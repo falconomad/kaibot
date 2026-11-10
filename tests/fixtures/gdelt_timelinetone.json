@@ -1,0 +1,10 @@
+{"query_details": {"title": "(tariff OR tariffs OR \"trade war\") sourcelang:english", "date_resolution": "15m"},
+"timeline": [{"series": "Average Tone", "data": [
+{"date": "20261108T234500Z", "value": -2.0113},
+{"date": "20261109T000000Z", "value": -1.8421},
+{"date": "20261109T001500Z", "value": -2.3107},
+{"date": "20261109T003000Z", "value": -1.0562},
+{"date": "bogus", "value": 1.0},
+{"date": "20261109T004500Z", "value": "NaN"},
+{"date": "20261109T010000Z", "value": 0}
+]}]}

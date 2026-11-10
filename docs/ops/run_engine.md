@@ -57,6 +57,14 @@ A 1 GB VM is enough (pandas + ~70 symbols × 70 sessions of minute bars).
    plus a `shadow_session_end` event (totals and the hook's cost). Any shadow error is logged as `shadow_error`
    (once per kind per day) and never affects live trading. Replay: `scripts/run_shadow_replay.py --strategy orb`.
 
+## Request budgets
+Every outgoing call (Alpaca data, Alpaca paper trading, FRED, SEC, FINRA, GDELT) waits for its source's budget in
+`config/sources.yaml` (`kaibot.common.ratelimit`): sliding windows (`budget_per_s/_min/_hour`) plus an optional
+minimum gap. All clients of one source in a process share one budget; a 429 makes every caller of that source back
+off together, and 429/5xx are retried with backoff (1, 2, 4, 8, 16 s). Budgets are per process, so the engine and a
+script such as `fetch_history.py` running at the same time each get the full budget: keep the sum under the
+provider limit (Alpaca: 150 + `--per-min` < 200/min). Nightly alt-data collection: see `alt_data.md`.
+
 ## Known differences from the replay
 - Free data: today's bars are IEX, not SIP. Prices match closely; volume is rescaled by each symbol's
   SIP/IEX ratio over the prior 20 days, and VWAP is IEX-only.

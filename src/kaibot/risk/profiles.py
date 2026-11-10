@@ -31,3 +31,9 @@ def load_profiles(path: Path = DEFAULT_PATH) -> dict[str, RiskPolicy]:
         validate_policy(pol)
         out[name] = pol
     return out
+
+
+def load_strategies(path: Path = DEFAULT_PATH) -> dict[str, list[str]]:
+    """Which live strategies each level runs (profiles.yaml `strategies`). Shadow strategies are separate."""
+    cfg = yaml.safe_load(path.read_text())
+    return {name: list(lv.get("strategies") or ["dip_reversal"]) for name, lv in cfg["levels"].items()}

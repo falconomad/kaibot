@@ -1,4 +1,4 @@
-"""Download SEC XBRL companyfacts for the seed universe (needs SEC_USER_AGENT; <= 5 req/s).
+"""Download SEC XBRL companyfacts for the seed universe (needs SEC_USER_AGENT; paced by the sec_edgar budget).
 
 python scripts/fetch_fundamentals.py --env .env
 """
@@ -8,30 +8,31 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import time
-import urllib.request
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from fetch_history import load_env  # noqa: E402
+from fetch_history import load_env  # noqa: E402  (also puts src/ on sys.path)
+
+from kaibot.common import http  # noqa: E402
 
 
 def get(url: str, ua: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return r.read()
+    """SEC GET under the shared `sec_edgar` budget (config/sources.yaml, 5 req/s; SEC fair access is 10)."""
+    headers = {"User-Agent": ua, "Accept-Encoding": "identity"}
+    return http.get(url, source="sec_edgar", headers=headers, timeout=60, max_bytes=256 * 1024 * 1024).body
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", required=True)
     ap.add_argument("--data", default=str(ROOT / "data"))
+    ap.add_argument("--universe", default=str(ROOT / "config" / "universe_seed.yaml"))
     a = ap.parse_args()
     ua = load_env(a.env)["SEC_USER_AGENT"]
-    cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
+    cfg = yaml.safe_load(Path(a.universe).read_text())
     syms = [s for v in cfg["sectors"].values() for s in v]
     tickers = json.loads(get("https://www.sec.gov/files/company_tickers.json", ua))
     cik = {v["ticker"].upper(): str(v["cik_str"]).zfill(10) for v in tickers.values()}
@@ -47,7 +48,6 @@ def main() -> None:
             continue
         f.write_bytes(get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{c}.json", ua))
         print(s, c, f.stat().st_size // 1024, "KB", flush=True)
-        time.sleep(0.25)
 
 
 if __name__ == "__main__":

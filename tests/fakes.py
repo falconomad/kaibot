@@ -114,6 +114,12 @@ class FakeBroker:
             b = self._bar(o["symbol"], t)
             if b is None:
                 continue
+            if o["status"] == "new" and o.get("time_in_force") == "cls":
+                if self._is_last_bar(o["symbol"], t):  # market-on-close: fills at the closing print
+                    px = float(b["c"])
+                    o.update(status="filled", filled_avg_price=str(px), filled_at=t.isoformat())
+                    self.pos.pop(o["symbol"], None)
+                continue
             if o["status"] == "new" and o["type"] == "market":
                 px = float(b["o"])
                 o.update(status="filled", filled_avg_price=str(px), filled_at=t.isoformat())
@@ -126,22 +132,31 @@ class FakeBroker:
                 continue
             if o["status"] == "filled" and o.get("legs"):
                 stop = next(x for x in o["legs"] if x["type"] == "stop")
-                tgt = next(x for x in o["legs"] if x["type"] == "limit")
+                tgt = next((x for x in o["legs"] if x["type"] == "limit"), None)
                 if stop["status"] != "new":
                     continue
                 if b["l"] <= float(stop["stop_price"]):
                     px = min(float(stop["stop_price"]), float(b["o"]))
                     stop.update(status="filled", filled_avg_price=str(px), filled_at=t.isoformat())
-                    tgt["status"] = "canceled"
+                    if tgt:
+                        tgt["status"] = "canceled"
                     self.pos.pop(o["symbol"], None)
-                elif b["h"] >= float(tgt["limit_price"]) + 0.01:
+                elif tgt and b["h"] >= float(tgt["limit_price"]) + 0.01:
                     tgt.update(status="filled", filled_avg_price=tgt["limit_price"], filled_at=t.isoformat())
                     stop["status"] = "canceled"
                     self.pos.pop(o["symbol"], None)
 
+    def _is_last_bar(self, s, t) -> bool:
+        f = self.data.frames[s]
+        day = f[f["ts"].dt.date == pd.Timestamp(t).date()]
+        return len(day) > 0 and pd.Timestamp(t) == day["ts"].max()
+
     # --- broker API used by the engine ---
     def account(self):
-        return {"status": "ACTIVE", "equity": "100000"}
+        a = {"status": "ACTIVE", "equity": "100000"}
+        if getattr(self, "buying_power", None) is not None:
+            a["buying_power"] = str(self.buying_power)
+        return a
 
     def calendar(self, day):
         return {"date": day, "open": "09:30", "close": "16:00"}
@@ -176,6 +191,21 @@ class FakeBroker:
         self.orders[oid] = o
         return o
 
+    def submit_oto_stop(self, coid, symbol, qty, stop):
+        oid = f"o{next(self.ids)}"
+        o = {"id": oid, "client_order_id": coid, "symbol": symbol, "qty": qty, "side": "buy", "type": "market",
+             "status": "new", "order_class": "oto",
+             "legs": [{"id": f"{oid}s", "type": "stop", "stop_price": f"{stop:.2f}", "status": "held"}]}
+        self.orders[oid] = o
+        return o
+
+    def submit_moc_sell(self, coid, symbol, qty):
+        oid = f"o{next(self.ids)}"
+        o = {"id": oid, "client_order_id": coid, "symbol": symbol, "qty": qty, "side": "sell", "type": "market",
+             "time_in_force": "cls", "status": "new", "legs": []}
+        self.orders[oid] = o
+        return o
+
     def _leg(self, leg_id):
         for o in self.orders.values():
             for leg in o.get("legs") or []:
@@ -196,6 +226,11 @@ class FakeBroker:
     def cancel_order(self, oid):
         if oid in self.orders and self.orders[oid]["status"] == "new":
             self.orders[oid]["status"] = "canceled"
+            return
+        for o in self.orders.values():  # a leg
+            for leg in o.get("legs") or []:
+                if leg["id"] == oid and leg["status"] in ("new", "held"):
+                    leg["status"] = "canceled"
 
     def close_position(self, symbol):
         if symbol not in self.pos:

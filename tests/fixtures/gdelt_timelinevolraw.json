@@ -1,0 +1,5 @@
+{"query_details": {"title": "(tariff OR tariffs OR \"trade war\") sourcelang:english", "date_resolution": "15m"},
+"timeline": [{"series": "Article Count", "data": [
+{"date": "20261109T000000Z", "value": 184, "norm": 21873},
+{"date": "20261109T001500Z", "value": 201, "norm": 22410}
+]}]}
