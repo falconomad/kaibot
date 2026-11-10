@@ -24,11 +24,28 @@ class SymbolDays:
     vw: np.ndarray
 
 
-def load_symbol(data_dir: Path, symbol: str) -> SymbolDays | None:
+def load_symbol(data_dir: Path, symbol: str, start: np.datetime64 | None = None,
+                end: np.datetime64 | None = None) -> SymbolDays | None:
+    """Load monthly files for `symbol`, optionally only sessions in [start, end] (keeps 10 years x 300 symbols
+    out of memory when a replay needs one window)."""
     files = sorted((data_dir / "bars_1m" / f"symbol={symbol}").glob("*.parquet"))
+    if start is not None:
+        files = [f for f in files if f.stem >= str(np.datetime64(start, "M"))]
+    if end is not None:
+        files = [f for f in files if f.stem <= str(np.datetime64(end, "M"))]
     if not files:
         return None
-    return from_frame(symbol, pd.concat([pd.read_parquet(f) for f in files], ignore_index=True))
+    sd = from_frame(symbol, pd.concat([pd.read_parquet(f) for f in files], ignore_index=True))
+    if sd is None or (start is None and end is None):
+        return sd
+    keep = np.ones(len(sd.dates), dtype=bool)
+    if start is not None:
+        keep &= sd.dates >= np.datetime64(start, "D")
+    if end is not None:
+        keep &= sd.dates <= np.datetime64(end, "D")
+    if not keep.any():
+        return None
+    return SymbolDays(symbol, sd.dates[keep], *(getattr(sd, k)[keep] for k in ("o", "h", "l", "c", "v", "vw")))
 
 
 def from_frame(symbol: str, df: pd.DataFrame, upto: dict | None = None) -> SymbolDays | None:
@@ -68,8 +85,10 @@ def from_frame(symbol: str, df: pd.DataFrame, upto: dict | None = None) -> Symbo
 
 
 def load_news_times(data_dir: Path, symbol: str) -> np.ndarray:
-    f = data_dir / "news" / f"symbol={symbol}" / "all.parquet"
-    if not f.exists():
+    """Publication times of every stored article (all.parquet from the first download, YYYY.parquet after)."""
+    files = sorted((data_dir / "news" / f"symbol={symbol}").glob("*.parquet"))
+    if not files:
         return np.array([], dtype="datetime64[s]")
-    t = pd.read_parquet(f)["created_at"].dt.tz_convert("UTC").dt.tz_localize(None)
-    return np.sort(t.to_numpy().astype("datetime64[s]"))
+    t = pd.concat([pd.read_parquet(f, columns=["created_at"]) for f in files])["created_at"]
+    t = t.dt.tz_convert("UTC").dt.tz_localize(None)
+    return np.unique(t.to_numpy().astype("datetime64[s]"))  # sorted; the two layouts may overlap
