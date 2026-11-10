@@ -1,0 +1,150 @@
+{
+ "cik": "0000320193",
+ "entityType": "operating",
+ "sic": "3571",
+ "sicDescription": "Electronic Computers",
+ "ownerOrg": "06 Technology",
+ "insiderTransactionForOwnerExists": 0,
+ "insiderTransactionForIssuerExists": 1,
+ "name": "Apple Inc.",
+ "tickers": [
+  "AAPL"
+ ],
+ "exchanges": [
+  "Nasdaq"
+ ],
+ "ein": "942404110",
+ "lei": null,
+ "website": "",
+ "investorWebsite": "",
+ "category": "Large accelerated filer",
+ "fiscalYearEnd": "0926",
+ "stateOfIncorporation": "CA",
+ "stateOfIncorporationDescription": "CA",
+ "phone": "(408) 996-1010",
+ "flags": "",
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0001354457-26-001062",
+    "0001140361-26-042798",
+    "0001140361-26-042505",
+    "0001140361-26-042149",
+    "0001140361-26-041201"
+   ],
+   "filingDate": [
+    "2026-11-09",
+    "2026-11-09",
+    "2026-11-06",
+    "2026-11-05",
+    "2026-10-29"
+   ],
+   "reportDate": [
+    "",
+    "2026-11-05",
+    "",
+    "2026-11-03",
+    "2026-10-27"
+   ],
+   "acceptanceDateTime": [
+    "2026-11-09T22:00:55.000Z",
+    "2026-11-09T21:30:40.000Z",
+    "2026-11-06T21:30:47.000Z",
+    "2026-11-05T23:30:13.000Z",
+    "2026-10-29T22:30:14.000Z"
+   ],
+   "act": [
+    "34",
+    "34",
+    "33",
+    "",
+    ""
+   ],
+   "form": [
+    "25-NSE",
+    "8-K",
+    "424B2",
+    "4",
+    "4"
+   ],
+   "fileNumber": [
+    "000-10030",
+    "001-36743",
+    "333-282937",
+    "",
+    ""
+   ],
+   "filmNumber": [
+    "261536843",
+    "261536464",
+    "261532487",
+    "",
+    ""
+   ],
+   "items": [
+    "",
+    "8.01,9.01",
+    "",
+    "",
+    ""
+   ],
+   "core_type": [
+    "25-NSE",
+    "XBRL",
+    "424B2",
+    "4",
+    "4"
+   ],
+   "size": [
+    3110,
+    1029343,
+    930109,
+    4822,
+    4822
+   ],
+   "isXBRL": [
+    0,
+    1,
+    1,
+    0,
+    0
+   ],
+   "isInlineXBRL": [
+    0,
+    1,
+    1,
+    0,
+    0
+   ],
+   "isXBRLNumeric": [
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "primaryDocument": [
+    "xslF25X02/primary_doc.xml",
+    "ef20085077_8k.htm",
+    "ny20084621x2_424b2.htm",
+    "xslF345X06/form4.xml",
+    "xslF345X06/form4.xml"
+   ],
+   "primaryDocDescription": [
+    "",
+    "",
+    "424B2",
+    "FORM 4",
+    "FORM 4"
+   ]
+  },
+  "files": [
+   {
+    "name": "CIK0000320193-submissions-001.json",
+    "filingCount": 1271,
+    "filingFrom": "1994-01-26",
+    "filingTo": "2015-10-03"
+   }
+  ]
+ }
+}
