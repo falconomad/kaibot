@@ -44,7 +44,9 @@ def pick_blocks(t: int, wanted: int) -> int:
 
 def report(data: Path, blocks: int = 16) -> dict:
     rows, series = load_trials(data)
-    n_trials = len(rows)  # every logged trial counts against the DSR, even without a stored series
+    # every logged trial counts against the DSR, even without a stored series; a walk-forward row carries
+    # n_trials = grid size x folds (the configurations it searched)
+    n_trials = sum(int(r.get("n_trials", 1)) for r in rows)
     srs = [sharpe(s.to_numpy()) for s in series.values() if len(s) > 2]
     sr_var = float(np.var(srs, ddof=1)) if len(srs) > 1 else 0.0
     out = {"n_trials_logged": n_trials, "n_series": len(series), "trial_sharpe_var": sr_var, "trials": [],

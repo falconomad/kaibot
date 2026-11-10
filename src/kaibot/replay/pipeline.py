@@ -23,8 +23,10 @@ class Prepared:
 
 
 def prepare(stocks: Mapping[str, SymbolDays], etfs: Mapping[str, SymbolDays], sector_of: Mapping[str, str],
-            news: Mapping[str, np.ndarray], start: np.datetime64, end: np.datetime64, z_max: float = -1.5
-            ) -> Prepared:
+            news: Mapping[str, np.ndarray], start: np.datetime64, end: np.datetime64, z_max: float = -1.5,
+            arrays: bool = True) -> Prepared:
+    """`arrays=False` skips the ATR / VWAP / sigma arrays only the random-entry baseline needs (the walk-forward
+    holds 300 symbols in memory and does not run it)."""
     bars, frames, atr5, vwap, sigma = {}, [], {}, {}, {}
     # Iterates in the caller's order (the universe file's order). That order feeds the seeded random-entry
     # baseline, so it is part of the replay's input and is hashed with it.
@@ -36,6 +38,8 @@ def prepare(stocks: Mapping[str, SymbolDays], etfs: Mapping[str, SymbolDays], se
         cf = candidates(sd, etf, news.get(s, np.array([], dtype="datetime64[s]")), z_max=z_max)
         if len(cf):
             frames.append(cf)
+        if not arrays:
+            continue
         atr5[s], _ = five_minute(sd.o, sd.h, sd.l, sd.c)
         vwap[s] = np.cumsum(sd.vw * sd.v, axis=1) / np.maximum(np.cumsum(sd.v, axis=1), 1)
         close = sd.c[:, -1]

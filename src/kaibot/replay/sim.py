@@ -98,7 +98,11 @@ def first_exit_trail(h, l, o, c, start_m, fill, risk_ps, atr, target_r=2.0, trai
 
 def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict, fomc: set, pol: RiskPolicy,
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
-                  pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1") -> Book:
+                  pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1",
+                  target_r: float | None = None) -> Book:
+    """`atr_mult` (stop = atr_mult x 5-minute ATR) and `target_r` (profit target in R; None = the variant's
+    pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged."""
+    tr = target_r if target_r is not None else (2.0 if variant == "A" else 1.5)
     book = Book(equity0)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
     by_day = {d: g.sort_values(["m", "z"]) for d, g in cands.groupby("date")} if len(cands) else {}
@@ -156,7 +160,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 stop = ref - atr_mult * cnd["atr5"]
                 risk_ps = ref - stop
                 vw = cnd["vwap"]
-                target = min(vw, ref + 1.5 * risk_ps) if vw > ref else ref + 1.5 * risk_ps
+                target = min(vw, ref + tr * risk_ps) if vw > ref else ref + tr * risk_ps
                 if variant == "v1" and target - ref < min_reward_r * risk_ps:
                     continue
                 open_risk = sum(p["risk"] for p in open_pos)
@@ -176,8 +180,8 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 tgt_f = fill + (target - ref)
                 if variant == "A":
                     xm, gross, why = first_exit_trail(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, fill, risk_ps,
-                                                      cnd["atr5"])
-                    stop_f, tgt_f = fill - risk_ps, fill + 2.0 * risk_ps
+                                                      cnd["atr5"], target_r=tr)
+                    stop_f, tgt_f = fill - risk_ps, fill + tr * risk_ps
                 else:
                     xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, stop_f, tgt_f)
                 xp = gross if why == "target" else sell_px(gross, qty, cnd["sigma_1m"], sd.v[r, xm])

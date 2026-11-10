@@ -26,3 +26,11 @@ def test_trial_report_pbo_and_dsr(tmp_path):
     (w,) = rep["windows"]
     assert w["blocks"] == 16 and w["splits"] == 12870 and 0 <= w["pbo"] <= 1
     assert all(0 <= t["dsr"] <= 1 for t in rep["trials"])
+
+
+def test_walkforward_rows_count_their_search(tmp_path):
+    rows = [{"trial_id": "a"}, {"trial_id": "wf_tuned", "n_trials": 27 * 115},
+            {"trial_id": "wf_default", "n_trials": 1}]
+    (tmp_path / "trials.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    (tmp_path / "trials").mkdir()
+    assert report(tmp_path)["n_trials_logged"] == 2 + 27 * 115

@@ -31,3 +31,38 @@ Every replay appends to `data/trials.jsonl` and stores its daily returns in `dat
 `scripts/trial_report.py` computes the deflated Sharpe of each trial (deflated by the number of trials and the
 spread of their Sharpes) and, for each window with two or more trials, the probability of backtest overfitting
 (CSCV, 16 blocks = 12,870 splits). PBO near 0.5 means picking the best variant on that window was luck.
+
+## 4. Walk-forward (story S08)
+Once `./scripts/fetch_history.sh --status` shows the 2016+ download complete:
+
+```
+E=~/Projects/kaibot-secrets/.env
+.venv/bin/python scripts/walk_forward.py --env $E --universe config/universe_history.yaml \
+    --start 2016-01-01 --end 2026-11-06 --variant A --level balanced --grid default
+.venv/bin/python scripts/trial_report.py
+```
+
+- **Folds:** train on 12 whole months, test on the next month, roll monthly. `--start` is the first date with bars;
+  the first train month starts after the 120-day feature warm-up (2016-05), so the first test month is 2017-05
+  (115 folds to Nov 2026; the last test month is partial).
+- **Grid (`default`, 27 configs, pre-declared):** `z_max` (dip threshold) in {-1.5, -1.75, -2.0},
+  `atr_mult` (stop in 5-minute ATRs = 1R) in {1.0, 1.5, 2.0}, `target_r` (target in R) in {1.5, 2.0, 3.0}.
+  The pre-registered default is z -1.5, 1.5 ATR, 2R (variant A as replayed in 002).
+- **Selection:** highest train daily Sharpe after shadow costs among configs with >= 100 train trades
+  (`--min-train-trades`); ties go to the default; if none qualifies the default is used (reported as a fallback).
+  The choice for month M is made before M is simulated. The default also runs on every test month (no-tuning
+  baseline).
+- **Simulation:** every month is simulated for every config from flat $100k, so the run-drawdown stop resets
+  monthly. Bars are loaded `--block-months` (3) months at a time plus the warm-up; features are computed once per
+  block and shared by the grid.
+- **Output:** `data/reports/walkforward_<level>_wf_A_<ts>.{json,md}`: OOS (stitched test months) trades, t-stat per
+  trade, daily Sharpe, hit rate, trades/month, max drawdown for tuned and default; SPY over the same sessions;
+  PBO across the grid (CSCV over the per-config OOS daily returns); deflated Sharpe with
+  n_trials = 27 x folds + trials already logged; the share of folds where the tuned choice beat the default.
+  Two trial rows (tuned, default) are appended to `data/trials.jsonl`; the tuned row carries `n_trials` so
+  `trial_report.py` deflates later trials by the whole search.
+- **Cost (estimated from a synthetic 94-symbol run, not yet measured on the real data):** peak memory ~1.4 GB
+  for 300 symbols with 3-month blocks (~1 GB with `--block-months 1`) and roughly 30 minutes, most of it reading
+  Parquet (each month is read ~5 times because of the warm-up overlap). The report records `runtime_s` and
+  `peak_rss_mb`. Running the same command twice must give the same
+  `input_sha256` and `events_sha256_*`.
