@@ -13,13 +13,13 @@ import logging
 import signal
 import socket
 import time
-import urllib.request
 from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
 import yaml
 
+from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
@@ -28,16 +28,18 @@ from kaibot.engine.store import Store
 from kaibot.risk.profiles import load_profiles
 
 log = logging.getLogger("kaibot.engine")
+FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
 
 
 def vix_loader(fred_key: str):
     def load() -> pd.Series:
-        url = (
-            "https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&observation_start="
-            f"{(pd.Timestamp.now() - pd.Timedelta(days=60)).date()}&file_type=json&api_key={fred_key}"
-        )
-        with urllib.request.urlopen(url, timeout=30) as r:
-            obs = json.loads(r.read())["observations"]
+        params = {
+            "series_id": "VIXCLS",
+            "observation_start": str((pd.Timestamp.now() - pd.Timedelta(days=60)).date()),
+            "file_type": "json",
+            "api_key": fred_key,
+        }
+        obs = http.get_json(FRED_URL, source="fred", params=params, timeout=30)["observations"]
         s = pd.Series({pd.Timestamp(o["date"]): float(o["value"]) for o in obs if o["value"] != "."}).sort_index()
         return (
             s.shift(1, freq="D")

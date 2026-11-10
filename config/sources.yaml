@@ -1,23 +1,27 @@
 # Free data sources and their request budgets (research 01–05, checked 10 Nov 2026).
 # budget = what Kaibot allows itself, kept below the provider's free limit. verify_on_day1 = probe with a live key.
+# Enforced by kaibot.common.ratelimit (one process-wide budget per source name below): budget_per_s / _min / _hour
+# are sliding windows, min_seconds_between_requests is a minimum gap. Every outgoing call must name its source.
 market_data:
   alpaca:           {use: primary, auth: key, limit: "200 req/min REST; WS 30 symbols, 1 conn (IEX)", budget_per_min: 150, verify_on_day1: [movers, corporate_actions_path]}
+  alpaca_trading:   {use: paper_orders, auth: key, limit: "200 req/min per account (trading API, separate from data)", budget_per_min: 150}
   finnhub:          {use: fallback_quotes, auth: key, limit: "60/min, 30/s burst; WS 50 symbols; no candles on free", budget_per_min: 45}
   massive:          {use: nightly_universe, auth: key, limit: "5/min, EOD grouped daily bars", budget_per_min: 4}
   tiingo:           {use: third_fallback, auth: key, limit: "50/hr, 1000/day", budget_per_hour: 40}
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:
-  sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5}
-  sec_edgar_atom:   {use: 8k_and_form4_stream, poll_seconds: 30}
-  finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET"}
-  fred_vixcls:      {use: regime, schedule: daily, note: "VIX via FRED (Cboe CSV unreachable from our network, 10 Nov 2026)"}
-  gdelt_pacing:     {min_seconds_between_requests: 6, note: "GDELT returns 429 when called faster"}
+  sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}
+  sec_edgar_atom:   {use: 8k_and_form4_stream, poll_seconds: 30, note: "requests count against sec_edgar"}
+  finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET", limit: "static CDN files", min_seconds_between_requests: 1}
+  fred:             {use: regime, auth: key, limit: "120 req/min per key", budget_per_min: 30}
+  fred_vixcls:      {use: regime, schedule: daily, note: "VIX via FRED (Cboe CSV unreachable from our network, 10 Nov 2026); requests count against fred"}
+  gdelt_pacing:     {min_seconds_between_requests: 6, note: "GDELT returns 429 when called faster (one every 5 s); enforced on gdelt_doc"}
 news:
   alpaca_news_ws:   {use: primary_stream, auth: key, note: "Benzinga feed; verify free status + latency day 1"}
   finnhub_news:     {use: secondary, budget_per_min: 10}
   pr_newswire_rss:  {use: primary_source, poll_seconds: 60}
   globenewswire_rss: {use: primary_source, poll_seconds: 60}
-  gdelt_doc:        {use: macro_geo, auth: none, poll_seconds: 900}
+  gdelt_doc:        {use: macro_geo, auth: none, poll_seconds: 900, min_seconds_between_requests: 6}
 nlp:
   finbert_local:    {use: cheap_sentiment, note: "CPU, non-commercial licence: fine for paper, review before live"}
   claude:           {use: triage_and_room, models: {triage: claude-haiku-5-5, room: claude-sonnet-5-5}, monthly_alert_usd: 150, monthly_hard_stop_usd: 190}

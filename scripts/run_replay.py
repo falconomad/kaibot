@@ -12,7 +12,6 @@ import argparse
 import json
 import subprocess
 import sys
-import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,6 +21,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import http  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
 from kaibot.replay.features import candidates, five_minute, regime  # noqa: E402
@@ -39,10 +39,10 @@ def load_env(p):
 
 
 def vix_prev_close(fred_key: str) -> pd.Series:
-    url = ("https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&observation_start=2024-06-01"
-           f"&file_type=json&api_key={fred_key}")
-    with urllib.request.urlopen(url, timeout=30) as r:
-        obs = json.loads(r.read())["observations"]
+    params = {"series_id": "VIXCLS", "observation_start": "2024-06-01", "file_type": "json", "api_key": fred_key}
+    obs = http.get_json("https://api.stlouisfed.org/fred/series/observations", source="fred", params=params)[
+        "observations"
+    ]
     s = pd.Series({pd.Timestamp(o["date"]): float(o["value"]) for o in obs if o["value"] != "."}).sort_index()
     # value dated d is d's close -> available for session d+1 only
     return s.shift(1, freq="D").resample("D").ffill()
