@@ -20,10 +20,17 @@ git pull --ff-only -q 2>/dev/null || echo "(could not pull the latest code; runn
 mkdir -p data/live
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
+CHECK=0; for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = --check ] && CHECK=1; done
+# The watchdog (separate process, own broker client) is left running when the engine stops or crashes:
+# that is its job. It cancels entries if the engine goes quiet and flattens at 15:55. One copy at a time.
 
 if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }; then
   echo "Starting with Docker…"
   docker build -q -t kaibot-engine --build-arg CODE_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" . >/dev/null
+  if [ "$CHECK" = 0 ] && ! docker ps -q -f name=^kaibot-watchdog$ | grep -q .; then
+    docker run -d --rm --name kaibot-watchdog -e KAIBOT_ENV_FILE=/secrets/.env -v "$ENV_FILE:/secrets/.env:ro" \
+      kaibot-engine python -m kaibot.engine.watchdog >/dev/null && echo "Watchdog started (container kaibot-watchdog)."
+  fi
   awake docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env \
     -v "$ENV_FILE:/secrets/.env:ro" -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
 else
@@ -34,6 +41,13 @@ else
   echo "Starting with $("$PY" --version)…"
   [ -d .venv ] || "$PY" -m venv .venv
   .venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt
+  WD_PID=data/live/watchdog.pid
+  if [ "$CHECK" = 0 ] && ! { [ -f "$WD_PID" ] && kill -0 "$(cat "$WD_PID")" 2>/dev/null; }; then
+    mkdir -p logs
+    KAIBOT_ENV_FILE="$ENV_FILE" PYTHONPATH="$PWD/src" nohup .venv/bin/python -m kaibot.engine.watchdog \
+      >> logs/watchdog.log 2>&1 &
+    echo $! > "$WD_PID"; echo "Watchdog started (pid $(cat "$WD_PID"), log: logs/watchdog.log)."
+  fi
   KAIBOT_ENV_FILE="$ENV_FILE" KAIBOT_DATA_DIR="$PWD/data/live" PYTHONPATH="$PWD/src" \
     KAIBOT_CODE_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
     awake .venv/bin/python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}

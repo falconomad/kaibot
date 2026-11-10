@@ -52,7 +52,9 @@ def _check(entry, stop_frac, equity):
     p = Proposal("X", Side.BUY, entry, entry * stop_frac)
     v = evaluate(p, snap(equity=equity, day_start_equity=equity, open_risk=0), POL)
     if v.approved:
-        assert v.max_loss <= equity * 0.005 + 1e-6
+        # the real risk (qty floored by the gate); v.max_loss is the same figure rounded to cents for display
+        assert v.qty * abs(entry - p.stop) <= equity * 0.005 + 1e-6
+        assert abs(v.max_loss - v.qty * abs(entry - p.stop)) <= 0.005 + 1e-9
         assert v.qty * entry <= equity * 0.10 + 1e-6
 
 

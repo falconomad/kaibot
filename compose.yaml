@@ -9,3 +9,11 @@ services:
     volumes:
       - ${KAIBOT_ENV_FILE:-~/Projects/kaibot-secrets/.env}:/secrets/.env:ro
       - ./data/live:/data
+  watchdog:  # separate process with its own broker client (S16): cancels entries / flattens if the engine dies
+    image: kaibot-engine
+    restart: unless-stopped
+    command: ["python", "-m", "kaibot.engine.watchdog"]
+    environment:
+      KAIBOT_ENV_FILE: /secrets/.env
+    volumes:
+      - ${KAIBOT_ENV_FILE:-~/Projects/kaibot-secrets/.env}:/secrets/.env:ro
