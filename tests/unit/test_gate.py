@@ -84,3 +84,32 @@ def test_profiles_cannot_loosen_ceilings():
     from kaibot.risk.gate import validate_policy
     with pytest.raises(ValueError):
         validate_policy(RiskPolicy(2.0, 10, 2, 1.5, 5))
+
+
+@pytest.mark.parametrize("level", ["conservative", "balanced", "aggressive"])
+def test_property_level_presets_cap_losses(level):
+    """Story S10: under every preset, an approved trade never risks more than that level's risk per trade,
+    never exceeds its position cap, and nothing is approved once the day's loss hits its daily stop."""
+    hyp = pytest.importorskip("hypothesis")
+    from kaibot.risk.profiles import load_profiles
+
+    pol = load_profiles()[level]
+    st = hyp.strategies
+
+    @hyp.settings(max_examples=300, deadline=None)
+    @hyp.given(entry=st.floats(1, 1000), stop_frac=st.floats(0.5, 0.999), equity=st.floats(1000, 1e7),
+               day_loss_frac=st.floats(0, 0.05), open_risk_frac=st.floats(0, 0.03),
+               positions=st.integers(0, 10))
+    def prop(entry, stop_frac, equity, day_loss_frac, open_risk_frac, positions):
+        start = equity / (1 - day_loss_frac) if day_loss_frac < 1 else equity
+        s = snap(equity=equity, day_start_equity=start, open_risk=equity * open_risk_frac,
+                 open_positions=positions)
+        v = evaluate(Proposal("X", Side.BUY, entry, entry * stop_frac), s, pol)
+        if not v.approved:
+            return
+        assert v.max_loss <= equity * pol.risk_per_trade_pct / 100 + 1e-6
+        assert v.qty * entry <= equity * pol.max_position_pct / 100 + 1e-6
+        assert positions < pol.max_positions
+        assert (start - equity) < start * pol.max_daily_loss_pct / 100
+
+    prop()
