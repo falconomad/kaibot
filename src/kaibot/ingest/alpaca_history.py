@@ -2,13 +2,14 @@
 
 Point-in-time: SIP bars are only requested up to now - 15 min (free plan rule). Each bar's available_ts is
 its end time (bar start + 1 min); features may only read bars with available_ts <= decision_ts.
-Layout: data/bars_1m/symbol=XYZ/YYYY-MM.parquet ; data/news/symbol=XYZ/YYYY.parquet
+Layout: data/bars_1m/symbol=XYZ/YYYY-MM.parquet (.empty = no bars that month) ; data/news/symbol=XYZ/YYYY.parquet
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -17,6 +18,7 @@ from kaibot.common import http
 from kaibot.common.ratelimit import REGISTRY, Budget, BudgetSpec, get_budget
 
 DATA = "https://data.alpaca.markets"
+ET = ZoneInfo("America/New_York")
 
 
 class Alpaca:
@@ -43,7 +45,16 @@ def month_ranges(start: datetime, end: datetime):
         cur = nxt
 
 
-def fetch_bars(api: Alpaca, symbol: str, start: datetime, end: datetime, out: Path) -> int:
+def is_rth(t: datetime) -> bool:
+    """09:30-15:59 ET bar start (the only minutes the replay reads); DST handled via zoneinfo."""
+    et = t.astimezone(ET)
+    m = et.hour * 60 + et.minute
+    return 570 <= m < 960
+
+
+def fetch_bars(api: Alpaca, symbol: str, start: datetime, end: datetime, out: Path, rth_only: bool = False) -> int:
+    """Write one month of bars to `out`. A month with no bars (before a listing) leaves an `.empty` marker so a
+    resumed download skips it."""
     rows = []
     token = None
     while True:
@@ -57,9 +68,14 @@ def fetch_bars(api: Alpaca, symbol: str, start: datetime, end: datetime, out: Pa
         token = d.get("next_page_token")
         if not token:
             break
-    if not rows:
-        return 0
     ts = [datetime.fromisoformat(b["t"].replace("Z", "+00:00")) for b in rows]
+    if rth_only:
+        keep = [i for i, t in enumerate(ts) if is_rth(t)]
+        rows, ts = [rows[i] for i in keep], [ts[i] for i in keep]
+    if not rows:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.with_suffix(".empty").touch()
+        return 0
     table = pa.table({
         "ts": pa.array(ts, pa.timestamp("s", tz="UTC")),
         "available_ts": pa.array([t + timedelta(minutes=1) for t in ts], pa.timestamp("s", tz="UTC")),

@@ -29,9 +29,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", required=True)
     ap.add_argument("--data", default=str(ROOT / "data"))
+    ap.add_argument("--universe", default=str(ROOT / "config" / "universe_seed.yaml"))
     a = ap.parse_args()
     ua = load_env(a.env)["SEC_USER_AGENT"]
-    cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
+    cfg = yaml.safe_load(Path(a.universe).read_text())
     syms = [s for v in cfg["sectors"].values() for s in v]
     tickers = json.loads(get("https://www.sec.gov/files/company_tickers.json", ua))
     cik = {v["ticker"].upper(): str(v["cik_str"]).zfill(10) for v in tickers.values()}
