@@ -1,0 +1,16 @@
+/* "Chart room" design tokens (docs/decisions/02_design.md + 07_design_v2_visual.md). Light paper default. */
+@import "tailwindcss";
+:root {
+  --paper: #F6F4EF; --surface: #FFFFFF; --rule: #DAD6CC; --ink: #1B2430; --slate: #5B6573;
+  --sea: #1F5F6B; --gain: #1F5FAE; --loss: #B4500A; --pass: #2F6F4F; --warn: #94600F; --fail: #B42318;
+  --ai: #5B4B8A; --ai-tint: #F2EFF8; --stale: #7D848D;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif; --font-num: "IBM Plex Mono", ui-monospace, monospace;
+  --font-ai: "Source Serif 4", Georgia, serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #11161C; --surface: #171E26; --rule: #2A333D; --ink: #E6E3DC; --slate: #98A1AC;
+    --sea: #5FA8B4; --gain: #6FA3E8; --loss: #F0904A; --pass: #6DBF94; --warn: #E0A845; --fail: #F07466;
+    --ai: #A898DA; --ai-tint: #1E1A2B; --stale: #7A838E; }
+}
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); }
+.num { font-family: var(--font-num); font-feature-settings: "tnum" 1, "zero" 1; }

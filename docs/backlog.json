@@ -1,0 +1,415 @@
+[
+ {
+  "n": 1,
+  "epic": "E1 Foundation and replay",
+  "title": "As the operator, I want one repo (worker, API, Postgres)",
+  "ac": "CI passes",
+  "milestone": "M0",
+  "teams": [
+   "qa-ops"
+  ]
+ },
+ {
+  "n": 2,
+  "epic": "E1 Foundation and replay",
+  "title": "As the operator, I want bloodbath's client and indicators ported for reuse",
+  "ac": "fixture parity",
+  "milestone": "M0",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 3,
+  "epic": "E1 Foundation and replay",
+  "title": "As the quant, I want minute bars since 2016 for replay",
+  "ac": "300 symbols",
+  "milestone": "M0",
+  "teams": [
+   "data"
+  ]
+ },
+ {
+  "n": 4,
+  "epic": "E1 Foundation and replay",
+  "title": "As the quant, I want a point-in-time quality score against lookahead",
+  "ac": "pre-date filings only",
+  "milestone": "M0",
+  "teams": [
+   "data"
+  ]
+ },
+ {
+  "n": 5,
+  "epic": "E1 Foundation and replay",
+  "title": "As the quant, I want event-sourced replay for reproducibility",
+  "ac": "identical hash",
+  "milestone": "M0",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 6,
+  "epic": "E1 Foundation and replay",
+  "title": "As the quant, I want the shadow cost model for honest P&L",
+  "ac": "unit-tested",
+  "milestone": "M0",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 7,
+  "epic": "E1 Foundation and replay",
+  "title": "As the quant, I want SPY, cash, random and rules-only baselines to measure edge",
+  "ac": "in every replay",
+  "milestone": "M0",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 8,
+  "epic": "E1 Foundation and replay",
+  "title": "As the quant, I want walk-forward testing with a trial log to expose overfitting",
+  "ac": "DSR and PBO",
+  "milestone": "M0",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 9,
+  "epic": "E2 Paper engine",
+  "title": "As the operator, I want an idempotent `BrokerAdapter` against duplicates",
+  "ac": "retry gives one order",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 10,
+  "epic": "E2 Paper engine",
+  "title": "As the user, I want level presets in the gate to cap losses",
+  "ac": "property tests pass",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 11,
+  "epic": "E2 Paper engine",
+  "title": "As the user, I want brackets held at the broker to survive crashes",
+  "ac": "stop fires with the worker dead",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 12,
+  "epic": "E2 Paper engine",
+  "title": "As the user, I want dip reversal live to trade",
+  "ac": "reason codes logged",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 13,
+  "epic": "E2 Paper engine",
+  "title": "As the user, I want SPY momentum (Balanced and up) so levels differ",
+  "ac": "≤ 1 trade a day, MOC exit",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 14,
+  "epic": "E2 Paper engine",
+  "title": "As the quant, I want ORB and news continuation in shadow to see counterfactuals",
+  "ac": "never sent",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 15,
+  "epic": "E2 Paper engine",
+  "title": "As the user, I want regime and event gates to avoid crises",
+  "ac": "none ±30 min of FOMC/CPI",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 16,
+  "epic": "E2 Paper engine",
+  "title": "As the operator, I want automatic halts to fail closed",
+  "ac": "injected faults halt",
+  "milestone": "M1",
+  "teams": [
+   "qa-ops"
+  ]
+ },
+ {
+  "n": 17,
+  "epic": "E2 Paper engine",
+  "title": "As the operator, I want rate-limited ingestion",
+  "ac": "no 429s",
+  "milestone": "M1",
+  "teams": [
+   "data"
+  ]
+ },
+ {
+  "n": 18,
+  "epic": "E2 Paper engine",
+  "title": "As the user, I want a ledger at my amount so buying power is capped",
+  "ac": "drift halts",
+  "milestone": "M1",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 19,
+  "epic": "E2 Paper engine",
+  "title": "As the quant, I want alt-data collectors to build history",
+  "ac": "engine never reads them",
+  "milestone": "M1",
+  "teams": [
+   "data"
+  ]
+ },
+ {
+  "n": 20,
+  "epic": "E3 Onboarding and controls",
+  "title": "As the user, I want onboarding to understand the contract",
+  "ac": "one confirm, start at next open",
+  "milestone": "M2",
+  "teams": [
+   "design",
+   "frontend"
+  ]
+ },
+ {
+  "n": 21,
+  "epic": "E3 Onboarding and controls",
+  "title": "As the user, I want Pause to stop entries",
+  "ac": "within 1 cycle",
+  "milestone": "M2",
+  "teams": [
+   "frontend"
+  ]
+ },
+ {
+  "n": 22,
+  "epic": "E3 Onboarding and controls",
+  "title": "As the user, I want Flatten-and-stop as a brake",
+  "ac": "flat < 30 s, tagged",
+  "milestone": "M2",
+  "teams": [
+   "backend-quant",
+   "frontend"
+  ]
+ },
+ {
+  "n": 23,
+  "epic": "E3 Onboarding and controls",
+  "title": "As the user, I want level changes to apply next session for clean stats",
+  "ac": "new segment",
+  "milestone": "M2",
+  "teams": [
+   "frontend"
+  ]
+ },
+ {
+  "n": 24,
+  "epic": "E3 Onboarding and controls",
+  "title": "As the user, I want New run to restart",
+  "ac": "old run read-only",
+  "milestone": "M2",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 25,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the user, I want a clear layout for glanceability",
+  "ac": "approved mocks",
+  "milestone": "M2",
+  "teams": [
+   "design"
+  ]
+ },
+ {
+  "n": 26,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the user, I want the pot against SPY and cash so profit isn't misleading",
+  "ac": "updates ≤ 60 s",
+  "milestone": "M2",
+  "teams": [
+   "frontend"
+  ]
+ },
+ {
+  "n": 27,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the user, I want a tape with reasons to trust it",
+  "ac": "every fill, after costs",
+  "milestone": "M2",
+  "teams": [
+   "frontend"
+  ]
+ },
+ {
+  "n": 28,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the user, I want a risk strip and status to see halts",
+  "ac": "red on breach",
+  "milestone": "M2",
+  "teams": [
+   "frontend"
+  ]
+ },
+ {
+  "n": 29,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the user, I want an evidence counter for meaningful progress",
+  "ac": "trades/900, CI",
+  "milestone": "M2",
+  "teams": [
+   "backend-quant",
+   "frontend"
+  ]
+ },
+ {
+  "n": 30,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the user, I want a daily report card to learn",
+  "ac": "by 16:15 ET",
+  "milestone": "M2",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 31,
+  "epic": "E4 Dashboard and reporting",
+  "title": "As the quant, I want weekly attribution to kill losers",
+  "ac": "auto flags",
+  "milestone": "M2",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 32,
+  "epic": "E5 Agent room and alt-data",
+  "title": "As the operator, I want a capped LLM gateway against overspend",
+  "ac": "no call over budget",
+  "milestone": "M3",
+  "teams": [
+   "agents-ai"
+  ]
+ },
+ {
+  "n": 33,
+  "epic": "E5 Agent room and alt-data",
+  "title": "As the user, I want triage of deduplicated stories so echoes count once",
+  "ac": "one score per cluster",
+  "milestone": "M3",
+  "teams": [
+   "agents-ai"
+  ]
+ },
+ {
+  "n": 34,
+  "epic": "E5 Agent room and alt-data",
+  "title": "As the user, I want a veto room to skip news drops",
+  "ac": "≤ 45 s; no size or price fields",
+  "milestone": "M3",
+  "teams": [
+   "agents-ai"
+  ]
+ },
+ {
+  "n": 35,
+  "epic": "E5 Agent room and alt-data",
+  "title": "As the user, I want transcripts to see dissent",
+  "ac": "linked, sourced",
+  "milestone": "M3",
+  "teams": [
+   "frontend"
+  ]
+ },
+ {
+  "n": 36,
+  "epic": "E5 Agent room and alt-data",
+  "title": "As the quant, I want a rules-only A/B so the room earns its place",
+  "ac": "veto lift",
+  "milestone": "M3",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 37,
+  "epic": "E5 Agent room and alt-data",
+  "title": "As the quant, I want alt-data features and `pump_risk` for the ablation",
+  "ac": "`pump_risk` blocks longs",
+  "milestone": "M3",
+  "teams": [
+   "data"
+  ]
+ },
+ {
+  "n": 38,
+  "epic": "E6 Evaluation gate",
+  "title": "As the quant, I want an automatic gate report so it can't be bent",
+  "ac": "read-only",
+  "milestone": "M4",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 39,
+  "epic": "E6 Evaluation gate",
+  "title": "As the quant, I want a 3-month alt-data ablation for admission",
+  "ac": "beats random at 95%",
+  "milestone": "M4",
+  "teams": [
+   "backend-quant"
+  ]
+ },
+ {
+  "n": 40,
+  "epic": "E6 Evaluation gate",
+  "title": "As the operator, I want an outage drill to recover",
+  "ac": "< 5 min",
+  "milestone": "M4",
+  "teams": [
+   "qa-ops"
+  ]
+ },
+ {
+  "n": 41,
+  "epic": "E6 Evaluation gate",
+  "title": "As the user, I want a go/no-go review for an evidence-based call",
+  "ac": "no live button",
+  "milestone": "M4",
+  "teams": [
+   "frontend"
+  ]
+ }
+]

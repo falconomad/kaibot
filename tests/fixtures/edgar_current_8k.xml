@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>Latest Filings</title>
+<entry>
+<title>8-K - ACME CORP (0000123456) (Filer)</title>
+<link rel="alternate" type="text/html" href="https://www.sec.gov/Archives/edgar/data/123456/000012345626000001-index.htm"/>
+<updated>2026-11-10T09:31:05-05:00</updated>
+<id>urn:tag:sec.gov,2008:accession-number=0000123456-26-000001</id>
+</entry>
+</feed>

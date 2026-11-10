@@ -1,0 +1,1 @@
+"""Kaibot dashboard API."""

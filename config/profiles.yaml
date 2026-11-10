@@ -1,0 +1,46 @@
+# Aggressiveness profiles (PRD v2, Risk's final numbers). Profiles can only TIGHTEN the hard ceilings in risk/gate.py.
+# Simulation defaults: recalibrate from walk-forward results; every change is a logged trial.
+universe:            # one universe for every level, so results compare (PM decision)
+  min_quality_score: 70
+  min_adv_usd: 50_000_000
+  max_spread_bp: 5
+  min_price_usd: 5
+levels:
+  conservative:
+    label: Steady
+    risk_per_trade_pct: 0.25
+    daily_stop_pct: 0.75          # flatten and halt for the day (= 3R)
+    max_position_pct: 10
+    max_positions: 3
+    max_entries_per_day: 10
+    run_drawdown_end_pct: 4       # run ends
+    strategies: [dip_reversal]
+  balanced:
+    label: Balanced
+    risk_per_trade_pct: 0.5
+    daily_stop_pct: 1.5
+    max_position_pct: 15
+    max_positions: 5
+    max_entries_per_day: 20
+    run_drawdown_end_pct: 8
+    strategies: [dip_reversal, spy_late_momentum]
+  aggressive:
+    label: Hunter
+    risk_per_trade_pct: 1.0
+    daily_stop_pct: 3.0
+    max_position_pct: 20
+    max_positions: 8
+    max_entries_per_day: 30
+    run_drawdown_end_pct: 12
+    strategies: [dip_reversal, spy_late_momentum]
+shadow_strategies: [orb_stocks_in_play, news_continuation]   # logged "would have" trades, never sent
+all_levels:
+  allow_short: false
+  allow_leverage: false
+  allow_overnight: false
+  entry_window_et: ["09:35", "15:45"]
+  flatten_at_et: "15:55"
+  max_quote_age_s: 5
+  halts:
+    consecutive_losses_pause: {losses: 3, minutes: 60}
+    daily_stops_in_10_sessions: 3
