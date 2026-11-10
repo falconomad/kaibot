@@ -1,4 +1,4 @@
-"""Download historical 1-minute SIP bars and news from Alpaca into Parquet (resumable, rate-limited).
+"""Download historical 1-minute SIP bars and news from Alpaca into Parquet (resumable, budgeted).
 
 Point-in-time: SIP bars are only requested up to now - 15 min (free plan rule). Each bar's available_ts is
 its end time (bar start + 1 min); features may only read bars with available_ts <= decision_ts.
@@ -7,10 +7,6 @@ Layout: data/bars_1m/symbol=XYZ/YYYY-MM.parquet (.empty = no bars that month) ; 
 
 from __future__ import annotations
 
-import json
-import time
-import urllib.parse
-import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -18,32 +14,27 @@ from zoneinfo import ZoneInfo
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from kaibot.common import http
+from kaibot.common.ratelimit import REGISTRY, Budget, BudgetSpec, get_budget
+
 DATA = "https://data.alpaca.markets"
 ET = ZoneInfo("America/New_York")
 
 
 class Alpaca:
-    def __init__(self, key: str, secret: str, per_min: int = 150):
+    """Market-data GETs under the shared `alpaca` budget (config/sources.yaml), so the downloader and the engine's
+    AlpacaData never add up past it within one process. `per_min` optionally ADDS a tighter per-minute cap for
+    this process (parallel workers are separate processes: give each its share)."""
+
+    def __init__(self, key: str, secret: str, per_min: int | None = None, budget: Budget | None = None):
         self.h = {"APCA-API-KEY-ID": key, "APCA-API-SECRET-KEY": secret, "User-Agent": "kaibot/0.1"}
-        self.min_gap = 60.0 / per_min
-        self._last = 0.0
+        if budget is None and per_min:
+            budget = REGISTRY.tighten("alpaca", BudgetSpec(((int(per_min), 60.0),)))
+        self.budget = budget or get_budget("alpaca")
 
     def get(self, path: str, params: dict) -> dict:
-        wait = self._last + self.min_gap - time.monotonic()
-        if wait > 0:
-            time.sleep(wait)
-        url = f"{DATA}{path}?{urllib.parse.urlencode(params)}"
-        for attempt in range(5):
-            self._last = time.monotonic()
-            try:
-                with urllib.request.urlopen(urllib.request.Request(url, headers=self.h), timeout=60) as r:
-                    return json.loads(r.read())
-            except urllib.error.HTTPError as e:
-                if e.code == 429 or e.code >= 500:
-                    time.sleep(2 ** attempt * 2)
-                    continue
-                raise
-        raise RuntimeError(f"giving up on {path}")
+        return http.get_json(f"{DATA}{path}", source="alpaca", params=params, headers=self.h, timeout=60,
+                             budget=self.budget, max_bytes=64 * 1024 * 1024)
 
 
 def month_ranges(start: datetime, end: datetime):

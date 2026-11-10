@@ -1,19 +1,24 @@
 """SEC EDGAR: current-filings Atom feed (8-K, Form 4) and ticker->CIK map.
 
-Fair access: <=10 req/s and a User-Agent with a contact email (research 02). We budget 5 req/s.
+Fair access: <=10 req/s and a User-Agent with a contact email (research 02). We budget 5 req/s
+(config/sources.yaml `sec_edgar`, enforced by common.http / common.ratelimit for every SEC host).
+The feed is untrusted: parsed with common.safexml (no DTD/entities) and malformed entries are skipped.
 """
 
 from __future__ import annotations
 
+import logging
 import re
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
+
+from kaibot.common import safexml
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 CURRENT_URL = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type={form}&count=100&output=atom"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 _CIK = re.compile(r"\((\d{10})\)")
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -26,8 +31,8 @@ class Filing:
     accession: str
 
 
-def parse_current_feed(xml_text: str) -> list[Filing]:
-    root = ET.fromstring(xml_text)
+def parse_current_feed(xml_text: str | bytes) -> list[Filing]:
+    root = safexml.fromstring(xml_text)
     out: list[Filing] = []
     for e in root.findall(f"{ATOM}entry"):
         title = (e.findtext(f"{ATOM}title") or "").strip()  # "8-K - ACME CORP (0000123456) (Filer)"
@@ -38,9 +43,17 @@ def parse_current_feed(xml_text: str) -> list[Filing]:
         updated = e.findtext(f"{ATOM}updated") or ""
         if not m or link is None:
             continue
+        try:
+            accepted = datetime.fromisoformat(updated)
+        except ValueError:
+            log.warning("edgar feed: skipping entry with bad <updated> %r", updated[:40])
+            continue
+        if accepted.tzinfo is None:
+            log.warning("edgar feed: skipping entry without a UTC offset %r", updated[:40])
+            continue
         out.append(Filing(
             form=form.strip(), company=rest.split(" (")[0].strip(), cik=m.group(1),
-            accepted=datetime.fromisoformat(updated), url=link.get("href", ""),
+            accepted=accepted, url=link.get("href", ""),
             accession=eid.rsplit("=", 1)[-1] if "accession-number=" in eid else eid,
         ))
     return out

@@ -14,7 +14,6 @@ import hashlib
 import json
 import subprocess
 import sys
-import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +23,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import http  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
 from kaibot.replay.events import events, events_digest, input_digest  # noqa: E402
@@ -45,10 +45,10 @@ def load_env(p):
 def vix_prev_close(fred_key: str, cache: Path, refresh: bool = False) -> pd.Series:
     """VIXCLS from FRED, cached under data/inputs so a re-run reads the same series (event-sourced input)."""
     if refresh or not cache.exists():
-        url = ("https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&observation_start=2015-06-01"
-               f"&file_type=json&api_key={fred_key}")
-        with urllib.request.urlopen(url, timeout=30) as r:
-            obs = json.loads(r.read())["observations"]
+        params = {"series_id": "VIXCLS", "observation_start": "2015-06-01", "file_type": "json", "api_key": fred_key}
+        obs = http.get_json("https://api.stlouisfed.org/fred/series/observations", source="fred", params=params)[
+            "observations"
+        ]
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps([{"date": o["date"], "value": o["value"]} for o in obs]))
     obs = json.loads(cache.read_text())
