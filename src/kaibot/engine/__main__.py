@@ -23,9 +23,10 @@ from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
+from kaibot.engine.events import load_calendar
 from kaibot.engine.market import LiveMarket
 from kaibot.engine.store import Store
-from kaibot.risk.profiles import load_profiles
+from kaibot.risk.profiles import load_profiles, load_strategies
 
 log = logging.getLogger("kaibot.engine")
 FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -54,7 +55,6 @@ def vix_loader(fred_key: str):
 
 def build(settings: Settings) -> Engine:
     cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
-    cal = yaml.safe_load((ROOT / "config" / "macro_calendar.yaml").read_text())
     etf_of = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}
     broker = AlpacaPaper(settings.alpaca_key, settings.alpaca_secret)
     data = AlpacaData(settings.alpaca_key, settings.alpaca_secret)
@@ -62,8 +62,10 @@ def build(settings: Settings) -> Engine:
         data, sorted(etf_of), etf_of, cfg["market"], settings.data_dir / "history", vix_loader(settings.fred_key)
     )
     store = Store(settings.supabase_url, settings.supabase_service_key)
-    fomc = {np.datetime64(str(d), "D") for d in cal["fomc_statement_1400"]}
-    return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name)
+    events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
+    fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
+    return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
+                  calendar_until=covers_until, events=events, strategies=load_strategies())
 
 
 def main() -> None:
@@ -124,11 +126,14 @@ def main() -> None:
             minute = now.replace(second=0, microsecond=0)
             if minute != last_minute and now.second >= 7:
                 status = eng.tick()
+                eng.on_tick_ok()
                 last_minute = minute
                 if status.get("state") != "market_closed":
                     log.info("tick %s", status)
         except Exception as e:
             log.exception("loop error (will retry)")
+            with contextlib.suppress(Exception):
+                eng.on_tick_error(e)  # repeated failures trip the kill switch (fail closed)
             msg = f"{type(e).__name__}: {e}"[:300]
             status = {"state": "error", "error": msg}
             if msg != last_error:  # record each new error once, so it shows up without the terminal

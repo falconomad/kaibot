@@ -106,18 +106,47 @@ class AlpacaPaper:
             raise
 
     def submit_bracket(self, coid: str, symbol: str, qty: int, stop: float, target: float) -> dict:
-        """Market buy with a broker-held stop and take-profit (both GTC-day legs). Adopts on duplicate id."""
+        """Market buy with a broker-held stop and take-profit. Adopts the existing order on a duplicate id.
+
+        GTC, not DAY: day legs expire at 16:00, so if the engine is dead at the close the position would sit
+        overnight with no stop. GTC legs keep protecting it until the engine closes it at the next open."""
         body = {
             "symbol": symbol,
             "qty": str(int(qty)),
             "side": "buy",
             "type": "market",
-            "time_in_force": "day",
+            "time_in_force": "gtc",
             "order_class": "bracket",
             "client_order_id": coid,
             "take_profit": {"limit_price": f"{target:.2f}"},
             "stop_loss": {"stop_price": f"{stop:.2f}"},
         }
+        try:
+            return self._t("POST", "/v2/orders", body=body)
+        except AlpacaError as e:
+            if e.status == 422 and "client_order_id" in e.body:
+                existing = self.order_by_client_id(coid)
+                if existing:
+                    return existing
+            raise
+
+    def submit_oto_stop(self, coid: str, symbol: str, qty: int, stop: float) -> dict:
+        """Market buy with a broker-held protective stop only (OTO), for exits the engine times itself (MOC)."""
+        body = {"symbol": symbol, "qty": str(int(qty)), "side": "buy", "type": "market", "time_in_force": "gtc",
+                "order_class": "oto", "client_order_id": coid, "stop_loss": {"stop_price": f"{stop:.2f}"}}
+        try:
+            return self._t("POST", "/v2/orders", body=body)
+        except AlpacaError as e:
+            if e.status == 422 and "client_order_id" in e.body:
+                existing = self.order_by_client_id(coid)
+                if existing:
+                    return existing
+            raise
+
+    def submit_moc_sell(self, coid: str, symbol: str, qty: int) -> dict:
+        """Market-on-close sell (time_in_force=cls; Alpaca accepts these until 15:50 ET)."""
+        body = {"symbol": symbol, "qty": str(int(qty)), "side": "sell", "type": "market", "time_in_force": "cls",
+                "client_order_id": coid}
         try:
             return self._t("POST", "/v2/orders", body=body)
         except AlpacaError as e:

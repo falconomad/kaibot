@@ -9,7 +9,11 @@ Safety:
   process (or the laptop) stops.
 - On startup, positions the engine doesn't know about block all entries (account not clean); positions it does
   know from an earlier session are closed at the first tick of the next open.
-- The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds.
+- The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds, and so
+  does the account's own buying power (the smaller wins).
+- Fail closed (S16/S18): unknown open orders or positions, position drift against the broker, three loop errors
+  in a row, an event calendar that has run out, or three daily stops in ten sessions all stop new entries.
+  Nothing here ever adds risk: protection stays at the broker and exits keep being managed.
 """
 
 from __future__ import annotations
@@ -25,9 +29,12 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
+from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
-from kaibot.replay.sim import BLACKOUT_FOMC, half_spread, sell_px
+from kaibot.replay.features import five_minute
+from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
+from kaibot.strategies import spy_momentum as spymom
 
 log = logging.getLogger("kaibot.engine")
 
@@ -36,6 +43,8 @@ TARGET_R = 2.0
 TRAIL_ATR = 1.5
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
+MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
+STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
 
 
@@ -77,6 +86,7 @@ class Pos:
     db_order_id: int | None = None
     entry_ts: str | None = None
     carried: bool = False  # left over from an earlier session
+    strategy: str = "dip_reversal"
 
     def features(self) -> dict:
         return {k: v for k, v in asdict(self).items() if k not in ("trade_id", "symbol", "qty")}
@@ -99,6 +109,7 @@ class Day:
     halted: bool = False
     flattened: bool = False
     finalized: bool = False
+    spy_mom_done: bool = False
     last_m: int = -1
     events: list = field(default_factory=list)
 
@@ -121,9 +132,18 @@ class Engine:
         fomc: set,
         process: str = "engine",
         now=lambda: datetime.now(UTC),
+        calendar_until: date | None = None,
+        events: dict | None = None,
+        strategies: dict[str, list[str]] | None = None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
+        self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
+        self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
+        self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> dip reversal only
+        self.kill: str | None = None  # set by a fail-closed halt; blocks entries until the next session
+        self.error_streak = 0
+        self._drift_seen: dict = {}
         self.run: dict | None = None
         self.day: Day | None = None
         self.pos: dict[str, Pos] = {}
@@ -144,13 +164,63 @@ class Engine:
         )
 
     def check_account(self) -> None:
+        """Positions or open orders the engine doesn't know about block all entries (fail closed).
+
+        An open order counts as known if it is on a symbol the engine holds (its bracket legs and exits). An
+        unknown one is e.g. a bracket accepted just before a crash, before its row was written: adopting it
+        blindly could double the position, so we stop instead and say so."""
         broker_pos = self.broker.positions()
         foreign = sorted(set(broker_pos) - set(self.pos))
-        self.account_clean = not foreign
-        if foreign:
-            msg = {"foreign_positions": foreign, "action": "entries blocked until the paper account is clean"}
-            log.warning("account not clean: %s", foreign)
+        orders = sorted({o["symbol"] for o in self.broker.open_orders() if o["symbol"] not in self.pos})
+        self.account_clean = not foreign and not orders
+        if not self.account_clean:
+            msg = {"foreign_positions": foreign, "unknown_open_orders": orders,
+                   "action": "entries blocked until the paper account is clean"}
+            log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
+
+    # ================= fail-closed halts =================
+    def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
+        if self.kill:
+            return
+        self.kill = kind
+        log.error("entries halted: %s (%s)", kind, reason)
+        self.store.insert(
+            "halt",
+            {"run_id": self._rid(), "kind": kind, "reason": reason,
+             "session": str(self.day.day) if self.day else None},
+            returning=False,
+        )
+        self.store.event("halt", {"kind": kind, "reason": reason, **(detail or {})}, self._rid())
+
+    def on_tick_error(self, err: Exception) -> None:
+        """Called by the main loop when an iteration raises. Repeated failures trip the kill switch."""
+        self.error_streak += 1
+        if self.error_streak >= MAX_ERROR_STREAK:
+            self._halt_entries("engine_errors", f"{self.error_streak} loop errors in a row: {str(err)[:120]}")
+
+    def on_tick_ok(self) -> None:
+        self.error_streak = 0
+
+    def _check_drift(self) -> None:
+        """S18: the engine's book must match the broker's. Any difference stops new entries."""
+        broker_pos = self.broker.positions()
+        diffs = {}
+        for s, p in self.pos.items():
+            if p.status != "open" or p.exit_order_id:
+                continue
+            q = broker_pos.get(s)
+            bq = int(float(q["qty"])) if q else 0
+            if bq != p.qty:
+                diffs[s] = {"engine": p.qty, "broker": bq}
+        for s in set(broker_pos) - set(self.pos):
+            diffs[s] = {"engine": 0, "broker": int(float(broker_pos[s]["qty"]))}
+        # A bracket leg can fill between our order sync and this read; that heals on the next minute's sync.
+        # Only a difference seen on two consecutive minutes is drift.
+        persistent = {s: v for s, v in diffs.items() if self._drift_seen.get(s) == v}
+        self._drift_seen = diffs
+        if persistent:
+            self._halt_entries("drift", "positions differ from the broker", {"diffs": persistent})
 
     def _restore_positions(self) -> None:
         self.pos = {}
@@ -277,6 +347,7 @@ class Engine:
             return self._status(m)
         d.last_m = m
         self._sync_orders()
+        self._check_drift()
         if any(p.carried for p in self.pos.values()):
             for p in [p for p in self.pos.values() if p.carried and p.status in ("open", "pending")]:
                 self._exit(p, "carried_over")
@@ -288,6 +359,12 @@ class Engine:
             d.flattened = True
         if (m - 4) % 5 == 0 and self._may_enter(m):
             self._entries(m)
+        if m == spymom.ENTRY_M and not d.spy_mom_done and self._runs("spy_late_momentum") and d.n_min == 390:
+            d.spy_mom_done = True  # one decision a day, whatever happens below
+            if self._may_enter(m):
+                self._spy_momentum(m)
+        if spymom.EXIT_SUBMIT_M <= m < spymom.MOC_CUTOFF_M:
+            self._moc_exits()
         self._ledger(eq)
         return self._status(m)
 
@@ -340,12 +417,31 @@ class Engine:
             )
         for p in self.pos.values():  # positions opened on an earlier session are closed at the first tick
             p.carried = bool(p.entry_ts) and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today
+        if self.kill:
+            self.store.event("halt_cleared", {"kind": self.kill, "day": str(today)}, self._rid())
+        self.kill, self.error_streak = None, 0
+        self._check_recent_stops(today)
+        if self.calendar_until is not None and today > self.calendar_until:
+            self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),
+                                                "action": "update config/macro_calendar.yaml"}, self._rid())
+            self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
         self.check_account()
         self.store.event(
             "session_start",
             {"day": str(today), "start_equity": start_eq, "level": self.level(), "minutes": n_min},
             self._rid(),
         )
+
+    def _check_recent_stops(self, today: date) -> None:
+        rows = self.store.select("halt", {"run_id": f"eq.{self.run['id']}", "kind": "eq.daily_stop"})
+        lo = today - timedelta(days=STOPS_WINDOW_DAYS)
+        recent = sorted({r["session"] for r in rows if r.get("session") and lo <= date.fromisoformat(r["session"])})
+        if len(recent) >= STOPS_TO_PAUSE and self.run["status"] == "running":
+            reason = f"{len(recent)} daily stops since {lo}: paused until you resume"
+            self.store.insert("halt", {"run_id": self._rid(), "kind": "three_stops", "reason": reason,
+                                       "session": str(today)}, returning=False)
+            self._set_run_status("paused", reason)
+            self.store.event("run_paused", {"reason": reason, "sessions": recent}, self._rid())
 
     def equity_now(self) -> tuple[float, float]:
         d = self.day
@@ -363,7 +459,8 @@ class Engine:
             d.halted = True
             self.store.insert(
                 "halt",
-                {"run_id": self._rid(), "kind": "daily_stop", "reason": f"day P&L reached -{pol.max_daily_loss_pct}%"},
+                {"run_id": self._rid(), "kind": "daily_stop", "reason": f"day P&L reached -{pol.max_daily_loss_pct}%",
+                 "session": str(d.day)},
                 returning=False,
             )
         self.peak = max(self.peak or eq, eq)
@@ -382,13 +479,57 @@ class Engine:
 
     def _may_enter(self, m: int) -> bool:
         d = self.day
-        if self.run is None or self.run["status"] != "running" or not self.account_clean:
+        if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
             return False
         if d.halted or d.flattened or m < d.pause_until:
             return False
         if not (FIRST_ENTRY_M <= m + 1 <= d.last_entry_m):
             return False
-        return not (np.datetime64(d.day, "D") in self.fomc and BLACKOUT_FOMC[0] <= m <= BLACKOUT_FOMC[1])
+        return in_blackout(self.events, d.day, m) is None
+
+    def _runs(self, strategy: str) -> bool:
+        return strategy in self.strategies.get(self.level(), ["dip_reversal"])
+
+    # ================= SPY late momentum (S13) =================
+    def _spy_momentum(self, m: int) -> None:
+        spy = self.market.spy
+        if spy in self.pos:
+            return
+        sd = self.market.symbol_days(spy, m)
+        if sd is None or not len(sd.dates) or sd.dates[-1] != np.datetime64(self.day.day, "D"):
+            return
+        today = len(sd.dates) - 1
+        ret, sigma = spymom.inputs_from_days(sd, today)
+        z = ret / sigma if sigma and np.isfinite(sigma) and sigma > 0 else float("nan")
+        atr = five_minute(sd.o[today:], sd.h[today:], sd.l[today:], sd.c[today:])[0][0, (m - 4) // 5]
+        ref = float(sd.c[today, m])
+        go = spymom.should_buy(spymom.MomentumInputs(ret, sigma if np.isfinite(sigma) else 0.0, False, False))
+        if not (np.isfinite(atr) and atr > 0):
+            go = False
+        off, vix = self.market.regime_at(m)  # S15: the regime gate (incl. VIX > 35 crisis) applies here too
+        stop = ref - spymom.STOP_ATR * float(atr if np.isfinite(atr) else 0)
+        feats = {"ret_close_to_10": _num(ret), "sigma": _num(sigma), "z": _num(z), "atr5": _num(atr), "m": m}
+        self._decide(spy, "spy_late_momentum", ref, stop, None, feats,
+                     ["SPY +0.5 sigma by 10:00", "last-30-minute momentum"],
+                     "regime off" if off else (None if go else "momentum below threshold"),
+                     sigma_1m=float(sigma or 0) / np.sqrt(390), atr=float(atr if np.isfinite(atr) else 0), vix=vix)
+
+    def _moc_exits(self) -> None:
+        """From 15:45, close momentum positions market-on-close. Cancel the stop first (it reserves the shares);
+        if the MOC is refused, the position stays and the 15:55 market flatten closes it."""
+        for p in list(self.pos.values()):
+            if p.strategy != "spy_late_momentum" or p.status != "open" or p.exit_order_id:
+                continue
+            if p.stop_order_id:
+                self.broker.cancel_order(p.stop_order_id)
+                p.stop_order_id = None
+            try:
+                o = self.broker.submit_moc_sell(f"{p.coid}-moc", p.symbol, p.qty)
+                p.exit_order_id, p.exit_reason = o["id"], "moc"
+            except Exception as e:
+                log.warning("MOC refused for %s (%s); the 15:55 flatten will close it", p.symbol, e)
+                self.store.event("moc_refused", {"symbol": p.symbol, "error": str(e)[:200]}, self._rid())
+                p.exit_reason = None
 
     # ================= entries =================
     def _entries(self, m: int) -> None:
@@ -396,10 +537,10 @@ class Engine:
         if off:
             return
         cands = self.market.candidates_at(m)
-        if not len(cands):
+        if not len(cands) or not self._runs("dip_reversal"):
             return
-        quotes = self.broker_quotes(list(cands["symbol"]))
-        pol, d = self.policy(), self.day
+        self._quotes = self.broker_quotes(list(cands["symbol"]))
+        self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
         decision = self.now()
         for _, c in cands.iterrows():
             s = c["symbol"]
@@ -408,71 +549,98 @@ class Engine:
             news = self.market.data.news_count(s, decision - timedelta(hours=24), decision)
             ref = float(c["price"])
             stop = ref - ATR_MULT * float(c["atr5"])
-            risk_ps = ref - stop
-            target = ref + TARGET_R * risk_ps
-            q = quotes.get(s) or {}
-            q_age = _age_s(q.get("t"), decision)
-            eq, _ = self.equity_now()
-            exposure = sum((p.fill or p.ref) * p.qty for p in self.pos.values() if p.status in ("pending", "open"))
-            snap = Snapshot(
-                equity=eq,
-                day_start_equity=d.start_equity,
-                open_positions=sum(p.status in ("pending", "open") for p in self.pos.values()),
-                symbol_exposure=0.0,
-                open_risk=sum(p.risk_ps * p.qty for p in self.pos.values() if p.status in ("pending", "open")),
-                quote_age_s=q_age,
-                kill_switch=False,
-                reconciled=self.account_clean,
-                market_open=True,
-                data_ok=(self.market.last_bar_minute(s) or -99) >= m - 2,
-                in_entry_window=True,
-                entries_today=d.entries,
-                run_peak_equity=self.peak,
-                buying_power=eq - exposure,
-            )
+            target = ref + TARGET_R * (ref - stop)
             feats = {k: _num(c[k]) for k in ("z", "resid_z", "turnover", "atr5", "vwap", "sigma_1m")}
-            feats.update({"news_24h": news, "vix": vix, "m": m, "quote_age_s": q_age})
-            veto = "company news in 24 h" if news else None
-            v = evaluate(Proposal(s, Side.BUY, ref, stop, target), snap, pol)
-            qty = int(np.floor(v.qty * (0.5 if vix > 25 else 1.0))) if v.approved and not veto else 0
-            sig = self.store.insert(
-                "signal",
-                {
-                    "run_id": self._rid(),
-                    "strategy": "dip_reversal",
-                    "mode": "live",
-                    "symbol": s,
-                    "ts": decision,
-                    "features_hash": hashlib.sha256(json.dumps(feats, sort_keys=True).encode()).hexdigest()[:16],
-                    "features": feats,
-                    "entry": ref,
-                    "stop": stop,
-                    "target": target,
-                    "reasons": ["no-news dip", "5-min higher low", "sector-adjusted"],
-                    "rules_veto": veto,
-                },
-            )
-            self.store.insert(
-                "gate_run",
-                {
-                    "signal_id": sig["id"],
-                    "policy_hash": self._policy_hash(self.level()),
-                    "code_sha": self.code,
-                    "checks": {
-                        ch.rule: {"state": ch.state.value, "actual": ch.actual, "limit": ch.limit} for ch in v.checks
-                    },
-                    "approved": bool(v.approved and not veto and qty > 0),
-                    "qty": qty,
-                    "binding": v.binding,
-                },
-                returning=False,
-            )
-            if qty <= 0:
-                continue
-            self._open(s, qty, ref, stop, target, risk_ps, float(c["atr5"]), float(c["sigma_1m"]), q, sig["id"], feats)
-            d.entries += 1
-            if d.entries >= pol.max_entries_per_day:
+            feats.update({"news_24h": news, "vix": vix, "m": m})
+            self._decide(s, "dip_reversal", ref, stop, target, feats,
+                         ["no-news dip", "5-min higher low", "sector-adjusted"],
+                         "company news in 24 h" if news else None, sigma_1m=float(c["sigma_1m"]),
+                         atr=float(c["atr5"]), vix=vix, fresh_reads=False)
+            if self.day.entries >= self.policy().max_entries_per_day:
                 break
+
+    def _decide(self, s, strategy, ref, stop, target, feats, reasons, veto, sigma_1m, atr, vix=None,
+                fresh_reads=True) -> None:
+        """Gate one proposal, log the signal and the gate run (reason codes, S12), and place it if approved."""
+        pol, d = self.policy(), self.day
+        decision = self.now()
+        if fresh_reads:  # single decisions read quotes and buying power themselves
+            self._quotes = self.broker_quotes([s])
+            self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
+        if vix is None:
+            vix = self.market.regime_at(int(feats.get("m", 0)))[1]
+        q = self._quotes.get(s) or {}
+        q_age = _age_s(q.get("t"), decision)
+        eq, _ = self.equity_now()
+        live = [p for p in self.pos.values() if p.status in ("pending", "open")]
+        exposure = sum((p.fill or p.ref) * p.qty for p in live)
+        bp = self._bp_read
+        snap = Snapshot(
+            equity=eq,
+            day_start_equity=d.start_equity,
+            open_positions=len(live),
+            symbol_exposure=0.0,
+            open_risk=sum(p.risk_ps * p.qty for p in live),
+            quote_age_s=q_age,
+            kill_switch=bool(self.kill),
+            reconciled=self.account_clean,
+            market_open=True,
+            data_ok=(self.market.last_bar_minute(s) or -99) >= int(feats.get("m", 0)) - 2,
+            in_entry_window=True,
+            entries_today=d.entries,
+            run_peak_equity=self.peak,
+            # the account's figure already nets its open positions; subtract what this loop has added since
+            buying_power=eq - exposure if bp is None else min(eq - exposure, bp - self._bp_added),
+        )
+        feats = {**feats, "quote_age_s": q_age, "vix": vix}
+        v = evaluate(Proposal(s, Side.BUY, ref, stop, target), snap, pol)
+        qty = int(np.floor(v.qty * (0.5 if vix > 25 else 1.0))) if v.approved and not veto else 0
+        sig = self.store.insert(
+            "signal",
+            {
+                "run_id": self._rid(),
+                "strategy": strategy,
+                "mode": "live",
+                "symbol": s,
+                "ts": decision,
+                "features_hash": hashlib.sha256(json.dumps(feats, sort_keys=True).encode()).hexdigest()[:16],
+                "features": feats,
+                "entry": ref,
+                "stop": stop,
+                "target": target,
+                "reasons": reasons,
+                "rules_veto": veto,
+            },
+        )
+        self.store.insert(
+            "gate_run",
+            {
+                "signal_id": sig["id"],
+                "policy_hash": self._policy_hash(self.level()),
+                "code_sha": self.code,
+                "checks": {
+                    ch.rule: {"state": ch.state.value, "actual": ch.actual, "limit": ch.limit} for ch in v.checks
+                },
+                "approved": bool(v.approved and not veto and qty > 0),
+                "qty": qty,
+                "binding": v.binding,
+            },
+            returning=False,
+        )
+        if qty <= 0:
+            return
+        self._open(s, qty, ref, stop, target, ref - stop, atr, sigma_1m, q, sig["id"], feats, strategy)
+        self._bp_added += qty * ref
+        d.entries += 1
+
+    def _broker_buying_power(self) -> float | None:
+        """The paper account's own buying power; None if unknown (then the pot alone caps it)."""
+        try:
+            bp = self.broker.account().get("buying_power")
+            return float(bp) if bp is not None else None
+        except Exception:
+            log.exception("account read failed")
+            return 0.0  # fail closed: no buying power if we can't read it
 
     def broker_quotes(self, symbols: list[str]) -> dict:
         try:
@@ -481,21 +649,25 @@ class Engine:
             log.exception("quotes failed")
             return {}
 
-    def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats) -> None:
+    def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats,
+              strategy: str = "dip_reversal") -> None:
         coid = f"kb-{self._rid()}-{signal_id}-1"
         bid, ask = float(quote.get("bp") or 0), float(quote.get("ap") or 0)
         if not (0 < bid <= ask):
             hs = half_spread(ref)
             bid, ask = ref - hs, ref + hs
         shadow_entry = shadow_fill_price("buy", qty, QuoteCtx(bid, ask, sigma, max(self.market.bar_volume(s), 1)))
-        order = self.broker.submit_bracket(coid, s, qty, round(stop, 2), round(target, 2))
+        if target is None:  # exit timed by the engine (MOC): stop only, still held at the broker
+            order = self.broker.submit_oto_stop(coid, s, qty, round(stop, 2))
+        else:
+            order = self.broker.submit_bracket(coid, s, qty, round(stop, 2), round(target, 2))
         db_order = self.store.insert(
             "order",
             {
                 "signal_id": signal_id,
                 "client_order_id": coid,
                 "venue": "alpaca_paper",
-                "legs": {"stop": round(stop, 2), "target": round(target, 2), "qty": qty},
+                "legs": {"stop": round(stop, 2), "target": None if target is None else round(target, 2), "qty": qty},
                 "status": order.get("status", "new"),
                 "submitted_at": self.now(),
             },
@@ -511,17 +683,18 @@ class Engine:
             atr=atr,
             sigma=sigma,
             stop=stop,
-            target=target,
+            target=target if target is not None else 0.0,
             shadow_entry=shadow_entry,
             db_order_id=db_order["id"],
             entry_ts=self.now().isoformat(),
+            strategy=strategy,
         )
         trade = self.store.insert(
             "trade",
             {
                 "run_id": self._rid(),
                 "signal_id": signal_id,
-                "strategy": "dip_reversal",
+                "strategy": strategy,
                 "symbol": s,
                 "entry_ts": self.now(),
                 "qty": qty,
@@ -562,7 +735,7 @@ class Engine:
         p.fill = float(o["filled_avg_price"])
         p.status = "open"
         p.stop = p.fill - p.risk_ps
-        p.target = p.fill + TARGET_R * p.risk_ps
+        p.target = p.fill + TARGET_R * p.risk_ps if p.strategy == "dip_reversal" else 0.0
         for leg in o.get("legs") or []:
             if leg.get("type") == "limit":
                 p.target_order_id = leg["id"]
@@ -646,7 +819,7 @@ class Engine:
     # ================= exits =================
     def _trail_stops(self, m: int) -> None:
         for p in self.pos.values():
-            if p.status != "open" or p.exit_order_id:
+            if p.status != "open" or p.exit_order_id or p.strategy != "dip_reversal":
                 continue
             c = self.market.last_close(p.symbol)
             if c is None:
