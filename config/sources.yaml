@@ -10,7 +10,8 @@ fundamentals_filings:
   sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5}
   sec_edgar_atom:   {use: 8k_and_form4_stream, poll_seconds: 30}
   finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET"}
-  cboe_vix_csv:     {use: regime, schedule: daily}
+  fred_vixcls:      {use: regime, schedule: daily, note: "VIX via FRED (Cboe CSV unreachable from our network, 10 Nov 2026)"}
+  gdelt_pacing:     {min_seconds_between_requests: 6, note: "GDELT returns 429 when called faster"}
 news:
   alpaca_news_ws:   {use: primary_stream, auth: key, note: "Benzinga feed; verify free status + latency day 1"}
   finnhub_news:     {use: secondary, budget_per_min: 10}

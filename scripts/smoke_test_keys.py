@@ -107,6 +107,9 @@ def main() -> int:
         last = d["observations"][0]["date"] if code == 200 and isinstance(d, dict) and d.get("observations") else ""
         report(code == 200, "FRED (DGS10)", f"http {code} last={last}")
         fails += code != 200
+        code, d = get("https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&limit=1"
+                      f"&sort_order=desc&file_type=json&api_key={env['FRED_API_KEY']}")
+        report(code == 200, "FRED VIX (VIXCLS, replaces Cboe CSV)", f"http {code}")
     if env.get("BLS_API_KEY"):
         payload = json.dumps({"seriesid": ["CUUR0000SA0"], "startyear": "2026", "endyear": "2026",
                               "registrationkey": env["BLS_API_KEY"]}).encode()
@@ -123,8 +126,7 @@ def main() -> int:
 
     for name, url in [
         ("Polymarket Gamma (no key)", "https://gamma-api.polymarket.com/events?active=true&closed=false&limit=1"),
-        ("GDELT DOC (no key)", "https://api.gdeltproject.org/api/v2/doc/doc?query=tariff&mode=artlist&maxrecords=1&format=json"),
-        ("Cboe VIX CSV (no key)", "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"),
+        ("GDELT DOC (no key, ~1 req/5 s)", "https://api.gdeltproject.org/api/v2/doc/doc?query=tariff&mode=artlist&maxrecords=1&format=json"),
         ("ApeWisdom (no key)", "https://apewisdom.io/api/v1.0/filter/all-stocks/page/1"),
     ]:
         code, _ = get(url)
