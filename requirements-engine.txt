@@ -1,0 +1,5 @@
+# Everything the trading engine needs (kept small so it installs fast on a laptop or a 1 GB VM).
+numpy>=2.0
+pandas>=2.2
+pyarrow>=17
+pyyaml>=6.0

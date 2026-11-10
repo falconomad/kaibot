@@ -1,0 +1,11 @@
+# docker compose up -d   (same container on any host; set KAIBOT_ENV_FILE to your .env path)
+services:
+  engine:
+    build: .
+    image: kaibot-engine
+    restart: unless-stopped
+    environment:
+      KAIBOT_ENV_FILE: /secrets/.env
+    volumes:
+      - ${KAIBOT_ENV_FILE:-~/Projects/kaibot-secrets/.env}:/secrets/.env:ro
+      - ./data/live:/data

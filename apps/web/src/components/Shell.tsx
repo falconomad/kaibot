@@ -30,14 +30,40 @@ function Meter({ label, value, frac }: { label: string; value: string; frac: num
   );
 }
 
-function engineChip(o: Overview | undefined, run: Run) {
+const STATE_TEXT: Record<string, string> = {
+  trading: "Running", managing: "Running · no new entries", market_closed: "Market closed", idle: "Idle",
+  starting: "Starting", error: "Error, retrying",
+};
+
+export function engineChip(o: Overview | undefined, run: Run) {
   const beat = o?.heartbeat.find((h) => h.process === "engine");
-  if (run.kind === "replay")
-    return { dot: "var(--ai)", text: "Replay", sub: "engine not started · M1" };
-  if (!beat) return { dot: "var(--stale)", text: "Engine offline", sub: "no heartbeat" };
+  if (run.kind === "replay") return { dot: "var(--ai)", text: "Replay", sub: "past data", live: false };
+  if (!beat) return { dot: "var(--stale)", text: "Engine offline", sub: "never connected", live: false };
   const age = (Date.now() - new Date(beat.ts).getTime()) / 1000;
-  return age < 120 ? { dot: "var(--sea)", text: "Running", sub: `beat ${Math.round(age)} s ago` }
-    : { dot: "var(--warn)", text: "Stale", sub: `last beat ${Math.round(age / 60)} min ago` };
+  const state = beat.detail?.state ?? "unknown";
+  if (state === "stopped" || age > 90)
+    return { dot: "var(--stale)", text: "Engine offline", sub: `last seen ${ago(age)}`, live: false };
+  return { dot: state === "error" ? "var(--warn)" : "var(--sea)", text: STATE_TEXT[state] ?? state,
+    sub: `${beat.detail?.host ?? ""} · ${Math.round(age)} s ago`, live: true };
+}
+
+function ago(s: number) {
+  return s < 120 ? `${Math.round(s)} s ago` : s < 7200 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+}
+
+/** Paper runs: pot now = worse of broker and shadow equity in the latest ledger row (today), else last close. */
+const etDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
+
+export function livePot(run: Run, o: Overview | undefined) {
+  const today = etDay(new Date());
+  const daily = o?.daily ?? [];
+  const before = run.amount_usd + daily.filter((d) => d.session < today).reduce((a, d) => a + d.pnl, 0);
+  const closedAll = run.amount_usd + daily.reduce((a, d) => a + d.pnl, 0);
+  const l = o?.ledger;
+  const fresh = !!l && etDay(new Date(l.ts)) === today;
+  const pot = fresh ? Math.min(l!.equity_venue, l!.equity_shadow) : closedAll;
+  const dayStart = fresh ? before : pot;
+  return { pot, dayPnl: pot - dayStart, dayPct: ((pot - dayStart) / dayStart) * 100, positions: fresh ? l!.positions : {} };
 }
 
 export function Shell() {
@@ -62,10 +88,11 @@ export function Shell() {
   const chip = engineChip(o, run);
   const last = o?.daily.at(-1);
   const c = o ? curve(run.amount_usd, o.daily) : [];
-  const nowPot = c.at(-1)?.pot ?? run.amount_usd;
-  const peak = Math.max(run.amount_usd, ...c.map((p) => p.pot));
+  const live = run.kind === "paper" ? livePot(run, o) : null;
+  const nowPot = live?.pot ?? c.at(-1)?.pot ?? run.amount_usd;
+  const peak = Math.max(run.amount_usd, run.peak_equity ?? 0, ...c.map((p) => p.pot));
   const dd = ((peak - nowPot) / peak) * 100;
-  const dayPct = last ? (last.pnl / (nowPot - last.pnl)) * 100 : 0;
+  const dayPct = live ? live.dayPct : last ? (last.pnl / (nowPot - last.pnl)) * 100 : 0;
 
   return (
     <div className="shell">

@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useRunCtx } from "../components/Shell";
+import { engineChip, livePot, useRunCtx } from "../components/Shell";
 import { PotChart } from "../components/PotChart";
-import { api, type Trade } from "../lib/api";
+import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { EXIT_LABEL, R, dateEt, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
 
@@ -39,6 +40,66 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
   );
 }
 
+function Controls({ run, overview }: { run: Run; overview: Overview }) {
+  const qc = useQueryClient();
+  const [confirm, setConfirm] = useState(false);
+  const cmd = useMutation({
+    mutationFn: ({ kind, payload }: { kind: CommandKind; payload?: Record<string, unknown> }) => api.command(kind, payload),
+    onSuccess: () => { setConfirm(false); qc.invalidateQueries({ queryKey: ["overview"] }); },
+  });
+  const pending = overview.pending_commands;
+  const paused = run.status === "paused";
+  const ended = !["scheduled", "running", "paused"].includes(run.status);
+  return (
+    <section className="card" aria-labelledby="ctl-h">
+      <h2 id="ctl-h">Controls</h2>
+      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>No trade-by-trade control. You can pause new entries, or close everything and stop the run.
+        The engine applies a command within about 10 seconds; nothing here changes until it does.</p>
+      {ended ? <p>This run has {run.status}{run.end_reason ? `: ${run.end_reason}` : ""}. Start a new run from the menu.</p> : (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <button disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
+          {!confirm ? <button onClick={() => setConfirm(true)} style={{ borderColor: "var(--fail)", color: "var(--fail)" }}>Flatten and stop</button> : (
+            <span className="banner warn" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              Sell every position at market now and end this run?
+              <button onClick={() => setConfirm(false)}>Cancel</button>
+              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)" }} disabled={cmd.isPending}
+                onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
+            </span>
+          )}
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>Level from next session
+            <select value={run.level ?? "balanced"} onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
+              {(Object.keys(LEVELS) as Level[]).map((k) => <option key={k} value={k}>{LEVELS[k].name}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
+      {cmd.isError && <p className="loss" role="alert">{String(cmd.error)}</p>}
+      {pending.length > 0 && <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => p.kind.replace(/_/g, " ")).join(", ")}</p>}
+    </section>
+  );
+}
+
+function Positions({ positions }: { positions: Record<string, { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }> }) {
+  const nav = useNavigate();
+  const rows = Object.entries(positions);
+  if (!rows.length) return <p className="muted" style={{ fontSize: 13 }}>No open positions. Kaibot is flat by 15:55 every day.</p>;
+  return (
+    <table className="list">
+      <thead><tr><th>Stock</th><th className="r">Shares</th><th className="r">Entry</th><th className="r">Last</th><th className="r">Stop</th><th className="r">Target</th><th className="r">Open P&amp;L</th></tr></thead>
+      <tbody>{rows.map(([s, p]) => {
+        const pnl = p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null;
+        return (
+          <tr key={s} className="click" onClick={() => nav(`/trades/${p.trade_id}`)}>
+            <td><b>{s}</b>{p.status === "pending" && <span className="muted"> · filling</span>}</td><td className="r num">{p.qty}</td>
+            <td className="r num">{px(p.fill)}</td><td className="r num">{px(p.last)}</td><td className="r num">{px(p.stop)}</td>
+            <td className="r num">{px(p.target)}</td><td className={`r num ${tone(pnl)}`}>{signedMoney(pnl)}</td>
+          </tr>
+        );
+      })}</tbody>
+    </table>
+  );
+}
+
 export function Live() {
   const { run, overview } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
@@ -49,7 +110,9 @@ export function Live() {
   const daily = overview.daily;
   const c = curve(run.amount_usd, daily);
   const s = stats(run.amount_usd, daily, trades.data.rows);
-  const pot = c.at(-1)?.pot ?? run.amount_usd;
+  const live = run.kind === "paper" ? livePot(run, overview) : null;
+  const chip = engineChip(overview, run);
+  const pot = live?.pot ?? c.at(-1)?.pot ?? run.amount_usd;
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
   const vsSpy = s.netUsd - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
@@ -63,6 +126,12 @@ export function Live() {
           {" "}with the Balanced rules and the shadow cost model. The engine starts paper trading in M1; from then on this screen updates every 5 seconds.
         </div>
       )}
+      {run.kind === "paper" && !chip.live && ["scheduled", "running", "paused"].includes(run.status) && (
+        <div className="banner warn">
+          <b>The engine isn't running.</b> Nothing trades until you start it on your Mac: open Terminal in the kaibot folder and run
+          {" "}<code className="num">./scripts/run_engine.sh</code>. Open trades keep their stop-loss at Alpaca meanwhile.
+        </div>
+      )}
       {newRun && (
         <div className="banner warn">
           A new run is queued: <b className="num">{money(Number(newRun.payload.amount_usd))}</b> at <b>{LEVELS[newRun.payload.level as keyof typeof LEVELS]?.name}</b>.
@@ -71,10 +140,11 @@ export function Live() {
       )}
 
       <section className="card" aria-labelledby="pot-h">
-        <h2 id="pot-h">{run.kind === "replay" ? "Pot at the end of the replay, after costs" : "Today's pot, after costs"}</h2>
+        <h2 id="pot-h">{run.kind === "replay" ? "Pot at the end of the replay, after costs" : "Pot now, after costs"}</h2>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "baseline" }}>
           <div className="hero">{money(pot)}</div>
-          <div className={`num ${tone(s.netUsd)}`}>{s.netUsd >= 0 ? "▲" : "▼"} {signedMoney(s.netUsd)} · {pct(s.netPct)}</div>
+          <div className={`num ${tone(pot - run.amount_usd)}`}>{pot >= run.amount_usd ? "▲" : "▼"} {signedMoney(pot - run.amount_usd)} · {pct(((pot - run.amount_usd) / run.amount_usd) * 100)}</div>
+          {live && <div className={`num ${tone(live.dayPnl)}`}>today {signedMoney(live.dayPnl)}</div>}
           <div className="num muted">start {money(run.amount_usd)}</div>
         </div>
         <p style={{ margin: "6px 0 12px" }}>
@@ -119,10 +189,23 @@ export function Live() {
         )}
       </div>
 
+      {run.kind === "paper" && (
+        <div className="grid">
+          <section className="card" aria-labelledby="pos-h">
+            <h2 id="pos-h">Open positions · {Object.keys(live?.positions ?? {}).length} / {lv?.maxPositions ?? "—"}</h2>
+            <Positions positions={live?.positions ?? {}} />
+            <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Every stop and target is held at Alpaca, so it fires even if your Mac is off.</p>
+          </section>
+          <Controls run={run} overview={overview} />
+        </div>
+      )}
+
       <section className="card" aria-labelledby="last-h">
-        <h2 id="last-h">{lastDay ? `Trades on ${day(lastDay.session)}, the last trading day` : "Trades"}</h2>
-        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Open positions: none. Kaibot is flat by 15:55 every day. Select a trade for the full reasoning.</p>
-        {lastRows.length ? <TradeRows rows={lastRows} /> : <p className="muted">No trades yet.</p>}
+        <h2 id="last-h">{run.kind === "paper" ? "Latest trades" : lastDay ? `Trades on ${day(lastDay.session)}, the last trading day` : "Trades"}</h2>
+        {run.kind === "replay" && <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Open positions: none. Kaibot is flat by 15:55 every day. Select a trade for the full reasoning.</p>}
+        {(run.kind === "paper" ? trades.data.rows.slice(0, 12) : lastRows).length
+          ? <TradeRows rows={run.kind === "paper" ? trades.data.rows.slice(0, 12) : lastRows} />
+          : <p className="muted">No trades yet. Kaibot checks for setups every 5 minutes from 09:35 to 15:45 ET; many days have none.</p>}
       </section>
     </>
   );

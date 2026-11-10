@@ -44,7 +44,11 @@ function NotRecorded({ what, replay }: { what: string; replay: boolean }) {
 function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
   const t = d.trade, replay = d.run.kind === "replay";
   if (id === "why") {
-    const f = t.features ?? {};
+    const LABELS: Record<string, string> = { z: "Drop since the open (σ)", resid_z: "Stock-specific part (σ)",
+      turnover: "Volume vs normal for this time", news_24h: "News items in 24 h", vix: "VIX (previous close)",
+      atr5: "5-minute ATR ($)", vwap: "VWAP ($)", quote_age_s: "Quote age (s)", room: "Agent room" };
+    const f = Object.fromEntries(Object.entries(t.features ?? {}).filter(([k]) => k in LABELS)
+      .map(([k, v]) => [LABELS[k], typeof v === "number" ? Number(v.toFixed(3)) : v]));
     return (
       <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
         <span>Setup</span><span className="v">{t.strategy.replace("_", " ")}: dip with no company news, sector-adjusted</span>
@@ -58,14 +62,24 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
   }
   if (id === "gate") {
     if (!d.gate) return <NotRecorded what="The gate record" replay={replay} />;
+    const rows = Object.entries(d.gate.checks as Record<string, { state: string; actual: unknown; limit: unknown }>);
     return (
-      <table className="list"><thead><tr><th>Check</th><th>Result</th></tr></thead>
-        <tbody>{Object.entries(d.gate.checks).map(([k, v]) => <tr key={k}><td>{k}</td><td className="num">{JSON.stringify(v)}</td></tr>)}</tbody>
-      </table>
+      <>
+        <p className="muted num" style={{ marginTop: 0, fontSize: 12 }}>policy {d.gate.policy_hash} · code {d.gate.code_sha} · {d.gate.qty} sh · size bound by {d.gate.binding}</p>
+        <table className="list"><thead><tr><th>Check</th><th>Result</th><th className="r">Actual</th><th className="r">Limit</th></tr></thead>
+          <tbody>{rows.map(([k, v]) => (
+            <tr key={k}><td>{k.replace(/_/g, " ")}</td>
+              <td className={v.state === "pass" ? "" : v.state === "warn" ? "loss" : "loss"} style={{ color: v.state === "pass" ? "var(--pass)" : v.state === "warn" ? "var(--warn)" : "var(--fail)" }}>
+                {v.state === "pass" ? "✓ pass" : v.state === "warn" ? "▲ warn" : "✕ fail"}</td>
+              <td className="r num">{String(v.actual)}</td><td className="r num">{String(v.limit)}</td></tr>
+          ))}</tbody>
+        </table>
+      </>
     );
   }
   if (id === "room") {
-    if (!d.room) return <NotRecorded what="The agent room's debate" replay={replay} />;
+    if (!d.room) return replay ? <NotRecorded what="The agent room's debate" replay /> :
+      <p className="muted">The agent room is off in M1: trades are rules-only, so the go-live test measures the rules alone. It can only ever veto or halve a trade, never size or price it.</p>;
     return (
       <div style={{ display: "grid", gap: 12 }}>
         {(["proposer", "critic", "judge"] as const).map((r) => (

@@ -12,8 +12,15 @@ export interface Run {
   started_on: string | null; ended_on: string | null;
 }
 export interface Daily { session: string; pnl: number; pnl_venue: number; pnl_shadow: number; spy_ret: number | null; trades: number }
-export interface Heartbeat { process: string; ts: string; detail: unknown }
-export interface Overview { run: Run; daily: Daily[]; heartbeat: Heartbeat[]; pending_commands: { kind: string; ts: string; payload: Record<string, unknown> }[] }
+export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean } | null }
+export interface LedgerPos { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }
+export interface Ledger { ts: string; cash: number; positions: Record<string, LedgerPos>; equity_venue: number; equity_shadow: number }
+export interface Overview {
+  run: Run; daily: Daily[]; heartbeat: Heartbeat[];
+  pending_commands: { kind: string; ts: string; payload: Record<string, unknown> }[];
+  ledger: Ledger | null; today: { trades: number; pnl: number } | null;
+}
+export type CommandKind = "pause" | "resume" | "flatten_and_stop" | "set_level";
 export interface Trade {
   id: number; run_id: number; signal_id: number | null; strategy: string; symbol: string;
   entry_ts: string; exit_ts: string | null; qty: number; entry_px: number; exit_px: number | null;
@@ -46,7 +53,9 @@ export const api = {
   runs: async () => (await rpc<Run[]>("kb_runs")).map(fixRun),
   overview: async (run: number) => {
     const o = await rpc<Overview>("kb_overview", { p_run: run });
-    return { ...o, run: fixRun(o.run), daily: o.daily.map((d) => ({ ...d, pnl: Number(d.pnl), pnl_venue: Number(d.pnl_venue),
+    const ledger = o.ledger ? { ...o.ledger, cash: Number(o.ledger.cash), equity_venue: Number(o.ledger.equity_venue),
+      equity_shadow: Number(o.ledger.equity_shadow) } : null;
+    return { ...o, ledger, run: fixRun(o.run), daily: o.daily.map((d) => ({ ...d, pnl: Number(d.pnl), pnl_venue: Number(d.pnl_venue),
       pnl_shadow: Number(d.pnl_shadow), spy_ret: num(d.spy_ret) })) };
   },
   trades: async (run: number, limit = 50, offset = 0) => {
@@ -57,6 +66,8 @@ export const api = {
     const r = await rpc<TradeDetail | null>("kb_trade", { p_id: id });
     return r ? { ...r, trade: fixTrade(r.trade), run: fixRun(r.run) } : null;
   },
+  command: (kind: CommandKind, payload: Record<string, unknown> = {}) =>
+    rpc<{ queued: boolean }>("kb_command", { p_kind: kind, p_idem: crypto.randomUUID(), p_payload: payload }),
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

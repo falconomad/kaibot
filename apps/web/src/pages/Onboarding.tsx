@@ -88,8 +88,8 @@ export function Onboarding() {
           <section className="card">
             <h1 style={{ margin: "0 0 8px", fontSize: 20 }}>Ready</h1>
             <p className="num" style={{ fontSize: 18 }}>{money(amount)} · {lv.name} · worst allowed day −{money((amount * lv.stop) / 100)}</p>
-            <p className="muted">The run is queued for the engine and starts at the next market open (09:35 ET, 15:35 CET) once the engine is online.
-              The first 5 sessions are a calibration week.</p>
+            <p className="muted">The run is queued for the engine on your Mac. If the market is open it starts at the next 5-minute check,
+              otherwise at the next open (09:35 ET, 15:35 CET). Starting a new run closes the current run's positions first.</p>
             {start.isError && <p className="loss" role="alert">{String(start.error)}</p>}
           </section>
         )}
