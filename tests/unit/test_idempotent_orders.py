@@ -57,8 +57,12 @@ class Resp:
 
 def broker(monkeypatch, fake):
     monkeypatch.setattr(alp.urllib.request, "urlopen", fake.urlopen)
-    monkeypatch.setattr(alp.time, "sleep", lambda s: None)
-    return alp.AlpacaPaper("k", "s")
+    if hasattr(alp, "time"):  # before the shared rate-limit layer (#17)
+        monkeypatch.setattr(alp.time, "sleep", lambda s: None)
+    b = alp.AlpacaPaper("k", "s")
+    if hasattr(b.http, "_open"):  # with the shared layer: the opener and sleep are bound at construction
+        b.http._open, b.http._sleep = fake.urlopen, (lambda s: None)
+    return b
 
 
 def test_lost_response_retry_gives_one_order(monkeypatch):
