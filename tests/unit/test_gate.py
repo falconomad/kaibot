@@ -52,7 +52,8 @@ def _check(entry, stop_frac, equity):
     p = Proposal("X", Side.BUY, entry, entry * stop_frac)
     v = evaluate(p, snap(equity=equity, day_start_equity=equity, open_risk=0), POL)
     if v.approved:
-        assert v.max_loss <= equity * 0.005 + 1e-6
+        # the real risk (qty floored by the gate); v.max_loss is the same figure rounded to cents for display
+        assert v.qty * abs(entry - p.stop) <= equity * 0.005 + 1e-6
         assert v.qty * entry <= equity * 0.10 + 1e-6
 
 
@@ -107,7 +108,7 @@ def test_property_level_presets_cap_losses(level):
         v = evaluate(Proposal("X", Side.BUY, entry, entry * stop_frac), s, pol)
         if not v.approved:
             return
-        assert v.max_loss <= equity * pol.risk_per_trade_pct / 100 + 1e-6
+        assert v.qty * entry * (1 - stop_frac) <= equity * pol.risk_per_trade_pct / 100 + 1e-6  # true risk
         assert v.qty * entry <= equity * pol.max_position_pct / 100 + 1e-6
         assert positions < pol.max_positions
         assert (start - equity) < start * pol.max_daily_loss_pct / 100
