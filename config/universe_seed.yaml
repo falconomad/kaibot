@@ -1,0 +1,16 @@
+# M0 seed universe: liquid US large caps by sector + their sector ETF (for the beta residual), plus SPY.
+# CAVEAT (survivorship bias): this is TODAY's list of large caps applied to the past. Replays on it are
+# optimistic. M1 replaces it with a point-in-time universe rebuilt nightly (story S04 / tech design §2).
+sectors:
+  XLK: [AAPL, MSFT, NVDA, AVGO, ORCL, CRM, ADBE, AMD, CSCO, INTC, QCOM, TXN]
+  XLC: [GOOGL, META, NFLX, DIS, TMUS]
+  XLY: [AMZN, TSLA, HD, MCD, NKE, LOW, SBUX, BKNG]
+  XLP: [PG, KO, PEP, COST, WMT]
+  XLV: [UNH, JNJ, LLY, MRK, ABBV, PFE, TMO]
+  XLF: [JPM, BAC, WFC, GS, MS, V, MA]
+  XLI: [CAT, BA, GE, HON, UPS, RTX, DE]
+  XLE: [XOM, CVX, COP]
+  XLU: [NEE, DUK]
+  XLRE: [PLD, AMT]
+  XLB: [LIN]
+market: SPY

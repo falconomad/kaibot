@@ -1,0 +1,24 @@
+# Event blackouts (PRD v2: no new entries +-30 min around FOMC and CPI). Times are America/New_York.
+# Sources: FOMC statements from federalreserve.gov/monetarypolicy/fomccalendars.htm (read 10 Nov 2026);
+# CPI release dates from FRED release_id=10 (read 10 Nov 2026). CPI is published 08:30 ET, before the open,
+# so it only blacks out entries if the window overlaps the session (it does not); kept for the open-gap filter.
+fomc_statement_1400:
+  - 2025-01-29
+  - 2025-03-19
+  - 2025-05-07
+  - 2025-06-18
+  - 2025-07-30
+  - 2025-09-17
+  - 2025-10-29
+  - 2025-12-10
+  - 2026-01-28
+  - 2026-03-18
+  - 2026-04-29
+  - 2026-06-17
+  - 2026-07-29
+  - 2026-09-16
+  - 2026-10-28
+  - 2026-12-09
+cpi_0830: [2025-01-15, 2025-02-12, 2025-03-12, 2025-04-10, 2025-05-13, 2025-06-11, 2025-07-15, 2025-08-12,
+           2025-09-11, 2025-10-24, 2025-12-18, 2026-01-13, 2026-02-13, 2026-03-11, 2026-04-10, 2026-05-12,
+           2026-06-10, 2026-07-14, 2026-08-12, 2026-09-11, 2026-10-14, 2026-11-10, 2026-12-10]
