@@ -130,6 +130,7 @@ class Engine:
         self.account_clean = True
         self.code = code_sha()
         self.peak: float | None = None
+        self.on_progress = lambda status: None
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -298,7 +299,13 @@ class Engine:
         if timedelta(0) < nxt - now <= timedelta(minutes=45) and self.market.day != nxt.date():
             cal = self.broker.calendar(str(nxt.date()))
             open_utc, _ = session_minutes(cal, nxt.date())
-            self.market.prepare_day(nxt.date(), open_utc)
+            self.market.prepare_day(
+                nxt.date(),
+                open_utc,
+                progress=lambda n, tot: self.on_progress(
+                    {"state": "preparing", "note": f"loading price history {n}/{tot}"}
+                ),
+            )
 
     def _start_day(self, now: datetime) -> None:
         today = now.astimezone(_et()).date()
@@ -323,7 +330,14 @@ class Engine:
         self.peak = max(float(self.run.get("peak_equity") or start_eq), start_eq)
         self.day = Day(self.run["id"], today, open_utc, n_min, start_eq)
         if self.market.day != today:
-            self.market.prepare_day(today, open_utc)
+            self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
+            self.market.prepare_day(
+                today,
+                open_utc,
+                progress=lambda n, tot: self.on_progress(
+                    {"state": "preparing", "note": f"loading price history {n}/{tot}"}
+                ),
+            )
         for p in self.pos.values():  # positions opened on an earlier session are closed at the first tick
             p.carried = bool(p.entry_ts) and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today
         self.check_account()

@@ -50,14 +50,16 @@ class LiveMarket:
         self._last_fetch: datetime | None = None
 
     # ---------- once per session ----------
-    def prepare_day(self, day: date, open_utc: datetime) -> None:
+    def prepare_day(self, day: date, open_utc: datetime, progress=None) -> None:
         self.day, self.open_utc = day, open_utc
         self.today_bars = {s: pd.DataFrame(columns=["ts", "o", "h", "l", "c", "v", "vw"]) for s in self.all}
         self._last_fetch = None
         end = open_utc - timedelta(hours=7)  # previous evening: history never touches today
         start = end - timedelta(days=int(HISTORY_SESSIONS * 1.5))
         self.cache.mkdir(parents=True, exist_ok=True)
-        for s in self.all:
+        for n, s in enumerate(self.all):
+            if progress and n % 5 == 0:
+                progress(n, len(self.all))
             f = self.cache / f"{s}.parquet"
             old = pd.read_parquet(f) if f.exists() else pd.DataFrame(columns=["ts", "o", "h", "l", "c", "v", "vw"])
             have_to = old["ts"].max() if len(old) else None

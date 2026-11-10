@@ -7,6 +7,7 @@ Stops cleanly on Ctrl-C / SIGTERM. Open positions keep their broker-held stops e
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import signal
@@ -105,6 +106,15 @@ def main() -> None:
     status: dict = {"state": "starting"}
     last_minute = None
     log.info("engine up (code %s). Ctrl-C to stop; broker-held stops stay in place.", eng.code)
+    last_error = ""
+
+    def beat(st: dict) -> None:
+        try:
+            eng.store.heartbeat(eng.process, {**st, "host": host, "ts": datetime.now(UTC).isoformat()})
+        except Exception:
+            log.exception("heartbeat failed")
+
+    eng.on_progress = lambda st: beat(st)  # long steps (history load) report progress
     while not stop["now"]:
         try:
             eng.apply_commands()
@@ -115,10 +125,15 @@ def main() -> None:
                 last_minute = minute
                 if status.get("state") != "market_closed":
                     log.info("tick %s", status)
-            eng.store.heartbeat(eng.process, {**status, "host": host, "ts": now.isoformat()})
-        except Exception:
+        except Exception as e:
             log.exception("loop error (will retry)")
-            status = {"state": "error"}
+            msg = f"{type(e).__name__}: {e}"[:300]
+            status = {"state": "error", "error": msg}
+            if msg != last_error:  # record each new error once, so it shows up without the terminal
+                last_error = msg
+                with contextlib.suppress(Exception):
+                    eng.store.event("engine_error", {"error": msg}, eng._rid())
+        beat(status)
         for _ in range(10):
             if stop["now"]:
                 break

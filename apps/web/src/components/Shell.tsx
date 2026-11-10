@@ -32,7 +32,7 @@ function Meter({ label, value, frac }: { label: string; value: string; frac: num
 
 const STATE_TEXT: Record<string, string> = {
   trading: "Running", managing: "Running · no new entries", market_closed: "Market closed", idle: "Idle",
-  starting: "Starting", error: "Error, retrying",
+  starting: "Starting", error: "Error, retrying", preparing: "Loading price history",
 };
 
 export function engineChip(o: Overview | undefined, run: Run) {
