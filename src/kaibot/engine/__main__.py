@@ -71,28 +71,32 @@ def main() -> None:
     settings = Settings.from_env()
     eng = build(settings)
     if a.check:
-        acct = eng.broker.account()
-        clk = eng.broker.clock()
-        eng.store.heartbeat("engine-check", {"state": "check", "host": socket.gethostname()})
-        assert eng.store.select("heartbeat", {"process": "eq.engine-check"}), "Supabase write/read failed"
-        run = eng.store.active_run()
-        eng.check_account()
-        print(
-            json.dumps(
-                {
-                    "alpaca_paper": acct["status"],
-                    "account_equity": acct["equity"],
-                    "positions": list(eng.broker.positions()),
-                    "market_open": clk["is_open"],
-                    "next_open": clk["next_open"],
-                    "supabase": "ok",
-                    "active_run": run and run["id"],
-                    "account_clean": eng.account_clean,
-                },
-                indent=1,
-            )
-        )
-        return
+        report: dict = {}
+
+        def step(name, fn):
+            try:
+                report[name] = fn()
+            except Exception as e:  # report every failure, don't stop at the first
+                report[name] = f"FAILED: {str(e)[:160]}"
+
+        step("alpaca_paper", lambda: {k: eng.broker.account()[k] for k in ("status", "equity")})
+        step("market", lambda: {k: eng.broker.clock()[k] for k in ("is_open", "next_open")})
+        step("positions_in_account", lambda: sorted(eng.broker.positions()))
+        step("market_data", lambda: f"{len(eng.market.data.latest_quotes(['SPY']))} quote(s) from IEX")
+
+        def supa():
+            eng.store.heartbeat("engine-check", {"state": "check", "host": socket.gethostname()})
+            if not eng.store.select("heartbeat", {"process": "eq.engine-check"}):
+                raise RuntimeError("write/read did not round-trip")
+            run = eng.store.active_run()
+            return {"write_read": "ok", "active_run": run and {"id": run["id"], "status": run["status"]}}
+
+        step("supabase", supa)
+        step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
+        print(json.dumps(report, indent=1, default=str))
+        ok = not any(isinstance(v, str) and v.startswith("FAILED") for v in report.values())
+        print("ALL GOOD" if ok else "Fix the FAILED lines above, then run --check again.")
+        raise SystemExit(0 if ok else 1)
     stop = {"now": False}
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True))
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
