@@ -9,7 +9,11 @@ Safety:
   process (or the laptop) stops.
 - On startup, positions the engine doesn't know about block all entries (account not clean); positions it does
   know from an earlier session are closed at the first tick of the next open.
-- The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds.
+- The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds, and so
+  does the account's own buying power (the smaller wins).
+- Fail closed (S16/S18): unknown open orders or positions, position drift against the broker, three loop errors
+  in a row, an event calendar that has run out, or three daily stops in ten sessions all stop new entries.
+  Nothing here ever adds risk: protection stays at the broker and exits keep being managed.
 """
 
 from __future__ import annotations
@@ -25,8 +29,9 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
+from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
-from kaibot.replay.sim import BLACKOUT_FOMC, half_spread, sell_px
+from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
 
 log = logging.getLogger("kaibot.engine")
@@ -36,6 +41,8 @@ TARGET_R = 2.0
 TRAIL_ATR = 1.5
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
+MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
+STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
 
 
@@ -121,9 +128,16 @@ class Engine:
         fomc: set,
         process: str = "engine",
         now=lambda: datetime.now(UTC),
+        calendar_until: date | None = None,
+        events: dict | None = None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
+        self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
+        self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
+        self.kill: str | None = None  # set by a fail-closed halt; blocks entries until the next session
+        self.error_streak = 0
+        self._drift_seen: dict = {}
         self.run: dict | None = None
         self.day: Day | None = None
         self.pos: dict[str, Pos] = {}
@@ -144,13 +158,63 @@ class Engine:
         )
 
     def check_account(self) -> None:
+        """Positions or open orders the engine doesn't know about block all entries (fail closed).
+
+        An open order counts as known if it is on a symbol the engine holds (its bracket legs and exits). An
+        unknown one is e.g. a bracket accepted just before a crash, before its row was written: adopting it
+        blindly could double the position, so we stop instead and say so."""
         broker_pos = self.broker.positions()
         foreign = sorted(set(broker_pos) - set(self.pos))
-        self.account_clean = not foreign
-        if foreign:
-            msg = {"foreign_positions": foreign, "action": "entries blocked until the paper account is clean"}
-            log.warning("account not clean: %s", foreign)
+        orders = sorted({o["symbol"] for o in self.broker.open_orders() if o["symbol"] not in self.pos})
+        self.account_clean = not foreign and not orders
+        if not self.account_clean:
+            msg = {"foreign_positions": foreign, "unknown_open_orders": orders,
+                   "action": "entries blocked until the paper account is clean"}
+            log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
+
+    # ================= fail-closed halts =================
+    def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
+        if self.kill:
+            return
+        self.kill = kind
+        log.error("entries halted: %s (%s)", kind, reason)
+        self.store.insert(
+            "halt",
+            {"run_id": self._rid(), "kind": kind, "reason": reason,
+             "session": str(self.day.day) if self.day else None},
+            returning=False,
+        )
+        self.store.event("halt", {"kind": kind, "reason": reason, **(detail or {})}, self._rid())
+
+    def on_tick_error(self, err: Exception) -> None:
+        """Called by the main loop when an iteration raises. Repeated failures trip the kill switch."""
+        self.error_streak += 1
+        if self.error_streak >= MAX_ERROR_STREAK:
+            self._halt_entries("engine_errors", f"{self.error_streak} loop errors in a row: {str(err)[:120]}")
+
+    def on_tick_ok(self) -> None:
+        self.error_streak = 0
+
+    def _check_drift(self) -> None:
+        """S18: the engine's book must match the broker's. Any difference stops new entries."""
+        broker_pos = self.broker.positions()
+        diffs = {}
+        for s, p in self.pos.items():
+            if p.status != "open" or p.exit_order_id:
+                continue
+            q = broker_pos.get(s)
+            bq = int(float(q["qty"])) if q else 0
+            if bq != p.qty:
+                diffs[s] = {"engine": p.qty, "broker": bq}
+        for s in set(broker_pos) - set(self.pos):
+            diffs[s] = {"engine": 0, "broker": int(float(broker_pos[s]["qty"]))}
+        # A bracket leg can fill between our order sync and this read; that heals on the next minute's sync.
+        # Only a difference seen on two consecutive minutes is drift.
+        persistent = {s: v for s, v in diffs.items() if self._drift_seen.get(s) == v}
+        self._drift_seen = diffs
+        if persistent:
+            self._halt_entries("drift", "positions differ from the broker", {"diffs": persistent})
 
     def _restore_positions(self) -> None:
         self.pos = {}
@@ -277,6 +341,7 @@ class Engine:
             return self._status(m)
         d.last_m = m
         self._sync_orders()
+        self._check_drift()
         if any(p.carried for p in self.pos.values()):
             for p in [p for p in self.pos.values() if p.carried and p.status in ("open", "pending")]:
                 self._exit(p, "carried_over")
@@ -340,12 +405,31 @@ class Engine:
             )
         for p in self.pos.values():  # positions opened on an earlier session are closed at the first tick
             p.carried = bool(p.entry_ts) and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today
+        if self.kill:
+            self.store.event("halt_cleared", {"kind": self.kill, "day": str(today)}, self._rid())
+        self.kill, self.error_streak = None, 0
+        self._check_recent_stops(today)
+        if self.calendar_until is not None and today > self.calendar_until:
+            self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),
+                                                "action": "update config/macro_calendar.yaml"}, self._rid())
+            self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
         self.check_account()
         self.store.event(
             "session_start",
             {"day": str(today), "start_equity": start_eq, "level": self.level(), "minutes": n_min},
             self._rid(),
         )
+
+    def _check_recent_stops(self, today: date) -> None:
+        rows = self.store.select("halt", {"run_id": f"eq.{self.run['id']}", "kind": "eq.daily_stop"})
+        lo = today - timedelta(days=STOPS_WINDOW_DAYS)
+        recent = sorted({r["session"] for r in rows if r.get("session") and lo <= date.fromisoformat(r["session"])})
+        if len(recent) >= STOPS_TO_PAUSE and self.run["status"] == "running":
+            reason = f"{len(recent)} daily stops since {lo}: paused until you resume"
+            self.store.insert("halt", {"run_id": self._rid(), "kind": "three_stops", "reason": reason,
+                                       "session": str(today)}, returning=False)
+            self._set_run_status("paused", reason)
+            self.store.event("run_paused", {"reason": reason, "sessions": recent}, self._rid())
 
     def equity_now(self) -> tuple[float, float]:
         d = self.day
@@ -363,7 +447,8 @@ class Engine:
             d.halted = True
             self.store.insert(
                 "halt",
-                {"run_id": self._rid(), "kind": "daily_stop", "reason": f"day P&L reached -{pol.max_daily_loss_pct}%"},
+                {"run_id": self._rid(), "kind": "daily_stop", "reason": f"day P&L reached -{pol.max_daily_loss_pct}%",
+                 "session": str(d.day)},
                 returning=False,
             )
         self.peak = max(self.peak or eq, eq)
@@ -382,13 +467,13 @@ class Engine:
 
     def _may_enter(self, m: int) -> bool:
         d = self.day
-        if self.run is None or self.run["status"] != "running" or not self.account_clean:
+        if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
             return False
         if d.halted or d.flattened or m < d.pause_until:
             return False
         if not (FIRST_ENTRY_M <= m + 1 <= d.last_entry_m):
             return False
-        return not (np.datetime64(d.day, "D") in self.fomc and BLACKOUT_FOMC[0] <= m <= BLACKOUT_FOMC[1])
+        return in_blackout(self.events, d.day, m) is None
 
     # ================= entries =================
     def _entries(self, m: int) -> None:
@@ -401,6 +486,8 @@ class Engine:
         quotes = self.broker_quotes(list(cands["symbol"]))
         pol, d = self.policy(), self.day
         decision = self.now()
+        broker_bp = self._broker_buying_power()
+        added = 0.0
         for _, c in cands.iterrows():
             s = c["symbol"]
             if s in self.pos:
@@ -421,14 +508,15 @@ class Engine:
                 symbol_exposure=0.0,
                 open_risk=sum(p.risk_ps * p.qty for p in self.pos.values() if p.status in ("pending", "open")),
                 quote_age_s=q_age,
-                kill_switch=False,
+                kill_switch=bool(self.kill),
                 reconciled=self.account_clean,
                 market_open=True,
                 data_ok=(self.market.last_bar_minute(s) or -99) >= m - 2,
                 in_entry_window=True,
                 entries_today=d.entries,
                 run_peak_equity=self.peak,
-                buying_power=eq - exposure,
+                # the account's figure already nets its open positions; subtract what this loop has added since
+                buying_power=eq - exposure if broker_bp is None else min(eq - exposure, broker_bp - added),
             )
             feats = {k: _num(c[k]) for k in ("z", "resid_z", "turnover", "atr5", "vwap", "sigma_1m")}
             feats.update({"news_24h": news, "vix": vix, "m": m, "quote_age_s": q_age})
@@ -470,9 +558,19 @@ class Engine:
             if qty <= 0:
                 continue
             self._open(s, qty, ref, stop, target, risk_ps, float(c["atr5"]), float(c["sigma_1m"]), q, sig["id"], feats)
+            added += qty * ref
             d.entries += 1
             if d.entries >= pol.max_entries_per_day:
                 break
+
+    def _broker_buying_power(self) -> float | None:
+        """The paper account's own buying power; None if unknown (then the pot alone caps it)."""
+        try:
+            bp = self.broker.account().get("buying_power")
+            return float(bp) if bp is not None else None
+        except Exception:
+            log.exception("account read failed")
+            return 0.0  # fail closed: no buying power if we can't read it
 
     def broker_quotes(self, symbols: list[str]) -> dict:
         try:

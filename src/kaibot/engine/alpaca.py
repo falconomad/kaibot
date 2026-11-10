@@ -104,13 +104,16 @@ class AlpacaPaper:
             raise
 
     def submit_bracket(self, coid: str, symbol: str, qty: int, stop: float, target: float) -> dict:
-        """Market buy with a broker-held stop and take-profit (both GTC-day legs). Adopts on duplicate id."""
+        """Market buy with a broker-held stop and take-profit. Adopts the existing order on a duplicate id.
+
+        GTC, not DAY: day legs expire at 16:00, so if the engine is dead at the close the position would sit
+        overnight with no stop. GTC legs keep protecting it until the engine closes it at the next open."""
         body = {
             "symbol": symbol,
             "qty": str(int(qty)),
             "side": "buy",
             "type": "market",
-            "time_in_force": "day",
+            "time_in_force": "gtc",
             "order_class": "bracket",
             "client_order_id": coid,
             "take_profit": {"limit_price": f"{target:.2f}"},

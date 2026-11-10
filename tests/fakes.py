@@ -141,7 +141,10 @@ class FakeBroker:
 
     # --- broker API used by the engine ---
     def account(self):
-        return {"status": "ACTIVE", "equity": "100000"}
+        a = {"status": "ACTIVE", "equity": "100000"}
+        if getattr(self, "buying_power", None) is not None:
+            a["buying_power"] = str(self.buying_power)
+        return a
 
     def calendar(self, day):
         return {"date": day, "open": "09:30", "close": "16:00"}
