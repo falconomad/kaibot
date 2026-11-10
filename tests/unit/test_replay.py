@@ -57,3 +57,14 @@ def test_five_minute_shapes():
     sd = flat_days(3)
     atr, hl = five_minute(sd.o, sd.h, sd.l, sd.c)
     assert atr.shape == (3, 78) and hl.shape == (3, 78)
+
+
+def test_trailing_exit_moves_to_breakeven_without_lookahead():
+    from kaibot.replay.sim import first_exit_trail
+    c = np.full(N_MIN, 100.0)
+    c[10:15] = 101.2  # closes above +1R (R = 1.0)
+    c[15:] = 99.5
+    o = np.r_[c[:1], c[:-1]]
+    h, l = np.maximum(o, c) + 0.05, np.minimum(o, c) - 0.05  # noqa: E741
+    m, px, why = first_exit_trail(h, l, o, c, 1, 100.0, 1.0, 0.5)
+    assert why == "trail" and px >= 100.0 and m == 15

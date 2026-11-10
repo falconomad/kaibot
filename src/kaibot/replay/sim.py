@@ -74,9 +74,31 @@ def first_exit(h, l, o, c, start_m, stop, target):  # noqa: E741
     return m, float(target), "target"
 
 
+def first_exit_trail(h, l, o, c, start_m, fill, risk_ps, atr, target_r=2.0, trail_atr=1.5):  # noqa: E741
+    """Variant A: fixed 2R target; after a bar CLOSES >= +1R, stop -> breakeven, then trails trail_atr*ATR below
+    the highest close. The stop used on bar m only depends on closes up to m-1 (no lookahead)."""
+    stop = fill - risk_ps
+    target = fill + target_r * risk_ps
+    armed = False
+    hi_close = -np.inf
+    for m in range(start_m, EXIT_M + 1):
+        if l[m] <= stop:
+            return m, float(min(stop, o[m])), "trail" if armed else "stop"
+        if h[m] >= target + 0.01:
+            return m, float(target), "target"
+        if m == EXIT_M:
+            return m, float(c[m]), "time"
+        hi_close = max(hi_close, c[m])
+        if not armed and c[m] >= fill + risk_ps:
+            armed = True
+        if armed:
+            stop = max(stop, fill, hi_close - trail_atr * atr)
+    return EXIT_M, float(c[EXIT_M]), "time"
+
+
 def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict, fomc: set, pol: RiskPolicy,
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
-                  pause_after_losses: int = 3, pause_minutes: int = 60) -> Book:
+                  pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1") -> Book:
     book = Book(equity0)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
     by_day = {d: g.sort_values(["m", "z"]) for d, g in cands.groupby("date")} if len(cands) else {}
@@ -135,7 +157,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 risk_ps = ref - stop
                 vw = cnd["vwap"]
                 target = min(vw, ref + 1.5 * risk_ps) if vw > ref else ref + 1.5 * risk_ps
-                if target - ref < min_reward_r * risk_ps:
+                if variant == "v1" and target - ref < min_reward_r * risk_ps:
                     continue
                 open_risk = sum(p["risk"] for p in open_pos)
                 eq_now = start_eq + realized + unreal
@@ -152,7 +174,12 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 fill = buy_px(sd.o[r, fm], qty, cnd["sigma_1m"], sd.v[r, fm])
                 stop_f = fill - risk_ps
                 tgt_f = fill + (target - ref)
-                xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, stop_f, tgt_f)
+                if variant == "A":
+                    xm, gross, why = first_exit_trail(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, fill, risk_ps,
+                                                      cnd["atr5"])
+                    stop_f, tgt_f = fill - risk_ps, fill + 2.0 * risk_ps
+                else:
+                    xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, stop_f, tgt_f)
                 xp = gross if why == "target" else sell_px(gross, qty, cnd["sigma_1m"], sd.v[r, xm])
                 pnl = (xp - fill) * qty - sell_fees(qty, xp)
                 t = Trade(cnd["symbol"], d, fm, xm, qty, fill, xp, stop_f, tgt_f, why, pnl, risk_ps * qty)
@@ -171,7 +198,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
 
 def random_entry_runs(bars: dict[str, SymbolDays], atr5: dict, vwap: dict, sigma: dict, trades_per_day: pd.Series,
                       pol: RiskPolicy, equity0: float, n_runs: int = 200, seed: int = 7,
-                      atr_mult: float = 1.5) -> np.ndarray:
+                      atr_mult: float = 1.5, variant: str = "v1") -> np.ndarray:
     """Total net P&L ($) of n_runs random-entry strategies with the same daily trade count, sizing and exits."""
     rng = np.random.default_rng(seed)
     syms = list(bars)
@@ -202,8 +229,11 @@ def random_entry_runs(bars: dict[str, SymbolDays], atr5: dict, vwap: dict, sigma
                 if qty <= 0:
                     continue
                 fill = buy_px(sd.o[r, m + 1], qty, sigma[s][r], sd.v[r, m + 1])
-                xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], m + 1, fill - risk_ps,
-                                            fill + (target - ref))
+                if variant == "A":
+                    xm, gross, why = first_exit_trail(sd.h[r], sd.l[r], sd.o[r], sd.c[r], m + 1, fill, risk_ps, a)
+                else:
+                    xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], m + 1, fill - risk_ps,
+                                                fill + (target - ref))
                 xp = gross if why == "target" else sell_px(gross, qty, sigma[s][r], sd.v[r, xm])
                 tot += (xp - fill) * qty - sell_fees(qty, xp)
         totals[k] = tot

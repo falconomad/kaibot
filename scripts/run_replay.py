@@ -56,6 +56,9 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=200)
     ap.add_argument("--start", default="2025-02-01", help="first traded session (earlier data warms up stats)")
     ap.add_argument("--equity", type=float, default=100_000.0)
+    ap.add_argument("--end", default="2099-12-31", help="last traded session (inclusive)")
+    ap.add_argument("--variant", default="v1", choices=["v1", "A"])
+    ap.add_argument("--label", default="", help="e.g. design / holdout")
     a = ap.parse_args()
     env = load_env(a.env)
     data = Path(a.data)
@@ -82,22 +85,24 @@ def main() -> None:
             r = np.r_[np.nan, close[1:] / close[:-1] - 1]
             sigma[s] = pd.Series(r).shift(1).rolling(20, min_periods=20).std().to_numpy() / np.sqrt(390)
     start = np.datetime64(a.start, "D")
+    end = np.datetime64(a.end, "D")
     cands = pd.concat(cand_frames, ignore_index=True) if cand_frames else pd.DataFrame()
     if len(cands):
-        cands = cands[cands["date"] >= start]
+        cands = cands[(cands["date"] >= start) & (cands["date"] <= end)]
     reg_all = regime(spy, vix_prev_close(env["FRED_API_KEY"]))
-    reg = {d: v for d, v in reg_all.items() if d >= start}
+    reg = {d: v for d, v in reg_all.items() if start <= d <= end}
 
-    book = run_portfolio(bars, cands, reg, fomc, pol, equity0=a.equity)
+    book = run_portfolio(bars, cands, reg, fomc, pol, equity0=a.equity, variant=a.variant)
     daily = pd.DataFrame(book.daily)
     trades = pd.DataFrame([t.__dict__ for t in book.trades])
     n = len(trades)
     per_trade_ret = (trades["pnl"] / a.equity).to_numpy() if n else np.array([])
     daily_ret = (daily["pnl"] / daily["start"]).to_numpy()
     tpd = trades.groupby("date").size() if n else pd.Series(dtype=int)
-    rand = random_entry_runs(bars, atr5, vwap, sigma, tpd, pol, a.equity, n_runs=a.runs) if n else np.array([])
+    rand = random_entry_runs(bars, atr5, vwap, sigma, tpd, pol, a.equity, n_runs=a.runs,
+                             variant=a.variant) if n else np.array([])
     spy_close = pd.Series(spy.c[:, -1], index=spy.dates)
-    spy_close = spy_close[spy_close.index >= start]
+    spy_close = spy_close[(spy_close.index >= start) & (spy_close.index <= end)]
     spy_ret = spy_close.pct_change().dropna().to_numpy()
 
     total = float(trades["pnl"].sum()) if n else 0.0
@@ -105,7 +110,8 @@ def main() -> None:
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "code_sha": subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                                    cwd=ROOT).stdout.strip(),
-        "level": a.level, "equity": a.equity, "start": a.start,
+        "level": a.level, "equity": a.equity, "start": a.start, "end": a.end, "variant": a.variant,
+        "label": a.label,
         "sessions": int(len(daily)), "symbols": len(bars), "candidates_raw": int(len(cands)),
         "candidates_no_news": int((~cands["news_24h"]).sum()) if len(cands) else 0,
         "trades": n,
@@ -139,12 +145,13 @@ def main() -> None:
     out = data / "reports"
     out.mkdir(parents=True, exist_ok=True)
     tag = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+    tag = f"{a.variant}_{a.label}_{tag}" if a.label else f"{a.variant}_{tag}"
     (out / f"replay_{a.level}_{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
     trades.to_csv(out / f"trades_{a.level}_{tag}.csv", index=False)
     daily.to_csv(out / f"daily_{a.level}_{tag}.csv", index=False)
     with (data / "trials.jsonl").open("a") as fh:
         fh.write(json.dumps({"ts": rep["run_at"], "strategy": "dip_reversal", "level": a.level,
-                             "code_sha": rep["code_sha"], "params": "pre-registered v1",
+                             "code_sha": rep["code_sha"], "params": f"pre-registered {a.variant} {a.label}".strip(),
                              "window": [a.start, str(daily["date"].max()) if len(daily) else None],
                              "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade",
                                                              "daily_sharpe_ann")}}, default=str) + "\n")
