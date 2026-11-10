@@ -9,10 +9,11 @@ period is out-of-sample for them. Every run appends a trial row to data/trials.j
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import hashlib
 import json
 import subprocess
 import sys
-import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,9 +23,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import http  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
-from kaibot.replay.features import candidates, five_minute, regime  # noqa: E402
+from kaibot.replay.events import events, events_digest, input_digest  # noqa: E402
+from kaibot.replay.features import regime  # noqa: E402
+from kaibot.replay.pipeline import prepare  # noqa: E402
 from kaibot.replay.sim import random_entry_runs, run_portfolio  # noqa: E402
 from kaibot.risk.profiles import load_profiles  # noqa: E402
 
@@ -38,11 +42,16 @@ def load_env(p):
     return env
 
 
-def vix_prev_close(fred_key: str) -> pd.Series:
-    url = ("https://api.stlouisfed.org/fred/series/observations?series_id=VIXCLS&observation_start=2024-06-01"
-           f"&file_type=json&api_key={fred_key}")
-    with urllib.request.urlopen(url, timeout=30) as r:
-        obs = json.loads(r.read())["observations"]
+def vix_prev_close(fred_key: str, cache: Path, refresh: bool = False) -> pd.Series:
+    """VIXCLS from FRED, cached under data/inputs so a re-run reads the same series (event-sourced input)."""
+    if refresh or not cache.exists():
+        params = {"series_id": "VIXCLS", "observation_start": "2015-06-01", "file_type": "json", "api_key": fred_key}
+        obs = http.get_json("https://api.stlouisfed.org/fred/series/observations", source="fred", params=params)[
+            "observations"
+        ]
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps([{"date": o["date"], "value": o["value"]} for o in obs]))
+    obs = json.loads(cache.read_text())
     s = pd.Series({pd.Timestamp(o["date"]): float(o["value"]) for o in obs if o["value"] != "."}).sort_index()
     # value dated d is d's close -> available for session d+1 only
     return s.shift(1, freq="D").resample("D").ffill()
@@ -59,36 +68,30 @@ def main() -> None:
     ap.add_argument("--end", default="2099-12-31", help="last traded session (inclusive)")
     ap.add_argument("--variant", default="v1", choices=["v1", "A", "B"])
     ap.add_argument("--label", default="", help="e.g. design / holdout")
+    ap.add_argument("--universe", default=str(ROOT / "config" / "universe_seed.yaml"))
+    ap.add_argument("--data-from", default="", help="first bar date to load (default: start - 120 days)")
+    ap.add_argument("--refresh-vix", action="store_true", help="re-download VIXCLS instead of the cached copy")
     a = ap.parse_args()
     env = load_env(a.env)
     data = Path(a.data)
-    cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
+    cfg = yaml.safe_load(Path(a.universe).read_text())
     cal = yaml.safe_load((ROOT / "config" / "macro_calendar.yaml").read_text())
     fomc = {np.datetime64(str(d), "D") for d in cal["fomc_statement_1400"]}
     pol = load_profiles()[a.level]
 
-    spy = load_symbol(data, cfg["market"])
-    etfs = {e: load_symbol(data, e) for e in cfg["sectors"]}
-    bars, cand_frames, atr5, vwap, sigma = {}, [], {}, {}, {}
-    for etf, syms in cfg["sectors"].items():
-        for s in syms:
-            sd = load_symbol(data, s)
-            if sd is None or etfs[etf] is None:
-                continue
-            bars[s] = sd
-            cf = candidates(sd, etfs[etf], load_news_times(data, s), z_max=-2.0 if a.variant == "B" else -1.5)
-            if len(cf):
-                cand_frames.append(cf)
-            atr5[s], _ = five_minute(sd.o, sd.h, sd.l, sd.c)
-            vwap[s] = np.cumsum(sd.vw * sd.v, axis=1) / np.maximum(np.cumsum(sd.v, axis=1), 1)
-            close = sd.c[:, -1]
-            r = np.r_[np.nan, close[1:] / close[:-1] - 1]
-            sigma[s] = pd.Series(r).shift(1).rolling(20, min_periods=20).std().to_numpy() / np.sqrt(390)
     start = np.datetime64(a.start, "D")
     end = np.datetime64(a.end, "D")
-    cands = pd.concat(cand_frames, ignore_index=True) if cand_frames else pd.DataFrame()
-    if len(cands):
-        cands = cands[(cands["date"] >= start) & (cands["date"] <= end)]
+    # Warm-up: the longest feature window is the 60-session beta, so ~120 calendar days before the first session.
+    # --data-from pins it explicitly (replays 001-003 had data from 2025-01-01 only; pass that to reproduce them).
+    lo = np.datetime64(a.data_from, "D") if a.data_from else start - np.timedelta64(120, "D")
+    spy = load_symbol(data, cfg["market"], lo, end)
+    etfs = {e: load_symbol(data, e, lo, end) for e in cfg["sectors"]}
+    sector_of = {s: e for e, syms in cfg["sectors"].items() for s in syms}
+    stocks = {s: load_symbol(data, s, lo, end) for s in sector_of}
+    stocks = {s: sd for s, sd in stocks.items() if sd is not None}
+    news = {s: load_news_times(data, s) for s in stocks}
+    prep = prepare(stocks, etfs, sector_of, news, start, end, z_max=-2.0 if a.variant == "B" else -1.5)
+    bars, cands, atr5, vwap, sigma = prep.bars, prep.cands, prep.atr5, prep.vwap, prep.sigma
     if a.variant == "B" and len(cands):
         # Pre-registered B: point-in-time quality score >= 70 (10-K data filed before that date only).
         from kaibot.replay.quality import quality_panel
@@ -105,7 +108,8 @@ def main() -> None:
         cands = c2[c2["quality"] >= 70].drop(columns=["date_key"]).reset_index(drop=True)
         print(f"quality filter: {n_before} -> {len(cands)} candidates")
     sim_variant = "A" if a.variant == "B" else a.variant
-    reg_all = regime(spy, vix_prev_close(env["FRED_API_KEY"]))
+    vix = vix_prev_close(env.get("FRED_API_KEY", ""), data / "inputs" / "fred_vixcls.json", a.refresh_vix)
+    reg_all = regime(spy, vix)
     reg = {d: v for d, v in reg_all.items() if start <= d <= end}
 
     book = run_portfolio(bars, cands, reg, fomc, pol, equity0=a.equity, variant=sim_variant)
@@ -122,12 +126,22 @@ def main() -> None:
     spy_ret = spy_close.pct_change().dropna().to_numpy()
 
     total = float(trades["pnl"].sum()) if n else 0.0
+    vix_used = {str(k.date()): float(v) for k, v in vix.items() if lo <= np.datetime64(k.date(), "D") <= end}
+    params = {"level": a.level, "policy": dataclasses.asdict(pol),
+              "equity": a.equity, "start": a.start, "end": a.end, "variant": a.variant, "runs": a.runs,
+              "data_from": str(lo), "fomc": sorted(str(d) for d in fomc),
+              "universe_order": list(bars), "quality_filter": a.variant == "B"}
+    in_sha = input_digest({**bars, "SPY": spy, **{f"ETF:{e}": sd for e, sd in etfs.items() if sd is not None}},
+                          news={s: news[s] for s in bars}, series={"vix": vix_used}, params=params)
+    ev_sha = events_digest(book)
     rep = {
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "code_sha": subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                                    cwd=ROOT).stdout.strip(),
         "level": a.level, "equity": a.equity, "start": a.start, "end": a.end, "variant": a.variant,
-        "label": a.label,
+        "label": a.label, "universe": Path(a.universe).name, "data_from": str(lo),
+        "input_sha256": in_sha, "events_sha256": ev_sha,
+        "random_totals_sha256": hashlib.sha256(np.round(rand, 6).tobytes()).hexdigest(),
         "sessions": int(len(daily)), "symbols": len(bars), "candidates_raw": int(len(cands)),
         "candidates_no_news": int((~cands["news_24h"]).sum()) if len(cands) else 0,
         "trades": n,
@@ -166,8 +180,18 @@ def main() -> None:
     (out / f"replay_{a.level}_{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
     trades.to_csv(out / f"trades_{a.level}_{tag}.csv", index=False)
     daily.to_csv(out / f"daily_{a.level}_{tag}.csv", index=False)
+    with (out / f"events_{a.level}_{tag}.jsonl").open("w") as fh:
+        for e in events(book):
+            fh.write(json.dumps(e, default=str) + "\n")
+    # Per-trial daily return series: the input to PBO and to the cross-trial Sharpe variance used by the DSR.
+    trial_id = f"{a.level}_{tag}"
+    tdir = data / "trials"
+    tdir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"date": daily["date"].astype(str), "ret": daily_ret}).to_csv(tdir / f"{trial_id}.csv", index=False)
     with (data / "trials.jsonl").open("a") as fh:
-        fh.write(json.dumps({"ts": rep["run_at"], "strategy": "dip_reversal", "level": a.level,
+        fh.write(json.dumps({"ts": rep["run_at"], "trial_id": trial_id, "strategy": "dip_reversal",
+                             "variant": a.variant, "label": a.label, "level": a.level,
+                             "universe": rep["universe"], "events_sha256": ev_sha, "input_sha256": in_sha,
                              "code_sha": rep["code_sha"], "params": f"pre-registered {a.variant} {a.label}".strip(),
                              "window": [a.start, str(daily["date"].max()) if len(daily) else None],
                              "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade",

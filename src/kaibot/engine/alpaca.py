@@ -7,8 +7,6 @@ Free market-data plan: real-time bars and quotes come from the IEX feed; SIP is 
 from __future__ import annotations
 
 import json
-import threading
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -16,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
+from kaibot.common.ratelimit import Budget, get_budget
 from kaibot.engine.config import DATA_URL, PAPER_TRADING_URL
 
 
@@ -27,40 +26,43 @@ class AlpacaError(RuntimeError):
 
 
 class _Http:
-    def __init__(self, key: str, secret: str, per_min: int = 180):
+    """Paced by the process-wide budget of `source` (config/sources.yaml), shared by every client of that source.
+    A 429 holds the whole source for the backoff; 5xx and network errors back off this caller only."""
+
+    def __init__(self, key: str, secret: str, source: str = "alpaca", budget: Budget | None = None,
+                 opener=None, sleep=None):
         self.h = {
             "APCA-API-KEY-ID": key,
             "APCA-API-SECRET-KEY": secret,
             "User-Agent": "kaibot-engine/0.2",
             "Content-Type": "application/json",
         }
-        self.gap = 60.0 / per_min
-        self._last = 0.0
-        self._lock = threading.Lock()
+        self.budget = budget or get_budget(source)
+        self._open = opener or urllib.request.urlopen
+        self._sleep = sleep or self.budget.clock.sleep
 
     def call(self, method: str, url: str, params: dict | None = None, body: dict | None = None):
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
         data = json.dumps(body).encode() if body is not None else None
         for attempt in range(5):
-            with self._lock:
-                wait = self._last + self.gap - time.monotonic()
-                if wait > 0:
-                    time.sleep(wait)
-                self._last = time.monotonic()
+            self.budget.acquire()
             try:
                 req = urllib.request.Request(url, data=data, headers=self.h, method=method)
-                with urllib.request.urlopen(req, timeout=30) as r:
+                with self._open(req, timeout=30) as r:
                     raw = r.read()
                     return json.loads(raw) if raw else None
             except urllib.error.HTTPError as e:
                 text = e.read().decode(errors="replace")
-                if e.code == 429 or e.code >= 500:
-                    time.sleep(min(2**attempt, 20))
+                if e.code == 429:
+                    self.budget.backoff(min(2**attempt, 20))
+                    continue
+                if e.code >= 500:
+                    self._sleep(min(2**attempt, 20))
                     continue
                 raise AlpacaError(e.code, text) from None
             except (urllib.error.URLError, TimeoutError):
-                time.sleep(min(2**attempt, 20))
+                self._sleep(min(2**attempt, 20))
         raise AlpacaError(0, f"giving up on {method} {url}")
 
 
@@ -70,7 +72,7 @@ class AlpacaPaper:
     name = "alpaca_paper"
 
     def __init__(self, key: str, secret: str):
-        self.http = _Http(key, secret)
+        self.http = _Http(key, secret, source="alpaca_trading")
         self.base = PAPER_TRADING_URL
 
     def _t(self, method, path, params=None, body=None):
@@ -222,6 +224,10 @@ class AlpacaData:
                     break
         return {s: _frame(rows) for s, rows in out.items()}
 
+    def movers(self, top: int = 15) -> list[dict]:
+        """Today's top gainers then losers (ported from bloodbath's get_top_movers; free screener endpoint)."""
+        return parse_movers(self._d("/v1beta1/screener/stocks/movers", {"top": top}))
+
     def latest_quotes(self, symbols: list[str]) -> dict[str, dict]:
         d = self._d("/v2/stocks/quotes/latest", {"symbols": ",".join(symbols), "feed": "iex"})
         return d.get("quotes") or {}
@@ -229,6 +235,12 @@ class AlpacaData:
     def news_count(self, symbol: str, start: datetime, end: datetime) -> int:
         d = self._d("/v1beta1/news", {"symbols": symbol, "start": _iso(start), "end": _iso(end), "limit": 50})
         return len(d.get("news") or [])
+
+
+def parse_movers(raw: dict) -> list[dict]:
+    """Screener movers response -> [{symbol, price, change_pct}], gainers first, same as bloodbath."""
+    return [{"symbol": str(m["symbol"]), "price": float(m["price"]), "change_pct": float(m["percent_change"])}
+            for m in (raw.get("gainers") or []) + (raw.get("losers") or [])]
 
 
 def _iso(t: datetime) -> str:
