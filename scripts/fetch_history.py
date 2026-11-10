@@ -31,11 +31,14 @@ def main() -> None:
     ap.add_argument("--start", default="2025-01-01")
     ap.add_argument("--data", default="data")
     ap.add_argument("--news", action="store_true")
+    ap.add_argument("--rotate", type=int, default=0, help="start at this index (parallel workers)")
+    ap.add_argument("--per-min", type=int, default=60, help="request budget for THIS worker")
     a = ap.parse_args()
     env = load_env(a.env)
-    api = Alpaca(env["ALPACA_API_KEY"], env.get("ALPACA_API_SECRET") or env["ALPACA_SECRET"])
+    api = Alpaca(env["ALPACA_API_KEY"], env.get("ALPACA_API_SECRET") or env["ALPACA_SECRET"], per_min=a.per_min)
     cfg = yaml.safe_load((Path(__file__).resolve().parents[1] / "config" / "universe_seed.yaml").read_text())
     symbols = [cfg["market"], *cfg["sectors"].keys(), *[s for v in cfg["sectors"].values() for s in v]]
+    symbols = symbols[a.rotate:] + symbols[:a.rotate]
     start = datetime.fromisoformat(a.start).replace(tzinfo=UTC)
     end = datetime.now(UTC) - timedelta(minutes=20)  # SIP is free only when >= 15 min old
     data = Path(a.data)
@@ -49,7 +52,9 @@ def main() -> None:
             print(f"[{i}/{len(symbols)}] {sym} {tag}: {n} bars", flush=True)
         if a.news and sym not in cfg["sectors"] and sym != cfg["market"]:
             out = data / "news" / f"symbol={sym}" / "all.parquet"
-            if not out.exists():
+            if not out.exists() and not out.with_suffix(".lock").exists():
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.with_suffix(".lock").touch()
                 print(f"[{i}/{len(symbols)}] {sym} news: {fetch_news(api, sym, start - timedelta(days=2), end, out)}",
                       flush=True)
 

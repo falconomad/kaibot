@@ -1,0 +1,42 @@
+{
+ "run_at": "2026-11-10T14:31:02+00:00",
+ "code_sha": "6482318",
+ "level": "balanced",
+ "equity": 100000.0,
+ "start": "2025-02-01",
+ "sessions": 445,
+ "symbols": 59,
+ "candidates_raw": 3625,
+ "candidates_no_news": 1282,
+ "trades": 642,
+ "net_pnl_usd": -4008.97,
+ "net_return_pct": -4.009,
+ "mean_bp_per_trade": -0.62,
+ "t_stat_per_trade": -2.38,
+ "hit_rate": 0.408,
+ "profit_factor": 0.81,
+ "avg_R": -0.136,
+ "exit_reasons": {
+  "stop": 359,
+  "target": 223,
+  "time": 60
+ },
+ "daily_sharpe_ann": -1.46,
+ "losing_day_share_of_trading_days": 0.552,
+ "days_with_trades": 232,
+ "max_drawdown_pct": 5.23,
+ "spy_return_pct": 25.93,
+ "spy_daily_sharpe_ann": 0.86,
+ "random_runs": 200,
+ "random_mean_pnl_usd": -7108.35,
+ "random_p95_pnl_usd": -4584.05,
+ "strategy_percentile_vs_random": 97.0,
+ "min_trades_for_claim": 900,
+ "caveats": [
+  "survivorship bias: today's large caps applied to the past",
+  "no point-in-time quality filter yet (SEC_USER_AGENT not set); quality >= 70 not applied",
+  "earnings-day filter relies on Alpaca news only (no historical earnings calendar)",
+  "agent room not replayed (LLM lookahead); rules-only",
+  "fills: next-bar open at modelled bid/ask + impact, no queue model; target needs trade-through"
+ ]
+}
