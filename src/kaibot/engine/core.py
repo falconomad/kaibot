@@ -29,6 +29,7 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
+from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
 from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
 from kaibot.replay.features import five_minute
@@ -366,6 +367,7 @@ class Engine:
         if spymom.EXIT_SUBMIT_M <= m < spymom.MOC_CUTOFF_M:
             self._moc_exits()
         self._ledger(eq)
+        shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
         return self._status(m)
 
     def _maybe_prepare(self, clk: dict, now: datetime) -> None:
@@ -919,6 +921,7 @@ class Engine:
             },
             rid,
         )
+        shadow.on_day_end(self)  # S14: counterfactual P&L of today's shadow signals (exceptions contained)
         d.finalized = True
 
     def _status(self, m: int) -> dict:

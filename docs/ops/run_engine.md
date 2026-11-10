@@ -51,6 +51,11 @@ A 1 GB VM is enough (pandas + ~70 symbols × 70 sessions of minute bars).
 6. Every 5-minute bar from 09:35 to 15:45: Variant A candidates (same code as the replay), news check,
    risk gate, then a bracket order (market buy + broker-held stop + 2R target).
 7. Writes signal, gate, order, fill, trade, ledger, daily result and a heartbeat to Supabase.
+8. Shadow strategies (S14, `engine/shadow.py`, never traded): ORB on Stocks in Play (`strategies/orb.py`) and news
+   continuation (`strategies/news_continuation.py`) write `signal` rows with `mode = 'shadow'`, the would-be qty from
+   the risk gate in `features`, and at day end `features.counterfactual` (fill, exit, $ P&L, R after shadow costs)
+   plus a `shadow_session_end` event (totals and the hook's cost). Any shadow error is logged as `shadow_error`
+   (once per kind per day) and never affects live trading. Replay: `scripts/run_shadow_replay.py --strategy orb`.
 
 ## Request budgets
 Every outgoing call (Alpaca data, Alpaca paper trading, FRED, SEC, FINRA, GDELT) waits for its source's budget in
