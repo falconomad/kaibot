@@ -1,0 +1,26 @@
+# M0 history universe (story S03): 288 liquid US large caps across 11 sectors + their sector ETFs + SPY = 300.
+# Replays 001-003 used universe_seed.yaml (71 symbols); it is a subset of this file, so those replays still reproduce.
+# CAVEAT (survivorship bias): this is TODAY's list applied back to 2016. It includes some 2016 leaders that later
+# lagged (INTC, WBD, PFE, MMM, BA, VZ, T, KHC, F...), but companies delisted or acquired before Nov 2026 are absent,
+# so replays on it are optimistic. M1 replaces it with a point-in-time universe rebuilt nightly.
+# Names listed after 2016 (PLTR, ABNB, UBER, COIN, HOOD, SOFI, CARR, OTIS, CEG, CTVA, DOW, KDP, MRNA, SNAP, PINS...)
+# simply have no bars before their listing. Renamed tickers (META, ELV, WBD) come back under today's symbol.
+sectors:
+  XLK: [AAPL, MSFT, NVDA, AVGO, ORCL, CRM, ADBE, AMD, CSCO, INTC, QCOM, TXN, IBM, ACN, NOW, INTU, AMAT, MU, LRCX,
+        KLAC, ADI, SNPS, CDNS, PANW, FTNT, ANET, MRVL, NXPI, MCHP, ON, ADSK, ROP, HPQ, HPE, DELL, GLW, APH, TEL,
+        WDAY, PLTR]
+  XLC: [GOOGL, META, NFLX, DIS, TMUS, CMCSA, VZ, T, CHTR, EA, TTWO, WBD, OMC, IPG, LYV, MTCH, PINS, SNAP]
+  XLY: [AMZN, TSLA, HD, MCD, NKE, LOW, SBUX, BKNG, TJX, ROST, CMG, ORLY, AZO, MAR, HLT, GM, F, EBAY, DHI, LEN, YUM,
+        ABNB, DPZ, BBY, ULTA, TSCO, RCL, CCL, LVS, WYNN, ETSY, APTV]
+  XLP: [PG, KO, PEP, COST, WMT, PM, MO, MDLZ, CL, KMB, GIS, KHC, STZ, SYY, KR, TGT, DG, DLTR, HSY, EL, KDP, MNST]
+  XLV: [UNH, JNJ, LLY, MRK, ABBV, PFE, TMO, ABT, DHR, BMY, AMGN, GILD, CVS, CI, ELV, ISRG, MDT, SYK, BSX, VRTX, REGN,
+        ZTS, BDX, HCA, HUM, MRNA, BIIB, IQV, EW, DXCM, IDXX, A, RMD, MCK]
+  XLF: [JPM, BAC, WFC, GS, MS, V, MA, C, BLK, SCHW, AXP, SPGI, CB, MMC, PGR, USB, PNC, TFC, COF, MET, AIG, PRU, ALL,
+        TRV, BK, ICE, CME, MCO, AON, AFL, PYPL, FIS, COIN, HOOD, SOFI, KKR, BX, STT, FITB, ALLY]
+  XLI: [CAT, BA, GE, HON, UPS, RTX, DE, LMT, UNP, ETN, ADP, ITW, EMR, NOC, GD, MMM, CSX, NSC, FDX, WM, RSG, PH, CMI,
+        PCAR, JCI, CARR, OTIS, TT, URI, FAST, GWW, DAL, UAL, LUV, AAL, UBER, LHX, ODFL]
+  XLE: [XOM, CVX, COP, EOG, SLB, OXY, PSX, MPC, VLO, WMB, KMI, OKE, HAL, DVN, BKR, FANG, CTRA, APA]
+  XLU: [NEE, DUK, SO, D, AEP, EXC, SRE, XEL, PCG, ED, PEG, EIX, WEC, CEG]
+  XLRE: [PLD, AMT, EQIX, CCI, PSA, O, SPG, WELL, DLR, VICI, AVB, EQR, CBRE, SBAC, EXR, IRM]
+  XLB: [LIN, SHW, APD, ECL, FCX, NEM, DOW, DD, NUE, PPG, CTVA, MLM, VMC, ALB, MOS, IP]
+market: SPY

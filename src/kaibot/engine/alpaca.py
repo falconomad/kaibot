@@ -193,6 +193,10 @@ class AlpacaData:
                     break
         return {s: _frame(rows) for s, rows in out.items()}
 
+    def movers(self, top: int = 15) -> list[dict]:
+        """Today's top gainers then losers (ported from bloodbath's get_top_movers; free screener endpoint)."""
+        return parse_movers(self._d("/v1beta1/screener/stocks/movers", {"top": top}))
+
     def latest_quotes(self, symbols: list[str]) -> dict[str, dict]:
         d = self._d("/v2/stocks/quotes/latest", {"symbols": ",".join(symbols), "feed": "iex"})
         return d.get("quotes") or {}
@@ -200,6 +204,12 @@ class AlpacaData:
     def news_count(self, symbol: str, start: datetime, end: datetime) -> int:
         d = self._d("/v1beta1/news", {"symbols": symbol, "start": _iso(start), "end": _iso(end), "limit": 50})
         return len(d.get("news") or [])
+
+
+def parse_movers(raw: dict) -> list[dict]:
+    """Screener movers response -> [{symbol, price, change_pct}], gainers first, same as bloodbath."""
+    return [{"symbol": str(m["symbol"]), "price": float(m["price"]), "change_pct": float(m["percent_change"])}
+            for m in (raw.get("gainers") or []) + (raw.get("losers") or [])]
 
 
 def _iso(t: datetime) -> str:
