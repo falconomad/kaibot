@@ -57,7 +57,7 @@ def main() -> None:
     ap.add_argument("--start", default="2025-02-01", help="first traded session (earlier data warms up stats)")
     ap.add_argument("--equity", type=float, default=100_000.0)
     ap.add_argument("--end", default="2099-12-31", help="last traded session (inclusive)")
-    ap.add_argument("--variant", default="v1", choices=["v1", "A"])
+    ap.add_argument("--variant", default="v1", choices=["v1", "A", "B"])
     ap.add_argument("--label", default="", help="e.g. design / holdout")
     a = ap.parse_args()
     env = load_env(a.env)
@@ -76,7 +76,7 @@ def main() -> None:
             if sd is None or etfs[etf] is None:
                 continue
             bars[s] = sd
-            cf = candidates(sd, etfs[etf], load_news_times(data, s))
+            cf = candidates(sd, etfs[etf], load_news_times(data, s), z_max=-2.0 if a.variant == "B" else -1.5)
             if len(cf):
                 cand_frames.append(cf)
             atr5[s], _ = five_minute(sd.o, sd.h, sd.l, sd.c)
@@ -89,10 +89,26 @@ def main() -> None:
     cands = pd.concat(cand_frames, ignore_index=True) if cand_frames else pd.DataFrame()
     if len(cands):
         cands = cands[(cands["date"] >= start) & (cands["date"] <= end)]
+    if a.variant == "B" and len(cands):
+        # Pre-registered B: point-in-time quality score >= 70 (10-K data filed before that date only).
+        from kaibot.replay.quality import quality_panel
+
+        qdates = np.arange(start, end + np.timedelta64(1, "D"))
+        qp = quality_panel(Path("data/fundamentals/companyfacts"), sorted(bars), qdates)
+        ql = qp.stack().rename("quality").reset_index()
+        ql.columns = ["date", "symbol", "quality"]
+        ql["date"] = pd.to_datetime(ql["date"]).values.astype("datetime64[D]")
+        c2 = cands.copy()
+        c2["date_key"] = pd.to_datetime(c2["date"]).values.astype("datetime64[D]")
+        c2 = c2.merge(ql.rename(columns={"date": "date_key"}), on=["date_key", "symbol"], how="left")
+        n_before = len(c2)
+        cands = c2[c2["quality"] >= 70].drop(columns=["date_key"]).reset_index(drop=True)
+        print(f"quality filter: {n_before} -> {len(cands)} candidates")
+    sim_variant = "A" if a.variant == "B" else a.variant
     reg_all = regime(spy, vix_prev_close(env["FRED_API_KEY"]))
     reg = {d: v for d, v in reg_all.items() if start <= d <= end}
 
-    book = run_portfolio(bars, cands, reg, fomc, pol, equity0=a.equity, variant=a.variant)
+    book = run_portfolio(bars, cands, reg, fomc, pol, equity0=a.equity, variant=sim_variant)
     daily = pd.DataFrame(book.daily)
     trades = pd.DataFrame([t.__dict__ for t in book.trades])
     n = len(trades)
@@ -100,7 +116,7 @@ def main() -> None:
     daily_ret = (daily["pnl"] / daily["start"]).to_numpy()
     tpd = trades.groupby("date").size() if n else pd.Series(dtype=int)
     rand = random_entry_runs(bars, atr5, vwap, sigma, tpd, pol, a.equity, n_runs=a.runs,
-                             variant=a.variant) if n else np.array([])
+                             variant=sim_variant) if n else np.array([])
     spy_close = pd.Series(spy.c[:, -1], index=spy.dates)
     spy_close = spy_close[(spy_close.index >= start) & (spy_close.index <= end)]
     spy_ret = spy_close.pct_change().dropna().to_numpy()
@@ -136,7 +152,8 @@ def main() -> None:
         "min_trades_for_claim": 900,
         "caveats": [
             "survivorship bias: today's large caps applied to the past",
-            "no point-in-time quality filter yet (SEC_USER_AGENT not set); quality >= 70 not applied",
+            ("point-in-time quality >= 70 applied (10-K data filed before each date)" if a.variant == "B"
+             else "no point-in-time quality filter (variant B only)"),
             "earnings-day filter relies on Alpaca news only (no historical earnings calendar)",
             "agent room not replayed (LLM lookahead); rules-only",
             "fills: next-bar open at modelled bid/ask + impact, no queue model; target needs trade-through",
