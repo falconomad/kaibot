@@ -14,7 +14,7 @@ import yaml
 
 WINDOW_MIN = 30
 OPEN_MIN = 9 * 60 + 30
-EVENT_TIMES = {"fomc_statement_1400": (14, 0), "cpi_0830": (8, 30)}
+EVENT_TIMES = {"fomc_statement_1400": (14, 0), "cpi_0830": (8, 30), "fomc_unscheduled_1000": (10, 0)}
 
 
 def load_calendar(path: Path) -> tuple[dict[date, list[tuple[str, int]]], date | None]:
