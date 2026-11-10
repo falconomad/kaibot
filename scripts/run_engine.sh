@@ -15,7 +15,7 @@ for k in ALPACA_API_KEY ALPACA_SECRET FRED_API_KEY; do
   grep -q "^$k=" "$ENV_FILE" || { echo "Missing $k in $ENV_FILE"; exit 1; }
 done
 grep -qE "^SUPABASE_SERVICE(_ROLE)?_KEY=" "$ENV_FILE" || {
-  echo "Missing SUPABASE_SERVICE_KEY in $ENV_FILE (Supabase → Project Settings → API keys → service_role)"; exit 1; }
+  echo "Missing SUPABASE_SERVICE_KEY in $ENV_FILE (Supabase → Project Settings → API keys → Secret key, sb_secret_…)"; exit 1; }
 git pull --ff-only -q 2>/dev/null || echo "(could not pull the latest code; running what is here)"
 mkdir -p data/live
 

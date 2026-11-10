@@ -15,7 +15,7 @@ Mac / VM ──► Alpaca paper + data, FRED
 One-time:
 1. `git clone https://github.com/falconomad/kaibot ~/Projects/kaibot`
 2. Add to `~/Projects/kaibot-secrets/.env`:
-   `SUPABASE_SERVICE_KEY=...` (Supabase → Project Settings → API keys → `service_role`). It never leaves this file.
+   `SUPABASE_SERVICE_KEY=...` (Supabase → Project Settings → API keys → **Secret key** `sb_secret_…`; the legacy `service_role` key also works). It never leaves this file.
 3. Either Docker Desktop running, or Python 3.12+ (`brew install python@3.13`).
 
 Every trading day, before 15:30 Berlin (09:30 New York):
