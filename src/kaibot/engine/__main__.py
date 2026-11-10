@@ -26,7 +26,7 @@ from kaibot.engine.core import Engine
 from kaibot.engine.events import load_calendar
 from kaibot.engine.market import LiveMarket
 from kaibot.engine.store import Store
-from kaibot.risk.profiles import load_profiles
+from kaibot.risk.profiles import load_profiles, load_strategies
 
 log = logging.getLogger("kaibot.engine")
 
@@ -63,7 +63,7 @@ def build(settings: Settings) -> Engine:
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
     return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
-                  calendar_until=covers_until, events=events)
+                  calendar_until=covers_until, events=events, strategies=load_strategies())
 
 
 def main() -> None:

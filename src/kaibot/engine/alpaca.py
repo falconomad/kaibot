@@ -128,6 +128,32 @@ class AlpacaPaper:
                     return existing
             raise
 
+    def submit_oto_stop(self, coid: str, symbol: str, qty: int, stop: float) -> dict:
+        """Market buy with a broker-held protective stop only (OTO), for exits the engine times itself (MOC)."""
+        body = {"symbol": symbol, "qty": str(int(qty)), "side": "buy", "type": "market", "time_in_force": "gtc",
+                "order_class": "oto", "client_order_id": coid, "stop_loss": {"stop_price": f"{stop:.2f}"}}
+        try:
+            return self._t("POST", "/v2/orders", body=body)
+        except AlpacaError as e:
+            if e.status == 422 and "client_order_id" in e.body:
+                existing = self.order_by_client_id(coid)
+                if existing:
+                    return existing
+            raise
+
+    def submit_moc_sell(self, coid: str, symbol: str, qty: int) -> dict:
+        """Market-on-close sell (time_in_force=cls; Alpaca accepts these until 15:50 ET)."""
+        body = {"symbol": symbol, "qty": str(int(qty)), "side": "sell", "type": "market", "time_in_force": "cls",
+                "client_order_id": coid}
+        try:
+            return self._t("POST", "/v2/orders", body=body)
+        except AlpacaError as e:
+            if e.status == 422 and "client_order_id" in e.body:
+                existing = self.order_by_client_id(coid)
+                if existing:
+                    return existing
+            raise
+
     def replace_stop(self, order_id: str, stop: float) -> dict:
         return self._t("PATCH", f"/v2/orders/{order_id}", body={"stop_price": f"{stop:.2f}"})
 
