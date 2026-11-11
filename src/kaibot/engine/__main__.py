@@ -214,10 +214,11 @@ def main() -> None:
             if stop["now"]:
                 break
             time.sleep(1)
-    if stop.get("lease_lost"):  # another engine is in charge: leave its heartbeat and its lease alone
-        with contextlib.suppress(Exception):
-            eng.store.event("engine_lease_lost", {"host": host, "positions": list(eng.pos)}, eng._rid())
-        log.error("engine stopped: lease lost")
+    if stop.get("lease_lost"):
+        # Another engine is in charge: write nothing. Its heartbeat and lease are not ours, and an event from
+        # here would fork the hash-chained event log it is now appending to. Its `engine_lease_takeover` event
+        # is the record; this side has the log line.
+        log.error("engine stopped: lease lost (positions it was managing: %s)", sorted(eng.pos))
         raise SystemExit(EXIT_LEASE)
     try:
         eng.store.heartbeat(eng.process, {"state": "stopped", "host": host})
