@@ -114,6 +114,7 @@ class Day:
     spy_mom_done: bool = False
     last_m: int = -1
     events: list = field(default_factory=list)
+    scan: dict = field(default_factory=lambda: new_scan())  # dashboard-only counters, never read by decisions
 
     @property
     def flatten_m(self) -> int:
@@ -546,10 +547,14 @@ class Engine:
 
     # ================= entries =================
     def _entries(self, m: int) -> None:
+        sc = self.day.scan
         off, vix = self.market.regime_at(m)
         if off:
+            if (m + 1) % 5 == 0:
+                sc["regime_off"] += 1
             return
         cands = self.market.candidates_at(m)
+        note_scan(sc, m, getattr(self.market, "last_checked", 0), getattr(self.market, "last_near", []), len(cands))
         if not len(cands) or not self._runs("dip_reversal"):
             return
         self._quotes = self.broker_quotes(list(cands["symbol"]))
@@ -573,10 +578,13 @@ class Engine:
                 except Exception:
                     log.exception("extra rules veto failed for %s: skipping the candidate", s)
                     veto = "extra rules unavailable"
+            if veto is not None:
+                sc["vetoed"][veto] = sc["vetoed"].get(veto, 0) + 1
             rf = self.roomflow
             if veto is None and rf is not None:
                 mode = rf.mode(m)
                 if mode == "ok":
+                    sc["to_room"] += 1
                     rf.submit(s, c, ref, stop, target, feats, reasons, m)
                     continue
                 if mode == "no_entries":
@@ -973,7 +981,24 @@ class Engine:
             "halted": bool(d and d.halted),
             "account_clean": self.account_clean,
             "code_sha": self.code,
+            "scan": dict(d.scan) if d else None,
         }
+
+
+def new_scan() -> dict:
+    return {"bars": 0, "checks": 0, "regime_off": 0, "setups": 0, "near": 0, "vetoed": {}, "to_room": 0,
+            "recent_near": []}
+
+
+def note_scan(sc: dict, m: int, checked: int, near: list, setups: int) -> None:
+    """Dashboard counters for one completed 5-minute bar: symbols checked, setups, near-misses (last 5 kept)."""
+    if (m + 1) % 5 != 0:
+        return
+    sc["bars"] += 1
+    sc["checks"] += int(checked)
+    sc["setups"] += int(setups)
+    sc["near"] += len(near)
+    sc["recent_near"] = (sc["recent_near"] + list(near))[-5:]
 
 
 def _et():

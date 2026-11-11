@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Evidence, Overview, Report, RoomAB, RoomSession, Run } from "./api";
 import { coerce } from "./coerce";
 import { budgetText, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, levelPlan, liftInterval, packIndex, resolveEvidence, riskStatus,
-  roomAbVerdict, roomOutcome, roomView, safeUrl } from "./derive";
+  roomAbVerdict, roomOutcome, roomView, safeUrl, scanSummary } from "./derive";
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: 2, created_at: "2026-11-10T16:29:16Z", amount_usd: 5000, status: "running", end_reason: null, peak_equity: 5000,
@@ -207,4 +207,20 @@ describe("budgetText (S32)", () => {
   it("rules-only past the daily cap", () => expect(budgetText({ state: "rules_only", alert: false, caps }).text).toMatch(/Rules-only.*\$3/));
   it("no entries at the hard cap", () => expect(budgetText({ state: "no_entries", alert: true, caps }).tone).toBe("breach"));
   it("warns past the monthly alert", () => expect(budgetText({ state: "ok", alert: true, caps }).text).toMatch(/\$150 alert/));
+});
+
+describe("scanSummary", () => {
+  const base = { bars: 0, checks: 0, regime_off: 0, setups: 0, near: 0, vetoed: {}, to_room: 0, recent_near: [] };
+  it("waits before the first bar", () => expect(scanSummary(base).headline).toMatch(/09:40 ET/));
+  it("says no qualifying dip on an empty day", () => {
+    const s = scanSummary({ ...base, bars: 12, checks: 708, near: 2 });
+    expect(s.headline).toBe("No qualifying dip yet today");
+    expect(s.lines).toContain("2 near-misses (a rebound formed but the dip didn't qualify)");
+  });
+  it("counts setups, vetoes and entries", () => {
+    const s = scanSummary({ ...base, bars: 30, checks: 1770, setups: 3, vetoed: { "company news in 24 h": 2 } }, 1);
+    expect(s.headline).toBe("3 setups found · 2 vetoed · 1 entered");
+    expect(s.lines).toContain("2 vetoed: company news in 24 h");
+  });
+  it("handles a missing scan", () => expect(scanSummary(null).headline).toBe("No scan yet today"));
 });

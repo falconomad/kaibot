@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Heartbeat } from "../lib/api";
-import { ageS, ageText, budgetText, haltText } from "../lib/derive";
+import { ageS, ageText, budgetText, haltText, scanSummary } from "../lib/derive";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
@@ -68,6 +68,28 @@ function LlmBudgetCard() {
   );
 }
 
+function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
+  const d = beat?.detail ?? null;
+  const { headline, lines } = scanSummary(d?.scan, d?.entries_today ?? 0);
+  const near = d?.scan?.recent_near ?? [];
+  return (
+    <section className="card" aria-labelledby="scan-h">
+      <h2 id="scan-h">Today's scan</h2>
+      <p style={{ fontWeight: 600, marginTop: 0 }}>{headline}</p>
+      <ul style={{ fontSize: 13, margin: "0 0 8px", paddingLeft: 18 }}>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
+      {near.length > 0 && (
+        <div>
+          <table className="list">
+            <thead><tr><th>Near-miss</th><th>Minute</th><th>Dip (σ)</th><th>Why it didn't qualify</th></tr></thead>
+            <tbody>{near.map((n, i) => <tr key={`${n.symbol}-${n.m}-${i}`}><td>{n.symbol}</td><td>{n.m}</td><td>{n.z.toFixed(2)}</td><td>{n.why}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The dip rule buys only a fall of at least 1.5σ that its sector doesn't explain, on calm volume, with no company news in 24 h, after a 5-minute higher low. Quiet up-days often have none.</p>
+    </section>
+  );
+}
+
 export function Health() {
   const q = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
   if (q.isPending) return <p className="skeleton">Loading…</p>;
@@ -85,6 +107,8 @@ export function Health() {
         </table>
         {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 12 }}>Waiting for the engine: {h.pending_commands.map((c) => c.kind.replace(/_/g, " ")).join(", ")}</p>}
       </section>
+
+      <ScanCard beat={h.heartbeat.find((b) => b.process === "engine")} />
 
       <div className="grid">
         <section className="card" aria-labelledby="dm-h">

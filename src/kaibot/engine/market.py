@@ -42,6 +42,7 @@ class LiveMarket:
         self.cache = cache_dir
         self.vix_loader = vix_loader
         self.history: dict[str, pd.DataFrame] = {}
+        self.last_checked, self.last_near = 0, []
         self.today_bars: dict[str, pd.DataFrame] = {}
         self.vol_ratio: dict[str, float] = {}
         self.vix: pd.Series = pd.Series(dtype=float)
@@ -125,18 +126,31 @@ class LiveMarket:
         return len(sd.dates) - 1
 
     def candidates_at(self, m: int) -> pd.DataFrame:
-        """Dip-reversal candidates whose 5-minute bar completed at minute m (news is checked separately, live)."""
-        out = []
+        """Dip-reversal candidates whose 5-minute bar completed at minute m (news is checked separately, live).
+
+        Also records, for the dashboard only, how many symbols were checked (`last_checked`) and the near-misses
+        (`last_near`): a 5-minute higher low formed, but the dip was shallower, more sector-driven or on heavier
+        volume than the rules allow (within NEAR). The strict set is exactly what candidates() returns with its
+        defaults: the near pass is a superset filtered back down, so trading is unchanged."""
+        out, near, checked = [], [], 0
         etf_days = {e: self.symbol_days(e, m) for e in set(self.etf_of.values())}
         for s in self.symbols:
             sd, ed = self.symbol_days(s, m), etf_days.get(self.etf_of[s])
             if self.has_today(sd) is None or self.has_today(ed) is None:
                 continue
-            c = candidates(sd, ed, EMPTY_NEWS)
+            checked += 1
+            c = candidates(sd, ed, EMPTY_NEWS, **NEAR)
             if len(c):
                 c = c[(c["date"] == np.datetime64(self.day, "D")) & (c["m"] == m)]
-                if len(c):
-                    out.append(c)
+            if not len(c):
+                continue
+            strict = (c["z"] <= STRICT["z_max"]) & (c["resid_z"].abs() <= STRICT["resid_abs_max"]) & (
+                c["turnover"] <= STRICT["turnover_max"])
+            if strict.any():
+                out.append(c[strict])
+            for _, r in c[~strict].iterrows():
+                near.append({"symbol": s, "m": m, "z": round(float(r["z"]), 2), "why": _near_why(r)})
+        self.last_checked, self.last_near = checked, near
         return pd.concat(out, ignore_index=True).sort_values("z") if out else pd.DataFrame()
 
     def regime_at(self, m: int) -> tuple[bool, float]:
@@ -173,3 +187,20 @@ def session_minutes(cal: dict, day: date) -> tuple[datetime, int]:
     o = pd.Timestamp(f"{day} {cal['open']}", tz=ET)
     c = pd.Timestamp(f"{day} {cal['close']}", tz=ET)
     return o.tz_convert(UTC).to_pydatetime(), min(int((c - o).total_seconds() // 60), N_MIN)
+
+
+# Strict = the strategy's rules (candidates() defaults). NEAR only widens what is reported as a near-miss.
+STRICT = {"z_max": -1.5, "resid_abs_max": 1.5, "turnover_max": 1.5}
+NEAR = {"z_max": -1.0, "resid_abs_max": 2.0, "turnover_max": 2.0}
+
+
+def _near_why(r) -> str:
+    why = []
+    if r["z"] > STRICT["z_max"]:
+        why.append(f"dip only {r['z']:.2f} sigma (needs <= {STRICT['z_max']})")
+    if abs(r["resid_z"]) > STRICT["resid_abs_max"]:
+        why.append("move explained by its sector")
+    if r["turnover"] > STRICT["turnover_max"]:
+        why.append("volume too heavy")
+    return "; ".join(why)
+

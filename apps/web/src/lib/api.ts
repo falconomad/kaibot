@@ -14,7 +14,9 @@ export interface Run {
   started_on: string | null; ended_on: string | null;
 }
 export interface Daily { session: string; pnl: number; pnl_venue: number; pnl_shadow: number; spy_ret: number | null; cash_ret?: number | null; trades: number }
-export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean } | null }
+export interface NearMiss { symbol: string; m: number; z: number; why: string }
+export interface Scan { bars: number; checks: number; regime_off: number; setups: number; near: number; vetoed: Record<string, number>; to_room: number; recent_near: NearMiss[] }
+export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null } | null }
 export interface LedgerPos { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }
 export interface Ledger { ts: string; cash: number; positions: Record<string, LedgerPos>; equity_venue: number; equity_shadow: number }
 export interface Overview {

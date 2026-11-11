@@ -1,6 +1,6 @@
 // Pure helpers for the M2 screens. No React, no network: unit-tested in derive.test.ts.
 import type { AttributionGroup, BudgetState, Evidence, Halt, Level, LlmBudget, Overview, PackItem, Report, RoomAB, RoomSession,
-  RoomStatus, RoomVerdict, Run } from "./api";
+  RoomStatus, RoomVerdict, Run, Scan } from "./api";
 import { BAR, LEVELS } from "./model";
 
 export const etToday = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
@@ -219,3 +219,18 @@ export const safeDate = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? null : d;
 };
+
+/** Plain-language summary of today's dip scan (engine heartbeat). Never claims a cause the counters don't show. */
+export function scanSummary(sc: Scan | null | undefined, entries = 0): { headline: string; lines: string[] } {
+  if (!sc) return { headline: "No scan yet today", lines: ["The engine reports its scan once the session has started."] };
+  const vetoed = Object.values(sc.vetoed ?? {}).reduce((a, b) => a + b, 0);
+  const lines = [`${sc.bars} five-minute bars scanned, ${sc.checks.toLocaleString("en-US")} stock checks`];
+  if (sc.regime_off) lines.push(`${sc.regime_off} bars skipped: market regime off (SPY weak or VIX > 35)`);
+  for (const [why, n] of Object.entries(sc.vetoed ?? {}).sort((a, b) => b[1] - a[1])) lines.push(`${n} vetoed: ${why}`);
+  if (sc.to_room) lines.push(`${sc.to_room} sent to the agent room`);
+  if (sc.near) lines.push(`${sc.near} near-misses (a rebound formed but the dip didn't qualify)`);
+  const headline = sc.setups === 0
+    ? (sc.bars === 0 ? "Waiting for the first 5-minute bar (09:40 ET)" : "No qualifying dip yet today")
+    : `${sc.setups} setup${sc.setups === 1 ? "" : "s"} found · ${vetoed} vetoed · ${entries} entered`;
+  return { headline, lines };
+}
