@@ -9,6 +9,9 @@ What stops Kaibot from adding risk when something breaks, from the inside out.
 | Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel unfilled `kb-` entry orders; still stale at 15:55 ET: close every position |
 | Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | 15:56 ET, heartbeat > 3 min old: `DELETE /v2/positions?cancel_orders=true` on the **paper** account |
 
+Restart and recovery (crash, 10-minute outage, API outage, half-written order, two engines): see
+[outage_drill.md](outage_drill.md) and `scripts/outage_drill.sh`.
+
 ## Engine halts (fail closed)
 Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume).
 
