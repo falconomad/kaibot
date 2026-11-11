@@ -18,6 +18,8 @@ const Onboarding = lazy(() => import("./pages/Onboarding").then((m) => ({ defaul
 const TradeDetailPage = lazy(() => import("./pages/TradeDetail").then((m) => ({ default: m.TradeDetailPage })));
 const GoNoGo = lazy(() => import("./pages/Gate").then((m) => ({ default: m.Gate })));
 const Strategy = lazy(() => import("./pages/Strategy").then((m) => ({ default: m.Strategy })));
+const StrategyHome = lazy(() => import("./pages/Strategy").then((m) => ({ default: m.StrategyHome })));
+const FineTune = lazy(() => import("./pages/FineTune").then((m) => ({ default: m.FineTune })));
 const Trades = lazy(() => import("./pages/Trades").then((m) => ({ default: m.Trades })));
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 15_000 } } });
@@ -53,7 +55,10 @@ function Gate() {
         <Route path="report" element={<Report />} />
         <Route path="health" element={<Health />} />
         <Route path="gate" element={<GoNoGo />} />
-        <Route path="strategy" element={<Strategy />} />
+        <Route path="strategy" element={<Strategy />}>
+          <Route index element={<StrategyHome />} />
+          <Route path="fine-tune" element={<FineTune />} />
+        </Route>
         <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="start" element={<Onboarding />} />
