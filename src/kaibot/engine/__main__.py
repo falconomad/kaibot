@@ -10,6 +10,7 @@ import argparse
 import contextlib
 import json
 import logging
+import os
 import signal
 import socket
 import time
@@ -19,6 +20,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from kaibot.agents.gateway import from_env as gateway_from_env
+from kaibot.agents.room import Room
 from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
@@ -64,8 +67,11 @@ def build(settings: Settings) -> Engine:
     store = Store(settings.supabase_url, settings.supabase_service_key)
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
+    gw = gateway_from_env(store, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
+    room = Room(gw) if gw.enabled else None
+    log.info("agent room: %s", "ON (Sonnet, capped budget)" if room else "off (rules-only)")
     return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
-                  calendar_until=covers_until, events=events, strategies=load_strategies())
+                  calendar_until=covers_until, events=events, strategies=load_strategies(), room=room)
 
 
 def main() -> None:

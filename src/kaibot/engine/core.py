@@ -32,6 +32,7 @@ from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
 from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
+from kaibot.engine.roomflow import RoomFlow
 from kaibot.replay.features import five_minute
 from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
@@ -136,12 +137,18 @@ class Engine:
         calendar_until: date | None = None,
         events: dict | None = None,
         strategies: dict[str, list[str]] | None = None,
+        room=None,
+        pack_fn=None,
+        rules_extra=None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
         self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> dip reversal only
+        # S34: the agent room (None = rules-only). It can only veto or halve a candidate the rules approved.
+        self.roomflow = RoomFlow(self, room, pack_fn) if room is not None else None
+        self.rules_extra = rules_extra  # extra rules-only veto (S37 pump risk): (engine, symbol, m) -> str | None
         self.kill: str | None = None  # set by a fail-closed halt; blocks entries until the next session
         self.error_streak = 0
         self._drift_seen: dict = {}
@@ -358,6 +365,10 @@ class Engine:
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")
             d.flattened = True
+        if self.roomflow is not None and self.roomflow.jobs:
+            self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
+            self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
+            self.roomflow.collect(m)
         if (m - 4) % 5 == 0 and self._may_enter(m):
             self._entries(m)
         if m == spymom.ENTRY_M and not d.spy_mom_done and self._runs("spy_late_momentum") and d.n_min == 390:
@@ -554,16 +565,35 @@ class Engine:
             target = ref + TARGET_R * (ref - stop)
             feats = {k: _num(c[k]) for k in ("z", "resid_z", "turnover", "atr5", "vwap", "sigma_1m")}
             feats.update({"news_24h": news, "vix": vix, "m": m})
-            self._decide(s, "dip_reversal", ref, stop, target, feats,
-                         ["no-news dip", "5-min higher low", "sector-adjusted"],
-                         "company news in 24 h" if news else None, sigma_1m=float(c["sigma_1m"]),
-                         atr=float(c["atr5"]), vix=vix, fresh_reads=False)
+            reasons = ["no-news dip", "5-min higher low", "sector-adjusted"]
+            veto = "company news in 24 h" if news else None
+            if veto is None and self.rules_extra is not None:
+                try:
+                    veto = self.rules_extra(self, s, m)
+                except Exception:
+                    log.exception("extra rules veto failed for %s: skipping the candidate", s)
+                    veto = "extra rules unavailable"
+            rf = self.roomflow
+            if veto is None and rf is not None:
+                mode = rf.mode(m)
+                if mode == "ok":
+                    rf.submit(s, c, ref, stop, target, feats, reasons, m)
+                    continue
+                if mode == "no_entries":
+                    return
+            sig_id, full_qty = self._decide(s, "dip_reversal", ref, stop, target, feats, reasons, veto,
+                                            sigma_1m=float(c["sigma_1m"]), atr=float(c["atr5"]), vix=vix,
+                                            fresh_reads=False)
+            if veto is None and rf is not None:
+                rf.record_skipped(sig_id, s, m, ref, ref - stop, float(c["atr5"]), float(c["sigma_1m"]), full_qty,
+                                  "daily LLM budget reached: rules-only")
             if self.day.entries >= self.policy().max_entries_per_day:
                 break
 
     def _decide(self, s, strategy, ref, stop, target, feats, reasons, veto, sigma_1m, atr, vix=None,
-                fresh_reads=True) -> None:
-        """Gate one proposal, log the signal and the gate run (reason codes, S12), and place it if approved."""
+                fresh_reads=True, size_mult: float = 1.0) -> tuple[int | None, int]:
+        """Gate one proposal, log the signal and the gate run (reason codes, S12), and place it if approved.
+        size_mult: 0.5 when the room downgrades. Returns (signal id, the gate's full-size qty) for the A/B."""
         pol, d = self.policy(), self.day
         decision = self.now()
         if fresh_reads:  # single decisions read quotes and buying power themselves
@@ -596,7 +626,8 @@ class Engine:
         )
         feats = {**feats, "quote_age_s": q_age, "vix": vix}
         v = evaluate(Proposal(s, Side.BUY, ref, stop, target), snap, pol)
-        qty = int(np.floor(v.qty * (0.5 if vix > 25 else 1.0))) if v.approved and not veto else 0
+        full_qty = int(np.floor(v.qty * (0.5 if vix > 25 else 1.0))) if v.approved else 0
+        qty = int(np.floor(full_qty * size_mult)) if not veto else 0
         sig = self.store.insert(
             "signal",
             {
@@ -630,10 +661,11 @@ class Engine:
             returning=False,
         )
         if qty <= 0:
-            return
+            return sig["id"], full_qty
         self._open(s, qty, ref, stop, target, ref - stop, atr, sigma_1m, q, sig["id"], feats, strategy)
         self._bp_added += qty * ref
         d.entries += 1
+        return sig["id"], full_qty
 
     def _broker_buying_power(self) -> float | None:
         """The paper account's own buying power; None if unknown (then the pot alone caps it)."""
@@ -893,6 +925,11 @@ class Engine:
 
     def _finalize_day(self) -> None:
         d = self.day
+        if self.roomflow is not None:
+            try:
+                self.roomflow.finalize()  # S36: rules-only counterfactuals for today's room sessions
+            except Exception:
+                log.exception("room finalize failed")
         if self.pos:
             log.warning("session ended with open positions %s; they will be closed at the next open", list(self.pos))
             for p in self.pos.values():
