@@ -27,8 +27,11 @@ from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
 from kaibot.engine.events import load_calendar
+from kaibot.engine.m3glue import LockedDesk, make_pack_fn, make_rules_extra
 from kaibot.engine.market import LiveMarket
 from kaibot.engine.store import Store
+from kaibot.news import NewsDesk
+from kaibot.news import configure as configure_news
 from kaibot.risk.profiles import load_profiles, load_strategies
 
 log = logging.getLogger("kaibot.engine")
@@ -70,8 +73,17 @@ def build(settings: Settings) -> Engine:
     gw = gateway_from_env(store, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
     room = Room(gw) if gw.enabled else None
     log.info("agent room: %s", "ON (Sonnet, capped budget)" if room else "off (rules-only)")
+    # S33: one news desk per engine; it triages through the gateway only when the room is on.
+    desk = NewsDesk(store, source=data, gateway=gw if gw.enabled else None)
+    try:
+        log.info("news window: %d items reloaded", desk.load_window())
+    except Exception:
+        log.exception("news window reload failed: starting empty")
+    configure_news(desk)
+    locked = LockedDesk(desk)
     return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
-                  calendar_until=covers_until, events=events, strategies=load_strategies(), room=room)
+                  calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
+                  pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked))
 
 
 def main() -> None:
