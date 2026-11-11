@@ -6,6 +6,7 @@ import { PotChart } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { EXIT_LABEL, R, dateEt, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { evidenceVerdict, levelPlan } from "../lib/derive";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -40,7 +41,7 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
   );
 }
 
-function Controls({ run, overview }: { run: Run; overview: Overview }) {
+export function Controls({ run, overview }: { run: Run; overview: Overview }) {
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState(false);
   const cmd = useMutation({
@@ -48,6 +49,7 @@ function Controls({ run, overview }: { run: Run; overview: Overview }) {
     onSuccess: () => { setConfirm(false); qc.invalidateQueries({ queryKey: ["overview"] }); },
   });
   const pending = overview.pending_commands;
+  const plan = levelPlan(run, overview.segments);
   const paused = run.status === "paused";
   const ended = !["scheduled", "running", "paused"].includes(run.status);
   return (
@@ -67,12 +69,14 @@ function Controls({ run, overview }: { run: Run; overview: Overview }) {
             </span>
           )}
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>Level from next session
-            <select value={run.level ?? "balanced"} onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
+            <select value={plan.next?.level ?? plan.current ?? "balanced"} disabled={cmd.isPending}
+              onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
               {(Object.keys(LEVELS) as Level[]).map((k) => <option key={k} value={k}>{LEVELS[k].name}</option>)}
             </select>
           </label>
         </div>
       )}
+      {plan.next && <p className="muted" style={{ fontSize: 12 }}>{LEVELS[plan.current ?? "balanced"].name} today; {LEVELS[plan.next.level].name} from {day(plan.next.from_session)}.</p>}
       {cmd.isError && <p className="loss" role="alert">{String(cmd.error)}</p>}
       {pending.length > 0 && <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => p.kind.replace(/_/g, " ")).join(", ")}</p>}
     </section>
@@ -103,6 +107,7 @@ function Positions({ positions }: { positions: Record<string, { qty: number; fil
 export function Live() {
   const { run, overview } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
+  const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), refetchInterval: 60_000 });
   const lv = run.level ? LEVELS[run.level] : null;
   if (!overview || trades.isPending) return <p className="skeleton">Loading…</p>;
   if (trades.isError) return <p className="loss">{String(trades.error)}</p>;
@@ -158,9 +163,9 @@ export function Live() {
         <section className="card" aria-labelledby="bar-h">
           <h2 id="bar-h">Evidence toward the go-live bar</h2>
           <div className="kv">
-            <Progress label="Trades" now={s.trades} bar={BAR.trades} />
+            <Progress label="Trades" now={evidence.data?.n ?? s.trades} bar={BAR.trades} />
             <Progress label="Months" now={s.months} bar={BAR.months} fmt={(v) => v.toFixed(1)} />
-            <Progress label="t-stat (net)" now={Math.max(0, s.t)} bar={BAR.t} fmt={(v) => v.toFixed(2)} />
+            <Progress label="t-stat (net)" now={evidence.data?.t ?? s.t} bar={BAR.t} fmt={(v) => v.toFixed(2)} />
             <span>Max drawdown</span><span /><span className="v">{s.maxDdPct.toFixed(1)}% / {lv?.runDd ?? "—"}%</span>
             <span>Hit rate</span><span /><span className="v">{(s.hitRate * 100).toFixed(1)}%</span>
             <span>Profit factor</span><span /><span className="v">{s.profitFactor?.toFixed(2) ?? "—"}</span>
@@ -168,8 +173,9 @@ export function Live() {
           </div>
           <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
             The bar is fixed in advance: ≥ {BAR.trades} trades over ≥ {BAR.months} months, t &gt; {BAR.t}, above the {BAR.randomPct}th
-            percentile of random entries, and better risk-adjusted than SPY. {s.t < BAR.t ? "Not met: no evidence of an edge yet." : ""}
+            percentile of random entries, and better risk-adjusted than SPY. {s.t < BAR.t ? "Not met." : ""}
           </p>
+          {evidence.data && <p style={{ fontSize: 13, marginBottom: 0 }}>{evidenceVerdict(evidence.data).text}</p>}
         </section>
 
         {lv && (

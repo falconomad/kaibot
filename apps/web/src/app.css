@@ -80,3 +80,12 @@ input[type=email], input[type=text] { font: inherit; height: 40px; padding: 0 12
 .levels button[aria-pressed=true] { border: 2px solid var(--sea); padding: 15px; }
 .foot { font-size: 11px; color: var(--slate); padding: 10px 24px; border-top: 1px solid var(--rule); }
 .skeleton { color: var(--stale); }
+
+/* S28 risk strip: red on breach, amber on a warning */
+.riskstrip { padding: 8px 20px; font-size: 13px; border-bottom: 1px solid var(--rule); }
+.riskstrip.warn { background: color-mix(in srgb, var(--warn) 12%, var(--surface)); color: var(--ink); }
+.riskstrip.breach { background: color-mix(in srgb, var(--fail) 14%, var(--surface)); color: var(--ink); border-bottom-color: var(--fail); }
+.riskstrip a { color: inherit; margin-left: 8px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* Phones: wide tables scroll sideways instead of wrapping every cell */
+@media (max-width: 720px) { table.list { display: block; overflow-x: auto; white-space: nowrap; } }
