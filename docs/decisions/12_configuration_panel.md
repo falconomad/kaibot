@@ -85,6 +85,27 @@ See [`docs/design/research_m5_config_ui.md`](../design/research_m5_config_ui.md)
 
 A preset or Boldness step is only a shortcut that writes the same config fields. Nothing new reaches the engine.
 
+## Custom ticker lists (approved 11 Nov 2026)
+
+The stakeholder approved custom ticker lists (S68, #96, PR #103) on 11 Nov 2026. They widen the original rule,
+"pickier or smaller, never looser or different", in **one bounded way**: the user may add tickers that are outside
+the 59-name catalogue. Nothing else about the rule changes. The bounds:
+
+- **Only in *Only these* mode.** A custom list affects what Kaibot trades only when the focus mode is *Only* and
+  the list is the chosen focus. In *All* and *Prefer* mode custom tickers are never loaded or traded; a config
+  that carries a custom list in those modes is rejected by the server and by the engine.
+- **The same safety filters, point-in-time.** Each ticker must pass the filters every catalogue stock passes
+  (listed and tradable at the broker, 60 days of history, price of $5 or more, more than $50M traded a day), on
+  data known at the time: when it is added, when the config is saved and applied, and again by the engine at
+  every session open. The owner cannot override a refusal. Spread and quote freshness stay checked at every entry.
+- **At most 40 tickers** in a list, so the 5-minute scan and the free data limits hold.
+- **At least 5 accepted stocks** in the focus, the same minimum *Only these* always had.
+
+Everything in "Never" above still holds: no shorts, leverage or overnight holds, no limit above the level, and
+the locked safety rows stay locked. A new list is a new config version, with its own report chapter, trial row
+and replay. Enforced in three places: `kaibot.config_check` (migration 0014), `engine/userconfig.py` and the
+engine's universe loader. Contract: `docs/m5/contract.md` ("Custom ticker lists").
+
 ## M5 backlog and build order
 
 1. **Foundations (backend-quant, data)**

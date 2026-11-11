@@ -532,16 +532,17 @@ class Engine:
                                             "config_sha": d.rules.config_sha}, self._rid())
 
     def _custom_before_open(self, open_utc: datetime) -> dict[str, str]:
-        """S68: the custom tickers of the config that will apply at `open_utc`, so their history is loaded ahead of
-        the open. Anything unreadable or invalid means none (the session open decides again and fails closed)."""
+        """S68: the custom tickers of the config that will apply at `open_utc` (Only mode; none otherwise), so their
+        history is loaded ahead of the open.
+        Anything unreadable or invalid means none (the session open decides again and fails closed)."""
         try:
             c = self._applied_config(self.run["id"], open_utc)
             if c is None:
                 return {}
             uni, themes = self._universe_and_themes()
             lv = self.level()
-            return dict(tighten(self.policies[lv], self.strategies.get(lv, ["dip_reversal"]), c.get("body") or {},
-                                version=int(c["version"]), universe=uni, themes=themes).custom)
+            return tighten(self.policies[lv], self.strategies.get(lv, ["dip_reversal"]), c.get("body") or {},
+                           version=int(c["version"]), universe=uni, themes=themes).custom_universe()
         except Exception:  # noqa: BLE001
             return {}
 
@@ -692,7 +693,8 @@ class Engine:
         self.day = Day(self.run["id"], today, open_utc, n_min, start_eq)
         self._load_rules(self.day)
         self._restore_session(self.day)
-        custom = dict(self.day.rules.custom) if self.day.rules and not self.day.refused else {}
+        # S68: custom tickers are loaded only in 'Only these' mode (decision 12); All / Prefer = the catalogue alone
+        custom = self.day.rules.custom_universe() if self.day.rules and not self.day.refused else {}
         if self.market.set_custom(custom):  # S68: the custom list changed since the history was loaded
             self.market.day = None
         if self.market.day != today:

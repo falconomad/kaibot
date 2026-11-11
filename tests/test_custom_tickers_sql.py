@@ -1,4 +1,4 @@
-"""M5 S68 (#96): the SQL side of custom ticker lists (migration 0013): kb_check_ticker, the named lists and the
+"""M5 S68 (#96): the SQL side of custom ticker lists (migration 0014): kb_check_ticker, the named lists and the
 accepted-ticker check on save/apply. Needs a scratch Postgres with the migrations applied
 (KAIBOT_TEST_PG="-h /tmp -p 55432 -U postgres -d m5"); skipped otherwise (CI). The Python/SQL shape parity for
 focus.custom is covered by test_config_sql.py::test_sql_and_python_validators_agree."""
@@ -13,7 +13,7 @@ import subprocess
 import pytest
 
 PG = os.environ.get("KAIBOT_TEST_PG")
-pytestmark = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0013 applied")
+pytestmark = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0014 applied")
 OWNER, OTHER = "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"
 SETUP = f"""
 delete from kaibot.ticker_list; delete from kaibot.ticker_check; delete from kaibot.config_draft;
@@ -133,6 +133,34 @@ def test_only_needs_five_and_a_week_old_check_is_too_old(clean):
     assert "UBER has not been checked yet" in error(f"public.kb_save_config({run}, '{b}'::jsonb)")
     forty_one = body(*[(f"Q{a}{c}", "SPY") for a in "ABCDEFG" for c in "ABCDEF"][:41])
     assert "at most 40" in error(f"public.kb_save_config({run}, '{forty_one}'::jsonb)")
+
+
+def test_custom_list_needs_only_mode(clean):
+    """Approved 11 Nov 2026: a config with a custom list and a mode other than 'only' is rejected on save AND on
+    apply, with a plain message; the same list in Only mode goes through."""
+    run = clean
+    answer("PLTR", "accepted", "XLK")
+    answer("UBER", "accepted", "XLI")
+    five = ("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL")
+    msg = "A custom list can only be used with 'Only these'. Choose 'Only these' or remove the list."
+    for mode in ("all", "prefer"):
+        b = body(("PLTR", "XLK"), ("UBER", "XLI"), mode=mode, symbols=five)
+        assert msg in error(f"public.kb_save_config({run}, '{b}'::jsonb)")
+    no_mode = json.dumps({"focus": {"custom": {"tickers": [{"symbol": "PLTR", "etf": "XLK"}]}}})  # no mode = All
+    assert msg in error(f"public.kb_save_config({run}, '{no_mode}'::jsonb)")
+    # a draft that got in some other way is still refused by the apply, and nothing is versioned
+    b = body(("PLTR", "XLK"), ("UBER", "XLI"), mode="prefer", symbols=five)
+    psql(f"""insert into kaibot.config_draft (run_id, body) values ({run}, '{b}'::jsonb)
+             on conflict (run_id) do update set body = excluded.body""", uid=None)
+    before = psql(f"select count(*) from kaibot.config where run_id = {run};", None).stdout.strip()
+    assert msg in error(f"public.kb_apply_config({run}, gen_random_uuid())")
+    assert psql(f"select count(*) from kaibot.config where run_id = {run};", None).stdout.strip() == before
+    ok = body(("PLTR", "XLK"), ("UBER", "XLI"), mode="only", symbols=five)
+    assert call(f"public.kb_save_config({run}, '{ok}'::jsonb)")["ok"] is True
+    assert call(f"public.kb_apply_config({run}, gen_random_uuid())")["version"] >= 1
+    # All / Prefer without a custom list are untouched
+    plain = json.dumps({"focus": {"mode": "prefer", "symbols": list(five)}})
+    assert call(f"public.kb_save_config({run}, '{plain}'::jsonb)")["ok"] is True
 
 
 def test_named_lists_are_per_owner():

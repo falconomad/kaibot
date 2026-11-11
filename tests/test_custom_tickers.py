@@ -2,6 +2,8 @@
 
 - the config stores a custom list by value and can only add ACCEPTED tickers (shape here, acceptance in SQL and in the
   engine's own point-in-time check);
+- a custom list is valid ONLY in 'Only these' mode (approved 11 Nov 2026): in All and Prefer mode it is rejected, and
+  the engine never loads or trades it;
 - one verdict (engine/tickercheck.py) for the dashboard's check worker and for the engine at every session open;
 - PROPERTY: a refused or unchecked ticker can never reach an entry;
 - no custom list = exactly the seed universe; a replay on a custom list logs a trial.
@@ -26,11 +28,18 @@ from test_userconfig import PROFILES, STRATS, THEMES, UNIVERSE, T
 
 from kaibot.engine import tickercheck as tc
 from kaibot.engine.config import ROOT
-from kaibot.engine.userconfig import MAX_CUSTOM, REFERENCE_ETFS, ConfigError, is_tightening
+from kaibot.engine.userconfig import (
+    CUSTOM_NEEDS_ONLY,
+    MAX_CUSTOM,
+    REFERENCE_ETFS,
+    ConfigError,
+    Rules,
+    is_tightening,
+)
 from kaibot.replay.config_replay import NoData, replay_config
 
 UCFG = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
-SQL = (ROOT / "migrations" / "0013_m5_custom_tickers.sql").read_text()
+SQL = (ROOT / "migrations" / "0014_m5_custom_tickers.sql").read_text()
 GOOD = {"symbol": "PLTR", "class": "us_equity", "exchange": "NASDAQ", "status": "active", "tradable": True}
 OK_STATS = {"sessions": 70, "adv20_usd": 2e9, "last_close": 40.0}
 
@@ -60,10 +69,41 @@ def test_custom_list_is_stored_by_value_and_joins_the_focus():
     mixed = T("balanced", {"focus": {"mode": "only", "symbols": ["AAPL", "MSFT", "NVDA"],
                                      "custom": custom("PLTR", "UBER")}})
     assert mixed.focus == {"AAPL", "MSFT", "NVDA", "PLTR", "UBER"}  # catalogue stocks + custom tickers count together
-    assert T("balanced", {"focus": {"mode": "all", "custom": custom("PLTR")}}).custom == (("PLTR", "XLK"),)
+    assert mixed.custom_universe() == {"PLTR": "XLK", "UBER": "XLK"}
     # the same list, however it is ordered, is the same version content
-    a = T("balanced", {"focus": {"custom": custom("PLTR", "UBER")}})
-    assert a.custom == T("balanced", {"focus": {"custom": custom("UBER", "PLTR")}}).custom
+    five = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"]
+    a = T("balanced", {"focus": {"mode": "only", "symbols": five, "custom": custom("PLTR", "UBER")}})
+    assert a.custom == T("balanced", {"focus": {"mode": "only", "symbols": five,
+                                                "custom": custom("UBER", "PLTR")}}).custom
+
+
+@pytest.mark.parametrize("mode", ["all", "prefer", None])
+def test_custom_list_is_rejected_outside_only_mode(mode):
+    """Approved 11 Nov 2026: custom tickers trade only in 'Only these' mode. A config that carries a custom list
+    with All, Prefer or no mode (= All) is rejected with a plain message, however good the list is."""
+    fo = {"symbols": ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"], "custom": custom("PLTR", "UBER")}
+    if mode:
+        fo["mode"] = mode
+    with pytest.raises(ConfigError) as e:
+        T("balanced", {"focus": fo})
+    assert str(e.value) == CUSTOM_NEEDS_ONLY and "Only these" in CUSTOM_NEEDS_ONLY
+    assert CUSTOM_NEEDS_ONLY.replace("'", "''") in SQL  # the server says the very same sentence
+    T("balanced", {"focus": {**fo, "mode": "only"}})  # the same list is fine in Only mode
+    fo.pop("custom")
+    assert T("balanced", {"focus": fo}).custom == ()  # and All / Prefer without a list are unchanged
+
+
+def test_custom_universe_is_empty_outside_only_mode_even_for_hand_built_rules():
+    """The loader's own guard: whatever reaches the engine, custom tickers load only in Only mode and only when
+    they are in the chosen focus."""
+    pairs = (("PLTR", "XLK"), ("UBER", "XLI"))
+    for mode in ("all", "prefer"):
+        r = Rules(1, PROFILES["balanced"], ("dip_reversal",), mode=mode, focus=frozenset({"PLTR", "UBER"}),
+                  custom=pairs)
+        assert r.custom_universe() == {} and not is_tightening(r, PROFILES["balanced"], STRATS["balanced"])
+    only = Rules(1, PROFILES["balanced"], ("dip_reversal",), mode="only",
+                 focus=frozenset({"PLTR", "AAPL", "MSFT", "NVDA", "AMZN"}), custom=pairs)
+    assert only.custom_universe() == {"PLTR": "XLK"}  # UBER is not in the chosen focus
 
 
 def test_no_custom_list_is_exactly_the_old_rules():
@@ -74,7 +114,7 @@ def test_no_custom_list_is_exactly_the_old_rules():
 def test_custom_list_rejections():
     many = [tick(a + b) for a in "ABCDEFG" for b in "QRSTUVW"][: MAX_CUSTOM + 1]
     assert len(many) == MAX_CUSTOM + 1
-    T("balanced", {"focus": {"custom": {"tickers": many[:MAX_CUSTOM]}}})  # 40 is allowed
+    T("balanced", {"focus": {"mode": "only", "custom": {"tickers": many[:MAX_CUSTOM]}}})  # 40 is allowed
     bad = [
         {"tickers": many},                                         # 41 > the cap
         {"tickers": []}, {}, {"name": "x"}, [], None, "PLTR",      # no tickers / wrong type
@@ -89,9 +129,11 @@ def test_custom_list_rejections():
         {"tickers": [tick("PLTR")], "name": "x" * 41}, {"tickers": [tick("PLTR")], "name": 5},
         {"tickers": [tick("PLTR")], "shorts": True},
     ]
+    five = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"]  # so that the list itself is what gets rejected
     for b in bad:
-        with pytest.raises(ConfigError):
-            T("balanced", {"focus": {"custom": b}})
+        with pytest.raises(ConfigError) as e:
+            T("balanced", {"focus": {"mode": "only", "symbols": five, "custom": b}})
+        assert str(e.value) != CUSTOM_NEEDS_ONLY and "at least 5" not in str(e.value)
     with pytest.raises(ConfigError, match="at least 5"):  # 'Only' still needs five
         T("balanced", {"focus": {"mode": "only", "custom": custom("PLTR", "UBER", "SHOP", "COIN")}})
 
@@ -238,16 +280,19 @@ def frames_with(*extra, seed=1):
     return f
 
 
-def engine(tmp_path, custom_map, frames, mode="all", before_open=True, extra_body=None):
+FILLER = ["FA", "FB", "FC", "FD"]  # catalogue names with no data here: they only make the Only focus >= 5 stocks
+
+
+def engine(tmp_path, custom_map, frames, mode="only", before_open=True, extra_body=None):
     eng, broker, clock, store, open_utc = make(tmp_path, frames)
     eng.market._base_symbols = eng.market.symbols = ["A"]  # the catalogue of this fake world is just A
     eng.market._base_etf_of = eng.market.etf_of = {"A": "XLK"}
     eng.market.base = frozenset({"A"})
     eng.market._refresh()
-    eng._uni_cache = (frozenset({"A"}), {})
+    eng._uni_cache = (frozenset({"A", *FILLER}), {})
     if custom_map is not None:
-        body = {"focus": {"mode": mode, "custom": {"name": "mine", "tickers": [tick(s, e) for s, e in
-                                                                             custom_map.items()]}},
+        body = {"focus": {"mode": mode, "symbols": ["A", *FILLER],
+                          "custom": {"name": "mine", "tickers": [tick(s, e) for s, e in custom_map.items()]}},
                 **(extra_body or {})}
         ts = open_utc - timedelta(hours=10) if before_open else open_utc + timedelta(minutes=5)
         store.insert("config", {"run_id": store.tables["run"][0]["id"], "version": 1, "body": body,
@@ -351,6 +396,50 @@ def test_invalid_config_refuses_the_session_and_loads_no_custom_ticker(tmp_path)
     offer(eng, ["ZED", "A"])
     run_day(eng, broker, clock, open_utc, until=60)
     assert eng.day.refused and eng.market.custom == {} and not traded(store)
+
+
+@pytest.mark.parametrize("mode", ["all", "prefer"])
+def test_custom_list_in_all_or_prefer_mode_is_never_loaded_or_traded(tmp_path, mode):
+    """A stored config with a custom list outside Only mode (the server rejects it, so this is the engine's own
+    line of defence): the session is refused, the ticker's history is never loaded and it can never be entered."""
+    eng, broker, clock, store, open_utc = engine(tmp_path, {"ZED": "XLK"}, frames_with("ZED"), mode=mode)
+    loaded = []
+    real = eng.market.prepare_day
+    eng.market.prepare_day = lambda *a, **k: (loaded.append(list(eng.market.all)), real(*a, **k))[1]
+    assert eng._custom_before_open(open_utc) == {}  # nothing to backfill ahead of the open
+    offer(eng, ["ZED", "A"])
+    run_day(eng, broker, clock, open_utc, until=60)
+    assert eng.day.refused and "Only these" in eng.day.refused
+    assert eng.market.custom == {} and eng.day.custom_ok == frozenset() and eng.market.symbols == ["A"]
+    assert loaded and all("ZED" not in a for a in loaded)
+    assert not traded(store) and not [o for o in broker.orders.values() if o.get("symbol") == "ZED"]
+    assert not [e for e in store.tables["event"] if e["type"] == "custom_tickers"]
+
+
+def test_loader_ignores_custom_tickers_when_the_rules_are_not_only_mode(tmp_path, monkeypatch):
+    """Even if a validator bug let such rules through, the universe loader reads Rules.custom_universe(), so a
+    Prefer-mode custom ticker is not loaded, not scanned and is vetoed if offered."""
+    import kaibot.engine.core as core
+
+    eng, broker, clock, store, open_utc = engine(tmp_path, {"ZED": "XLK"}, frames_with("ZED"))
+    real = core.tighten
+
+    def leaky(*a, **k):
+        r = real(*a, **k)
+        return Rules(**{**r.__dict__, "mode": "prefer"})
+
+    monkeypatch.setattr(core, "tighten", leaky)
+    assert eng._custom_before_open(open_utc) == {}
+    offer(eng, ["ZED"])
+    run_day(eng, broker, clock, open_utc, until=60)
+    assert eng.day.rules.mode == "prefer" and eng.day.rules.custom and not eng.day.refused
+    assert eng.market.custom == {} and "ZED" not in eng.market.all and eng.market.symbols == ["A"]
+    assert not traded(store) and "ZED" not in eng.market.history
+    eng._decide("ZED", "dip_reversal", 100.0, 99.0, 102.0, {"m": eng.day.last_m}, ["test"], None,
+                sigma_1m=0.0006, atr=0.2, vix=18.0)  # offered directly: still vetoed
+    last = store.tables["signal"][-1]
+    assert last["symbol"] == "ZED" and last["rules_veto"] == "not an accepted ticker today"
+    assert "ZED" not in eng.pos and not [o for o in broker.orders.values() if o.get("symbol") == "ZED"]
 
 
 def test_stricter_owner_floor_applies_to_custom_tickers(tmp_path):

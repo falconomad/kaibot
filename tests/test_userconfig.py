@@ -119,7 +119,9 @@ focus = st.fixed_dictionaries({}, optional={
     "themes": st.lists(st.sampled_from([*THEMES, "nope"]), max_size=4),
     "symbols": st.lists(st.sampled_from([*sorted(UNIVERSE), "GME"]), max_size=6),
     "exclude": st.lists(st.sampled_from(sorted(UNIVERSE)), max_size=4),
-    "mode": st.sampled_from(["all", "prefer", "only", "x"]),
+    # 'only' is drawn more often: a custom list is valid only in Only mode (approved 11 Nov 2026), so the fuzz
+    # needs enough Only bodies to cover accepted custom lists as well as the All / Prefer rejections
+    "mode": st.sampled_from(["all", "prefer", "only", "only", "only", "x"]),
     # S68: custom ticker lists (mostly valid shapes, with the occasional catalogue stock, reference fund, bad
     # symbol, bad sector fund, duplicate or wrong type)
     "custom": st.one_of(
@@ -143,6 +145,40 @@ advanced = st.fixed_dictionaries({}, optional={
 body = st.fixed_dictionaries({}, optional={"risk": risk, "timing": timing, "focus": focus, "strategies": strategies,
                                            "advanced": advanced, "preset": st.sampled_from(["custom", "calm"]),
                                            "boldness": st.integers(0, 4)})
+
+
+# Well-formed custom lists in every mode (approved 11 Nov 2026: valid only in Only mode). Used here and by the
+# Python/SQL parity fuzz in test_config_sql.py, so both sides are compared on accepted custom lists too.
+custom_body = st.fixed_dictionaries({"focus": st.fixed_dictionaries(
+    {"mode": st.sampled_from(["all", "prefer", "only", "only"]),
+     "custom": st.fixed_dictionaries(
+         {"tickers": st.lists(st.fixed_dictionaries({
+             "symbol": st.sampled_from(["PLTR", "UBER", "SHOP", "COIN", "SNOW", "ABNB", "BRK.B", "F"]),
+             "etf": st.sampled_from(["XLK", "XLF", "SPY", "XLY", "XLRE"])}), min_size=1, max_size=8,
+             unique_by=lambda x: x["symbol"])},
+         optional={"name": st.sampled_from(["", "AI picks", "x" * 40])})},
+    optional={"symbols": st.lists(st.sampled_from(sorted(UNIVERSE)[:8]), max_size=6, unique=True),
+              "themes": st.lists(st.sampled_from(sorted(THEMES)), max_size=1),
+              "exclude": st.lists(st.sampled_from(sorted(UNIVERSE)[:8]), max_size=2, unique=True)})})
+
+
+@settings(max_examples=400, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(level=st.sampled_from(sorted(PROFILES)), b=custom_body)
+def test_property_custom_list_only_in_only_mode(level, b):
+    """A custom list never survives All or Prefer mode; in Only mode every loaded ticker is in the chosen focus."""
+    from kaibot.engine.userconfig import CUSTOM_NEEDS_ONLY
+
+    mode = b["focus"]["mode"]
+    try:
+        r = T(level, b)
+    except ConfigError as e:
+        if mode != "only":
+            assert str(e) == CUSTOM_NEEDS_ONLY
+        return
+    assert mode == "only" and r.mode == "only" and r.custom
+    assert is_tightening(r, PROFILES[level], STRATS[level])
+    assert r.custom_universe() == dict(r.custom) and set(r.custom_universe()) <= r.focus
+    assert all(r.tradable(s) for s in r.custom_universe())
 
 
 @settings(max_examples=600, deadline=None, suppress_health_check=[HealthCheck.too_slow])

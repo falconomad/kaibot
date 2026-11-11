@@ -2,6 +2,7 @@
 
 The backend (migration 0011, `engine/userconfig.py`) and the frontend (`/strategy`) both build against this.
 **Principle:** a config can only make Kaibot pickier or smaller. Any field that is missing means "the level's value".
+The one bounded exception (approved 11 Nov 2026) is a custom ticker list in *Only these* mode, see below.
 The server validates every save and apply. The engine validates again at the session open and refuses the session
 if anything is off (fail closed).
 
@@ -16,7 +17,7 @@ if anything is off (fail closed).
     "symbols": ["CRM"],                                    // extra symbols from the 59-name universe
     "exclude": ["INTC"],                                   // never traded, in every mode (also removed from the focus set)
     "mode": "all" | "prefer" | "only",                     // all = no focus; only needs >= 5 symbols after exclude
-    "custom": {                                            // optional (S68): a custom ticker list, stored BY VALUE
+    "custom": {                                            // optional (S68), ONLY with mode "only": stored BY VALUE
       "name": "AI picks",                                  // <= 40 characters, informational
       "tickers": [{"symbol": "PLTR", "etf": "XLK"}]        // 1..40 accepted tickers outside the 59, see below
     }
@@ -86,10 +87,16 @@ SPY momentum has no stored replay yet, so the page says "not estimated yet".
 Show `≈ N trades/month`, and the evidence pace as months to 900 trades. Rough guide: < 15/month "very slow
 evidence", < 40 "slow", otherwise "normal".
 
-## Custom ticker lists (S68, #96, migration 0013: waits for the stakeholder)
+## Custom ticker lists (S68, #96, migration 0014; approved by the stakeholder on 11 Nov 2026)
 
 The owner may type any US stock ticker. Kaibot checks it, and only **accepted** tickers can be put in a config.
 The safety filters are the same as for every catalogue stock and **cannot be overridden**.
+
+**Custom tickers trade only in *Only these* mode.** A custom list changes what Kaibot may trade only when
+`focus.mode` is `"only"` and the list is part of that focus. In *All* and *Prefer* mode Kaibot trades the 59
+catalogue stocks and nothing else: a config that carries `focus.custom` with any other mode is rejected by the
+server and by the engine, and the engine never loads, scans or trades a custom ticker outside Only mode.
+Migration 0014 must be applied before PR #103 is merged (after 0013, the engine lease).
 
 ### Checking a ticker: `kb_check_ticker(p_symbol text)`
 Owner-checked. The symbol is trimmed and upper-cased. Returns:
@@ -159,16 +166,19 @@ To use a list, the page writes it into the draft:
 - symbols with `in_catalogue: true` go to `focus.symbols`;
 - every other **accepted** symbol goes to `focus.custom.tickers` as `{symbol, etf}`, with the `etf` that
   `kb_check_ticker` returned;
-- `focus.custom.name` is the list's name; `focus.mode` is usually `"only"`.
+- `focus.custom.name` is the list's name; `focus.mode` **must be** `"only"`. When the owner switches to *All* or
+  *Prefer*, the page removes `focus.custom` from the draft (the named list itself stays saved).
 
 Rules, checked by `kb_save_config` and `kb_apply_config` (and again by the engine):
 - 1 to **40** custom tickers; no duplicates; no catalogue stocks; no reference funds; `etf` is SPY or a sector fund;
 - every custom ticker has an **accepted** check from the last 7 days, with the same `etf`;
 - *Only these* still needs at least **5** stocks in total (themes + `symbols` + custom tickers, after `exclude`);
 - `exclude` is for catalogue stocks; to drop a custom ticker, remove it from the list;
-- with mode `all` or `prefer`, custom tickers are traded **in addition to** the 59.
+- a custom list is accepted **only with mode `only`**. With mode `all` or `prefer` (or no mode, which means
+  `all`) the save and the apply are rejected; custom tickers are never traded in addition to the 59.
 
 Save and apply errors (`22023`):
+- A custom list can only be used with 'Only these'. Choose 'Only these' or remove the list.
 - X has not been checked yet. Check it before saving.
 - X cannot be used: *the refusal reason*
 - X has a different sector fund than its check
@@ -183,6 +193,9 @@ Save and apply errors (`22023`):
 - 'Only these' needs at least 5 stocks
 
 ### What the engine does
+- Custom tickers are loaded **only in Only mode** (`Rules.custom_universe()`): the universe loader, the pre-open
+  backfill and the replay all read the same guard. A stored config with a custom list in any other mode fails
+  validation, so entries are refused for that session (fail closed) and no custom ticker is loaded.
 - The applied version takes effect at the **next session open**, like every config change. The history of new
   tickers is downloaded before that open (from 45 minutes ahead; the first load of 40 tickers takes a few minutes).
 - At every open the engine runs the acceptance check again on the data it loaded. A ticker that no longer passes

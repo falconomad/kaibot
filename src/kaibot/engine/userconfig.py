@@ -1,7 +1,8 @@
 """M5 (decision 12, S43/S44): the owner's Strategy config, applied at the session open. Pure and property-tested.
 
 `tighten()` turns the level's policy plus a config body (docs/m5/contract.md) into the `Rules` the engine trades
-under for the day. Each setting can only make Kaibot pickier or smaller:
+under for the day. Each setting can only make Kaibot pickier or smaller (the one bounded exception, approved on
+11 Nov 2026, is a custom ticker list in 'Only these' mode: see decision 12):
 - a value above the level, below its floor, or of the wrong type is REJECTED (ConfigError), never clamped;
 - the result is validated against both the level policy and HARD_CEILINGS.
 
@@ -44,6 +45,10 @@ MAX_EXCLUDED = 10  # S53: config/presets.yaml limits.max_excluded
 MAX_BODY_BYTES = 8192
 # S68 (#96): a custom ticker list, stored BY VALUE in the config (symbol + its sector ETF), so an applied version
 # never changes. The cap keeps the 5-minute scan and the free data limits intact.
+# Decision 12 ("Custom ticker lists", approved 11 Nov 2026): a custom list is the one bounded way a config may trade
+# something outside the catalogue, and only in 'Only these' mode. In All and Prefer mode it is rejected here and by
+# the server, and the engine never loads it (Rules.custom_universe()).
+CUSTOM_NEEDS_ONLY = "A custom list can only be used with 'Only these'. Choose 'Only these' or remove the list."
 MAX_CUSTOM = 40
 MAX_LIST_NAME = 40
 TICKER_RE = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
@@ -81,6 +86,13 @@ class Rules:
         if symbol in self.excluded:
             return False
         return self.mode != "only" or symbol in self.focus
+
+    def custom_universe(self) -> dict[str, str]:
+        """{custom ticker: sector ETF} the engine and the replay may load. Empty unless the mode is 'only' and the
+        ticker is in the chosen focus: outside Only mode a custom ticker is never loaded, scanned or traded."""
+        if self.mode != "only":
+            return {}
+        return {s: e for s, e in self.custom if s in self.focus and s not in self.excluded}
 
     def rank(self, symbol: str) -> int:
         """Sort key: focus names first in Prefer mode (0 before 1); everything equal otherwise."""
@@ -162,6 +174,8 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
         if s not in universe:
             raise ConfigError(f"{s!r} is not in the universe")
         excluded.add(s)
+    if "custom" in fo and mode != "only":  # approved 11 Nov 2026: custom tickers trade only in 'Only these' mode
+        raise ConfigError(CUSTOM_NEEDS_ONLY)
     custom_name, custom = _custom(fo["custom"], universe) if "custom" in fo else ("", ())
     sel |= {s for s, _ in custom}
     sel -= excluded
@@ -224,6 +238,7 @@ def is_tightening(r: Rules, level_policy: RiskPolicy, level_strategies) -> bool:
         r.min_price_usd >= LEVEL_MIN_PRICE, r.min_adv_usd >= LEVEL_MIN_ADV, r.max_spread_bp <= LEVEL_MAX_SPREAD,
         r.mode != "only" or len(r.focus) >= MIN_ONLY_SYMBOLS,
         len(r.custom) <= MAX_CUSTOM, all(e in REFERENCE_ETFS and s not in REFERENCE_ETFS for s, e in r.custom),
+        not r.custom or r.mode == "only",  # custom tickers exist only in 'Only these' mode
     ])
 
 

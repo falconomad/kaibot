@@ -48,7 +48,7 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
         raise NoData("minute-bar history or the VIX cache is missing (run ./scripts/fetch_history.sh, M0 #3)")
     # S68: custom tickers replay like any other symbol, against the sector ETF stored in the config. The $-volume
     # filter is point-in-time (candidates()); a ticker without downloaded history blocks the replay, never fakes it.
-    custom = {s: e for s, e in rules.custom if s not in sector_of}
+    custom = {s: e for s, e in rules.custom_universe().items() if s not in sector_of}  # Only mode; else none
     missing = [s for s in sorted(custom) if not any((data_dir / "bars_1m" / f"symbol={s}").glob("*.parquet"))]
     if missing:
         raise NoData(f"minute-bar history is missing for custom ticker(s) {', '.join(missing)} "
@@ -83,8 +83,8 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
     months = (end - start).astype(int) / 30.44
     return {
         "window": list(window), "symbols": len(stocks), "trades": n,
-        "custom_list": ({"name": rules.custom_name, "tickers": [list(x) for x in rules.custom]}
-                        if rules.custom else None),
+        "custom_list": ({"name": rules.custom_name, "tickers": [[s, e] for s, e in sorted(custom.items())]}
+                        if custom else None),
         "trades_per_month": round(n / months, 1) if months else None,
         "net_pnl_usd": round(float(trades["pnl"].sum()), 2) if n else 0.0,
         "net_return_pct": round(float(trades["pnl"].sum()) / equity0 * 100, 3) if n else 0.0,
@@ -95,5 +95,5 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
                     "SPY momentum not included", "spread/price filters approximated by the universe filter",
                     "survivorship: today's large caps applied to the past",
                     *(["custom tickers: accepted today, applied to the past (tradability and listing history are "
-                       "not point-in-time); only the $-volume filter is"] if rules.custom else [])],
+                       "not point-in-time); only the $-volume filter is"] if custom else [])],
     }
