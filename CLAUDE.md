@@ -15,3 +15,4 @@
   update the matching blocks and the "Synced with main @ <sha>" line. Read the board first and edit only what changed.
 - Teams and delegation: `docs/teams.md`. The stakeholder talks to Product only; Product delegates with `/delegate <issue>`
   to the team agents in `.claude/agents/`. Stay inside your team's folders.
+- Daily rhythm, idle-work lists and the autonomous-merge rules are in `docs/teams.md`. Check for an open PR on a story before starting it.
