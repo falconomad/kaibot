@@ -1,0 +1,24 @@
+# LLM gateway (story S32). Every call reserves its worst-case cost in Postgres under a row lock, then settles
+# the actual cost. Above the daily soft cap the room is skipped (rules-only veto); at the monthly hard cap the
+# engine opens nothing new. The budget never blocks exits, the gate or the broker.
+# Prices: USD per million tokens, from Anthropic's published rates (checked 11 Nov 2026: Haiku 5.5 launched
+# 7 Oct 2026 at $0.10/$0.50 for prompts <= 100k tokens; Sonnet 5.5 $2/$10, cache read cut to $0.10 on 7 Oct).
+# Re-check https://platform.claude.com/docs/en/about-claude/pricing when models change.
+enabled_by_default: false   # the room only runs when ANTHROPIC_API_KEY is set AND KAIBOT_ROOM=on
+budget:
+  daily_soft_usd: 3.0
+  monthly_alert_usd: 150.0
+  monthly_hard_usd: 190.0
+  reservation_ttl_s: 300     # an unsettled reservation older than this no longer counts (crashed call)
+models:
+  triage: claude-haiku-5-5
+  room: claude-sonnet-5-5
+prices:
+  claude-haiku-5-5:  {input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.125, max_prompt_tokens: 100000}
+  claude-sonnet-5-5: {input: 2.00, output: 10.00, cache_read: 0.10, cache_write: 2.50}
+limits:
+  triage: {max_tokens: 300, timeout_s: 10}
+  proposer: {max_tokens: 700, timeout_s: 15}
+  critic: {max_tokens: 700, timeout_s: 15}
+  judge: {max_tokens: 500, timeout_s: 15}
+  room_total_s: 45

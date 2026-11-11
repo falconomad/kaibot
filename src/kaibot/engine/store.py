@@ -76,6 +76,10 @@ class Store:
     def select(self, table: str, params: dict) -> list[dict]:
         return self._call("GET", table, params) or []
 
+    def rpc(self, fn: str, args: dict) -> Any:
+        """Call a kaibot.* Postgres function (service role only)."""
+        return self._call("POST", f"rpc/{fn}", body=args)
+
     # ---------- engine helpers ----------
     def heartbeat(self, process: str, detail: dict) -> None:
         self.upsert("heartbeat", {"process": process, "ts": datetime.now(UTC), "detail": detail}, "process")
