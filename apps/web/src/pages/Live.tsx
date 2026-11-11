@@ -126,6 +126,8 @@ export function Live() {
   const { run, overview } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), refetchInterval: 60_000 });
+  // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
+  const chapters = useQuery({ queryKey: ["chapters", run.id], queryFn: () => api.chapters(run.id), enabled: run.kind === "paper", staleTime: 300_000, retry: false });
   const lv = run.level ? LEVELS[run.level] : null;
   const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
   if (!overview || trades.isPending) return <Skeleton variant="dashboard" />;
@@ -179,7 +181,8 @@ export function Live() {
           {RANGES.map(([k]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{k}</button>)}
         </div>
         <div className="card" style={{ padding: "18px 18px 10px" }}>
-          <PotChart key={range} data={shown} start={range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd} />
+          <PotChart key={range} data={shown} start={range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd}
+            markers={(chapters.data ?? []).filter((c) => c.version > 0 && c.from).map((c) => ({ session: c.from.slice(0, 10), label: `v${c.version}` }))} />
         </div>
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
           {vsSpy >= 0 ? "Ahead of" : "Behind"} SPY by <b className="num" style={{ color: "var(--ink)" }}>{money(Math.abs(vsSpy))}</b> since the start.

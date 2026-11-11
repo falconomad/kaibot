@@ -26,6 +26,7 @@ const NAV: { to: string; label: string; short: string; icon: string; tab?: boole
   { to: "/report", label: "Report", short: "Report", icon: "M5 20 V12 M12 20 V5 M19 20 V9", tab: true },
   { to: "/gate", label: "Go / no-go", short: "Gate", icon: "M5 12 L10 17 L19 7" },
   { to: "/health", label: "Engine", short: "Engine", icon: "M3 12 H7 L10 5 L14 19 L17 12 H21" },
+  { to: "/strategy", label: "Strategy", short: "Strategy", icon: "M4 7 H14 M18 7 H20 M4 17 H8 M12 17 H20 M16 5 A2 2 0 1 0 16 9 A2 2 0 1 0 16 5 M10 15 A2 2 0 1 0 10 19 A2 2 0 1 0 10 15", tab: true },
   { to: "/settings", label: "Run & settings", short: "Run", icon: "M12 9 A3 3 0 1 0 12 15 A3 3 0 1 0 12 9 M12 3 V6 M12 18 V21 M3 12 H6 M18 12 H21", tab: true },
 ];
 
