@@ -164,6 +164,9 @@ class Engine:
         self.roomflow = RoomFlow(self, room, pack_fn) if room is not None else None
         self.rules_extra = rules_extra  # extra rules-only veto (S37 pump risk): (engine, symbol, m) -> str | None
         self.kill: str | None = None  # set by a fail-closed halt; blocks entries until the next session
+        # Issue #81: the cross-machine lease (engine/lease.py), set by __main__. None = not enforced (tests,
+        # replays). When set, entries need a lease that is provably ours right now.
+        self.lease = None
         self.error_streak = 0
         self._drift_seen: dict = {}
         self.run: dict | None = None
@@ -230,6 +233,10 @@ class Engine:
 
     def on_tick_ok(self) -> None:
         self.error_streak = 0
+
+    def lease_ok(self) -> bool:
+        """Issue #81: no lease object means the lease is not enforced; otherwise it must be verified and fresh."""
+        return self.lease is None or bool(self.lease.ok)
 
     def _check_drift(self) -> None:
         """S18: the engine's book must match the broker's. Any difference stops new entries."""
@@ -670,6 +677,8 @@ class Engine:
         d = self.day
         if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
             return False
+        if not self.lease_ok():  # fail closed: the lease could not be renewed, so we may not be the only engine
+            return False
         if d.halted or d.flattened or d.refused or m < d.pause_until:
             return False
         r = d.rules
@@ -815,7 +824,7 @@ class Engine:
             symbol_exposure=0.0,
             open_risk=sum(p.risk_ps * p.qty for p in live),
             quote_age_s=q_age,
-            kill_switch=bool(self.kill),
+            kill_switch=bool(self.kill) or not self.lease_ok(),  # second lock on the same door (#81)
             reconciled=self.account_clean,
             market_open=True,
             data_ok=(self.market.last_bar_minute(s) or -99) >= int(feats.get("m", 0)) - 2,

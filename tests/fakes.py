@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import threading
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -269,6 +270,11 @@ class FakeStore:
         self.ids = itertools.count(1)
         self.beats: dict = {}
         self.llm = {"day": 0.0, "month": 0.0, "open": {}}  # mirrors kaibot.llm_reserve / llm_settle
+        self.lease: dict | None = None  # the single kaibot.engine_lease row
+        self.lease_now = lambda: datetime.now(UTC)
+        self.lease_fail = False
+        self.lease_calls = 0
+        self._lease_lock = threading.Lock()
 
     def rpc(self, fn, args):
         b = self.llm
@@ -295,6 +301,53 @@ class FakeStore:
                   else "rules_only" if b["day"] >= args["p_daily_soft"] else "ok")
             return {"day": b["day"], "month": b["month"], "state": st, "alert": b["month"] >= args["p_monthly_alert"]}
         raise KeyError(fn)
+
+    # --- engine lease (issue #81): mirrors kaibot.engine_lease_* in migration 0013 ---
+    # One row, compare-and-set under a lock (Postgres: the row lock). `lease_now` is the database clock;
+    # `lease_fail = True` makes every lease call raise, like Supabase being unreachable.
+    def _lease_guard(self):
+        self.lease_calls += 1
+        if self.lease_fail:
+            raise ConnectionError("supabase unreachable (lease)")
+
+    def lease_acquire(self, holder, host, ttl_s):
+        self._lease_guard()
+        if not holder or not 30 <= ttl_s <= 600:
+            raise ValueError("engine_lease_acquire: holder required, ttl must be 30..600 s")
+        with self._lease_lock:
+            now, cur = self.lease_now(), self.lease
+            if cur and cur["holder"] != holder and cur["expires_at"] > now:
+                return {"acquired": False, "holder": cur["holder"], "host": cur["host"],
+                        "started_at": cur["started_at"], "expires_at": cur["expires_at"],
+                        "expires_in_s": int(-(-(cur["expires_at"] - now).total_seconds() // 1))}
+            same = bool(cur) and cur["holder"] == holder
+            started = cur["started_at"] if same and cur["expires_at"] > now else now
+            self.lease = {"holder": holder, "host": host, "started_at": started, "renewed_at": now,
+                          "expires_at": now + timedelta(seconds=ttl_s)}
+            return {"acquired": True, "holder": holder, "host": host, "started_at": started,
+                    "expires_at": self.lease["expires_at"], "taken_over": bool(cur) and not same,
+                    "previous_holder": None if not cur or same else cur["holder"],
+                    "previous_host": None if not cur or same else cur["host"]}
+
+    def lease_renew(self, holder, ttl_s):
+        self._lease_guard()
+        with self._lease_lock:
+            if not self.lease or self.lease["holder"] != holder:
+                return False
+            now = self.lease_now()
+            self.lease.update(renewed_at=now, expires_at=now + timedelta(seconds=ttl_s))
+            return True
+
+    def lease_release(self, holder):
+        self._lease_guard()
+        with self._lease_lock:
+            if not self.lease or self.lease["holder"] != holder:
+                return False
+            self.lease = None
+            return True
+
+    def lease_row(self):
+        return dict(self.lease) if self.lease else None
 
     def insert(self, table, row, returning=True):
         rows = row if isinstance(row, list) else [row]

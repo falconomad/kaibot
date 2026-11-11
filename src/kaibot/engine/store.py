@@ -30,7 +30,8 @@ class Store:
             "Content-Profile": "kaibot",
         }
 
-    def _call(self, method: str, path: str, params: dict | None = None, body: Any = None, prefer: str | None = None):
+    def _call(self, method: str, path: str, params: dict | None = None, body: Any = None, prefer: str | None = None,
+              attempts: int = 4, timeout: float = 20):
         url = f"{self.base}/{path}"
         if params:
             url += "?" + urllib.parse.urlencode(params, safe="(),.*:")
@@ -38,20 +39,20 @@ class Store:
         if prefer:
             h["Prefer"] = prefer
         data = json.dumps(body, default=_json).encode() if body is not None else None
-        for attempt in range(4):
+        for attempt in range(attempts):
             try:
                 req = urllib.request.Request(url, data=data, headers=h, method=method)
-                with urllib.request.urlopen(req, timeout=20) as r:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
                     raw = r.read()
                     return json.loads(raw) if raw else None
             except urllib.error.HTTPError as e:
                 text = e.read().decode(errors="replace")
-                if e.code >= 500 and attempt < 3:
+                if e.code >= 500 and attempt < attempts - 1:
                     time.sleep(2**attempt)
                     continue
                 raise StoreError(f"{method} {path} -> {e.code}: {text[:300]}") from None
             except (urllib.error.URLError, TimeoutError) as e:
-                if attempt < 3:
+                if attempt < attempts - 1:
                     time.sleep(2**attempt)
                     continue
                 raise StoreError(f"{method} {path}: {e}") from None
@@ -79,6 +80,26 @@ class Store:
     def rpc(self, fn: str, args: dict) -> Any:
         """Call a kaibot.* Postgres function (service role only)."""
         return self._call("POST", f"rpc/{fn}", body=args)
+
+    # ---------- engine lease (issue #81, migration 0013) ----------
+    # Short timeouts and one retry: a lease call must answer well inside the 90 s lease, not after 4 slow tries.
+    def _lease_rpc(self, fn: str, args: dict) -> Any:
+        return self._call("POST", f"rpc/{fn}", body=args, attempts=2, timeout=10)
+
+    def lease_acquire(self, holder: str, host: str, ttl_s: int) -> dict:
+        """Atomic compare-and-set: {acquired: true, ...} or {acquired: false, holder, host, expires_in_s, ...}."""
+        return self._lease_rpc("engine_lease_acquire", {"p_holder": holder, "p_host": host, "p_ttl_s": ttl_s})
+
+    def lease_renew(self, holder: str, ttl_s: int) -> bool:
+        """True if the lease is still ours and was extended; False if another holder has it or it is gone."""
+        return self._lease_rpc("engine_lease_renew", {"p_holder": holder, "p_ttl_s": ttl_s})
+
+    def lease_release(self, holder: str) -> bool:
+        return self._lease_rpc("engine_lease_release", {"p_holder": holder})
+
+    def lease_row(self) -> dict | None:
+        rows = self.select("engine_lease", {"limit": "1"})
+        return rows[0] if rows else None
 
     # ---------- engine helpers ----------
     def heartbeat(self, process: str, detail: dict) -> None:
