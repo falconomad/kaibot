@@ -41,8 +41,14 @@ else
   echo "Starting with $("$PY" --version)…"
   [ -d .venv ] || "$PY" -m venv .venv
   .venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt
+  # python.org's macOS Python has no root certificates until "Install Certificates.command" is run: use certifi's.
+  export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"
   WD_PID=data/live/watchdog.pid
-  if [ "$CHECK" = 0 ] && ! { [ -f "$WD_PID" ] && kill -0 "$(cat "$WD_PID")" 2>/dev/null; }; then
+  # Restart a watchdog left over from an earlier start, so it runs today's code and settings.
+  if [ "$CHECK" = 0 ] && [ -f "$WD_PID" ] && ps -p "$(cat "$WD_PID")" -o command= 2>/dev/null | grep -q kaibot.engine.watchdog; then
+    kill "$(cat "$WD_PID")" 2>/dev/null || true; sleep 1
+  fi
+  if [ "$CHECK" = 0 ]; then
     mkdir -p logs
     KAIBOT_ENV_FILE="$ENV_FILE" PYTHONPATH="$PWD/src" nohup .venv/bin/python -m kaibot.engine.watchdog \
       >> logs/watchdog.log 2>&1 &

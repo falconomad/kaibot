@@ -3,3 +3,4 @@ numpy>=2.0
 pandas>=2.2
 pyarrow>=17
 pyyaml>=6.0
+certifi>=2024.8.30  # CA bundle: python.org's macOS Python ships without root certificates
