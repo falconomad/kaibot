@@ -137,3 +137,10 @@ def test_property_in_range_values_are_accepted(level, vals):
         risk_[k] = min(max(risk_[k], floor), getattr(lp, attr))
     r = T(level, {"risk": risk_})
     assert is_tightening(r, lp, STRATS[level])
+
+
+def test_excluded_stocks_are_never_traded_in_any_mode():
+    for mode in ("all", "prefer", "only"):
+        r = T("balanced", {"focus": {"mode": mode, "themes": ["defensives"], "exclude": ["DUK"]}})
+        assert not r.tradable("DUK"), mode
+    assert T("balanced", {"focus": {"mode": "all", "exclude": ["DUK"]}}).tradable("NEE")

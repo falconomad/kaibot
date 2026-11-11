@@ -566,8 +566,8 @@ function FocusEditor({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBo
           ))}
         </ul>
         {body.focus.exclude.length > 0 && (<>
-          <span className="cap">Left out</span>
-          <ul className="kb-symlist out" aria-label="Stocks left out">
+          <span className="cap">Never traded</span>
+          <ul className="kb-symlist out" aria-label="Stocks never traded">
             {body.focus.exclude.map((s) => (
               <li key={s}><b>{s}</b><button type="button" aria-label={`Put ${s} back`} onClick={() => edit({ ...body, focus: { ...body.focus, exclude: body.focus.exclude.filter((x) => x !== s) } })}>↺</button></li>
             ))}

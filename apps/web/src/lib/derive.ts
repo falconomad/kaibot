@@ -308,7 +308,9 @@ export function windowShare(start: number, end: number, est: EstimatorData, full
 export function estimateTrades(body: ConfigBody, est: EstimatorData, themes: Themes,
   entry: { start: string; end: string } = { start: "09:35", end: "15:45" }): Estimate {
   const open = SESSION_OPEN;
-  const tradable = body.focus.mode === "only" ? focusSet(body, themes) : Object.keys(est.dip_per_month);
+  // excluded stocks are never traded, in any mode
+  const tradable = body.focus.mode === "only" ? focusSet(body, themes)
+    : Object.keys(est.dip_per_month).filter((s) => !body.focus.exclude.includes(s));
   const share = windowShare(toMin(body.timing.entry_start) - open, toMin(body.timing.entry_end) - open, est,
     [toMin(entry.start) - open, toMin(entry.end) - open]);
   const perMonth = body.strategies.dip_reversal ? tradable.reduce((a, s) => a + (est.dip_per_month[s] ?? 0), 0) * share : 0;

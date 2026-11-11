@@ -52,6 +52,7 @@ class Rules:
     strategies: tuple[str, ...]
     mode: str = "all"  # all | prefer | only
     focus: frozenset[str] = frozenset()
+    excluded: frozenset[str] = frozenset()  # never traded, in every mode
     first_entry_m: int = FIRST_ENTRY_M
     last_entry_m: int = LAST_ENTRY_M
     pause_losses: int = LEVEL_PAUSE_LOSSES
@@ -64,6 +65,8 @@ class Rules:
     config_sha: str = ""
 
     def tradable(self, symbol: str) -> bool:
+        if symbol in self.excluded:
+            return False
         return self.mode != "only" or symbol in self.focus
 
     def rank(self, symbol: str) -> int:
@@ -138,10 +141,12 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
         if s not in universe:
             raise ConfigError(f"{s!r} is not in the universe")
         sel.add(s)
+    excluded = set()
     for s in _list(fo.get("exclude"), "focus.exclude"):
         if s not in universe:
             raise ConfigError(f"{s!r} is not in the universe")
-        sel.discard(s)
+        excluded.add(s)
+    sel -= excluded
     if mode == "only" and len(sel) < MIN_ONLY_SYMBOLS:
         raise ConfigError(f"'Only these' needs at least {MIN_ONLY_SYMBOLS} stocks (has {len(sel)})")
     if mode == "all":
@@ -182,6 +187,7 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
         raise ConfigError("advanced.max_spread_bp must be 1..5")
 
     return Rules(version=int(version), policy=pol, strategies=tuple(on), mode=mode, focus=frozenset(sel),
+                 excluded=frozenset(excluded),
                  first_entry_m=first, last_entry_m=last, pause_losses=pl, pause_minutes=pm, vix_max=vx,
                  event_window_min=ew, min_price_usd=mp, min_adv_usd=ma, max_spread_bp=ms, config_sha=body_sha(body))
 

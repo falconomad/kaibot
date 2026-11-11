@@ -14,7 +14,7 @@ if anything is off (fail closed).
   "focus": {
     "themes": ["hyperscalers", "semiconductors"],          // keys of config/universe_seed.yaml `themes`
     "symbols": ["CRM"],                                    // extra symbols from the 59-name universe
-    "exclude": ["INTC"],                                   // removed from the focus set
+    "exclude": ["INTC"],                                   // never traded, in every mode (also removed from the focus set)
     "mode": "all" | "prefer" | "only"                      // all = no focus; only needs >= 5 symbols after exclude
   },
   "risk": {                       // each value must be >= its floor and <= the level's value
@@ -56,7 +56,9 @@ and the strategy entry thresholds.
 - `level`: `"conservative" | "balanced" | "aggressive"`.
 - `bounds`: `{ risk_per_trade_pct: {min, max}, max_positions: {...}, max_position_pct, max_entries_per_day, daily_stop_pct,
   run_drawdown_end_pct, pause_losses, pause_minutes, vix_max, event_window_min, min_price_usd, min_adv_usd, max_spread_bp,
-  entry: {start: "09:35", end: "15:45"}, strategies: ["dip_reversal", ...level's] }`. Each max is the level's value.
+  entry: {start: "09:35", end: "15:45"}, strategies: ["dip_reversal", ...level's] }`. Where a smaller value is stricter
+  (risk, positions, stops, pause_losses, vix_max, max_spread_bp), max = the level's value. Where a larger value is
+  stricter (pause_minutes, event_window_min, min_price_usd, min_adv_usd), min = the level's value. Steps are UI-only.
 - `themes`: `{ key: { label, symbols: [...] } }`. `universe`: the 59 symbols.
 - `applied`: the version in effect now, or null for level defaults. `pending`: one applied version that starts at
   the next open, or null. Each is `{version, body, applies_from, created_at}`. `draft`: `{body, updated_at}` or null.
@@ -73,6 +75,7 @@ non-superseded version created before D 09:30 ET. Positions already open keep th
 Estimate = Σ over tradable symbols of `dip_per_month` × the share of the entry window that is selected (dip on).
 - **Only** mode: tradable = the focus set.
 - **All** and **Prefer**: tradable = all 59. Prefer only ranks focus names first when slots compete.
+- In every mode, excluded stocks are never tradable.
 
 SPY momentum has no stored replay yet, so the page says "not estimated yet".
 

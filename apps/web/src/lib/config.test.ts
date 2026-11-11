@@ -193,7 +193,7 @@ describe("diff text", () => {
     const x = { ...toggleTheme(d, "energy"), strategies: { dip_reversal: true, spy_late_momentum: false } };
     x.focus = { ...x.focus, exclude: ["XOM"] };
     const s = diffConfig(d, x, THEMES).map(diffSentence);
-    expect(s).toContain("Left out of the focus: none → XOM");
+    expect(s).toContain("Never traded: none → XOM");
     expect(s).toContain("SPY end-of-day momentum: on → off");
     expect(s).toContain("Focus: All 59 stocks → Prefer Energy (2 stocks)");
   });
@@ -276,5 +276,14 @@ describe("the Strategy page has no live-trading control", () => {
   });
   it("the config body has no field outside the contract", () => {
     expect(Object.keys(levelDefaults(B())).sort()).toEqual(["advanced", "boldness", "focus", "preset", "risk", "schema", "strategies", "timing"]);
+  });
+});
+
+describe("exclude means never traded", () => {
+  it("drops excluded stocks from the estimate in every mode", () => {
+    const d = levelDefaults(B());
+    const base = estimateTrades(d, EST, THEMES).perMonth;
+    const ex = estimateTrades({ ...d, focus: { ...d.focus, exclude: ["DUK"] } }, EST, THEMES).perMonth;
+    expect(ex).toBeLessThan(base);
   });
 });

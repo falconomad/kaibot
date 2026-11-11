@@ -284,8 +284,8 @@ export function diffConfig(a: ConfigBody, c: ConfigBody, themes: Themes): DiffRo
   const rows: DiffRow[] = [];
   const add = (key: string, label: string, from: string, to: string) => { if (from !== to) rows.push({ key, label, from, to }); };
   add("focus", "Focus", focusText(a, themes), focusText(c, themes));
-  const ex = (x: ConfigBody) => (x.focus.mode === "all" || !x.focus.exclude.length ? "none" : [...x.focus.exclude].sort().join(", "));
-  add("exclude", "Left out of the focus", ex(a), ex(c));
+  const ex = (x: ConfigBody) => (!x.focus.exclude.length ? "none" : [...x.focus.exclude].sort().join(", "));
+  add("exclude", "Never traded", ex(a), ex(c));
   for (const k of RISK_KEYS) add(k, LABEL[k], fmtNum(k, a.risk[k]), fmtNum(k, c.risk[k]));
   for (const s of STRATEGY_KEYS) add(s, STRATEGY_NAME[s], a.strategies[s] ? "on" : "off", c.strategies[s] ? "on" : "off");
   add("hours", "New trades between", `${a.timing.entry_start}–${a.timing.entry_end} ET`, `${c.timing.entry_start}–${c.timing.entry_end} ET`);
