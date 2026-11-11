@@ -34,6 +34,7 @@ from kaibot.engine.config import ROOT
 from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
 from kaibot.engine.roomflow import RoomFlow
+from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
 from kaibot.replay.features import five_minute
 from kaibot.replay.sim import half_spread, sell_px
@@ -124,6 +125,8 @@ class Day:
     spy_mom_done: bool = False
     last_m: int = -1
     events: list = field(default_factory=list)
+    rules: Rules | None = None  # M5: the owner's config for this session (None before the open)
+    refused: str | None = None  # M5: entries refused for this session only (invalid config); next day re-checks
     scan: dict = field(default_factory=lambda: new_scan())  # dashboard-only counters, never read by decisions
 
     @property
@@ -304,7 +307,8 @@ class Engine:
                 target=float(target) if target is not None else 0.0, db_order_id=db_order["id"],
                 entry_ts=_iso(sig.get("ts")) or self.now().isoformat(), strategy=sig.get("strategy") or "dip_reversal")
         trade = self.store.insert("trade", {
-            "run_id": self._rid(), "signal_id": sig["id"], "strategy": p.strategy, "symbol": p.symbol,
+            "run_id": self._rid(), "config_version": self._cfg_version(), "signal_id": sig["id"],
+            "strategy": p.strategy, "symbol": p.symbol,
             "entry_ts": p.entry_ts, "qty": qty, "entry_px": ref, "stop_px": stop, "target_px": target,
             "risk_usd": p.risk_ps * qty, "features": {**f, **p.features(), "adopted": True}})
         p.trade_id = trade["id"]
@@ -330,9 +334,10 @@ class Engine:
             d.realized_reported += pnl
             d.trades_closed += 1
             d.losses_in_row = d.losses_in_row + 1 if pnl < 0 else 0
-            if d.losses_in_row >= PAUSE_AFTER_LOSSES:
+            pl, pm = self._pause_rule()
+            if d.losses_in_row >= pl:
                 exit_m = int((_parse_ts(t["exit_ts"]) - d.open_utc).total_seconds() // 60)
-                d.pause_until, d.losses_in_row = exit_m + PAUSE_MINUTES, 0
+                d.pause_until, d.losses_in_row = exit_m + pm, 0
         halts = self.store.select("halt", {"run_id": f"eq.{d.run_id}", "kind": "eq.daily_stop",
                                            "session": f"eq.{d.day}"})
         d.halted = bool(halts)
@@ -431,7 +436,74 @@ class Engine:
         return (self.run or {}).get("level") or "balanced"
 
     def policy(self) -> RiskPolicy:
+        d = self.day
+        if d is not None and d.rules is not None:
+            return d.rules.policy  # M5: the level tightened by the owner's config, fixed at the session open
         return self.policies[self.level()]
+
+    def _user_veto(self, r: Rules, s: str, ref: float, vix: float | None) -> str | None:
+        """M5 tighten-only filters from the owner's config (the level's own gates run regardless)."""
+        if vix is not None and np.isfinite(vix) and vix > r.vix_max:
+            return f"VIX above your limit ({r.vix_max:g})"
+        if ref < r.min_price_usd:
+            return f"price below your minimum (${r.min_price_usd:g})"
+        q = (self._quotes or {}).get(s) or {}
+        bid, ask = float(q.get("bp") or 0), float(q.get("ap") or 0)
+        if 0 < bid <= ask and (ask - bid) / ((ask + bid) / 2) * 1e4 > r.max_spread_bp:
+            return f"spread above your limit ({r.max_spread_bp:g} bp)"
+        return None
+
+    def _load_rules(self, d: Day) -> None:
+        """M5 S43: the owner's latest applied config created before this session's open, tightened onto the level.
+        Invalid -> entries refused for the session (fail closed); management, stops and the flatten still run."""
+        lv_pol, lv_strats = self.policies[self.level()], self.strategies.get(self.level(), ["dip_reversal"])
+        d.rules = defaults(lv_pol, lv_strats)
+        try:
+            rows = [c for c in self.store.select("config", {"run_id": f"eq.{d.run_id}", "status": "eq.applied"})
+                    if _parse_ts(c["created_at"]) < d.open_utc]
+        except Exception as e:
+            self._refuse_session(f"config unreadable: {type(e).__name__}")
+            return
+        if not rows:
+            self.market.min_adv = d.rules.min_adv_usd
+            return
+        c = max(rows, key=lambda c: int(c["version"]))
+        uni, themes = self._universe_and_themes()
+        try:
+            d.rules = tighten(lv_pol, lv_strats, c.get("body") or {}, version=int(c["version"]),
+                              universe=uni, themes=themes)
+        except (ConfigError, ValueError) as e:
+            d.rules = Rules(int(c["version"]), lv_pol, tuple(lv_strats))  # keep the version for the record
+            self._refuse_session(f"config v{c['version']} rejected: {e}")
+            return
+        self.market.min_adv = d.rules.min_adv_usd
+        self.store.event("config_applied", {"day": str(d.day), "version": d.rules.version,
+                                            "config_sha": d.rules.config_sha}, self._rid())
+
+    def _refuse_session(self, reason: str) -> None:
+        """Entries off for this session only; stops, management and the 15:55 flatten keep running."""
+        d = self.day
+        d.refused = reason[:300]
+        log.error("session refused: %s", reason)
+        self.store.event("engine_error", {"kind": "config", "reason": d.refused}, self._rid())
+        self.store.insert("halt", {"run_id": self._rid(), "kind": "config", "reason": d.refused,
+                                   "session": str(d.day)}, returning=False)
+
+    def _universe_and_themes(self) -> tuple[frozenset[str], dict[str, list[str]]]:
+        if not hasattr(self, "_uni_cache"):
+            import yaml
+
+            u = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
+            self._uni_cache = (frozenset(x for v in u["sectors"].values() for x in v),
+                               {k: list(v["symbols"]) for k, v in (u.get("themes") or {}).items()})
+        return self._uni_cache
+
+    def _cfg_version(self) -> int:
+        return self.day.rules.version if self.day and self.day.rules else 0
+
+    def _pause_rule(self) -> tuple[int, int]:
+        r = self.day.rules if self.day else None
+        return (r.pause_losses, r.pause_minutes) if r else (PAUSE_AFTER_LOSSES, PAUSE_MINUTES)
 
     # ================= per tick =================
     def tick(self) -> dict:
@@ -521,6 +593,7 @@ class Engine:
         start_eq = float(self.run["amount_usd"]) + self.store.run_realized(self.run["id"])
         self.peak = max(float(self.run.get("peak_equity") or start_eq), start_eq)
         self.day = Day(self.run["id"], today, open_utc, n_min, start_eq)
+        self._load_rules(self.day)
         self._restore_session(self.day)
         if self.market.day != today:
             self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
@@ -597,13 +670,19 @@ class Engine:
         d = self.day
         if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
             return False
-        if d.halted or d.flattened or m < d.pause_until:
+        if d.halted or d.flattened or d.refused or m < d.pause_until:
             return False
-        if not (FIRST_ENTRY_M <= m + 1 <= d.last_entry_m):
+        r = d.rules
+        first, last = (max(FIRST_ENTRY_M, r.first_entry_m), min(d.last_entry_m, r.last_entry_m)) if r else (
+            FIRST_ENTRY_M, d.last_entry_m)
+        if not (first <= m + 1 <= last):
             return False
-        return in_blackout(self.events, d.day, m) is None
+        return in_blackout(self.events, d.day, m, r.event_window_min if r else None) is None
 
     def _runs(self, strategy: str) -> bool:
+        r = self.day.rules if self.day else None
+        if r is not None:
+            return strategy in r.strategies
         return strategy in self.strategies.get(self.level(), ["dip_reversal"])
 
     # ================= SPY late momentum (S13) =================
@@ -623,6 +702,9 @@ class Engine:
         if not (np.isfinite(atr) and atr > 0):
             go = False
         off, vix = self.market.regime_at(m)  # S15: the regime gate (incl. VIX > 35 crisis) applies here too
+        r = self.day.rules
+        if not off and r is not None and np.isfinite(vix) and vix > r.vix_max:
+            off = True  # M5: the owner's VIX limit (tighter than the crisis gate)
         stop = ref - spymom.STOP_ATR * float(atr if np.isfinite(atr) else 0)
         feats = {"ret_close_to_10": _num(ret), "sigma": _num(sigma), "z": _num(z), "atr5": _num(atr), "m": m}
         self._decide(spy, "spy_late_momentum", ref, stop, None, feats,
@@ -659,6 +741,13 @@ class Engine:
         note_scan(sc, m, getattr(self.market, "last_checked", 0), getattr(self.market, "last_near", []), len(cands))
         if not len(cands) or not self._runs("dip_reversal"):
             return
+        r = self.day.rules
+        if r is not None and r.mode != "all":  # M5 focus: Only filters; Prefer ranks focus names first
+            cands = cands[[r.tradable(x) for x in cands["symbol"]]]
+            if not len(cands):
+                return
+            cands = cands.assign(_rank=[r.rank(x) for x in cands["symbol"]]).sort_values(
+                ["_rank", "z"], kind="stable").drop(columns="_rank")
         self._quotes = self.broker_quotes(list(cands["symbol"]))
         self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
         decision = self.now()
@@ -674,6 +763,8 @@ class Engine:
             feats.update({"news_24h": news, "vix": vix, "m": m})
             reasons = ["no-news dip", "5-min higher low", "sector-adjusted"]
             veto = "company news in 24 h" if news else None
+            if veto is None and r is not None:
+                veto = self._user_veto(r, s, ref, vix)
             if veto is None and self.rules_extra is not None:
                 try:
                     veto = self.rules_extra(self, s, m)
@@ -837,6 +928,7 @@ class Engine:
             "trade",
             {
                 "run_id": self._rid(),
+                "config_version": self._cfg_version(),
                 "signal_id": signal_id,
                 "strategy": strategy,
                 "symbol": s,
@@ -940,8 +1032,9 @@ class Engine:
             d.realized_reported += min(pnl_v, pnl_s)
             d.trades_closed += 1
             d.losses_in_row = d.losses_in_row + 1 if min(pnl_v, pnl_s) < 0 else 0
-            if d.losses_in_row >= PAUSE_AFTER_LOSSES:
-                d.pause_until, d.losses_in_row = d.last_m + PAUSE_MINUTES, 0
+            pl, pm = self._pause_rule()
+            if d.losses_in_row >= pl:
+                d.pause_until, d.losses_in_row = d.last_m + pm, 0
         p.exit_reason = reason
         self._close_trade(p, px, reason, min(pnl_v, pnl_s), ts, {"pnl_venue": pnl_v, "pnl_shadow": pnl_s})
 
@@ -1055,6 +1148,7 @@ class Engine:
                     "pnl_shadow": round(d.realized_shadow, 2),
                     "spy_ret": self.market.spy_return(),
                     "trades": d.trades_closed,
+                    "config_version": d.rules.version if d.rules else 0,
                 },
                 "run_id,session",
             )

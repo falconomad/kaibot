@@ -1,0 +1,57 @@
+# M5 S51 (#67): the one shared spec for the Strategy page's shortcuts. A preset or a Boldness step only writes the
+# same config fields as Fine-tune (docs/m5/contract.md); nothing new reaches the engine. Every value is clamped to the
+# run's level: a step can never be looser than the level, and the server rejects anything that is (config_check).
+#
+# The dashboard reads apps/web/src/data/presets.json, generated from this file by scripts/gen_presets_json.py;
+# tests/test_presets.py fails if the two drift.
+
+# Absolute limits per step (approved design, board 09): Careful = Steady's limits, Moderate = Balanced, Max = Hunter.
+# On a lower level the upper steps collapse onto the level's own limits.
+boldness:
+  - {name: Careful,  risk_per_trade_pct: 0.25, daily_stop_pct: 0.75, max_positions: 3, max_position_pct: 10, max_entries_per_day: 10, run_drawdown_end_pct: 4}
+  - {name: Steady,   risk_per_trade_pct: 0.35, daily_stop_pct: 1.0,  max_positions: 4, max_position_pct: 12, max_entries_per_day: 15, run_drawdown_end_pct: 6}
+  - {name: Moderate, risk_per_trade_pct: 0.5,  daily_stop_pct: 1.5,  max_positions: 5, max_position_pct: 15, max_entries_per_day: 20, run_drawdown_end_pct: 8}
+  - {name: Bold,     risk_per_trade_pct: 0.75, daily_stop_pct: 2.0,  max_positions: 6, max_position_pct: 18, max_entries_per_day: 25, run_drawdown_end_pct: 10}
+  - {name: Max,      risk_per_trade_pct: 1.0,  daily_stop_pct: 3.0,  max_positions: 8, max_position_pct: 20, max_entries_per_day: 30, run_drawdown_end_pct: 12}
+
+# Trading-hours shapes: entry window in minutes after 09:30 ET, clamped to 09:35-15:45.
+hours:
+  - {key: all,  name: All day,       from: 5,   to: 375}
+  - {key: skip, name: Skip the open, from: 30,  to: 375}
+  - {key: am,   name: Mornings,      from: 5,   to: 180}
+  - {key: pm,   name: Afternoons,    from: 180, to: 375}
+
+# Extra-caution switches: the value each writes when on (off = the level's own value).
+caution:
+  vix:   {name: Sit out fear spikes,       vix_max: 25}
+  pause: {name: Longer pause after losses, pause_losses: 2, pause_minutes: 120}
+  quiet: {name: Wider Fed/CPI quiet,       event_window_min: 60}
+
+presets:
+  default:
+    name: Kaibot default
+    icon: "⚡"
+    blurb: All 59 stocks, the full limits of your level, all day.
+    focus: {mode: all, themes: []}
+    boldness: 4
+    hours: all
+    caution: []
+  big_tech:
+    name: Big tech
+    icon: "◆"
+    blurb: Big Tech, hyperscalers and chips only. Moderate size, skips the open.
+    focus: {mode: only, themes: [big_tech, hyperscalers, semiconductors]}
+    boldness: 2
+    hours: skip
+    caution: []
+  calm:
+    name: Calm
+    icon: "☾"
+    blurb: All stocks, small trades, sits out shaky days.
+    focus: {mode: all, themes: []}
+    boldness: 0
+    hours: skip
+    caution: [vix, pause, quiet]
+
+limits:
+  max_excluded: 10   # S53 (#69): at most 10 single stocks can be excluded

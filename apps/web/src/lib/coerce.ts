@@ -2,7 +2,7 @@
 const NUMERIC = new Set(["pnl", "pnl_usd", "pnl_venue", "pnl_shadow", "spy_ret", "cash_ret", "mean_r", "sd_r", "t", "ci_lo", "ci_hi",
   "qty", "entry_px", "exit_px", "risk_usd", "entry", "stop", "target", "venue_px", "shadow_px", "fees", "win", "r",
   "start_equity", "r_multiple", "cost_usd", "diff", "cf_pnl", "loss_avoided", "win_missed", "rules_pnl", "room_pnl", "llm_usd",
-  "room_usd", "per_loss_avoided", "day_usd", "month_usd", "open_reserved_usd", "daily_soft", "monthly_alert", "monthly_hard"]);
+  "room_usd", "per_loss_avoided", "day_usd", "month_usd", "open_reserved_usd", "daily_soft", "monthly_alert", "monthly_hard", "t_stat"]);
 export function coerce<T>(v: T): T {
   if (Array.isArray(v)) return v.map(coerce) as T;
   if (v && typeof v === "object") {

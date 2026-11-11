@@ -6,7 +6,10 @@ import { day, money } from "../lib/fmt";
 // validator (light #1A6FA0/#A8640F on #FFF, dark #4E9BCB/#BE8028 on #171E26); SPY is also dashed + labelled.
 const W = 760, H = 240, M = { t: 12, r: 92, b: 24, l: 64 };
 
-export function PotChart({ data, start }: { data: Curve[]; start: number }) {
+/** Optional chapter boundaries (M5 S48): a dashed rule at the first session on or after each `session`. */
+export interface ChartMarker { session: string; label: string }
+
+export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: number; markers?: ChartMarker[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const [table, setTable] = useState(false);
   const ref = useRef<SVGSVGElement>(null);
@@ -55,7 +58,7 @@ export function PotChart({ data, start }: { data: Curve[]; start: number }) {
         </div>
       ) : (
         <div className="chart">
-          <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Pot ${money(last.pot)} versus SPY ${money(last.spy)} at the end`}
+          <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Pot ${money(last.pot)} versus SPY ${money(last.spy)} at the end${markers.length ? `; ${markers.length} chapter change${markers.length === 1 ? "" : "s"} marked` : ""}`}
             onPointerMove={move} onPointerLeave={() => setHover(null)}>
             {g.ticks.map((t) => (
               <g key={t}>
@@ -64,6 +67,16 @@ export function PotChart({ data, start }: { data: Curve[]; start: number }) {
                 <text x={M.l - 8} y={g.y(t) + 4} textAnchor="end" fontSize="11" fill="var(--slate)" className="num">{short(t)}</text>
               </g>
             ))}
+            {markers.map((mk) => {
+              const i = data.findIndex((d) => d.session >= mk.session);
+              if (i <= 0) return null;
+              return (
+                <g key={mk.session + mk.label} className="fade-late">
+                  <line x1={g.x(i)} x2={g.x(i)} y1={M.t} y2={H - M.b} stroke="var(--ai)" strokeWidth="1" strokeDasharray="4 4" />
+                  <text x={g.x(i) + 4} y={M.t + 10} fontSize="10" fill="var(--ai)">{mk.label}</text>
+                </g>
+              );
+            })}
             <text x={M.l} y={H - 6} fontSize="11" fill="var(--slate)">{day(data[0].session)}</text>
             <text x={W - M.r} y={H - 6} fontSize="11" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
             <defs>

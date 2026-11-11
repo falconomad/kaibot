@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { coerce } from "./coerce";
+import type { Chapter, ConfigBody, ConfigResp } from "./config";
 export { coerce };
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
@@ -129,7 +130,7 @@ export interface TradeDetail {
 
 async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
   const { data, error } = await supa.rpc(fn, args);
-  if (error) throw new Error(error.message);
+  if (error) throw Object.assign(new Error(error.message), { code: error.code });
   return data as T;
 }
 
@@ -182,6 +183,16 @@ export const api = {
     return { ...b, by_purpose: numValues(b.by_purpose) };
   },
   gate: async (run: number) => rpc<GateResp>("kb_gate_report", { p_run: run }),
+  // M5 config (docs/m5/contract.md). The server validates every save and apply; the UI is bounded so it never trips that.
+  getConfig: async (run: number) => rpc<ConfigResp>("kb_get_config", { p_run: run }),
+  saveConfig: (run: number, body: ConfigBody) =>
+    rpc<{ ok: boolean; draft: { body: ConfigBody; updated_at: string } }>("kb_save_config", { p_run: run, p_body: body }),
+  applyConfig: (run: number) => rpc<{ version: number; applies_from: string }>("kb_apply_config", { p_run: run, p_idem: crypto.randomUUID() }),
+  resetConfig: (run: number) => rpc<unknown>("kb_reset_config", { p_run: run }),
+  chapters: async (run: number) => {
+    const r = coerce(await rpc<Chapter[] | null>("kb_chapters", { p_run: run })) ?? [];
+    return r.map((c) => ({ ...c, version: Number(c.version), n_trades: Number(c.n_trades), pnl_usd: Number(c.pnl_usd ?? 0) }));
+  },
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

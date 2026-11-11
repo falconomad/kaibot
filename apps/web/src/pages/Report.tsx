@@ -240,6 +240,39 @@ function RoomAbCard({ runId }: { runId: number }) {
   );
 }
 
+/** S48: results split by config version. A chapter is one applied version of the Strategy settings (0 = level defaults). */
+function ChaptersCard({ runId }: { runId: number }) {
+  const q = useQuery({ queryKey: ["chapters", runId], queryFn: () => api.chapters(runId), staleTime: 300_000 });
+  return (
+    <section className="card" aria-labelledby="ch-h">
+      <h2 id="ch-h">Chapters</h2>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Each time you apply new Strategy settings, a new chapter starts at the next open, so each setup is judged on its own trades.
+        The go-live review judges one frozen setup only.</p>
+      {q.isPending ? <Skeleton /> : q.isError ? <p className="muted" style={{ fontSize: 13 }}>Chapters aren't available yet: {String((q.error as Error).message)}</p>
+        : !q.data.length ? <p className="muted">No chapters yet. Everything so far ran on the level's defaults.</p> : (
+        <table className="list">
+          <thead><tr><th>Chapter</th><th>Dates</th><th className="r">Trades</th><th className="r">P&amp;L</th><th className="r">Mean R</th><th className="r">t</th><th>Verdict</th></tr></thead>
+          <tbody>{q.data.map((c) => {
+            const early = c.too_early || c.n_trades < 30;
+            return (
+              <tr key={c.version}>
+                <td><b>{c.version === 0 ? "Level defaults" : `Version ${c.version}`}</b></td>
+                <td className="num">{c.from ? day(c.from.slice(0, 10)) : "—"} – {c.to ? day(c.to.slice(0, 10)) : "now"}</td>
+                <td className="r num">{c.n_trades}</td>
+                <td className={`r num ${tone(c.pnl_usd)}`}>{signedMoney(c.pnl_usd)}</td>
+                <td className="r num">{fmtR(c.mean_r)}</td>
+                <td className="r num">{c.t_stat === null || c.t_stat === undefined ? "—" : c.t_stat.toFixed(2)}</td>
+                <td>{early ? <span className="chapter-tag">too early to judge</span> : <span className="muted">{c.n_trades} trades</span>}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+      )}
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Under 30 trades a chapter says nothing about an edge. Narrow settings slow the evidence a lot.</p>
+    </section>
+  );
+}
+
 export function Report() {
   const { run } = useRunCtx();
   return (
@@ -255,6 +288,7 @@ export function Report() {
           <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Pot start {money(run.amount_usd)}.</p>
         </section>
       </div>
+      {run.kind === "paper" && <ChaptersCard runId={run.id} />}
       <DayCard runId={run.id} />
       {run.kind === "paper" && <RoomAbCard runId={run.id} />}
       <Attribution runId={run.id} />

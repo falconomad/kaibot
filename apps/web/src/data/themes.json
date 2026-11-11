@@ -1,0 +1,13 @@
+{
+ "hyperscalers": {"label": "Hyperscalers", "symbols": ["MSFT", "AMZN", "GOOGL", "META", "ORCL"]},
+ "semiconductors": {"label": "Semiconductors", "symbols": ["NVDA", "AVGO", "AMD", "INTC", "QCOM", "TXN"]},
+ "big_tech": {"label": "Big Tech", "symbols": ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA"]},
+ "software": {"label": "Software & IT", "symbols": ["MSFT", "ORCL", "CRM", "ADBE", "CSCO"]},
+ "media_telecom": {"label": "Media & telecom", "symbols": ["GOOGL", "META", "NFLX", "DIS", "TMUS"]},
+ "consumer": {"label": "Consumer", "symbols": ["AMZN", "TSLA", "HD", "MCD", "NKE", "LOW", "SBUX", "BKNG"]},
+ "healthcare": {"label": "Healthcare", "symbols": ["UNH", "JNJ", "LLY", "MRK", "ABBV", "PFE", "TMO"]},
+ "financials": {"label": "Financials", "symbols": ["JPM", "BAC", "WFC", "GS", "MS", "V", "MA"]},
+ "industrials": {"label": "Industrials", "symbols": ["CAT", "BA", "GE", "HON", "UPS", "RTX", "DE", "LIN"]},
+ "energy": {"label": "Energy", "symbols": ["XOM", "CVX", "COP"]},
+ "defensives": {"label": "Defensives", "symbols": ["PG", "KO", "PEP", "COST", "WMT", "NEE", "DUK", "PLD", "AMT"]}
+}

@@ -70,7 +70,8 @@ def frozen_since(starts: list[dict], current_fp: str) -> datetime | None:
 # ---------------- evaluation ----------------
 def evaluate(bar: Bar, *, strategies: list[str], trades: list[dict], sessions: list[dict], random_days: list[dict],
              starts: list[dict], fingerprint_now: str, amount: float, dd_cap_pct: float,
-             trials: dict[str, list[float]] | None = None, as_of: datetime | None = None) -> dict:
+             trials: dict[str, list[float]] | None = None, as_of: datetime | None = None,
+             config_version: int | None = None) -> dict:
     """The gate report as JSON-ready data.
 
     trades: closed trades {strategy, entry_ts, exit_ts, pnl_usd}. sessions: {session, spy_ret}.
@@ -78,8 +79,15 @@ def evaluate(bar: Bar, *, strategies: list[str], trades: list[dict], sessions: l
     trials: per strategy, the daily (not annualised) Sharpe of every logged research trial (deflated Sharpe)."""
     cfg, b, k = bar.cfg, bar.cfg["bar"], bar.cfg["kill"]
     since = frozen_since(starts, fingerprint_now)
+    other_cfg = 0
+    if config_version is not None:  # M5: the gate judges one frozen configuration only
+        keep = [t for t in trades if int(t.get("config_version") or 0) == config_version]
+        other_cfg = len(trades) - len(keep)
+        trades = keep
+        random_days = [r for r in random_days if int(r.get("config_version") or 0) == config_version]
     out = {"generated_at": _iso(as_of or datetime.now(UTC)), "bar_sha": bar.sha, "fingerprint": fingerprint_now,
-           "frozen_since": _iso(since) if since else None, "bar": b, "kill": k, "strategies": {}}
+           "frozen_since": _iso(since) if since else None, "config_version": config_version,
+           "excluded_other_config": other_cfg, "bar": b, "kill": k, "strategies": {}}
     sess = pd.DataFrame(sessions or [], columns=["session", "spy_ret"])
     sess["session"] = pd.to_datetime(sess["session"]).dt.date
     for strat in strategies:
@@ -197,7 +205,8 @@ def day_random(engine, n_runs: int) -> dict | None:
                                                        "strategy": "eq.dip_reversal"})
             if _et_date(_ts(t.get("entry_ts"))) == d.day)
     last_m = d.n_min - 1
-    stocks = {s: mk.symbol_days(s, last_m) for s in mk.symbols}
+    rules = getattr(d, "rules", None)
+    stocks = {s: mk.symbol_days(s, last_m) for s in mk.symbols if rules is None or rules.tradable(s)}
     etfs = {e: mk.symbol_days(e, last_m) for e in set(mk.etf_of.values())}
     day = np.datetime64(d.day, "D")
     stocks = {s: sd for s, sd in stocks.items() if sd is not None and len(sd.dates) and sd.dates[-1] == day}
@@ -206,6 +215,7 @@ def day_random(engine, n_runs: int) -> dict | None:
     totals = random_entry_runs(prep.bars, prep.atr5, prep.vwap, prep.sigma, pd.Series({day: n}), engine.policy(),
                                d.start_equity, n_runs=n_runs, seed=seed, variant="A") if n else np.zeros(n_runs)
     return {"strategy": "dip_reversal", "session": str(d.day), "n_trades": n, "seed": seed,
+            "config_version": rules.version if rules is not None else 0,
             "totals": [round(float(x), 2) for x in totals]}
 
 
@@ -223,8 +233,11 @@ def on_day_end(engine, root: Path) -> dict | None:
             rnd = day_random(engine, int(bar.cfg["bar"]["random_runs"]))
             if rnd is not None:
                 engine.store.insert("gate_random", {**rnd, "run_id": rid, "fingerprint": fp}, returning=False)
-        report = build(engine.store, bar, rid, fp, engine.run, engine.policy().run_drawdown_end_pct,
-                       list(engine.strategies.get(engine.level(), ["dip_reversal"])), root / "data" / "trials.jsonl")
+        rules = getattr(engine.day, "rules", None)
+        strategies = list(rules.strategies) if rules is not None else list(
+            engine.strategies.get(engine.level(), ["dip_reversal"]))
+        report = build(engine.store, bar, rid, fp, engine.run, engine.policy().run_drawdown_end_pct, strategies,
+                       root / "data" / "trials.jsonl", config_version=rules.version if rules is not None else 0)
         engine.store.insert("gate_report", {"run_id": rid, "session": str(engine.day.day), "bar_sha": bar.sha,
                                             "fingerprint": fp, "overall": report["overall"], "report": report},
                             returning=False)
@@ -262,17 +275,17 @@ def load_trials(store, trials_file: Path | None) -> dict[str, list[float]]:
 
 
 def build(store, bar: Bar, run_id: int, fp: str, run: dict | None, dd_cap_pct: float, strategies: list[str],
-          trials_file: Path | None = None) -> dict:
+          trials_file: Path | None = None, config_version: int | None = None) -> dict:
     q = {"run_id": f"eq.{run_id}"}
-    trades = store.select("trade", {"select": "strategy,entry_ts,exit_ts,pnl_usd", **q})
+    trades = store.select("trade", {"select": "strategy,entry_ts,exit_ts,pnl_usd,config_version", **q})
     sessions = store.select("daily_result", {"select": "session,spy_ret", **q})
-    random_days = store.select("gate_random", {"select": "strategy,session,fingerprint,totals", **q})
+    random_days = store.select("gate_random", {"select": "strategy,session,fingerprint,totals,config_version", **q})
     starts = [{"ts": e.get("ts"), "fingerprint": (e.get("payload") or {}).get("fingerprint")}
               for e in store.select("event", {"select": "ts,payload", "type": "eq.engine_start", **q})]
     trials = load_trials(store, trials_file)
     return evaluate(bar, strategies=strategies, trades=trades, sessions=sessions, random_days=random_days,
                     starts=starts, fingerprint_now=fp, amount=float((run or {}).get("amount_usd") or 0) or 1.0,
-                    dd_cap_pct=dd_cap_pct, trials=trials)
+                    dd_cap_pct=dd_cap_pct, trials=trials, config_version=config_version)
 
 
 # ---------------- helpers ----------------
