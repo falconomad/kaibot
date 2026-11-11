@@ -28,13 +28,14 @@ For each rule, `src/kaibot/evaluation/ablation.py` (pure, injectable feature loo
 | Verdict | When |
 |---|---|
 | `insufficient` | fewer than **63 distinct trading days** with a known feature value, or fewer than **100 trades** with a known value |
-| `admit` | percentile **>= 95** AND kept mean R > all-trades mean R |
+| `admit` | percentile **>= 95** AND kept mean R > all-trades mean R AND p-value <= 0.05 / (rules tested) (Bonferroni) |
+| `promising` | clears the per-rule 95% bar but not Bonferroni: reported, never proposed |
 | `reject` | otherwise |
 
 The thresholds are constants in the module; the config cannot loosen them. If the feature carries no information,
-the kept set is just a random subset, so one rule is falsely admitted about 5% of the time (a test checks this
-over 200 seeds). With several rules, a false admit *somewhere* is likely. So each row also reports `p_value` and
-an informational `bonferroni_pass`, and the admission PR's own replay trial is the real check.
+the kept set is just a random subset, so one rule clears the per-rule bar about 5% of the time (a test checks this
+over 200 seeds). With 7 rules that would mean a false admit *somewhere* about 30% of the time, so admission also
+requires Bonferroni across the rules tested (family-wise 5%). The admission PR's own replay trial is a second check.
 
 ## Running it
 ```

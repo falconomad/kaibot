@@ -188,14 +188,21 @@ def run_ablation(trades: pd.DataFrame, lookup: Lookup, config: AblationConfig, g
             "random_p95_total_r": _num(float(np.percentile(rand, 95))), "percentile": _num(pct, 2),
             "p_value": _num(p_value), "verdict": verdict,
         })
+    # Family-wise control: with k rules tested at 95% each, a noise feature would slip through ~1-(0.95^k) of the
+    # time (k=7: ~30%). A rule is admitted only if it also clears Bonferroni (p <= 0.05 / k); one that clears only
+    # the per-rule bar is "promising": reported, never proposed.
     tested = [p for p in per_rule if p["verdict"] != "insufficient"]
-    for p in per_rule:  # informational family-wise check; the verdict is the pre-registered per-rule bar
-        p["bonferroni_pass"] = bool(p["verdict"] == "admit" and p["p_value"] <= 0.05 / max(len(tested), 1))
+    alpha = 0.05 / max(len(tested), 1)
+    for p in per_rule:
+        p["bonferroni_pass"] = bool(p["verdict"] == "admit" and p["p_value"] <= alpha)
+        if p["verdict"] == "admit" and not p["bonferroni_pass"]:
+            p["verdict"] = "promising"
     sessions = sorted(t["session"].unique()) if n else []
     return {
         "kind": "ablation", "story": "S39", "source": source, "git_sha": git_sha,
         "config_sha256": config.sha256, "seed": config.seed, "n_random": config.n_random,
         "thresholds": {"admit_percentile": ADMIT_PERCENTILE, "admit_needs_kept_mean_above_all": True,
+                       "admit_needs_bonferroni": True, "family_alpha": 0.05,
                        "min_history_days": MIN_HISTORY_DAYS, "min_known_trades": MIN_KNOWN_TRADES,
                        "unknown_values": "kept"},
         "trades": n, "trading_days": len(sessions),
@@ -205,6 +212,7 @@ def run_ablation(trades: pd.DataFrame, lookup: Lookup, config: AblationConfig, g
         "rules": per_rule,
         "rules_tested": len(tested),
         "admitted": [p["name"] for p in per_rule if p["verdict"] == "admit"],
-        "summary": {v: sum(p["verdict"] == v for p in per_rule) for v in ("admit", "reject", "insufficient")},
+        "summary": {v: sum(p["verdict"] == v for p in per_rule)
+                    for v in ("admit", "promising", "reject", "insufficient")},
         "note": "admit only PROPOSES a feature for rules_extra via a PR with a replay trial; it never enables trading",
     }

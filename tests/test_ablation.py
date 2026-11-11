@@ -210,3 +210,27 @@ def test_script_with_zero_alt_history_reports_insufficient_and_logs_a_trial(tmp_
     t = mod.normalize_trades(pd.DataFrame(rows[:1]))
     assert t["entry_ts"].iloc[0] == pd.Timestamp("2026-06-01 14:00", tz="UTC")
     assert t["decision_ts"].iloc[0] == pd.Timestamp("2026-06-01 13:59", tz="UTC") and t["r"].iloc[0] == 0.0
+
+
+def test_family_wise_rate_is_controlled_across_rules():
+    """7 noise rules at once: a false admit anywhere stays near 5% (Bonferroni), not ~30% (1 - 0.95^7)."""
+    rules = "".join(f"""
+  - name: r{k}
+    feature: sig.x{k}
+    op: "<="
+    value: 0.5
+    hypothesis: noise {k}
+""" for k in range(7))
+    hits = promising = 0
+    runs = 120
+    for s in range(runs):
+        rng = np.random.default_rng(5000 + s)
+        df, _ = make_trades(n=300, seed=5000 + s)
+        feats = {(sym, pd.Timestamp(t)): {"sig": {f"x{k}": float(rng.normal()) for k in range(7)}}
+                 for sym, t in zip(df["symbol"], df["entry_ts"], strict=True)}
+        cfg = parse_config(f"seed: {s}\nn_random: 1000\nrules:{rules}")
+        res = run_ablation(df, lambda sym, ts, f=feats: f[(sym, pd.Timestamp(ts))], cfg)
+        hits += bool(res["admitted"])
+        promising += res["summary"]["promising"] > 0
+    assert hits / runs <= 0.10, hits
+    assert promising > hits  # the per-rule bar alone would have let more through
