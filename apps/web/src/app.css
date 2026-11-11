@@ -112,6 +112,9 @@ button.primary { background: var(--ink); border-color: var(--ink); color: #0A0B0
 button.danger { background: transparent; border-color: #5A2A2E; color: var(--loss); }
 button:disabled { opacity: 0.45; cursor: not-allowed; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }
+summary:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; border-radius: 6px; }
+/* Page headings take focus from script after a page switch (never from Tab), so they show no ring. */
+h1[tabindex="-1"]:focus { outline: none; }
 input[type=email], input[type=text], input:not([type]), select { font: inherit; min-height: 48px; padding: 0 16px; border: 1px solid var(--rule); border-radius: 14px;
   background: var(--surface); color: var(--ink); width: 100%; }
 select { width: auto; border-radius: 999px; }
@@ -331,6 +334,8 @@ input[type=range].kb:disabled { opacity: .45; cursor: not-allowed; }
 .kb-tog[aria-checked=true] { background: var(--sea); } .kb-tog[aria-checked=true] > span { transform: translateX(20px); }
 .kb-search { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--rule); border-radius: 999px; background: var(--paper); color: var(--stale); }
 .kb-search input { border: 0 !important; background: transparent !important; min-height: 42px !important; padding: 0 !important; outline: none; }
+/* The input's own outline is off (it would cut through the pill), so the pill shows the focus instead. */
+.kb-search:focus-within { outline: 2px solid var(--sea); outline-offset: 2px; }
 .kb-symlist { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .kb-symlist li { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 4px 0 6px; border-radius: 999px; background: var(--surface-2); font-size: 13px; }
 .kb-symlist.out li { padding-left: 12px; color: var(--slate); }

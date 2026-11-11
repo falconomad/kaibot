@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./tokens.css";
@@ -10,17 +10,23 @@ import { Shell } from "./components/Shell";
 import { SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
 import { Skeleton } from "./components/Skeleton";
-const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
-const Health = lazy(() => import("./pages/Health").then((m) => ({ default: m.Health })));
-const Tape = lazy(() => import("./pages/Tape").then((m) => ({ default: m.Tape })));
-const Report = lazy(() => import("./pages/Report").then((m) => ({ default: m.Report })));
-const Onboarding = lazy(() => import("./pages/Onboarding").then((m) => ({ default: m.Onboarding })));
-const TradeDetailPage = lazy(() => import("./pages/TradeDetail").then((m) => ({ default: m.TradeDetailPage })));
-const GoNoGo = lazy(() => import("./pages/Gate").then((m) => ({ default: m.Gate })));
-const Strategy = lazy(() => import("./pages/Strategy").then((m) => ({ default: m.Strategy })));
-const StrategyHome = lazy(() => import("./pages/Strategy").then((m) => ({ default: m.StrategyHome })));
-const FineTune = lazy(() => import("./pages/FineTune").then((m) => ({ default: m.FineTune })));
-const Trades = lazy(() => import("./pages/Trades").then((m) => ({ default: m.Trades })));
+import { ROUTE_LOADERS as load } from "./routes";
+
+// Lazy routes (see routes.ts). Sign-in, the shell and Home stay in the first load so the first screen is one round trip.
+const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
+const Health = lazy(() => load["/health"]().then((m) => ({ default: m.Health })));
+const Tape = lazy(() => load["/tape"]().then((m) => ({ default: m.Tape })));
+const Report = lazy(() => load["/report"]().then((m) => ({ default: m.Report })));
+const Onboarding = lazy(() => load["/start"]().then((m) => ({ default: m.Onboarding })));
+const TradeDetailPage = lazy(() => load["/trades/:id"]().then((m) => ({ default: m.TradeDetailPage })));
+const GoNoGo = lazy(() => load["/gate"]().then((m) => ({ default: m.Gate })));
+const Strategy = lazy(() => load["/strategy"]().then((m) => ({ default: m.Strategy })));
+const StrategyHome = lazy(() => load["/strategy"]().then((m) => ({ default: m.StrategyHome })));
+const FineTune = lazy(() => load["/strategy/fine-tune"]().then((m) => ({ default: m.FineTune })));
+const Trades = lazy(() => load["/trades"]().then((m) => ({ default: m.Trades })));
+
+/** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton. */
+const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense>;
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 15_000 } } });
 
@@ -45,21 +51,21 @@ function Gate() {
       </div></div>
     );
   return (
-    <Suspense fallback={<div className="shell"><main><Skeleton /></main></div>}>
+    <Suspense fallback={<Skeleton variant="center" />}>
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<Live />} />
-        <Route path="trades" element={<Trades />} />
-        <Route path="trades/:id" element={<TradeDetailPage />} />
-        <Route path="tape" element={<Tape />} />
-        <Route path="report" element={<Report />} />
-        <Route path="health" element={<Health />} />
-        <Route path="gate" element={<GoNoGo />} />
-        <Route path="strategy" element={<Strategy />}>
+        <Route path="trades" element={page(<Trades />)} />
+        <Route path="trades/:id" element={page(<TradeDetailPage />, "detail")} />
+        <Route path="tape" element={page(<Tape />)} />
+        <Route path="report" element={page(<Report />)} />
+        <Route path="health" element={page(<Health />)} />
+        <Route path="gate" element={page(<GoNoGo />)} />
+        <Route path="strategy" element={page(<Strategy />)}>
           <Route index element={<StrategyHome />} />
           <Route path="fine-tune" element={<FineTune />} />
         </Route>
-        <Route path="settings" element={<Settings />} />
+        <Route path="settings" element={page(<Settings />)} />
       </Route>
       <Route path="start" element={<Onboarding />} />
       <Route path="*" element={<Navigate to="/" replace />} />

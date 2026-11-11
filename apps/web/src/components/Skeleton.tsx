@@ -1,15 +1,16 @@
-/** Shimmer placeholders shaped like the screen that's loading, so nothing jumps when data arrives. */
+/** Shimmer placeholders shaped like the screen that's loading, so nothing jumps when data arrives.
+ *  role="status" gives the "Loading" label somewhere to live: aria-label on a plain div is ignored by screen readers. */
 const Bar = ({ w = "100%", h = 14, r = 10 }: { w?: number | string; h?: number; r?: number }) => (
   <span className="sk" style={{ width: w, height: h, borderRadius: r }} />
 );
 
 export function Skeleton({ variant = "list" }: { variant?: "dashboard" | "list" | "detail" | "center" }) {
   if (variant === "center")
-    return <div className="center" aria-busy="true" aria-label="Loading"><div className="sk-stack" style={{ width: "min(420px, 100%)" }}>
+    return <div className="center" role="status" aria-busy="true" aria-label="Loading"><div className="sk-stack" style={{ width: "min(420px, 100%)" }}>
       <Bar w={140} h={20} /><Bar h={52} r={14} /><Bar h={52} r={999} /></div></div>;
   if (variant === "dashboard")
     return (
-      <div className="sk-stack" aria-busy="true" aria-label="Loading">
+      <div className="sk-stack" role="status" aria-busy="true" aria-label="Loading">
         <div className="sk-row">
           <div className="sk-stack" style={{ flex: "999 1 560px" }}>
             <Bar w={150} /><Bar w={320} h={56} r={14} /><Bar w={260} h={16} />
@@ -22,7 +23,7 @@ export function Skeleton({ variant = "list" }: { variant?: "dashboard" | "list" 
       </div>
     );
   return (
-    <div className="sk-stack" aria-busy="true" aria-label="Loading">
+    <div className="sk-stack" role="status" aria-busy="true" aria-label="Loading">
       <Bar w={220} h={32} r={12} />
       {variant === "detail" ? <div className="sk-row"><Bar h={300} r={24} /><Bar h={300} r={24} /></div>
         : <div className="sk-row">{[0, 1, 2].map((i) => <Bar key={i} h={92} r={20} />)}</div>}
