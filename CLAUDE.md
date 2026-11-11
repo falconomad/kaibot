@@ -10,3 +10,8 @@
   env-only settings, outgoing connections only, same Docker image anywhere (decision 11). Never run two engines at once.
 - Run `ruff check .` and `pytest -q` before committing. Deploy only outside 09:30-16:00 ET.
 - Decisions live in `docs/decisions/`; the backlog in GitHub issues (milestones M0-M5, labels team:* and epic:*).
+- Architecture board (Whiteboard, slug `b099f04b-1c74-46fe-b635-7b9b30348e4f`, https://claude.ai/artifact/NoqNs89Sbz3h5UPRQUZNFY):
+  when a change adds, removes or renames an engine step in `src/kaibot/engine/` or `risk/gate.py`, or a milestone's status changes,
+  update the matching blocks and the "Synced with main @ <sha>" line. Read the board first and edit only what changed.
+- Teams and delegation: `docs/teams.md`. The stakeholder talks to Product only; Product delegates with `/delegate <issue>`
+  to the team agents in `.claude/agents/`. Stay inside your team's folders.

@@ -1,6 +1,6 @@
 # M5 debate: the configuration panel
 
-Status: **proposal**. A stakeholder brought it to the product owners on 2026-11-11, and it is not yet approved. It is scheduled after M0–M4.
+Status: **approved by product on 2026-11-11**; M5, after M4.
 
 Stakeholder ask: the engine keeps trading on its own, but the signed-in user can tune it with toggles and sliders. That includes which kinds of stock it targets (for example hyperscalers, tech, or a sub-sector of tech), and "each and everything should be configurable". Phase one covers only what the engine can already do.
 

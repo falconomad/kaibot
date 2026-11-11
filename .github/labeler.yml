@@ -1,0 +1,12 @@
+team:frontend:
+  - changed-files: [{any-glob-to-any-file: 'apps/web/**'}]
+team:design:
+  - changed-files: [{any-glob-to-any-file: 'docs/design/**'}]
+team:backend-quant:
+  - changed-files: [{any-glob-to-any-file: ['src/kaibot/engine/**', 'src/kaibot/risk/**', 'src/kaibot/strategies/**', 'src/kaibot/replay/**', 'src/kaibot/evaluation/**', 'src/kaibot/features/**', 'src/kaibot/broker/**', 'migrations/**', 'config/profiles.yaml', 'config/gate.yaml']}]
+team:data:
+  - changed-files: [{any-glob-to-any-file: ['src/kaibot/ingest/**', 'config/sources.yaml', 'config/universe_seed.yaml', 'config/macro_calendar.yaml', 'scripts/fetch_*', 'scripts/collect_alt.py']}]
+team:agents-ai:
+  - changed-files: [{any-glob-to-any-file: ['src/kaibot/agents/**', 'src/kaibot/news/**', 'src/kaibot/engine/roomflow.py', 'src/kaibot/engine/m3glue.py']}]
+team:qa-ops:
+  - changed-files: [{any-glob-to-any-file: ['tests/**', '.github/**', 'docs/ops/**', 'Dockerfile', 'compose.yaml', 'scripts/run_engine.sh', 'scripts/outage_drill.sh', 'scripts/engine_guard.sh']}]
