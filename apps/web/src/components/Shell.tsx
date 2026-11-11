@@ -6,6 +6,10 @@ import { LEVELS, curve } from "../lib/model";
 import { pct } from "../lib/fmt";
 import { riskStatus } from "../lib/derive";
 import { Skeleton } from "./Skeleton";
+import { preloadRoute } from "../routes";
+
+/** Warm a lazy route's chunk when the pointer or keyboard focus reaches its nav link. */
+const warm = (to: string) => ({ onPointerEnter: () => { preloadRoute(to); }, onFocus: () => { preloadRoute(to); } });
 
 export interface RunCtx { run: Run; runs: Run[]; overview: Overview | undefined }
 export const useRunCtx = () => useOutletContext<RunCtx>();
@@ -34,7 +38,7 @@ function TabBar() {
   return (
     <nav className="tabbar" aria-label="Main">
       {NAV.filter((n) => n.tab).map((n) => (
-        <NavLink key={n.to} to={n.to} end={n.to === "/"}>
+        <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={n.icon} /></svg>
           {n.short}
         </NavLink>
@@ -125,7 +129,7 @@ export function Shell() {
       <header className="top">
         <Link to="/" className="brand" aria-label="kaibot home"><Logo /><span>kaibot</span></Link>
         <nav className="topnav" aria-label="Main">
-          {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"}>{n.label}</NavLink>)}
+          {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>{n.label}</NavLink>)}
         </nav>
         <div className="spacer" />
         {list.length > 1 && (

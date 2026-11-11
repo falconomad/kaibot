@@ -68,7 +68,7 @@ export function FineTune() {
   return (<>
     <div className="kb-fine-head">
       <Link to="/strategy" className="kb-back">← Strategy</Link>
-      <h1 className="kb-h1">Fine-tune</h1>
+      <h1 className="kb-h1" tabIndex={-1}>Fine-tune</h1>
       <span className="muted">Every setting, one row each. Pickier or smaller, never riskier than {levelName}.</span>
       <div className="num muted" style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", fontSize: 14 }}>
         <span><b style={{ color: "var(--ink)" }}>≈ {Math.round(est.perMonth)}</b> trades a month</span>

@@ -1,7 +1,25 @@
 // M5 config controls: native inputs where possible, proper ARIA where not. All keyboard operable.
-import { useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
-export interface RadioOpt<T extends string | number> { value: T; label: string; content?: ReactNode; disabled?: boolean; className?: string; style?: CSSProperties }
+/** `label` is the accessible name. With `content` the name replaces the visible text for screen readers, so anything else
+ *  the option shows (a blurb, numbers) goes in `description`, which is read after the name. */
+export interface RadioOpt<T extends string | number> {
+  value: T; label: string; content?: ReactNode; description?: string; disabled?: boolean; className?: string; style?: CSSProperties;
+}
+
+/** Which option a key press moves to in a radio group, or null when the key is not a radio key.
+ *  `enabled` holds the indexes of the options that can be chosen, in order; arrows wrap around and skip disabled ones. */
+export function radioKeyTarget(key: string, i: number, enabled: number[]): number | null {
+  if (!enabled.length) return null;
+  if (key === "Home") return enabled[0];
+  if (key === "End") return enabled[enabled.length - 1];
+  const dir = key === "ArrowRight" || key === "ArrowDown" ? 1 : key === "ArrowLeft" || key === "ArrowUp" ? -1 : 0;
+  if (!dir) return null;
+  const pos = enabled.indexOf(i);
+  // Focus on a disabled option (reached with a pointer): step to the nearest enabled one in that direction.
+  if (pos < 0) return dir > 0 ? enabled.find((x) => x > i) ?? enabled[0] : [...enabled].reverse().find((x) => x < i) ?? enabled[enabled.length - 1];
+  return enabled[(pos + dir + enabled.length) % enabled.length];
+}
 
 /** WAI-ARIA radio group with a roving tabindex: Tab enters at the checked option, arrows move and select. */
 export function RadioGroup<T extends string | number>({ options, value, onChange, label, labelledBy, className, optClass, style }: {
@@ -12,13 +30,11 @@ export function RadioGroup<T extends string | number>({ options, value, onChange
   const enabled = options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0);
   const cur = options.findIndex((o) => o.value === value);
   const focusIdx = cur >= 0 && !options[cur].disabled ? cur : enabled[0];
+  const uid = useId();
   function key(e: KeyboardEvent, i: number) {
-    const dir = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-    const jump = e.key === "Home" ? enabled[0] : e.key === "End" ? enabled[enabled.length - 1] : null;
-    if (!dir && jump === null) return;
+    const next = radioKeyTarget(e.key, i, enabled);
+    if (next === null) return;
     e.preventDefault();
-    const pos = enabled.indexOf(i);
-    const next = jump ?? enabled[(pos + dir + enabled.length) % enabled.length];
     refs.current[next]?.focus();
     onChange(options[next].value);
   }
@@ -26,10 +42,12 @@ export function RadioGroup<T extends string | number>({ options, value, onChange
     <div role="radiogroup" aria-label={label} aria-labelledby={labelledBy} className={className} style={style}>
       {options.map((o, i) => (
         <button key={String(o.value)} ref={(el) => { refs.current[i] = el; }} type="button" role="radio" aria-checked={o.value === value}
-          aria-disabled={o.disabled || undefined} aria-label={o.content ? o.label : undefined} tabIndex={i === focusIdx ? 0 : -1}
+          aria-disabled={o.disabled || undefined} aria-label={o.content ? o.label : undefined} aria-describedby={o.description ? `${uid}-d${i}` : undefined}
+          tabIndex={i === focusIdx ? 0 : -1}
           className={[optClass, o.className].filter(Boolean).join(" ")} style={o.style}
           onClick={() => !o.disabled && onChange(o.value)} onKeyDown={(e) => key(e, i)}>
           {o.content ?? o.label}
+          {o.description && <span id={`${uid}-d${i}`} className="sr-only">{o.description}</span>}
         </button>
       ))}
     </div>

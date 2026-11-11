@@ -6,7 +6,7 @@
 // Paper trading only: there is no live-trading control here, and server text is always rendered as plain text.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Outlet, useNavigate, useSearchParams } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { livePot, useRunCtx } from "../components/Shell";
 import { PillSwitch, RadioGroup } from "../components/ConfigControls";
 import { StockBadge } from "../components/StockBadge";
@@ -49,7 +49,7 @@ export function Strategy() {
 
 function StrategySkeleton() {
   return (
-    <div className="kb-strategy" aria-busy="true" aria-label="Loading your setup">
+    <div className="kb-strategy" role="status" aria-busy="true" aria-label="Loading your setup">
       <span className="sk" style={{ width: 220, height: 40, borderRadius: 12, flex: "none" }} />
       <div className="kb-presets">{[0, 1, 2, 3].map((i) => <span key={i} className="sk" style={{ height: 110, borderRadius: 20 }} />)}</div>
       <div className="kb-twocol">
@@ -58,6 +58,11 @@ function StrategySkeleton() {
       </div>
     </div>
   );
+}
+
+/** Move focus to the page heading (h1 with tabIndex -1) without scrolling: deep links scroll on their own. */
+function focusHeading(root: HTMLElement | null) {
+  root?.querySelector<HTMLElement>("h1[tabindex]")?.focus({ preventScroll: true });
 }
 
 type SaveState = { kind: "idle" | "saving" | "saved" } | { kind: "error"; text: string };
@@ -84,6 +89,17 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
   const [sheet, setSheet] = useState(false);
   const dirty = useRef(false);
   const timer = useRef<number | undefined>(undefined);
+  const root = useRef<HTMLDivElement>(null);
+
+  // Strategy <-> Fine-tune swaps the whole page under the same layout, and the button that was pressed is gone.
+  // Put focus on the new page's heading so keyboard and screen-reader users start at its top, not at <body>.
+  const { pathname } = useLocation();
+  const shownPath = useRef(pathname);
+  useEffect(() => {
+    if (shownPath.current === pathname) return;
+    shownPath.current = pathname;
+    focusHeading(root.current);
+  }, [pathname]);
 
   // Drafts survive a reload: save ~800 ms after the last edit. The body is always clamped first.
   useEffect(() => {
@@ -144,7 +160,7 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
   const shared: StrategyState = { body, edit, ctx, baseline, est, usd, pot, reset, busy };
   return (
     <StrategyProvider value={shared}>
-    <div className="kb-strategy">
+    <div className="kb-strategy" ref={root}>
       <Suspense fallback={<Skeleton />}><Outlet /></Suspense>
       {pending && (
         <p className="banner warn" role="status" style={{ margin: 0 }}>
@@ -153,7 +169,7 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
       )}
       <OutcomeBar est={est.perMonth} maxLoss={usd.maxLoss} changes={diff.length} save={save} pendingDate={pending?.applies_from ?? null}
         canApply={canApply} invalid={errors[0] ?? null} onReview={() => { setActionErr(null); setSheet(true); }} onUndo={diff.length ? undo : null} />
-      <ReviewSheet open={sheet} onClose={() => setSheet(false)} diff={diff} est={est} estBase={estBase.perMonth} maxLoss={usd.maxLoss}
+      <ReviewSheet open={sheet} onClose={() => setSheet(false)} fallbackFocus={() => focusHeading(root.current)} diff={diff} est={est} estBase={estBase.perMonth} maxLoss={usd.maxLoss}
         maxLossBase={dollars(baseline, pot).maxLoss} nextOpen={nextOpenEt()} nextVersion={nextVersion} canApply={canApply} busy={busy}
         error={actionErr ?? (save.kind === "error" ? save.text : null)} errors={errors} onApply={apply} onReset={reset} levelName={ctx.levelName} />
     </div>
@@ -172,7 +188,7 @@ export function StrategyHome() {
   return (<>
     <div className="kb-head">
       <div style={{ flex: "1 1 360px", display: "flex", flexDirection: "column", gap: 6 }}>
-        <h1 className="kb-h1">Strategy</h1>
+        <h1 className="kb-h1" tabIndex={-1}>Strategy</h1>
         <span className="muted">Kaibot trades on its own. Pick a starting point, nudge it, done. Settings can only make it pickier or smaller than {levelName}.</span>
       </div>
       <button type="button" className="kb-ghost" onClick={() => toFine()}>
@@ -188,11 +204,17 @@ export function StrategyHome() {
         options={[...PRESETS.map((p) => {
           const x = presetBody(p.key, b, themes, universe);
           const e = estimateTrades(x, EST, themes, b.entry);
-          return { value: p.key, label: p.name, content: <PresetCard icon={p.icon} name={p.name} blurb={p.blurb.replace("your level", levelName)}
-            stats={`≈ ${Math.round(e.perMonth)} trades/mo · ${usd0(dollars(x, pot).maxLoss)} max a trade`} /> };
-        }), { value: "custom" as const, label: "Custom", disabled: preset !== "custom",
-          content: <PresetCard icon="✎" name="Custom" blurb={preset === "custom" ? "Your own mix. Keep shaping it below." : "Change anything below and it lands here."}
-            stats={preset === "custom" ? `≈ ${Math.round(est.perMonth)} trades/mo · ${usd0(usd.maxLoss)} max a trade` : "—"} /> }]} />
+          const blurb = p.blurb.replace("your level", levelName);
+          const stats = `≈ ${Math.round(e.perMonth)} trades/mo · ${usd0(dollars(x, pot).maxLoss)} max a trade`;
+          return { value: p.key, label: p.name, description: `${blurb} ${presetStatsSpoken(e.perMonth, usd0(dollars(x, pot).maxLoss))}`,
+            content: <PresetCard icon={p.icon} name={p.name} blurb={blurb} stats={stats} /> };
+        }), (() => {
+          const blurb = preset === "custom" ? "Your own mix. Keep shaping it below." : "Change anything below and it lands here.";
+          return { value: "custom" as const, label: "Custom", disabled: preset !== "custom",
+            description: preset === "custom" ? `${blurb} ${presetStatsSpoken(est.perMonth, usd0(usd.maxLoss))}` : blurb,
+            content: <PresetCard icon="✎" name="Custom" blurb={blurb}
+              stats={preset === "custom" ? `≈ ${Math.round(est.perMonth)} trades/mo · ${usd0(usd.maxLoss)} max a trade` : "—"} /> };
+        })()]} />
     </section>
 
     <div className="kb-twocol">
@@ -205,6 +227,9 @@ export function StrategyHome() {
     </div>
   </>);
 }
+
+/** The card's numbers in words: the radio's accessible name is only the preset name, so this is its description. */
+export const presetStatsSpoken = (perMonth: number, maxLoss: string) => `About ${Math.round(perMonth)} trades a month, ${maxLoss} max loss a trade.`;
 
 function PresetCard({ icon, name, blurb, stats }: { icon: string; name: string; blurb: string; stats: string }) {
   return (<>
@@ -351,25 +376,33 @@ function OutcomeBar({ est, maxLoss, changes, save, pendingDate, canApply, invali
         </span>
         <span className={`hide-sm ${save.kind === "error" ? "loss" : "muted"}`} aria-live="polite" style={{ fontSize: 12 }}>{saveText}</span>
       </div>
-      {invalid && changes > 0 && <span className="kb-warn hide-sm" style={{ fontSize: 12, maxWidth: 200 }}>{invalid}</span>}
+      {invalid && changes > 0 && <span id="kb-dock-why" className="kb-warn hide-sm" style={{ fontSize: 12, maxWidth: 200 }}>{invalid}</span>}
       {onUndo && <button type="button" className="kb-dock-undo" onClick={onUndo}>Undo</button>}
-      <button type="button" className="primary kb-dock-go" disabled={!canApply} onClick={onReview}>Review &amp; apply</button>
+      <button type="button" className="primary kb-dock-go" disabled={!canApply} aria-describedby={invalid && changes > 0 ? "kb-dock-why" : undefined} onClick={onReview}>Review &amp; apply</button>
     </div>
   );
 }
 
-function ReviewSheet({ open, onClose, diff, est, estBase, maxLoss, maxLossBase, nextOpen, nextVersion, canApply, busy, error, errors, onApply, onReset, levelName }: {
-  open: boolean; onClose: () => void; diff: ReturnType<typeof diffConfig>; est: ReturnType<typeof estimateTrades>; estBase: number; maxLoss: number;
+function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss, maxLossBase, nextOpen, nextVersion, canApply, busy, error, errors, onApply, onReset, levelName }: {
+  open: boolean; onClose: () => void; fallbackFocus: () => void; diff: ReturnType<typeof diffConfig>; est: ReturnType<typeof estimateTrades>; estBase: number; maxLoss: number;
   maxLossBase: number; nextOpen: string; nextVersion: number; canApply: boolean; busy: boolean; error: string | null; errors: string[];
   onApply: () => void; onReset: () => void; levelName: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const wasOpen = useRef(false);
+  // A modal <dialog> (showModal) gives the focus trap, Escape and the inert page behind it natively, and hands focus
+  // back to the button that opened it. After "Apply" that button is disabled, so focus would fall to <body>: catch that.
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) d.showModal?.();
     if (!open && d.open) d.close();
-  }, [open]);
+    if (!open && wasOpen.current) {
+      const a = document.activeElement as HTMLElement | null;
+      if (!a || a === document.body || (a as HTMLButtonElement).disabled) fallbackFocus();
+    }
+    wasOpen.current = open;
+  }, [open, fallbackFocus]);
   return (
     <dialog ref={ref} className="kb-sheet" aria-labelledby="rv-h" onClose={onClose} onClick={(e) => { if (e.target === ref.current) onClose(); }}>
       {open && (

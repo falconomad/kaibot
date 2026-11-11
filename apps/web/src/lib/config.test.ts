@@ -392,7 +392,7 @@ describe("S53: exclusions, in every mode", () => {
 
 describe("S52: Fine-tune is a real route that shares the Strategy draft", () => {
   it("/strategy/fine-tune is a lazy child route of /strategy", () => {
-    expect(mainSrc).toMatch(/<Route path="strategy" element={<Strategy \/>}>[\s\S]*<Route path="fine-tune" element={<FineTune \/>} \/>/);
+    expect(mainSrc).toMatch(/<Route path="strategy" element={page\(<Strategy \/>\)}>[\s\S]*<Route path="fine-tune" element={<FineTune \/>} \/>/);
     expect(mainSrc).toMatch(/const FineTune = lazy\(/);
   });
   it("Fine-tune reads the shared draft and calls no RPC itself", () => {

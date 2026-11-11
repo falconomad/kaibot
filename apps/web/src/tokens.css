@@ -1,5 +1,8 @@
 /* v3 "night" tokens (design canvas v3). One dark theme; names kept so every page picks them up. */
 @import "tailwindcss";
+/* Tests are not shipped: keep their words from being picked up as utility classes. */
+@source not "./**/*.test.ts";
+@source not "./**/*.test.tsx";
 :root {
   color-scheme: dark;
   --paper: #0A0B0D; --surface: #131519; --surface-2: #1B1E24; --rule: #262A31; --rule-strong: #3A404A;
