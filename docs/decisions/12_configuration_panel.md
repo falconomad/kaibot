@@ -1,6 +1,6 @@
-# Decision 12: Configuration panel (M5) — PROPOSAL
+# Decision 12: Configuration panel (M5)
 
-- **Status:** proposed by a stakeholder on 2026-11-11. **Designs approved by the stakeholder on 2026-11-11** (canvas boards 09, 09m, 09b). Milestone still awaits product-owner sign-off.
+- **Status:** proposed by a stakeholder on 2026-11-11. **Designs approved by the stakeholder on 2026-11-11** (canvas boards 09, 09m, 09b). **Product owner asked for it to be implemented on 2026-11-11** (after M4 shipped), which counts as sign-off.
 - **Scheduled:** after M4 (the evaluation gate). Nothing in M0–M4 changes.
 - **Debate:** [`docs/debate/m5_config_panel.md`](../debate/m5_config_panel.md)
 

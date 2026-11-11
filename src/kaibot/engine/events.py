@@ -34,10 +34,11 @@ def load_calendar(path: Path) -> tuple[dict[date, list[tuple[str, int]]], date |
     return out, covers
 
 
-def in_blackout(events: dict[date, list[tuple[str, int]]], day: date, m: int) -> str | None:
-    """The event blacking out decision minute m on `day`, or None."""
+def in_blackout(events: dict[date, list[tuple[str, int]]], day: date, m: int, window: int | None = None) -> str | None:
+    """The event blacking out decision minute m on `day`, or None. `window` (M5) can only widen the +-30 min."""
+    w = max(WINDOW_MIN, int(window)) if window is not None else WINDOW_MIN
     for name, em in events.get(day, ()):
-        if em - WINDOW_MIN <= m <= em + WINDOW_MIN:
+        if em - w <= m <= em + w:
             return name
     return None
 

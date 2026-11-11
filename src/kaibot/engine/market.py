@@ -43,6 +43,7 @@ class LiveMarket:
         self.vix_loader = vix_loader
         self.history: dict[str, pd.DataFrame] = {}
         self.last_checked, self.last_near = 0, []
+        self.min_adv = 50e6  # M5: the owner may only raise the $-volume floor
         self.today_bars: dict[str, pd.DataFrame] = {}
         self.vol_ratio: dict[str, float] = {}
         self.vix: pd.Series = pd.Series(dtype=float)
@@ -139,7 +140,7 @@ class LiveMarket:
             if self.has_today(sd) is None or self.has_today(ed) is None:
                 continue
             checked += 1
-            c = candidates(sd, ed, EMPTY_NEWS, **NEAR)
+            c = candidates(sd, ed, EMPTY_NEWS, min_adv=max(self.min_adv, 50e6), **NEAR)
             if len(c):
                 c = c[(c["date"] == np.datetime64(self.day, "D")) & (c["m"] == m)]
             if not len(c):
