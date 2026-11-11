@@ -6,6 +6,7 @@ What stops Kaibot from adding risk when something breaks, from the inside out.
 |---|---|---|---|
 | Broker-held brackets, **GTC** legs | Alpaca | engine or laptop dead at any time | stop (and 2R target) stay at the broker until filled or the engine closes the position; nothing sits overnight unprotected |
 | Engine halts | engine | bad state | no new entries for the session (exits keep being managed) |
+| Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)) |
 | Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel unfilled `kb-` entry orders; still stale at 15:55 ET: close every position |
 | Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | 15:56 ET, heartbeat > 3 min old: `DELETE /v2/positions?cancel_orders=true` on the **paper** account |
 
@@ -23,6 +24,7 @@ Each writes a `halt` row and an event; all clear at the next session start, exce
 | `engine_errors` | 3 loop iterations in a row raised |
 | `calendar_stale` | today is after `covers_until` in `config/macro_calendar.yaml` |
 | `three_stops` | 3 daily stops within 14 calendar days (~10 sessions): run paused |
+| lease unverified (no halt row) | the engine lease could not be renewed: entries blocked until a renewal succeeds; shown as `lease: unverified` in the heartbeat |
 | account not clean | positions or open orders on symbols the engine doesn't hold (entries blocked until clean) |
 
 Also enforced per entry by `risk/gate.py`: quote older than 5 s, missing bars, buying power (the smaller of the pot
