@@ -7,6 +7,8 @@ Layout: data/bars_1m/symbol=XYZ/YYYY-MM.parquet (.empty = no bars that month) ; 
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -19,6 +21,23 @@ from kaibot.common.ratelimit import REGISTRY, Budget, BudgetSpec, get_budget
 
 DATA = "https://data.alpaca.markets"
 ET = ZoneInfo("America/New_York")
+SIP_DELAY = timedelta(minutes=20)  # free plan: SIP only when >= 15 min old; 20 leaves a margin
+SYMBOL_RE = re.compile(r"[A-Z]{1,5}(?:\.[A-Z]{1,2})?")  # US tickers as Alpaca writes them: NBIS, BRK.B
+
+
+def parse_symbols(symbols: str | Iterable[str]) -> list[str]:
+    """Explicit download list ("NBIS,CRWV" or a list) -> upper-case tickers, order kept, duplicates dropped.
+
+    A symbol becomes a URL path segment and a folder name (data/bars_1m/symbol=XYZ), so anything that is not a
+    plain ticker is refused here, before any request or file. Raises ValueError naming every bad entry."""
+    raw = symbols.split(",") if isinstance(symbols, str) else list(symbols)
+    out = list(dict.fromkeys(str(s).strip().upper() for s in raw if str(s).strip()))
+    bad = [s for s in out if not SYMBOL_RE.fullmatch(s)]
+    if bad:
+        raise ValueError(f"not a ticker symbol: {', '.join(repr(s) for s in bad)} (expected e.g. NBIS or BRK.B)")
+    if not out:
+        raise ValueError("empty symbol list")
+    return out
 
 
 class Alpaca:
