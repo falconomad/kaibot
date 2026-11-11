@@ -55,3 +55,4 @@ Each team's brief is in `.claude/agents/<team>.md`.
 - **Yes, when checks are green and it is outside 09:30-16:00 ET:** docs, designs, tests, CI, frontend, scripts, shadow-only collectors, and engine changes that are behaviour-neutral (speed, logging) with a replay diff of zero.
 - **Never without the stakeholder:** anything that changes live trading behaviour (strategy rules or parameters, `risk/gate.py`, sizing, broker code, `config/profiles.yaml`), production database migrations, new paid services, switching the agent room on, the cloud move, real money. These wait as open PRs and are listed under "Waiting on you".
 - Before starting a story, check for an open PR or branch on it, so no story is built twice.
+- **Draft milestones are not built.** Stories in a milestone whose title ends with "(draft)" (for example M6) are never picked up by a team, the night shift or `/delegate` until the stakeholder approves the milestone.
