@@ -1,6 +1,10 @@
 """Shared shell for v3 artboards: helmet (fonts, motion, responsive rules), top bar, phone tab bar."""
-CSS = open('/tmp/kb_motion.css').read()
-TAB = open('/tmp/kb_tabbar.html').read()
+from pathlib import Path
+
+_HERE = Path(__file__).resolve().parent
+CSS = (_HERE / 'kb_motion.css').read_text()       # motion, responsive and reduced-motion rules
+TAB = (_HERE / 'kb_tabbar.html').read_text()      # phone tab bar
+MORE = (_HERE / 'kb_more.css').read_text()        # baseline-rise charts, ring, skeleton shimmer (opt-in: shell.CSS += shell.MORE)
 NAV = [("Home", "Home.dc.html"), ("Trades", "Trades.dc.html"), ("Report", "Report.dc.html"),
        ("Engine", "Engine.dc.html"), ("Run &amp; settings", "Settings.dc.html")]
 

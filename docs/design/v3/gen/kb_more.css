@@ -1,0 +1,8 @@
+@keyframes kb-riseY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes kb-ring{from{stroke-dasharray:0 239}}
+@keyframes kb-shimmer{from{background-position:-600px 0}to{background-position:600px 0}}
+.rise{transform-box:view-box;animation:kb-riseY 1.1s var(--ease) .15s both}
+.rise-bar{transform-box:view-box;animation:kb-riseY .8s var(--ease) both}
+.rise-up{transform-origin:bottom;animation:kb-riseY .6s var(--ease) both}
+.ring{animation:kb-ring 1.1s var(--ease) .3s both}
+.sk{display:block;background:linear-gradient(90deg,#16181C 0%,#23272E 50%,#16181C 100%);background-size:1200px 100%;animation:kb-shimmer 1.5s linear infinite;border-radius:10px}
