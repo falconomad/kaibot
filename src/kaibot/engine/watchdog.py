@@ -61,6 +61,7 @@ class Watchdog:
         clk = self.broker.clock()
         if not clk.get("is_open"):
             self.tripped = False
+            self._beat({"state": "waiting", "next_open": clk.get("next_open")})  # visibly alive before the open
             return {"state": "market_closed"}
         age = self.heartbeat_age()
         self._beat({"engine_heartbeat_age_s": None if age == float("inf") else round(age, 1)})
@@ -96,7 +97,7 @@ class Watchdog:
 
     def _beat(self, detail: dict) -> None:
         try:
-            self.store.heartbeat("watchdog", {"state": "watching", **detail})
+            self.store.heartbeat("watchdog", {"state": "watching", **detail})  # detail may override the state
         except Exception:
             log.exception("watchdog heartbeat failed")
 

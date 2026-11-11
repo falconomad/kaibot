@@ -91,3 +91,12 @@ def test_closed_market_is_ignored(tmp_path):
     eng, broker, clock, store, open_utc = setup(tmp_path)
     clock.t = open_utc + timedelta(hours=8)
     assert Watchdog(broker, store, now=clock).step()["state"] == "market_closed"
+
+
+def test_beats_while_the_market_is_closed(tmp_path):
+    eng, broker, clock, store, open_utc = setup(tmp_path)
+    clock.t = open_utc + timedelta(hours=8)
+    beats = []
+    store.heartbeat = lambda proc, d: beats.append((proc, d))
+    Watchdog(broker, store, now=clock).step()
+    assert beats and beats[0][0] == "watchdog" and beats[0][1]["state"] == "waiting"
