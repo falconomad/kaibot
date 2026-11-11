@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import numpy as np
+import pandas as pd
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -39,8 +40,29 @@ def slide(c):
     return c
 
 
+def no_scan(eng):
+    """Switch off the real dip-reversal scan before `fake_candidate` wraps it.
+
+    `fake_candidate` still runs the real scan on every decision minute it does not fake, rebuilding 75 days of
+    minute bars each time, and then throws the result away (it always hands the engine an empty frame there).
+    That scan was ~70% of this file's run time and none of it reaches a signal, gate run, order or trade, so the
+    sessions here hand the engine the same empty frame directly (as test_shadow and test_spy_momentum_engine do).
+    """
+    eng.market.candidates_at = lambda m: pd.DataFrame()
+
+
+_FRAMES: dict = {}
+
+
+def frames(shock=None):
+    """The same 75 days of fake bars for every session (built once per shape; nothing writes to them)."""
+    if shock not in _FRAMES:
+        _FRAMES[shock] = synth_frames(shock=shock)
+    return _FRAMES[shock]
+
+
 def session(tmp_path, timing=None, *, shock=None, at=(54,), vix=18.0, event_at=None, until=390):
-    eng, broker, clock, store, open_utc = make(tmp_path, synth_frames(shock=shock))
+    eng, broker, clock, store, open_utc = make(tmp_path, frames(shock))
     eng._uni_cache = (UNI, {})
     if timing is not None:
         store.insert("config", {"run_id": store.tables["run"][0]["id"], "version": 1, "body": {"timing": timing},
@@ -48,6 +70,7 @@ def session(tmp_path, timing=None, *, shock=None, at=(54,), vix=18.0, event_at=N
                                 "applies_from": open_utc.isoformat()})
     if event_at is not None:
         eng.events = {date.fromisoformat(DAY): [("test_event", event_at)]}
+    no_scan(eng)
     fake_candidate(eng, at=at)
     eng.market.regime_at = lambda m: (False, vix)
     run_day(eng, broker, clock, open_utc, until=until)
@@ -62,11 +85,28 @@ def entry_minutes(store, open_utc):
             if s.get("strategy") == "dip_reversal" and s["id"] in traded]
 
 
+@pytest.fixture(scope="module")
+def shared(tmp_path_factory):
+    """`session(...)` run once per distinct (config, day): tests that only read the result share the run.
+
+    The sessions are deterministic, so a second run of the same config on the same day would only repeat the first.
+    """
+    done: dict = {}
+
+    def run(timing=None, **kw):
+        key = repr((timing, sorted(kw.items(), key=lambda x: x[0])))
+        if key not in done:
+            done[key] = session(tmp_path_factory.mktemp("s"), timing, **kw)
+        return done[key]
+
+    yield run
+    done.clear()
+
+
 # ---------------- 1. each setting is read from the config ----------------
 @pytest.fixture(scope="module")
-def streak_default(tmp_path_factory):
-    eng, store, open_utc = session(tmp_path_factory.mktemp("d"), shock=slide, at=EVERY_20, until=200)
-    return eng, store, open_utc
+def streak_default(shared):
+    return shared(shock=slide, at=EVERY_20, until=200)
 
 
 def test_default_loss_pause_is_three_losses_then_sixty_minutes(streak_default):
@@ -90,12 +130,13 @@ def test_loss_pause_length_from_config(tmp_path):
 
 
 @pytest.mark.parametrize("timing,minute,traded", [
-    (None, 164, True), (None, 174, False),  # today: +-30 around minute 200 blocks 170..230
-    ({"event_window_min": 90}, 104, True), ({"event_window_min": 90}, 114, False),  # +-90 blocks 110..290
-    ({"event_window_min": 90}, 164, False),
+    (None, 84, True), (None, 94, False),  # today: +-30 around minute 120 blocks 90..150
+    ({"event_window_min": 90}, 24, True), ({"event_window_min": 90}, 34, False),  # +-90 blocks 30..210
+    ({"event_window_min": 90}, 84, False),
 ])
 def test_quiet_window_from_config(tmp_path, timing, minute, traded):
-    eng, store, _ = session(tmp_path, timing, at=(minute,), event_at=200, until=minute + 6)
+    # the event sits at minute 120 so each case ends by minute 100 (the same grid steps either side of each edge)
+    eng, store, _ = session(tmp_path, timing, at=(minute,), event_at=120, until=minute + 6)
     assert bool(store.tables.get("trade")) is traded
 
 
@@ -105,8 +146,8 @@ def test_quiet_window_from_config(tmp_path, timing, minute, traded):
     ({"vix_max": 20}, 20.0, True), ({"vix_max": 20}, 20.1, False),
     ({"vix_max": 27.5}, 27.4, True), ({"vix_max": 27.5}, 27.6, False),
 ])
-def test_vix_cutoff_from_config(tmp_path, timing, vix, traded):
-    eng, store, _ = session(tmp_path, timing, vix=vix, until=60)
+def test_vix_cutoff_from_config(shared, timing, vix, traded):
+    eng, store, _ = shared(timing, vix=vix, until=60)
     assert bool(store.tables.get("trade")) is traded
     if not traded:
         assert any("VIX above your limit" in (s.get("rules_veto") or "") for s in store.tables["signal"])
@@ -114,8 +155,9 @@ def test_vix_cutoff_from_config(tmp_path, timing, vix, traded):
 
 def test_the_settings_are_fixed_at_the_open(tmp_path):
     """A config applied during the session does not change the day's safety values."""
-    eng, broker, clock, store, open_utc = make(tmp_path, synth_frames())
+    eng, broker, clock, store, open_utc = make(tmp_path, frames())
     eng._uni_cache = (UNI, {})
+    no_scan(eng)
     fake_candidate(eng)
     run_day(eng, broker, clock, open_utc, until=30)
     store.insert("config", {"run_id": store.tables["run"][0]["id"], "version": 1,
@@ -161,13 +203,11 @@ def _record(store, open_utc):
     {"vix": 34.9, "until": 60},  # just under the crisis gate
     {"vix": 35.1, "until": 60},  # just over the 35 the owner may not raise
 ], ids=["loss_streak", "event_day", "vix_34_9", "vix_35_1"])
-def test_spelled_out_defaults_trade_exactly_like_no_config(tmp_path, kw, streak_default):
-    if kw.get("shock") is slide:
-        _, base_store, base_open = streak_default
-    else:
-        _, base_store, base_open = session(tmp_path / "a", **kw)
-    eng, store, open_utc = session(tmp_path / "b", TODAY, **kw)
-    assert eng.day.rules.version == 1  # the config was really applied
+def test_spelled_out_defaults_trade_exactly_like_no_config(shared, kw):
+    base_eng, base_store, base_open = shared(**kw)
+    eng, store, open_utc = shared(TODAY, **kw)
+    assert eng is not base_eng and store is not base_store  # two separate sessions
+    assert base_eng.day.rules.version == 0 and eng.day.rules.version == 1  # no config vs the config really applied
     assert _record(store, open_utc) == _record(base_store, base_open)
 
 
