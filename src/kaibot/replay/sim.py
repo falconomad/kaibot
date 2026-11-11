@@ -99,9 +99,13 @@ def first_exit_trail(h, l, o, c, start_m, fill, risk_ps, atr, target_r=2.0, trai
 def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict, fomc: set, pol: RiskPolicy,
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
                   pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1",
-                  target_r: float | None = None) -> Book:
+                  target_r: float | None = None, fills=None) -> Book:
     """`atr_mult` (stop = atr_mult x 5-minute ATR) and `target_r` (profit target in R; None = the variant's
-    pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged."""
+    pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged.
+    `fills` (a replay.fills.FillModel) switches on the stricter fill assumptions of issue #75; None (the default)
+    is the fill model every earlier replay used, unchanged."""
+    buy = buy_px if fills is None else fills.buy
+    sell = sell_px if fills is None else fills.sell
     tr = target_r if target_r is not None else (2.0 if variant == "A" else 1.5)
     book = Book(equity0)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
@@ -139,7 +143,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
             if not halted and realized + unreal <= -start_eq * pol.max_daily_loss_pct / 100:
                 for p in open_pos:
                     sd, r = bars[p["symbol"]], row_of[p["symbol"]][d]
-                    px = sell_px(sd.c[r, m], p["qty"], p["sigma"], sd.v[r, m])
+                    px = sell(sd.c[r, m], p["qty"], p["sigma"], sd.v[r, m])
                     pnl = (px - p["fill"]) * p["qty"] - sell_fees(p["qty"], px)
                     realized += pnl
                     t = p["trade"]
@@ -175,7 +179,11 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 if qty <= 0:
                     continue
                 fm = m + 1
-                fill = buy_px(sd.o[r, fm], qty, cnd["sigma_1m"], sd.v[r, fm])
+                if fills is not None:  # the bar after the signal bar: its open and volume only
+                    qty = fills.entry_qty(qty, sd.v[r, fm])
+                    if qty <= 0:
+                        continue
+                fill = buy(sd.o[r, fm], qty, cnd["sigma_1m"], sd.v[r, fm])
                 stop_f = fill - risk_ps
                 tgt_f = fill + (target - ref)
                 if variant == "A":
@@ -184,7 +192,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                     stop_f, tgt_f = fill - risk_ps, fill + tr * risk_ps
                 else:
                     xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, stop_f, tgt_f)
-                xp = gross if why == "target" else sell_px(gross, qty, cnd["sigma_1m"], sd.v[r, xm])
+                xp = gross if why == "target" else sell(gross, qty, cnd["sigma_1m"], sd.v[r, xm])
                 pnl = (xp - fill) * qty - sell_fees(qty, xp)
                 t = Trade(cnd["symbol"], d, fm, xm, qty, fill, xp, stop_f, tgt_f, why, pnl, risk_ps * qty)
                 open_pos.append({"symbol": cnd["symbol"], "qty": qty, "fill": fill, "exit_m": xm, "pnl": pnl,
@@ -202,8 +210,11 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
 
 def random_entry_runs(bars: dict[str, SymbolDays], atr5: dict, vwap: dict, sigma: dict, trades_per_day: pd.Series,
                       pol: RiskPolicy, equity0: float, n_runs: int = 200, seed: int = 7,
-                      atr_mult: float = 1.5, variant: str = "v1") -> np.ndarray:
-    """Total net P&L ($) of n_runs random-entry strategies with the same daily trade count, sizing and exits."""
+                      atr_mult: float = 1.5, variant: str = "v1", fills=None) -> np.ndarray:
+    """Total net P&L ($) of n_runs random-entry strategies with the same daily trade count, sizing and exits.
+    `fills`: the same optional FillModel as run_portfolio, so the baseline pays the same costs as the strategy."""
+    buy = buy_px if fills is None else fills.buy
+    sell = sell_px if fills is None else fills.sell
     rng = np.random.default_rng(seed)
     syms = list(bars)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
@@ -232,13 +243,17 @@ def random_entry_runs(bars: dict[str, SymbolDays], atr5: dict, vwap: dict, sigma
                                    equity0 * pol.max_position_pct / 100 / ref))
                 if qty <= 0:
                     continue
-                fill = buy_px(sd.o[r, m + 1], qty, sigma[s][r], sd.v[r, m + 1])
+                if fills is not None:
+                    qty = fills.entry_qty(qty, sd.v[r, m + 1])
+                    if qty <= 0:
+                        continue
+                fill = buy(sd.o[r, m + 1], qty, sigma[s][r], sd.v[r, m + 1])
                 if variant == "A":
                     xm, gross, why = first_exit_trail(sd.h[r], sd.l[r], sd.o[r], sd.c[r], m + 1, fill, risk_ps, a)
                 else:
                     xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], m + 1, fill - risk_ps,
                                                 fill + (target - ref))
-                xp = gross if why == "target" else sell_px(gross, qty, sigma[s][r], sd.v[r, xm])
+                xp = gross if why == "target" else sell(gross, qty, sigma[s][r], sd.v[r, xm])
                 tot += (xp - fill) * qty - sell_fees(qty, xp)
         totals[k] = tot
     return totals

@@ -26,6 +26,12 @@ $R --variant B --start 2026-07-01 --end 2026-11-06 --label holdout        # 003:
 ```
 (`.venv/bin/pip install scipy` first: the replay's statistics need it.)
 
+### Rerun with feed and fill options (issue #75)
+`docs/m0/replay_004.md` holds the fill assumptions and the one command that reruns the five windows above on SIP
+bars (and on IEX bars once an IEX-feed download exists) with the default and the stricter fills, and writes the
+side-by-side table. `scripts/run_replay.py` takes the same options one replay at a time: `--feed sip|iex`,
+`--bars-data DIR`, `--fills realistic`, `--slippage-bps N`. Without them a replay is unchanged.
+
 ## 3. Overfitting checks (story S08)
 Every replay appends to `data/trials.jsonl` and stores its daily returns in `data/trials/<trial_id>.csv`.
 `scripts/trial_report.py` computes the deflated Sharpe of each trial (deflated by the number of trials and the
