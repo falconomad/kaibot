@@ -259,6 +259,33 @@ class FakeStore:
         self.tables: dict[str, list[dict]] = {}
         self.ids = itertools.count(1)
         self.beats: dict = {}
+        self.llm = {"day": 0.0, "month": 0.0, "open": {}}  # mirrors kaibot.llm_reserve / llm_settle
+
+    def rpc(self, fn, args):
+        b = self.llm
+        if fn == "llm_reserve":
+            open_res = sum(b["open"].values())
+            r = float(args["p_reserved"])
+            if b["day"] + open_res + r > args["p_daily_soft"] or b["month"] + open_res + r > args["p_monthly_hard"]:
+                return None
+            cid = next(self.ids)
+            b["open"][cid] = r
+            self.insert("llm_call", {"id": cid, "model": args["p_model"], "purpose": args["p_purpose"],
+                                     "reserved_usd": r})
+            return cid
+        if fn == "llm_settle":
+            if b["open"].pop(args["p_id"], None) is None:
+                return None
+            b["day"] += float(args["p_actual"])
+            b["month"] += float(args["p_actual"])
+            self.update("llm_call", {"id": args["p_id"]},
+                        {"actual_usd": args["p_actual"], "error": args.get("p_error")})
+            return None
+        if fn == "llm_budget_state":
+            st = ("no_entries" if b["month"] >= args["p_monthly_hard"]
+                  else "rules_only" if b["day"] >= args["p_daily_soft"] else "ok")
+            return {"day": b["day"], "month": b["month"], "state": st, "alert": b["month"] >= args["p_monthly_alert"]}
+        raise KeyError(fn)
 
     def insert(self, table, row, returning=True):
         rows = row if isinstance(row, list) else [row]
@@ -334,3 +361,27 @@ class FakeStore:
         return sum(
             min(r["pnl_venue"], r["pnl_shadow"]) for r in self.tables.get("daily_result", []) if r["run_id"] == run_id
         )
+
+
+class FakeLLM:
+    """Stands in for anthropic.messages.create: returns a scripted tool input per tool name."""
+
+    def __init__(self, answers: dict, usage=(800, 150, 0, 0), delay=0.0, fail: set | None = None):
+        self.answers, self.usage, self.delay, self.fail = answers, usage, delay, fail or set()
+        self.calls: list[dict] = []
+
+    def create(self, **kw):
+        import time as _t
+        from types import SimpleNamespace as NS
+
+        self.calls.append(kw)
+        name = kw["tool_choice"]["name"]
+        if self.delay:
+            _t.sleep(self.delay)
+        if name in self.fail:
+            raise TimeoutError(f"{name} timed out")
+        ans = self.answers[name]
+        data = ans(kw) if callable(ans) else ans
+        u = NS(input_tokens=self.usage[0], output_tokens=self.usage[1], cache_read_input_tokens=self.usage[2],
+               cache_creation_input_tokens=self.usage[3])
+        return NS(content=[NS(type="tool_use", name=name, input=data)], usage=u)

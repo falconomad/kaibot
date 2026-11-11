@@ -14,7 +14,9 @@ export interface Run {
   started_on: string | null; ended_on: string | null;
 }
 export interface Daily { session: string; pnl: number; pnl_venue: number; pnl_shadow: number; spy_ret: number | null; cash_ret?: number | null; trades: number }
-export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean } | null }
+export interface NearMiss { symbol: string; m: number; z: number; why: string }
+export interface Scan { bars: number; checks: number; regime_off: number; setups: number; near: number; vetoed: Record<string, number>; to_room: number; recent_near: NearMiss[] }
+export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null } | null }
 export interface LedgerPos { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }
 export interface Ledger { ts: string; cash: number; positions: Record<string, LedgerPos>; equity_venue: number; equity_shadow: number }
 export interface Overview {
@@ -45,9 +47,10 @@ export interface AttributionGroup { dim: string; key: string; n: number; pnl: nu
 export interface Attribution { since: string; weeks: number; n: number; groups: AttributionGroup[];
   weekly: { week: string; strategy: string; n: number; pnl: number }[] }
 export type TapeItem =
-  | { kind: "signal"; ts: string; mode: "live" | "shadow"; strategy: string; symbol: string; entry: number | null; stop: number | null;
+  | { kind: "signal"; ts: string; signal_id?: number; mode: "live" | "shadow"; strategy: string; symbol: string; entry: number | null; stop: number | null;
       target: number | null; reasons: string[]; veto: string | null; approved: boolean | null; qty: number | null; binding: string | null;
-      trade_id: number | null; counterfactual: { pnl_usd?: number; r_multiple?: number } | null }
+      trade_id: number | null; counterfactual: Counterfactual | null;
+      room?: { status: RoomStatus; verdict: RoomVerdict | null; cause: string | null; confidence: string | null; counterfactual: Counterfactual | null } | null }
   | { kind: "fill"; ts: string; side: "buy" | "sell"; qty: number; venue_px: number; shadow_px: number; fees: number; tag: string | null;
       symbol: string; strategy: string; trade_id: number | null; exit_reason: string | null; pnl_usd: number | null };
 export interface Health {
@@ -57,6 +60,45 @@ export interface Health {
     runs: { status: string; message: string; start: string }[] };
   pending_commands: { kind: string; ts: string }[];
 }
+// M3 agent room (S35/S36). Model fields are untrusted jsonb: read them through derive.roomView, render as plain text.
+export type RoomVerdict = "allow" | "downgrade" | "veto";
+export type RoomStatus = "pending" | "done" | "timeout" | "invalid" | "skipped" | "error";
+export interface Counterfactual { pnl_usd?: number; r_multiple?: number; exit_reason?: string }
+export interface EvidenceRef { id: string; source?: string; published_at?: string }
+export interface PackItem { id: string; kind?: string; source?: string; published_at?: string; headline?: string; url?: string;
+  n_outlets?: number; triage?: { cause?: string; materiality?: string; direction?: string; summary?: string } | null }
+export interface RoomSession {
+  id?: number; signal_id: number; ts: string; status: RoomStatus; verdict: RoomVerdict | null; rules_only: "allow" | "veto" | null;
+  proposer: unknown; critic: unknown; judge: unknown; evidence: { items?: unknown } | null;
+  latency_ms: number | null; cost_usd: number | null; error: string | null; counterfactual: Counterfactual | null;
+}
+export interface Room {
+  session: RoomSession;
+  signal: { id: number; run_id: number; ts: string; mode: string; strategy: string; symbol: string; entry: number | null;
+    stop: number | null; target: number | null; reasons: string[]; veto: string | null } | null;
+  trade: { id: number; qty: number; pnl_usd: number | null; risk_usd: number | null; exit_reason: string | null; exit_ts: string | null } | null;
+}
+export interface RoomAB {
+  since: string; weeks: number; n: number;
+  by_verdict: Partial<Record<RoomVerdict | "none", number>>; by_status: Partial<Record<RoomStatus, number>>;
+  veto: { n: number; n_cf: number; mean_r: number | null; sd_r: number | null; cf_pnl: number; n_loss_avoided: number;
+    loss_avoided: number; n_win_missed: number; win_missed: number };
+  allow: { n: number; n_closed: number; mean_r: number | null; sd_r: number | null; pnl: number };
+  downgrade: { n: number; n_paired: number; pnl: number; cf_pnl: number; mean_r: number | null };
+  no_answer: { n: number; n_cf: number; cf_pnl: number };
+  arms: { n: number; rules_pnl: number; room_pnl: number };
+  lift: { n_veto: number; n_allow: number; diff: number | null; ci_lo: number | null; ci_hi: number | null };
+  spend: { llm_usd: number; room_usd: number; by_purpose: Record<string, number>; per_loss_avoided: number | null };
+}
+export type BudgetState = "ok" | "rules_only" | "no_entries";
+export interface LlmBudget {
+  day: string; day_usd: number; month_usd: number; state: BudgetState; alert: boolean;
+  caps: { daily_soft: number; monthly_alert: number; monthly_hard: number };
+  calls_today: number; open_reserved_usd: number; by_purpose: Record<string, number>;
+}
+const numValues = (o: Record<string, unknown> | null | undefined) =>
+  Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, Number(v)]));
+
 export type CommandKind = "pause" | "resume" | "flatten_and_stop" | "set_level";
 export interface Trade {
   id: number; run_id: number; signal_id: number | null; strategy: string; symbol: string;
@@ -67,7 +109,7 @@ export interface Trade {
 export interface TradeDetail {
   trade: Trade; run: Run;
   gate: { checks: Record<string, unknown>; approved: boolean; qty: number; binding: string | null; policy_hash: string; code_sha: string } | null;
-  room: { proposer: unknown; critic: unknown; judge: unknown; verdict: string; latency_ms: number; cost_usd: number } | null;
+  room: RoomSession | null;
   fills: { ts: string; side: string; qty: number; venue_px: number; shadow_px: number; fees: number }[];
 }
 
@@ -102,7 +144,7 @@ export const api = {
   },
   trade: async (id: number) => {
     const r = await rpc<TradeDetail | null>("kb_trade", { p_id: id });
-    return r ? { ...r, trade: fixTrade(r.trade), run: fixRun(r.run) } : null;
+    return r ? { ...r, trade: fixTrade(r.trade), run: fixRun(r.run), room: r.room ? coerce(r.room) : null } : null;
   },
   command: (kind: CommandKind, payload: Record<string, unknown> = {}) =>
     rpc<{ queued: boolean }>("kb_command", { p_kind: kind, p_idem: crypto.randomUUID(), p_payload: payload }),
@@ -113,6 +155,18 @@ export const api = {
   tape: async (run: number, limit = 100, before?: string) =>
     coerce(await rpc<TapeItem[]>("kb_tape", { p_run: run, p_limit: limit, p_before: before ?? null })),
   health: async () => coerce(await rpc<Health>("kb_health")),
+  room: async (signal: number) => {
+    const r = await rpc<Room | null>("kb_room", { p_signal: signal });
+    return r ? coerce(r) : null;
+  },
+  roomAb: async (run: number, weeks = 13) => {
+    const r = coerce(await rpc<RoomAB>("kb_room_ab", { p_run: run, p_weeks: weeks }));
+    return { ...r, spend: { ...r.spend, by_purpose: numValues(r.spend?.by_purpose) } };
+  },
+  llmBudget: async () => {
+    const b = coerce(await rpc<LlmBudget>("kb_llm_budget"));
+    return { ...b, by_purpose: numValues(b.by_purpose) };
+  },
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

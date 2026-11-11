@@ -1,9 +1,10 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
 import { api, type TapeItem } from "../lib/api";
-import { fmtR } from "../lib/derive";
+import { RoomBySignal } from "../components/Room";
+import { CAUSE_TEXT, fmtR, roomOutcome } from "../lib/derive";
 import { EXIT_LABEL, dateEt, money, px, signedMoney, timeEt, tone } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 import { StockCell } from "../components/StockBadge";
@@ -12,10 +13,10 @@ const PAGE = 100;
 const STRAT: Record<string, string> = {
   dip_reversal: "dip reversal", spy_late_momentum: "SPY momentum", orb_stocks_in_play: "ORB", news_continuation: "news continuation",
 };
-type Filter = "all" | "trades" | "live" | "shadow";
+type Filter = "all" | "trades" | "live" | "room" | "shadow";
 
 /** What happened, in one line, with the reason. */
-function Line({ it }: { it: TapeItem }) {
+function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?: () => void }) {
   if (it.kind === "fill") {
     const cost = Math.abs(it.venue_px - it.shadow_px) * it.qty + it.fees;
     return (
@@ -32,16 +33,34 @@ function Line({ it }: { it: TapeItem }) {
   }
   const taken = it.mode === "live" && it.approved && !it.veto && (it.qty ?? 0) > 0;
   const label = it.mode === "shadow" ? "shadow" : taken ? "taken" : "skipped";
-  const why = it.veto ?? (it.mode === "live" && !it.approved ? `gate: ${it.binding ?? "not approved"}` : null);
-  const cf = it.counterfactual;
+  const room = it.room ?? null;
+  const out = room ? roomOutcome(room.status, room.verdict) : null;
+  const roomBlocked = !!room && !taken && (room.status === "done" ? room.verdict === "veto"
+    : ["timeout", "invalid", "error"].includes(room.status));
+  const why = it.veto ?? (roomBlocked && out ? `room: ${out.label}${room!.cause ? ` (${CAUSE_TEXT[room!.cause] ?? room!.cause})` : ""}`
+    : it.mode === "live" && !it.approved ? `gate: ${it.binding ?? "not approved"}` : null);
+  // Shadow strategies carry their own counterfactual; room-blocked setups show the rules-only arm's.
+  const cf = it.counterfactual ?? (!taken ? room?.counterfactual ?? null : null);
   return (
     <>
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
       <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
         <span className="muted"> · {STRAT[it.strategy] ?? it.strategy}</span></td>
       <td>{it.reasons.join(" · ")}{why && <span className="muted"> — {why}</span>}
-        {it.entry !== null && <span className="muted num"> · ref {px(it.entry)}, stop {px(it.stop)}{it.target ? `, target ${px(it.target)}` : ""}</span>}</td>
-      <td className={`r num ${tone(cf?.pnl_usd)}`}>{cf && cf.pnl_usd !== undefined ? <span title="Counterfactual, never traded">{signedMoney(cf.pnl_usd)} · {fmtR(cf.r_multiple)}</span> : taken ? <span className="muted">{it.qty} sh</span> : ""}</td>
+        {it.entry !== null && <span className="muted num"> · ref {px(it.entry)}, stop {px(it.stop)}{it.target ? `, target ${px(it.target)}` : ""}</span>}
+        {room && out && (
+          <div className="room-line">
+            <span className={`tag ${out.tag}`} title={out.text}>room: {out.label}</span>
+            {room.confidence && <span className="muted"> {room.confidence} confidence</span>}
+            {it.signal_id !== undefined && onToggle && (
+              <> · <button className="linkbtn" aria-expanded={open} onClick={onToggle}>{open ? "hide transcript" : "transcript"}</button></>
+            )}
+          </div>
+        )}</td>
+      <td className={`r num ${tone(cf?.pnl_usd)}`}>{cf && cf.pnl_usd !== undefined
+        ? <span title={it.mode === "shadow" ? "Counterfactual, never traded" : "Rules-only counterfactual at full size: what the room's veto avoided or missed"}>
+            {it.mode === "shadow" ? "" : "would have "}{signedMoney(cf.pnl_usd)} · {fmtR(cf.r_multiple)}</span>
+        : taken ? <span className="muted">{it.qty} sh</span> : ""}</td>
     </>
   );
 }
@@ -49,6 +68,8 @@ function Line({ it }: { it: TapeItem }) {
 export function Tape() {
   const { run } = useRunCtx();
   const [filter, setFilter] = useState<Filter>("all");
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  const toggle = (id: number) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const q = useInfiniteQuery({
     queryKey: ["tape", run.id],
     queryFn: ({ pageParam }) => api.tape(run.id, PAGE, pageParam),
@@ -58,7 +79,7 @@ export function Tape() {
   });
   const all = q.data?.pages.flat() ?? [];
   const rows = all.filter((it) => filter === "all" || (filter === "trades" ? it.kind === "fill"
-    : it.kind === "signal" && it.mode === filter));
+    : filter === "room" ? it.kind === "signal" && !!it.room : it.kind === "signal" && it.mode === filter));
   let lastDay = "";
   return (
     <section className="card" aria-labelledby="tape-h">
@@ -67,7 +88,7 @@ export function Tape() {
         <span className="muted" style={{ fontSize: 13 }}>Every setup Kaibot saw, what it did, why, and every fill after costs. Newest first.</span>
         <span className="spacer" />
         <div className="tabs" role="tablist" aria-label="Show">
-          {([["all", "All"], ["trades", "Fills"], ["live", "Setups"], ["shadow", "Shadow"]] as [Filter, string][]).map(([k, l]) => (
+          {([["all", "All"], ["trades", "Fills"], ["live", "Setups"], ["room", "Agent room"], ["shadow", "Shadow"]] as [Filter, string][]).map(([k, l]) => (
             <button key={k} role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}>{l}</button>))}
         </div>
       </div>
@@ -80,11 +101,18 @@ export function Tape() {
             const d = dateEt(it.ts);
             const head = d !== lastDay;
             lastDay = d;
+            const sid = it.kind === "signal" ? it.signal_id : undefined;
+            const isOpen = sid !== undefined && open.has(sid);
             return (
-              <tr key={`${it.kind}-${it.ts}-${i}`} style={head ? { borderTop: "2px solid var(--rule)" } : undefined}>
-                <td className="num">{head ? <b>{d} </b> : null}{timeEt(it.ts)}</td>
-                <Line it={it} />
-              </tr>
+              <Fragment key={`${it.kind}-${it.ts}-${i}`}>
+                <tr style={head ? { borderTop: "2px solid var(--rule)" } : undefined}>
+                  <td className="num">{head ? <b>{d} </b> : null}{timeEt(it.ts)}</td>
+                  <Line it={it} open={isOpen} onToggle={sid !== undefined ? () => toggle(sid) : undefined} />
+                </tr>
+                {isOpen && (
+                  <tr className="expand"><td colSpan={5}><div className="expand-inner"><RoomBySignal signalId={sid!} /></div></td></tr>
+                )}
+              </Fragment>
             );
           })}</tbody>
         </table>

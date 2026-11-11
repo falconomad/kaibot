@@ -4,3 +4,5 @@ pandas>=2.2
 pyarrow>=17
 pyyaml>=6.0
 certifi>=2024.8.30  # CA bundle: python.org's macOS Python ships without root certificates
+pydantic>=2.8       # agent-room contracts (S34): every model output is validated before it can matter
+anthropic>=0.40     # imported only when ANTHROPIC_API_KEY is set and KAIBOT_ROOM=on

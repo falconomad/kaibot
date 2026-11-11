@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Heartbeat } from "../lib/api";
-import { ageS, ageText, haltText } from "../lib/derive";
+import { ageS, ageText, budgetText, haltText, scanSummary, sessionTime } from "../lib/derive";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 
@@ -39,6 +39,58 @@ const EV: Record<string, string> = {
   watchdog_flatten: "Watchdog flattened", watchdog_recovered: "Engine heartbeat back", shadow_error: "Shadow strategy error",
 };
 
+const STATE_TAG = { ok: ["allow", "ok"], rules_only: ["downgrade", "rules-only"], no_entries: ["veto", "no entries"] } as const;
+const usd = (v: number) => `$${v.toFixed(v < 10 ? 3 : 2)}`;
+
+/** S32/S36: today's LLM spend against the caps. */
+function LlmBudgetCard() {
+  const q = useQuery({ queryKey: ["llm_budget"], queryFn: api.llmBudget, refetchInterval: 30_000 });
+  if (q.isPending) return <section className="card"><h2>LLM budget</h2><p className="skeleton">Loading…</p></section>;
+  if (q.isError) return <section className="card"><h2>LLM budget</h2><p className="loss">{String(q.error)}</p></section>;
+  const b = q.data, t = budgetText(b), [cls, label] = STATE_TAG[b.state] ?? STATE_TAG.ok;
+  const bar = (frac: number) => <div className="prog bar-row" aria-hidden="true"><i style={{ width: `${Math.min(100, frac * 100)}%`,
+    background: frac >= 1 ? "var(--fail)" : frac >= 0.8 ? "var(--warn)" : undefined }} /></div>;
+  const purposes = Object.entries(b.by_purpose);
+  return (
+    <section className="card" aria-labelledby="llm-h">
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <h2 id="llm-h" style={{ margin: 0 }}>LLM budget</h2><span className={`tag ${cls}`}>{label}</span>
+      </div>
+      <p style={{ fontSize: 13 }} className={t.tone === "breach" ? "loss" : undefined}>{t.text}</p>
+      <div className="kv">
+        <span>Today</span><span /><span className="v">{usd(b.day_usd)} / ${b.caps.daily_soft}</span>{bar(b.day_usd / b.caps.daily_soft)}
+        <span>This month</span><span /><span className="v">{usd(b.month_usd)} / ${b.caps.monthly_hard}</span>{bar(b.month_usd / b.caps.monthly_hard)}
+        <span>Calls today</span><span /><span className="v">{b.calls_today}{b.open_reserved_usd > 0 ? ` · ${usd(b.open_reserved_usd)} reserved` : ""}</span>
+        {purposes.length > 0 && (<><span>By purpose</span><span /><span className="v">{purposes.map(([k, v]) => `${k} ${usd(v)}`).join(" · ")}</span></>)}
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Above ${b.caps.daily_soft} a day the rules decide alone; ${b.caps.monthly_alert} a month raises an alert;
+        at ${b.caps.monthly_hard} no new entries. Each call reserves its worst case first, so the caps can't be overshot.</p>
+    </section>
+  );
+}
+
+function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
+  const d = beat?.detail ?? null;
+  const { headline, lines } = scanSummary(d?.scan, d?.entries_today ?? 0);
+  const near = d?.scan?.recent_near ?? [];
+  return (
+    <section className="card" aria-labelledby="scan-h">
+      <h2 id="scan-h">Today's scan</h2>
+      <p style={{ fontWeight: 600, marginTop: 0 }}>{headline}</p>
+      <ul style={{ fontSize: 13, margin: "0 0 8px", paddingLeft: 18 }}>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
+      {near.length > 0 && (
+        <div>
+          <table className="list">
+            <thead><tr><th>Near-miss</th><th>Time (ET)</th><th>Dip (σ)</th><th>Why it didn't qualify</th></tr></thead>
+            <tbody>{near.map((n, i) => <tr key={`${n.symbol}-${n.m}-${i}`}><td>{n.symbol}</td><td>{sessionTime(n.m)}</td><td>{n.z.toFixed(2)}</td><td>{n.why.replace(/ sigma/g, "σ")}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The dip rule buys only a fall of at least 1.5σ that its sector doesn't explain, on calm volume, with no company news in 24 h, after a 5-minute higher low. Quiet up-days often have none.</p>
+    </section>
+  );
+}
+
 export function Health() {
   const q = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
   if (q.isPending) return <Skeleton />;
@@ -57,6 +109,8 @@ export function Health() {
         {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 12 }}>Waiting for the engine: {h.pending_commands.map((c) => c.kind.replace(/_/g, " ")).join(", ")}</p>}
       </section>
 
+      <ScanCard beat={h.heartbeat.find((b) => b.process === "engine")} />
+
       <div className="grid">
         <section className="card" aria-labelledby="dm-h">
           <h2 id="dm-h">Off-box dead-man</h2>
@@ -68,6 +122,7 @@ export function Health() {
             <span>Last check</span><span /><span className="v">{lastDead ? `${dateEt(lastDead.start)} ${timeEt(lastDead.start)} ET · ${lastDead.status}` : "not run yet"}</span>
           </div>
         </section>
+        <LlmBudgetCard />
         <section className="card" aria-labelledby="halt-h">
           <h2 id="halt-h">Recent halts</h2>
           {h.halts.length ? (

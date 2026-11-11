@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { RoomTranscript } from "../components/Room";
 import { api, type Trade, type TradeDetail } from "../lib/api";
 import { EXIT_LABEL, R, dateEt, money, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
@@ -81,15 +82,9 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
   }
   if (id === "room") {
     if (!d.room) return replay ? <NotRecorded what="The agent room's debate" replay /> :
-      <p className="muted">The agent room is off in M1: trades are rules-only, so the go-live test measures the rules alone. It can only ever veto or halve a trade, never size or price it.</p>;
-    return (
-      <div style={{ display: "grid", gap: 12 }}>
-        {(["proposer", "critic", "judge"] as const).map((r) => (
-          <div key={r} className="banner"><div className="cap">{r}</div><pre className="serif" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{JSON.stringify(d.room![r], null, 2)}</pre></div>
-        ))}
-        <p className="muted num">verdict {d.room.verdict} · {d.room.latency_ms} ms · ${Number(d.room.cost_usd).toFixed(3)}</p>
-      </div>
-    );
+      <p className="muted">No room session for this trade. Only dip-reversal candidates that pass every rule go to the room (SPY momentum never uses it);
+        trades from before M3, or with the room switched off, are rules-only. The room can only ever veto or halve a trade, never size or price it.</p>;
+    return <RoomTranscript s={d.room} trade={{ id: t.id, qty: t.qty, pnl_usd: t.pnl_usd, risk_usd: t.risk_usd, exit_reason: t.exit_reason, exit_ts: t.exit_ts }} />;
   }
   if (!d.fills.length)
     return <p className="muted">{replay ? "Replay fills use the shadow cost model only: next-bar open at the modelled bid/ask plus impact, and SEC/FINRA fees on sells. No broker fills exist for a replay." : "No fills recorded."}</p>;
@@ -103,7 +98,9 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
 
 export function TradeDetailPage() {
   const { id } = useParams();
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>("why");
+  const [params] = useSearchParams();
+  const initial = TABS.find(([k]) => k === params.get("tab"))?.[0] ?? "why";
+  const [tab, setTab] = useState<(typeof TABS)[number][0]>(initial);
   const q = useQuery({ queryKey: ["trade", id], queryFn: () => api.trade(Number(id)) });
   if (q.isPending) return <Skeleton variant="detail" />;
   if (q.isError) return <p className="loss">{String(q.error)}</p>;
@@ -121,7 +118,7 @@ export function TradeDetailPage() {
           {dateEt(t.entry_ts)} · in {timeBoth(t.entry_ts)}{t.exit_ts ? ` · out ${timeEt(t.exit_ts)} ET` : ""} · {t.qty} sh · {d.run.label ?? `run ${d.run.id}`}
         </p>
       </section>
-      <div className="grid" style={{ gridTemplateColumns: "minmax(280px, 1fr) minmax(300px, 1.4fr)" }}>
+      <div className="grid trade-grid">
         <section className="card"><h2>Price levels</h2><Ladder t={t} /></section>
         <section className="card">
           <div className="tabs" role="tablist">
