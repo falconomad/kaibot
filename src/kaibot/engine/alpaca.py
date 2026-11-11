@@ -236,6 +236,25 @@ class AlpacaData:
         d = self._d("/v1beta1/news", {"symbols": symbol, "start": _iso(start), "end": _iso(end), "limit": 50})
         return len(d.get("news") or [])
 
+    def news(self, symbols: list[str], start: datetime, end: datetime, max_pages: int = 10) -> list[dict]:
+        """Raw Benzinga articles (headline, summary, created_at, url, symbols, author, source) for `symbols` in
+        [start, end], newest first. Paginated (50 per page, at most `max_pages` requests, all under the shared
+        `alpaca` budget). The payload is untrusted: kaibot.news.desk normalises and sanitises it."""
+        out: list[dict] = []
+        token = None
+        for _ in range(max_pages):
+            p = {"symbols": ",".join(symbols), "start": _iso(start), "end": _iso(end), "limit": 50, "sort": "desc",
+                 "include_content": "false"}
+            if token:
+                p["page_token"] = token
+            d = self._d("/v1beta1/news", p) or {}
+            rows = d.get("news") or []
+            out.extend(r for r in rows if isinstance(r, dict))
+            token = d.get("next_page_token")
+            if not token or not rows:
+                break
+        return out
+
 
 def parse_movers(raw: dict) -> list[dict]:
     """Screener movers response -> [{symbol, price, change_pct}], gainers first, same as bloodbath."""
