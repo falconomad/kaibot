@@ -69,3 +69,18 @@ Principle: **the user can make Kaibot pickier or smaller, never looser or differ
 ## Known trade-off
 
 Narrow focus slows the evidence a lot. On replay 002's rate (about 45 trades/month on 59 symbols), *Hyperscalers only* gives about 4 trades a month, and *all tech* about 11. The page shows this before Apply. It does not hide it.
+
+## UI direction (update 2026-11-11, after research)
+
+See [`docs/design/research_m5_config_ui.md`](../design/research_m5_config_ui.md). The panel has two layers.
+
+1. **Strategy page (one screen):**
+   - "Start from" preset cards: Kaibot default / Big tech / Calm / Custom. Each shows its trades a month and max loss.
+   - Focus theme cards (Prefer / Only, Exclude a stock).
+   - One 5-step **Boldness** bar that sets all six risk limits within the level.
+   - Trading-hours shapes on a day bar.
+   - Three "extra caution" pill switches.
+   - A pinned outcome bar with Review & apply.
+2. **Fine-tune page:** every MVP control from the table above, one expandable row each.
+
+A preset or Boldness step is only a shortcut that writes the same config fields. Nothing new reaches the engine.

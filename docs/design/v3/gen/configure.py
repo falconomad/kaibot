@@ -218,8 +218,9 @@ SKEL = f"""
 H = 1700
 DESK = f"""  <main class="page" style="max-width: 720px; margin: 0 auto; box-sizing: border-box; padding: 32px 24px 140px; display: flex; flex-direction: column; gap: 28px">
     <div class="enter" style="display: flex; flex-direction: column; gap: 8px">
-      <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Strategy</h1>
-      <span style="font-size: 15px; color: #A1A8B3; line-height: 1.5">Kaibot trades on its own. Tune it here: pickier or smaller, never riskier than Hunter.</span>
+      <a href="Configure.dc.html" style="font-size: 14px; font-weight: 600; text-decoration: none">← Strategy</a>
+      <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Fine-tune</h1>
+      <span style="font-size: 15px; color: #A1A8B3; line-height: 1.5">Every setting, one row each. Tap a row to change it. Pickier or smaller, never riskier than Hunter.</span>
       <div class="num sumline swap" style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; color: #7E8693; padding-top: 4px"><span><b style="color: #F4F5F7">≈ {{{{est}}}}</b> trades a month</span><span><b style="color: #F4F5F7">{{{{maxLoss}}}}</b> max loss a trade</span><span><b style="color: #F4F5F7">{{{{worstDay}}}}</b> worst day</span></div>
     </div>
 {SKEL}
@@ -372,11 +373,5 @@ SCRIPT = r'''class Component extends DCLogic {
   }
 }'''
 
-open('../project/v3/Configure.dc.html', 'w').write(shell.head('Strategy', 'Strategy', H) + DESK + shell.tail('Strategy', SCRIPT, H))
-
-# phone artboard: same markup, 390-wide preview, sheet open on load to show the review step
-PH = 844
-mob = (shell.head('Strategy on a phone', 'Strategy', PH) + DESK + shell.tail('Strategy', SCRIPT, PH))
-mob = mob.replace('"width":1440', '"width":390')
-open('../project/v3/ConfigureMobile.dc.html', 'w').write(mob)
+open('../project/v3/ConfigureList.dc.html', 'w').write(shell.head('Fine-tune', 'Strategy', H) + DESK + shell.tail('Strategy', SCRIPT, H))
 print('ok')
