@@ -1,6 +1,10 @@
 """S54: Databento validation source (cost gate, cap, cache, budget) and the smoke-test probes. No network."""
 
 import importlib.util
+import json
+import os
+import sys
+import types
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -56,6 +60,13 @@ class FakeClient:
 @pytest.fixture(autouse=True)
 def _registry(monkeypatch):
     monkeypatch.setattr(ratelimit, "REGISTRY", ratelimit.Registry())
+
+
+@pytest.fixture(autouse=True)
+def _cert_env(monkeypatch):
+    """The CLI's main() may set SSL_CERT_FILE: start without it and restore the real value afterwards."""
+    monkeypatch.setenv("SSL_CERT_FILE", "x")
+    monkeypatch.delenv("SSL_CERT_FILE")
 
 
 def _req(syms=("SPY", "AAPL"), schema="ohlcv-1m"):
@@ -163,6 +174,120 @@ def test_cli_is_dry_run_by_default_and_refuses_over_cap(tmp_path, capsys):
     fresh = [*base[:-1], str(tmp_path / "fresh")]
     assert cli.main([*fresh, "--confirm", "--max-cost", "999"], client=c) == 3  # --max-cost cannot raise it
     assert c.names() == ["get_cost"]
+
+
+def _ledger(root):
+    return [json.loads(x) for x in dbh.ledger_path(root).read_text().splitlines()]
+
+
+def test_sources_yaml_credit_is_125_and_validated():
+    assert dbh.credit_from_config(dbh.load_config()) == 125.0
+    assert dbh.credit_from_config({}) == 125.0
+    for bad in (-1, True, "125", float("nan")):
+        with pytest.raises(ValueError):
+            dbh.credit_from_config({"credit_usd": bad})
+
+
+def test_confirmed_download_is_recorded_in_the_ledger_and_dry_run_is_not(tmp_path):
+    dbh.fetch(FakeClient(cost=0.42), _req(), tmp_path, 10.0, out=lambda _: None)
+    assert not dbh.ledger_path(tmp_path).exists() and dbh.spent(tmp_path) == 0.0
+    dbh.fetch(FakeClient(cost=0.42), _req(("SPY",)), tmp_path, 10.0, confirm=True, out=lambda _: None)
+    dbh.fetch(FakeClient(cost=1.5), _req(), tmp_path, 10.0, confirm=True, out=lambda _: None)
+    rows = _ledger(tmp_path)
+    assert [r["cost_usd"] for r in rows] == [0.42, 1.5] and rows[1]["symbols"] == ["AAPL"]
+    assert rows[0]["dataset"] == "EQUS.MINI" and dbh.spent(tmp_path) == pytest.approx(1.92)
+    assert dbh.ledger_path(tmp_path) == tmp_path / "databento" / "ledger.jsonl"
+
+
+def test_request_past_the_total_credit_is_refused_even_with_confirm(tmp_path):
+    out = []
+    dbh.fetch(FakeClient(cost=4.0), _req(("SPY",)), tmp_path, 10.0, confirm=True, out=out.append, credit_usd=5.0)
+    assert "recorded spend $0.00 of $5.00 credit" in out[0]
+    c = FakeClient(cost=1.01)
+    with pytest.raises(dbh.CreditExceeded, match="past the \\$5.00 credit"):
+        dbh.fetch(c, _req(("AAPL",)), tmp_path, 10.0, confirm=True, out=lambda _: None, credit_usd=5.0)
+    assert c.names() == ["get_cost"] and len(_ledger(tmp_path)) == 1
+    assert not dbh.is_cached(tmp_path, _req(("AAPL",)), "AAPL")
+    with pytest.raises(dbh.CreditExceeded):  # a dry run is refused too: it would not be allowed anyway
+        dbh.fetch(FakeClient(cost=1.01), _req(("AAPL",)), tmp_path, 10.0, out=lambda _: None, credit_usd=5.0)
+    c = FakeClient(cost=1.0)  # exactly up to the credit is allowed
+    dbh.fetch(c, _req(("AAPL",)), tmp_path, 10.0, confirm=True, out=lambda _: None, credit_usd=5.0)
+    assert c.names() == ["get_cost", "get_range"] and dbh.spent(tmp_path) == 5.0
+
+
+def test_fetch_guards_the_125_usd_credit_by_default(tmp_path):
+    dbh.ledger_path(tmp_path).parent.mkdir(parents=True)
+    dbh.ledger_path(tmp_path).write_text(json.dumps({"cost_usd": 124.5}) + "\n")
+    c = FakeClient(cost=0.6)
+    with pytest.raises(dbh.CreditExceeded):
+        dbh.fetch(c, _req(), tmp_path, 10.0, confirm=True, out=lambda _: None)
+    assert c.names() == ["get_cost"]
+
+
+def test_spend_is_recorded_even_if_the_local_write_fails(tmp_path, monkeypatch):
+    def boom(self, *a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", boom)
+    with pytest.raises(OSError):
+        dbh.fetch(FakeClient(cost=2.0), _req(("SPY",)), tmp_path, 10.0, confirm=True, out=lambda _: None)
+    assert dbh.spent(tmp_path) == 2.0
+
+
+@pytest.mark.parametrize("line", ["not json", '{"cost": 1}', '{"cost_usd": -3}', '{"cost_usd": "NaN"}'])
+def test_unreadable_ledger_refuses_instead_of_counting_zero(tmp_path, line):
+    dbh.ledger_path(tmp_path).parent.mkdir(parents=True)
+    dbh.ledger_path(tmp_path).write_text(line + "\n")
+    c = FakeClient()
+    with pytest.raises(ValueError, match="ledger"):
+        dbh.fetch(c, _req(), tmp_path, 10.0, confirm=True, out=lambda _: None)
+    assert "get_range" not in c.names()
+
+
+@pytest.mark.parametrize("cost", [-1.0, float("nan"), float("inf")])
+def test_unusable_estimate_is_refused(tmp_path, cost):
+    c = FakeClient(cost=cost)
+    with pytest.raises(dbh.CostCapExceeded):
+        dbh.fetch(c, _req(), tmp_path, 10.0, confirm=True, out=lambda _: None)
+    assert c.names() == ["get_cost"] and not dbh.ledger_path(tmp_path).exists()
+
+
+def test_cli_refuses_past_the_credit_from_sources_yaml(tmp_path, capsys):
+    cli = _load("fetch_databento")
+    env = tmp_path / ".env"
+    env.write_text("DATABENTO_API_KEY=db-test\n")
+    data = tmp_path / "data"
+    dbh.ledger_path(data).parent.mkdir(parents=True)
+    dbh.ledger_path(data).write_text(json.dumps({"cost_usd": 124.0}) + "\n")
+    args = ["--env", str(env), "--symbols", "SPY", "--start", "2026-10-01", "--end", "2026-10-02",
+            "--data", str(data), "--confirm"]
+    c = FakeClient(cost=1.5)
+    assert cli.main(args, client=c) == 3 and c.names() == ["get_cost"]
+    assert "past the $125.00 credit" in capsys.readouterr().err
+    c = FakeClient(cost=0.5)
+    assert cli.main(args, client=c) == 0 and c.names() == ["get_cost", "get_range"]
+    assert dbh.spent(data) == 124.5
+    dbh.ledger_path(data).write_text("garbage\n")
+    c = FakeClient(cost=0.5)
+    assert cli.main([*args[:3], "AAPL", *args[4:]], client=c) == 3 and "get_range" not in c.names()
+    assert "ledger" in capsys.readouterr().err
+
+
+def test_cli_sets_certifi_bundle_only_when_ssl_cert_file_is_unset(tmp_path, monkeypatch):
+    cli = _load("fetch_databento")
+    monkeypatch.setitem(sys.modules, "certifi", types.SimpleNamespace(where=lambda: "/fake/cacert.pem"))
+    env = tmp_path / ".env"
+    env.write_text("DATABENTO_API_KEY=db-test\n")
+    args = ["--env", str(env), "--symbols", "SPY", "--start", "2026-10-01", "--end", "2026-10-02",
+            "--data", str(tmp_path)]
+    seen = []
+
+    c = FakeClient()
+    orig = c.metadata.get_cost
+    c.metadata.get_cost = lambda **kw: (seen.append(os.environ.get("SSL_CERT_FILE")), orig(**kw))[1]
+    assert cli.main(args, client=c) == 0 and seen == ["/fake/cacert.pem"]
+    monkeypatch.setenv("SSL_CERT_FILE", "/my/own/roots.pem")
+    assert cli.main(args, client=FakeClient()) == 0 and os.environ["SSL_CERT_FILE"] == "/my/own/roots.pem"
 
 
 def test_smoke_sip_probe_pass_and_fail(monkeypatch):

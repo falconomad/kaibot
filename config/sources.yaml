@@ -9,8 +9,9 @@ market_data:
   massive:          {use: nightly_universe, auth: key, limit: "5/min, EOD grouped daily bars", budget_per_min: 4}
   tiingo:           {use: third_fallback, auth: key, limit: "50/hr, 1000/day", budget_per_hour: 40}
   databento:        {use: validation_only, auth: key, billing: "one-time $125 historical credit (portal cap $1/month); credit-only",
-                     max_cost_usd: 10, cost_estimate_before_download: required, default_dataset: EQUS.MINI, default_schema: ohlcv-1m,
-                     cache: "data/databento (Parquet, per symbol; cached symbols never re-requested)", budget_per_min: 20,
+                     max_cost_usd: 10, credit_usd: 125, cost_estimate_before_download: required, default_dataset: EQUS.MINI, default_schema: ohlcv-1m,
+                     cache: "data/databento (Parquet, per symbol; cached symbols never re-requested)",
+                     ledger: "data/databento/ledger.jsonl (estimated spend of every confirmed download; total never past credit_usd)", budget_per_min: 20,
                      note: "historical validation only, never in the live path; scripts/fetch_databento.py is dry-run unless --confirm"}
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:

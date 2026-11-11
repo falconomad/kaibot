@@ -6,6 +6,9 @@ Rules (config/sources.yaml `market_data.databento`):
 - Downloads are cached per symbol in Parquet; cached symbols are dropped from the request BEFORE the estimate,
   so nothing is paid twice. Layout: <root>/databento/<dataset>/<schema>/symbol=XYZ/<start>_<end>.parquet
   (`.empty` marker = Databento returned no rows for that symbol and window).
+- Total-credit guard: every confirmed download appends its estimated cost to <root>/databento/ledger.jsonl, and
+  a request that would take the recorded spend past `credit_usd` (default $125, the one-time credit) is refused,
+  even with `confirm=True`. An unreadable ledger also refuses (fail closed). Delete a line only to correct it.
 - Every call acquires the shared `databento` budget (kaibot.common.ratelimit) first.
 - Windows must end >= 15 min before now (SIP rule). Each row gets `available_ts` = bar/interval end, so features
   that read it stay point-in-time.
@@ -15,6 +18,8 @@ The `databento` package is imported lazily (only `make_client` needs it), so tes
 
 from __future__ import annotations
 
+import json
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -32,12 +37,17 @@ DEFAULT_DATASET = "EQUS.MINI"  # Databento US Equities Mini: consolidated across
 DEFAULT_SCHEMA = "ohlcv-1m"
 SCHEMAS = {"ohlcv-1m": timedelta(minutes=1), "bbo-1m": timedelta(minutes=1)}
 DEFAULT_MAX_COST_USD = 10.0
+DEFAULT_CREDIT_USD = 125.0  # the one-time historical credit: total recorded spend never goes past it
 SIP_DELAY = timedelta(minutes=15)
 _SAFE = re.compile(r"^[A-Za-z0-9._\-]+$")
 
 
 class CostCapExceeded(RuntimeError):
     pass
+
+
+class CreditExceeded(CostCapExceeded):
+    """The estimate would take the recorded spend past the total credit: nothing was downloaded."""
 
 
 def load_config(path: str | Path | None = None) -> dict:
@@ -55,6 +65,47 @@ def max_cost_from_config(cfg: dict) -> float:
     if isinstance(v, bool) or not isinstance(v, int | float) or v < 0:
         raise ValueError(f"max_cost_usd must be a number >= 0, got {v!r}")
     return float(v)
+
+
+def credit_from_config(cfg: dict) -> float:
+    v = cfg.get("credit_usd", DEFAULT_CREDIT_USD)
+    if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v) or v < 0:
+        raise ValueError(f"credit_usd must be a number >= 0, got {v!r}")
+    return float(v)
+
+
+def ledger_path(root: Path) -> Path:
+    return Path(root) / "databento" / "ledger.jsonl"
+
+
+def spent(root: Path) -> float:
+    """Total estimated cost of every confirmed download recorded under `root`. Raises ValueError on a line it
+    cannot read, so a damaged ledger refuses downloads instead of silently counting as $0."""
+    p = ledger_path(root)
+    if not p.exists():
+        return 0.0
+    total = 0.0
+    for n, line in enumerate(p.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            cost = float(json.loads(line)["cost_usd"])
+        except (ValueError, TypeError, KeyError):
+            cost = math.nan
+        if not math.isfinite(cost) or cost < 0:
+            raise ValueError(f"unreadable spend ledger {p} (line {n}): fix or remove that line before downloading")
+        total += cost
+    return total
+
+
+def record_spend(root: Path, req: Request, cost_usd: float, now: datetime | None = None) -> None:
+    p = ledger_path(root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    row = {"at": (now or datetime.now(UTC)).isoformat(), "cost_usd": cost_usd, "dataset": req.dataset,
+           "schema": req.schema, "symbols": list(req.symbols), "start": req.start.isoformat(),
+           "end": req.end.isoformat()}
+    with p.open("a") as f:
+        f.write(json.dumps(row) + "\n")
 
 
 def _ts(v: str | datetime) -> datetime:
@@ -133,8 +184,10 @@ def _frame(store, req: Request) -> pd.DataFrame:
 
 
 def fetch(client, req: Request, root: Path, max_cost_usd: float, confirm: bool = False,
-          out: Callable[[str], None] = print, budget: Budget | None = None) -> Result:
-    """Estimate, print, enforce the cap, then (only with confirm) download the uncached symbols to Parquet."""
+          out: Callable[[str], None] = print, budget: Budget | None = None,
+          credit_usd: float = DEFAULT_CREDIT_USD) -> Result:
+    """Estimate, print, enforce the per-request cap and the total credit, then (only with confirm) download the
+    uncached symbols to Parquet and record the estimated spend in the ledger."""
     budget = budget or get_budget(SOURCE)
     cached = tuple(s for s in req.symbols if is_cached(root, req, s))
     todo = tuple(s for s in req.symbols if s not in cached)
@@ -146,15 +199,24 @@ def fetch(client, req: Request, root: Path, max_cost_usd: float, confirm: bool =
         return res
     sub = req.with_symbols(todo)
     res.estimated_usd = estimate_cost(client, sub, budget)
+    if not math.isfinite(res.estimated_usd) or res.estimated_usd < 0:
+        raise CostCapExceeded(f"cost estimate {res.estimated_usd!r} is not a usable number: refused")
+    used = spent(root)
     out(f"estimated cost: ${res.estimated_usd:.4f}  dataset={sub.dataset} schema={sub.schema} "
-        f"symbols={len(todo)} {sub.start.isoformat()} -> {sub.end.isoformat()}  (cap ${max_cost_usd:.2f})")
+        f"symbols={len(todo)} {sub.start.isoformat()} -> {sub.end.isoformat()}  (cap ${max_cost_usd:.2f}; "
+        f"recorded spend ${used:.2f} of ${credit_usd:.2f} credit)")
     if res.estimated_usd > max_cost_usd:
         raise CostCapExceeded(f"estimated ${res.estimated_usd:.4f} is above the cap ${max_cost_usd:.2f}: refused")
+    if used + res.estimated_usd > credit_usd:
+        raise CreditExceeded(f"estimated ${res.estimated_usd:.4f} would take recorded spend ${used:.2f} past the "
+                             f"${credit_usd:.2f} credit: refused")
     if not confirm:
         out("dry run: nothing downloaded (add --confirm to download)")
         return res
     budget.acquire()
-    df = _frame(client.timeseries.get_range(**sub.kwargs()), sub)
+    store = client.timeseries.get_range(**sub.kwargs())
+    record_spend(root, sub, res.estimated_usd)  # first thing after the billed call, before any local write can fail
+    df = _frame(store, sub)
     for s in todo:
         p = cache_path(root, sub, s)
         p.parent.mkdir(parents=True, exist_ok=True)
