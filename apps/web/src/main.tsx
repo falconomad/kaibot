@@ -17,6 +17,7 @@ const Report = lazy(() => import("./pages/Report").then((m) => ({ default: m.Rep
 const Onboarding = lazy(() => import("./pages/Onboarding").then((m) => ({ default: m.Onboarding })));
 const TradeDetailPage = lazy(() => import("./pages/TradeDetail").then((m) => ({ default: m.TradeDetailPage })));
 const GoNoGo = lazy(() => import("./pages/Gate").then((m) => ({ default: m.Gate })));
+const Strategy = lazy(() => import("./pages/Strategy").then((m) => ({ default: m.Strategy })));
 const Trades = lazy(() => import("./pages/Trades").then((m) => ({ default: m.Trades })));
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 15_000 } } });
@@ -52,6 +53,7 @@ function Gate() {
         <Route path="report" element={<Report />} />
         <Route path="health" element={<Health />} />
         <Route path="gate" element={<GoNoGo />} />
+        <Route path="strategy" element={<Strategy />} />
         <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="start" element={<Onboarding />} />
