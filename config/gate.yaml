@@ -1,0 +1,38 @@
+# S38: the pre-registered go-live bar (PRD v2 §1). Every gate report records this file's sha256, so a change
+# is visible. Changing it needs a decision in docs/decisions/ first. The report is computed in Python from the
+# stored trades and written to an append-only table: nobody can edit a verdict after the fact.
+#
+# Passing opens a discussion, not a switch. There is no live trading path (CLAUDE.md: paper only).
+bar:
+  min_trades: 900            # per strategy, on frozen code
+  min_months: 3.0            # first decision to last exit, in months of 30.44 days
+  t_min: 3.0                 # net expectancy after shadow costs: t-stat of per-trade P&L must exceed this
+  dsr_min: 0.5               # deflated Sharpe as a probability; > 0.5 is the PRD's "deflated Sharpe > 0" (z > 0)
+  random_pct_min: 95.0       # beat at least 95% of 1,000 random-entry runs (same days, counts, sizing, exits)
+  random_runs: 1000
+  beat_spy_sharpe: true      # daily Sharpe of the strategy's P&L above SPY's over the same sessions
+  drawdown_within_cap: true  # the level's run_drawdown_end_pct
+
+# "50 trades can only kill." From min_trades on, a strategy whose evidence is already clearly negative is killed.
+# Below 900 trades a pass is impossible: the report says "provisional".
+kill:
+  min_trades: 50
+  t_max: -2.0                # t-stat at or below this: expectancy is credibly negative
+  random_pct_max: 5.0        # at or below the 5th percentile of random entries (needs random data)
+  drawdown_breach: true      # drawdown beyond the cap
+
+# Frozen code: trades count only since the strategy code last changed. The fingerprint hashes these files
+# (dashboard, docs and tests are excluded). The macro calendar is data, so it is excluded too.
+fingerprint:
+  - src/kaibot/engine/*.py
+  - src/kaibot/risk/*.py
+  - src/kaibot/replay/*.py
+  - src/kaibot/features/*.py
+  - src/kaibot/agents/*.py
+  - src/kaibot/news/*.py
+  - config/profiles.yaml
+  - config/llm.yaml
+  - config/universe_seed.yaml
+
+# Strategies with a random-entry baseline computed each evening. Others report "unknown" (it fails closed).
+random_baseline: [dip_reversal]

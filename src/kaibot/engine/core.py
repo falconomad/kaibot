@@ -30,9 +30,11 @@ import numpy as np
 
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
+from kaibot.engine.config import ROOT
 from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
 from kaibot.engine.roomflow import RoomFlow
+from kaibot.evaluation import gate_report
 from kaibot.replay.features import five_minute
 from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
@@ -48,6 +50,14 @@ PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
 MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
+
+
+def _fingerprint() -> str:
+    try:
+        return gate_report.fingerprint(ROOT, gate_report.Bar.load(ROOT).cfg["fingerprint"])
+    except Exception:
+        log.exception("strategy fingerprint unavailable")
+        return "unknown"
 
 
 def code_sha() -> str:
@@ -158,6 +168,7 @@ class Engine:
         self.pos: dict[str, Pos] = {}
         self.account_clean = True
         self.code = code_sha()
+        self.fingerprint = _fingerprint()  # S38: strategy-code hash; trades count toward the gate only on frozen code
         self.peak: float | None = None
         self.on_progress = lambda status: None
 
@@ -168,7 +179,8 @@ class Engine:
         self.check_account()
         self.store.event(
             "engine_start",
-            {"code_sha": self.code, "run_id": self.run and self.run["id"], "positions": list(self.pos)},
+            {"code_sha": self.code, "fingerprint": self.fingerprint, "run_id": self.run and self.run["id"],
+             "positions": list(self.pos)},
             self._rid(),
         )
 
@@ -967,6 +979,7 @@ class Engine:
             rid,
         )
         shadow.on_day_end(self)  # S14: counterfactual P&L of today's shadow signals (exceptions contained)
+        gate_report.on_day_end(self, ROOT)  # S38: random baseline + append-only gate report (exceptions contained)
         d.finalized = True
 
     def _status(self, m: int) -> dict:
