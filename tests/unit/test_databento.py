@@ -6,6 +6,9 @@ import base64
 import importlib.util
 import io
 import json
+import os
+import sys
+import types
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -216,6 +219,17 @@ def _cli():
     return mod
 
 
+CERT_BUNDLE = "/fake/certifi/cacert.pem"
+
+
+@pytest.fixture(autouse=True)
+def cert_env(monkeypatch):
+    """The CLI may set SSL_CERT_FILE: start each test without it and restore the real value afterwards."""
+    monkeypatch.setenv("SSL_CERT_FILE", "x")
+    monkeypatch.delenv("SSL_CERT_FILE")
+    monkeypatch.setitem(sys.modules, "certifi", types.SimpleNamespace(where=lambda: CERT_BUNDLE))
+
+
 @pytest.fixture
 def cli_env(tmp_path, monkeypatch):
     from kaibot.common import ratelimit
@@ -256,3 +270,36 @@ def test_cli_missing_key(net, tmp_path, monkeypatch, capsys):
     rc = _cli().main(["--env", str(tmp_path / "none.env"), "--symbols", "SPY", "--start", "2026-10-01",
                       "--end", "2026-10-02"])
     assert rc == 1 and "DATABENTO_API_KEY" in capsys.readouterr().err and net.calls == []
+
+
+def test_cli_sets_certifi_bundle_before_any_request(cli_env, tmp_path, monkeypatch):
+    m = _cli()
+    seen = []
+
+    def fake_fetch(*a, **kw):
+        seen.append(os.environ.get("SSL_CERT_FILE"))
+
+    monkeypatch.setattr(m.dbn, "fetch", fake_fetch)
+    args = ["--env", str(cli_env), "--symbols", "SPY", "--start", "2026-10-01", "--end", "2026-10-02"]
+    assert m.main(args) == 0 and seen == [CERT_BUNDLE]
+    monkeypatch.setenv("SSL_CERT_FILE", "/my/own/roots.pem")
+    assert m.main(args) == 0 and seen[-1] == "/my/own/roots.pem"
+
+
+def test_cli_status_0_prints_the_certificate_hint(cli_env, tmp_path, monkeypatch, capsys):
+    m = _cli()
+
+    def no_roots(*a, **kw):
+        raise http.HttpError(0, "https://hist.databento.com/v0/metadata.get_cost", "giving up (URLError)")
+
+    monkeypatch.setattr(m.dbn, "fetch", no_roots)
+    args = ["--env", str(cli_env), "--symbols", "SPY", "--start", "2026-10-01", "--end", "2026-10-02"]
+    assert m.main(args) == 1
+    err = capsys.readouterr().err
+    assert err.count(m.CERT_HINT) == 1 and "pip install certifi" in err and KEY not in err
+
+    def forbidden(*a, **kw):
+        raise http.HttpError(403, "https://hist.databento.com/v0/metadata.get_cost", "Forbidden")
+
+    monkeypatch.setattr(m.dbn, "fetch", forbidden)
+    assert m.main(args) == 1 and m.CERT_HINT not in capsys.readouterr().err

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Smoke-test Kaibot's free API keys. Standard library only; prints status codes, NEVER key values.
+Uses certifi's root certificates when certifi is installed and SSL_CERT_FILE is not set (macOS Python has none).
 
 Usage (on your Mac, normal terminal):
     python3 scripts/smoke_test_keys.py ~/Projects/kaibot-secrets/.env
@@ -24,7 +25,11 @@ import urllib.request
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from kaibot.ingest.certs import CERT_HINT, ensure_ca_bundle  # noqa: E402  (standard library only)
+
 UA = "kaibot-smoke-test/0.1"
+_no_response: list[str] = []  # hosts that gave no HTTP response at all (status 0); never holds keys
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -51,6 +56,7 @@ def get(url: str, headers: dict[str, str] | None = None, data: bytes | None = No
     except urllib.error.HTTPError as e:
         return e.code, None
     except Exception as e:  # network errors
+        _no_response.append(urllib.parse.urlsplit(url).hostname or "?")
         return 0, str(e)[:80]
 
 
@@ -98,6 +104,8 @@ def check_databento(key: str) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    ensure_ca_bundle()  # before any network call
+    _no_response.clear()
     env = load_env(env_path(sys.argv if argv is None else argv))
     fails = 0
 
@@ -188,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
         if not env.get(k):
             print(f"TODO  {k:<34} not set yet")
     print(f"\n{'All required checks passed.' if not fails else f'{fails} required check(s) failed.'}")
+    if _no_response:
+        print(CERT_HINT)
     return 1 if fails else 0
 
 

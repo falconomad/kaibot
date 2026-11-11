@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import sys
+import types
 import urllib.parse
+import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "smoke_test_keys.py"
 KEY = "db-SECRET-not-real"
 NOW = datetime(2026, 11, 11, 18, 0, tzinfo=UTC)
+
+
+BUNDLE = "/fake/certifi/cacert.pem"
+HINT = "http 0 everywhere usually means missing root certificates: pip install certifi, or run with .venv/bin/python"
+
+
+@pytest.fixture(autouse=True)
+def cert_env(monkeypatch):
+    """main() may set SSL_CERT_FILE: start each test without it and restore the real value afterwards."""
+    monkeypatch.setenv("SSL_CERT_FILE", "x")
+    monkeypatch.delenv("SSL_CERT_FILE")
+    monkeypatch.setitem(sys.modules, "certifi", types.SimpleNamespace(where=lambda: BUNDLE))
 
 
 def _load():
@@ -79,3 +97,64 @@ def test_main_reads_kaibot_env_file_and_reports_databento(monkeypatch, tmp_path,
     out = capsys.readouterr().out
     assert "Databento auth" in out and KEY not in out
     assert "SKIP  Alpaca" in out
+
+
+def _empty_env(tmp_path, monkeypatch):
+    env = tmp_path / "secrets.env"
+    env.write_text("SEC_USER_AGENT=kaibot test@example.com\n")
+    monkeypatch.setenv("KAIBOT_ENV_FILE", str(env))
+
+
+def test_main_sets_certifi_bundle_before_the_first_request(monkeypatch, tmp_path, capsys):
+    m = _load()
+    _empty_env(tmp_path, monkeypatch)
+    seen = []
+
+    def fake_get(url, headers=None, data=None):
+        seen.append(os.environ.get("SSL_CERT_FILE"))
+        return 200, {}
+
+    monkeypatch.setattr(m, "get", fake_get)
+    m.main(["smoke_test_keys.py"])
+    assert seen and set(seen) == {BUNDLE}
+    assert HINT not in capsys.readouterr().out
+
+
+def test_main_keeps_an_existing_ssl_cert_file(monkeypatch, tmp_path):
+    m = _load()
+    _empty_env(tmp_path, monkeypatch)
+    monkeypatch.setenv("SSL_CERT_FILE", "/my/own/roots.pem")
+    monkeypatch.setattr(m, "get", lambda url, headers=None, data=None: (200, {}))
+    m.main(["smoke_test_keys.py"])
+    assert os.environ["SSL_CERT_FILE"] == "/my/own/roots.pem"
+
+
+def test_status_0_prints_the_certificate_hint_once_at_the_end(monkeypatch, tmp_path, capsys):
+    m = _load()
+    env = tmp_path / "secrets.env"
+    env.write_text(f"DATABENTO_API_KEY={KEY}\nFINNHUB_API_KEY=fh-SECRET-not-real\n")
+    monkeypatch.setenv("KAIBOT_ENV_FILE", str(env))
+
+    def no_roots(req, timeout=None):
+        raise urllib.error.URLError("[SSL: CERTIFICATE_VERIFY_FAILED] unable to get local issuer certificate")
+
+    monkeypatch.setattr(urllib.request, "urlopen", no_roots)
+    assert m.main(["smoke_test_keys.py"]) == 1
+    out = capsys.readouterr().out
+    assert "http 0" in out and out.count(HINT) == 1
+    assert out.rstrip().splitlines()[-1] == HINT
+    assert KEY not in out and "fh-SECRET-not-real" not in out
+
+
+def test_no_hint_when_failures_are_real_http_statuses(monkeypatch, tmp_path, capsys):
+    m = _load()
+    env = tmp_path / "secrets.env"
+    env.write_text(f"DATABENTO_API_KEY={KEY}\n")
+    monkeypatch.setenv("KAIBOT_ENV_FILE", str(env))
+
+    def unauthorised(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", None, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", unauthorised)
+    assert m.main(["smoke_test_keys.py"]) == 1
+    assert HINT not in capsys.readouterr().out

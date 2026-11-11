@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.common.http import HttpError  # noqa: E402
 from kaibot.ingest import databento as dbn  # noqa: E402
+from kaibot.ingest.certs import CERT_HINT, ensure_ca_bundle  # noqa: E402
 
 DEFAULT_ENV = os.environ.get("KAIBOT_ENV_FILE") or str(Path.home() / "Projects" / "kaibot-secrets" / ".env")
 
@@ -49,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-cost", type=float, default=None, help="lower the per-request cap for this run (USD)")
     ap.add_argument("--confirm", action="store_true", help="actually download (billed against the credit)")
     a = ap.parse_args(argv)
+    ensure_ca_bundle()  # macOS Python has no root certificates: use certifi's, before any network call
     try:
         q = dbn.Query(a.dataset, a.schema, tuple(s.strip().upper() for s in a.symbols.split(",") if s.strip()),
                       a.start, a.end)
@@ -68,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except (HttpError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
+        if getattr(e, "status", None) == 0:
+            print(CERT_HINT, file=sys.stderr)
         return 1
     return 0
 
