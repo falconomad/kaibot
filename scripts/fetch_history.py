@@ -3,6 +3,8 @@
 python scripts/fetch_history.py --env .env --start 2025-01-01 [--news]
 python scripts/fetch_history.py --env .env --universe config/universe_history.yaml --start 2016-01-01 \
     --rth-only --shard 0/3 --per-min 45      # one of three workers; see scripts/fetch_history.sh
+python scripts/fetch_history.py --env .env --test-group high_beta_growth --start 2024-01-01 --rth-only
+    # S66: SPY + the research-only `test_groups` block (written by scripts/screen_test_group.py --write)
 """
 
 from __future__ import annotations
@@ -28,6 +30,16 @@ def load_env(p: str) -> dict:
     return env
 
 
+def universe_symbols(cfg: dict, test_group: str = "") -> list[str]:
+    """Default: SPY, the sector ETFs and every live symbol. With `test_group`: SPY plus that research-only group."""
+    if test_group:
+        groups = cfg.get("test_groups") or {}
+        if test_group not in groups:
+            raise SystemExit(f"no test_groups.{test_group} in the universe file: run screen_test_group.py --write")
+        return [cfg["market"], *groups[test_group]["symbols"]]
+    return [cfg["market"], *cfg["sectors"].keys(), *[s for v in cfg["sectors"].values() for s in v]]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--env", required=True)
@@ -35,6 +47,7 @@ def main() -> None:
     ap.add_argument("--data", default="data")
     ap.add_argument("--news", action="store_true")
     ap.add_argument("--universe", default=str(ROOT / "config" / "universe_seed.yaml"))
+    ap.add_argument("--test-group", default="", help="download SPY + this test_groups block instead of the universe")
     ap.add_argument("--rth-only", action="store_true", help="keep only 09:30-15:59 ET bars (all the replay reads)")
     ap.add_argument("--shard", default="0/1", help="i/n: this worker takes every n-th symbol starting at i")
     ap.add_argument("--rotate", type=int, default=0, help="start at this index (parallel workers)")
@@ -43,7 +56,7 @@ def main() -> None:
     env = load_env(a.env)
     api = Alpaca(env["ALPACA_API_KEY"], env.get("ALPACA_API_SECRET") or env["ALPACA_SECRET"], per_min=a.per_min)
     cfg = yaml.safe_load(Path(a.universe).read_text())
-    symbols = [cfg["market"], *cfg["sectors"].keys(), *[s for v in cfg["sectors"].values() for s in v]]
+    symbols = universe_symbols(cfg, a.test_group)
     symbols = symbols[a.rotate:] + symbols[:a.rotate]
     k, n_shards = (int(x) for x in a.shard.split("/"))
     symbols = symbols[k::n_shards]
