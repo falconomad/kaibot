@@ -15,7 +15,11 @@ if anything is off (fail closed).
     "themes": ["hyperscalers", "semiconductors"],          // keys of config/universe_seed.yaml `themes`
     "symbols": ["CRM"],                                    // extra symbols from the 59-name universe
     "exclude": ["INTC"],                                   // never traded, in every mode (also removed from the focus set)
-    "mode": "all" | "prefer" | "only"                      // all = no focus; only needs >= 5 symbols after exclude
+    "mode": "all" | "prefer" | "only",                     // all = no focus; only needs >= 5 symbols after exclude
+    "custom": {                                            // optional (S68): a custom ticker list, stored BY VALUE
+      "name": "AI picks",                                  // <= 40 characters, informational
+      "tickers": [{"symbol": "PLTR", "etf": "XLK"}]        // 1..40 accepted tickers outside the 59, see below
+    }
   },
   "risk": {                       // each value must be >= its floor and <= the level's value
     "risk_per_trade_pct": 0.5,    // floor 0.10
@@ -81,3 +85,110 @@ SPY momentum has no stored replay yet, so the page says "not estimated yet".
 
 Show `≈ N trades/month`, and the evidence pace as months to 900 trades. Rough guide: < 15/month "very slow
 evidence", < 40 "slow", otherwise "normal".
+
+## Custom ticker lists (S68, #96, migration 0013: waits for the stakeholder)
+
+The owner may type any US stock ticker. Kaibot checks it, and only **accepted** tickers can be put in a config.
+The safety filters are the same as for every catalogue stock and **cannot be overridden**.
+
+### Checking a ticker: `kb_check_ticker(p_symbol text)`
+Owner-checked. The symbol is trimmed and upper-cased. Returns:
+```jsonc
+{
+  "symbol": "PLTR",
+  "status": "accepted" | "refused" | "pending" | "error",
+  "reason": null | "plain sentence",        // always set for refused and error
+  "etf": "XLK",                             // accepted only: the sector fund for the sector-adjusted features
+  "in_catalogue": false,                    // true = one of the 59: put it in focus.symbols, not in focus.custom
+  "name": "Palantir Technologies Inc", "industry": "Technology",
+  "checked_on": "2026-11-12",               // ET day; the answer is cached for that day
+  "detail": {"sessions": 72, "adv20_usd": 3.1e9, "last_close": 61.2, "exchange": "NASDAQ", "as_of": "2026-11-12"}
+}
+```
+- **`pending`**: the check is queued (the database cannot call the data vendors; a worker answers within a few
+  seconds). Call `kb_check_ticker` again every 2 seconds, for at most 30 seconds, then show "still checking".
+- **`error`**: the vendors could not be reached. Calling again queues a new attempt.
+- Catalogue stocks, reference funds and badly formed symbols are answered at once, without a vendor call.
+- At most 200 new checks a day (free data limits). Past that the call raises `22023`.
+
+A ticker is **accepted** when all of these hold, on completed sessions before today (point-in-time):
+1. listed on NYSE, NASDAQ, ARCA, AMEX or BATS, and active and tradable at the broker;
+2. at least 60 trading days of price history;
+3. last close of $5 or more;
+4. average daily $ volume over the last 20 sessions above $50,000,000.
+
+The spread and quote-freshness limits need a live quote, so they stay where they are: checked at every entry.
+The sector fund comes from the company's Finnhub industry; an unknown industry uses SPY (the market).
+
+Refusal reasons (shown as they are; `X` is the ticker):
+| Case | `reason` |
+|---|---|
+| not a ticker | That does not look like a US stock ticker (1 to 5 letters, for example PLTR). |
+| SPY or a sector fund | X is a reference fund Kaibot compares stocks against, so it cannot be traded. |
+| unknown at the broker | We could not find X at the broker. Check the spelling. |
+| OTC, crypto, not a stock | X is not a stock listed on a major US exchange. |
+| halted or not tradable | X cannot be traded at the broker right now. |
+| too new | X has only N trading days of price history; Kaibot needs at least 60. |
+| price under $5 | X closed at $P; Kaibot only trades stocks above $5. |
+| too thinly traded | X trades about $NM a day; Kaibot needs more than $50M so orders fill at a fair price. |
+| vendors unreachable (`error`) | We could not check X right now. Try again later. |
+
+### Named lists (per owner)
+A list is a saved selection of symbols. It gives no permission by itself: tickers are checked when used.
+| RPC | Args | Returns |
+|---|---|---|
+| `kb_ticker_lists()` | | `{ max_tickers: 40, max_lists: 20, min_only: 5, lists: [{name, updated_at, symbols: [...]}] }` |
+| `kb_save_ticker_list(p_name text, p_symbols text[])` | name, symbols | `{ ok, name, symbols }`; same name = replace |
+| `kb_delete_ticker_list(p_name text)` | name | `{ ok: true }` |
+
+Each entry of `symbols` in `kb_ticker_lists` is `{symbol, status, in_catalogue, reason?, etf?, ...}` with the
+latest check of the last 7 days, or `status: "unchecked"`. Symbols are trimmed, upper-cased and de-duplicated; a
+list may mix catalogue stocks and other tickers.
+
+Errors (`22023`, message shown as it is):
+- Give the list a name of 1 to 40 characters.
+- A list needs at least one ticker.
+- A list can hold at most 40 tickers.
+- One of the tickers does not look like a US stock symbol.
+- Reference funds (SPY and the sector funds) cannot be in a list.
+- You can keep at most 20 lists. Delete one first.
+
+### Using a list in a config
+The config stores the list **by value**: editing or deleting a named list later never changes an applied version.
+To use a list, the page writes it into the draft:
+- symbols with `in_catalogue: true` go to `focus.symbols`;
+- every other **accepted** symbol goes to `focus.custom.tickers` as `{symbol, etf}`, with the `etf` that
+  `kb_check_ticker` returned;
+- `focus.custom.name` is the list's name; `focus.mode` is usually `"only"`.
+
+Rules, checked by `kb_save_config` and `kb_apply_config` (and again by the engine):
+- 1 to **40** custom tickers; no duplicates; no catalogue stocks; no reference funds; `etf` is SPY or a sector fund;
+- every custom ticker has an **accepted** check from the last 7 days, with the same `etf`;
+- *Only these* still needs at least **5** stocks in total (themes + `symbols` + custom tickers, after `exclude`);
+- `exclude` is for catalogue stocks; to drop a custom ticker, remove it from the list;
+- with mode `all` or `prefer`, custom tickers are traded **in addition to** the 59.
+
+Save and apply errors (`22023`):
+- X has not been checked yet. Check it before saving.
+- X cannot be used: *the refusal reason*
+- X has a different sector fund than its check
+- X is already in the catalogue: pick it as a stock instead
+- X is a reference fund and cannot be traded
+- X has an unknown sector fund
+- a custom ticker is not a valid US stock symbol
+- a custom ticker is listed twice
+- a custom list needs at least one ticker
+- a custom list can hold at most 40 tickers
+- the list name must be text of at most 40 characters
+- 'Only these' needs at least 5 stocks
+
+### What the engine does
+- The applied version takes effect at the **next session open**, like every config change. The history of new
+  tickers is downloaded before that open (from 45 minutes ahead; the first load of 40 tickers takes a few minutes).
+- At every open the engine runs the acceptance check again on the data it loaded. A ticker that no longer passes
+  is **not scanned that day** and can never be entered; a `custom_tickers` event lists what was accepted and
+  refused, with the reason. The rest of the list trades as usual.
+- Shorts, leverage and overnight holds stay off. A new list is a new config version: a new report chapter, a
+  trial row and a queued replay. The replay waits (`waiting_for_data`) until the minute history of the custom
+  tickers is on the replay machine.
+- Estimator: there is no stored trade rate for a custom ticker. Show "not estimated yet" for them.

@@ -119,7 +119,24 @@ focus = st.fixed_dictionaries({}, optional={
     "themes": st.lists(st.sampled_from([*THEMES, "nope"]), max_size=4),
     "symbols": st.lists(st.sampled_from([*sorted(UNIVERSE), "GME"]), max_size=6),
     "exclude": st.lists(st.sampled_from(sorted(UNIVERSE)), max_size=4),
-    "mode": st.sampled_from(["all", "prefer", "only", "x"])})
+    "mode": st.sampled_from(["all", "prefer", "only", "x"]),
+    # S68: custom ticker lists (mostly valid shapes, with the occasional catalogue stock, reference fund, bad
+    # symbol, bad sector fund, duplicate or wrong type)
+    "custom": st.one_of(
+        st.fixed_dictionaries(  # well-formed lists: most of these are accepted
+            {"tickers": st.lists(st.fixed_dictionaries({
+                "symbol": st.sampled_from(["PLTR", "UBER", "SHOP", "COIN", "SNOW", "ABNB", "BRK.B", "F", "AAPL"]),
+                "etf": st.sampled_from(["XLK", "XLF", "SPY", "XLY", "XLRE"])}), max_size=7,
+                unique_by=lambda x: x["symbol"])},
+            optional={"name": st.sampled_from(["", "AI picks", "x" * 40, "x" * 41, "caf\u00e9 \U0001F680"])}),
+        st.none(), st.just([]), st.fixed_dictionaries(  # hostile shapes
+            {"tickers": st.one_of(st.none(), st.lists(st.one_of(
+                st.fixed_dictionaries({"symbol": st.sampled_from(["PLTR", "UBER", "SPY", "XLK", "pltr", "TOOLONG", "",
+                                                                  "A1", "PLTR\n", "BRK.BB"]),
+                                       "etf": st.sampled_from(["XLK", "QQQ", ""])}, optional={"note": st.just("x")}),
+                st.just({"symbol": "PLTR"}), st.just("PLTR"), st.just({"symbol": 5, "etf": "XLK"}),
+                st.just({"symbol": "UBER", "etf": None})), max_size=4))},
+            optional={"name": st.one_of(st.none(), st.integers()), "extra": st.just(1)}))})
 strategies = st.dictionaries(st.sampled_from(["dip_reversal", "spy_late_momentum", "orb"]), st.booleans(), max_size=3)
 advanced = st.fixed_dictionaries({}, optional={
     "min_price_usd": num, "min_adv_usd": st.floats(0, 1e11, allow_nan=False), "max_spread_bp": num})
