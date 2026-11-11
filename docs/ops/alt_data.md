@@ -80,3 +80,18 @@ Central European time is 18:45 or 19:45 ET all year. If the Mac was asleep, laun
 Check it: `tail -50 ~/Projects/kaibot/logs/collect_alt.log`; data: `ls data/alt/*/`.
 On a VM later: the same command from cron (`45 23 * * *` in UTC is 18:45 ET in winter, 19:45 in summer; FINRA simply finds no file on weekends) or a
 `docker compose run` of the engine image with `python scripts/collect_alt.py` (mount `scripts/` and the data volume).
+
+## Features for the ablation (story S37)
+`src/kaibot/features/alt.py` is the one audited reader of this store from the trading packages (tech design §1:
+"Alt data is unreachable from features, except pump_risk"). Nothing in engine, strategies, risk, broker, agents or
+replay may import it (`tests/unit/test_alt_isolation.py`); its output is for the signal log and the M3 ablation only.
+All readers use `read_pit`; missing data gives None.
+
+| Feature | Definition |
+|---|---|
+| `short_volume(root, symbol, decision_ts)` | latest CNMS short/total volume ratio vs the mean of the previous 20 trade dates (>= 10 needed): `{trade_date, svr, svr_mean20, svr_rel}` |
+| `insider_net_buying(root, symbol, decision_ts, days=30)` | Form 4 non-derivative P minus S, transaction date in the last 30 days: `{net_shares, net_usd, n_buys, n_sells}`; None if the symbol is not in the filing ledger |
+| `gdelt_tone_z(root, query_name, decision_ts)` | latest 15-min average tone vs the previous buckets of 7 days (>= 20 needed) |
+| `alt_features(root, symbol, decision_ts)` | all of the above, every query |
+
+The live `pump_risk` long-block reads no alt data; see `docs/ops/news.md`.

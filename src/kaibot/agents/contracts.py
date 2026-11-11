@@ -7,8 +7,9 @@ candidate; they never set entry, stop, size or exit (those come from strategies 
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DropCause(StrEnum):
@@ -62,3 +63,15 @@ def admissible(v: JudgeVerdict, strategy: str) -> bool:
     if v.verdict == "veto":
         return False
     return not (strategy == "dip_reversal" and v.cause in (DropCause.COMPANY_NEWS, DropCause.UNKNOWN))
+
+
+class TriageScore(BaseModel):
+    """Haiku's one score per deduplicated news cluster (story S33). No price, size, stop or exit fields:
+    triage only labels evidence for the rules-only veto and the room."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cause: DropCause
+    materiality: float = Field(ge=0.0, le=1.0, description="0 = irrelevant to the stock today, 1 = thesis-changing")
+    direction: Literal["negative", "neutral", "positive"]
+    summary: str = Field(max_length=200)
