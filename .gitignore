@@ -16,3 +16,4 @@ logs/
 *.sqlite
 .DS_Store
 *.tsbuildinfo
+!apps/web/src/data/

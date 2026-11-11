@@ -1,0 +1,357 @@
+{
+ "AAPL": {
+  "name": "Apple Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AAPL.png",
+  "industry": "Technology"
+ },
+ "ABBV": {
+  "name": "AbbVie Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ABBV.png",
+  "industry": "Biotechnology"
+ },
+ "ADBE": {
+  "name": "Adobe Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ADBE.png",
+  "industry": "Technology"
+ },
+ "AMD": {
+  "name": "Advanced Micro Devices, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMD.png",
+  "industry": "Semiconductors"
+ },
+ "AMT": {
+  "name": "American Tower Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959033886.png",
+  "industry": "Real Estate"
+ },
+ "AMZN": {
+  "name": "Amazon.com Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMZN.png",
+  "industry": "Retail"
+ },
+ "AVGO": {
+  "name": "Broadcom Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AVGO.png",
+  "industry": "Semiconductors"
+ },
+ "BA": {
+  "name": "Boeing Co",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BA.png",
+  "industry": "Aerospace & Defense"
+ },
+ "BAC": {
+  "name": "Bank of America Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BAC.png",
+  "industry": "Banking"
+ },
+ "BKNG": {
+  "name": "Booking Holdings Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BKNG.png",
+  "industry": "Hotels, Restaurants & Leisure"
+ },
+ "CAT": {
+  "name": "Caterpillar Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CAT.png",
+  "industry": "Machinery"
+ },
+ "COP": {
+  "name": "ConocoPhillips",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/COP.png",
+  "industry": "Energy"
+ },
+ "COST": {
+  "name": "Costco Wholesale Corp",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/COST.png",
+  "industry": "Retail"
+ },
+ "CRM": {
+  "name": "Salesforce, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CRM.png",
+  "industry": "Technology"
+ },
+ "CSCO": {
+  "name": "Cisco Systems Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/950800186156.png",
+  "industry": "Communications"
+ },
+ "CVX": {
+  "name": "Chevron Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CVX.png",
+  "industry": "Energy"
+ },
+ "DE": {
+  "name": "Deere & Co",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DE.png",
+  "industry": "Machinery"
+ },
+ "DIS": {
+  "name": "The Walt Disney Company",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DIS.png",
+  "industry": "Media"
+ },
+ "DUK": {
+  "name": "Duke Energy Corp",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DUK.png",
+  "industry": "Utilities"
+ },
+ "GE": {
+  "name": "General Electric Company",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GE.png",
+  "industry": "Aerospace & Defense"
+ },
+ "GOOGL": {
+  "name": "Alphabet Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GOOG.png",
+  "industry": "Media"
+ },
+ "GS": {
+  "name": "The Goldman Sachs Group, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GS.png",
+  "industry": "Financial Services"
+ },
+ "HD": {
+  "name": "The Home Depot, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/HD.png",
+  "industry": "Retail"
+ },
+ "HON": {
+  "name": "Honeywell International Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942965692746.png",
+  "industry": "Industrial Conglomerates"
+ },
+ "INTC": {
+  "name": "Intel Corp",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/INTC.png",
+  "industry": "Semiconductors"
+ },
+ "JNJ": {
+  "name": "Johnson & Johnson",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/JNJ.png",
+  "industry": "Pharmaceuticals"
+ },
+ "JPM": {
+  "name": "JPMorgan Chase & Co.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/JPM.png",
+  "industry": "Banking"
+ },
+ "KO": {
+  "name": "Coca-Cola Co",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/KO.png",
+  "industry": "Beverages"
+ },
+ "LIN": {
+  "name": "Linde PLC",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/950838588696.png",
+  "industry": "Chemicals"
+ },
+ "LLY": {
+  "name": "Eli Lilly and Company",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LLY.png",
+  "industry": "Pharmaceuticals"
+ },
+ "LOW": {
+  "name": "Lowe's Companies Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LOW.png",
+  "industry": "Retail"
+ },
+ "MA": {
+  "name": "Mastercard Incorporated",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MA.png",
+  "industry": "Financial Services"
+ },
+ "MCD": {
+  "name": "McDonald's Corp",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MCD.png",
+  "industry": "Hotels, Restaurants & Leisure"
+ },
+ "META": {
+  "name": "Meta Platforms, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/FB.png",
+  "industry": "Media"
+ },
+ "MRK": {
+  "name": "Merck & Co Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MRK.png",
+  "industry": "Pharmaceuticals"
+ },
+ "MS": {
+  "name": "Morgan Stanley",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MS.png",
+  "industry": "Financial Services"
+ },
+ "MSFT": {
+  "name": "Microsoft Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MSFT.png",
+  "industry": "Technology"
+ },
+ "NEE": {
+  "name": "NextEra Energy, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NEE.png",
+  "industry": "Utilities"
+ },
+ "NFLX": {
+  "name": "Netflix, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NFLX.png",
+  "industry": "Media"
+ },
+ "NKE": {
+  "name": "NIKE, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NKE.png",
+  "industry": "Textiles, Apparel & Luxury Goods"
+ },
+ "NVDA": {
+  "name": "NVIDIA Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959144056.png",
+  "industry": "Semiconductors"
+ },
+ "ORCL": {
+  "name": "Oracle Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ORCL.png",
+  "industry": "Technology"
+ },
+ "PEP": {
+  "name": "PepsiCo, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PEP.png",
+  "industry": "Beverages"
+ },
+ "PFE": {
+  "name": "Pfizer Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PFE.png",
+  "industry": "Pharmaceuticals"
+ },
+ "PG": {
+  "name": "The Procter & Gamble Company",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PG.png",
+  "industry": "Consumer products"
+ },
+ "PLD": {
+  "name": "Prologis, Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959032636.png",
+  "industry": "Real Estate"
+ },
+ "QCOM": {
+  "name": "QUALCOMM Incorporated",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/QCOM.png",
+  "industry": "Semiconductors"
+ },
+ "RTX": {
+  "name": "RTX Corporation",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/RTX.png",
+  "industry": "Aerospace & Defense"
+ },
+ "SBUX": {
+  "name": "Starbucks Corp",
+  "logo": "https://static9.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959080056.png",
+  "industry": "Hotels, Restaurants & Leisure"
+ },
+ "SPY": {
+  "name": "S&P 500 ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "TMO": {
+  "name": "Thermo Fisher Scientific Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TMO.png",
+  "industry": "Life Sciences Tools & Services"
+ },
+ "TMUS": {
+  "name": "T-Mobile US Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TMUS.png",
+  "industry": "Telecommunication"
+ },
+ "TSLA": {
+  "name": "Tesla Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TSLA.png",
+  "industry": "Automobiles"
+ },
+ "TXN": {
+  "name": "Texas Instruments Incorporated",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TXN.png",
+  "industry": "Semiconductors"
+ },
+ "UNH": {
+  "name": "UnitedHealth Group Incorporated",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/UNH.png",
+  "industry": "Health Care"
+ },
+ "UPS": {
+  "name": "United Parcel Service Inc",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/UPS.png",
+  "industry": "Logistics & Transportation"
+ },
+ "V": {
+  "name": "Visa Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/V.png",
+  "industry": "Financial Services"
+ },
+ "WFC": {
+  "name": "Wells Fargo & Company",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/WFC.png",
+  "industry": "Banking"
+ },
+ "WMT": {
+  "name": "Walmart Inc.",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/WMT.png",
+  "industry": "Retail"
+ },
+ "XLB": {
+  "name": "Materials ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLC": {
+  "name": "Communication ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLE": {
+  "name": "Energy ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLF": {
+  "name": "Financials ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLI": {
+  "name": "Industrials ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLK": {
+  "name": "Technology ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLP": {
+  "name": "Consumer Staples ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLRE": {
+  "name": "Real Estate ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLU": {
+  "name": "Utilities ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLV": {
+  "name": "Health Care ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XLY": {
+  "name": "Consumer Discretionary ETF",
+  "logo": null,
+  "industry": "ETF"
+ },
+ "XOM": {
+  "name": "Exxonmobil Holdings Corp",
+  "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/960001797516.png",
+  "industry": "Energy"
+ }
+}
