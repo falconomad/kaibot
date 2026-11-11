@@ -106,8 +106,8 @@ def main(argv: list[str] | None = None, api=None) -> int:
         return 1
     tg.write_test_group(seed, a.group, passing, label, datetime.now(UTC).date(), filters)
     print(f"Wrote {len(passing)} names to {seed} under test_groups.{a.group} (not read by the live engine).")
-    print("Minute bars for replay: scripts/fetch_history.py --env <.env> --test-group "
-          f"{a.group} --start 2024-01-01 --rth-only")
+    print("Minute bars for replay: .venv/bin/python scripts/fetch_history.py --test-group "
+          f"{a.group} --start 2024-01-01 --rth-only --per-min 45   (same KAIBOT_ENV_FILE)")
     return 0
 
 
