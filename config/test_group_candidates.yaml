@@ -1,0 +1,42 @@
+# S66 (issue #94): CANDIDATES, NOT YET SCREENED. Research-only test groups; nothing here is tradable.
+# No beta, volume, spread or price is recorded in this file on purpose: those come only from
+# scripts/screen_test_group.py (Alpaca SIP history), which prints PASS/FAIL per name and, with --write, puts the
+# passing names into `test_groups` in config/universe_seed.yaml. The live engine reads neither file's test groups.
+# The list was written from general knowledge on 11 Nov 2026 without market data: a ticker that has since been
+# renamed, acquired or delisted shows up as "no data" in the screen. The reasons say why a name is a candidate,
+# they are not recommendations.
+status: candidates_not_yet_screened
+groups:
+  high_beta_growth:
+    label: High-beta growth (test)
+    candidates:
+      # named by the stakeholder
+      - {symbol: NBIS, reason: "Nebius: AI cloud infrastructure; relisted on Nasdaq in 2024, so a short history"}
+      - {symbol: CRWV, reason: "CoreWeave: AI cloud (GPU) provider; IPO in 2025, so a short history"}
+      - {symbol: FSLY, reason: "Fastly: edge cloud and content delivery; smaller cap, liquidity to be checked"}
+      # AI infrastructure and semis-adjacent
+      - {symbol: IREN, reason: "IREN: data centres moving from bitcoin mining to AI cloud"}
+      - {symbol: SMCI, reason: "Super Micro Computer: AI servers; large swings around earnings and news"}
+      - {symbol: ALAB, reason: "Astera Labs: data-centre connectivity chips; IPO in 2024"}
+      # software and internet growth
+      - {symbol: PLTR, reason: "Palantir: AI and data software; heavily traded growth name"}
+      - {symbol: APP, reason: "AppLovin: ad-tech software; fast-moving growth name"}
+      - {symbol: NET, reason: "Cloudflare: edge network and security; Fastly's larger peer"}
+      - {symbol: SNOW, reason: "Snowflake: cloud data platform"}
+      - {symbol: DDOG, reason: "Datadog: cloud monitoring software"}
+      - {symbol: SHOP, reason: "Shopify: e-commerce platform, US-listed"}
+      - {symbol: RBLX, reason: "Roblox: gaming platform"}
+      - {symbol: ROKU, reason: "Roku: streaming platform"}
+      - {symbol: RDDT, reason: "Reddit: social platform; IPO in 2024"}
+      # fintech and crypto-linked
+      - {symbol: COIN, reason: "Coinbase: crypto exchange; moves with crypto prices"}
+      - {symbol: HOOD, reason: "Robinhood: retail brokerage"}
+      - {symbol: MSTR, reason: "Strategy (MicroStrategy): bitcoin-holding company; very volatile"}
+      - {symbol: SOFI, reason: "SoFi: digital bank; low share price, check the $5 floor"}
+      - {symbol: AFRM, reason: "Affirm: buy-now-pay-later lender"}
+      - {symbol: UPST, reason: "Upstart: AI lending platform"}
+      # frontier tech and consumer growth
+      - {symbol: RKLB, reason: "Rocket Lab: space launch and systems"}
+      - {symbol: ASTS, reason: "AST SpaceMobile: satellite-to-phone network; pre-revenue style swings"}
+      - {symbol: IONQ, reason: "IonQ: quantum computing"}
+      - {symbol: HIMS, reason: "Hims & Hers: consumer telehealth"}
