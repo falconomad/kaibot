@@ -13,3 +13,5 @@
 - Architecture board (Whiteboard, slug `b099f04b-1c74-46fe-b635-7b9b30348e4f`, https://claude.ai/artifact/NoqNs89Sbz3h5UPRQUZNFY):
   when a change adds, removes or renames an engine step in `src/kaibot/engine/` or `risk/gate.py`, or a milestone's status changes,
   update the matching blocks and the "Synced with main @ <sha>" line. Read the board first and edit only what changed.
+- Teams and delegation: `docs/teams.md`. The stakeholder talks to Product only; Product delegates with `/delegate <issue>`
+  to the team agents in `.claude/agents/`. Stay inside your team's folders.
