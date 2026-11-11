@@ -292,9 +292,14 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 .kb-locked ul { margin: 8px 0 0; padding-left: 22px; font-size: 13px; color: var(--slate); }
 /* fine-tune */
 .kb-fine-head { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
+.kb-back { align-self: flex-start; font-size: 14px; font-weight: 600; color: var(--sea); text-decoration: none; padding: 6px 0; }
+.kb-expand .kb-locked-rows { padding: 0 0 0 26px; }
+.kb-exclude, .kb-never { display: flex; flex-direction: column; gap: 10px; }
+.kb-exclude { padding-top: 14px; border-top: 1px solid var(--surface-2); }
+.kb-srow > button:focus-visible { outline: 2px solid var(--sea); outline-offset: -2px; }
 .kb-strategy:has(.kb-fine-head) > * { max-width: 720px; width: 100%; margin-left: auto; margin-right: auto; }
 .kb-group { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
-.kb-srow + .kb-srow, .kb-srow-static + .kb-srow-static, figure + .kb-srow, .kb-srow + .kb-locked-head { border-top: 1px solid var(--surface-2); }
+.kb-srow + .kb-srow, .kb-srow-static + .kb-srow-static, figure + .kb-srow { border-top: 1px solid var(--surface-2); }
 .kb-srow > button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 0 20px; border: 0; border-radius: 0;
   background: transparent; text-align: left; font-weight: 400; }
 .kb-srow > button:hover { background: #171A1F; filter: none; }
@@ -328,7 +333,8 @@ input[type=range].kb:disabled { opacity: .45; cursor: not-allowed; }
 .kb-search input { border: 0 !important; background: transparent !important; min-height: 42px !important; padding: 0 !important; outline: none; }
 .kb-symlist { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .kb-symlist li { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 4px 0 6px; border-radius: 999px; background: var(--surface-2); font-size: 13px; }
-.kb-symlist.out li { padding-left: 12px; color: var(--slate); text-decoration: line-through; }
+.kb-symlist.out li { padding-left: 12px; color: var(--slate); }
+.kb-symlist.out li b { text-decoration: line-through; }
 .kb-symlist li button { width: 28px; min-height: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--stale); font-size: 15px; }
 /* outcome bar + review sheet */
 .kb-dock { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 15; display: flex; align-items: center; gap: 12px;

@@ -2,15 +2,20 @@ import { describe, expect, it } from "vitest";
 import estimatorJson from "../data/estimator.json";
 import themesJson from "../data/themes.json";
 import seedYaml from "../../../../config/universe_seed.yaml?raw";
-import strategySrc from "../pages/Strategy.tsx?raw";
+import presetsJson from "../data/presets.json";
+import strategyPageSrc from "../pages/Strategy.tsx?raw";
+import fineTuneSrc from "../pages/FineTune.tsx?raw";
+import sharedSrc from "../pages/StrategyShared.tsx?raw";
+import mainSrc from "../main.tsx?raw";
 import type { Level } from "./api";
 import {
-  ADV_KEYS, BOLD_STEPS, NUM_KEYS, PRESETS, RISK_KEYS, TIMING_KEYS, boldnessRisk, boldnessSteps, cautionOn, clampBody, diffConfig, diffSentence,
+  ADV_KEYS, BOLD_STEPS, CAUTION, HOURS, MAX_EXCLUDED, NUM_KEYS, PRESETS, canExclude, excludeStock, includeStock, RISK_KEYS, TIMING_KEYS, boldnessRisk, boldnessSteps, cautionOn, clampBody, diffConfig, diffSentence,
   dollars, focusSet, hoursShape, hoursWindow, levelDefaults, matchBoldness, matchPreset, nextOpenEt, normalizeBounds, presetBody,
   setBoldness, setCaution, toggleTheme, validateBody, type Bounds, type ConfigBody, type NumKey, type Themes,
 } from "./config";
 import { estimateTrades, paceText, windowShare, type EstimatorData } from "./derive";
 
+const strategySrc = strategyPageSrc + fineTuneSrc + sharedSrc;
 const EST = estimatorJson as unknown as EstimatorData;
 const THEMES = themesJson as Themes;
 const UNI = Object.keys(EST.dip_per_month);
@@ -285,5 +290,117 @@ describe("exclude means never traded", () => {
     const base = estimateTrades(d, EST, THEMES).perMonth;
     const ex = estimateTrades({ ...d, focus: { ...d.focus, exclude: ["DUK"] } }, EST, THEMES).perMonth;
     expect(ex).toBeLessThan(base);
+  });
+});
+
+describe("S51: presets and Boldness come from the shared spec (presets.json)", () => {
+  const spec = presetsJson as unknown as {
+    boldness: Record<string, number | string>[]; hours: { key: string }[]; caution: Record<string, Record<string, number | string>>;
+    presets: Record<string, { boldness: number; hours: string; caution: string[] }>; limits: { max_excluded: number };
+  };
+  it("the exported tables are the spec, nothing hard-coded", () => {
+    expect(BOLD_STEPS.map((s) => s.name)).toEqual(spec.boldness.map((s) => s.name));
+    for (let i = 0; i < 5; i++) for (const k of RISK_KEYS) expect(BOLD_STEPS[i].risk[k]).toBe(spec.boldness[i][k]);
+    expect(HOURS).toEqual(spec.hours);
+    expect(CAUTION.map((c) => c.key)).toEqual(Object.keys(spec.caution));
+    expect(PRESETS.map((p) => p.key)).toEqual(Object.keys(spec.presets));
+    expect(MAX_EXCLUDED).toBe(spec.limits.max_excluded);
+    expect(MAX_EXCLUDED).toBe(10);
+  });
+  for (const l of LEVELS) {
+    it(`${l}: every step, hours shape, caution pill and preset, clamped, stays inside the bounds`, () => {
+      const b = B(l);
+      const d = levelDefaults(b);
+      for (let i = 0; i < spec.boldness.length; i++) {
+        const x = setBoldness(d, i, b);
+        expect(inBounds(x, b)).toBe(true);
+        expect(clampBody(x, b, THEMES, UNI).risk).toEqual(x.risk); // already clamped: clampBody changes nothing
+      }
+      for (const h of spec.hours) {
+        const x = { ...d, timing: { ...d.timing, ...hoursWindow(h.key, b) } };
+        expect(validateBody(x, b, THEMES)).toEqual([]);
+      }
+      for (const c of CAUTION) {
+        const x = setCaution(d, c.key, true, b);
+        expect(inBounds(x, b)).toBe(true);
+        expect(cautionOn(x, b)[c.key]).toBe(true);
+      }
+      for (const p of PRESETS) {
+        const x = presetBody(p.key, b, THEMES, UNI);
+        expect(inBounds(x, b)).toBe(true);
+        expect(validateBody(x, b, THEMES)).toEqual([]);
+        expect(x.risk).toEqual(boldnessRisk(spec.presets[p.key].boldness, b));
+        expect(hoursShape(x, b)).toBe(spec.presets[p.key].hours);
+        for (const c of CAUTION) expect(cautionOn(x, b)[c.key]).toBe(spec.presets[p.key].caution.includes(c.key));
+      }
+    });
+  }
+  it("any manual edit after a preset or step switches to Custom", () => {
+    const b = B("balanced");
+    const x = presetBody("calm", b, THEMES, UNI);
+    expect(matchPreset({ ...x, risk: { ...x.risk, max_positions: x.risk.max_positions - 1 } }, b, THEMES, UNI)).toBe("custom");
+    expect(matchPreset(excludeStock(x, "INTC", UNI), b, THEMES, UNI)).toBe("custom");
+    expect(setBoldness(x, 1, b).preset).toBe("custom");
+  });
+});
+
+describe("S53: exclusions, in every mode", () => {
+  const b = B();
+  const d = levelDefaults(b);
+  it("excluding works in All mode and keeps the mode", () => {
+    const x = excludeStock(excludeStock(d, "INTC", UNI), "XOM", UNI);
+    expect(x.focus.mode).toBe("all");
+    expect(x.focus.exclude).toEqual(["INTC", "XOM"]);
+    expect(includeStock(x, "INTC").focus.exclude).toEqual(["XOM"]);
+  });
+  it("an excluded extra symbol leaves the focus set", () => {
+    const x = { ...d, focus: { themes: ["semiconductors"], symbols: ["CRM"], exclude: [], mode: "prefer" as const } };
+    const y = excludeStock(x, "CRM", UNI);
+    expect(y.focus.symbols).toEqual([]);
+    expect(focusSet(y, THEMES)).not.toContain("CRM");
+  });
+  it("choosing All stocks keeps the exclusions", () => {
+    const x = excludeStock(toggleTheme(d, "energy"), "XOM", UNI);
+    expect(toggleTheme(x, null).focus).toEqual({ themes: [], symbols: [], exclude: ["XOM"], mode: "all" });
+  });
+  it("at most MAX_EXCLUDED: the 11th is refused and clampBody trims", () => {
+    let x = d;
+    for (const s of UNI.slice(0, MAX_EXCLUDED)) x = excludeStock(x, s, UNI);
+    expect(x.focus.exclude.length).toBe(MAX_EXCLUDED);
+    expect(canExclude(x, UNI[MAX_EXCLUDED], UNI)).toBe(false);
+    expect(excludeStock(x, UNI[MAX_EXCLUDED], UNI)).toBe(x);
+    const wild = clampBody({ focus: { themes: [], symbols: [], exclude: UNI.slice(0, 15), mode: "all" } } as Partial<ConfigBody>, b, THEMES, UNI);
+    expect(wild.focus.exclude.length).toBe(MAX_EXCLUDED);
+  });
+  it("reference symbols (SPY, sector ETFs) aren't in the universe, so they can't be excluded", () => {
+    for (const s of ["SPY", "XLK", "XLE", "XLF", "SMH", "QQQ"]) {
+      expect(UNI).not.toContain(s);
+      expect(canExclude(d, s, UNI)).toBe(false);
+      expect(excludeStock(d, s, UNI).focus.exclude).toEqual([]);
+    }
+  });
+  for (const mode of ["all", "prefer", "only"] as const) {
+    it(`the estimator drops excluded stocks in ${mode} mode`, () => {
+      const x = { ...d, focus: { themes: ["semiconductors", "big_tech"], symbols: [], exclude: [], mode } };
+      const sym = focusSet(x, THEMES)[0];
+      const before = estimateTrades(x, EST, THEMES).perMonth;
+      const after = estimateTrades(excludeStock(x, sym, UNI), EST, THEMES).perMonth;
+      expect(before - after).toBeCloseTo(EST.dip_per_month[sym], 9);
+    });
+  }
+});
+
+describe("S52: Fine-tune is a real route that shares the Strategy draft", () => {
+  it("/strategy/fine-tune is a lazy child route of /strategy", () => {
+    expect(mainSrc).toMatch(/<Route path="strategy" element={<Strategy \/>}>[\s\S]*<Route path="fine-tune" element={<FineTune \/>} \/>/);
+    expect(mainSrc).toMatch(/const FineTune = lazy\(/);
+  });
+  it("Fine-tune reads the shared draft and calls no RPC itself", () => {
+    expect(fineTuneSrc).toMatch(/useStrategy\(\)/);
+    expect(fineTuneSrc).not.toMatch(/api\./);
+    expect(fineTuneSrc).toMatch(/to="\/strategy"/);
+  });
+  it("the accordion rows are buttons with aria-expanded and aria-controls", () => {
+    expect(fineTuneSrc).toMatch(/aria-expanded={open} aria-controls={panel}/);
   });
 });

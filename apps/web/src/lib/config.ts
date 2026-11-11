@@ -3,6 +3,7 @@
 // server's 22023 check should never fire. Presets and Boldness are shortcuts that write these same fields.
 import type { Level } from "./api";
 import { LEVELS } from "./model";
+import presetsJson from "../data/presets.json";
 
 export type FocusMode = "all" | "prefer" | "only";
 export type PresetKey = "default" | "big_tech" | "calm" | "custom";
@@ -114,7 +115,7 @@ export function clampBody(partial: Partial<ConfigBody> | null | undefined, b: Bo
     schema: 1,
     preset: (["default", "big_tech", "calm", "custom"] as const).includes(p.preset as PresetKey) ? (p.preset as PresetKey) : "custom",
     boldness: typeof p.boldness === "number" && p.boldness >= 0 && p.boldness <= 4 ? Math.round(p.boldness) : null,
-    focus: { themes: uniq(f.themes, new Set(Object.keys(themes))), symbols: uniq(f.symbols, uni), exclude: uniq(f.exclude, uni), mode },
+    focus: { themes: uniq(f.themes, new Set(Object.keys(themes))), symbols: uniq(f.symbols, uni), exclude: uniq(f.exclude, uni).slice(0, MAX_EXCLUDED), mode },
     risk: pick(RISK_KEYS, p.risk),
     strategies: Object.fromEntries(STRATEGY_KEYS.map((k) => [k, (s[k] === undefined || s[k] === null ? d.strategies[k] : !!s[k]) && b.strategies.includes(k)])) as Record<StrategyKey, boolean>,
     timing: { entry_start: toHhmm(tm(p.timing?.entry_start, lo)), entry_end: toHhmm(tm(p.timing?.entry_end, hi)), ...pick(TIMING_KEYS, p.timing) },
@@ -148,17 +149,29 @@ export function validateBody(body: ConfigBody, b: Bounds, themes: Themes): strin
   return err;
 }
 
+// ---------------------------------------------------------------- the shared spec (S51)
+// config/presets.yaml is the one source for the presets, the 5 Boldness steps, the hours shapes, the caution pills and
+// the exclusion limit; src/data/presets.json is its generated copy (scripts/gen_presets_json.py, kept in sync by
+// tests/test_presets.py). The spec is in absolute numbers (Careful = the Steady level's limits, Max = Hunter); every
+// value is clamped to the run's level here, so below Hunter the upper steps collapse onto the level's own limits.
+export type Caution = "vix" | "pause" | "quiet";
+type SpecPresetKey = Exclude<PresetKey, "custom">;
+interface PresetSpec {
+  boldness: ({ name: string } & Record<RiskKey, number>)[];
+  hours: { key: string; name: string; from: number; to: number }[];
+  caution: Record<Caution, { name: string } & Partial<Record<TimingNumKey, number>>>;
+  presets: Record<SpecPresetKey, { name: string; icon: string; blurb: string; focus: { mode: FocusMode; themes: string[] }; boldness: number;
+    hours: string; caution: Caution[] }>;
+  limits: { max_excluded: number };
+}
+export const SPEC = presetsJson as unknown as PresetSpec;
+/** Most stocks that can be excluded ("never traded"). The server rejects more. */
+export const MAX_EXCLUDED = SPEC.limits.max_excluded;
+
 // ---------------------------------------------------------------- Boldness (5 steps)
-// The approved design's table (configure2.py) is in absolute numbers: Careful = the Steady level's limits, Moderate =
-// Balanced, Max = Hunter. A step is clamped to the run's level, so below Hunter the upper steps collapse onto the
-// level's own limits and Max can never exceed it.
-export const BOLD_STEPS: { name: string; risk: Record<RiskKey, number> }[] = [
-  { name: "Careful", risk: { risk_per_trade_pct: 0.25, daily_stop_pct: 0.75, max_positions: 3, max_position_pct: 10, max_entries_per_day: 10, run_drawdown_end_pct: 4 } },
-  { name: "Steady", risk: { risk_per_trade_pct: 0.35, daily_stop_pct: 1.0, max_positions: 4, max_position_pct: 12, max_entries_per_day: 15, run_drawdown_end_pct: 6 } },
-  { name: "Moderate", risk: { risk_per_trade_pct: 0.5, daily_stop_pct: 1.5, max_positions: 5, max_position_pct: 15, max_entries_per_day: 20, run_drawdown_end_pct: 8 } },
-  { name: "Bold", risk: { risk_per_trade_pct: 0.75, daily_stop_pct: 2.0, max_positions: 6, max_position_pct: 18, max_entries_per_day: 25, run_drawdown_end_pct: 10 } },
-  { name: "Max", risk: { risk_per_trade_pct: 1.0, daily_stop_pct: 3.0, max_positions: 8, max_position_pct: 20, max_entries_per_day: 30, run_drawdown_end_pct: 12 } },
-];
+export const BOLD_STEPS: { name: string; risk: Record<RiskKey, number> }[] = SPEC.boldness.map((s) => ({
+  name: s.name, risk: Object.fromEntries(RISK_KEYS.map((k) => [k, Number(s[k])])) as Record<RiskKey, number>,
+}));
 
 export function boldnessRisk(step: number, b: Bounds): Record<RiskKey, number> {
   const s = BOLD_STEPS[Math.max(0, Math.min(4, Math.round(step)))];
@@ -180,10 +193,7 @@ export function setBoldness(body: ConfigBody, step: number, b: Bounds): ConfigBo
 }
 
 // ---------------------------------------------------------------- trading-hours shapes (minutes after 09:30)
-export const HOURS: { key: string; name: string; from: number; to: number }[] = [
-  { key: "all", name: "All day", from: 5, to: 375 }, { key: "skip", name: "Skip the open", from: 30, to: 375 },
-  { key: "am", name: "Mornings", from: 5, to: 180 }, { key: "pm", name: "Afternoons", from: 180, to: 375 },
-];
+export const HOURS: { key: string; name: string; from: number; to: number }[] = SPEC.hours;
 export function hoursWindow(key: string, b: Bounds) {
   const h = HOURS.find((x) => x.key === key) ?? HOURS[0];
   const lo = toMin(b.entry.start), hi = toMin(b.entry.end);
@@ -195,40 +205,29 @@ export function hoursShape(body: ConfigBody, b: Bounds): string | null {
 }
 
 // ---------------------------------------------------------------- extra caution pills
-export type Caution = "vix" | "pause" | "quiet";
-export const CAUTION: { key: Caution; name: string }[] = [
-  { key: "vix", name: "Sit out fear spikes" }, { key: "pause", name: "Longer pause after losses" }, { key: "quiet", name: "Wider Fed/CPI quiet" },
-];
+export const CAUTION: { key: Caution; name: string }[] = (Object.keys(SPEC.caution) as Caution[]).map((key) => ({ key, name: SPEC.caution[key].name }));
+const cautionFields = (key: Caution) => (Object.keys(SPEC.caution[key]) as (TimingNumKey | "name")[]).filter((k): k is TimingNumKey => k !== "name");
+/** A pill is on when any field it writes is stricter than the level's value. */
 export function cautionOn(body: ConfigBody, b: Bounds): Record<Caution, boolean> {
-  const t = body.timing;
-  return { vix: t.vix_max < b.vix_max.max, pause: t.pause_losses < b.pause_losses.max || t.pause_minutes > b.pause_minutes.min,
-    quiet: t.event_window_min > b.event_window_min.min };
+  return Object.fromEntries(CAUTION.map(({ key }) => [key, cautionFields(key).some((k) => body.timing[k] !== levelValue(k, b))])) as Record<Caution, boolean>;
 }
+/** On writes the spec's values (clamped to the level); off returns those fields to the level's value. */
 export function setCaution(body: ConfigBody, key: Caution, on: boolean, b: Bounds): ConfigBody {
   const t = { ...body.timing };
-  if (key === "vix") t.vix_max = on ? clamp(25, b.vix_max) : b.vix_max.max;
-  if (key === "pause") { t.pause_losses = on ? b.pause_losses.min : b.pause_losses.max; t.pause_minutes = on ? clamp(120, b.pause_minutes) : b.pause_minutes.min; }
-  if (key === "quiet") t.event_window_min = on ? clamp(60, b.event_window_min) : b.event_window_min.min;
+  for (const k of cautionFields(key)) t[k] = on ? clamp(Number(SPEC.caution[key][k]), b[k]) : levelValue(k, b);
   return { ...body, preset: "custom", timing: t };
 }
 
 // ---------------------------------------------------------------- presets
-export const PRESETS: { key: Exclude<PresetKey, "custom">; name: string; icon: string; blurb: string }[] = [
-  { key: "default", name: "Kaibot default", icon: "⚡", blurb: "All 59 stocks, the full limits of your level, all day." },
-  { key: "big_tech", name: "Big tech", icon: "◆", blurb: "Big Tech, hyperscalers and chips only. Moderate size, skips the open." },
-  { key: "calm", name: "Calm", icon: "☾", blurb: "All stocks, small trades, sits out shaky days." },
-];
-export function presetBody(key: Exclude<PresetKey, "custom">, b: Bounds, themes: Themes, universe: string[]): ConfigBody {
+export const PRESETS: { key: SpecPresetKey; name: string; icon: string; blurb: string }[] = (Object.keys(SPEC.presets) as SpecPresetKey[])
+  .map((key) => ({ key, name: SPEC.presets[key].name, icon: SPEC.presets[key].icon, blurb: SPEC.presets[key].blurb }));
+export function presetBody(key: SpecPresetKey, b: Bounds, themes: Themes, universe: string[]): ConfigBody {
+  const p = SPEC.presets[key];
   let x = levelDefaults(b);
-  if (key === "big_tech") {
-    x = { ...x, focus: { themes: ["big_tech", "hyperscalers", "semiconductors"].filter((t) => t in themes), symbols: [], exclude: [], mode: "only" },
-      timing: { ...x.timing, ...hoursWindow("skip", b) } };
-    x = setBoldness(x, 2, b);
-  }
-  if (key === "calm") {
-    x = setBoldness({ ...x, timing: { ...x.timing, ...hoursWindow("skip", b) } }, 0, b);
-    for (const c of ["vix", "pause", "quiet"] as Caution[]) x = setCaution(x, c, true, b);
-  }
+  x = { ...x, focus: { themes: p.focus.themes.filter((t) => t in themes), symbols: [], exclude: [], mode: p.focus.mode },
+    timing: { ...x.timing, ...hoursWindow(p.hours, b) } };
+  x = setBoldness(x, p.boldness, b);
+  for (const c of p.caution) x = setCaution(x, c, true, b);
   return clampBody({ ...x, preset: key }, b, themes, universe);
 }
 /** Which preset card these settings match (presets are only shortcuts, so we compare the fields they write). */
@@ -239,11 +238,26 @@ export function matchPreset(body: ConfigBody, b: Bounds, themes: Themes, univers
 
 // ---------------------------------------------------------------- focus edits
 export function toggleTheme(body: ConfigBody, key: string | null): ConfigBody {
-  if (key === null) return { ...body, preset: "custom", focus: { themes: [], symbols: [], exclude: [], mode: "all" } };
+  // Exclusions are kept: they mean "never traded" in every mode, including All stocks.
+  if (key === null) return { ...body, preset: "custom", focus: { themes: [], symbols: [], exclude: body.focus.exclude, mode: "all" } };
   const on = body.focus.themes.includes(key);
   const th = on ? body.focus.themes.filter((t) => t !== key) : [...body.focus.themes, key];
   const empty = th.length === 0 && body.focus.symbols.length === 0;
   return { ...body, preset: "custom", focus: { ...body.focus, themes: th, mode: empty ? "all" : body.focus.mode === "all" ? "prefer" : body.focus.mode } };
+}
+
+// ---------------------------------------------------------------- exclusions (S53): never traded, in every mode
+/** Can another stock be excluded? Only universe stocks (reference symbols like SPY or sector ETFs aren't in it). */
+export const canExclude = (body: ConfigBody, sym: string, universe: string[]) =>
+  universe.includes(sym) && !body.focus.exclude.includes(sym) && body.focus.exclude.length < MAX_EXCLUDED;
+/** Exclude a stock: it also leaves the focus set (an extra symbol is dropped). The mode is unchanged. */
+export function excludeStock(body: ConfigBody, sym: string, universe: string[]): ConfigBody {
+  if (!canExclude(body, sym, universe)) return body;
+  const f = body.focus;
+  return { ...body, preset: "custom", focus: { ...f, exclude: [...f.exclude, sym], symbols: f.symbols.filter((x) => x !== sym) } };
+}
+export function includeStock(body: ConfigBody, sym: string): ConfigBody {
+  return { ...body, preset: "custom", focus: { ...body.focus, exclude: body.focus.exclude.filter((x) => x !== sym) } };
 }
 
 // ---------------------------------------------------------------- plain-words diff
