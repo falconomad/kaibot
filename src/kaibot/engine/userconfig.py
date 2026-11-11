@@ -38,6 +38,7 @@ RISK_FIELDS = {
     "run_drawdown_end_pct": (2.0, "run_drawdown_end_pct", False),
 }
 MIN_ONLY_SYMBOLS = 5
+MAX_EXCLUDED = 10  # S53: config/presets.yaml limits.max_excluded
 MAX_BODY_BYTES = 8192
 
 
@@ -142,6 +143,8 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
             raise ConfigError(f"{s!r} is not in the universe")
         sel.add(s)
     excluded = set()
+    if len(set(_list(fo.get("exclude"), "focus.exclude"))) > MAX_EXCLUDED:
+        raise ConfigError(f"at most {MAX_EXCLUDED} stocks can be excluded")
     for s in _list(fo.get("exclude"), "focus.exclude"):
         if s not in universe:
             raise ConfigError(f"{s!r} is not in the universe")
