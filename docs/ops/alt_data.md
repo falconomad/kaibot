@@ -94,4 +94,5 @@ All readers use `read_pit`; missing data gives None.
 | `gdelt_tone_z(root, query_name, decision_ts)` | latest 15-min average tone vs the previous buckets of 7 days (>= 20 needed) |
 | `alt_features(root, symbol, decision_ts)` | all of the above, every query |
 
-The live `pump_risk` long-block reads no alt data; see `docs/ops/news.md`.
+The live `pump_risk` long-block reads no alt data; see `docs/ops/news.md`. The admission test itself (story S39,
+`scripts/run_ablation.py`) is described in `docs/ops/ablation.md`.
