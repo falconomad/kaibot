@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kaibot · New run</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0B0D}
+a{color:#7FB2FF}a:hover{color:#B3D1FF}
+.num{font-variant-numeric:tabular-nums}
+/* motion: one easing, short durations; everything stops for prefers-reduced-motion */
+:root{--ease:cubic-bezier(.2,.7,.2,1)}
+@keyframes kb-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes kb-fade{from{opacity:0}to{opacity:1}}
+@keyframes kb-draw{to{stroke-dashoffset:0}}
+@keyframes kb-pulse{0%{box-shadow:0 0 0 0 rgba(61,220,151,.55)}70%{box-shadow:0 0 0 8px rgba(61,220,151,0)}100%{box-shadow:0 0 0 0 rgba(61,220,151,0)}}
+@keyframes kb-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.enter{animation:kb-rise .55s var(--ease) both}
+.d1{animation-delay:.06s}.d2{animation-delay:.12s}.d3{animation-delay:.18s}.d4{animation-delay:.24s}.d5{animation-delay:.3s}
+.draw{stroke-dasharray:1400;stroke-dashoffset:1400;animation:kb-draw 1.3s var(--ease) .25s forwards}
+.fade{animation:kb-fade .6s var(--ease) .9s both}
+.grow{transform-origin:left;animation:kb-grow .8s var(--ease) .3s both}
+.live-dot{border-radius:999px;animation:kb-pulse 2s infinite}
+.morph{transition:d .45s var(--ease),cy .45s var(--ease)}
+.press{transition:transform .15s var(--ease),background-color .2s var(--ease),border-color .2s var(--ease),color .2s var(--ease),opacity .2s}
+.press:hover{filter:brightness(1.12)}.press:active{transform:scale(.97)}
+.lift{transition:transform .2s var(--ease),background-color .2s var(--ease),border-color .2s var(--ease)}
+.lift:hover{transform:translateY(-2px);border-color:#3A404A}
+.row{transition:background-color .2s var(--ease)}.swap{animation:kb-rise .35s var(--ease) both}
+.tabbar{display:none}
+@media (max-width: 760px){
+  .topnav{display:none!important}
+  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:5;justify-content:space-around;padding:8px 8px 20px;background:rgba(10,11,13,.92);backdrop-filter:blur(12px);border-top:1px solid #1B1E24}
+  .page{padding:16px 16px 96px!important;gap:16px!important}
+  .bar{padding:12px 16px!important;gap:12px!important}
+  .hero{font-size:44px!important}
+  .h1{font-size:30px!important}
+  .hide-sm{display:none!important}
+  .full-sm{flex:1 1 100%!important;width:100%}
+  .cols{grid-template-columns:minmax(0,1fr)!important}
+  .card{border-radius:20px!important;padding:16px!important}
+}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0}}
+
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #4F95F0;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 1000px; background: #0A0B0D; color: #F4F5F7; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column">
+  <header class="bar" style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 40px; border-bottom: 1px solid #1B1E24">
+    <div style="display: flex; align-items: center; gap: 10px">
+      <svg width="26" height="26" viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="8" fill="#F4F5F7"></rect><path d="M8 18 L12.5 12.5 L15.5 15.5 L20 9.5" stroke="#0A0B0D" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span style="font-weight: 700; font-size: 18px; letter-spacing: -0.02em">kaibot</span>
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #0A0B0D; background: #F5B64C; border-radius: 999px; padding: 3px 8px">PAPER</span>
+    </div>
+    <a href="Home.dc.html" style="font-size: 14px; color: #A1A8B3; text-decoration: none">Cancel</a>
+  </header>
+
+  <main class="page" style="width: 100%; max-width: 880px; margin: 0 auto; box-sizing: border-box; padding: 48px 24px 64px; display: flex; flex-direction: column; gap: 32px">
+    <nav aria-label="Steps" style="display: flex; gap: 8px">
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 8px">
+          <div style="height: 4px; border-radius: 4px; background: {{s.bar}}; transition: background-color .4s cubic-bezier(.2,.7,.2,1)"></div>
+          <span style="font-size: 13px; color: {{s.ink}}; font-weight: 500">{{s.n}} · {{s.label}}</span>
+        </div>
+      </sc-for>
+    </nav>
+
+    <sc-if value="{{is1}}" hint-placeholder-val="{{true}}">
+      <section class="swap" style="display: flex; flex-direction: column; gap: 28px">
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">How much paper money?</h1>
+          <p style="margin: 0; font-size: 16px; color: #A1A8B3; line-height: 1.5">Simulated dollars only. Kaibot keeps its own ledger at exactly this amount and never sizes beyond it.</p>
+        </div>
+        <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 40px 32px; display: flex; flex-direction: column; align-items: center; gap: 24px">
+          <div style="display: flex; align-items: center; gap: 24px">
+            <button type="button" class="press" aria-label="Less" onClick="{{less}}" style="width: 56px; height: 56px; border-radius: 999px; border: 1px solid #262A31; background: #1B1E24; color: #F4F5F7; font-size: 24px; cursor: pointer">−</button>
+            <span class="num hero" style="font-size: 72px; font-weight: 700; letter-spacing: -0.04em; min-width: 0; text-align: center">{{amountTxt}}</span>
+            <button type="button" class="press" aria-label="More" onClick="{{more}}" style="width: 56px; height: 56px; border-radius: 999px; border: 1px solid #262A31; background: #1B1E24; color: #F4F5F7; font-size: 24px; cursor: pointer">+</button>
+          </div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap; justify-content: center">
+            <sc-for list="{{presets}}" as="p" hint-placeholder-count="4">
+              <button type="button" class="press" onClick="{{p.pick}}" style="height: 40px; padding: 0 18px; border-radius: 999px; border: 1px solid {{p.border}}; background: {{p.bg}}; color: #F4F5F7; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">{{p.label}}</button>
+            </sc-for>
+          </div>
+          <span style="font-size: 13px; color: #7E8693">$1,000 to $100,000 · US dollars</span>
+        </div>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is2}}" hint-placeholder-val="{{false}}">
+      <section class="swap" style="display: flex; flex-direction: column; gap: 28px">
+        <div style="display: flex; flex-direction: column; gap: 10px">
+          <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Pick a level</h1>
+          <p style="margin: 0; font-size: 16px; color: #A1A8B3; line-height: 1.5">Higher levels risk more per trade and allow bigger red days. None use leverage, shorts or overnight positions.</p>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px">
+          <sc-for list="{{levels}}" as="l" hint-placeholder-count="3">
+            <button type="button" class="lift press" aria-pressed="{{l.pressed}}" onClick="{{l.pick}}" style="text-align: left; background: #131519; border: 2px solid {{l.border}}; border-radius: 20px; padding: 22px; color: #F4F5F7; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 14px">
+              <span style="display: flex; justify-content: space-between; align-items: center; width: 100%">
+                <strong style="font-size: 20px; letter-spacing: -0.01em">{{l.name}}</strong>
+                <span style="width: 22px; height: 22px; border-radius: 999px; border: 2px solid {{l.border}}; background: {{l.dot}}"></span>
+              </span>
+              <span style="font-size: 14px; color: #A1A8B3; line-height: 1.45">{{l.blurb}}</span>
+              <span style="display: flex; flex-direction: column; gap: 4px">
+                <span style="font-size: 12px; color: #7E8693">Worst allowed day</span>
+                <span class="num" style="font-size: 26px; font-weight: 700; color: #FF6B6B">▼ {{l.worst}}</span>
+              </span>
+              <span class="num" style="font-size: 13px; color: #A1A8B3">{{l.rules}}</span>
+            </button>
+          </sc-for>
+        </div>
+        <p style="margin: 0; font-size: 13px; color: #7E8693">Only the loss cap is shown: it's a rule, not a forecast. In the replays no level showed a reliable edge yet.</p>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is3}}" hint-placeholder-val="{{false}}">
+      <section class="swap" style="display: flex; flex-direction: column; gap: 24px">
+        <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">The deal</h1>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px">
+          <div style="background: #131519; border: 1px solid #262A31; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px">
+            <strong style="font-size: 16px">What Kaibot does</strong>
+            <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">Trades liquid US stocks with paper money, on its own, and ends every day flat by 15:55 New York time.</span>
+          </div>
+          <div style="background: #131519; border: 1px solid #262A31; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px">
+            <strong style="font-size: 16px">What to expect</strong>
+            <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">4–5 losing days in 10, some red weeks. Success means beating SPY and cash after costs, by a small margin.</span>
+          </div>
+          <div style="background: #131519; border: 1px solid #262A31; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px">
+            <strong style="font-size: 16px">What it won't do</strong>
+            <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">Promise profit, or go live on its own. Going live needs 900+ trades over 3+ months passing a test set in advance.</span>
+          </div>
+          <div style="background: #131519; border: 1px solid #262A31; border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 8px">
+            <strong style="font-size: 16px">What you keep</strong>
+            <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">Pause new trades, flatten and stop, and change the level from the next session. Nothing trade by trade.</span>
+          </div>
+        </div>
+        <label style="display: flex; gap: 12px; align-items: center; font-size: 15px; background: #131519; border: 1px solid #262A31; border-radius: 16px; padding: 16px 18px; cursor: pointer">
+          <input type="checkbox" checked="{{agreed}}" onChange="{{toggle}}" style="width: 20px; height: 20px; accent-color: #4F95F0">
+          I understand this is an experiment and losing days are part of it.
+        </label>
+      </section>
+    </sc-if>
+
+    <sc-if value="{{is4}}" hint-placeholder-val="{{false}}">
+      <section class="swap" style="display: flex; flex-direction: column; gap: 24px">
+        <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Ready to start</h1>
+        <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 28px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 24px">
+          <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #7E8693">Pot</span><span class="num" style="font-size: 32px; font-weight: 700">{{amountTxt}}</span></div>
+          <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #7E8693">Level</span><span style="font-size: 32px; font-weight: 700">{{levelName}}</span></div>
+          <div style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: 13px; color: #7E8693">Worst allowed day</span><span class="num" style="font-size: 32px; font-weight: 700; color: #FF6B6B">▼ {{levelWorst}}</span></div>
+        </div>
+        <p style="margin: 0; font-size: 15px; color: #A1A8B3; line-height: 1.5">If the market is open, the run starts at the next 5-minute check. Otherwise it starts at the open: 09:35 New York, 15:35 Berlin. Starting a new run closes the current run's positions first.</p>
+      </section>
+    </sc-if>
+
+    <div style="display: flex; justify-content: space-between; gap: 12px; padding-top: 8px">
+      <button type="button" class="press" onClick="{{back}}" style="height: 52px; padding: 0 28px; border-radius: 999px; border: 1px solid #262A31; background: transparent; color: #F4F5F7; font: inherit; font-size: 16px; font-weight: 500; cursor: pointer">Back</button>
+      <button type="button" class="press" onClick="{{next}}" disabled="{{nextDisabled}}" style="height: 52px; padding: 0 32px; border-radius: 999px; border: 0; background: {{nextBg}}; color: #0A0B0D; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer">{{nextLabel}}</button>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { step: 1, amount: 5000, level: 'aggressive', agreed: false }; }
+  renderVals() {
+    const st = this.state;
+    const fmt = (v) => '$' + Math.round(v).toLocaleString('en-US');
+    const L = {
+      conservative: { name: 'Steady', blurb: 'Dip reversal only. Smallest risk per trade.', stop: 0.75, rules: '0.25% per trade · 3 positions · 10/day' },
+      balanced: { name: 'Balanced', blurb: 'Dip reversal plus SPY late-day momentum.', stop: 1.5, rules: '0.5% per trade · 5 positions · 20/day' },
+      aggressive: { name: 'Hunter', blurb: 'Same strategies, more risk per trade.', stop: 3.0, rules: '1% per trade · 8 positions · 30/day' },
+    };
+    const names = ['Amount', 'Level', 'The deal', 'Start'];
+    const go = (n) => this.setState({ step: Math.max(1, Math.min(4, n)) });
+    const lv = L[st.level];
+    return {
+      steps: names.map((label, i) => ({ n: i + 1, label: label, bar: i + 1 <= st.step ? '#4F95F0' : '#262A31', ink: i + 1 === st.step ? '#F4F5F7' : '#7E8693' })),
+      is1: st.step === 1, is2: st.step === 2, is3: st.step === 3, is4: st.step === 4,
+      amountTxt: fmt(st.amount),
+      less: () => this.setState({ amount: Math.max(1000, st.amount - 500) }),
+      more: () => this.setState({ amount: Math.min(100000, st.amount + 500) }),
+      presets: [1000, 5000, 10000, 25000].map((v) => ({ label: fmt(v), pick: () => this.setState({ amount: v }), border: v === st.amount ? '#4F95F0' : '#262A31', bg: v === st.amount ? '#132A4A' : '#1B1E24' })),
+      levels: Object.keys(L).map((k) => ({ name: L[k].name, blurb: L[k].blurb, rules: L[k].rules, worst: fmt(st.amount * L[k].stop / 100) + ' · −' + L[k].stop + '%', pressed: st.level === k ? 'true' : 'false', border: st.level === k ? '#4F95F0' : '#262A31', dot: st.level === k ? '#4F95F0' : 'transparent', pick: () => this.setState({ level: k }) })),
+      agreed: st.agreed, toggle: () => this.setState({ agreed: !st.agreed }),
+      levelName: lv.name, levelWorst: fmt(st.amount * lv.stop / 100),
+      back: () => go(st.step - 1),
+      next: () => (st.step === 4 ? this.setState({ step: 1 }) : go(st.step + 1)),
+      nextDisabled: st.step === 3 && !st.agreed,
+      nextBg: st.step === 3 && !st.agreed ? '#4A4F57' : '#F4F5F7',
+      nextLabel: st.step === 4 ? 'Start paper run' : 'Continue',
+    };
+  }
+}
+</script>
+</body>
+</html>
