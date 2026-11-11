@@ -1,6 +1,6 @@
-# Decision 12: Configuration panel (M5) — PROPOSAL
+# Decision 12: Configuration panel (M5)
 
-- **Status:** proposed by a stakeholder on 2026-11-11. **Designs approved by the stakeholder on 2026-11-11** (canvas boards 09, 09m, 09b). Milestone still awaits product-owner sign-off.
+- **Status:** **approved by product on 2026-11-11** (designs approved the same day: canvas boards 09, 09m, 09b). Scheduled after M4.
 - **Scheduled:** after M4 (the evaluation gate). Nothing in M0–M4 changes.
 - **Debate:** [`docs/debate/m5_config_panel.md`](../debate/m5_config_panel.md)
 
@@ -84,3 +84,28 @@ See [`docs/design/research_m5_config_ui.md`](../design/research_m5_config_ui.md)
 2. **Fine-tune page:** every MVP control from the table above, one expandable row each.
 
 A preset or Boldness step is only a shortcut that writes the same config fields. Nothing new reaches the engine.
+
+## M5 backlog and build order
+
+1. **Foundations (backend-quant, data)**
+   - #54 S42 — config storage, versioned, tighten-only validation in SQL
+   - #66 S50 — the fixed safety values become tighten-only settings; defaults reproduce today exactly
+   - #56 S44 — themes in `universe_seed.yaml`, Only/Prefer
+   - #69 S53 — exclude stocks
+2. **Engine (backend-quant)**
+   - #55 S43 — apply the config at the session open, fail closed, `config_version` on every trade
+   - #57 S45 — per-symbol trade-rate estimator from replay
+3. **App (frontend)**
+   - #67 S51 — presets + Boldness spec
+   - #58 S46 — Strategy page (boards 09 / 09m)
+   - #68 S52 — Fine-tune page (board 09b)
+   - #59 S47 — review & apply
+   - #60 S48 — report chapters + a trial row and replay per applied config
+4. **Proof (qa-ops)**
+   - #61 S49 — no config can loosen the engine (property tests, e2e, hostile RPC payloads)
+
+**Exit criteria:**
+- A config applied before the open is used by the engine that session.
+- Every trade carries its `config_version`.
+- The Report shows chapters.
+- No setting can exceed the level or `HARD_CEILINGS`.

@@ -9,4 +9,4 @@
 - The engine (`python -m kaibot.engine`, `scripts/run_engine.sh`) runs on the user's Mac for now and must stay portable:
   env-only settings, outgoing connections only, same Docker image anywhere (decision 11). Never run two engines at once.
 - Run `ruff check .` and `pytest -q` before committing. Deploy only outside 09:30-16:00 ET.
-- Decisions live in `docs/decisions/`; the backlog in GitHub issues (milestones M0-M5; M5 is a proposal, labels team:* and epic:*).
+- Decisions live in `docs/decisions/`; the backlog in GitHub issues (milestones M0-M5, labels team:* and epic:*).
