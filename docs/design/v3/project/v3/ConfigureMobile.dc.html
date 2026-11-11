@@ -64,9 +64,14 @@ input[type=range].kb:active::-webkit-slider-thumb{transform:scale(1.15)}
 @keyframes kb-sheet{from{transform:translateY(100%)}to{transform:none}}
 details>summary{list-style:none;cursor:pointer}details>summary::-webkit-details-marker{display:none}
 details[open] .chev{transform:rotate(180deg)}.chev{transition:transform .25s var(--ease)}
-.rail{position:sticky;top:24px}
-@media (max-width: 1100px){.rail{position:static}}
-@media (max-width: 760px){.rail-wrap{display:none!important}.mbar{display:flex!important}}
+.srow{transition:background-color .2s var(--ease)}.srow:hover{background:#171A1F}
+.open-chev{transform:rotate(90deg)}
+.expand{animation:kb-rise .3s var(--ease) both}
+.dock{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:6;width:min(640px,calc(100% - 24px));animation:kb-dock .4s var(--ease) both}
+@keyframes kb-dock{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
+.mwrap{position:fixed;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;padding:24px}
+.mpanel{width:min(440px,100%);max-height:86vh;overflow:auto;border-radius:24px;animation:kb-rise .3s var(--ease) both}
+@media (max-width: 760px){.dock{bottom:84px}.mwrap{align-items:flex-end;padding:0}.mpanel{width:100%;border-radius:24px 24px 0 0;animation:kb-sheet .35s var(--ease) both}.sumline{font-size:13px!important}}
 
 button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid #4F95F0;outline-offset:2px}
 </style>
@@ -92,393 +97,345 @@ button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{ou
     </span>
     <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #0A0B0D; background: #F5B64C; border-radius: 999px; padding: 4px 9px">PAPER · HUNTER</span>
   </header>
-  <main class="page" style="max-width: 1280px; margin: 0 auto; box-sizing: border-box; padding: 32px 40px 64px; display: flex; flex-direction: column; gap: 20px">
-    <div class="enter" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
-      <div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 6px">
-        <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Strategy</h1>
-        <span style="font-size: 15px; color: #A1A8B3">Kaibot still trades on its own. These settings make it pickier or smaller, never riskier than your level.</span>
-      </div>
-      <span style="font-size: 12px; font-weight: 600; color: #A1A8B3; background: #131519; border: 1px solid #262A31; border-radius: 999px; padding: 7px 12px">Level Hunter · chapter 1 since Tue 10 Nov</span>
+  <main class="page" style="max-width: 720px; margin: 0 auto; box-sizing: border-box; padding: 32px 24px 140px; display: flex; flex-direction: column; gap: 28px">
+    <div class="enter" style="display: flex; flex-direction: column; gap: 8px">
+      <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Strategy</h1>
+      <span style="font-size: 15px; color: #A1A8B3; line-height: 1.5">Kaibot trades on its own. Tune it here: pickier or smaller, never riskier than Hunter.</span>
+      <div class="num sumline swap" style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; color: #7E8693; padding-top: 4px"><span><b style="color: #F4F5F7">≈ {{est}}</b> trades a month</span><span><b style="color: #F4F5F7">{{maxLoss}}</b> max loss a trade</span><span><b style="color: #F4F5F7">{{worstDay}}</b> worst day</span></div>
     </div>
 
     <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
-      <div aria-busy="true" aria-label="Loading your setup" style="display: flex; gap: 24px; align-items: flex-start">
-        <div style="flex: 1; display: flex; flex-direction: column; gap: 20px">
-          <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 14px"><span class="sk" style="width: 180px; height: 18px"></span><span class="sk" style="width: 70%; height: 14px"></span><div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="sk" style="width: 120px; height: 40px; border-radius: 999px"></span><span class="sk" style="width: 140px; height: 40px; border-radius: 999px"></span><span class="sk" style="width: 110px; height: 40px; border-radius: 999px"></span><span class="sk" style="width: 130px; height: 40px; border-radius: 999px"></span></div><span class="sk" style="height: 120px; border-radius: 14px"></span></div>
-          <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 18px"><span class="sk" style="width: 160px; height: 18px"></span><span class="sk" style="height: 28px"></span><span class="sk" style="height: 28px"></span><span class="sk" style="height: 28px"></span></div>
-        </div>
-        <div class="rail-wrap" style="flex: 0 0 340px; background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 14px"><span class="sk" style="width: 120px; height: 18px"></span><span class="sk" style="width: 160px; height: 44px"></span><span class="sk" style="height: 8px"></span><span class="sk" style="height: 60px"></span><span class="sk" style="height: 48px; border-radius: 999px"></span></div>
+      <div aria-busy="true" aria-label="Loading your setup" style="display: flex; flex-direction: column; gap: 20px">
+        <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 14px"><span class="sk" style="width: 160px; height: 20px"></span><div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="sk" style="width: 120px; height: 38px; border-radius: 999px"></span><span class="sk" style="width: 140px; height: 38px; border-radius: 999px"></span><span class="sk" style="width: 100px; height: 38px; border-radius: 999px"></span><span class="sk" style="width: 130px; height: 38px; border-radius: 999px"></span></div></div>
+        <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 8px 20px; display: flex; flex-direction: column"><span class="sk" style="height: 18px; margin: 19px 0"></span><span class="sk" style="height: 18px; margin: 19px 0"></span><span class="sk" style="height: 18px; margin: 19px 0"></span></div>
       </div>
     </sc-if>
     <sc-if value="{{ready}}" hint-placeholder-val="{{true}}">
-      <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
-        <div style="flex: 1 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
 
-    <section class="card enter d1" aria-labelledby="fo-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+    <section class="card enter d1" aria-labelledby="fo-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
       <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
-        <div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 4px">
-          <h2 id="fo-h" style="margin: 0; font-size: 18px; font-weight: 600">What to trade</h2>
-          <span style="font-size: 13px; color: #A1A8B3">Pick themes or single stocks. Kaibot only looks for setups inside your focus.</span>
-        </div>
-        <div role="radiogroup" aria-label="Focus mode" style="display: flex; gap: 4px; background: #0A0B0D; border: 1px solid #262A31; border-radius: 999px; padding: 4px">
+        <h2 id="fo-h" style="margin: 0; flex: 1; font-size: 20px; font-weight: 600">What to trade</h2>
+        <div role="radiogroup" aria-label="Focus mode" style="display: flex; gap: 2px; background: #0A0B0D; border: 1px solid #262A31; border-radius: 999px; padding: 3px">
           <sc-for list="{{modes}}" as="m" hint-placeholder-count="2">
-            <button type="button" role="radio" aria-checked="{{m.on}}" onClick="{{m.pick}}" class="press" style="height: 38px; padding: 0 16px; border-radius: 999px; border: 0; background: {{m.bg}}; color: {{m.ink}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">{{m.name}}</button>
+            <button type="button" role="radio" aria-checked="{{m.on}}" onClick="{{m.pick}}" class="press" style="height: 34px; padding: 0 14px; border-radius: 999px; border: 0; background: {{m.bg}}; color: {{m.ink}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{m.name}}</button>
           </sc-for>
         </div>
       </div>
-      <span class="swap" style="font-size: 13px; color: #7E8693">{{modeNote}}</span>
       <div style="display: flex; flex-wrap: wrap; gap: 8px" role="group" aria-label="Themes">
         <sc-for list="{{themes}}" as="t" hint-placeholder-count="11">
-          <button type="button" aria-pressed="{{t.on}}" onClick="{{t.pick}}" class="chip" style="display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid {{t.bd}}; background: {{t.bg}}; color: {{t.ink}}; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">{{t.name}}<span class="num" style="font-size: 12px; color: {{t.sub}}">{{t.n}}</span></button>
+          <button type="button" aria-pressed="{{t.on}}" onClick="{{t.pick}}" class="chip" style="height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid {{t.bd}}; background: {{t.bg}}; color: {{t.ink}}; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">{{t.name}}</button>
         </sc-for>
       </div>
-      <div style="display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #1B1E24; padding-top: 16px">
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
-          <span class="num" style="font-size: 14px; font-weight: 600">{{picked}}</span>
-          <span style="flex: 1"></span>
-          <label style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #262A31; background: #0A0B0D; color: #7E8693">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20 L16 16" stroke-linecap="round"></path></svg>
-            <input type="text" placeholder="Add a stock, e.g. COST" aria-label="Add a stock" style="border: 0; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; width: 170px; outline: none">
-          </label>
+      <div style="display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid #1B1E24">
+        <div aria-hidden="true" style="display: flex">
+          <sc-for list="{{faces}}" as="y" hint-placeholder-count="4">
+            <span style="width: 28px; height: 28px; margin-right: -8px; border-radius: 999px; border: 2px solid #131519; background: {{y.c}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700">{{y.i}}</span>
+          </sc-for>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px">
-          <sc-for list="{{syms}}" as="y" hint-placeholder-count="11">
-            <div class="swap lift" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: #1B1E24; border: 1px solid #262A31">
-              <span aria-hidden="true" style="flex: none; width: 30px; height: 30px; border-radius: 999px; background: {{y.c}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700">{{y.i}}</span>
-              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 14px; font-weight: 600">{{y.s}}</span><span style="font-size: 11px; color: #7E8693; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{y.n}}</span></span>
-              <button type="button" aria-label="Remove {{y.s}}" onClick="{{y.drop}}" class="press" style="flex: none; width: 28px; height: 28px; border-radius: 999px; border: 0; background: transparent; color: #7E8693; cursor: pointer; font-size: 16px">×</button>
+        <span class="num swap" style="flex: 1; min-width: 0; padding-left: 8px; font-size: 14px; color: #A1A8B3">{{picked}}</span>
+        <button type="button" onClick="{{editTap}}" aria-expanded="{{editS}}" class="press" style="height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid #262A31; background: transparent; color: #F4F5F7; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{editText}}</button>
+      </div>
+      <sc-if value="{{edit}}" hint-placeholder-val="{{false}}">
+        <div class="expand" style="display: flex; flex-direction: column; gap: 10px">
+          <label style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border-radius: 999px; border: 1px solid #262A31; background: #0A0B0D; color: #7E8693">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20 L16 16" stroke-linecap="round"></path></svg>
+            <input type="text" placeholder="Add a stock, e.g. COST" aria-label="Add a stock" style="flex: 1; border: 0; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; outline: none">
+          </label>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <sc-for list="{{syms}}" as="y" hint-placeholder-count="11">
+              <span class="swap" style="display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px 0 12px; border-radius: 999px; background: #1B1E24; font-size: 13px; font-weight: 600">{{y.s}}<button type="button" aria-label="Remove {{y.s}}" onClick="{{y.drop}}" class="press" style="width: 26px; height: 26px; border-radius: 999px; border: 0; background: transparent; color: #7E8693; cursor: pointer; font-size: 15px">×</button></span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <span class="swap" style="font-size: 13px; color: {{modeInk}}; line-height: 1.5">{{modeNote}}</span>
+    </section>
+
+    <section class="enter" style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px"><h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #A1A8B3">Risk</h2><span style="font-size: 13px; color: #7E8693">Can only go down from Hunter.</span></div>
+      <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column">
+          <div style="display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.risk.openS}}" onClick="{{s.risk.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Risk per trade</span>
+              <sc-if value="{{s.risk.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.risk.ink}}">{{s.risk.text}}</span>
+              <svg class="chev {{s.risk.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.risk.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Risk per trade" min="{{s.risk.min}}" max="{{s.risk.max}}" step="{{s.risk.step}}" value="{{s.risk.v}}" onInput="{{s.risk.set}}" style="--p: {{s.risk.pct}}" aria-valuetext="{{s.risk.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.risk.lo}}</span><span>{{s.risk.note}}</span><span>{{s.risk.hi}}</span></div>
+            </div></div>
+            </sc-if>
+          </div>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.dstop.openS}}" onClick="{{s.dstop.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Daily stop</span>
+              <sc-if value="{{s.dstop.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.dstop.ink}}">{{s.dstop.text}}</span>
+              <svg class="chev {{s.dstop.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.dstop.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Daily stop" min="{{s.dstop.min}}" max="{{s.dstop.max}}" step="{{s.dstop.step}}" value="{{s.dstop.v}}" onInput="{{s.dstop.set}}" style="--p: {{s.dstop.pct}}" aria-valuetext="{{s.dstop.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.dstop.lo}}</span><span>{{s.dstop.note}}</span><span>{{s.dstop.hi}}</span></div>
+            </div></div>
+            </sc-if>
+          </div>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.pos.openS}}" onClick="{{s.pos.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Open positions</span>
+              <sc-if value="{{s.pos.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.pos.ink}}">{{s.pos.text}}</span>
+              <svg class="chev {{s.pos.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.pos.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Open positions" min="{{s.pos.min}}" max="{{s.pos.max}}" step="{{s.pos.step}}" value="{{s.pos.v}}" onInput="{{s.pos.set}}" style="--p: {{s.pos.pct}}" aria-valuetext="{{s.pos.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.pos.lo}}</span><span>{{s.pos.note}}</span><span>{{s.pos.hi}}</span></div>
+            </div></div>
+            </sc-if>
+          </div>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.size.openS}}" onClick="{{s.size.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Position size</span>
+              <sc-if value="{{s.size.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.size.ink}}">{{s.size.text}}</span>
+              <svg class="chev {{s.size.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.size.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Position size" min="{{s.size.min}}" max="{{s.size.max}}" step="{{s.size.step}}" value="{{s.size.v}}" onInput="{{s.size.set}}" style="--p: {{s.size.pct}}" aria-valuetext="{{s.size.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.size.lo}}</span><span>{{s.size.note}}</span><span>{{s.size.hi}}</span></div>
+            </div></div>
+            </sc-if>
+          </div>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.entries.openS}}" onClick="{{s.entries.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">New trades a day</span>
+              <sc-if value="{{s.entries.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.entries.ink}}">{{s.entries.text}}</span>
+              <svg class="chev {{s.entries.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.entries.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="New trades a day" min="{{s.entries.min}}" max="{{s.entries.max}}" step="{{s.entries.step}}" value="{{s.entries.v}}" onInput="{{s.entries.set}}" style="--p: {{s.entries.pct}}" aria-valuetext="{{s.entries.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.entries.lo}}</span><span>{{s.entries.note}}</span><span>{{s.entries.hi}}</span></div>
+            </div></div>
+            </sc-if>
+          </div>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.dd.openS}}" onClick="{{s.dd.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">End run at drawdown</span>
+              <sc-if value="{{s.dd.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.dd.ink}}">{{s.dd.text}}</span>
+              <svg class="chev {{s.dd.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.dd.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="End run at drawdown" min="{{s.dd.min}}" max="{{s.dd.max}}" step="{{s.dd.step}}" value="{{s.dd.v}}" onInput="{{s.dd.set}}" style="--p: {{s.dd.pct}}" aria-valuetext="{{s.dd.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.dd.lo}}</span><span>{{s.dd.note}}</span><span>{{s.dd.hi}}</span></div>
+            </div></div>
+            </sc-if>
+          </div>
+      </div>
+    </section>
+
+    <section class="enter" style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px"><h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #A1A8B3">Strategies</h2></div>
+      <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column">
+          <sc-for list="{{strats}}" as="g" hint-placeholder-count="2">
+            <div style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 20px; border-bottom: 1px solid #1B1E24">
+              <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">{{g.name}}</span><span style="font-size: 12px; color: #7E8693">{{g.blurb}}</span></span>
+              <button type="button" role="switch" aria-checked="{{g.on}}" aria-label="{{g.name}}" onClick="{{g.flip}}" class="tog press" style="flex: none; width: 48px; height: 28px; border-radius: 999px; border: 0; padding: 3px; cursor: pointer; background: {{g.tbg}}; display: flex"><span style="width: 22px; height: 22px; border-radius: 999px; background: #F4F5F7; transform: {{g.tx}}"></span></button>
             </div>
           </sc-for>
-        </div>
-        <sc-if value="{{tooFew}}" hint-placeholder-val="{{false}}">
-          <span class="swap" role="alert" style="font-size: 13px; color: #F5B64C">“Only these” needs at least 5 stocks, so one stock’s bad day can’t decide the run. Add more or switch to “Prefer these”.</span>
-        </sc-if>
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 20px">
+            <span style="flex: 1; font-size: 13px; color: #7E8693">Opening range breakout · News continuation</span>
+            <span style="font-size: 11px; font-weight: 600; color: #F5B64C; background: #33270F; border-radius: 999px; padding: 3px 8px">under test</span>
+          </div>
       </div>
     </section>
 
-    <section class="card enter d2" aria-labelledby="rk-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 20px">
-      <div style="display: flex; flex-direction: column; gap: 4px">
-        <h2 id="rk-h" style="margin: 0; font-size: 18px; font-weight: 600">How much to risk</h2>
-        <span style="font-size: 13px; color: #A1A8B3">Each limit can go down from your level (Hunter), never up. Dollar amounts use today’s pot, $5,021.</span>
-      </div>
-      <div class="cols" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px">
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-risk" style="font-size: 14px; font-weight: 500">Risk per trade</label>
-            <sc-if value="{{s.risk.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.risk.text}}</span>
+    <section class="enter" style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px"><h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #A1A8B3">Timing</h2></div>
+      <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column">
+          <figure style="margin: 0; padding: 18px 20px 10px" aria-label="{{dayAria}}">
+            <svg viewBox="0 0 780 46" width="100%" height="46" aria-hidden="true">
+              <defs><pattern id="hz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#F5B64C" opacity=".55"></rect></pattern></defs>
+              <rect x="0" y="8" width="780" height="14" rx="7" fill="#1B1E24"></rect>
+              <rect class="grow" x="{{winX}}" y="8" width="{{winW}}" height="14" rx="7" fill="#4F95F0" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
+              <rect x="{{fomcX}}" y="5" width="{{fomcW}}" height="20" rx="5" fill="url(#hz)" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
+              <line x1="770" y1="2" x2="770" y2="28" stroke="#FF6B6B" stroke-width="2"></line>
+              <text x="0" y="42" fill="#7E8693" font-size="11" font-family="Inter">09:30</text><text x="{{winX}}" y="42" fill="#A1A8B3" font-size="11" font-family="Inter" dx="4">{{winStart}}</text><text x="740" y="42" fill="#7E8693" font-size="11" font-family="Inter">16:00</text>
+            </svg>
+            <figcaption style="display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: #7E8693"><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: #4F95F0; vertical-align: -1px"></span> new trades</span><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: #5A4520; border: 1px solid #F5B64C; vertical-align: -1px"></span> Fed/CPI quiet</span><span><span style="display: inline-block; width: 2px; height: 10px; background: #FF6B6B; vertical-align: -1px"></span> sell-all 15:55</span></figcaption>
+          </figure>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.start.openS}}" onClick="{{s.start.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">First new trade</span>
+              <sc-if value="{{s.start.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.start.ink}}">{{s.start.text}}</span>
+              <svg class="chev {{s.start.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.start.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="First new trade" min="{{s.start.min}}" max="{{s.start.max}}" step="{{s.start.step}}" value="{{s.start.v}}" onInput="{{s.start.set}}" style="--p: {{s.start.pct}}" aria-valuetext="{{s.start.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.start.lo}}</span><span>{{s.start.note}}</span><span>{{s.start.hi}}</span></div>
+            </div></div>
+            </sc-if>
           </div>
-          <input id="s-risk" class="kb" type="range" min="{{s.risk.min}}" max="{{s.risk.max}}" step="{{s.risk.step}}" value="{{s.risk.v}}" onInput="{{s.risk.set}}" style="--p: {{s.risk.pct}}" aria-valuetext="{{s.risk.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Max loss if the stop is hit</span><span>{{s.risk.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-pos" style="font-size: 14px; font-weight: 500">Max open positions</label>
-            <sc-if value="{{s.pos.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.pos.text}}</span>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.end.openS}}" onClick="{{s.end.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Last new trade</span>
+              <sc-if value="{{s.end.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.end.ink}}">{{s.end.text}}</span>
+              <svg class="chev {{s.end.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.end.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Last new trade" min="{{s.end.min}}" max="{{s.end.max}}" step="{{s.end.step}}" value="{{s.end.v}}" onInput="{{s.end.set}}" style="--p: {{s.end.pct}}" aria-valuetext="{{s.end.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.end.lo}}</span><span>{{s.end.note}}</span><span>{{s.end.hi}}</span></div>
+            </div></div>
+            </sc-if>
           </div>
-          <input id="s-pos" class="kb" type="range" min="{{s.pos.min}}" max="{{s.pos.max}}" step="{{s.pos.step}}" value="{{s.pos.v}}" onInput="{{s.pos.set}}" style="--p: {{s.pos.pct}}" aria-valuetext="{{s.pos.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>At the same time</span><span>{{s.pos.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-size" style="font-size: 14px; font-weight: 500">Max position size</label>
-            <sc-if value="{{s.size.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.size.text}}</span>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.quiet.openS}}" onClick="{{s.quiet.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Fed & CPI quiet window</span>
+              <sc-if value="{{s.quiet.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.quiet.ink}}">{{s.quiet.text}}</span>
+              <svg class="chev {{s.quiet.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.quiet.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Fed & CPI quiet window" min="{{s.quiet.min}}" max="{{s.quiet.max}}" step="{{s.quiet.step}}" value="{{s.quiet.v}}" onInput="{{s.quiet.set}}" style="--p: {{s.quiet.pct}}" aria-valuetext="{{s.quiet.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.quiet.lo}}</span><span>{{s.quiet.note}}</span><span>{{s.quiet.hi}}</span></div>
+            </div></div>
+            </sc-if>
           </div>
-          <input id="s-size" class="kb" type="range" min="{{s.size.min}}" max="{{s.size.max}}" step="{{s.size.step}}" value="{{s.size.v}}" onInput="{{s.size.set}}" style="--p: {{s.size.pct}}" aria-valuetext="{{s.size.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Share of the pot in one stock</span><span>{{s.size.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-entries" style="font-size: 14px; font-weight: 500">Max new trades a day</label>
-            <sc-if value="{{s.entries.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.entries.text}}</span>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.vix.openS}}" onClick="{{s.vix.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Sit out when VIX is above</span>
+              <sc-if value="{{s.vix.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.vix.ink}}">{{s.vix.text}}</span>
+              <svg class="chev {{s.vix.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.vix.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Sit out when VIX is above" min="{{s.vix.min}}" max="{{s.vix.max}}" step="{{s.vix.step}}" value="{{s.vix.v}}" onInput="{{s.vix.set}}" style="--p: {{s.vix.pct}}" aria-valuetext="{{s.vix.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.vix.lo}}</span><span>{{s.vix.note}}</span><span>{{s.vix.hi}}</span></div>
+            </div></div>
+            </sc-if>
           </div>
-          <input id="s-entries" class="kb" type="range" min="{{s.entries.min}}" max="{{s.entries.max}}" step="{{s.entries.step}}" value="{{s.entries.v}}" onInput="{{s.entries.set}}" style="--p: {{s.entries.pct}}" aria-valuetext="{{s.entries.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Counted from the open</span><span>{{s.entries.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-dstop" style="font-size: 14px; font-weight: 500">Daily stop</label>
-            <sc-if value="{{s.dstop.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.dstop.text}}</span>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.streak.openS}}" onClick="{{s.streak.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Pause after a losing streak</span>
+              <sc-if value="{{s.streak.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.streak.ink}}">{{streakText}}</span>
+              <svg class="chev {{s.streak.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.streak.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px"><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #A1A8B3">Losses in a row</span>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Losses in a row" min="{{s.streak.min}}" max="{{s.streak.max}}" step="{{s.streak.step}}" value="{{s.streak.v}}" onInput="{{s.streak.set}}" style="--p: {{s.streak.pct}}" aria-valuetext="{{s.streak.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.streak.lo}}</span><span>{{s.streak.note}}</span><span>{{s.streak.hi}}</span></div>
+            </div></div><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #A1A8B3">Pause length</span>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Pause length" min="{{s.wait.min}}" max="{{s.wait.max}}" step="{{s.wait.step}}" value="{{s.wait.v}}" onInput="{{s.wait.set}}" style="--p: {{s.wait.pct}}" aria-valuetext="{{s.wait.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.wait.lo}}</span><span>{{s.wait.note}}</span><span>{{s.wait.hi}}</span></div>
+            </div></div></div>
+            </sc-if>
           </div>
-          <input id="s-dstop" class="kb" type="range" min="{{s.dstop.min}}" max="{{s.dstop.max}}" step="{{s.dstop.step}}" value="{{s.dstop.v}}" onInput="{{s.dstop.set}}" style="--p: {{s.dstop.pct}}" aria-valuetext="{{s.dstop.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>No new trades after this loss today</span><span>{{s.dstop.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-dd" style="font-size: 14px; font-weight: 500">End the run at drawdown</label>
-            <sc-if value="{{s.dd.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.dd.text}}</span>
-          </div>
-          <input id="s-dd" class="kb" type="range" min="{{s.dd.min}}" max="{{s.dd.max}}" step="{{s.dd.step}}" value="{{s.dd.v}}" onInput="{{s.dd.set}}" style="--p: {{s.dd.pct}}" aria-valuetext="{{s.dd.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>From the run’s peak</span><span>{{s.dd.note}}</span></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="card enter d3" aria-labelledby="st-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px 24px 12px; display: flex; flex-direction: column; gap: 6px">
-      <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px">
-        <h2 id="st-h" style="margin: 0; font-size: 18px; font-weight: 600">Strategies</h2>
-        <span style="font-size: 13px; color: #A1A8B3">At least one stays on. Strategies under test run on paper in the background and never touch your pot.</span>
-      </div>
-      <sc-for list="{{strats}}" as="g" hint-placeholder-count="4">
-        <div class="row" style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid #1B1E24">
-          <div style="flex: 1; display: flex; flex-direction: column; gap: 3px">
-            <span style="display: flex; gap: 8px; align-items: center; font-size: 15px; font-weight: 600">{{g.name}}<span style="font-size: 11px; font-weight: 600; color: {{g.tagInk}}; background: {{g.tagBg}}; border-radius: 999px; padding: 3px 8px">{{g.tag}}</span></span>
-            <span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{g.blurb}}</span>
-          </div>
-          <sc-if value="{{g.can}}" hint-placeholder-val="{{true}}">
-            <button type="button" role="switch" aria-checked="{{g.on}}" aria-label="{{g.name}}" onClick="{{g.flip}}" class="tog press" style="flex: none; width: 48px; height: 28px; border-radius: 999px; border: 0; padding: 3px; cursor: pointer; background: {{g.tbg}}; display: flex"><span style="width: 22px; height: 22px; border-radius: 999px; background: #F4F5F7; transform: {{g.tx}}"></span></button>
-          </sc-if>
-          <sc-if value="{{g.cant}}" hint-placeholder-val="{{false}}">
-            <span style="flex: none; font-size: 12px; color: #7E8693">{{g.why}}</span>
-          </sc-if>
-        </div>
-      </sc-for>
-    </section>
-
-    <section class="card enter d4" aria-labelledby="tm-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 20px">
-      <div style="display: flex; flex-direction: column; gap: 4px">
-        <h2 id="tm-h" style="margin: 0; font-size: 18px; font-weight: 600">When to trade, and when to sit out</h2>
-        <span style="font-size: 13px; color: #A1A8B3">The window can only get shorter. Everything is sold at 15:55 ET every day.</span>
-      </div>
-      <figure style="margin: 0; display: flex; flex-direction: column; gap: 8px" aria-label="{{dayAria}}">
-        <svg viewBox="0 0 780 64" width="100%" height="64" role="img" aria-hidden="true">
-          <defs><pattern id="hz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#F5B64C" opacity=".55"></rect></pattern></defs>
-          <rect x="0" y="22" width="780" height="20" rx="10" fill="#1B1E24"></rect>
-          <rect class="grow" x="{{winX}}" y="22" width="{{winW}}" height="20" rx="10" fill="#4F95F0" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
-          <rect x="{{fomcX}}" y="18" width="{{fomcW}}" height="28" rx="6" fill="url(#hz)" stroke="#F5B64C" stroke-width="1" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
-          <line x1="770" y1="12" x2="770" y2="52" stroke="#FF6B6B" stroke-width="2"></line>
-          <text x="0" y="62" fill="#7E8693" font-size="11" font-family="Inter">09:30</text><text x="360" y="62" fill="#7E8693" font-size="11" font-family="Inter">12:45</text><text x="740" y="62" fill="#7E8693" font-size="11" font-family="Inter">16:00</text>
-          <text x="{{fomcX}}" y="12" fill="#F5B64C" font-size="11" font-family="Inter">Fed day 14:00</text>
-          <text x="700" y="10" fill="#FF6B6B" font-size="11" font-family="Inter">sell-all 15:55</text>
-        </svg>
-        <figcaption class="num" style="font-size: 13px; color: #A1A8B3">{{dayCap}}</figcaption>
-      </figure>
-      <div class="cols" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px">
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-start" style="font-size: 14px; font-weight: 500">First new trade</label>
-            <sc-if value="{{s.start.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.start.text}}</span>
-          </div>
-          <input id="s-start" class="kb" type="range" min="{{s.start.min}}" max="{{s.start.max}}" step="{{s.start.step}}" value="{{s.start.v}}" onInput="{{s.start.set}}" style="--p: {{s.start.pct}}" aria-valuetext="{{s.start.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Earliest 09:35</span><span>{{s.start.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-end" style="font-size: 14px; font-weight: 500">Last new trade</label>
-            <sc-if value="{{s.end.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.end.text}}</span>
-          </div>
-          <input id="s-end" class="kb" type="range" min="{{s.end.min}}" max="{{s.end.max}}" step="{{s.end.step}}" value="{{s.end.v}}" onInput="{{s.end.set}}" style="--p: {{s.end.pct}}" aria-valuetext="{{s.end.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Latest 15:45</span><span>{{s.end.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-vix" style="font-size: 14px; font-weight: 500">Sit out when VIX is above</label>
-            <sc-if value="{{s.vix.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.vix.text}}</span>
-          </div>
-          <input id="s-vix" class="kb" type="range" min="{{s.vix.min}}" max="{{s.vix.max}}" step="{{s.vix.step}}" value="{{s.vix.v}}" onInput="{{s.vix.set}}" style="--p: {{s.vix.pct}}" aria-valuetext="{{s.vix.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Fear index; 35 always stops new trades</span><span>{{s.vix.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-quiet" style="font-size: 14px; font-weight: 500">Fed and CPI quiet window</label>
-            <sc-if value="{{s.quiet.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.quiet.text}}</span>
-          </div>
-          <input id="s-quiet" class="kb" type="range" min="{{s.quiet.min}}" max="{{s.quiet.max}}" step="{{s.quiet.step}}" value="{{s.quiet.v}}" onInput="{{s.quiet.set}}" style="--p: {{s.quiet.pct}}" aria-valuetext="{{s.quiet.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Before and after; always on</span><span>{{s.quiet.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-streak" style="font-size: 14px; font-weight: 500">Pause after losses in a row</label>
-            <sc-if value="{{s.streak.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.streak.text}}</span>
-          </div>
-          <input id="s-streak" class="kb" type="range" min="{{s.streak.min}}" max="{{s.streak.max}}" step="{{s.streak.step}}" value="{{s.streak.v}}" onInput="{{s.streak.set}}" style="--p: {{s.streak.pct}}" aria-valuetext="{{s.streak.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Then wait</span><span>{{s.streak.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-wait" style="font-size: 14px; font-weight: 500">Pause length</label>
-            <sc-if value="{{s.wait.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.wait.text}}</span>
-          </div>
-          <input id="s-wait" class="kb" type="range" min="{{s.wait.min}}" max="{{s.wait.max}}" step="{{s.wait.step}}" value="{{s.wait.v}}" onInput="{{s.wait.set}}" style="--p: {{s.wait.pct}}" aria-valuetext="{{s.wait.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>After a losing streak</span><span>{{s.wait.note}}</span></div>
-        </div>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 0; border-top: 1px solid #1B1E24; padding-top: 8px">
-        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: #7E8693; padding: 8px 0">ALWAYS ON</span>
-        <sc-for list="{{locked}}" as="k" hint-placeholder-count="4">
-          <div style="display: flex; gap: 12px; align-items: center; padding: 10px 0">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>
-            <span style="flex: 1; font-size: 14px; color: #A1A8B3">{{k}}</span>
-          </div>
-        </sc-for>
       </div>
     </section>
 
-    <details class="card enter d5" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 0">
-      <summary style="display: flex; align-items: center; gap: 12px; padding: 20px 24px">
-        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 16px; font-weight: 600">Advanced</span><span style="font-size: 13px; color: #7E8693">Liquidity floors. Raising them skips thinner stocks.</span></span>
-        <svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true"><path d="M6 9 L12 15 L18 9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-      </summary>
-      <div class="cols" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 32px; padding: 0 24px 24px">
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-price" style="font-size: 14px; font-weight: 500">Min share price</label>
-            <sc-if value="{{s.price.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.price.text}}</span>
+    <section class="enter" style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px"><h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #A1A8B3">More</h2></div>
+      <div style="background: #131519; border: 1px solid #262A31; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column">
+          <div style="display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{s.price.openS}}" onClick="{{s.price.tap}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">Advanced liquidity floors</span>
+              <sc-if value="{{s.price.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{s.price.ink}}">{{advText}}</span>
+              <svg class="chev {{s.price.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{s.price.open}}" hint-placeholder-val="{{false}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px"><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #A1A8B3">Min share price</span>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Min share price" min="{{s.price.min}}" max="{{s.price.max}}" step="{{s.price.step}}" value="{{s.price.v}}" onInput="{{s.price.set}}" style="--p: {{s.price.pct}}" aria-valuetext="{{s.price.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.price.lo}}</span><span>{{s.price.note}}</span><span>{{s.price.hi}}</span></div>
+            </div></div><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #A1A8B3">Min daily $ volume</span>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Min daily $ volume" min="{{s.adv.min}}" max="{{s.adv.max}}" step="{{s.adv.step}}" value="{{s.adv.v}}" onInput="{{s.adv.set}}" style="--p: {{s.adv.pct}}" aria-valuetext="{{s.adv.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.adv.lo}}</span><span>{{s.adv.note}}</span><span>{{s.adv.hi}}</span></div>
+            </div></div><div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #A1A8B3">Max bid-ask spread</span>
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="Max bid-ask spread" min="{{s.spread.min}}" max="{{s.spread.max}}" step="{{s.spread.step}}" value="{{s.spread.v}}" onInput="{{s.spread.set}}" style="--p: {{s.spread.pct}}" aria-valuetext="{{s.spread.text}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{s.spread.lo}}</span><span>{{s.spread.note}}</span><span>{{s.spread.hi}}</span></div>
+            </div></div></div>
+            </sc-if>
           </div>
-          <input id="s-price" class="kb" type="range" min="{{s.price.min}}" max="{{s.price.max}}" step="{{s.price.step}}" value="{{s.price.v}}" onInput="{{s.price.set}}" style="--p: {{s.price.pct}}" aria-valuetext="{{s.price.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Floor $5</span><span>{{s.price.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-adv" style="font-size: 14px; font-weight: 500">Min daily $ volume</label>
-            <sc-if value="{{s.adv.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.adv.text}}</span>
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" onClick="{{lockTap}}" aria-expanded="{{lockS}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>
+              <span style="flex: 1; font-size: 15px">Safety rules</span>
+              <span style="font-size: 15px; font-weight: 600; color: #3DDC97">Always on</span>
+              <svg class="chev {{lockChev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{lock}}" hint-placeholder-val="{{false}}">
+              <ul class="expand" style="margin: 0; padding: 0 20px 18px 46px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #A1A8B3; line-height: 1.45">
+                <sc-for list="{{locked}}" as="k" hint-placeholder-count="4"><li>{{k}}</li></sc-for>
+              </ul>
+            </sc-if>
           </div>
-          <input id="s-adv" class="kb" type="range" min="{{s.adv.min}}" max="{{s.adv.max}}" step="{{s.adv.step}}" value="{{s.adv.v}}" onInput="{{s.adv.set}}" style="--p: {{s.adv.pct}}" aria-valuetext="{{s.adv.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Floor $50M</span><span>{{s.adv.note}}</span></div>
-        </div>
-
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-spread" style="font-size: 14px; font-weight: 500">Max bid-ask spread</label>
-            <sc-if value="{{s.spread.changed}}" hint-placeholder-val="{{false}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{s.spread.text}}</span>
-          </div>
-          <input id="s-spread" class="kb" type="range" min="{{s.spread.min}}" max="{{s.spread.max}}" step="{{s.spread.step}}" value="{{s.spread.v}}" onInput="{{s.spread.set}}" style="--p: {{s.spread.pct}}" aria-valuetext="{{s.spread.text}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>Ceiling 5 bp</span><span>{{s.spread.note}}</span></div>
-        </div>
       </div>
-    </details>
-    <section class="enter d5" aria-labelledby="cl-h" style="border: 1px dashed #262A31; border-radius: 24px; padding: 20px 24px; display: flex; flex-direction: column; gap: 8px">
-      <h2 id="cl-h" style="margin: 0; font-size: 14px; font-weight: 600; color: #A1A8B3">Coming later, once each passes a replay</h2>
-      <span style="font-size: 13px; color: #7E8693; line-height: 1.6">Exit style presets (tighter / standard / looser) · more stocks in the catalogue (e.g. more chip and software names) · your own themes · days off (e.g. Fridays) · how strict the news room is</span>
     </section>
-        </div>
-        <div class="rail-wrap" style="flex: 1 0 320px; max-width: 360px; align-self: stretch">
-          <aside class="card rail enter d2" aria-labelledby="rv-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
-
-        <div style="display: flex; align-items: center; gap: 8px">
-          <h2 id="rv-h" style="margin: 0; flex: 1; font-size: 18px; font-weight: 600">Your setup</h2>
-          <span class="swap" style="font-size: 12px; font-weight: 600; color: {{stateInk}}; background: {{stateBg}}; border-radius: 999px; padding: 5px 10px">{{stateText}}</span>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <span style="font-size: 12px; color: #7E8693">Expected trades a month</span>
-          <div style="display: flex; align-items: baseline; gap: 10px"><span class="num swap" style="font-size: 40px; font-weight: 700; letter-spacing: -0.02em">≈ {{est}}</span><span class="num" style="font-size: 13px; color: #7E8693">now ≈ {{estNow}}</span></div>
-          <svg viewBox="0 0 300 26" width="100%" height="26" aria-hidden="true">
-            <rect x="0" y="4" width="300" height="8" rx="4" fill="#1B1E24"></rect>
-            <rect x="0" y="4" width="{{estNowW}}" height="8" rx="4" fill="#3A404A"></rect>
-            <rect class="grow" x="0" y="4" width="{{estW}}" height="8" rx="4" fill="#4F95F0" style="transition: width .35s var(--ease)"></rect>
-            <line x1="{{estNowW}}" y1="0" x2="{{estNowW}}" y2="16" stroke="#A1A8B3" stroke-width="2"></line>
-            <text x="0" y="25" fill="#7E8693" font-size="10" font-family="Inter">0</text><text x="276" y="25" fill="#7E8693" font-size="10" font-family="Inter">60</text>
-          </svg>
-          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{pace}}</span>
-        </div>
-        <div class="num" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid #1B1E24; padding-top: 14px">
-          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #7E8693">Max loss a trade</span><span style="font-size: 18px; font-weight: 700">{{maxLoss}}</span></div>
-          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #7E8693">Worst day</span><span style="font-size: 18px; font-weight: 700">{{worstDay}}</span></div>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1B1E24; padding-top: 14px">
-          <span class="num" style="font-size: 13px; font-weight: 600">{{diffTitle}}</span>
-          <sc-for list="{{diff}}" as="d" hint-placeholder-count="3">
-            <div class="swap" style="display: flex; gap: 8px; font-size: 13px"><span style="flex: 1; color: #A1A8B3">{{d.k}}</span><span class="num" style="color: #7E8693; text-decoration: line-through">{{d.a}}</span><span class="num" style="font-weight: 600">{{d.b}}</span></div>
-          </sc-for>
-        </div>
-        <sc-if value="{{dirty}}" hint-placeholder-val="{{true}}">
-          <span class="swap" style="font-size: 12px; color: #7E8693; line-height: 1.5">Applies at the next open, Thu 12 Nov 09:30 ET. Open trades keep their rules. Starts chapter 2 in your report.</span>
-        </sc-if>
-        <div style="display: flex; gap: 8px">
-          <button type="button" onClick="{{apply}}" disabled="{{cantApply}}" class="press" style="flex: 1; height: 48px; border-radius: 999px; border: 0; background: {{applyBg}}; color: {{applyInk}}; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">{{applyText}}</button>
-          <button type="button" onClick="{{reset}}" class="press" style="height: 48px; padding: 0 18px; border-radius: 999px; border: 1px solid #262A31; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Reset</button>
-        </div>
-          </aside>
-        </div>
-      </div>
+      <span class="enter" style="font-size: 13px; color: #7E8693; line-height: 1.6; padding: 0 4px">Coming later, once each passes a replay: exit style presets, more stocks, your own themes, days off, news-room strictness.</span>
     </sc-if>
   </main>
-  <div class="mbar" style="display: none; position: fixed; left: 12px; right: 12px; bottom: 84px; z-index: 6; align-items: center; gap: 12px; padding: 10px 10px 10px 18px; border-radius: 999px; background: #1B1E24; border: 1px solid #3A404A; box-shadow: 0 12px 32px rgba(0,0,0,.5)">
-    <span class="num" style="flex: 1; font-size: 13px"><b>{{diffShort}}</b> · ≈ {{est}} trades/mo</span>
-    <button type="button" onClick="{{openSheet}}" class="press" style="height: 40px; padding: 0 18px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Review</button>
-  </div>
+  <sc-if value="{{dirty}}" hint-placeholder-val="{{true}}">
+    <div class="dock" style="display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 20px; border-radius: 999px; background: #1B1E24; border: 1px solid #3A404A; box-shadow: 0 16px 40px rgba(0,0,0,.55)">
+      <span class="num" style="flex: 1; font-size: 14px"><b>{{diffShort}}</b><span style="color: #A1A8B3"> · ≈ {{est}} trades/mo</span></span>
+      <button type="button" onClick="{{reset}}" class="press" style="height: 40px; padding: 0 14px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Undo</button>
+      <button type="button" onClick="{{openSheet}}" disabled="{{cantApply}}" class="press" style="height: 40px; padding: 0 18px; border-radius: 999px; border: 0; background: {{applyBg}}; color: {{applyInk}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Review</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{scheduled}}" hint-placeholder-val="{{false}}">
+    <div class="dock" role="status" style="display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: 999px; background: #33270F; border: 1px solid #5A4520; color: #F5B64C; font-size: 14px; font-weight: 600">Scheduled · applies Thu 12 Nov 09:30 ET</div>
+  </sc-if>
   <sc-if value="{{sheet}}" hint-placeholder-val="{{false}}">
-    <div onClick="{{closeSheet}}" style="position: fixed; inset: 0; z-index: 7; background: rgba(0,0,0,.55)" aria-hidden="true"></div>
-    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="rv-h" style="position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; max-height: 86%; overflow: auto; background: #131519; border-top: 1px solid #262A31; border-radius: 24px 24px 0 0; padding: 12px 20px 32px; display: flex; flex-direction: column; gap: 16px">
-      <span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 999px; background: #3A404A"></span>
+    <div class="mwrap">
+      <div onClick="{{closeSheet}}" style="position: absolute; inset: 0; background: rgba(0,0,0,.6)" aria-hidden="true"></div>
+      <section class="mpanel" role="dialog" aria-modal="true" aria-labelledby="rv-h" style="position: relative; background: #131519; border: 1px solid #262A31; padding: 22px 22px 28px; display: flex; flex-direction: column; gap: 18px">
 
         <div style="display: flex; align-items: center; gap: 8px">
-          <h2 id="rv-h" style="margin: 0; flex: 1; font-size: 18px; font-weight: 600">Your setup</h2>
-          <span class="swap" style="font-size: 12px; font-weight: 600; color: {{stateInk}}; background: {{stateBg}}; border-radius: 999px; padding: 5px 10px">{{stateText}}</span>
+          <h2 id="rv-h" style="margin: 0; flex: 1; font-size: 20px; font-weight: 600">Review changes</h2>
+          <button type="button" onClick="{{closeSheet}}" aria-label="Close" class="press" style="width: 36px; height: 36px; border-radius: 999px; border: 0; background: #1B1E24; color: #A1A8B3; cursor: pointer; font-size: 16px">×</button>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <span style="font-size: 12px; color: #7E8693">Expected trades a month</span>
-          <div style="display: flex; align-items: baseline; gap: 10px"><span class="num swap" style="font-size: 40px; font-weight: 700; letter-spacing: -0.02em">≈ {{est}}</span><span class="num" style="font-size: 13px; color: #7E8693">now ≈ {{estNow}}</span></div>
-          <svg viewBox="0 0 300 26" width="100%" height="26" aria-hidden="true">
-            <rect x="0" y="4" width="300" height="8" rx="4" fill="#1B1E24"></rect>
-            <rect x="0" y="4" width="{{estNowW}}" height="8" rx="4" fill="#3A404A"></rect>
-            <rect class="grow" x="0" y="4" width="{{estW}}" height="8" rx="4" fill="#4F95F0" style="transition: width .35s var(--ease)"></rect>
-            <line x1="{{estNowW}}" y1="0" x2="{{estNowW}}" y2="16" stroke="#A1A8B3" stroke-width="2"></line>
-            <text x="0" y="25" fill="#7E8693" font-size="10" font-family="Inter">0</text><text x="276" y="25" fill="#7E8693" font-size="10" font-family="Inter">60</text>
-          </svg>
-          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{pace}}</span>
-        </div>
-        <div class="num" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid #1B1E24; padding-top: 14px">
-          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #7E8693">Max loss a trade</span><span style="font-size: 18px; font-weight: 700">{{maxLoss}}</span></div>
-          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #7E8693">Worst day</span><span style="font-size: 18px; font-weight: 700">{{worstDay}}</span></div>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1B1E24; padding-top: 14px">
-          <span class="num" style="font-size: 13px; font-weight: 600">{{diffTitle}}</span>
-          <sc-for list="{{diff}}" as="d" hint-placeholder-count="3">
-            <div class="swap" style="display: flex; gap: 8px; font-size: 13px"><span style="flex: 1; color: #A1A8B3">{{d.k}}</span><span class="num" style="color: #7E8693; text-decoration: line-through">{{d.a}}</span><span class="num" style="font-weight: 600">{{d.b}}</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{diff}}" as="d" hint-placeholder-count="4">
+            <div style="display: flex; gap: 8px; font-size: 14px"><span style="flex: 1; color: #A1A8B3">{{d.k}}</span><span class="num" style="color: #7E8693; text-decoration: line-through">{{d.a}}</span><span class="num" style="font-weight: 600">{{d.b}}</span></div>
           </sc-for>
         </div>
-        <sc-if value="{{dirty}}" hint-placeholder-val="{{true}}">
-          <span class="swap" style="font-size: 12px; color: #7E8693; line-height: 1.5">Applies at the next open, Thu 12 Nov 09:30 ET. Open trades keep their rules. Starts chapter 2 in your report.</span>
-        </sc-if>
-        <div style="display: flex; gap: 8px">
-          <button type="button" onClick="{{apply}}" disabled="{{cantApply}}" class="press" style="flex: 1; height: 48px; border-radius: 999px; border: 0; background: {{applyBg}}; color: {{applyInk}}; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">{{applyText}}</button>
-          <button type="button" onClick="{{reset}}" class="press" style="height: 48px; padding: 0 18px; border-radius: 999px; border: 1px solid #262A31; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Reset</button>
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 16px; background: #0A0B0D">
+          <span style="font-size: 12px; color: #7E8693">Expected trades a month</span>
+          <span class="num" style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em">≈ {{est}} <span style="font-size: 14px; font-weight: 500; color: #7E8693">now ≈ {{estNow}}</span></span>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{pace}}</span>
         </div>
-    </section>
+        <span style="font-size: 13px; color: #7E8693; line-height: 1.5">Applies at the next open, Thu 12 Nov 09:30 ET. Open trades keep their rules. Your report starts chapter 2.</span>
+        <button type="button" onClick="{{apply}}" class="press" style="height: 52px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer">Apply at next open</button>
+      </section>
+    </div>
   </sc-if>
   <nav class="tabbar" aria-label="Main">
     <a href="Home.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; color: #7E8693; text-decoration: none; font-size: 11px; font-weight: 600"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z" stroke-linejoin="round"></path></svg>Home</a>
@@ -528,7 +485,7 @@ class Component extends DCLogic {
     };
     const v = {}; Object.keys(this.S).forEach(k => v[k] = this.S[k].def);
     v.risk = 0.5; v.dstop = 1.5; v.start = 30;
-    this.state = { mode: 'only', themes: ['Hyperscalers', 'Semiconductors'], dropped: [], v, dip: true, spy: true, applied: false, sheet: false, ready: false };
+    this.state = { mode: 'only', themes: ['Hyperscalers', 'Semiconductors'], dropped: [], v, dip: true, spy: true, applied: false, sheet: false, ready: false, open: 'risk', edit: false, lock: false };
   }
   componentDidMount() { this._t = setTimeout(() => this.setState({ ready: true }), 1000); }
   componentWillUnmount() { clearTimeout(this._t); }
@@ -554,7 +511,8 @@ class Component extends DCLogic {
     const s = {};
     Object.keys(S).forEach(k => {
       const d = S[k]; const x = v[k];
-      s[k] = { min: d.min, max: d.max, step: d.step, v: x, text: d.f(x), note: d.usd(x), changed: x !== d.def,
+      s[k] = { min: d.min, max: d.max, step: d.step, v: x, text: d.f(x), note: d.usd(x), changed: x !== d.def, ink: x !== d.def ? '#F4F5F7' : '#A1A8B3', lo: d.f(d.min), hi: d.f(d.max),
+        open: st.open === k, openS: String(st.open === k), chev: st.open === k ? 'open-chev' : '', tap: () => this.setState({ open: st.open === k ? null : k }),
         pct: ((x - d.min) / (d.max - d.min) * 100).toFixed(1) + '%', set: e => this.set(k, e.target.value) };
     });
     const diff = [];
@@ -564,6 +522,9 @@ class Component extends DCLogic {
     if (!st.dip) diff.push({ k: 'Dip reversal', a: 'On', b: 'Off' });
     if (!st.spy) diff.push({ k: 'SPY late momentum', a: 'On', b: 'Off' });
     const dirty = diff.length > 0 && !st.applied;
+    ['wait', 'adv', 'spread'].forEach(k => { s[k].changed = s[k].changed; });
+    s.streak.changed = s.streak.changed || s.wait.changed; s.price.changed = s.price.changed || s.adv.changed || s.spread.changed;
+    s.streak.ink = s.streak.changed ? '#F4F5F7' : '#A1A8B3'; s.price.ink = s.price.changed ? '#F4F5F7' : '#A1A8B3';
     const months = est ? Math.round(900 / est) : 0;
     const pace = !est ? 'No trades expected with these settings.' : 'The go-live bar needs about 900 trades. At ≈ ' + est + ' a month that is about ' + (months >= 24 ? Math.round(months / 12) + ' years' : months + ' months') + '. A wider focus gets there faster.';
     const tog = (on) => ({ tbg: on ? '#4F95F0' : '#3A404A', tx: on ? 'translateX(20px)' : 'none' });
@@ -572,16 +533,21 @@ class Component extends DCLogic {
     return {
       loading, ready: !loading,
       modes: [['only', 'Only these'], ['prefer', 'Prefer these']].map(([k, nm]) => ({ name: nm, on: st.mode === k ? 'true' : 'false', bg: st.mode === k ? '#F4F5F7' : 'transparent', ink: st.mode === k ? '#0A0B0D' : '#A1A8B3', pick: () => this.setState({ mode: k, applied: false }) })),
-      modeNote: st.mode === 'only' ? 'Only these: Kaibot trades nothing outside your focus. SPY and sector funds are still read as reference.' : 'Prefer these: your focus goes first when slots are short; Kaibot still trades the rest of the 59.',
+      modeNote: tooFew ? '“Only these” needs at least 5 stocks. Add a theme or switch to “Prefer these”.' : st.mode === 'only' ? 'Kaibot trades nothing outside these stocks.' : 'These go first; Kaibot can still trade the other 59.',
       themes: Object.keys(this.T).map(t => { const on = st.themes.includes(t); return { name: t, n: this.T[t].length, on: on ? 'true' : 'false', bg: on ? '#16263D' : '#131519', bd: on ? '#4F95F0' : '#262A31', ink: on ? '#F4F5F7' : '#A1A8B3', sub: on ? '#7FB2FF' : '#7E8693', pick: () => this.setState({ themes: on ? st.themes.filter(z => z !== t) : [...st.themes, t], applied: false }) }; }),
-      picked: syms.length + (syms.length === 1 ? ' stock' : ' stocks') + (st.mode === 'only' ? ' in focus' : ' preferred'),
+      picked: !syms.length ? 'All 59 stocks' : syms.slice(0, 3).join(', ') + (syms.length > 3 ? ' +' + (syms.length - 3) : '') + ' · ' + syms.length + (st.mode === 'only' ? ' in focus' : ' preferred'),
       syms: syms.map((y, i) => ({ s: y, n: this.N[y] || y, i: y.slice(0, 2), c: this.C[i % this.C.length], drop: () => this.setState({ dropped: [...st.dropped, y], applied: false }) })),
       tooFew, s,
+      faces: syms.slice(0, 4).map((y, i) => ({ i: y.slice(0, 2), c: this.C[i % this.C.length] })),
+      edit: st.edit, editS: String(st.edit), editText: st.edit ? 'Done' : 'Edit', editTap: () => this.setState({ edit: !st.edit }),
+      modeInk: tooFew ? '#F5B64C' : '#7E8693',
+      streakText: v.streak + ' losses → ' + v.wait + ' min',
+      advText: (v.price === 5 && v.adv === 50 && v.spread === 5) ? 'Standard' : 'Tighter',
+      lock: st.lock, lockS: String(st.lock), lockChev: st.lock ? 'open-chev' : '', lockTap: () => this.setState({ lock: !st.lock }),
+      winStart: this.clock(v.start), scheduled: st.applied,
       strats: [
-        { name: 'Dip reversal', tag: 'live', tagInk: '#3DDC97', tagBg: '#12301F', blurb: 'Buys a sharp intraday dip in a strong stock, with a stop at 1.5× ATR and a target at 2R.', can: true, cant: false, on: String(st.dip), flip: () => this.setState({ dip: !st.dip || !st.spy ? true : false, applied: false }), ...tog(st.dip) },
-        { name: 'SPY late momentum', tag: 'live', tagInk: '#3DDC97', tagBg: '#12301F', blurb: 'One SPY trade in the last half hour when the day has trended. Needs the window to run to 15:45.', can: true, cant: false, on: String(st.spy), flip: () => this.setState({ spy: !st.spy || !st.dip ? true : false, applied: false }), ...tog(st.spy) },
-        { name: 'Opening range breakout', tag: 'under test', tagInk: '#F5B64C', tagBg: '#33270F', blurb: 'Runs on paper in the background. It can be switched on once it passes the evidence bar.', can: false, cant: true, why: 'Not yet' },
-        { name: 'News continuation', tag: 'under test', tagInk: '#F5B64C', tagBg: '#33270F', blurb: 'Runs on paper in the background. It can be switched on once it passes the evidence bar.', can: false, cant: true, why: 'Not yet' },
+        { name: 'Dip reversal', blurb: 'Buys sharp intraday dips in strong stocks', on: String(st.dip), flip: () => this.setState({ dip: !st.dip || !st.spy ? true : false, applied: false }), ...tog(st.dip) },
+        { name: 'SPY late momentum', blurb: 'One SPY trade late on trending days', on: String(st.spy), flip: () => this.setState({ spy: !st.spy || !st.dip ? true : false, applied: false }), ...tog(st.spy) },
       ],
       winX: winX.toFixed(1), winW: Math.max(0, winW).toFixed(1), fomcX: (fomcC - fomcHalf).toFixed(1), fomcW: (2 * fomcHalf).toFixed(1),
       dayCap: 'New trades ' + this.clock(v.start) + '–' + this.clock(v.end) + ' ET. Quiet ±' + v.quiet + ' min around Fed and CPI releases. Everything sold at 15:55.',
@@ -589,13 +555,13 @@ class Component extends DCLogic {
       locked: ['Sell everything at 15:55 ET, no overnight holds', 'No short selling, no leverage, paper money only', 'Skip a stock with market-moving news in the last 24 hours', 'Stop and target sit at the broker from the moment a trade opens'],
       est: est, estNow, estW: (Math.min(est, 60) / 60 * 300).toFixed(1), estNowW: (estNow / 60 * 300).toFixed(1), pace,
       maxLoss: '$' + Math.round(5021 * v.risk / 100), worstDay: '−$' + Math.round(5021 * v.dstop / 100),
-      diff: diff.slice(0, 7), diffTitle: diff.length ? diff.length + (diff.length === 1 ? ' change' : ' changes') + ' from chapter 1' : 'No changes from chapter 1',
+      diff: diff, diffTitle: diff.length ? diff.length + (diff.length === 1 ? ' change' : ' changes') + ' from chapter 1' : 'No changes from chapter 1',
       diffShort: diff.length + (diff.length === 1 ? ' change' : ' changes'),
-      dirty: dirty, cantApply: !dirty || tooFew ? 'true' : null,
-      applyBg: st.applied ? '#1B1E24' : (!dirty || tooFew ? '#262A31' : '#F4F5F7'), applyInk: st.applied ? '#3DDC97' : (!dirty || tooFew ? '#7E8693' : '#0A0B0D'),
+      dirty: dirty, cantApply: tooFew ? 'true' : null,
+      applyBg: tooFew ? '#262A31' : '#F4F5F7', applyInk: tooFew ? '#7E8693' : '#0A0B0D',
       applyText: st.applied ? 'Scheduled for Thu 09:30' : 'Apply at next open',
       stateText: st.applied ? 'Scheduled' : (dirty ? 'Draft' : 'Applied'), stateInk: st.applied ? '#F5B64C' : (dirty ? '#7FB2FF' : '#3DDC97'), stateBg: st.applied ? '#33270F' : (dirty ? '#16263D' : '#12301F'),
-      apply: () => this.setState({ applied: true }),
+      apply: () => this.setState({ applied: true, sheet: false }),
       reset: () => { const v0 = {}; Object.keys(S).forEach(k => v0[k] = S[k].def); this.setState({ v: v0, themes: [], dropped: [], mode: 'prefer', dip: true, spy: true, applied: false }); },
       sheet: st.sheet, openSheet: () => this.setState({ sheet: true }), closeSheet: () => this.setState({ sheet: false }),
     };

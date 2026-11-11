@@ -42,27 +42,56 @@ input[type=range].kb:active::-webkit-slider-thumb{transform:scale(1.15)}
 @keyframes kb-sheet{from{transform:translateY(100%)}to{transform:none}}
 details>summary{list-style:none;cursor:pointer}details>summary::-webkit-details-marker{display:none}
 details[open] .chev{transform:rotate(180deg)}.chev{transition:transform .25s var(--ease)}
-.rail{position:sticky;top:24px}
-@media (max-width: 1100px){.rail{position:static}}
-@media (max-width: 760px){.rail-wrap{display:none!important}.mbar{display:flex!important}}
+.srow{transition:background-color .2s var(--ease)}.srow:hover{background:#171A1F}
+.open-chev{transform:rotate(90deg)}
+.expand{animation:kb-rise .3s var(--ease) both}
+.dock{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:6;width:min(640px,calc(100% - 24px));animation:kb-dock .4s var(--ease) both}
+@keyframes kb-dock{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
+.mwrap{position:fixed;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;padding:24px}
+.mpanel{width:min(440px,100%);max-height:86vh;overflow:auto;border-radius:24px;animation:kb-rise .3s var(--ease) both}
+@media (max-width: 760px){.dock{bottom:84px}.mwrap{align-items:flex-end;padding:0}.mpanel{width:100%;border-radius:24px 24px 0 0;animation:kb-sheet .35s var(--ease) both}.sumline{font-size:13px!important}}
 '''
 shell.CSS = shell.CSS + EXTRA_CSS
 
 # ---------------------------------------------------------------- shared pieces
 
 
-def slider(key, label, help_):
+def slider(key, label):
     return f'''
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <div style="display: flex; align-items: baseline; gap: 8px">
-            <label for="s-{key}" style="font-size: 14px; font-weight: 500">{label}</label>
-            <sc-if value="{{{{s.{key}.changed}}}}" hint-placeholder-val="{{{{false}}}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
-            <span style="flex: 1"></span>
-            <span class="num" style="font-size: 15px; font-weight: 600">{{{{s.{key}.text}}}}</span>
-          </div>
-          <input id="s-{key}" class="kb" type="range" min="{{{{s.{key}.min}}}}" max="{{{{s.{key}.max}}}}" step="{{{{s.{key}.step}}}}" value="{{{{s.{key}.v}}}}" onInput="{{{{s.{key}.set}}}}" style="--p: {{{{s.{key}.pct}}}}" aria-valuetext="{{{{s.{key}.text}}}}">
-          <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{help_}</span><span>{{{{s.{key}.note}}}}</span></div>
-        </div>'''
+            <div style="display: flex; flex-direction: column; gap: 4px">
+              <input class="kb" type="range" aria-label="{label}" min="{{{{s.{key}.min}}}}" max="{{{{s.{key}.max}}}}" step="{{{{s.{key}.step}}}}" value="{{{{s.{key}.v}}}}" onInput="{{{{s.{key}.set}}}}" style="--p: {{{{s.{key}.pct}}}}" aria-valuetext="{{{{s.{key}.text}}}}">
+              <div class="num" style="display: flex; justify-content: space-between; font-size: 12px; color: #7E8693"><span>{{{{s.{key}.lo}}}}</span><span>{{{{s.{key}.note}}}}</span><span>{{{{s.{key}.hi}}}}</span></div>
+            </div>'''
+
+
+def row(key, label, value=None, sliders=None, first=False):
+    value = value or f"{{{{s.{key}.text}}}}"
+    inner = "".join(slider(k, lab) for k, lab in (sliders or [(key, label)]))
+    if sliders:
+        inner = "".join(f'<div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #A1A8B3">{lab}</span>{slider(k, lab)}</div>' for k, lab in sliders)
+    bt = "" if first else "border-top: 1px solid #1B1E24; "
+    return f'''
+          <div style="{bt}display: flex; flex-direction: column">
+            <button type="button" class="srow" aria-expanded="{{{{s.{key}.openS}}}}" onClick="{{{{s.{key}.tap}}}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <span style="flex: 1; font-size: 15px">{label}</span>
+              <sc-if value="{{{{s.{key}.changed}}}}" hint-placeholder-val="{{{{false}}}}"><span aria-label="changed" style="width: 6px; height: 6px; border-radius: 999px; background: #4F95F0"></span></sc-if>
+              <span class="num" style="font-size: 15px; font-weight: 600; color: {{{{s.{key}.ink}}}}">{value}</span>
+              <svg class="chev {{{{s.{key}.chev}}}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{{{s.{key}.open}}}}" hint-placeholder-val="{{{{false}}}}">
+              <div class="expand" style="display: flex; flex-direction: column; gap: 14px; padding: 4px 20px 18px">{inner}</div>
+            </sc-if>
+          </div>'''
+
+
+def group(title, body, sub=""):
+    s2 = f'<span style="font-size: 13px; color: #7E8693">{sub}</span>' if sub else ""
+    return f'''
+    <section class="enter" style="display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; flex-direction: column; gap: 2px; padding: 0 4px"><h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #A1A8B3">{title}</h2>{s2}</div>
+      <div style="{CARD}; overflow: hidden; display: flex; flex-direction: column">{body}
+      </div>
+    </section>'''
 
 
 def toggle(on, click, label):
@@ -71,228 +100,157 @@ def toggle(on, click, label):
             f'<span style="width: 22px; height: 22px; border-radius: 999px; background: #F4F5F7; transform: {{{{TOGX}}}}"></span></button>')
 
 
-FOCUS = f'''
-    <section class="card enter d1" aria-labelledby="fo-h" style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+
+FOCUS = f"""
+    <section class="card enter d1" aria-labelledby="fo-h" style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 16px">
       <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center">
-        <div style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 4px">
-          <h2 id="fo-h" style="margin: 0; font-size: 18px; font-weight: 600">What to trade</h2>
-          <span style="font-size: 13px; color: #A1A8B3">Pick themes or single stocks. Kaibot only looks for setups inside your focus.</span>
-        </div>
-        <div role="radiogroup" aria-label="Focus mode" style="display: flex; gap: 4px; background: #0A0B0D; border: 1px solid #262A31; border-radius: 999px; padding: 4px">
+        <h2 id="fo-h" style="margin: 0; flex: 1; font-size: 20px; font-weight: 600">What to trade</h2>
+        <div role="radiogroup" aria-label="Focus mode" style="display: flex; gap: 2px; background: #0A0B0D; border: 1px solid #262A31; border-radius: 999px; padding: 3px">
           <sc-for list="{{{{modes}}}}" as="m" hint-placeholder-count="2">
-            <button type="button" role="radio" aria-checked="{{{{m.on}}}}" onClick="{{{{m.pick}}}}" class="press" style="height: 38px; padding: 0 16px; border-radius: 999px; border: 0; background: {{{{m.bg}}}}; color: {{{{m.ink}}}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">{{{{m.name}}}}</button>
+            <button type="button" role="radio" aria-checked="{{{{m.on}}}}" onClick="{{{{m.pick}}}}" class="press" style="height: 34px; padding: 0 14px; border-radius: 999px; border: 0; background: {{{{m.bg}}}}; color: {{{{m.ink}}}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{{{m.name}}}}</button>
           </sc-for>
         </div>
       </div>
-      <span class="swap" style="font-size: 13px; color: #7E8693">{{{{modeNote}}}}</span>
       <div style="display: flex; flex-wrap: wrap; gap: 8px" role="group" aria-label="Themes">
         <sc-for list="{{{{themes}}}}" as="t" hint-placeholder-count="11">
-          <button type="button" aria-pressed="{{{{t.on}}}}" onClick="{{{{t.pick}}}}" class="chip" style="display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid {{{{t.bd}}}}; background: {{{{t.bg}}}}; color: {{{{t.ink}}}}; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">{{{{t.name}}}}<span class="num" style="font-size: 12px; color: {{{{t.sub}}}}">{{{{t.n}}}}</span></button>
+          <button type="button" aria-pressed="{{{{t.on}}}}" onClick="{{{{t.pick}}}}" class="chip" style="height: 38px; padding: 0 14px; border-radius: 999px; border: 1px solid {{{{t.bd}}}}; background: {{{{t.bg}}}}; color: {{{{t.ink}}}}; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">{{{{t.name}}}}</button>
         </sc-for>
       </div>
-      <div style="display: flex; flex-direction: column; gap: 10px; border-top: 1px solid #1B1E24; padding-top: 16px">
-        <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
-          <span class="num" style="font-size: 14px; font-weight: 600">{{{{picked}}}}</span>
-          <span style="flex: 1"></span>
-          <label style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid #262A31; background: #0A0B0D; color: #7E8693">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20 L16 16" stroke-linecap="round"></path></svg>
-            <input type="text" placeholder="Add a stock, e.g. COST" aria-label="Add a stock" style="border: 0; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; width: 170px; outline: none">
-          </label>
+      <div style="display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid #1B1E24">
+        <div aria-hidden="true" style="display: flex">
+          <sc-for list="{{{{faces}}}}" as="y" hint-placeholder-count="4">
+            <span style="width: 28px; height: 28px; margin-right: -8px; border-radius: 999px; border: 2px solid #131519; background: {{{{y.c}}}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700">{{{{y.i}}}}</span>
+          </sc-for>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px">
-          <sc-for list="{{{{syms}}}}" as="y" hint-placeholder-count="11">
-            <div class="swap lift" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; background: #1B1E24; border: 1px solid #262A31">
-              <span aria-hidden="true" style="flex: none; width: 30px; height: 30px; border-radius: 999px; background: {{{{y.c}}}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700">{{{{y.i}}}}</span>
-              <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 14px; font-weight: 600">{{{{y.s}}}}</span><span style="font-size: 11px; color: #7E8693; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{{{y.n}}}}</span></span>
-              <button type="button" aria-label="Remove {{{{y.s}}}}" onClick="{{{{y.drop}}}}" class="press" style="flex: none; width: 28px; height: 28px; border-radius: 999px; border: 0; background: transparent; color: #7E8693; cursor: pointer; font-size: 16px">×</button>
+        <span class="num swap" style="flex: 1; min-width: 0; padding-left: 8px; font-size: 14px; color: #A1A8B3">{{{{picked}}}}</span>
+        <button type="button" onClick="{{{{editTap}}}}" aria-expanded="{{{{editS}}}}" class="press" style="height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid #262A31; background: transparent; color: #F4F5F7; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{{{editText}}}}</button>
+      </div>
+      <sc-if value="{{{{edit}}}}" hint-placeholder-val="{{{{false}}}}">
+        <div class="expand" style="display: flex; flex-direction: column; gap: 10px">
+          <label style="display: flex; align-items: center; gap: 8px; height: 42px; padding: 0 14px; border-radius: 999px; border: 1px solid #262A31; background: #0A0B0D; color: #7E8693">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20 L16 16" stroke-linecap="round"></path></svg>
+            <input type="text" placeholder="Add a stock, e.g. COST" aria-label="Add a stock" style="flex: 1; border: 0; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; outline: none">
+          </label>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <sc-for list="{{{{syms}}}}" as="y" hint-placeholder-count="11">
+              <span class="swap" style="display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px 0 12px; border-radius: 999px; background: #1B1E24; font-size: 13px; font-weight: 600">{{{{y.s}}}}<button type="button" aria-label="Remove {{{{y.s}}}}" onClick="{{{{y.drop}}}}" class="press" style="width: 26px; height: 26px; border-radius: 999px; border: 0; background: transparent; color: #7E8693; cursor: pointer; font-size: 15px">×</button></span>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <span class="swap" style="font-size: 13px; color: {{{{modeInk}}}}; line-height: 1.5">{{{{modeNote}}}}</span>
+    </section>"""
+
+RISK = group("Risk", row("risk", "Risk per trade", first=True) + row("dstop", "Daily stop") + row("pos", "Open positions")
+             + row("size", "Position size") + row("entries", "New trades a day") + row("dd", "End run at drawdown"),
+             "Can only go down from Hunter.")
+
+STRATS = group("Strategies", """
+          <sc-for list="{{strats}}" as="g" hint-placeholder-count="2">
+            <div style="display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 20px; border-bottom: 1px solid #1B1E24">
+              <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px">{{g.name}}</span><span style="font-size: 12px; color: #7E8693">{{g.blurb}}</span></span>
+              """ + toggle("{{g.on}}", "{{g.flip}}", "{{g.name}}").replace("{{TOGBG}}", "{{g.tbg}}").replace("{{TOGX}}", "{{g.tx}}") + """
             </div>
           </sc-for>
-        </div>
-        <sc-if value="{{{{tooFew}}}}" hint-placeholder-val="{{{{false}}}}">
-          <span class="swap" role="alert" style="font-size: 13px; color: #F5B64C">“Only these” needs at least 5 stocks, so one stock’s bad day can’t decide the run. Add more or switch to “Prefer these”.</span>
-        </sc-if>
-      </div>
-    </section>'''
+          <div style="display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 20px">
+            <span style="flex: 1; font-size: 13px; color: #7E8693">Opening range breakout · News continuation</span>
+            <span style="font-size: 11px; font-weight: 600; color: #F5B64C; background: #33270F; border-radius: 999px; padding: 3px 8px">under test</span>
+          </div>""")
 
-RISK = f'''
-    <section class="card enter d2" aria-labelledby="rk-h" style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 20px">
-      <div style="display: flex; flex-direction: column; gap: 4px">
-        <h2 id="rk-h" style="margin: 0; font-size: 18px; font-weight: 600">How much to risk</h2>
-        <span style="font-size: 13px; color: #A1A8B3">Each limit can go down from your level (Hunter), never up. Dollar amounts use today’s pot, $5,021.</span>
-      </div>
-      <div class="cols" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px">
-{slider("risk", "Risk per trade", "Max loss if the stop is hit")}
-{slider("pos", "Max open positions", "At the same time")}
-{slider("size", "Max position size", "Share of the pot in one stock")}
-{slider("entries", "Max new trades a day", "Counted from the open")}
-{slider("dstop", "Daily stop", "No new trades after this loss today")}
-{slider("dd", "End the run at drawdown", "From the run’s peak")}
-      </div>
-    </section>'''
+TIMELINE = """
+          <figure style="margin: 0; padding: 18px 20px 10px" aria-label="{{dayAria}}">
+            <svg viewBox="0 0 780 46" width="100%" height="46" aria-hidden="true">
+              <defs><pattern id="hz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#F5B64C" opacity=".55"></rect></pattern></defs>
+              <rect x="0" y="8" width="780" height="14" rx="7" fill="#1B1E24"></rect>
+              <rect class="grow" x="{{winX}}" y="8" width="{{winW}}" height="14" rx="7" fill="#4F95F0" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
+              <rect x="{{fomcX}}" y="5" width="{{fomcW}}" height="20" rx="5" fill="url(#hz)" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
+              <line x1="770" y1="2" x2="770" y2="28" stroke="#FF6B6B" stroke-width="2"></line>
+              <text x="0" y="42" fill="#7E8693" font-size="11" font-family="Inter">09:30</text><text x="{{winX}}" y="42" fill="#A1A8B3" font-size="11" font-family="Inter" dx="4">{{winStart}}</text><text x="740" y="42" fill="#7E8693" font-size="11" font-family="Inter">16:00</text>
+            </svg>
+            <figcaption style="display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: #7E8693"><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: #4F95F0; vertical-align: -1px"></span> new trades</span><span><span style="display: inline-block; width: 10px; height: 10px; border-radius: 3px; background: #5A4520; border: 1px solid #F5B64C; vertical-align: -1px"></span> Fed/CPI quiet</span><span><span style="display: inline-block; width: 2px; height: 10px; background: #FF6B6B; vertical-align: -1px"></span> sell-all 15:55</span></figcaption>
+          </figure>"""
 
-STRATS = f'''
-    <section class="card enter d3" aria-labelledby="st-h" style="{CARD}; padding: 24px 24px 12px; display: flex; flex-direction: column; gap: 6px">
-      <div style="display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px">
-        <h2 id="st-h" style="margin: 0; font-size: 18px; font-weight: 600">Strategies</h2>
-        <span style="font-size: 13px; color: #A1A8B3">At least one stays on. Strategies under test run on paper in the background and never touch your pot.</span>
-      </div>
-      <sc-for list="{{{{strats}}}}" as="g" hint-placeholder-count="4">
-        <div class="row" style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid #1B1E24">
-          <div style="flex: 1; display: flex; flex-direction: column; gap: 3px">
-            <span style="display: flex; gap: 8px; align-items: center; font-size: 15px; font-weight: 600">{{{{g.name}}}}<span style="font-size: 11px; font-weight: 600; color: {{{{g.tagInk}}}}; background: {{{{g.tagBg}}}}; border-radius: 999px; padding: 3px 8px">{{{{g.tag}}}}</span></span>
-            <span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{{{g.blurb}}}}</span>
-          </div>
-          <sc-if value="{{{{g.can}}}}" hint-placeholder-val="{{{{true}}}}">
-            {toggle("{{g.on}}", "{{g.flip}}", "{{g.name}}").replace("{{TOGBG}}", "{{g.tbg}}").replace("{{TOGX}}", "{{g.tx}}")}
-          </sc-if>
-          <sc-if value="{{{{g.cant}}}}" hint-placeholder-val="{{{{false}}}}">
-            <span style="flex: none; font-size: 12px; color: #7E8693">{{{{g.why}}}}</span>
-          </sc-if>
-        </div>
-      </sc-for>
-    </section>'''
+TIMING = group("Timing", TIMELINE + row("start", "First new trade") + row("end", "Last new trade")
+               + row("quiet", "Fed & CPI quiet window") + row("vix", "Sit out when VIX is above")
+               + row("streak", "Pause after a losing streak", "{{streakText}}", [("streak", "Losses in a row"), ("wait", "Pause length")]))
 
-TIMING = f'''
-    <section class="card enter d4" aria-labelledby="tm-h" style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 20px">
-      <div style="display: flex; flex-direction: column; gap: 4px">
-        <h2 id="tm-h" style="margin: 0; font-size: 18px; font-weight: 600">When to trade, and when to sit out</h2>
-        <span style="font-size: 13px; color: #A1A8B3">The window can only get shorter. Everything is sold at 15:55 ET every day.</span>
-      </div>
-      <figure style="margin: 0; display: flex; flex-direction: column; gap: 8px" aria-label="{{{{dayAria}}}}">
-        <svg viewBox="0 0 780 64" width="100%" height="64" role="img" aria-hidden="true">
-          <defs><pattern id="hz" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="2" height="6" fill="#F5B64C" opacity=".55"></rect></pattern></defs>
-          <rect x="0" y="22" width="780" height="20" rx="10" fill="#1B1E24"></rect>
-          <rect class="grow" x="{{{{winX}}}}" y="22" width="{{{{winW}}}}" height="20" rx="10" fill="#4F95F0" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
-          <rect x="{{{{fomcX}}}}" y="18" width="{{{{fomcW}}}}" height="28" rx="6" fill="url(#hz)" stroke="#F5B64C" stroke-width="1" style="transition: x .3s var(--ease), width .3s var(--ease)"></rect>
-          <line x1="770" y1="12" x2="770" y2="52" stroke="#FF6B6B" stroke-width="2"></line>
-          <text x="0" y="62" fill="#7E8693" font-size="11" font-family="Inter">09:30</text><text x="360" y="62" fill="#7E8693" font-size="11" font-family="Inter">12:45</text><text x="740" y="62" fill="#7E8693" font-size="11" font-family="Inter">16:00</text>
-          <text x="{{{{fomcX}}}}" y="12" fill="#F5B64C" font-size="11" font-family="Inter">Fed day 14:00</text>
-          <text x="700" y="10" fill="#FF6B6B" font-size="11" font-family="Inter">sell-all 15:55</text>
-        </svg>
-        <figcaption class="num" style="font-size: 13px; color: #A1A8B3">{{{{dayCap}}}}</figcaption>
-      </figure>
-      <div class="cols" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 32px">
-{slider("start", "First new trade", "Earliest 09:35")}
-{slider("end", "Last new trade", "Latest 15:45")}
-{slider("vix", "Sit out when VIX is above", "Fear index; 35 always stops new trades")}
-{slider("quiet", "Fed and CPI quiet window", "Before and after; always on")}
-{slider("streak", "Pause after losses in a row", "Then wait")}
-{slider("wait", "Pause length", "After a losing streak")}
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 0; border-top: 1px solid #1B1E24; padding-top: 8px">
-        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: #7E8693; padding: 8px 0">ALWAYS ON</span>
-        <sc-for list="{{{{locked}}}}" as="k" hint-placeholder-count="4">
-          <div style="display: flex; gap: 12px; align-items: center; padding: 10px 0">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>
-            <span style="flex: 1; font-size: 14px; color: #A1A8B3">{{{{k}}}}</span>
-          </div>
-        </sc-for>
-      </div>
-    </section>'''
+MORE = group("More", row("price", "Advanced liquidity floors", "{{advText}}", [("price", "Min share price"), ("adv", "Min daily $ volume"), ("spread", "Max bid-ask spread")], first=True) + """
+          <div style="border-top: 1px solid #1B1E24; display: flex; flex-direction: column">
+            <button type="button" class="srow" onClick="{{lockTap}}" aria-expanded="{{lockS}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>
+              <span style="flex: 1; font-size: 15px">Safety rules</span>
+              <span style="font-size: 15px; font-weight: 600; color: #3DDC97">Always on</span>
+              <svg class="chev {{lockChev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7E8693" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <sc-if value="{{lock}}" hint-placeholder-val="{{false}}">
+              <ul class="expand" style="margin: 0; padding: 0 20px 18px 46px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: #A1A8B3; line-height: 1.45">
+                <sc-for list="{{locked}}" as="k" hint-placeholder-count="4"><li>{{k}}</li></sc-for>
+              </ul>
+            </sc-if>
+          </div>""")
 
-ADV = f'''
-    <details class="card enter d5" style="{CARD}; padding: 0">
-      <summary style="display: flex; align-items: center; gap: 12px; padding: 20px 24px">
-        <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 16px; font-weight: 600">Advanced</span><span style="font-size: 13px; color: #7E8693">Liquidity floors. Raising them skips thinner stocks.</span></span>
-        <svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true"><path d="M6 9 L12 15 L18 9" stroke-linecap="round" stroke-linejoin="round"></path></svg>
-      </summary>
-      <div class="cols" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 32px; padding: 0 24px 24px">
-{slider("price", "Min share price", "Floor $5")}
-{slider("adv", "Min daily $ volume", "Floor $50M")}
-{slider("spread", "Max bid-ask spread", "Ceiling 5 bp")}
-      </div>
-    </details>
-    <section class="enter d5" aria-labelledby="cl-h" style="border: 1px dashed #262A31; border-radius: 24px; padding: 20px 24px; display: flex; flex-direction: column; gap: 8px">
-      <h2 id="cl-h" style="margin: 0; font-size: 14px; font-weight: 600; color: #A1A8B3">Coming later, once each passes a replay</h2>
-      <span style="font-size: 13px; color: #7E8693; line-height: 1.6">Exit style presets (tighter / standard / looser) · more stocks in the catalogue (e.g. more chip and software names) · your own themes · days off (e.g. Fridays) · how strict the news room is</span>
-    </section>'''
-
-REVIEW = '''
+REVIEW = """
         <div style="display: flex; align-items: center; gap: 8px">
-          <h2 id="rv-h" style="margin: 0; flex: 1; font-size: 18px; font-weight: 600">Your setup</h2>
-          <span class="swap" style="font-size: 12px; font-weight: 600; color: {{stateInk}}; background: {{stateBg}}; border-radius: 999px; padding: 5px 10px">{{stateText}}</span>
+          <h2 id="rv-h" style="margin: 0; flex: 1; font-size: 20px; font-weight: 600">Review changes</h2>
+          <button type="button" onClick="{{closeSheet}}" aria-label="Close" class="press" style="width: 36px; height: 36px; border-radius: 999px; border: 0; background: #1B1E24; color: #A1A8B3; cursor: pointer; font-size: 16px">×</button>
         </div>
-        <div style="display: flex; flex-direction: column; gap: 6px">
-          <span style="font-size: 12px; color: #7E8693">Expected trades a month</span>
-          <div style="display: flex; align-items: baseline; gap: 10px"><span class="num swap" style="font-size: 40px; font-weight: 700; letter-spacing: -0.02em">≈ {{est}}</span><span class="num" style="font-size: 13px; color: #7E8693">now ≈ {{estNow}}</span></div>
-          <svg viewBox="0 0 300 26" width="100%" height="26" aria-hidden="true">
-            <rect x="0" y="4" width="300" height="8" rx="4" fill="#1B1E24"></rect>
-            <rect x="0" y="4" width="{{estNowW}}" height="8" rx="4" fill="#3A404A"></rect>
-            <rect class="grow" x="0" y="4" width="{{estW}}" height="8" rx="4" fill="#4F95F0" style="transition: width .35s var(--ease)"></rect>
-            <line x1="{{estNowW}}" y1="0" x2="{{estNowW}}" y2="16" stroke="#A1A8B3" stroke-width="2"></line>
-            <text x="0" y="25" fill="#7E8693" font-size="10" font-family="Inter">0</text><text x="276" y="25" fill="#7E8693" font-size="10" font-family="Inter">60</text>
-          </svg>
-          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{pace}}</span>
-        </div>
-        <div class="num" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; border-top: 1px solid #1B1E24; padding-top: 14px">
-          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #7E8693">Max loss a trade</span><span style="font-size: 18px; font-weight: 700">{{maxLoss}}</span></div>
-          <div style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #7E8693">Worst day</span><span style="font-size: 18px; font-weight: 700">{{worstDay}}</span></div>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #1B1E24; padding-top: 14px">
-          <span class="num" style="font-size: 13px; font-weight: 600">{{diffTitle}}</span>
-          <sc-for list="{{diff}}" as="d" hint-placeholder-count="3">
-            <div class="swap" style="display: flex; gap: 8px; font-size: 13px"><span style="flex: 1; color: #A1A8B3">{{d.k}}</span><span class="num" style="color: #7E8693; text-decoration: line-through">{{d.a}}</span><span class="num" style="font-weight: 600">{{d.b}}</span></div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{diff}}" as="d" hint-placeholder-count="4">
+            <div style="display: flex; gap: 8px; font-size: 14px"><span style="flex: 1; color: #A1A8B3">{{d.k}}</span><span class="num" style="color: #7E8693; text-decoration: line-through">{{d.a}}</span><span class="num" style="font-weight: 600">{{d.b}}</span></div>
           </sc-for>
         </div>
-        <sc-if value="{{dirty}}" hint-placeholder-val="{{true}}">
-          <span class="swap" style="font-size: 12px; color: #7E8693; line-height: 1.5">Applies at the next open, Thu 12 Nov 09:30 ET. Open trades keep their rules. Starts chapter 2 in your report.</span>
-        </sc-if>
-        <div style="display: flex; gap: 8px">
-          <button type="button" onClick="{{apply}}" disabled="{{cantApply}}" class="press" style="flex: 1; height: 48px; border-radius: 999px; border: 0; background: {{applyBg}}; color: {{applyInk}}; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">{{applyText}}</button>
-          <button type="button" onClick="{{reset}}" class="press" style="height: 48px; padding: 0 18px; border-radius: 999px; border: 1px solid #262A31; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Reset</button>
-        </div>'''
-
-SKEL = f'''
-    <sc-if value="{{{{loading}}}}" hint-placeholder-val="{{{{false}}}}">
-      <div aria-busy="true" aria-label="Loading your setup" style="display: flex; gap: 24px; align-items: flex-start">
-        <div style="flex: 1; display: flex; flex-direction: column; gap: 20px">
-          <div style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 14px"><span class="sk" style="width: 180px; height: 18px"></span><span class="sk" style="width: 70%; height: 14px"></span><div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="sk" style="width: 120px; height: 40px; border-radius: 999px"></span><span class="sk" style="width: 140px; height: 40px; border-radius: 999px"></span><span class="sk" style="width: 110px; height: 40px; border-radius: 999px"></span><span class="sk" style="width: 130px; height: 40px; border-radius: 999px"></span></div><span class="sk" style="height: 120px; border-radius: 14px"></span></div>
-          <div style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 18px"><span class="sk" style="width: 160px; height: 18px"></span><span class="sk" style="height: 28px"></span><span class="sk" style="height: 28px"></span><span class="sk" style="height: 28px"></span></div>
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-radius: 16px; background: #0A0B0D">
+          <span style="font-size: 12px; color: #7E8693">Expected trades a month</span>
+          <span class="num" style="font-size: 30px; font-weight: 700; letter-spacing: -0.02em">≈ {{est}} <span style="font-size: 14px; font-weight: 500; color: #7E8693">now ≈ {{estNow}}</span></span>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{pace}}</span>
         </div>
-        <div class="rail-wrap" style="flex: 0 0 340px; {CARD}; padding: 24px; display: flex; flex-direction: column; gap: 14px"><span class="sk" style="width: 120px; height: 18px"></span><span class="sk" style="width: 160px; height: 44px"></span><span class="sk" style="height: 8px"></span><span class="sk" style="height: 60px"></span><span class="sk" style="height: 48px; border-radius: 999px"></span></div>
-      </div>
-    </sc-if>'''
+        <span style="font-size: 13px; color: #7E8693; line-height: 1.5">Applies at the next open, Thu 12 Nov 09:30 ET. Open trades keep their rules. Your report starts chapter 2.</span>
+        <button type="button" onClick="{{apply}}" class="press" style="height: 52px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 16px; font-weight: 600; cursor: pointer">Apply at next open</button>"""
 
-H = 2350
-DESK = f'''  <main class="page" style="max-width: 1280px; margin: 0 auto; box-sizing: border-box; padding: 32px 40px 64px; display: flex; flex-direction: column; gap: 20px">
-    <div class="enter" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
-      <div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 6px">
-        <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Strategy</h1>
-        <span style="font-size: 15px; color: #A1A8B3">Kaibot still trades on its own. These settings make it pickier or smaller, never riskier than your level.</span>
+SKEL = f"""
+    <sc-if value="{{{{loading}}}}" hint-placeholder-val="{{{{false}}}}">
+      <div aria-busy="true" aria-label="Loading your setup" style="display: flex; flex-direction: column; gap: 20px">
+        <div style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 14px"><span class="sk" style="width: 160px; height: 20px"></span><div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="sk" style="width: 120px; height: 38px; border-radius: 999px"></span><span class="sk" style="width: 140px; height: 38px; border-radius: 999px"></span><span class="sk" style="width: 100px; height: 38px; border-radius: 999px"></span><span class="sk" style="width: 130px; height: 38px; border-radius: 999px"></span></div></div>
+        <div style="{CARD}; padding: 8px 20px; display: flex; flex-direction: column"><span class="sk" style="height: 18px; margin: 19px 0"></span><span class="sk" style="height: 18px; margin: 19px 0"></span><span class="sk" style="height: 18px; margin: 19px 0"></span></div>
       </div>
-      <span style="font-size: 12px; font-weight: 600; color: #A1A8B3; background: #131519; border: 1px solid #262A31; border-radius: 999px; padding: 7px 12px">Level Hunter · chapter 1 since Tue 10 Nov</span>
+    </sc-if>"""
+
+H = 1700
+DESK = f"""  <main class="page" style="max-width: 720px; margin: 0 auto; box-sizing: border-box; padding: 32px 24px 140px; display: flex; flex-direction: column; gap: 28px">
+    <div class="enter" style="display: flex; flex-direction: column; gap: 8px">
+      <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Strategy</h1>
+      <span style="font-size: 15px; color: #A1A8B3; line-height: 1.5">Kaibot trades on its own. Tune it here: pickier or smaller, never riskier than Hunter.</span>
+      <div class="num sumline swap" style="display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; color: #7E8693; padding-top: 4px"><span><b style="color: #F4F5F7">≈ {{{{est}}}}</b> trades a month</span><span><b style="color: #F4F5F7">{{{{maxLoss}}}}</b> max loss a trade</span><span><b style="color: #F4F5F7">{{{{worstDay}}}}</b> worst day</span></div>
     </div>
 {SKEL}
     <sc-if value="{{{{ready}}}}" hint-placeholder-val="{{{{true}}}}">
-      <div style="display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start">
-        <div style="flex: 1 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
 {FOCUS}
 {RISK}
 {STRATS}
 {TIMING}
-{ADV}
-        </div>
-        <div class="rail-wrap" style="flex: 1 0 320px; max-width: 360px; align-self: stretch">
-          <aside class="card rail enter d2" aria-labelledby="rv-h" style="{CARD}; padding: 24px; display: flex; flex-direction: column; gap: 16px">
-{REVIEW}
-          </aside>
-        </div>
-      </div>
+{MORE}
+      <span class="enter" style="font-size: 13px; color: #7E8693; line-height: 1.6; padding: 0 4px">Coming later, once each passes a replay: exit style presets, more stocks, your own themes, days off, news-room strictness.</span>
     </sc-if>
   </main>
-  <div class="mbar" style="display: none; position: fixed; left: 12px; right: 12px; bottom: 84px; z-index: 6; align-items: center; gap: 12px; padding: 10px 10px 10px 18px; border-radius: 999px; background: #1B1E24; border: 1px solid #3A404A; box-shadow: 0 12px 32px rgba(0,0,0,.5)">
-    <span class="num" style="flex: 1; font-size: 13px"><b>{{{{diffShort}}}}</b> · ≈ {{{{est}}}} trades/mo</span>
-    <button type="button" onClick="{{{{openSheet}}}}" class="press" style="height: 40px; padding: 0 18px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Review</button>
-  </div>
-  <sc-if value="{{{{sheet}}}}" hint-placeholder-val="{{{{false}}}}">
-    <div onClick="{{{{closeSheet}}}}" style="position: fixed; inset: 0; z-index: 7; background: rgba(0,0,0,.55)" aria-hidden="true"></div>
-    <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="rv-h" style="position: fixed; left: 0; right: 0; bottom: 0; z-index: 8; max-height: 86%; overflow: auto; background: #131519; border-top: 1px solid #262A31; border-radius: 24px 24px 0 0; padding: 12px 20px 32px; display: flex; flex-direction: column; gap: 16px">
-      <span aria-hidden="true" style="align-self: center; width: 40px; height: 4px; border-radius: 999px; background: #3A404A"></span>
-{REVIEW}
-    </section>
+  <sc-if value="{{{{dirty}}}}" hint-placeholder-val="{{{{true}}}}">
+    <div class="dock" style="display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 20px; border-radius: 999px; background: #1B1E24; border: 1px solid #3A404A; box-shadow: 0 16px 40px rgba(0,0,0,.55)">
+      <span class="num" style="flex: 1; font-size: 14px"><b>{{{{diffShort}}}}</b><span style="color: #A1A8B3"> · ≈ {{{{est}}}} trades/mo</span></span>
+      <button type="button" onClick="{{{{reset}}}}" class="press" style="height: 40px; padding: 0 14px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Undo</button>
+      <button type="button" onClick="{{{{openSheet}}}}" disabled="{{{{cantApply}}}}" class="press" style="height: 40px; padding: 0 18px; border-radius: 999px; border: 0; background: {{{{applyBg}}}}; color: {{{{applyInk}}}}; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Review</button>
+    </div>
   </sc-if>
-'''
-
+  <sc-if value="{{{{scheduled}}}}" hint-placeholder-val="{{{{false}}}}">
+    <div class="dock" role="status" style="display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-radius: 999px; background: #33270F; border: 1px solid #5A4520; color: #F5B64C; font-size: 14px; font-weight: 600">Scheduled · applies Thu 12 Nov 09:30 ET</div>
+  </sc-if>
+  <sc-if value="{{{{sheet}}}}" hint-placeholder-val="{{{{false}}}}">
+    <div class="mwrap">
+      <div onClick="{{{{closeSheet}}}}" style="position: absolute; inset: 0; background: rgba(0,0,0,.6)" aria-hidden="true"></div>
+      <section class="mpanel" role="dialog" aria-modal="true" aria-labelledby="rv-h" style="position: relative; background: #131519; border: 1px solid #262A31; padding: 22px 22px 28px; display: flex; flex-direction: column; gap: 18px">
+{REVIEW}
+      </section>
+    </div>
+  </sc-if>
+"""
 SCRIPT = r'''class Component extends DCLogic {
   constructor(p) {
     super(p);
@@ -331,7 +289,7 @@ SCRIPT = r'''class Component extends DCLogic {
     };
     const v = {}; Object.keys(this.S).forEach(k => v[k] = this.S[k].def);
     v.risk = 0.5; v.dstop = 1.5; v.start = 30;
-    this.state = { mode: 'only', themes: ['Hyperscalers', 'Semiconductors'], dropped: [], v, dip: true, spy: true, applied: false, sheet: false, ready: false };
+    this.state = { mode: 'only', themes: ['Hyperscalers', 'Semiconductors'], dropped: [], v, dip: true, spy: true, applied: false, sheet: false, ready: false, open: 'risk', edit: false, lock: false };
   }
   componentDidMount() { this._t = setTimeout(() => this.setState({ ready: true }), 1000); }
   componentWillUnmount() { clearTimeout(this._t); }
@@ -357,7 +315,8 @@ SCRIPT = r'''class Component extends DCLogic {
     const s = {};
     Object.keys(S).forEach(k => {
       const d = S[k]; const x = v[k];
-      s[k] = { min: d.min, max: d.max, step: d.step, v: x, text: d.f(x), note: d.usd(x), changed: x !== d.def,
+      s[k] = { min: d.min, max: d.max, step: d.step, v: x, text: d.f(x), note: d.usd(x), changed: x !== d.def, ink: x !== d.def ? '#F4F5F7' : '#A1A8B3', lo: d.f(d.min), hi: d.f(d.max),
+        open: st.open === k, openS: String(st.open === k), chev: st.open === k ? 'open-chev' : '', tap: () => this.setState({ open: st.open === k ? null : k }),
         pct: ((x - d.min) / (d.max - d.min) * 100).toFixed(1) + '%', set: e => this.set(k, e.target.value) };
     });
     const diff = [];
@@ -367,6 +326,9 @@ SCRIPT = r'''class Component extends DCLogic {
     if (!st.dip) diff.push({ k: 'Dip reversal', a: 'On', b: 'Off' });
     if (!st.spy) diff.push({ k: 'SPY late momentum', a: 'On', b: 'Off' });
     const dirty = diff.length > 0 && !st.applied;
+    ['wait', 'adv', 'spread'].forEach(k => { s[k].changed = s[k].changed; });
+    s.streak.changed = s.streak.changed || s.wait.changed; s.price.changed = s.price.changed || s.adv.changed || s.spread.changed;
+    s.streak.ink = s.streak.changed ? '#F4F5F7' : '#A1A8B3'; s.price.ink = s.price.changed ? '#F4F5F7' : '#A1A8B3';
     const months = est ? Math.round(900 / est) : 0;
     const pace = !est ? 'No trades expected with these settings.' : 'The go-live bar needs about 900 trades. At ≈ ' + est + ' a month that is about ' + (months >= 24 ? Math.round(months / 12) + ' years' : months + ' months') + '. A wider focus gets there faster.';
     const tog = (on) => ({ tbg: on ? '#4F95F0' : '#3A404A', tx: on ? 'translateX(20px)' : 'none' });
@@ -375,16 +337,21 @@ SCRIPT = r'''class Component extends DCLogic {
     return {
       loading, ready: !loading,
       modes: [['only', 'Only these'], ['prefer', 'Prefer these']].map(([k, nm]) => ({ name: nm, on: st.mode === k ? 'true' : 'false', bg: st.mode === k ? '#F4F5F7' : 'transparent', ink: st.mode === k ? '#0A0B0D' : '#A1A8B3', pick: () => this.setState({ mode: k, applied: false }) })),
-      modeNote: st.mode === 'only' ? 'Only these: Kaibot trades nothing outside your focus. SPY and sector funds are still read as reference.' : 'Prefer these: your focus goes first when slots are short; Kaibot still trades the rest of the 59.',
+      modeNote: tooFew ? '“Only these” needs at least 5 stocks. Add a theme or switch to “Prefer these”.' : st.mode === 'only' ? 'Kaibot trades nothing outside these stocks.' : 'These go first; Kaibot can still trade the other 59.',
       themes: Object.keys(this.T).map(t => { const on = st.themes.includes(t); return { name: t, n: this.T[t].length, on: on ? 'true' : 'false', bg: on ? '#16263D' : '#131519', bd: on ? '#4F95F0' : '#262A31', ink: on ? '#F4F5F7' : '#A1A8B3', sub: on ? '#7FB2FF' : '#7E8693', pick: () => this.setState({ themes: on ? st.themes.filter(z => z !== t) : [...st.themes, t], applied: false }) }; }),
-      picked: syms.length + (syms.length === 1 ? ' stock' : ' stocks') + (st.mode === 'only' ? ' in focus' : ' preferred'),
+      picked: !syms.length ? 'All 59 stocks' : syms.slice(0, 3).join(', ') + (syms.length > 3 ? ' +' + (syms.length - 3) : '') + ' · ' + syms.length + (st.mode === 'only' ? ' in focus' : ' preferred'),
       syms: syms.map((y, i) => ({ s: y, n: this.N[y] || y, i: y.slice(0, 2), c: this.C[i % this.C.length], drop: () => this.setState({ dropped: [...st.dropped, y], applied: false }) })),
       tooFew, s,
+      faces: syms.slice(0, 4).map((y, i) => ({ i: y.slice(0, 2), c: this.C[i % this.C.length] })),
+      edit: st.edit, editS: String(st.edit), editText: st.edit ? 'Done' : 'Edit', editTap: () => this.setState({ edit: !st.edit }),
+      modeInk: tooFew ? '#F5B64C' : '#7E8693',
+      streakText: v.streak + ' losses → ' + v.wait + ' min',
+      advText: (v.price === 5 && v.adv === 50 && v.spread === 5) ? 'Standard' : 'Tighter',
+      lock: st.lock, lockS: String(st.lock), lockChev: st.lock ? 'open-chev' : '', lockTap: () => this.setState({ lock: !st.lock }),
+      winStart: this.clock(v.start), scheduled: st.applied,
       strats: [
-        { name: 'Dip reversal', tag: 'live', tagInk: '#3DDC97', tagBg: '#12301F', blurb: 'Buys a sharp intraday dip in a strong stock, with a stop at 1.5× ATR and a target at 2R.', can: true, cant: false, on: String(st.dip), flip: () => this.setState({ dip: !st.dip || !st.spy ? true : false, applied: false }), ...tog(st.dip) },
-        { name: 'SPY late momentum', tag: 'live', tagInk: '#3DDC97', tagBg: '#12301F', blurb: 'One SPY trade in the last half hour when the day has trended. Needs the window to run to 15:45.', can: true, cant: false, on: String(st.spy), flip: () => this.setState({ spy: !st.spy || !st.dip ? true : false, applied: false }), ...tog(st.spy) },
-        { name: 'Opening range breakout', tag: 'under test', tagInk: '#F5B64C', tagBg: '#33270F', blurb: 'Runs on paper in the background. It can be switched on once it passes the evidence bar.', can: false, cant: true, why: 'Not yet' },
-        { name: 'News continuation', tag: 'under test', tagInk: '#F5B64C', tagBg: '#33270F', blurb: 'Runs on paper in the background. It can be switched on once it passes the evidence bar.', can: false, cant: true, why: 'Not yet' },
+        { name: 'Dip reversal', blurb: 'Buys sharp intraday dips in strong stocks', on: String(st.dip), flip: () => this.setState({ dip: !st.dip || !st.spy ? true : false, applied: false }), ...tog(st.dip) },
+        { name: 'SPY late momentum', blurb: 'One SPY trade late on trending days', on: String(st.spy), flip: () => this.setState({ spy: !st.spy || !st.dip ? true : false, applied: false }), ...tog(st.spy) },
       ],
       winX: winX.toFixed(1), winW: Math.max(0, winW).toFixed(1), fomcX: (fomcC - fomcHalf).toFixed(1), fomcW: (2 * fomcHalf).toFixed(1),
       dayCap: 'New trades ' + this.clock(v.start) + '–' + this.clock(v.end) + ' ET. Quiet ±' + v.quiet + ' min around Fed and CPI releases. Everything sold at 15:55.',
@@ -392,13 +359,13 @@ SCRIPT = r'''class Component extends DCLogic {
       locked: ['Sell everything at 15:55 ET, no overnight holds', 'No short selling, no leverage, paper money only', 'Skip a stock with market-moving news in the last 24 hours', 'Stop and target sit at the broker from the moment a trade opens'],
       est: est, estNow, estW: (Math.min(est, 60) / 60 * 300).toFixed(1), estNowW: (estNow / 60 * 300).toFixed(1), pace,
       maxLoss: '$' + Math.round(5021 * v.risk / 100), worstDay: '−$' + Math.round(5021 * v.dstop / 100),
-      diff: diff.slice(0, 7), diffTitle: diff.length ? diff.length + (diff.length === 1 ? ' change' : ' changes') + ' from chapter 1' : 'No changes from chapter 1',
+      diff: diff, diffTitle: diff.length ? diff.length + (diff.length === 1 ? ' change' : ' changes') + ' from chapter 1' : 'No changes from chapter 1',
       diffShort: diff.length + (diff.length === 1 ? ' change' : ' changes'),
-      dirty: dirty, cantApply: !dirty || tooFew ? 'true' : null,
-      applyBg: st.applied ? '#1B1E24' : (!dirty || tooFew ? '#262A31' : '#F4F5F7'), applyInk: st.applied ? '#3DDC97' : (!dirty || tooFew ? '#7E8693' : '#0A0B0D'),
+      dirty: dirty, cantApply: tooFew ? 'true' : null,
+      applyBg: tooFew ? '#262A31' : '#F4F5F7', applyInk: tooFew ? '#7E8693' : '#0A0B0D',
       applyText: st.applied ? 'Scheduled for Thu 09:30' : 'Apply at next open',
       stateText: st.applied ? 'Scheduled' : (dirty ? 'Draft' : 'Applied'), stateInk: st.applied ? '#F5B64C' : (dirty ? '#7FB2FF' : '#3DDC97'), stateBg: st.applied ? '#33270F' : (dirty ? '#16263D' : '#12301F'),
-      apply: () => this.setState({ applied: true }),
+      apply: () => this.setState({ applied: true, sheet: false }),
       reset: () => { const v0 = {}; Object.keys(S).forEach(k => v0[k] = S[k].def); this.setState({ v: v0, themes: [], dropped: [], mode: 'prefer', dip: true, spy: true, applied: false }); },
       sheet: st.sheet, openSheet: () => this.setState({ sheet: true }), closeSheet: () => this.setState({ sheet: false }),
     };
