@@ -21,6 +21,8 @@ mkdir -p data/live
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 CHECK=0; for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = --check ] && CHECK=1; done
+# Never two engines at once (one paper account would trade twice): refuse if one already runs on this machine.
+if [ "$CHECK" = 0 ]; then ./scripts/engine_guard.sh || exit 1; fi
 # The watchdog (separate process, own broker client) is left running when the engine stops or crashes:
 # that is its job. It cancels entries if the engine goes quiet and flattens at 15:55. One copy at a time.
 

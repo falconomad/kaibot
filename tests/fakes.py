@@ -173,7 +173,14 @@ class FakeBroker:
     def order_by_client_id(self, coid):
         return next((o for o in self.orders.values() if o.get("client_order_id") == coid), None)
 
+    def _new_coid(self, coid):
+        """Alpaca refuses a reused client_order_id (422; the adapter then returns the existing order). Raising
+        here makes any duplicate submission in a test fail loudly."""
+        if coid and self.order_by_client_id(coid) is not None:
+            raise ValueError(f"422 client_order_id must be unique: {coid}")
+
     def submit_bracket(self, coid, symbol, qty, stop, target):
+        self._new_coid(coid)
         oid = f"o{next(self.ids)}"
         o = {
             "id": oid,
@@ -192,6 +199,7 @@ class FakeBroker:
         return o
 
     def submit_oto_stop(self, coid, symbol, qty, stop):
+        self._new_coid(coid)
         oid = f"o{next(self.ids)}"
         o = {"id": oid, "client_order_id": coid, "symbol": symbol, "qty": qty, "side": "buy", "type": "market",
              "status": "new", "order_class": "oto",
@@ -200,6 +208,7 @@ class FakeBroker:
         return o
 
     def submit_moc_sell(self, coid, symbol, qty):
+        self._new_coid(coid)
         oid = f"o{next(self.ids)}"
         o = {"id": oid, "client_order_id": coid, "symbol": symbol, "qty": qty, "side": "sell", "type": "market",
              "time_in_force": "cls", "status": "new", "legs": []}
