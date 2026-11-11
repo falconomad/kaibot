@@ -16,6 +16,15 @@ a{color:#7FB2FF}a:hover{color:#B3D1FF}
 .num{font-variant-numeric:tabular-nums}
 /* motion: one easing, short durations; everything stops for prefers-reduced-motion */
 :root{--ease:cubic-bezier(.2,.7,.2,1)}
+@keyframes kb-riseY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes kb-ring{from{stroke-dasharray:0 239}}
+@keyframes kb-shimmer{from{background-position:-600px 0}to{background-position:600px 0}}
+.rise{transform-box:view-box;animation:kb-riseY 1.1s var(--ease) .15s both}
+.rise-bar{transform-box:view-box;animation:kb-riseY .8s var(--ease) both}
+.rise-up{transform-origin:bottom;animation:kb-riseY .6s var(--ease) both}
+.ring{animation:kb-ring 1.1s var(--ease) .3s both}
+.sk{display:block;background:linear-gradient(90deg,#16181C 0%,#23272E 50%,#16181C 100%);background-size:1200px 100%;animation:kb-shimmer 1.5s linear infinite;border-radius:10px}
+
 @keyframes kb-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes kb-fade{from{opacity:0}to{opacity:1}}
 @keyframes kb-draw{to{stroke-dashoffset:0}}
@@ -46,13 +55,27 @@ a{color:#7FB2FF}a:hover{color:#B3D1FF}
   .cols{grid-template-columns:minmax(0,1fr)!important}
   .card{border-radius:20px!important;padding:16px!important}
 }
-@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0}}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0}.sk{background:#1B1E24}}
 
 button:focus-visible,a:focus-visible{outline:2px solid #4F95F0;outline-offset:2px}
 </style>
 </helmet>
 <div style="width: 390px; height: 844px; box-sizing: border-box; background: #0A0B0D; color: #F4F5F7; font-family: Inter, system-ui, sans-serif; display: flex; flex-direction: column; overflow: hidden">
   <div style="flex: 1; overflow: hidden; padding: 20px 20px 0; display: flex; flex-direction: column; gap: 18px">
+    <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
+      <div aria-busy="true" aria-label="Loading" style="display: flex; flex-direction: column; gap: 16px">
+        <span class="sk" style="width: 120px; height: 14px"></span>
+        <span class="sk" style="width: 230px; height: 44px; border-radius: 12px"></span>
+        <span class="sk" style="width: 200px; height: 14px"></span>
+        <span class="sk" style="width: 100%; height: 140px; border-radius: 18px"></span>
+        <span class="sk" style="width: 100%; height: 36px; border-radius: 999px"></span>
+        <span class="sk" style="width: 100%; height: 60px; border-radius: 18px"></span>
+        <span class="sk" style="width: 100%; height: 56px; border-radius: 14px"></span>
+        <span class="sk" style="width: 100%; height: 56px; border-radius: 14px"></span>
+      </div>
+    </sc-if>
+    <sc-if value="{{ready}}" hint-placeholder-val="{{true}}">
+    <div style="display: contents">
     <div style="display: flex; align-items: center; justify-content: space-between">
       <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #A1A8B3"><span class="live-dot" aria-hidden="true" style="width: 8px; height: 8px; background: #3DDC97"></span>Running · 6 s ago</span>
       <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #0A0B0D; background: #F5B64C; border-radius: 999px; padding: 4px 9px">PAPER · HUNTER</span>
@@ -65,9 +88,11 @@ button:focus-visible,a:focus-visible{outline:2px solid #4F95F0;outline-offset:2p
     <svg viewBox="0 0 350 140" role="img" aria-label="Pot rising 0.84% since the start while SPY fell 0.21%" style="width: 100%; height: auto">
       <defs><linearGradient id="mf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4F95F0" stop-opacity="0.28"></stop><stop offset="1" stop-color="#4F95F0" stop-opacity="0"></stop></linearGradient></defs>
       <line x1="0" y1="100" x2="350" y2="100" stroke="#262A31" stroke-dasharray="3 4"></line>
+      <g class="rise" style="transform-origin: 0 140px">
       <path d="M0 100 L32 98 L64 96 L95 97 L127 94 L159 92 L191 93 L223 89 L255 87 L286 85 L318 84 L350 82 L350 140 L0 140 Z" fill="url(#mf)"></path>
       <path d="M0 100 L32 101 L64 99 L95 100 L127 102 L159 101 L191 103 L223 101 L255 102 L286 100 L318 102 L350 101" fill="none" stroke="#C4862F" stroke-width="2" stroke-dasharray="5 4"></path>
-      <path class="draw" d="M0 100 L32 98 L64 96 L95 97 L127 94 L159 92 L191 93 L223 89 L255 87 L286 85 L318 84 L350 82" fill="none" stroke="#4F95F0" stroke-width="2.5" stroke-linejoin="round"></path>
+      <path d="M0 100 L32 98 L64 96 L95 97 L127 94 L159 92 L191 93 L223 89 L255 87 L286 85 L318 84 L350 82" fill="none" stroke="#4F95F0" stroke-width="2.5" stroke-linejoin="round"></path>
+      </g>
     </svg>
     <div role="group" aria-label="Chart range" style="display: flex; justify-content: space-between">
       <button type="button" style="height: 36px; width: 64px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; font: inherit; font-size: 14px; font-weight: 600">1D</button>
@@ -92,6 +117,8 @@ button:focus-visible,a:focus-visible{outline:2px solid #4F95F0;outline-offset:2p
         <span style="text-align: right; display: flex; flex-direction: column; gap: 2px"><span class="num" style="font-size: 15px; font-weight: 600">$116.40</span><span class="num" style="font-size: 13px; font-weight: 600; color: #FF6B6B">▼ −$3.76</span></span>
       </a>
     </div>
+    </div>
+    </sc-if>
   </div>
   <nav aria-label="Main" style="flex: none; display: flex; justify-content: space-around; padding: 10px 8px 22px; border-top: 1px solid #1B1E24; background: #0A0B0D">
     <a href="Home.dc.html" aria-current="page" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; color: #F4F5F7; text-decoration: none; font-size: 11px; font-weight: 600">
@@ -107,9 +134,11 @@ button:focus-visible,a:focus-visible{outline:2px solid #4F95F0;outline-offset:2p
   </nav>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"showLoading":{"editor":"boolean","default":false,"section":"States"},"$preview":{"width":390,"height":844}}'>
 class Component extends DCLogic {
-  renderVals() { return {}; }
+  componentDidMount() { this._t = setTimeout(() => this.setState({ ready: true }), 1100); }
+  componentWillUnmount() { clearTimeout(this._t); }
+  renderVals() { const loading = !!this.props.showLoading || !(this.state && this.state.ready); return { loading: loading, ready: !loading }; }
 }
 </script>
 </body>
