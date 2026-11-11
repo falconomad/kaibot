@@ -14,6 +14,20 @@ export interface Run {
   started_on: string | null; ended_on: string | null;
 }
 export interface Daily { session: string; pnl: number; pnl_venue: number; pnl_shadow: number; spy_ret: number | null; cash_ret?: number | null; trades: number }
+export interface GateCriterion { value: number | null; limit: number | null; met: boolean | null }
+export type GateStatus = "pass" | "fail" | "kill" | "provisional";
+export interface GateStrategy {
+  status: GateStatus; kills: string[]; criteria: Record<string, GateCriterion>; n_trades: number; excluded_older_code: number;
+  pnl_usd: number; mean_r_pct: number | null; sessions: number; random_days: number; random_missing_days: string[] | null;
+  n_trials: number; trades_to_go: number;
+}
+export interface GateReportBody {
+  generated_at: string; bar_sha: string; fingerprint: string; frozen_since: string | null; overall: GateOverall;
+  bar: Record<string, number | boolean>; kill: Record<string, number | boolean>; strategies: Record<string, GateStrategy>;
+}
+export type GateOverall = "discuss" | "keep collecting" | "kill";
+export interface GateHistoryRow { id: number; ts: string; session: string; overall: GateOverall; fingerprint: string; status: Record<string, GateStatus>; n_trades: Record<string, number> }
+export interface GateResp { latest: { id: number; ts: string; session: string; bar_sha: string; fingerprint: string; overall: GateOverall; report: GateReportBody } | null; history: GateHistoryRow[]; random_days: number }
 export interface NearMiss { symbol: string; m: number; z: number; why: string }
 export interface Scan { bars: number; checks: number; regime_off: number; setups: number; near: number; vetoed: Record<string, number>; to_room: number; recent_near: NearMiss[] }
 export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null } | null }
@@ -167,6 +181,7 @@ export const api = {
     const b = coerce(await rpc<LlmBudget>("kb_llm_budget"));
     return { ...b, by_purpose: numValues(b.by_purpose) };
   },
+  gate: async (run: number) => rpc<GateResp>("kb_gate_report", { p_run: run }),
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

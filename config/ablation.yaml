@@ -1,0 +1,48 @@
+# Story S39: pre-registered alt-data ablation rules (PRD v2: alt data is logged from M1 and traded only after a
+# 3-month ablation). Each rule is a simple KEEP filter on one point-in-time feature from
+# src/kaibot/features/alt.py `alt_features()` (dotted path into its dict). A trade whose value is unknown is KEPT.
+#
+# Pre-registration: write the rule and its hypothesis BEFORE looking at the result. Editing this file changes its
+# sha256 (recorded in every result and trial row), so a rule tuned after seeing data shows up as a new trial.
+# The admission thresholds (95th percentile vs random, 63 trading days, 100 known trades) are fixed in
+# src/kaibot/evaluation/ablation.py and cannot be loosened here. Passing only PROPOSES a feature (docs/ops/ablation.md).
+version: 1
+seed: 39            # numpy RNG seed for the random subsets (deterministic)
+n_random: 1000      # random subsets per rule (>= 1000)
+rules:
+  - name: sv_rel_no_spike
+    feature: short_volume.svr_rel
+    op: "<="
+    value: 1.5
+    hypothesis: A jump in the off-exchange short-volume share vs its 20-day mean flags informed selling; skipping
+      those longs raises mean R.
+  - name: sv_level_not_extreme
+    feature: short_volume.svr
+    op: "<="
+    value: 0.6
+    hypothesis: Days when more than 60% of off-exchange volume is short are crowded-short; longs there do worse.
+  - name: insider_no_net_selling
+    feature: insider_30d.net_usd
+    op: ">="
+    value: 0
+    hypothesis: Net open-market insider selling in the last 30 days is a negative signal; keep only no-net-selling names.
+  - name: insider_any_buying
+    feature: insider_30d.n_buys
+    op: ">="
+    value: 1
+    hypothesis: Open-market insider purchases in the last 30 days are a positive signal (Form 4 code P).
+  - name: tariffs_tone_not_shock
+    feature: gdelt_tone_z.tariffs
+    op: ">="
+    value: -2
+    hypothesis: A tariff-news tone shock (z <= -2 vs 7 days) is a market-wide risk-off moment; dip buys then fail.
+  - name: conflict_tone_not_shock
+    feature: gdelt_tone_z.conflict
+    op: ">="
+    value: -2
+    hypothesis: Same for war/conflict news tone shocks.
+  - name: recession_tone_not_shock
+    feature: gdelt_tone_z.recession
+    op: ">="
+    value: -2
+    hypothesis: Same for recession/layoffs news tone shocks.

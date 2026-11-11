@@ -216,3 +216,13 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 .grid.trade-grid { grid-template-columns: minmax(280px, 1fr) minmax(300px, 1.4fr); align-items: start; }
 @media (max-width: 760px) { .grid.trade-grid { grid-template-columns: minmax(0, 1fr); } }
 .kv .bar-row { grid-column: 1 / -1; margin: -2px 0 4px; }
+
+/* S41 go / no-go */
+.tag.gate-pass { color: var(--gain); background: var(--gain-tint); } .tag.gate-fail { color: var(--loss); background: var(--loss-tint); }
+.tag.gate-warn { color: var(--warn); background: var(--warn-tint); } .tag.gate-muted { color: var(--slate); background: var(--surface-2); }
+.bar-track { height: 4px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 4px 0 12px; }
+.bar-track i { display: block; height: 4px; border-radius: 4px; background: var(--sea); transform-origin: left; animation: kb-growX .9s var(--ease) .3s both; }
+.gate-dot { font-size: 12px; white-space: nowrap; }
+.gate-dot::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 999px; margin-right: 6px; background: var(--slate); }
+.gate-dot.gate-pass::before { background: var(--gain); } .gate-dot.gate-fail::before { background: var(--loss); }
+.gate-dot.gate-unknown::before { background: transparent; border: 1px solid var(--slate); }

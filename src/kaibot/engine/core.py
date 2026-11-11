@@ -30,9 +30,11 @@ import numpy as np
 
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
+from kaibot.engine.config import ROOT
 from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.market import LiveMarket, session_minutes
 from kaibot.engine.roomflow import RoomFlow
+from kaibot.evaluation import gate_report
 from kaibot.replay.features import five_minute
 from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
@@ -48,6 +50,14 @@ PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
 MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
+
+
+def _fingerprint() -> str:
+    try:
+        return gate_report.fingerprint(ROOT, gate_report.Bar.load(ROOT).cfg["fingerprint"])
+    except Exception:
+        log.exception("strategy fingerprint unavailable")
+        return "unknown"
 
 
 def code_sha() -> str:
@@ -158,6 +168,7 @@ class Engine:
         self.pos: dict[str, Pos] = {}
         self.account_clean = True
         self.code = code_sha()
+        self.fingerprint = _fingerprint()  # S38: strategy-code hash; trades count toward the gate only on frozen code
         self.peak: float | None = None
         self.on_progress = lambda status: None
 
@@ -165,10 +176,15 @@ class Engine:
     def startup(self) -> None:
         self.run = self.store.active_run()
         self._restore_positions()
+        try:
+            self._adopt_orphans()
+        except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
+            log.exception("order adoption failed")
         self.check_account()
         self.store.event(
             "engine_start",
-            {"code_sha": self.code, "run_id": self.run and self.run["id"], "positions": list(self.pos)},
+            {"code_sha": self.code, "fingerprint": self.fingerprint, "run_id": self.run and self.run["id"],
+             "positions": list(self.pos)},
             self._rid(),
         )
 
@@ -177,7 +193,8 @@ class Engine:
 
         An open order counts as known if it is on a symbol the engine holds (its bracket legs and exits). An
         unknown one is e.g. a bracket accepted just before a crash, before its row was written: adopting it
-        blindly could double the position, so we stop instead and say so."""
+        blindly could double the position, so we stop instead and say so. (One whose client_order_id is exactly
+        ours for an approved signal has already been adopted by `_adopt_orphans` at startup.)"""
         broker_pos = self.broker.positions()
         foreign = sorted(set(broker_pos) - set(self.pos))
         orders = sorted({o["symbol"] for o in self.broker.open_orders() if o["symbol"] not in self.pos})
@@ -240,6 +257,89 @@ class Engine:
             known = {k: f[k] for k in Pos.__dataclass_fields__ if k in f}
             p = Pos(trade_id=t["id"], symbol=t["symbol"], qty=int(float(t["qty"])), **known)
             self.pos[p.symbol] = p
+
+    def _adopt_orphans(self) -> None:
+        """S40: a crash between the broker accepting an entry and the engine writing its order/trade rows leaves an
+        order the engine doesn't know. If its client_order_id is exactly the one this run gave an approved signal
+        (kb-<run>-<signal>-1), it is ours beyond doubt: write the missing rows and manage it. Anything else still
+        counts as unknown and blocks entries (check_account)."""
+        if not self.run:
+            return
+        rid = self.run["id"]
+        sigs = self.store.select("signal", {"run_id": f"eq.{rid}", "mode": "eq.live", "order": "id.desc",
+                                            "limit": "50"})
+        if not sigs:
+            return
+        ids = ",".join(str(r["id"]) for r in sigs)
+        traded = {r["signal_id"] for r in self.store.select("trade", {"signal_id": f"in.({ids})"})}
+        approved = {g["signal_id"]: g for g in self.store.select("gate_run", {"signal_id": f"in.({ids})"})
+                    if g.get("approved")}
+        rows = {r["signal_id"]: r for r in self.store.select("order", {"signal_id": f"in.({ids})"})}
+        for sig in sigs:
+            sid, s = sig["id"], sig["symbol"]
+            if sid in traded or sid not in approved or s in self.pos:
+                continue
+            coid = f"kb-{rid}-{sid}-1"
+            o = self.broker.order_by_client_id(coid)
+            if not o or o.get("symbol") != s or o.get("side") != "buy" or o.get("status") in (
+                    "canceled", "expired", "rejected"):
+                continue
+            self._adopt(sig, o, coid, rows.get(sid))
+
+    def _adopt(self, sig: dict, o: dict, coid: str, db_order: dict | None) -> None:
+        f = sig.get("features") or {}
+        ref, stop, target = float(sig["entry"]), float(sig["stop"]), sig.get("target")
+        qty = int(float(o["qty"]))
+        sigma = f.get("sigma_1m")
+        if sigma is None and f.get("sigma") is not None:  # SPY momentum logs the daily sigma
+            sigma = float(f["sigma"]) / np.sqrt(390)
+        if db_order is None:
+            db_order = self.store.insert("order", {
+                "signal_id": sig["id"], "client_order_id": coid, "venue": "alpaca_paper",
+                "legs": {"stop": round(stop, 2), "target": None if target is None else round(float(target), 2),
+                         "qty": qty},
+                "status": o.get("status", "new"), "submitted_at": sig.get("ts") or self.now()})
+        p = Pos(trade_id=0, symbol=sig["symbol"], qty=qty, coid=coid, order_id=o["id"], ref=ref, risk_ps=ref - stop,
+                atr=float(f.get("atr5") or 0), sigma=float(sigma or 0), stop=stop,
+                target=float(target) if target is not None else 0.0, db_order_id=db_order["id"],
+                entry_ts=_iso(sig.get("ts")) or self.now().isoformat(), strategy=sig.get("strategy") or "dip_reversal")
+        trade = self.store.insert("trade", {
+            "run_id": self._rid(), "signal_id": sig["id"], "strategy": p.strategy, "symbol": p.symbol,
+            "entry_ts": p.entry_ts, "qty": qty, "entry_px": ref, "stop_px": stop, "target_px": target,
+            "risk_usd": p.risk_ps * qty, "features": {**f, **p.features(), "adopted": True}})
+        p.trade_id = trade["id"]
+        self.pos[p.symbol] = p  # pending: the next order sync books the fill and aligns the legs
+        log.warning("adopted %s order %s (%s) left by a crash", p.symbol, coid, o.get("status"))
+        self.store.event("order_adopted", {"symbol": p.symbol, "client_order_id": coid,
+                                           "broker_status": o.get("status")}, self._rid())
+
+    def _restore_session(self, d: Day) -> None:
+        """S40: a restart mid-session rebuilds today's risk state from the store instead of starting from zero:
+        entries placed, realized P&L, the loss streak / pause and a daily stop already hit all survive."""
+        trades = self.store.select("trade", {"run_id": f"eq.{d.run_id}", "order": "id.desc", "limit": "200"})
+        closed = []
+        for t in trades:
+            if _et_date(t.get("entry_ts")) == d.day:
+                d.entries += 1
+            if _et_date(t.get("exit_ts")) == d.day and t.get("pnl_usd") is not None:
+                closed.append(t)
+        for t in sorted(closed, key=lambda t: _iso(t["exit_ts"])):
+            f, pnl = t.get("features") or {}, float(t["pnl_usd"])
+            d.realized_venue += float(f.get("pnl_venue", pnl))
+            d.realized_shadow += float(f.get("pnl_shadow", pnl))
+            d.realized_reported += pnl
+            d.trades_closed += 1
+            d.losses_in_row = d.losses_in_row + 1 if pnl < 0 else 0
+            if d.losses_in_row >= PAUSE_AFTER_LOSSES:
+                exit_m = int((_parse_ts(t["exit_ts"]) - d.open_utc).total_seconds() // 60)
+                d.pause_until, d.losses_in_row = exit_m + PAUSE_MINUTES, 0
+        halts = self.store.select("halt", {"run_id": f"eq.{d.run_id}", "kind": "eq.daily_stop",
+                                           "session": f"eq.{d.day}"})
+        d.halted = bool(halts)
+        if d.entries or closed or d.halted:
+            self.store.event("session_restored", {"day": str(d.day), "entries": d.entries, "closed": len(closed),
+                                                  "realized": round(d.realized_reported, 2), "halted": d.halted},
+                             self._rid())
 
     def _rid(self) -> int | None:
         return self.run["id"] if self.run else None
@@ -342,14 +442,15 @@ class Engine:
                 self._sync_orders()
                 self._finalize_day()
             self._maybe_prepare(clk, now)
-            return {"state": "market_closed", "next_open": clk.get("next_open")}
+            return {"state": "market_closed", "next_open": clk.get("next_open"), "account_clean": self.account_clean}
         if self.run is None and not self.pos:
-            return {"state": "idle", "note": "no paper run: start one from the dashboard"}
+            return {"state": "idle", "note": "no paper run: start one from the dashboard",
+                    "account_clean": self.account_clean}
         if self.run is not None and (self.day is None or self.day.day != now.astimezone(_et()).date()):
             self._start_day(now)
         d = self.day
         if d is None:
-            return {"state": "idle"}
+            return {"state": "idle", "account_clean": self.account_clean}
         self.market.update(now)
         m = self.market.last_complete_minute(now)
         if m < 0 or m == d.last_m:
@@ -420,6 +521,7 @@ class Engine:
         start_eq = float(self.run["amount_usd"]) + self.store.run_realized(self.run["id"])
         self.peak = max(float(self.run.get("peak_equity") or start_eq), start_eq)
         self.day = Day(self.run["id"], today, open_utc, n_min, start_eq)
+        self._restore_session(self.day)
         if self.market.day != today:
             self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
             self.market.prepare_day(
@@ -967,6 +1069,7 @@ class Engine:
             rid,
         )
         shadow.on_day_end(self)  # S14: counterfactual P&L of today's shadow signals (exceptions contained)
+        gate_report.on_day_end(self, ROOT)  # S38: random baseline + append-only gate report (exceptions contained)
         d.finalized = True
 
     def _status(self, m: int) -> dict:
@@ -1015,6 +1118,18 @@ def _age_s(t: str | None, now: datetime) -> float:
         return max(0.0, (now - ts).total_seconds())
     except ValueError:
         return 1e9
+
+
+def _parse_ts(v) -> datetime:
+    return v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+
+
+def _iso(v) -> str | None:
+    return None if v is None else _parse_ts(v).astimezone(UTC).isoformat()
+
+
+def _et_date(v) -> date | None:
+    return None if v is None else _parse_ts(v).astimezone(_et()).date()
 
 
 def _num(v):
