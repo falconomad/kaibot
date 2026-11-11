@@ -3,7 +3,7 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
 import { api, type AttributionGroup } from "../lib/api";
-import { DIM_LABEL, FLAG_TEXT, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, haltText } from "../lib/derive";
+import { DIM_LABEL, FLAG_TEXT, MIN_VETOES, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, haltText, roomAbVerdict } from "../lib/derive";
 import { BAR } from "../lib/model";
 import { EXIT_LABEL, R, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
 
@@ -186,6 +186,58 @@ function Attribution({ runId }: { runId: number }) {
   );
 }
 
+
+const usd3 = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `$${v.toFixed(v < 10 ? 3 : 2)}`);
+
+/** S36: room vs rules-only. The rules-only arm is every candidate traded at full size (counterfactual, scored at day end). */
+function RoomAbCard({ runId }: { runId: number }) {
+  const [weeks, setWeeks] = useState(13);
+  const q = useQuery({ queryKey: ["room_ab", runId, weeks], queryFn: () => api.roomAb(runId, weeks), refetchInterval: 300_000 });
+  const ab = q.data;
+  const v = roomAbVerdict(ab);
+  const st = ab?.by_status ?? {};
+  const noAnswer = (st.timeout ?? 0) + (st.invalid ?? 0) + (st.error ?? 0);
+  return (
+    <section className="card" aria-labelledby="ab-h">
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <h2 id="ab-h" style={{ margin: 0 }}>Room vs rules-only</h2>
+        <span className="spacer" />
+        <div className="tabs" role="tablist" aria-label="Period">
+          {[[4, "4 weeks"], [13, "13 weeks"], [520, "All"]].map(([w, l]) => (
+            <button key={w} role="tab" aria-selected={weeks === w} onClick={() => setWeeks(Number(w))}>{l}</button>))}
+        </div>
+      </div>
+      {q.isPending ? <p className="skeleton">Loading…</p> : q.isError ? <p className="loss">{String(q.error)}</p> : !ab || ab.n === 0 ? (
+        <p className="muted">No agent-room sessions in this period. Dip-reversal candidates that pass every rule go to the room from M3 on;
+          until then every trade is rules-only.</p>
+      ) : (<>
+        <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 13, marginTop: 10 }}>{v.text}</p>
+        <div className="kv">
+          <span>Candidates sent to the room</span><span /><span className="v">{ab.n}</span>
+          <span className="muted">answered · no answer · rules-only</span><span /><span className="v muted">{st.done ?? 0} · {noAnswer} · {st.skipped ?? 0}</span>
+          <span>Allowed (full size)</span><span /><span className="v">{ab.allow.n} · <span className={tone(ab.allow.pnl)}>{signedMoney(ab.allow.pnl)}</span> · {fmtR(ab.allow.mean_r)} avg</span>
+          <span>Downgraded (half size)</span><span /><span className="v">{ab.downgrade.n} · <span className={tone(ab.downgrade.pnl)}>{signedMoney(ab.downgrade.pnl)}</span>
+            <span className="muted"> vs full size {signedMoney(ab.downgrade.cf_pnl)}</span></span>
+          <span>Vetoed: would have made</span><span /><span className="v">{ab.veto.n} · <span className={tone(ab.veto.cf_pnl)}>{signedMoney(ab.veto.cf_pnl)}</span> · {fmtR(ab.veto.mean_r)} avg</span>
+          <span className="muted">losses avoided · winners missed</span><span /><span className="v muted">{ab.veto.n_loss_avoided} ({money(ab.veto.loss_avoided)}) · {ab.veto.n_win_missed} ({money(ab.veto.win_missed)})</span>
+          {ab.no_answer.n > 0 && (<><span>No answer (no trade): would have made</span><span /><span className={`v ${tone(ab.no_answer.cf_pnl)}`}>{ab.no_answer.n} · {signedMoney(ab.no_answer.cf_pnl)}</span></>)}
+          <span>Veto lift <span className="muted">(allowed R − vetoed R)</span></span><span />
+          <span className="v">{v.lift ? `${fmtR(v.lift.diff)} [${fmtR(v.lift.lo)} … ${fmtR(v.lift.hi)}]` : "—"}
+            <span className="muted"> n {ab.allow.n_closed}/{ab.veto.n_cf}</span></span>
+          <span>Room arm vs rules-only arm</span><span />
+          <span className="v"><span className={tone(ab.arms.room_pnl)}>{signedMoney(ab.arms.room_pnl)}</span> vs <span className={tone(ab.arms.rules_pnl)}>{signedMoney(ab.arms.rules_pnl)}</span>
+            <span className="muted"> on {ab.arms.n}</span></span>
+          <span>LLM spend <span className="muted">(triage + room, all runs)</span></span><span /><span className="v">{usd3(ab.spend.llm_usd)}</span>
+          <span>Spend per avoided loss</span><span /><span className="v">{usd3(ab.spend.per_loss_avoided)}</span>
+        </div>
+        <div className="prog" aria-hidden="true" style={{ marginTop: 12 }}><i style={{ width: `${Math.min(1, ab.veto.n_cf / MIN_VETOES) * 100}%` }} /></div>
+        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>{Math.min(ab.veto.n_cf, MIN_VETOES)} / {MIN_VETOES} vetoes with a known outcome before any verdict.
+          Counterfactuals use the same cost model at full size, scored after the close. The room is never replayed: it is judged forward only.</p>
+      </>)}
+    </section>
+  );
+}
+
 export function Report() {
   const { run } = useRunCtx();
   return (
@@ -202,6 +254,7 @@ export function Report() {
         </section>
       </div>
       <DayCard runId={run.id} />
+      {run.kind === "paper" && <RoomAbCard runId={run.id} />}
       <Attribution runId={run.id} />
     </>
   );
