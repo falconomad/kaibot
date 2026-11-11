@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Heartbeat } from "../lib/api";
-import { ageS, ageText, haltText } from "../lib/derive";
+import { ageS, ageText, budgetText, haltText } from "../lib/derive";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
@@ -38,6 +38,36 @@ const EV: Record<string, string> = {
   watchdog_flatten: "Watchdog flattened", watchdog_recovered: "Engine heartbeat back", shadow_error: "Shadow strategy error",
 };
 
+const STATE_TAG = { ok: ["allow", "ok"], rules_only: ["downgrade", "rules-only"], no_entries: ["veto", "no entries"] } as const;
+const usd = (v: number) => `$${v.toFixed(v < 10 ? 3 : 2)}`;
+
+/** S32/S36: today's LLM spend against the caps. */
+function LlmBudgetCard() {
+  const q = useQuery({ queryKey: ["llm_budget"], queryFn: api.llmBudget, refetchInterval: 30_000 });
+  if (q.isPending) return <section className="card"><h2>LLM budget</h2><p className="skeleton">Loading…</p></section>;
+  if (q.isError) return <section className="card"><h2>LLM budget</h2><p className="loss">{String(q.error)}</p></section>;
+  const b = q.data, t = budgetText(b), [cls, label] = STATE_TAG[b.state] ?? STATE_TAG.ok;
+  const bar = (frac: number) => <div className="prog bar-row" aria-hidden="true"><i style={{ width: `${Math.min(100, frac * 100)}%`,
+    background: frac >= 1 ? "var(--fail)" : frac >= 0.8 ? "var(--warn)" : undefined }} /></div>;
+  const purposes = Object.entries(b.by_purpose);
+  return (
+    <section className="card" aria-labelledby="llm-h">
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <h2 id="llm-h" style={{ margin: 0 }}>LLM budget</h2><span className={`tag ${cls}`}>{label}</span>
+      </div>
+      <p style={{ fontSize: 13 }} className={t.tone === "breach" ? "loss" : undefined}>{t.text}</p>
+      <div className="kv">
+        <span>Today</span><span /><span className="v">{usd(b.day_usd)} / ${b.caps.daily_soft}</span>{bar(b.day_usd / b.caps.daily_soft)}
+        <span>This month</span><span /><span className="v">{usd(b.month_usd)} / ${b.caps.monthly_hard}</span>{bar(b.month_usd / b.caps.monthly_hard)}
+        <span>Calls today</span><span /><span className="v">{b.calls_today}{b.open_reserved_usd > 0 ? ` · ${usd(b.open_reserved_usd)} reserved` : ""}</span>
+        {purposes.length > 0 && (<><span>By purpose</span><span /><span className="v">{purposes.map(([k, v]) => `${k} ${usd(v)}`).join(" · ")}</span></>)}
+      </div>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Above ${b.caps.daily_soft} a day the rules decide alone; ${b.caps.monthly_alert} a month raises an alert;
+        at ${b.caps.monthly_hard} no new entries. Each call reserves its worst case first, so the caps can't be overshot.</p>
+    </section>
+  );
+}
+
 export function Health() {
   const q = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
   if (q.isPending) return <p className="skeleton">Loading…</p>;
@@ -67,6 +97,7 @@ export function Health() {
             <span>Last check</span><span /><span className="v">{lastDead ? `${dateEt(lastDead.start)} ${timeEt(lastDead.start)} ET · ${lastDead.status}` : "not run yet"}</span>
           </div>
         </section>
+        <LlmBudgetCard />
         <section className="card" aria-labelledby="halt-h">
           <h2 id="halt-h">Recent halts</h2>
           {h.halts.length ? (
