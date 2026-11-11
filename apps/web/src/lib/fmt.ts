@@ -21,5 +21,5 @@ export const R = (pnl: number | null, risk: number | null) =>
   pnl === null || !risk ? "—" : (pnl >= 0 ? "+" : "−") + Math.abs(pnl / risk).toFixed(1) + "R";
 
 export const EXIT_LABEL: Record<string, string> = {
-  stop: "stop hit", target: "target reached", trail: "trailing stop", time: "time exit 15:55",
+  stop: "stop hit", target: "target reached", trail: "trailing stop", time: "time exit 15:55", moc: "market-on-close", manual: "closed by you",
 };

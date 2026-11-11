@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useOutletContext } from "react-router-dom";
 import { api, supa, type Overview, type Run } from "../lib/api";
 import { LEVELS, curve } from "../lib/model";
 import { pct } from "../lib/fmt";
+import { riskStatus } from "../lib/derive";
 
 export interface RunCtx { run: Run; runs: Run[]; overview: Overview | undefined }
 export const useRunCtx = () => useOutletContext<RunCtx>();
@@ -93,6 +94,8 @@ export function Shell() {
   const peak = Math.max(run.amount_usd, run.peak_equity ?? 0, ...c.map((p) => p.pot));
   const dd = ((peak - nowPot) / peak) * 100;
   const dayPct = live ? live.dayPct : last ? (last.pnl / (nowPot - last.pnl)) * 100 : 0;
+  const risk = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status)
+    ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] };
 
   return (
     <div className="shell">
@@ -112,13 +115,20 @@ export function Shell() {
           value={`${pct(dayPct)} / −${lv.stop.toFixed(2)}%`} frac={dayPct < 0 ? -dayPct / lv.stop : 0} />}
         {lv && <Meter label="Run drawdown" value={`${dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={dd / lv.runDd} />}
       </header>
+      {risk.severity !== "ok" && (
+        <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
+          <b>{risk.severity === "breach" ? "Limit or safety halt in force:" : "Heads up:"}</b> {risk.items.join(" · ")}
+          {" "}<Link to="/health">Engine health</Link>
+        </div>
+      )}
       <div className="body">
         <nav className="side" aria-label="Main">
           <NavLink to="/" end>Live</NavLink>
           <NavLink to="/trades">Trades</NavLink>
-          <span title="Designed for M2">Report <small>M2</small></span>
-          <span title="Designed for M2">Engine health <small>M2</small></span>
-          <span title="Designed for M2">Run &amp; settings <small>M2</small></span>
+          <NavLink to="/tape">Tape</NavLink>
+          <NavLink to="/report">Report</NavLink>
+          <NavLink to="/health">Engine health</NavLink>
+          <NavLink to="/settings">Run &amp; settings</NavLink>
           <div className="grow" />
           <NavLink to="/start">New run</NavLink>
           <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a>

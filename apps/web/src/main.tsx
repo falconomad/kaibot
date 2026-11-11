@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./tokens.css";
@@ -9,9 +9,13 @@ import { api, supa } from "./lib/api";
 import { Shell } from "./components/Shell";
 import { SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
-import { Trades } from "./pages/Trades";
-import { TradeDetailPage } from "./pages/TradeDetail";
-import { Onboarding } from "./pages/Onboarding";
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Health = lazy(() => import("./pages/Health").then((m) => ({ default: m.Health })));
+const Tape = lazy(() => import("./pages/Tape").then((m) => ({ default: m.Tape })));
+const Report = lazy(() => import("./pages/Report").then((m) => ({ default: m.Report })));
+const Onboarding = lazy(() => import("./pages/Onboarding").then((m) => ({ default: m.Onboarding })));
+const TradeDetailPage = lazy(() => import("./pages/TradeDetail").then((m) => ({ default: m.TradeDetailPage })));
+const Trades = lazy(() => import("./pages/Trades").then((m) => ({ default: m.Trades })));
 
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 15_000 } } });
 
@@ -36,15 +40,21 @@ function Gate() {
       </div></div>
     );
   return (
+    <Suspense fallback={<div className="center skeleton">Loading…</div>}>
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<Live />} />
         <Route path="trades" element={<Trades />} />
         <Route path="trades/:id" element={<TradeDetailPage />} />
+        <Route path="tape" element={<Tape />} />
+        <Route path="report" element={<Report />} />
+        <Route path="health" element={<Health />} />
+        <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="start" element={<Onboarding />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
 
