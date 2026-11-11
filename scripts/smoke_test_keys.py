@@ -9,10 +9,13 @@ Each line: PASS / FAIL / SKIP, the endpoint family, and a short non-secret detai
 
 from __future__ import annotations
 
+import base64
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 UA = "kaibot-smoke-test/0.1"
@@ -49,6 +52,31 @@ def report(ok: bool, name: str, detail: str = "") -> None:
     print(f"{'PASS' if ok else 'FAIL'}  {name:<34} {detail}")
 
 
+def check_alpaca_sip_history(h: dict[str, str], now: datetime | None = None) -> tuple[bool, str]:
+    """Free-plan SIP history probe: 1-min SPY bars with feed=sip for a window that ENDS 20 min ago (>= 15 min old).
+    PASS = the free plan serves SIP history (what scripts/fetch_history.py relies on)."""
+    end = (now or datetime.now(UTC)) - timedelta(minutes=20)
+    q = urllib.parse.urlencode({"timeframe": "1Min", "feed": "sip", "limit": 5, "adjustment": "raw",
+                                "start": (end - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "end": end.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    code, d = get(f"https://data.alpaca.markets/v2/stocks/SPY/bars?{q}", h)
+    bars = d.get("bars") if isinstance(d, dict) else None
+    if code == 200 and bars:
+        return True, f"http 200 bars={len(bars)} first={str(bars[0].get('t'))[:16]} -> free plan serves SIP history"
+    if code == 200:
+        return False, "http 200 but no bars -> SIP history not confirmed"
+    return False, f"http {code} -> free plan does NOT serve SIP history" + (" (subscription)" if code == 403 else "")
+
+
+def check_databento(key: str) -> tuple[bool, str]:
+    """Zero-cost auth check: metadata.list_datasets (HTTP Basic, key as user). Never downloads or spends credit."""
+    auth = base64.b64encode(f"{key}:".encode()).decode()
+    code, d = get("https://hist.databento.com/v0/metadata.list_datasets", {"Authorization": f"Basic {auth}"})
+    if code == 200 and isinstance(d, list):
+        return True, f"http 200 datasets={len(d)} EQUS.MINI={'yes' if 'EQUS.MINI' in d else 'no'} (no cost)"
+    return False, f"http {code}" + (" (key rejected)" if code in (401, 403) else "")
+
+
 def main() -> int:
     env = load_env(Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 else Path(".env"))
     fails = 0
@@ -73,8 +101,6 @@ def main() -> int:
                   + ("" if fresh else "  <- shared with bloodbath? use a fresh paper account"))
         for name, url in [
             ("Alpaca IEX snapshot (SPY)", "https://data.alpaca.markets/v2/stocks/SPY/snapshot?feed=iex"),
-            ("Alpaca SIP bars (>=15 min old)",
-             "https://data.alpaca.markets/v2/stocks/SPY/bars?timeframe=1Day&limit=5&feed=sip"),
             ("Alpaca news (Benzinga)", "https://data.alpaca.markets/v1beta1/news?symbols=AAPL&limit=3"),
             ("Alpaca movers (free plan?)", "https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=5"),
             ("Alpaca corporate actions", "https://data.alpaca.markets/v1/corporate-actions?symbols=AAPL&types=forward_split"),
@@ -83,8 +109,19 @@ def main() -> int:
             code, _ = get(url, h)
             report(code == 200, name, f"http {code}")
             fails += code != 200 and "movers" not in name and "corporate" not in name
+        ok, detail = check_alpaca_sip_history(h)
+        report(ok, "Alpaca SIP history (free plan?)", detail)
+        fails += not ok
     else:
         print("SKIP  Alpaca                             ALPACA_API_KEY / ALPACA_SECRET missing")
+
+    dk = env.get("DATABENTO_API_KEY")
+    if dk:
+        ok, detail = check_databento(dk)
+        report(ok, "Databento auth (validation only)", detail)
+        fails += not ok
+    else:
+        print("SKIP  Databento                          DATABENTO_API_KEY missing")
 
     fk = env.get("FINNHUB_API_KEY")
     if fk:
