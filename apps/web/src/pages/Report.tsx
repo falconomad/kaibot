@@ -6,6 +6,8 @@ import { api, type AttributionGroup } from "../lib/api";
 import { DIM_LABEL, FLAG_TEXT, MIN_VETOES, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, haltText, roomAbVerdict } from "../lib/derive";
 import { BAR } from "../lib/model";
 import { EXIT_LABEL, R, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { Skeleton } from "../components/Skeleton";
+import { StockCell } from "../components/StockBadge";
 
 const STRAT: Record<string, string> = {
   dip_reversal: "Dip reversal", spy_late_momentum: "SPY end-of-day momentum",
@@ -17,7 +19,7 @@ const strat = (s: string) => STRAT[s] ?? s.replace(/_/g, " ");
 function DayCard({ runId }: { runId: number }) {
   const [session, setSession] = useState<string | undefined>();
   const q = useQuery({ queryKey: ["report", runId, session], queryFn: () => api.report(runId, session) });
-  if (q.isPending) return <section className="card"><p className="skeleton">Loading the report…</p></section>;
+  if (q.isPending) return <Skeleton />;
   if (q.isError) return <section className="card"><p className="loss">{String(q.error)}</p></section>;
   const r = q.data;
   if (!r.session) return (
@@ -59,7 +61,7 @@ function DayCard({ runId }: { runId: number }) {
           <tbody>{trades.map((t) => (
             <tr key={t.id}>
               <td className="num">{timeEt(t.entry_ts)}</td>
-              <td><Link to={`/trades/${t.id}`}><b>{t.symbol}</b></Link> <span className="muted">· {t.qty} sh</span></td>
+              <td><Link to={`/trades/${t.id}`} style={{ color: "inherit" }}><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
               <td className="muted">{strat(t.strategy)}</td>
               <td className="muted">{t.exit_reason ? EXIT_LABEL[t.exit_reason] ?? t.exit_reason : "open"}</td>
               <td className="r num">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
@@ -82,7 +84,7 @@ function DayCard({ runId }: { runId: number }) {
         <table className="list">
           <thead><tr><th>Time (ET)</th><th>Strategy</th><th>Stock</th><th className="r">Would have made</th><th className="r">R</th></tr></thead>
           <tbody>{r.shadow!.map((s, i) => (
-            <tr key={i}><td className="num">{timeEt(s.ts)}</td><td className="muted">{strat(s.strategy)}</td><td><b>{s.symbol}</b></td>
+            <tr key={i}><td className="num">{timeEt(s.ts)}</td><td className="muted">{strat(s.strategy)}</td><td><StockCell symbol={s.symbol} /></td>
               <td className={`r num ${tone(s.pnl_usd)}`}>{s.pnl_usd === null ? (s.veto ?? "—") : signedMoney(s.pnl_usd)}</td>
               <td className="r num">{fmtR(s.r)}</td></tr>))}</tbody>
         </table>
@@ -155,7 +157,7 @@ function Attribution({ runId }: { runId: number }) {
             <button key={w} role="tab" aria-selected={weeks === w} onClick={() => setWeeks(Number(w))}>{l}</button>))}
         </div>
       </div>
-      {q.isPending ? <p className="skeleton">Loading…</p> : q.isError ? <p className="loss">{String(q.error)}</p> : !a || a.n === 0 ? (
+      {q.isPending ? <Skeleton /> : q.isError ? <p className="loss">{String(q.error)}</p> : !a || a.n === 0 ? (
         <p className="muted">No closed trades in this period.</p>
       ) : (<>
         <p className="muted" style={{ fontSize: 13 }}>{a.n} closed trades since {day(a.since.slice(0, 10))}. A <b>kill</b> flag means ≥ 20 trades with t ≤ −2;

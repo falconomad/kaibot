@@ -41,7 +41,7 @@ packages = ["src/kaibot", "apps/api/kaibot_api"]
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["docs/design"]  # generated design-canvas sources, not product code
+extend-exclude = ["docs/design"]  # generators for design-canvas HTML, not app code
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]

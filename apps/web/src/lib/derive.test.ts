@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Evidence, Overview, Report, RoomAB, RoomSession, Run } from "./api";
 import { coerce } from "./coerce";
 import { budgetText, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, levelPlan, liftInterval, packIndex, resolveEvidence, riskStatus,
-  roomAbVerdict, roomOutcome, roomView, safeUrl, scanSummary } from "./derive";
+  roomAbVerdict, roomOutcome, roomView, safeUrl, scanSummary, sessionTime } from "./derive";
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: 2, created_at: "2026-11-10T16:29:16Z", amount_usd: 5000, status: "running", end_reason: null, peak_equity: 5000,
@@ -224,3 +224,5 @@ describe("scanSummary", () => {
   });
   it("handles a missing scan", () => expect(scanSummary(null).headline).toBe("No scan yet today"));
 });
+
+it("sessionTime: bar ending at minute 29 completes at 10:00 ET", () => { expect(sessionTime(29)).toBe("10:00"); expect(sessionTime(9)).toBe("09:40"); });

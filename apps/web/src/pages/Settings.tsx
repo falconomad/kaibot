@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
+import { supa } from "../lib/api";
 import type { Level } from "../lib/api";
 import { levelPlan } from "../lib/derive";
 import { LEVELS } from "../lib/model";
@@ -72,6 +73,14 @@ export function Settings() {
               <td className="num">{r.started_on ? day(r.started_on) : "—"}</td><td className="num">{r.ended_on ? day(r.ended_on) : "—"}</td>
             </tr>))}</tbody>
         </table>
+      </section>
+
+      <section className="card" aria-labelledby="acct-h" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
+        <div style={{ flex: "1 1 300px" }}>
+          <h2 id="acct-h" style={{ marginBottom: 4 }}>Account</h2>
+          <span className="muted" style={{ fontSize: 14 }}>Signed in as the owner · Alpaca paper account · data on Supabase</span>
+        </div>
+        <button className="full-sm" onClick={() => supa.auth.signOut()}>Sign out</button>
       </section>
     </>
   );

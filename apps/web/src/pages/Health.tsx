@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Heartbeat } from "../lib/api";
-import { ageS, ageText, budgetText, haltText, scanSummary } from "../lib/derive";
+import { ageS, ageText, budgetText, haltText, scanSummary, sessionTime } from "../lib/derive";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
+import { Skeleton } from "../components/Skeleton";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -80,8 +81,8 @@ function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
       {near.length > 0 && (
         <div>
           <table className="list">
-            <thead><tr><th>Near-miss</th><th>Minute</th><th>Dip (σ)</th><th>Why it didn't qualify</th></tr></thead>
-            <tbody>{near.map((n, i) => <tr key={`${n.symbol}-${n.m}-${i}`}><td>{n.symbol}</td><td>{n.m}</td><td>{n.z.toFixed(2)}</td><td>{n.why}</td></tr>)}</tbody>
+            <thead><tr><th>Near-miss</th><th>Time (ET)</th><th>Dip (σ)</th><th>Why it didn't qualify</th></tr></thead>
+            <tbody>{near.map((n, i) => <tr key={`${n.symbol}-${n.m}-${i}`}><td>{n.symbol}</td><td>{sessionTime(n.m)}</td><td>{n.z.toFixed(2)}</td><td>{n.why.replace(/ sigma/g, "σ")}</td></tr>)}</tbody>
           </table>
         </div>
       )}
@@ -92,7 +93,7 @@ function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
 
 export function Health() {
   const q = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
-  if (q.isPending) return <p className="skeleton">Loading…</p>;
+  if (q.isPending) return <Skeleton />;
   if (q.isError) return <p className="loss">{String(q.error)}</p>;
   const h = q.data;
   const procs = h.heartbeat.filter((b) => b.process in PROC);

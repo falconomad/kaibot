@@ -1,16 +1,18 @@
-/* "Chart room" design tokens (docs/decisions/02_design.md + 07_design_v2_visual.md). Light paper default. */
+/* v3 "night" tokens (design canvas v3). One dark theme; names kept so every page picks them up. */
 @import "tailwindcss";
 :root {
-  --paper: #F6F4EF; --surface: #FFFFFF; --rule: #DAD6CC; --ink: #1B2430; --slate: #5B6573;
-  --sea: #1F5F6B; --gain: #1F5FAE; --loss: #B4500A; --pass: #2F6F4F; --warn: #94600F; --fail: #B42318;
-  --ai: #5B4B8A; --ai-tint: #F2EFF8; --stale: #7D848D;
-  --font-ui: "IBM Plex Sans", system-ui, sans-serif; --font-num: "IBM Plex Mono", ui-monospace, monospace;
-  --font-ai: "Source Serif 4", Georgia, serif;
+  color-scheme: dark;
+  --paper: #0A0B0D; --surface: #131519; --surface-2: #1B1E24; --rule: #262A31; --rule-strong: #3A404A;
+  --ink: #F4F5F7; --slate: #A1A8B3; --stale: #7E8693;
+  --sea: #4F95F0; --sea-ink: #7FB2FF; --sea-tint: #132A4A;
+  --gain: #3DDC97; --gain-tint: #12301F; --loss: #FF6B6B; --loss-tint: #2A1517;
+  --pass: #3DDC97; --warn: #F5B64C; --warn-tint: #33280F; --fail: #FF6B6B;
+  --ai: #C9B6FF; --ai-tint: #1E1A2B;
+  --s-pot: #4F95F0; --s-spy: #C4862F;
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; --font-num: "Inter", system-ui, sans-serif;
+  --font-ai: "Inter", system-ui, sans-serif;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --radius: 24px;
 }
-@media (prefers-color-scheme: dark) {
-  :root { --paper: #11161C; --surface: #171E26; --rule: #2A333D; --ink: #E6E3DC; --slate: #98A1AC;
-    --sea: #5FA8B4; --gain: #6FA3E8; --loss: #F0904A; --pass: #6DBF94; --warn: #E0A845; --fail: #F07466;
-    --ai: #A898DA; --ai-tint: #1E1A2B; --stale: #7A838E; }
-}
-body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); }
-.num { font-family: var(--font-num); font-feature-settings: "tnum" 1, "zero" 1; }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }

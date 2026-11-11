@@ -234,3 +234,9 @@ export function scanSummary(sc: Scan | null | undefined, entries = 0): { headlin
     : `${sc.setups} setup${sc.setups === 1 ? "" : "s"} found · ${vetoed} vetoed · ${entries} entered`;
   return { headline, lines };
 }
+
+/** Clock time (ET) at which the 5-minute bar ending at session minute m completed: 09:30 + m + 1. */
+export function sessionTime(m: number): string {
+  const t = 9 * 60 + 30 + m + 1;
+  return `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+}
