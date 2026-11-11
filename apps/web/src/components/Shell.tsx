@@ -5,18 +5,39 @@ import { api, supa, type Overview, type Run } from "../lib/api";
 import { LEVELS, curve } from "../lib/model";
 import { pct } from "../lib/fmt";
 import { riskStatus } from "../lib/derive";
+import { Skeleton } from "./Skeleton";
 
 export interface RunCtx { run: Run; runs: Run[]; overview: Overview | undefined }
 export const useRunCtx = () => useOutletContext<RunCtx>();
 
-export function Logo() {
+export function Logo({ size = 26 }: { size?: number }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-      <path d="M3 7.5H19" stroke="var(--ink)" strokeWidth="1.8" />
-      <path d="M3 14.5H19" stroke="var(--ai)" strokeWidth="1.8" strokeDasharray="1.6 2.4" />
-      <path d="M11 7.5V14.5" stroke="var(--sea)" strokeWidth="1.2" />
-      <rect x="8.75" y="8.75" width="4.5" height="4.5" fill="var(--sea)" />
+    <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden="true">
+      <rect x="1" y="1" width="26" height="26" rx="8" fill="#F4F5F7" />
+      <path d="M8 18 L12.5 12.5 L15.5 15.5 L20 9.5" stroke="#0A0B0D" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
+  );
+}
+
+const NAV: { to: string; label: string; short: string; icon: string; tab?: boolean }[] = [
+  { to: "/", label: "Home", short: "Home", icon: "M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z", tab: true },
+  { to: "/trades", label: "Trades", short: "Trades", icon: "M4 7 H20 M4 12 H20 M4 17 H14", tab: true },
+  { to: "/tape", label: "Tape", short: "Tape", icon: "M4 6 H20 M4 10 H16 M4 14 H20 M4 18 H12", tab: true },
+  { to: "/report", label: "Report", short: "Report", icon: "M5 20 V12 M12 20 V5 M19 20 V9", tab: true },
+  { to: "/health", label: "Engine", short: "Engine", icon: "M3 12 H7 L10 5 L14 19 L17 12 H21" },
+  { to: "/settings", label: "Run & settings", short: "Run", icon: "M12 9 A3 3 0 1 0 12 15 A3 3 0 1 0 12 9 M12 3 V6 M12 18 V21 M3 12 H6 M18 12 H21", tab: true },
+];
+
+function TabBar() {
+  return (
+    <nav className="tabbar" aria-label="Main">
+      {NAV.filter((n) => n.tab).map((n) => (
+        <NavLink key={n.to} to={n.to} end={n.to === "/"}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={n.icon} /></svg>
+          {n.short}
+        </NavLink>
+      ))}
+    </nav>
   );
 }
 
@@ -75,7 +96,7 @@ export function Shell() {
   const overview = useQuery({ queryKey: ["overview", run?.id], queryFn: () => api.overview(run!.id), enabled: !!run,
     refetchInterval: run?.kind === "paper" ? 5_000 : false });
 
-  if (runs.isPending) return <div className="center skeleton">Loading runs…</div>;
+  if (runs.isPending) return <div className="shell"><main><Skeleton variant="dashboard" /></main></div>;
   if (runs.isError) return <div className="center"><div className="card"><b>Couldn't load runs</b><span className="muted">{String(runs.error)}</span></div></div>;
   if (!run) return (
     <div className="center"><div className="card">
@@ -101,19 +122,29 @@ export function Shell() {
     <div className="shell">
       <header className="top">
         <Link to="/" className="brand" aria-label="kaibot home"><Logo /><span>kaibot</span></Link>
-        <span className="pill">PAPER{lv ? ` · ${lv.name}` : ""}</span>
-        <span className="chip"><svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill={chip.dot} /></svg>
-          {chip.text} <span className="num muted">{chip.sub}</span></span>
+        <nav className="topnav" aria-label="Main">
+          {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"}>{n.label}</NavLink>)}
+        </nav>
+        <div className="spacer" />
         {list.length > 1 && (
           <select aria-label="Run" className="chip" value={run.id}
             onChange={(e) => { setPicked(Number(e.target.value)); localStorage.setItem("kb.run", e.target.value); }}>
             {list.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
           </select>
         )}
-        <div className="spacer" />
-        {lv && <Meter label={run.kind === "replay" ? "Last day vs stop" : "Day vs stop"}
-          value={`${pct(dayPct)} / −${lv.stop.toFixed(2)}%`} frac={dayPct < 0 ? -dayPct / lv.stop : 0} />}
-        {lv && <Meter label="Run drawdown" value={`${dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={dd / lv.runDd} />}
+        <Link to="/health" className="chip" aria-label={`Engine: ${chip.text}`}>
+          <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
+            style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot }} />
+          <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
+        </Link>
+        <span className="pill">PAPER{lv ? ` · ${lv.name.toUpperCase()}` : ""}</span>
+        {lv && (
+          <div className="meters">
+            <Meter label={run.kind === "replay" ? "Last day vs stop" : "Day vs stop"}
+              value={`${pct(dayPct)} / −${lv.stop.toFixed(2)}%`} frac={dayPct < 0 ? -dayPct / lv.stop : 0} />
+            <Meter label="Run drawdown" value={`${dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={dd / lv.runDd} />
+          </div>
+        )}
       </header>
       {risk.severity !== "ok" && (
         <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
@@ -122,20 +153,10 @@ export function Shell() {
         </div>
       )}
       <div className="body">
-        <nav className="side" aria-label="Main">
-          <NavLink to="/" end>Live</NavLink>
-          <NavLink to="/trades">Trades</NavLink>
-          <NavLink to="/tape">Tape</NavLink>
-          <NavLink to="/report">Report</NavLink>
-          <NavLink to="/health">Engine health</NavLink>
-          <NavLink to="/settings">Run &amp; settings</NavLink>
-          <div className="grow" />
-          <NavLink to="/start">New run</NavLink>
-          <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a>
-        </nav>
-        <main><Outlet context={{ run, runs: list, overview: o } satisfies RunCtx} /></main>
+        <main key={run.id}><Outlet context={{ run, runs: list, overview: o } satisfies RunCtx} /></main>
       </div>
-      <div className="foot">Paper trading only · simulated money · times ET (CET in brackets)</div>
+      <TabBar />
+      <div className="foot">Paper trading only · simulated money · times ET (CET in brackets) · <Link to="/start">New run</Link> · <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a></div>
     </div>
   );
 }

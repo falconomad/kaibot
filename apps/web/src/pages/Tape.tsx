@@ -5,6 +5,8 @@ import { useRunCtx } from "../components/Shell";
 import { api, type TapeItem } from "../lib/api";
 import { fmtR } from "../lib/derive";
 import { EXIT_LABEL, dateEt, money, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { Skeleton } from "../components/Skeleton";
+import { StockCell } from "../components/StockBadge";
 
 const PAGE = 100;
 const STRAT: Record<string, string> = {
@@ -19,7 +21,7 @@ function Line({ it }: { it: TapeItem }) {
     return (
       <>
         <td><span className={`tag ${it.side === "buy" ? "allow" : "downgrade"}`}>{it.side === "buy" ? "bought" : "sold"}</span></td>
-        <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`}><b>{it.symbol}</b></Link> : <b>{it.symbol}</b>}</td>
+        <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
         <td className="num">{it.qty} @ {px(it.venue_px)} <span className="muted">(shadow {px(it.shadow_px)}, fees {money(it.fees)})</span>
           {it.side === "sell" && it.exit_reason && <span className="muted"> · {EXIT_LABEL[it.exit_reason] ?? it.exit_reason}</span>}
           {it.tag && <span className="muted"> · {it.tag.replace(/_/g, " ")}</span>}</td>
@@ -35,7 +37,7 @@ function Line({ it }: { it: TapeItem }) {
   return (
     <>
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
-      <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`}><b>{it.symbol}</b></Link> : <b>{it.symbol}</b>}
+      <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
         <span className="muted"> · {STRAT[it.strategy] ?? it.strategy}</span></td>
       <td>{it.reasons.join(" · ")}{why && <span className="muted"> — {why}</span>}
         {it.entry !== null && <span className="muted num"> · ref {px(it.entry)}, stop {px(it.stop)}{it.target ? `, target ${px(it.target)}` : ""}</span>}</td>
@@ -69,7 +71,7 @@ export function Tape() {
             <button key={k} role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}>{l}</button>))}
         </div>
       </div>
-      {q.isPending ? <p className="skeleton">Loading…</p> : q.isError ? <p className="loss">{String(q.error)}</p> : !rows.length ? (
+      {q.isPending ? <Skeleton /> : q.isError ? <p className="loss">{String(q.error)}</p> : !rows.length ? (
         <p className="muted">{run.kind === "replay" ? "Replays don't record a tape: only live paper runs do." : "Nothing yet. Setups are checked every 5 minutes from 09:35 to 15:45 ET."}</p>
       ) : (
         <table className="list" style={{ marginTop: 12 }}>

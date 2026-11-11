@@ -20,7 +20,9 @@ export function PotChart({ data, start }: { data: Curve[]; start: number }) {
     const ticks: number[] = [];
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) ticks.push(v);
     const line = (k: "pot" | "spy") => data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d[k]).toFixed(1)}`).join("");
-    return { x, y, ticks, pot: line("pot"), spy: line("spy") };
+    const pot = line("pot");
+    const area = data.length ? `${pot}L${x(data.length - 1).toFixed(1)},${H - M.b}L${x(0).toFixed(1)},${H - M.b}Z` : "";
+    return { x, y, ticks, pot, spy: line("spy"), area };
   }, [data, start]);
 
   if (!data.length) return <p className="muted">No sessions yet.</p>;
@@ -43,7 +45,7 @@ export function PotChart({ data, start }: { data: Curve[]; start: number }) {
         <span><i className="sw" style={{ borderColor: "var(--s-pot)" }} />Pot, after costs</span>
         <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dashed" }} />SPY, same start</span>
         <span className="spacer" />
-        <button style={{ height: 28, fontSize: 12 }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
+        <button style={{ minHeight: 32, fontSize: 13, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
       </div>
       {table ? (
         <div style={{ maxHeight: 260, overflow: "auto" }}>
@@ -57,20 +59,30 @@ export function PotChart({ data, start }: { data: Curve[]; start: number }) {
             onPointerMove={move} onPointerLeave={() => setHover(null)}>
             {g.ticks.map((t) => (
               <g key={t}>
-                <line x1={M.l} x2={W - M.r} y1={g.y(t)} y2={g.y(t)} stroke="var(--rule)" strokeWidth={t === start ? 1 : 0.5}
+                <line x1={M.l} x2={W - M.r} y1={g.y(t)} y2={g.y(t)} stroke={t === start ? "var(--rule-strong)" : "var(--rule)"} strokeWidth={t === start ? 1 : 0.5}
                   strokeDasharray={t === start ? undefined : "2 3"} />
                 <text x={M.l - 8} y={g.y(t) + 4} textAnchor="end" fontSize="11" fill="var(--slate)" className="num">{short(t)}</text>
               </g>
             ))}
             <text x={M.l} y={H - 6} fontSize="11" fill="var(--slate)">{day(data[0].session)}</text>
             <text x={W - M.r} y={H - 6} fontSize="11" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
-            <path d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="2" strokeDasharray="5 3" strokeLinejoin="round" />
-            <path d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2" strokeLinejoin="round" />
-            <text x={W - M.r + 8} y={ly1 + 4} fontSize="12" fill="var(--ink)" className="num">Pot {short(last.pot)}</text>
-            <text x={W - M.r + 8} y={ly2 + 4} fontSize="12" fill="var(--slate)" className="num">SPY {short(last.spy)}</text>
+            <defs>
+              <linearGradient id="kb-potfill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.28" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {/* Lines start flat on the baseline and rise into shape once, when the chart first appears. */}
+            <g className="rise" style={{ transformOrigin: `0 ${H - M.b}px` }}>
+              <path className="morph" d={g.area} fill="url(#kb-potfill)" />
+              <path className="morph" d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" />
+              <path className="morph" d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+            </g>
+            <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="4.5" fill="var(--s-pot)" stroke="var(--surface)" strokeWidth="2" />
+            <text className="fade-late" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {short(last.pot)}</text>
+            <text className="fade-late" x={W - M.r + 10} y={ly2 + 4} fontSize="12" fill="var(--slate)">SPY {short(last.spy)}</text>
             {h && hover !== null && (
               <g>
-                <line x1={g.x(hover)} x2={g.x(hover)} y1={M.t} y2={H - M.b} stroke="var(--slate)" strokeWidth="1" />
+                <line x1={g.x(hover)} x2={g.x(hover)} y1={M.t} y2={H - M.b} stroke="var(--stale)" strokeWidth="1" strokeDasharray="3 3" />
                 <circle cx={g.x(hover)} cy={g.y(h.pot)} r="4" fill="var(--s-pot)" stroke="var(--surface)" strokeWidth="2" />
                 <circle cx={g.x(hover)} cy={g.y(h.spy)} r="4" fill="var(--s-spy)" stroke="var(--surface)" strokeWidth="2" />
               </g>

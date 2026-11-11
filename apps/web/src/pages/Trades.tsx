@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRunCtx } from "../components/Shell";
 import { api } from "../lib/api";
 import { TradeRows } from "./Live";
+import { Skeleton } from "../components/Skeleton";
 
 const PAGE = 50;
 
@@ -22,7 +23,7 @@ export function Trades() {
         <span className="num muted">{page + 1} / {pages}</span>
         <button disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>Older</button>
       </div>
-      {q.isPending ? <p className="skeleton">Loading…</p> : q.isError ? <p className="loss">{String(q.error)}</p> : <TradeRows rows={q.data.rows} />}
+      {q.isPending ? <Skeleton /> : q.isError ? <p className="loss">{String(q.error)}</p> : <TradeRows rows={q.data.rows} />}
     </section>
   );
 }

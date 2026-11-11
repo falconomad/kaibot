@@ -7,6 +7,8 @@ import { api, type CommandKind, type Level, type Overview, type Run, type Trade 
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { EXIT_LABEL, R, dateEt, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
 import { evidenceVerdict, levelPlan } from "../lib/derive";
+import { StockBadge, StockCell, companyName } from "../components/StockBadge";
+import { Skeleton } from "../components/Skeleton";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -22,18 +24,18 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
   const nav = useNavigate();
   return (
     <table className="list">
-      <thead><tr><th>Time (ET)</th><th>Stock</th><th>Why it closed</th><th className="r">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th><th>Room</th></tr></thead>
+      <thead><tr><th>Stock</th><th>Time (ET)</th><th className="hide-sm">Why it closed</th><th className="r hide-sm">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th><th className="hide-sm">Room</th></tr></thead>
       <tbody>
         {rows.map((t) => (
           <tr key={t.id} className="click" tabIndex={0} onClick={() => nav(`/trades/${t.id}`)}
             onKeyDown={(e) => e.key === "Enter" && nav(`/trades/${t.id}`)}>
-            <td className="num">{dateEt(t.entry_ts)} {timeEt(t.entry_ts)}</td>
-            <td><b>{t.symbol}</b> <span className="muted">· {t.qty} sh</span></td>
-            <td className="muted">{t.exit_reason ? EXIT_LABEL[t.exit_reason] ?? t.exit_reason : "open"}</td>
-            <td className="r num">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
+            <td><StockCell symbol={t.symbol} sub={`${t.qty} sh · ${t.strategy.replace(/_/g, " ")}`} /></td>
+            <td className="num muted">{dateEt(t.entry_ts)} {timeEt(t.entry_ts)}</td>
+            <td className="muted hide-sm">{t.exit_reason ? EXIT_LABEL[t.exit_reason] ?? t.exit_reason : "open"}</td>
+            <td className="r num hide-sm">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
             <td className={`r num ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)}</td>
             <td className="r num">{R(t.pnl_usd, t.risk_usd)}</td>
-            <td>{t.verdict && <span className={`tag ${t.verdict}`}>{t.verdict}</span>}</td>
+            <td className="hide-sm">{t.verdict && <span className={`tag ${t.verdict}`}>{t.verdict}</span>}</td>
           </tr>
         ))}
       </tbody>
@@ -59,12 +61,12 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
         The engine applies a command within about 10 seconds; nothing here changes until it does.</p>
       {ended ? <p>This run has {run.status}{run.end_reason ? `: ${run.end_reason}` : ""}. Start a new run from the menu.</p> : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <button disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
-          {!confirm ? <button onClick={() => setConfirm(true)} style={{ borderColor: "var(--fail)", color: "var(--fail)" }}>Flatten and stop</button> : (
-            <span className="banner warn" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button className="full-sm" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
+          {!confirm ? <button className="danger full-sm" onClick={() => setConfirm(true)}>Flatten and stop</button> : (
+            <span className="banner swap full-sm" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", background: "var(--loss-tint)", borderColor: "#5A2A2E" }}>
               Sell every position at market now and end this run?
               <button onClick={() => setConfirm(false)}>Cancel</button>
-              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)" }} disabled={cmd.isPending}
+              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)", color: "#0A0B0D" }} disabled={cmd.isPending}
                 onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
             </span>
           )}
@@ -86,34 +88,53 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
 function Positions({ positions }: { positions: Record<string, { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }> }) {
   const nav = useNavigate();
   const rows = Object.entries(positions);
-  if (!rows.length) return <p className="muted" style={{ fontSize: 13 }}>No open positions. Kaibot is flat by 15:55 every day.</p>;
+  if (!rows.length) return <p className="muted" style={{ fontSize: 14 }}>No open positions. Kaibot is flat by 15:55 every day.</p>;
   return (
-    <table className="list">
-      <thead><tr><th>Stock</th><th className="r">Shares</th><th className="r">Entry</th><th className="r">Last</th><th className="r">Stop</th><th className="r">Target</th><th className="r">Open P&amp;L</th></tr></thead>
-      <tbody>{rows.map(([s, p]) => {
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {rows.map(([s, p]) => {
         const pnl = p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null;
+        const span = p.target - p.stop || 1;
+        const at = (v: number | null) => `${Math.max(0, Math.min(100, (((v ?? p.stop) - p.stop) / span) * 100)).toFixed(1)}%`;
         return (
-          <tr key={s} className="click" onClick={() => nav(`/trades/${p.trade_id}`)}>
-            <td><b>{s}</b>{p.status === "pending" && <span className="muted"> · filling</span>}</td><td className="r num">{p.qty}</td>
-            <td className="r num">{px(p.fill)}</td><td className="r num">{px(p.last)}</td><td className="r num">{px(p.stop)}</td>
-            <td className="r num">{px(p.target)}</td><td className={`r num ${tone(pnl)}`}>{signedMoney(pnl)}</td>
-          </tr>
+          <button key={s} type="button" className="posrow" onClick={() => nav(`/trades/${p.trade_id}`)}
+            style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px", borderRadius: 16, border: 0, background: "transparent",
+              textAlign: "left", height: "auto", fontWeight: 400, width: "100%" }}>
+            <StockBadge symbol={s} size={44} />
+            <span style={{ flex: "1 1 160px", minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+              <b style={{ fontSize: 15 }}>{s} <span className="muted" style={{ fontWeight: 400 }}>· {companyName(s)}</span></b>
+              <span className="num muted" style={{ fontSize: 13 }}>{p.qty} sh · in at {px(p.fill)}{p.status === "pending" ? " · filling" : ""}</span>
+            </span>
+            <span className="hide-sm" style={{ flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 6 }}
+              aria-label={`Price ${px(p.last)} between stop ${px(p.stop)} and target ${px(p.target)}`}>
+              <span className="ladder-row"><span className="entry" style={{ left: at(p.fill) }} /><span className="now" style={{ left: at(p.last) }} /></span>
+              <span className="num muted" style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>stop {px(p.stop)}</span><span>target {px(p.target)}</span></span>
+            </span>
+            <span style={{ flex: "0 0 110px", textAlign: "right", display: "flex", flexDirection: "column", gap: 2 }}>
+              <span className="num" style={{ fontWeight: 600 }}>{px(p.last)}</span>
+              <span className={`num ${tone(pnl)}`} style={{ fontSize: 13, fontWeight: 600 }}>{pnl === null ? "—" : `${pnl >= 0 ? "▲" : "▼"} ${signedMoney(pnl)}`}</span>
+            </span>
+          </button>
         );
-      })}</tbody>
-    </table>
+      })}
+    </div>
   );
 }
+
+const RANGES = [["1W", 5], ["1M", 21], ["3M", 63], ["ALL", 0]] as const;
 
 export function Live() {
   const { run, overview } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), refetchInterval: 60_000 });
   const lv = run.level ? LEVELS[run.level] : null;
-  if (!overview || trades.isPending) return <p className="skeleton">Loading…</p>;
+  const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
+  if (!overview || trades.isPending) return <Skeleton variant="dashboard" />;
   if (trades.isError) return <p className="loss">{String(trades.error)}</p>;
 
   const daily = overview.daily;
   const c = curve(run.amount_usd, daily);
+  const keep = RANGES.find((r) => r[0] === range)![1];
+  const shown = keep && c.length > keep ? c.slice(-keep - 1) : c;
   const s = stats(run.amount_usd, daily, trades.data.rows);
   const live = run.kind === "paper" ? livePot(run, overview) : null;
   const chip = engineChip(overview, run);
@@ -144,19 +165,26 @@ export function Live() {
         </div>
       )}
 
-      <section className="card" aria-labelledby="pot-h">
-        <h2 id="pot-h">{run.kind === "replay" ? "Pot at the end of the replay, after costs" : "Pot now, after costs"}</h2>
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "baseline" }}>
+      <section aria-labelledby="pot-h" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <h1 id="pot-h" style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--slate)" }}>{run.kind === "replay" ? "Pot at the end of the replay, after costs" : "Pot, after costs"}</h1>
           <div className="hero">{money(pot)}</div>
-          <div className={`num ${tone(pot - run.amount_usd)}`}>{pot >= run.amount_usd ? "▲" : "▼"} {signedMoney(pot - run.amount_usd)} · {pct(((pot - run.amount_usd) / run.amount_usd) * 100)}</div>
-          {live && <div className={`num ${tone(live.dayPnl)}`}>today {signedMoney(live.dayPnl)}</div>}
-          <div className="num muted">start {money(run.amount_usd)}</div>
+          <div className="num" style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 16, fontWeight: 500 }}>
+            <span className={tone(pot - run.amount_usd)}>{pot >= run.amount_usd ? "▲" : "▼"} {signedMoney(pot - run.amount_usd)} · {pct(((pot - run.amount_usd) / run.amount_usd) * 100)}</span>
+            {live && <span className={tone(live.dayPnl)}>today {live.dayPnl >= 0 ? "▲" : "▼"} {signedMoney(live.dayPnl)}</span>}
+            <span className="muted">SPY same start {s.spyPct >= 0 ? "▲" : "▼"} {pct(s.spyPct)}</span>
+          </div>
         </div>
-        <p style={{ margin: "6px 0 12px" }}>
-          {vsSpy >= 0 ? "Ahead of" : "Behind"} SPY by <b className="num">{money(Math.abs(vsSpy))}</b> over the same days
-          {" "}(SPY {pct(s.spyPct)}). Worse-of shadow and broker P&amp;L is what's reported.
+        <div className="range" role="group" aria-label="Chart range">
+          {RANGES.map(([k]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{k}</button>)}
+        </div>
+        <div className="card" style={{ padding: "18px 18px 10px" }}>
+          <PotChart key={range} data={shown} start={range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd} />
+        </div>
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          {vsSpy >= 0 ? "Ahead of" : "Behind"} SPY by <b className="num" style={{ color: "var(--ink)" }}>{money(Math.abs(vsSpy))}</b> since the start.
+          {" "}Reported P&amp;L is the worse of broker fills and the stricter cost model.
         </p>
-        <PotChart data={c} start={run.amount_usd} />
       </section>
 
       <div className="grid">

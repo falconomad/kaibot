@@ -3,6 +3,8 @@ import { Fragment, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Trade, type TradeDetail } from "../lib/api";
 import { EXIT_LABEL, R, dateEt, money, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
+import { Skeleton } from "../components/Skeleton";
+import { StockBadge, companyName } from "../components/StockBadge";
 
 // Price ladder: entry, stop, target and exit on one vertical price scale.
 function Ladder({ t }: { t: Trade }) {
@@ -103,7 +105,7 @@ export function TradeDetailPage() {
   const { id } = useParams();
   const [tab, setTab] = useState<(typeof TABS)[number][0]>("why");
   const q = useQuery({ queryKey: ["trade", id], queryFn: () => api.trade(Number(id)) });
-  if (q.isPending) return <p className="skeleton">Loading…</p>;
+  if (q.isPending) return <Skeleton variant="detail" />;
   if (q.isError) return <p className="loss">{String(q.error)}</p>;
   if (!q.data) return <p>Trade not found. <Link to="/trades">All trades</Link></p>;
   const d = q.data, t = d.trade;
@@ -112,7 +114,7 @@ export function TradeDetailPage() {
       <Link to="/">← Live</Link>
       <section className="card">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-          <h1 style={{ margin: 0, fontSize: 22 }}>{t.symbol} · {t.strategy.replace("_", " ")} · {t.exit_ts ? "closed" : "open"}</h1>
+          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · {t.strategy.replace(/_/g, " ")} · {t.exit_ts ? "closed" : "open"}</span></span></span>
           <span className={`num ${tone(t.pnl_usd)}`} style={{ fontSize: 18 }}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         </div>
         <p className="muted num" style={{ margin: "4px 0 0" }}>

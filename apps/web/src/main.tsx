@@ -9,6 +9,7 @@ import { api, supa } from "./lib/api";
 import { Shell } from "./components/Shell";
 import { SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
+import { Skeleton } from "./components/Skeleton";
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Health = lazy(() => import("./pages/Health").then((m) => ({ default: m.Health })));
 const Tape = lazy(() => import("./pages/Tape").then((m) => ({ default: m.Tape })));
@@ -29,7 +30,7 @@ function Gate() {
   // Server decides ownership: the first account to sign in claims the dashboard; everyone else is refused.
   const owner = useQuery({ queryKey: ["owner", session?.user.id], queryFn: api.claimOwner, enabled: !!session, staleTime: Infinity });
 
-  if (session === undefined || (session && owner.isPending)) return <div className="center skeleton">Loading…</div>;
+  if (session === undefined || (session && owner.isPending)) return <Skeleton variant="center" />;
   if (!session) return <SignIn />;
   if (owner.isError || owner.data === false)
     return (
@@ -40,7 +41,7 @@ function Gate() {
       </div></div>
     );
   return (
-    <Suspense fallback={<div className="center skeleton">Loading…</div>}>
+    <Suspense fallback={<div className="shell"><main><Skeleton /></main></div>}>
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<Live />} />
