@@ -25,3 +25,9 @@ news:
 nlp:
   finbert_local:    {use: cheap_sentiment, note: "CPU, non-commercial licence: fine for paper, review before live"}
   claude:           {use: triage_and_room, models: {triage: claude-haiku-5-5, room: claude-sonnet-5-5}, monthly_alert_usd: 150, monthly_hard_stop_usd: 190}
+validation:
+  # Databento: $125 one-time historical credit (portal cap $1/month beyond it). Validation of our free feeds only:
+  # never in the live/engine path. kaibot.ingest.databento + scripts/fetch_databento.py run metadata.get_cost first
+  # and print it before EVERY download, refuse estimates above max_cost_usd_per_request or past credit_usd, and
+  # cache each request as Parquet under data/databento/ so nothing is paid twice. Dry run unless --confirm.
+  databento:        {use: validation_only, auth: key, billing: credit_only, credit_usd: 125, max_cost_usd_per_request: 10, cost_check: required_before_every_download, cache: "data/databento/<dataset>/<schema>/<key>.parquet", schemas: [ohlcv-1m, bbo-1m], budget_per_min: 30, note: "historical HTTP API, Basic auth; never in the live path"}

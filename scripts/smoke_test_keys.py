@@ -3,16 +3,25 @@
 
 Usage (on your Mac, normal terminal):
     python3 scripts/smoke_test_keys.py ~/Projects/kaibot-secrets/.env
+    KAIBOT_ENV_FILE=~/Projects/kaibot-secrets/.env python3 scripts/smoke_test_keys.py
+
+The .env path is the first argument, else $KAIBOT_ENV_FILE, else ./.env.
+Includes a free-plan SIP history probe (Alpaca 1-min bars, feed=sip, window ending 20 min ago) and a
+zero-cost Databento auth check (metadata.list_datasets: no data is downloaded, nothing is billed).
 
 Each line: PASS / FAIL / SKIP, the endpoint family, and a short non-secret detail.
 """
 
 from __future__ import annotations
 
+import base64
 import json
+import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 UA = "kaibot-smoke-test/0.1"
@@ -49,8 +58,47 @@ def report(ok: bool, name: str, detail: str = "") -> None:
     print(f"{'PASS' if ok else 'FAIL'}  {name:<34} {detail}")
 
 
-def main() -> int:
-    env = load_env(Path(sys.argv[1]).expanduser() if len(sys.argv) > 1 else Path(".env"))
+def env_path(argv: list[str]) -> Path:
+    if len(argv) > 1:
+        return Path(argv[1]).expanduser()
+    if os.environ.get("KAIBOT_ENV_FILE"):
+        return Path(os.environ["KAIBOT_ENV_FILE"]).expanduser()
+    return Path(".env")
+
+
+def check_sip_history(h: dict[str, str], now: datetime | None = None) -> bool:
+    """Free-plan SIP probe: 1-min SPY bars with feed=sip for a window that ends 20 min ago (free plan rule: SIP
+    only when >= 15 min old). PASS = the free plan serves SIP history; FAIL says why."""
+    end = (now or datetime.now(UTC)) - timedelta(minutes=20)
+    start = end - timedelta(days=5)  # spans a weekend, so a trading session is always inside
+    q = urllib.parse.urlencode({"timeframe": "1Min", "feed": "sip", "limit": 5, "start": start.strftime(
+        "%Y-%m-%dT%H:%M:%SZ"), "end": end.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    code, d = get(f"https://data.alpaca.markets/v2/stocks/SPY/bars?{q}", h)
+    bars = d.get("bars") if isinstance(d, dict) else None
+    ok = code == 200 and bool(bars)
+    if ok:
+        detail = f"http 200, {len(bars)} bars, first {str(bars[0].get('t'))[:16]} -> free plan serves SIP history"
+    elif code == 200:
+        detail = "http 200 but no bars in the last 5 days"
+    else:
+        detail = f"http {code}" + (" (plan does not permit SIP for this window)" if code in (402, 403) else "")
+    report(ok, "Alpaca SIP history (>=15 min old)", detail)
+    return ok
+
+
+def check_databento(key: str) -> bool:
+    """Zero-cost auth check: metadata.list_datasets (no data, nothing billed). Never prints the key."""
+    auth = base64.b64encode(f"{key}:".encode()).decode()
+    code, d = get("https://hist.databento.com/v0/metadata.list_datasets", {"Authorization": f"Basic {auth}"})
+    ok = code == 200 and isinstance(d, list)
+    detail = (f"http 200, {len(d)} datasets (zero-cost call)" if ok else
+              f"http {code}" + (" (key rejected)" if code in (401, 403) else ""))
+    report(ok, "Databento auth (list_datasets)", detail)
+    return ok
+
+
+def main(argv: list[str] | None = None) -> int:
+    env = load_env(env_path(sys.argv if argv is None else argv))
     fails = 0
 
     ak = env.get("ALPACA_API_KEY")
@@ -73,8 +121,6 @@ def main() -> int:
                   + ("" if fresh else "  <- shared with bloodbath? use a fresh paper account"))
         for name, url in [
             ("Alpaca IEX snapshot (SPY)", "https://data.alpaca.markets/v2/stocks/SPY/snapshot?feed=iex"),
-            ("Alpaca SIP bars (>=15 min old)",
-             "https://data.alpaca.markets/v2/stocks/SPY/bars?timeframe=1Day&limit=5&feed=sip"),
             ("Alpaca news (Benzinga)", "https://data.alpaca.markets/v1beta1/news?symbols=AAPL&limit=3"),
             ("Alpaca movers (free plan?)", "https://data.alpaca.markets/v1beta1/screener/stocks/movers?top=5"),
             ("Alpaca corporate actions", "https://data.alpaca.markets/v1/corporate-actions?symbols=AAPL&types=forward_split"),
@@ -83,6 +129,7 @@ def main() -> int:
             code, _ = get(url, h)
             report(code == 200, name, f"http {code}")
             fails += code != 200 and "movers" not in name and "corporate" not in name
+        fails += not check_sip_history(h)
     else:
         print("SKIP  Alpaca                             ALPACA_API_KEY / ALPACA_SECRET missing")
 
@@ -118,6 +165,11 @@ def main() -> int:
         st = d.get("status") if isinstance(d, dict) else None
         report(st == "REQUEST_SUCCEEDED", "BLS (CPI)", f"http {code} {st}")
         fails += st != "REQUEST_SUCCEEDED"
+
+    if env.get("DATABENTO_API_KEY"):
+        fails += not check_databento(env["DATABENTO_API_KEY"])
+    else:
+        print("SKIP  Databento                          DATABENTO_API_KEY missing")
 
     sua = env.get("SEC_USER_AGENT")
     code, _ = get("https://data.sec.gov/submissions/CIK0000320193.json",
