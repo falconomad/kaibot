@@ -143,3 +143,29 @@ model v1, gate sizing). The statement follows mechanically:
 Every run is a row in `data/trials.jsonl` with this file's sha256. A configuration counts once: version 1, version
 2 and each neighbour at the base scenario are one configuration each (`n_trials` 1); the other cost scenarios and
 the context rows are reports of them (`n_trials` 0).
+
+## Amendment 1 (12 Nov 2026, backend-quant, issue #149, before any control result was seen)
+
+Written before the random-timing control existed in code and before any result of it, on synthetic or real data,
+had been seen. It adds a mark that the sections above lack and changes nothing else: the construction, the
+neighbours, the costs and marks 1-7 stand as committed.
+
+**Gate B mark 3 for both versions** (decision 15 section 7 mark 3 as settled for SPY-only rules in section 10):
+the version's net Sharpe at **0.5 bp a side** must be **at or above the 90th percentile of at least 500 seeded
+random-timing accounts** (`config/gate_v2.yaml`, `gate_b.mark_3`). Each random account:
+
+- makes **the same number of SPY round trips** as the version's own run (finished round trips; a carry still open
+  at the end of the window is left out, as in the version's trade table);
+- uses **the version's own holding durations**, each exactly once, in a random order (the same multiset, so the time
+  invested is the rule's); a duration is the time from the entry fill to the exit fill inside the entry session; a
+  carried round trip keeps its time to the close and is sold at the next session's open;
+- enters at a **random session of the test window and a random check time the rule could use** (HH:00 and HH:30
+  from 10:00 to 15:30, filling at the next bar's open, the checks that can still fill inside the session), drawn
+  uniformly among the positions where the whole holding fits and that do not overlap a trip already placed;
+- holds **one position at a time, fully invested when long** (all cash in SPY, fractional shares), never exits and
+  re-enters at the same check, and is priced by the same account routine with the **same costs**.
+
+Run k is seeded by (149, k). The percentile is the share of random accounts with a net Sharpe strictly below the
+version's (ties count against it); the total-return percentile is reported beside it, not judged. The control is a
+report of each configuration, not a new trial (`n_trials` 0; no trial row). Like everything in this file the verdict
+is PROVISIONAL and cannot pass Gate B until the run comes from the engine with `SimBroker`.

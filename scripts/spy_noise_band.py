@@ -6,12 +6,19 @@ engine with SimBroker.
 python scripts/spy_noise_band.py --version spy_noise_band|spy_noise_band_carry --end 2026-11-06 [--start 2016-01-01]
 python scripts/spy_noise_band.py --has <version> --start ... --end ...     exit 0 if that version has a report
 python scripts/spy_noise_band.py --summary     one table, written to data/reports/experiments_spy_summary.md
+    [--control-runs 500] [--control-seed 149]   Gate B mark 3: the random-timing control (issue #149)
 
 Each version is ONE continuous $100k account from the first test month (2017-05 with the default start) to --end;
 nothing is tuned. Cost scenarios 0, 0.5, 1, 2 bp a side and cost model v1; version 1 adds its five neighbours,
 its 15:30-check round trips and a replay of the live last-30-minutes SPY trade; version 2 adds carry nights
 against other nights. Writes data/reports/spy_<level>_<version>_<ts>.json, trades and daily CSVs in the folder of
 the same name, and one trial row per run in data/trials.jsonl (n_trials 1 for each configuration at 0.5 bp a side).
+
+Gate B mark 3 for these SPY-only rules (decision 15 section 10, issue #149; prereg amendment 1): each version at
+0.5 bp a side against --control-runs (default 500) seeded random-timing accounts with the same number of SPY round
+trips, the rule's own holding durations, entries at the rule's check times and the same costs
+(`spy_noise_band.random_timing_control`). The control is a report of the configuration, not a trial. Its per-run
+numbers go to control_timing.csv in the report folder; the verdict is printed under the table.
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from walk_forward import peak_rss_mb  # noqa: E402
 
+from kaibot.evaluation.gate_v2 import GateV2, mark_3  # noqa: E402
 from kaibot.replay import spy_momentum  # noqa: E402
 from kaibot.replay import spy_noise_band as nb  # noqa: E402
 from kaibot.replay.data import SymbolDays, load_symbol  # noqa: E402
@@ -80,8 +88,26 @@ def window(spy: SymbolDays, start: str, end: str) -> tuple[int, int]:
     return i0, i1
 
 
+def timing_mark(spy: SymbolDays, spec: nb.Spec, trips, i0: int, i1: int, runs: int, seed: int,
+                equity0: float) -> dict:
+    """Gate B mark 3 (decision 15 section 10) from the random-timing control at the base cost, judged by
+    `gate_v2.mark_3` against config/gate_v2.yaml (90th percentile, at least 500 runs)."""
+    gate = GateV2.load(ROOT)
+    if runs < 1:
+        return {"control": None, "mark": mark_3(gate, None), "gate_sha": gate.sha}
+    try:
+        ctl = nb.random_timing_control(spy, spec, trips, i0, i1, nb.BASE_COST, runs=runs, seed=seed,
+                                       equity0=equity0)
+    except ValueError as e:  # no round trip to match
+        m = mark_3(gate, None)
+        m["why"] = str(e)
+        return {"control": None, "mark": m, "gate_sha": gate.sha}
+    return {"control": ctl, "mark": mark_3(gate, ctl), "gate_sha": gate.sha}
+
+
 def evaluate(spy: SymbolDays, version: str, i0: int, i1: int, equity0: float = 100_000.0, level: str = "balanced",
-             neighbours: bool = True) -> dict:
+             neighbours: bool = True, control_runs: int = nb.CONTROL_RUNS, control_seed: int = nb.CONTROL_SEED,
+             ) -> dict:
     """Every run of one version, in memory (the script writes it out; the tests call this on synthetic bars)."""
     spec = nb.VERSIONS[version]
     runs: dict[str, tuple[nb.Book, dict, dict]] = {}
@@ -101,7 +127,8 @@ def evaluate(spy: SymbolDays, version: str, i0: int, i1: int, equity0: float = 1
     be = nb.break_even(np.array([t["gross_ret"] for t in runs[rows[0]["label"]][0].trades]))
     for r in rows:
         r["break_even"] = be
-    out: dict = {"rows": rows, "runs": runs, "break_even": be}
+    out: dict = {"rows": rows, "runs": runs, "break_even": be,
+                 "timing_control": timing_mark(spy, spec, trips, i0, i1, control_runs, control_seed, equity0)}
     if version == "spy_noise_band":
         nbr = {sp.name.split("~")[1]: one(sp, nb.BASE_COST, "neighbour") for sp in nb.NEIGHBOURS} if neighbours \
             else {}
@@ -139,7 +166,8 @@ def run_version(a: argparse.Namespace) -> None:
         sys.exit(f"no {a.symbol} bars under {data / 'bars_1m'}: run scripts/fetch_history.sh first")
     print(f"{a.symbol}: {len(spy.dates)} sessions loaded, {time.time() - t0:.0f}s", flush=True)
     i0, i1 = window(spy, a.start, a.end)
-    res = evaluate(spy, a.version, i0, i1, a.equity, a.level)
+    res = evaluate(spy, a.version, i0, i1, a.equity, a.level, control_runs=a.control_runs,
+                   control_seed=a.control_seed)
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
     run_at = datetime.now(UTC)
@@ -147,6 +175,10 @@ def run_version(a: argparse.Namespace) -> None:
     out = data / "reports"
     (out / tag).mkdir(parents=True, exist_ok=True)
     (data / "trials").mkdir(parents=True, exist_ok=True)
+    ctl = res["timing_control"]["control"]
+    if ctl is not None:
+        pd.DataFrame(ctl.pop("per_run")).rename_axis("run").to_csv(out / tag / "control_timing.csv")
+        ctl["file"] = f"{tag}/control_timing.csv"
     trials = []
     for label, (book, row, _) in res["runs"].items():
         safe = label.replace("|", "_").replace("~", "-").replace(" ", "")
@@ -168,7 +200,8 @@ def run_version(a: argparse.Namespace) -> None:
                                             "max_drawdown_pct")}})
     rep = {"run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "set": "spy", "status": STATUS,
            "version": a.version, "symbol": a.symbol, "prereg": pre, "level": a.level, "start": a.start,
-           "end": a.end, "equity": a.equity, "oos_window": [str(spy.dates[i0]), str(spy.dates[i1])],
+           "end": a.end, "equity": a.equity, "control_runs": a.control_runs, "control_seed": a.control_seed,
+           "oos_window": [str(spy.dates[i0]), str(spy.dates[i1])],
            "oos_sessions": int(i1 - i0 + 1),
            **{k: v for k, v in res.items() if k != "runs"},
            "runtime_s": round(time.time() - t0, 1), "peak_rss_mb": round(peak_rss_mb(), 0),
@@ -207,7 +240,7 @@ def _row(name: str, s: dict, years: list[str], **extra) -> dict:
 def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] = ()) -> str:
     years = sorted({y for _, rep in found.values() for r in rep["rows"] for y in r["years"]})
     cols = (*HEAD, *years, *TAIL)
-    table, marks, notes, windows, spy = [], [], [], set(), None
+    table, marks, notes, windows, spy, mark3 = [], [], [], set(), None, []
     for version, (f, rep) in found.items():
         windows.add(tuple(rep["oos_window"]))
         be = rep["break_even"]
@@ -237,6 +270,7 @@ def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] 
                          f"{n['diff_bp']} bp, Welch t {n['welch_t']}. June 2022-July 2023: "
                          f"{n['carry_nights_2022_23_pct']}% over {n['carry_nights_2022_23']} carry nights. The carry "
                          f"adds {rep['carry_adds_cagr_points']} CAGR points at 0.5 bp a side (expected about +2).")
+        mark3.append(mark3_line(version, rep.get("timing_control")))
         marks += [f"### `{version}` (0.5 bp a side unless stated)", ""]
         marks += [f"- Mark {m['mark']} ({m['text']}): **{m['verdict']}**. {m['detail']}." for m in rep["marks"]]
         marks += ["- Overall: PROVISIONAL; a pass here only earns the engine run with `SimBroker`.", ""]
@@ -264,10 +298,33 @@ def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] 
             "50% haircut beside it) and drawdown are daily mark-to-market. Break-even: the cost a side at which the "
             "mean round trip (half the gross mean) and the account's total return reach zero. Days invested: "
             "sessions with any position. Context rows are not configurations.", "",
+            "## Gate B mark 3: random-timing control (decision 15 section 10, issue #149)", "", *mark3, "",
+            "Each random account makes the rule's number of SPY round trips with the rule's own holding durations "
+            "(in a random order), entered at random sessions and check times (:00/:30 from 10:00), one at a time and "
+            "fully invested when long, at the same 0.5 bp a side. Percentile: share of random accounts strictly "
+            "below the rule (ties count against it). The mark needs the net Sharpe at or above the 90th percentile "
+            "over at least 500 runs. PROVISIONAL like every verdict here.", "",
             "## Pass marks (issue #128, pre-registered)", "", *marks, "## Notes", "", *notes]
     if missing:
         out += ["", f"Not run yet: {', '.join(missing)}."]
     return "\n".join(out) + "\n"
+
+
+def mark3_line(version: str, tc: dict | None) -> str:
+    if not tc:
+        return f"- `{version}`: **not run** (the report predates the control: run this version again)."
+    m, c = tc["mark"], tc.get("control")
+    verdict = "cannot be judged" if m["met"] is None else ("pass" if m["met"] else "fail")
+    if c is None:
+        return f"- `{version}`: **{verdict}** ({m['why']})."
+    return (f"- `{version}`: **{verdict}**. Net Sharpe {c['strategy_sharpe']:.2f} at the {c['percentile']:.1f}th "
+            f"percentile of {c['runs']} random-timing runs (random median {c['random_median']:.2f}, 90th "
+            f"{c['random_p90']:.2f}); total return {c['strategy_return_pct']}% at the {c['return_percentile']:.1f}th "
+            f"percentile (random median {c['random_return_pct_median']}%). {c['round_trips']} round trips"
+            + (f" ({c['carried_trips']} carried overnight)" if c["carried_trips"] else "")
+            + f", median hold {c['median_hold_min']:g} min, seed {c['seed']}"
+            + ("" if c["matched"] else f", NOT matched: {c['unfilled']} trips could not be placed")
+            + (f"; {m['why']}" if m["why"] else "") + ".")
 
 
 def summary(data: Path, level: str) -> str:
@@ -292,10 +349,14 @@ def main() -> None:
     ap.add_argument("--end", help="last session (inclusive)")
     ap.add_argument("--level", default="balanced")
     ap.add_argument("--equity", type=float, default=100_000.0)
+    ap.add_argument("--control-runs", type=int, default=nb.CONTROL_RUNS,
+                    help="random-timing runs for Gate B mark 3 (needs 500; 0 switches the control off)")
+    ap.add_argument("--control-seed", type=int, default=nb.CONTROL_SEED)
     a = ap.parse_args()
     data = Path(a.data)
     if a.has:
-        sys.exit(0 if find_report(data / "reports", a.level, a.has, start=a.start, end=a.end) else 1)
+        sys.exit(0 if find_report(data / "reports", a.level, a.has, start=a.start, end=a.end,
+                                  control_runs=a.control_runs, control_seed=a.control_seed) else 1)
     if a.summary:
         text = summary(data, a.level)
         (data / "reports").mkdir(parents=True, exist_ok=True)

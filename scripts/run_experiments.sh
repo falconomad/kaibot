@@ -27,7 +27,10 @@
 #       carry, each ONE continuous account from 2017-05 on SPY minute bars, with cost scenarios, neighbours, the
 #       15:30 check and the live last-30-minutes trade beside it, then ONE table written to
 #       data/reports/experiments_spy_summary.md. Pre-registered in docs/prereg/spy_noise_band.md. Needs no .env.
-#       A few minutes (see docs/m0/reproduce.md section 8).
+#       A few minutes (see docs/m0/reproduce.md section 8). Since #149 each version also runs Gate B mark 3, the
+#       random-timing control of decision 15 section 10 (500 seeded runs by default, about a minute per version on
+#       synthetic bars of the real size; KAIBOT_SPY_CONTROL_RUNS changes it, and a report from before #149 or with a
+#       different number of runs is run again), printed under the table.
 # Resumable: an experiment whose report already exists for the same dates and universe is skipped, so after
 # Ctrl-C just run it again. Research only: reads the history under data/, never touches the engine or the broker.
 # Each run takes about as long as the baseline walk-forward (about 12 minutes), so allow about an hour in all.
@@ -93,14 +96,16 @@ if [ "${1:-}" = "core" ]; then  # reads only data/bars_1m, data/news and the dai
   exit 0
 fi
 if [ "${1:-}" = "spy" ]; then  # reads only data/bars_1m/symbol=SPY: no .env needed
+  RUNS="${KAIBOT_SPY_CONTROL_RUNS:-500}"
   for v in spy_noise_band spy_noise_band_carry; do
-    if "$PY" scripts/spy_noise_band.py --has "$v" --level "$LEVEL" --start "$START" --end "$END"; then
+    if "$PY" scripts/spy_noise_band.py --has "$v" --level "$LEVEL" --start "$START" --end "$END" \
+        --control-runs "$RUNS"; then
       echo "== $v: report exists, skipped"
       continue
     fi
     echo "== $v: running (log: logs/experiment_spy_$v.log)"
     awake "$PY" scripts/spy_noise_band.py --start "$START" --end "$END" --level "$LEVEL" --version "$v" \
-      > "logs/experiment_spy_$v.log" 2>&1 \
+      --control-runs "$RUNS" > "logs/experiment_spy_$v.log" 2>&1 \
       || { echo "$v failed: see logs/experiment_spy_$v.log, then run this again (finished ones are skipped)"
            exit 1; }
     tail -n 1 "logs/experiment_spy_$v.log"
