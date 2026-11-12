@@ -23,7 +23,7 @@ levels:
     max_positions: 5
     max_entries_per_day: 20
     run_drawdown_end_pct: 8
-    strategies: [dip_reversal, spy_late_momentum]
+    strategies: [dip_reversal]    # spy_late_momentum retired 12 Nov 2026 (#128); still registered
   aggressive:
     label: Hunter
     risk_per_trade_pct: 1.0
@@ -32,7 +32,7 @@ levels:
     max_positions: 8
     max_entries_per_day: 30
     run_drawdown_end_pct: 12
-    strategies: [dip_reversal, spy_late_momentum]
+    strategies: [dip_reversal]    # spy_late_momentum retired 12 Nov 2026 (#128); still registered
 shadow_strategies: [orb_stocks_in_play, news_continuation]   # logged "would have" trades, never sent
 all_levels:
   allow_short: false

@@ -34,6 +34,8 @@ import yaml
 from kaibot.evaluation import fingerprint as fpr
 from kaibot.evaluation import trials as registry
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, random_entry_percentile, sharpe, t_stat
+from kaibot.strategies import dip
+from kaibot.strategies import registry as strategy_registry
 
 log = logging.getLogger(__name__)
 DAYS_PER_MONTH = 30.44
@@ -215,14 +217,14 @@ def _c(value, limit, met) -> dict:
 
 
 # ---------------- engine hook ----------------
-def day_random(engine, n_runs: int) -> dict | None:
+def day_random(engine, n_runs: int, strategy: str = dip.NAME) -> dict | None:
     """Today's random-entry totals for the dip strategy (same entry count, sizing and exits as replay)."""
     from kaibot.replay.pipeline import prepare
     from kaibot.replay.sim import random_entry_runs
 
     d, mk = engine.day, engine.market
     n = sum(1 for t in engine.store.select("trade", {"select": "strategy,entry_ts", "run_id": f"eq.{d.run_id}",
-                                                       "strategy": "eq.dip_reversal"})
+                                                       "strategy": f"eq.{strategy}"})
             if _et_date(_ts(t.get("entry_ts"))) == d.day)
     last_m = d.n_min - 1
     rules = getattr(d, "rules", None)
@@ -234,9 +236,20 @@ def day_random(engine, n_runs: int) -> dict | None:
     seed = int(hashlib.sha256(f"{d.run_id}:{d.day}".encode()).hexdigest()[:8], 16)
     totals = random_entry_runs(prep.bars, prep.atr5, prep.vwap, prep.sigma, pd.Series({day: n}), engine.policy(),
                                d.start_equity, n_runs=n_runs, seed=seed, variant="A") if n else np.zeros(n_runs)
-    return {"strategy": "dip_reversal", "session": str(d.day), "n_trades": n, "seed": seed,
+    return {"strategy": strategy, "session": str(d.day), "n_trades": n, "seed": seed,
             "config_version": rules.version if rules is not None else 0,
             "totals": [round(float(x), 2) for x in totals]}
+
+
+# S76: the random-entry model of each rule that has one (config/gate.yaml `random_baseline` names which run).
+RANDOM_MODELS = {dip.NAME: lambda engine, n_runs, strategy: day_random(engine, n_runs, strategy)}
+
+
+def report_strategies(engine) -> list[str]:
+    """The registered live strategies the session runs (the owner's config, else the level's list), registry order."""
+    rules = getattr(engine.day, "rules", None)
+    names = rules.strategies if rules is not None else engine.level_strategies()
+    return [s.name for s in strategy_registry.live(names)]
 
 
 def on_day_end(engine, root: Path) -> dict | None:
@@ -247,15 +260,18 @@ def on_day_end(engine, root: Path) -> dict | None:
         rid = engine.day.run_id
         if not rid:
             return None
-        have = engine.store.select("gate_random", {"select": "session", "run_id": f"eq.{rid}",
-                                                   "session": f"eq.{engine.day.day}", "strategy": "eq.dip_reversal"})
-        if not have:  # first write wins: the table is append-only, a restart never recomputes a day
-            rnd = day_random(engine, int(bar.cfg["bar"]["random_runs"]))
-            if rnd is not None:
-                engine.store.insert("gate_random", {**rnd, "run_id": rid, "fingerprint": fp}, returning=False)
+        for strat in bar.cfg.get("random_baseline") or ():
+            model = RANDOM_MODELS.get(strat)
+            if model is None:
+                continue  # no random-entry model for this rule yet: its percentile reports "unknown" (fails closed)
+            have = engine.store.select("gate_random", {"select": "session", "run_id": f"eq.{rid}",
+                                                       "session": f"eq.{engine.day.day}", "strategy": f"eq.{strat}"})
+            if not have:  # first write wins: the table is append-only, a restart never recomputes a day
+                rnd = model(engine, int(bar.cfg["bar"]["random_runs"]), strat)
+                if rnd is not None:
+                    engine.store.insert("gate_random", {**rnd, "run_id": rid, "fingerprint": fp}, returning=False)
         rules = getattr(engine.day, "rules", None)
-        strategies = list(rules.strategies) if rules is not None else list(
-            engine.strategies.get(engine.level(), ["dip_reversal"]))
+        strategies = report_strategies(engine)
         report = build(engine.store, bar, rid, fp, engine.run, engine.policy().run_drawdown_end_pct, strategies,
                        registry.registry_file(root), config_version=rules.version if rules is not None else 0)
         engine.store.insert("gate_report", {"run_id": rid, "session": str(engine.day.day), "bar_sha": bar.sha,
