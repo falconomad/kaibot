@@ -28,6 +28,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
+from kaibot.broker.protocol import Broker
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
 from kaibot.engine.config import ROOT
@@ -141,7 +142,7 @@ class Day:
 class Engine:
     def __init__(
         self,
-        broker,
+        broker: Broker,
         market: LiveMarket,
         store,
         policies: dict[str, RiskPolicy],

@@ -1,0 +1,413 @@
+{
+ "equity0": 100000.0,
+ "events": [
+  {
+   "date": "2026-09-15",
+   "m": 70,
+   "px": 59.681369,
+   "qty": 251.0,
+   "stop": 59.448869,
+   "symbol": "BBB",
+   "target": 60.146369,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 70,
+   "px": 306.539838,
+   "qty": 48.0,
+   "stop": 305.013052,
+   "symbol": "CCC",
+   "target": 309.593409,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 80,
+   "pnl": -76.428787,
+   "px": 304.956215,
+   "qty": 48.0,
+   "reason": "stop",
+   "symbol": "CCC",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 81,
+   "pnl": 116.253645,
+   "px": 60.146369,
+   "qty": 251.0,
+   "reason": "target",
+   "symbol": "BBB",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 175,
+   "px": 59.421604,
+   "qty": 252.0,
+   "stop": 59.218033,
+   "symbol": "BBB",
+   "target": 59.828747,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 185,
+   "px": 131.76963,
+   "qty": 114.0,
+   "stop": 131.071059,
+   "symbol": "EEE",
+   "target": 133.166773,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 212,
+   "pnl": -83.636205,
+   "px": 131.039788,
+   "qty": 114.0,
+   "reason": "stop",
+   "symbol": "EEE",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 267,
+   "pnl": 5.499954,
+   "px": 59.445248,
+   "qty": 252.0,
+   "reason": "trail",
+   "symbol": "BBB",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 345,
+   "px": 158.83061,
+   "qty": 94.0,
+   "stop": 157.922039,
+   "symbol": "AAA",
+   "target": 160.647753,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-15",
+   "m": 385,
+   "pnl": -25.867633,
+   "px": 158.559997,
+   "qty": 94.0,
+   "reason": "time",
+   "symbol": "AAA",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-15",
+   "end": 99935.820974,
+   "halted": false,
+   "pnl": -64.179026,
+   "start": 100000.0,
+   "trades": 5,
+   "type": "day_close"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 95,
+   "px": 44.040069,
+   "qty": 340.0,
+   "stop": 43.80114,
+   "symbol": "DDD",
+   "target": 44.517926,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 110,
+   "pnl": -85.856242,
+   "px": 43.788934,
+   "qty": 340.0,
+   "reason": "stop",
+   "symbol": "DDD",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 150,
+   "px": 154.821162,
+   "qty": 96.0,
+   "stop": 154.099019,
+   "symbol": "AAA",
+   "target": 156.265448,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 150,
+   "px": 58.001923,
+   "qty": 258.0,
+   "stop": 57.751208,
+   "symbol": "BBB",
+   "target": 58.503351,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 150,
+   "px": 288.450577,
+   "qty": 51.0,
+   "stop": 286.924863,
+   "symbol": "CCC",
+   "target": 291.502006,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 160,
+   "pnl": 138.218451,
+   "px": 156.265448,
+   "qty": 96.0,
+   "reason": "target",
+   "symbol": "AAA",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 162,
+   "pnl": 128.906134,
+   "px": 58.503351,
+   "qty": 258.0,
+   "reason": "target",
+   "symbol": "BBB",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 165,
+   "px": 43.549936,
+   "qty": 344.0,
+   "stop": 43.39565,
+   "symbol": "DDD",
+   "target": 43.858507,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 168,
+   "pnl": -81.383353,
+   "px": 286.862966,
+   "qty": 51.0,
+   "reason": "stop",
+   "symbol": "CCC",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 195,
+   "px": 285.12206,
+   "qty": 52.0,
+   "stop": 283.713131,
+   "symbol": "CCC",
+   "target": 287.939917,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 238,
+   "pnl": 6.044674,
+   "px": 285.2464,
+   "qty": 52.0,
+   "reason": "trail",
+   "symbol": "CCC",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 246,
+   "pnl": 11.779953,
+   "px": 43.585558,
+   "qty": 344.0,
+   "reason": "trail",
+   "symbol": "DDD",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 355,
+   "px": 42.479427,
+   "qty": 353.0,
+   "stop": 42.235141,
+   "symbol": "DDD",
+   "target": 42.967998,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-16",
+   "m": 385,
+   "pnl": -31.80337,
+   "px": 42.390676,
+   "qty": 353.0,
+   "reason": "time",
+   "symbol": "DDD",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-16",
+   "end": 100021.727221,
+   "halted": false,
+   "pnl": 85.906247,
+   "start": 99935.820974,
+   "trades": 7,
+   "type": "day_close"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 75,
+   "px": 153.157955,
+   "qty": 48.5,
+   "stop": 152.490455,
+   "symbol": "AAA",
+   "target": 154.492955,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 75,
+   "px": 59.221383,
+   "qty": 126.5,
+   "stop": 58.996383,
+   "symbol": "BBB",
+   "target": 59.671383,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 75,
+   "px": 277.768522,
+   "qty": 27.0,
+   "stop": 276.325308,
+   "symbol": "CCC",
+   "target": 280.654951,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 79,
+   "pnl": -40.857634,
+   "px": 276.263123,
+   "qty": 27.0,
+   "reason": "stop",
+   "symbol": "CCC",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 80,
+   "pnl": -34.025146,
+   "px": 152.46081,
+   "qty": 48.5,
+   "reason": "stop",
+   "symbol": "AAA",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 86,
+   "pnl": -30.130333,
+   "px": 58.985005,
+   "qty": 126.5,
+   "reason": "stop",
+   "symbol": "BBB",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 235,
+   "px": 266.060789,
+   "qty": 28.0,
+   "stop": 264.52436,
+   "symbol": "CCC",
+   "target": 269.133646,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 240,
+   "px": 58.06167,
+   "qty": 129.0,
+   "stop": 57.797027,
+   "symbol": "BBB",
+   "target": 58.590956,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 249,
+   "pnl": 68.046324,
+   "px": 58.590956,
+   "qty": 129.0,
+   "reason": "target",
+   "symbol": "BBB",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 251,
+   "pnl": 85.825858,
+   "px": 269.133646,
+   "qty": 28.0,
+   "reason": "target",
+   "symbol": "CCC",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 365,
+   "px": 57.380016,
+   "qty": 130.5,
+   "stop": 57.207516,
+   "symbol": "BBB",
+   "target": 57.725016,
+   "type": "entry"
+  },
+  {
+   "date": "2026-09-17",
+   "m": 385,
+   "pnl": -12.046773,
+   "px": 57.289462,
+   "qty": 130.5,
+   "reason": "time",
+   "symbol": "BBB",
+   "type": "exit"
+  },
+  {
+   "date": "2026-09-17",
+   "end": 100058.539517,
+   "halted": false,
+   "pnl": 36.812296,
+   "start": 100021.727221,
+   "trades": 6,
+   "type": "day_close"
+  }
+ ],
+ "events_digest": "0e509a4197315da8d5869080895209ccab34847ce9750d3b028fbec48f4d7d22",
+ "exit_reasons": [
+  "stop",
+  "target",
+  "time",
+  "trail"
+ ],
+ "input_digest": "a3b8acc3db9ccbf05bf4a15a8cfd98b74c78b05bc6109b5d501f686cbbb87d32",
+ "policy": {
+  "allow_short": false,
+  "max_daily_loss_pct": 1.5,
+  "max_entries_per_day": 20,
+  "max_open_risk_pct": 1.5,
+  "max_position_pct": 15,
+  "max_positions": 5,
+  "max_quote_age_s": 5,
+  "risk_per_trade_pct": 0.5,
+  "run_drawdown_end_pct": 8,
+  "warn_fraction": 0.8
+ },
+ "variant": "A"
+}
