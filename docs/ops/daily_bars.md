@@ -208,7 +208,12 @@ plan table):
   volume but not to open, high, low or close; "official open / close" prints change nothing.
 - `GET https://data.alpaca.markets/v1/corporate-actions`: `symbols`, `types` (among them `forward_split`,
   `reverse_split`, `stock_dividend`, `cash_dividend`, `spin_off`, `name_change`), `start`, `end` (inclusive,
-  default today), `limit` up to 1000, `page_token`.
+  default today), `limit` up to 1000, `page_token`. Not sent, so their defaults apply: `region=us`,
+  `data_quality=complete`, `sort=asc`. Results are sorted by `process_date`. Other documented types
+  (`unit_split`, mergers, `redemption`, `worthless_removal`, `capital_gains_distribution` and more) are not requested.
+- Re-checked on 12 Nov 2026: both reference pages show the parameters above but no response schema; the FAQ
+  pages fetched do not state the 2016 start of history or the 200 calls a minute (taken from the plan table and
+  `config/sources.yaml`).
 
 **Not verified** (the documentation is silent or the page shows no schema; the first run settles each):
 

@@ -279,6 +279,27 @@ def test_the_frame_has_the_fields_of_the_harness_daily_bars():
     assert (df["v_first"] == 0.02 * df["v"]).all() and (df["v_last"] == 0.02 * df["v"]).all()
 
 
+def test_the_harness_daily_bars_read_the_raw_and_the_adjusted_panel_unchanged():
+    """The hand-off of docs/ops/daily_bars.md against the real `DailyBars` of replay/multiday.py (#113)."""
+    from kaibot.replay.multiday import FIELDS as HARNESS_FIELDS
+    from kaibot.replay.multiday import DailyBars, indicators
+
+    assert HARNESS_FIELDS == FIELDS
+    closes = [100.0 + i for i in range(30)]
+    closes[15:] = [c / 4 for c in closes[15:]]
+    i_split = 15
+    p = panel_of(closes, actions=[(i_split, 4.0, None)])
+    assert p.split[i_split, 0] == 4.0
+    for view in (p, p.adjusted("total")):
+        b = DailyBars.from_frame(view.to_frame(), view.symbols)
+        assert np.array_equal(b.dates, view.dates)
+        for k in ("o", "h", "l", "c", "v", "v_first", "v_last"):
+            np.testing.assert_array_equal(getattr(b, k), getattr(view, k))
+    raw, sig = (DailyBars.from_frame(v.to_frame(), v.symbols) for v in (p, p.adjusted("total")))
+    assert raw.c[i_split, 0] < raw.c[i_split - 1, 0] / 3, "market side: the raw split is visible"
+    assert indicators(sig) is not None and sig.c[i_split, 0] > sig.c[i_split - 1, 0], "signal side: continuous"
+
+
 # ---------------------------------------------------------------- through the store on disk
 
 
