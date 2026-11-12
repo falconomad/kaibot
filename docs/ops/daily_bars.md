@@ -102,17 +102,23 @@ adjusted[t] = raw[t] x the factor of every action with  t < ex-date <= D
   bought on the ex-date does not get that dividend; one sold on the ex-date does.
 - `source="auto"` (see the checks) uses Alpaca's own factor for the keys whose table failed the check.
 
-## Hand-off to Backend-quant: the multi-day harness (#113)
+## Hand-off to Backend-quant: `multiday.py` (#113) and `multiday_core.py` (#127)
 
-`src/kaibot/replay/multiday.py` builds its `DailyBars` (o, h, l, c, v, c1555, v_first, v_last) from the minute
-history, which is split-adjusted as of its download and has no dividends. The store gives the same fields:
+Both modules read one `DailyBars` (o, h, l, c, v, c1555, v_first, v_last) built by `multiday.load_or_build_daily`
+from the minute history, which is split-adjusted as of its download and has no dividends; `multiday_core` imports
+`DailyBars`, `Engine`, `Indicators` and `closes` from `multiday`, so both change in the same place. The store gives
+the same fields twice, once per side:
 
 ```python
 minute, _ = load_or_build_daily(data, symbols, start, end)        # unchanged: the only source of the 15:55 price
 panel = DailyStore(data / "daily").panel(symbols, start, end, intraday=minute.to_frame())
-adj = panel.adjusted("total", source="auto")
-raw = DailyBars.from_frame(panel.to_frame(), symbols)             # market side
-sig = DailyBars.from_frame(adj.to_frame(), symbols)               # signal side
+adj = panel.adjusted("split", source="auto")                      # "total" only after a prereg amendment, below
+raw = DailyBars.from_frame(panel.to_frame(), symbols)             # market side: orders, costs, stops, filters
+sig = DailyBars.from_frame(adj.to_frame(), symbols)               # signal side: scores, averages, returns
+f = adj.factor                                                    # adjusted level / f[i, j] = raw level of session i
+keep = np.isfinite(raw.c[:, raw.col(spy)])                        # SPY's session calendar, as today
+raw, sig, f = raw.keep_sessions(keep), sig.keep_sessions(keep), f[keep]
+spy_tr = panel.total_return(spy)[keep]                            # cut every panel array with the same mask
 ```
 
 - `o h l c v` come from the store (official open and close, full-day volume). `c1555`, `v_first`, `v_last` exist
@@ -121,14 +127,47 @@ sig = DailyBars.from_frame(adj.to_frame(), symbols)               # signal side
   index members) `c1555` is NaN, so a rule that decides at 15:55 cannot trade them, and the official close never
   stands in for a 15:55 price; `v_first` and `v_last` are then 2% of the day's volume (the number
   `DailyBars.make` already uses).
-- **Signals on `sig`**: `indicators(sig)` (ATR, sigma, returns), new highs, momentum ranks, averages.
-- **Market on `raw`**: fills, `half_spread`, `buy_px`, `sell_px`, fees, whole-share counts, stop levels, the
-  minimum-price filter and dollar volume (`MIN_PRICE`, `MIN_ADV`). An ATR computed on `sig` is in adjusted
-  dollars: use `atr / adj.factor[i, j]` (or the ratio `atr / sig.c`) before sizing or placing a stop.
-- **Positions through corporate actions**, at the start of `Engine.step(i)`, for every open position:
-  `qty, cash = panel.carry(i, j, qty)`; add `cash` to the account; divide the stop, the highest close, the fill
-  and the last mark by `panel.split[i, j]`. Without this a held position shows a split as a 75% loss.
-- **Benchmark**: replace `spy_buy_and_hold` (price only) by `panel.total_return("SPY")[i0:i1 + 1]`.
+
+**One rule for both files: anything compared over time reads `sig`; anything that becomes an order, a cost, a
+share count, a stop or a dollar filter reads `raw`.** An `Indicators` for the engine is built from `sig` and
+converted: `ind = indicators(sig)`, then `ind.atr / f` (raw dollars of that session); `sigma` and `ret` are ratios
+and stay; `adv` is computed on `raw` (`raw.c * raw.v`; a split leaves dollar volume unchanged, a dividend
+adjustment would understate it).
+
+`multiday.py` (the engine and the four first-look rules):
+
+| Where | Reads | Why |
+|---|---|---|
+| `Engine(bars=...)`: `enter`, `sell`, `adjust`, the gap and stop checks in `step`, `half_spread`, `buy_px`, `sell_px`, `cost_parts`, `sell_fees`, whole shares, `max_position_pct` | `raw` | the price the order would have met (audit E4, next paragraph) |
+| `Engine(ind=...)`: `ind.atr` for the initial and trailing stop, `ind.sigma` for impact, `ind.adv` for caps | the converted `ind` above | a stop in adjusted dollars is wrong by the factor; a 1-for-10 reverse split would put it 10x too far |
+| the rules in `multiday_rules.py`: new highs, averages, momentum ranks, `ret` | `sig` | a split in `raw` reads as a 75% loss and triggers every filter |
+| `MIN_PRICE`, `MIN_ADV` | `raw` | the filters are about tradable dollars |
+| corporate actions on open positions, at the start of `Engine.step(i)`, for every open position | `qty, cash = panel.carry(i, j, qty)`: add `cash` to the account; divide the stop, `hi_close`, the fill and the last mark by `panel.split[i, j]` | without it a held position shows a split as a loss and earns no dividend; with it "the trades explain the equity" still holds if the dividend is booked as its own line (`dividends`) next to `pnl` |
+| `spy_buy_and_hold` | `panel.total_return(spy)[i0:i1 + 1]` (the price-only version stays as `spy_price_only`) | the benchmark gains about 1.2 points a year (audit E4) |
+| `equal_weight_benchmark` | `raw` prices, plus `panel.carry` for the dividend of each held stock | the same cost model on the same prices as the rules |
+
+`multiday_core.py` (`trend_momentum`, `mom_12_1_band`, the random control, Gate B):
+
+| Where | Reads | Why |
+|---|---|---|
+| `Signals(bars, ind, ...)`: `closes`, `regression_score`, `momentum_score`, `below_avg` (100-day average), `big_move` (15% move in 90 sessions), `market_on` (SPY over its 200-day average) | `sig` and `indicators(sig)` | a 2-for-1 split is a 50% "move" on `raw` and would bar the stock for 90 sessions |
+| `Signals.ok` (`c >= MIN_PRICE`, `adv >= MIN_ADV`) | `raw.c`, the raw `adv` | as above |
+| `Signals.atr20` and `Signals.c` inside `target_shares` | `atr20 / f` and `raw.c` (or compute both from `sig` and divide by `f[k, j]`) | `shares = equity x atr_risk / ATR(20)` must use the dollars of session k; on `sig` an old bar of a later-split stock gives up to 40 times the shares |
+| `run_rule` and `matched_random_control` | `Engine(raw, converted ind, ...)`, `Signals(sig, ...)` | the control must use the same prices as the rule it is matched to |
+| `gate_b` mark 2 | `panel.total_return(spy)` as `spy`; drop the "price only until S84" detail and `mark2_price_only` becomes the verdict against total return | the prereg's mark 2 is "SPY total-return CAGR" |
+| `RESIZE_BUFFER` and `plan` (current against target shares) | held shares after `panel.carry` | otherwise a split makes every held name look 4 times over target |
+
+**Prereg note (before a real-data run on the store).** Both preregs (`docs/prereg/trend_momentum.md`,
+`mom_12_1_band.md`, item 1) define the close as "the last regular-hours minute, split-adjusted, no dividends". The
+store's `c` is the official close (normally the closing auction, a few basis points away) and `adjusted ("total")`
+also removes dividends. To stay inside the frozen construction use `adjusted("split")` for the signals; where the
+prereg's minute close matters, keep the minute-derived `minute.c` as the signal close (it is split-adjusted as of
+its download, so it equals the store's split-adjusted series up to one constant per symbol, except for the sessions
+check 1 lists as "another split basis"). Switching the signal side to the official close or to `"total"`
+(dividend-adjusted momentum) is a change of the construction and needs a prereg amendment first. The benchmark
+change to total return is already registered ("total return once S84 has landed") and needs none. Dividends
+credited to held positions are an accounting fix, not a rule change.
+
 - **Keys to leave out**: `store.adjustment_report()`; for a key with `split_basis_days > 0` the table and
   Alpaca's bars disagree about a split, so its share count cannot be carried through that date (the check prints
   these keys as a warning).

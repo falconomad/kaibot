@@ -300,6 +300,31 @@ def test_the_harness_daily_bars_read_the_raw_and_the_adjusted_panel_unchanged():
     assert indicators(sig) is not None and sig.c[i_split, 0] > sig.c[i_split - 1, 0], "signal side: continuous"
 
 
+def test_the_handoff_recipe_for_multiday_and_multiday_core():
+    """docs/ops/daily_bars.md: signals on the split-adjusted side, ATR back in raw dollars via `factor`, and the
+    90-session move filter of replay/multiday_core.py (#127) not tripped by a split."""
+    from kaibot.replay.multiday import DailyBars, indicators
+    from kaibot.replay.multiday_core import Signals
+
+    i_split, n = 60, 120
+    closes = [100.0 * 1.001 ** i for i in range(n)]
+    closes[i_split:] = [c / 2 for c in closes[i_split:]]
+    p = panel_of(closes, actions=[(i_split, 2.0, None)])
+    adj = p.adjusted("split")
+    raw, sig = (DailyBars.from_frame(v.to_frame(), v.symbols) for v in (p, adj))
+    f = adj.factor
+    ind_raw, ind_sig = indicators(raw), indicators(sig)
+    for i in (40, 100):  # windows wholly before and wholly after the split
+        assert ind_sig.atr[i, 0] / f[i, 0] == pytest.approx(ind_raw.atr[i, 0], rel=1e-9)
+    assert ind_raw.atr[i_split + 2, 0] > 3 * ind_sig.atr[i_split + 2, 0] / f[i_split + 2, 0], "raw ATR spikes"
+    keep = np.isfinite(raw.c[:, raw.col("X")])
+    assert len(p.total_return("X")[keep]) == len(raw.keep_sessions(keep).dates)
+    on_sig = Signals(sig, ind_sig, np.array([0]), 0)
+    on_raw = Signals(raw, ind_raw, np.array([0]), 0)
+    assert not on_sig.big_move[i_split:i_split + 90, 0].any(), "signal side: a split is not a 15% move"
+    assert on_raw.big_move[i_split:i_split + 90, 0].all(), "on raw bars a split would bar the stock for 90 sessions"
+
+
 # ---------------------------------------------------------------- through the store on disk
 
 
