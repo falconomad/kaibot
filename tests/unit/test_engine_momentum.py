@@ -364,6 +364,9 @@ def test_logged_runs_from_before_an_amendment_stay_attributable_to_the_rule():
     assert prereg.amended_only(base, base + "\n## Amendment 1 (12 Nov 2026)\n\nmore text\n")
     assert not prereg.amended_only(base, base.replace("20", "14") + "\n## Amendment 1 (12 Nov 2026)\n\nx\n")
     assert not prereg.amended_only(base, base + "\n## 8. A new section\n\nx\n")
+    glued = "# Pre-registration\n\n## 2. Frozen construction\n\n| ATR | 20 |"
+    assert not prereg.amended_only(glued, glued + "## Amendment 1 (12 Nov 2026)\n\nx\n")  # not on a new line
+    assert prereg.amended_only(glued, glued + "\n\n## Amendment 1 (12 Nov 2026)\n\nx\n")
     if shallow:
         pytest.skip("a shallow clone (CI) has no history of the pre-registrations")
     for rule in ("trend_momentum", "mom_12_1_band"):

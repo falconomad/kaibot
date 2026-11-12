@@ -1,7 +1,7 @@
 """The momentum core of decision 15 as engine strategies (issue #161, story S94): `trend_momentum` (rule 1, Clenow's
 "Stocks on the Move") and `mom_12_1_band` (rule 2, banded 12-1 momentum, with and without the index filter).
 
-Frozen exactly as docs/prereg/trend_momentum.md and docs/prereg/mom_12_1_band.md (with Amendments 1 and 2) say;
+Frozen exactly as docs/prereg/trend_momentum.md and docs/prereg/mom_12_1_band.md (with Amendments 1 to 3) say;
 nothing here is tuned. The research harness (replay/, the momentum core of #127) implements the same rules; the parity
 test (tests/unit/test_engine_momentum.py) proves both give the same targets, order by order.
 

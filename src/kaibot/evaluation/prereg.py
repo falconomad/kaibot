@@ -175,7 +175,10 @@ def amended_only(old: str, new: str) -> bool:
         return True
     if not new.startswith(old.rstrip()):
         return False
-    rest = new[len(old.rstrip()):].strip()
+    tail = new[len(old.rstrip()):]
+    if not tail.startswith("\n"):
+        return False  # an amendment starts on a line of its own, never glued onto the last line
+    rest = tail.strip()
     heads = [ln for ln in rest.splitlines() if ln.startswith("#")]
     return bool(rest) and rest.startswith("## Amendment") and all(_AMENDMENT.match(h) for h in heads)
 
