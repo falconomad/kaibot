@@ -1,6 +1,6 @@
 # M7 dashboard for a multi-day book: boards, data check and accessibility pass
 
-Date: 2026-11-12. Issue #129 (S89). Status: **proposal, awaiting stakeholder approval**. Frontend builds nothing before that (S90).
+Date: 2026-11-12. Issue #129 (S89). Status: **approved by the stakeholder on 12 Nov 2026 (layout B)**. Frontend builds it in S90 (#130). The open values listed on the canvas stay open until #132.
 
 Read first: the research in `research_m7_multiday_dashboard.md` and the layout debate in `../debate/m7_multiday_dashboard.md`. This note describes what was drawn, checks it against what Engine v3 will know, and records the accessibility pass.
 
