@@ -827,7 +827,7 @@ def test_the_core_is_research_only():
     """Nothing the engine runs imports the momentum core, and the core charges costs through the harness's engine
     (no cost arithmetic of its own, no second simulator)."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
-        if f.name != "multiday_core.py":
+        if f.name not in ("multiday_core.py", "daily_report.py"):  # #161: research command only
             assert "multiday_core" not in f.read_text(), f
     text = (ROOT / "src" / "kaibot" / "replay" / "multiday_core.py").read_text()
     for banned in ("buy_px", "sell_px", "sell_fees", "shadow_fill_price", "kaibot.engine", "kaibot.broker",

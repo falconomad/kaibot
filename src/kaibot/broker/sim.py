@@ -78,6 +78,30 @@ class ShadowCosts:
 COSTS_V1 = ShadowCosts()
 
 
+@dataclass(frozen=True)
+class AuctionImpactCosts(ShadowCosts):
+    """Cost model v1 at the opening and closing prints as the momentum pre-registrations price a daily rule's fill
+    (docs/prereg/trend_momentum.md section 4: half a spread a side PLUS the model's impact, `sim.buy_px` /
+    `sim.sell_px`), with `mult` scaling spread and impact (2x / 3x cost runs; regulatory fees are not scaled).
+    Issue #161. Opt-in: `COSTS_V1` keeps pricing the prints at half a spread, so every other run is unchanged.
+
+    `sigma(symbol, day)`: the 1-minute volatility the impact term uses for a fill on `day` (the daily path gives
+    the 20 split-adjusted daily returns before it, as the research harness does); the volume is the print's bar
+    volume (the first or the last minute)."""
+
+    sigma: Callable[[str, date], float] | None = None
+    mult: float = 1.0
+
+    def price(self, side: str, mid: float, qty: float, sigma: float, vol: float) -> float:
+        px = (buy_px if side == "buy" else sell_px)(mid, qty, sigma, vol)
+        return px if self.mult == 1.0 else mid + (px - mid) * self.mult
+
+    def auction_fill(self, side: str, price: float, qty: float, symbol: str, day: date, vol: float) -> float:
+        sig = self.sigma(symbol, day) if self.sigma is not None else 0.0
+        vol = float(vol) if math.isfinite(vol) and vol > 0 else 1.0
+        return self.price(side, price, qty, sig, vol)
+
+
 @dataclass
 class _Plan:
     kind: str  # reject | timeout | fills | hold
@@ -441,10 +465,10 @@ class SimBroker(BrokerBase):
         tif = o.get("time_in_force")
         if tif == "cls":
             if sess is not None and t == sess[1] - timedelta(minutes=1):
-                self._fill(o, o, left, self._auction(side, bar.c), t)
+                self._fill(o, o, left, self._auction(side, bar.c, left, o["symbol"], bar, t), t)
         elif tif == "opg":
             if sess is not None and t == sess[0]:
-                self._fill(o, o, left, self._auction(side, bar.o), t)
+                self._fill(o, o, left, self._auction(side, bar.o, left, o["symbol"], bar, t), t)
         elif o["type"] == "market":
             qty = left
             if plan is not None:  # scripted partial fills: one part per bar, the rest never
@@ -488,8 +512,13 @@ class SimBroker(BrokerBase):
         sigma = self.bars.sigma_1m(symbol, t.astimezone(NY).date())
         return self.costs.market(side, price, qty, sigma if math.isfinite(sigma) else 0.0, bar.v)
 
-    def _auction(self, side: str, price: float) -> float:
-        return price if self.costs is None else self.costs.auction(side, price)
+    def _auction(self, side: str, price: float, qty: float, symbol: str, bar: Bar, t: datetime) -> float:
+        if self.costs is None:
+            return price
+        full = getattr(self.costs, "auction_fill", None)  # AuctionImpactCosts: spread plus impact (#161)
+        if full is not None:
+            return full(side, price, qty, symbol, t.astimezone(NY).date(), bar.v)
+        return self.costs.auction(side, price)
 
     # ---------- booking ----------
     def _fill(self, parent: dict, o: dict, qty: float, px: float, t: datetime) -> None:

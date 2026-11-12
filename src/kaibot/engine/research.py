@@ -4,12 +4,16 @@
     python -m kaibot.engine.research --strategy dip_reversal
     python -m kaibot.engine.research --strategy orb_stocks_in_play --level aggressive --out /tmp/orb.json
     python -m kaibot.engine.research --list
+    python -m kaibot.engine.research --strategy trend_momentum --universe pit     # multi-day: engine/daily_report.py
 
 Bars: a directory in the engine-spine format (`bars.parquet`: symbol, ts, o/h/l/c in cents, v, vw in 1/100 cent;
 `meta.json`: sessions, test_days, sector_of, market, fomc, vix_prev_close, news). The default is the committed
 fixture tests/fixtures/engine_spine. A live strategy trades alone at the level; a shadow strategy runs alone in
 shadow mode next to no live rule (its signals and day-end counterfactuals are in the summary). Multi-day
-strategies need the ledger and the order manager (S77-S78) and are refused for now.
+strategies (`trend_momentum`, `mom_12_1_band`, `mom_12_1_band_nofilter`, issue #161) run on daily bars through
+`engine/daily.py` and produce a Gate B report from the engine's own fills (`engine/daily_report.py`):
+`--universe fixture` (the default: tests/fixtures/daily_momentum), `today` or `pit` (the daily store under
+`--data`).
 
 Numbers from here are research until a pre-registration exists (docs/prereg/), and read `pnl_venue`: the engine's
 reported P&L counts SimBroker's costs twice (review of #136, D4). The engine runs on the local journal
@@ -68,7 +72,7 @@ def run(strategy: str, *, level: str = "balanced", bars: Path = FIXTURE, days: l
     if strat is None:
         raise SystemExit(f"unknown strategy {strategy!r}; registered: {', '.join(registry.names())}")
     if strat.holding is Holding.MULTI_DAY:
-        raise SystemExit(f"{strategy} holds for days: the engine trades target lists only after S77-S78")
+        raise SystemExit(f"{strategy} holds for days: run it with --universe (engine/daily_report.py)")
     data = load_bars(Path(bars))
     days = days or data["days"]
     live = [strategy] if strat.mode is Mode.LIVE else []
@@ -120,11 +124,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--corporate-actions", type=Path, metavar="DAILY_DIR",
                     help="book dividends and splits from this daily store (e.g. data/daily)")
     ap.add_argument("--list", action="store_true", help="list the registered strategies")
+    md = ap.add_argument_group("multi-day strategies (daily bars, engine/daily_report.py)")
+    md.add_argument("--universe", choices=("fixture", "today", "pit"), default="fixture")
+    md.add_argument("--data", type=Path, default=ROOT / "data", help="holds daily/ (the store), reports/, trials.jsonl")
+    md.add_argument("--universe-file", type=Path, default=ROOT / "config" / "universe_history.yaml")
+    md.add_argument("--start", default="2016-01-01", help="first bar read (signals need 273 sessions before the test)")
+    md.add_argument("--test-start", default="2017-05-01", help="first test session (decision 15: 2017-05 onward)")
+    md.add_argument("--end", default=None)
+    md.add_argument("--control-runs", type=int, default=None,
+                    help="exposure-matched random portfolios (Gate B mark 3; default 500, 0 on the fixture)")
+    md.add_argument("--grid", choices=("gate", "full"), default="gate")
     a = ap.parse_args(argv)
     if a.list or not a.strategy:
-        for s in registry.STRATEGIES:
+        for s in (*registry.STRATEGIES, *registry.MULTI_DAY):
             print(f"{s.name:22} {s.mode:7} {s.holding:10} {'retired' if s.name in registry.RETIRED else ''}")
         return 0
+    strat = registry.get(a.strategy)
+    if strat is not None and strat.holding is Holding.MULTI_DAY:
+        return multi_day(a)
     ca = None
     if a.corporate_actions:
         from kaibot.replay.corporate_actions import daily_store_actions
@@ -135,6 +152,35 @@ def main(argv: list[str] | None = None) -> int:
     if a.out:
         a.out.write_text(text + "\n")
     print(text)
+    return 0
+
+
+def multi_day(a: argparse.Namespace) -> int:
+    """A multi-day rule through the engine's daily path: the Gate B report from its own fills."""
+    from kaibot.engine import daily_report as dr
+    from kaibot.evaluation import prereg as prereg_mod
+
+    strat = registry.get(a.strategy)
+    try:
+        sha = prereg_mod.require(strat.rule, ROOT)
+    except prereg_mod.PreregError as e:
+        raise SystemExit(f"no run: {e}") from e
+    pre = {"file": f"docs/prereg/{strat.rule}.md", "sha256": sha}
+    if a.universe == "fixture":
+        market, info = dr.load_fixture(a.bars if a.bars != FIXTURE else dr.FIXTURE)
+        runs = 0 if a.control_runs is None else a.control_runs
+        out_dir = trials = None
+    else:
+        end = a.end or str(np.datetime64("today", "D"))
+        market, info = dr.load_store(a.data, a.universe_file, a.universe, a.start, end)
+        info["window"] = [a.test_start, end]
+        runs = 500 if a.control_runs is None else a.control_runs
+        out_dir, trials = a.data / "reports", a.data / "trials.jsonl"
+    rep = dr.report(a.strategy, market, info, universe=a.universe, level=a.level, control_runs=runs,
+                    grid=a.grid, out_dir=out_dir, trials=trials, prereg=pre)
+    if a.out:
+        a.out.write_text(json.dumps(rep, indent=1, sort_keys=True, default=str) + "\n")
+    print(dr.summary(rep))
     return 0
 
 

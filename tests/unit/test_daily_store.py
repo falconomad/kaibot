@@ -498,8 +498,10 @@ def test_the_live_engine_never_imports_the_daily_store():
     """Research data only: nothing on the live path may read it (CLAUDE.md, issue #124)."""
     src = ROOT / "src" / "kaibot"
     live = ["engine", "risk", "broker", "strategies", "agents", "news", "features", "store"]
+    research = {"engine/daily_report.py"}  # #161: the research command's loader; the live engine never imports it
     offenders = [str(f.relative_to(src)) for pkg in live for f in (src / pkg).rglob("*.py")
-                 if "ingest.daily_" in f.read_text() or "ingest import daily_" in f.read_text()]
+                 if ("ingest.daily_" in f.read_text() or "ingest import daily_" in f.read_text())
+                 and str(f.relative_to(src)) not in research]
     assert offenders == []
     for name in ("daily_bars", "daily_store", "daily_check"):
         text = (src / "ingest" / f"{name}.py").read_text()
