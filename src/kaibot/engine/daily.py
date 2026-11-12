@@ -49,10 +49,15 @@ from datetime import UTC, date, datetime, time, timedelta
 import numpy as np
 import pandas as pd
 
-from kaibot.broker.protocol import BrokerError, OrderRequest
 from kaibot.broker.shadow_costs import half_spread
 from kaibot.broker.sim import NY, AuctionImpactCosts, SimBroker
 from kaibot.engine.clock import SimClock
+from kaibot.engine.execution import ExecutionPolicy
+from kaibot.engine.journal import Journal
+from kaibot.engine.orders import OrderManager, St
+from kaibot.engine.protect import ProtectiveStops
+from kaibot.engine.reconcile import Reconciler
+from kaibot.engine.targets import Target, reconcile_targets
 from kaibot.replay.history import BarHistory
 from kaibot.risk.gate import RiskPolicy
 from kaibot.strategies.base import Event, TargetList
@@ -485,6 +490,9 @@ class DailyRun:
     i0: int
     i1: int
     cash_gap: float = 0.0  # largest |venue cash - ledger cash| at any close
+    om: OrderManager | None = None  # every order of the run went through it (#118)
+    refused: list[tuple[int, list]] = field(default_factory=list)  # sessions reconciliation refused to trade
+    stops: dict = field(default_factory=dict)  # (strategy, symbol) -> protective stop price, when protect_atr
 
     @property
     def entries(self) -> dict[int, int]:
@@ -513,11 +521,17 @@ def _venue_actions(broker: SimBroker, symbol: str, *, split: float = 1.0, delist
 
 def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, fill: str = "base",
               cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-              on_session: Callable[[int], None] | None = None) -> DailyRun:
+              on_session: Callable[[int], None] | None = None, protect_atr: float | None = None) -> DailyRun:
     """One continuous account of one multi-day strategy over sessions i0..i1, starting flat: the strategy decides
-    after each close, `atr_risk_sizing` sizes, `SimBroker` fills at the next close (`fill="base"`) or open
-    (`"stress"`), `StandInLedger` books. What is still held after i1 is valued at its last mark less the cost
-    model's sale (the harness's `end_of_data`), so every dollar of the equity curve is in a trade row."""
+    after each close, `atr_risk_sizing` sizes, the target loop (engine/targets.py) sends target minus held minus
+    working through the order manager (engine/orders.py) as closing-auction orders, `SimBroker` fills them at the
+    next close (`fill="base"`) or open (`"stress"`, the research cost model), the manager books the venue's fills
+    from its account activities and `StandInLedger` books them. Each session starts with a reconciliation of the
+    ledger with the venue (shares and cash); a difference refuses that session's orders (`DailyRun.refused`).
+    `protect_atr`: a protective GTC stop that far below the entry (in ATR(20)) rests at the venue for every
+    position (decision 15; off by default: the pre-registrations have no stop, so the Gate B runs keep none).
+    What is still held after i1 is valued at its last mark less the cost model's sale (the harness's
+    `end_of_data`), so every dollar of the equity curve is in a trade row."""
     if i0 < 1 or i1 >= len(data.dates) or i0 > i1:
         raise ValueError("sessions i0..i1 must lie inside the data, with i0 >= 1")
     where, factor = FILLS[fill]
@@ -528,9 +542,16 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     broker = SimBroker(data.bar_history(), clock, costs=costs, cash=equity0, calendar=data.calendar(),
                        cash_at="fill")
     led = StandInLedger(strategy.name, strategy.rule, data, equity0, mult)
-    run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1)
+    om = OrderManager(broker, Journal(now=clock), clock)
+    run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om)
+    policy = ExecutionPolicy("close" if tif == "cls" else "open", research_open=tif == "opg")
+    at_close = ExecutionPolicy("close")
+    stops = ProtectiveStops(om) if protect_atr else None
+    recon = Reconciler(lambda: {"ledger_qty": {s: p.qty for s, p in led.pos.items()},
+                                "broker_positions": broker.positions(), "om": om, "ledger_cash": led.cash,
+                                "ledger_cash0": float(equity0), "broker_cash": broker.cash,
+                                "broker_cash0": float(equity0), "equity": led.equity}, om.journal)
     pending: dict[str, str] = {}
-    n_seen = 0
     exits_on: dict[int, list[int]] = {}
     for j, sessions in data.exits.items():
         for s in sessions:
@@ -545,17 +566,20 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         if tl is not None:
             run.targets[k + 1] = tl
 
-    def send(i: int, symbol: str, side: str, qty: float, kind: str, why, at: str = tif) -> None:
-        if qty < 1:
-            return
-        coid = f"kb-{strategy.name}-{data.dates[i]}-{kind}-{symbol}"
-        try:
-            broker.submit(OrderRequest(symbol, side, int(qty), "market", at, coid))
-        except BrokerError as e:
-            run.rejected.append((i, symbol, str(e)[:120]))
-            return
-        sent[coid] = (kind, symbol, why)
+    def send(i: int, targets: list[Target], pol_: ExecutionPolicy) -> None:
+        """The target loop, in the plan's order (the venue fills a print in the order the orders arrived)."""
+        held_now = {(strategy.name, s): q for s, (q, _) in led.held().items()}
+        res = reconcile_targets(om, pol_, targets, held_now, now=clock(), session=str(data.dates[i]),
+                                reconciler=recon, stops=stops, sells_first=False)
+        for r in res.sent:
+            if r.state is St.REJECTED:
+                run.rejected.append((i, r.symbol, (r.reason or "")[:120]))
+            else:
+                sent[r.coid] = (r.purpose, r.symbol, r.meta.get("why"))
+        for (_, sym), why in res.skipped:
+            run.rejected.append((i, sym, why[:120]))
 
+    name = strategy.name
     decide(i0 - 1)
     for i in range(i0, i1 + 1):
         d = data.day(i)
@@ -569,8 +593,17 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                 led.apply("dividend", {"symbol": s, "ex_date": str(d), "per_share": dv, "i": i})
             r = data.split_at(i, j)
             if r != 1.0:
+                if stops is not None:  # protective orders are cancelled before a split and re-created after it
+                    stops.before_split(s)
+                    om.sync()
                 _venue_actions(broker, s, split=r)
                 led.apply("split", {"symbol": s, "ex_date": str(d), "ratio": r, "i": i})
+                if (name, s) in run.stops:
+                    run.stops[(name, s)] = round(run.stops[(name, s)] / r, 2)
+                if stops is not None:  # re-protected at once, before the open: no session without a stop
+                    stops.after_split(s)
+                    q = led.pos[s].qty if s in led.pos else 0.0
+                    stops.ensure({(name, s): q}, run.stops, clock(), str(d), only={s})
                 frac = led.pos[s].qty - math.floor(led.pos[s].qty + 1e-9)
                 if frac > 1e-9:  # the fraction of a share is paid in cash (Alpaca), at the previous close / ratio
                     px = led.pos[s].last
@@ -590,27 +623,25 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         held = led.held()
         pending = {s: r for s, r in pending.items() if s in held}
         forced = {data.symbols[j] for j in exits_on.get(i, ()) if data.symbols[j] in held}
+        targets: list[Target] = []
+        if recon.check("startup" if i == i0 else "periodic").diffs:  # the ledger and the venue disagree:
+            run.refused.append((i, recon.last.summary()["diffs"]))  # the target loop refuses buys, sales go out
         if tl is not None:
             plan = atr_risk_sizing(tl, held, pending, data, i, eq, pol, exposure_pct, led.cash)
             run.skipped += plan.skipped
             run.orders += [(i, "sell", s, r) for s, r in plan.sell.items()]
             run.orders += [(i, "resize", s, t) for s, t in plan.resize] + [(i, "buy", s, t) for s, t in plan.buy]
-            for s, r in plan.sell.items():
-                send(i, s, "sell", held[s][0], "sell", r)
-            for s, t in plan.resize:
-                if s in forced:
-                    continue  # sold at this close anyway (a split the data disagree about is next)
-                q = held[s][0]
-                send(i, s, "buy" if t > q else "sell", abs(t - q), "resize", t)
-            for s, t in plan.buy:
-                send(i, s, "buy", t, "buy", t)
+            targets += [Target(name, s, 0, "sell", {"why": r}) for s, r in plan.sell.items()]
+            # a resize of a name sold at this close anyway (a split the data disagree about is next) is not sent
+            targets += [Target(name, s, int(t), "resize", {"why": t}) for s, t in plan.resize if s not in forced]
+            targets += [Target(name, s, int(t), "buy", {"why": t}) for s, t in plan.buy]
             pending = {}
-        else:
-            for s, r in pending.items():  # a sale whose stock had no bar: try again every session
-                send(i, s, "sell", held[s][0], "sell", r)
-        for s in forced:
-            if not any(v[1] == s and v[0] == "sell" for v in sent.values()):
-                send(i, s, "sell", held[s][0], "split_dispute", "split_dispute", at="cls")  # at the close, always
+        else:  # a sale whose stock had no bar: try again every session
+            targets += [Target(name, s, 0, "sell", {"why": r}) for s, r in pending.items()]
+        send(i, targets, policy)
+        sold = {t.symbol for t in targets if t.shares == 0}
+        send(i, [Target(name, s, 0, "split_dispute", {"why": "split_dispute"}) for s in forced if s not in sold],
+             at_close)  # at the close, always
         # -- the session: opening print, closing print
         broker.advance(_at(d, OPEN_BAR))
         clock.set(_at(d, CLOSE_BAR))
@@ -618,26 +649,29 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         # -- after the close: book the fills, terminal closes, marks
         clock.set(_at(d, AFTER_CLOSE))
         filled: set[str] = set()
-        by_id = {o["id"]: o for o in broker.orders.values()}
-        for f in broker.fills[n_seen:]:
-            o = by_id[f["order_id"]]
-            kind, s, why = sent.get(o["client_order_id"], ("sell", o["symbol"], "sell"))
+        for f in om.sync():  # the venue's fills, from its account activities, each booked once
+            r = om.get(f.coid)
+            if r.purpose == "stop":  # a protective stop fired: a sale like any other, at the stop's fill
+                sent.setdefault(f.coid, ("sell", f.symbol, "protective_stop"))
+            kind, s, why = sent.get(f.coid, ("sell", f.symbol, "sell"))
             j = data.col(s)
-            qty, px = float(f["qty"]), float(f["price"])
-            at = "close" if o.get("time_in_force") == "cls" else "open"
+            qty, px = f.qty, f.px
+            at = "close" if r.tif == "cls" else "open"
             mid = float(data.raw_c[i, j] if at == "close" else data.raw_o[i, j])
             ref = float(data.px[i - 1, j]) / data.split_at(i, j)
             reason = why if kind != "resize" else "resize"
-            led.apply("fill", {"i": i, "symbol": s, "side": f["side"], "qty": qty, "px": px, "mid": mid,
-                               "fees": float(f["fees"]), "reason": reason, "at": at, "equity": eq, "ref": ref})
-            run.fills.append({"i": i, "symbol": s, "side": f["side"], "qty": qty, "px": px, "fees": float(f["fees"]),
+            led.apply("fill", {"i": i, "symbol": s, "side": f.side, "qty": qty, "px": px, "mid": mid,
+                               "fees": f.fees, "reason": reason, "at": at, "equity": eq, "ref": ref})
+            run.fills.append({"i": i, "symbol": s, "side": f.side, "qty": qty, "px": px, "fees": f.fees,
                               "reason": reason})
-            filled.add(o["client_order_id"])
+            filled.add(f.coid)
+            if stops is not None and f.side == "buy" and (name, s) not in run.stops:
+                run.stops[(name, s)] = round(ref - protect_atr * float(data.atr20[i - 1, j]) / data.split_at(i, j),
+                                             2)
             if kind == "buy":
                 run.opened.append((i, j, qty * ref / eq))
             elif kind == "resize" and s in led.pos:
                 run.resized.append((i, j, led.pos[s].qty * ref / eq))
-        n_seen = len(broker.fills)
         for coid, (kind, s, why) in sent.items():
             if coid not in filled and kind in ("sell", "split_dispute") and s in led.pos:
                 pending[s] = why  # a sale without a bar waits for the next session that has one
@@ -655,6 +689,10 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                 pending.pop(s, None)
         led.apply("mark", {"i": i, "session": str(d),
                            "prices": {s: float(data.raw_c[i, data.col(s)]) for s in led.pos}})
+        if stops is not None:  # every position keeps a protective GTC stop at the venue, in whole shares
+            run.stops = {k: v for k, v in run.stops.items() if k[1] in led.pos}
+            stops.suspended.clear()
+            stops.ensure({(name, s): p.qty for s, p in led.pos.items()}, run.stops, clock(), str(d))
         run.cash_gap = max(run.cash_gap, abs(broker.cash - led.cash))  # the venue's cash book against the ledger
         if on_session:
             on_session(i)

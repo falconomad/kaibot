@@ -33,6 +33,7 @@ from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
+from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
 from kaibot.engine.journal import BootstrapError, IdentityError, Journal, JournalStore, Replicator, journal_path
 from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
@@ -94,7 +95,8 @@ def build(settings: Settings) -> Engine:
     locked = LockedDesk(desk)
     return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
                   calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
-                  pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked))
+                  pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
+                  ex_dividends=ExDateDividends(data))  # S78: dividends accrued at the ex-date (#118)
 
 
 EXIT_JOURNAL = 4
