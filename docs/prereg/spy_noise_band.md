@@ -31,7 +31,7 @@ Source of the construction: Zarattini, Aziz and Barbon (2024), "Beat the Market:
 Strategy for S&P500 ETF (SPY)", as summarised in `docs/research/engine_v3/notes_intraday_overnight_strategies.md`
 section 2; the carry from Concretum, "Breaking the Rules of Intraday Trading" (March 2026), same notes.
 
-## 2. Frozen construction (published parameters; not tuned)
+## 2. Frozen construction and fill model (published parameters; not tuned)
 
 Times are ET. Minute `m` is the 1-minute bar starting at 09:30 + m minutes; a decision "at 10:00" is taken at the
 close of the 09:59 bar (m = 29) and fills at the open of the 10:00 bar (m = 30), the convention of the live
