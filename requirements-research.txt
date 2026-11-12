@@ -1,0 +1,3 @@
+# Extra packages for the replay, walk-forward and report scripts (not needed by the engine).
+# Install with: .venv/bin/pip install -r requirements-engine.txt -r requirements-research.txt
+scipy>=1.14
