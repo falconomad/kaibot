@@ -23,7 +23,7 @@ export const fmtR = (r: number | null | undefined) =>
 
 /** S28: one status for the risk strip. Red when any limit or safety halt is in force. */
 export type Severity = "ok" | "warn" | "breach";
-export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, ddPct: number):
+export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, ddPct: number, now = Date.now()):
   { severity: Severity; items: string[] } {
   const items: string[] = [];
   let severity: Severity = "ok";
@@ -34,7 +34,10 @@ export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, dd
   if (run.status === "paused") { items.push("Entries paused"); bump("warn"); }
   if (detail.halted) { items.push("Engine halted entries for today"); bump("breach"); }
   if (detail.account_clean === false) { items.push("Paper account has positions or orders Kaibot didn't place"); bump("breach"); }
-  for (const h of o?.halts_today ?? []) { items.push(haltText(h)); bump(h.kind === "deadman" || h.kind === "watchdog" ? "warn" : "breach"); }
+  // A watchdog halt is over once the engine is back: a fresh heartbeat newer than the halt.
+  const beatTs = beat?.ts ? new Date(beat.ts).getTime() : 0;
+  const engineBack = (h: Halt) => h.kind === "watchdog" && beatTs > new Date(h.ts).getTime() && ageS(beat!.ts, now) < 120;
+  for (const h of (o?.halts_today ?? []).filter((x) => !engineBack(x))) { items.push(haltText(h)); bump(h.kind === "deadman" || h.kind === "watchdog" ? "warn" : "breach"); }
   if (lv && dayPct <= -lv.stop) { items.push(`Daily stop reached (−${lv.stop}%)`); bump("breach"); }
   else if (lv && dayPct < 0 && -dayPct >= 0.8 * lv.stop) { items.push("Close to the daily stop"); bump("warn"); }
   if (lv && ddPct >= lv.runDd) { items.push(`Run drawdown cap reached (${lv.runDd}%)`); bump("breach"); }

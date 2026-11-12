@@ -47,6 +47,13 @@ describe("riskStatus (S28: red on breach)", () => {
     expect(riskStatus(run({ status: "paused" }), ov(), 0, 0).severity).toBe("warn");
     expect(riskStatus(run(), ov({ halts_today: [{ kind: "watchdog", reason: "x", ts: "" }] }), 0, 0).severity).toBe("warn");
   });
+  it("drops a watchdog note once the engine is back", () => {
+    const now = Date.parse("2026-11-12T18:01:30Z");
+    const o = ov({ halts_today: [{ kind: "watchdog", reason: "x", ts: "2026-11-12T17:52:50Z" }],
+      heartbeat: [{ process: "engine", ts: "2026-11-12T18:01:19Z", detail: {} }] });
+    expect(riskStatus(run(), o, 0, 0, now).severity).toBe("ok");
+    expect(riskStatus(run(), o, 0, 0, now + 10 * 60_000).severity).toBe("warn");
+  });
 });
 
 describe("levelPlan (S23: next session)", () => {
