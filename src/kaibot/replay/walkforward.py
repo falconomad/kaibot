@@ -17,6 +17,7 @@ Pure: no I/O, clock or randomness here; the loader is injected.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import math
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -39,15 +40,23 @@ M1 = np.timedelta64(1, "M")
 
 @dataclass(frozen=True, order=True)
 class Params:
-    """The <= 3 tunable parameters. Defaults are today's pre-registered variant A values."""
+    """The <= 3 tunable parameters. Defaults are today's pre-registered variant A values. The last three fields
+    belong to the named experiments (issue #109); 0 switches each off, which is variant A as it always ran."""
 
     z_max: float = -1.5  # dip threshold, sigma since the open
     atr_mult: float = 1.5  # stop distance in 5-minute ATRs (1R)
     target_r: float = 2.0  # profit target in R
+    entry_cutoff_m: int = 0  # last minute an entry may fill, counted from 09:30 (60 = 10:30 ET); 0 = no cutoff
+    vix_min: float = 0.0  # enter only when the previous day's VIX close is above this; 0 = no filter
+    size_atr: float = 0.0  # size as if the stop were this many ATRs away (same $ risk with a wider stop); 0 = off
 
     @property
     def label(self) -> str:
-        return f"z{self.z_max:g}_atr{self.atr_mult:g}_tr{self.target_r:g}"
+        base = f"z{self.z_max:g}_atr{self.atr_mult:g}_tr{self.target_r:g}"
+        extra = ((f"_cut{self.entry_cutoff_m}" if self.entry_cutoff_m else "")
+                 + (f"_vix{self.vix_min:g}" if self.vix_min else "")
+                 + (f"_size{self.size_atr:g}" if self.size_atr else ""))
+        return base + extra
 
 
 DEFAULT = Params()
@@ -59,15 +68,64 @@ GRIDS: dict[str, dict[str, tuple[float, ...]]] = {
 }
 
 
+TUNABLE = ("z_max", "atr_mult", "target_r", "entry_cutoff_m", "vix_min")  # size_atr is fixed per experiment
+
+
 def make_grid(spec: Mapping[str, Sequence[float]], default: Params = DEFAULT) -> list[Params]:
-    """Cartesian grid in a fixed order with `default` first (ties in the selection go to the earliest entry)."""
-    if len(spec) > 3 or set(spec) - {"z_max", "atr_mult", "target_r"}:
-        raise ValueError("at most 3 parameters: z_max, atr_mult, target_r")
-    axes = {k: tuple(spec.get(k, (getattr(default, k),))) for k in ("z_max", "atr_mult", "target_r")}
-    grid = [Params(z, a, t) for z in axes["z_max"] for a in axes["atr_mult"] for t in axes["target_r"]]
+    """Cartesian grid in a fixed order with `default` first (ties in the selection go to the earliest entry).
+    Axes not in `spec` stay at `default`'s value."""
+    if len(spec) > 3 or set(spec) - set(TUNABLE):
+        raise ValueError(f"at most 3 parameters out of: {', '.join(TUNABLE)}")
+    grid = [default]
+    for k in TUNABLE:
+        if k in spec:
+            grid = [dataclasses.replace(p, **{k: v}) for p in grid for v in spec[k]]
     if default not in grid:
         raise ValueError(f"grid must contain the pre-registered default {default}")
     return [default] + [p for p in grid if p != default]
+
+
+@dataclass(frozen=True)
+class Experiment:
+    """A named, pre-declared walk-forward: its fixed default and the small grid tuned on the train months."""
+
+    default: Params
+    axes: Mapping[str, tuple[float, ...]]
+    what: str
+
+    @property
+    def grid(self) -> list[Params]:
+        return make_grid(self.axes, self.default)
+
+
+# Issue #109. Everything not named stays at variant A's defaults (z -1.5, stop 1.5 ATR, target 2R). Minutes count
+# from 09:30 ET: 30 = 10:00, 60 = 10:30, 90 = 11:00.
+EXPERIMENTS: dict[str, Experiment] = {
+    "control": Experiment(DEFAULT, GRIDS["default"], "variant A as run in docs/m0/walk_forward_10y.md"),
+    "mornings": Experiment(Params(entry_cutoff_m=60), {"entry_cutoff_m": (30, 60, 90)},
+                           "no entry after 10:30 ET (cutoff tuned over 10:00 / 10:30 / 11:00)"),
+    "wide_stop": Experiment(Params(atr_mult=3.0, size_atr=1.5), {"atr_mult": (2.5, 3.0, 4.0)},
+                            "stop 3 ATR (tuned over 2.5 / 3 / 4) with the dollar risk of the 1.5 ATR stop"),
+    "high_vix": Experiment(Params(vix_min=22.0), {"vix_min": (18.0, 22.0, 26.0)},
+                           "entries only when yesterday's VIX close is above 22 (tuned over 18 / 22 / 26)"),
+    "mornings_wide_stop": Experiment(Params(atr_mult=3.0, size_atr=1.5, entry_cutoff_m=60),
+                                     {"entry_cutoff_m": (30, 60, 90), "atr_mult": (2.5, 3.0, 4.0)},
+                                     "mornings and wide_stop together (3 x 3 configs)"),
+}
+
+
+def filter_candidates(cands: pd.DataFrame, regime: Mapping, p: Params) -> pd.DataFrame:
+    """The candidates configuration `p` may enter. Each rule only removes rows, using the decision minute and the
+    previous day's VIX close (both known before the entry), so the simulator sees a plain, smaller candidate set."""
+    if not len(cands):
+        return cands
+    keep = cands["z"].to_numpy() <= p.z_max
+    if p.entry_cutoff_m:  # decided at the close of minute m, filled at the open of m + 1
+        keep = keep & (cands["m"].to_numpy() + 1 <= p.entry_cutoff_m)
+    if p.vix_min:
+        ok = np.array([d for d, (_, vix) in regime.items() if vix > p.vix_min], dtype="datetime64[D]")  # NaN: no
+        keep = keep & np.isin(cands["date"].to_numpy().astype("datetime64[D]"), ok)
+    return cands[keep]
 
 
 # ---------------------------------------------------------------- folds
@@ -150,16 +208,20 @@ def simulate_months(bars: Mapping[str, SymbolDays], cands: pd.DataFrame, regime:
                     equity0: float, end=None) -> Iterator[tuple[np.datetime64, dict[Params, Book]]]:
     """Yield (month, {params: Book}) for each month, each config from flat `equity0`. `cands` must be computed at
     the loosest z_max in the grid (stricter ones are filters on `z`)."""
-    zs = sorted({p.z_max for p in grid})
     for m in months:
         lo, hi = month_bounds(m)
         if end is not None:
             hi = min(hi, np.datetime64(end, "D"))
         reg = {d: v for d, v in regime.items() if lo <= d <= hi}
         cm = cands[(cands["date"] >= lo) & (cands["date"] <= hi)] if len(cands) else cands
-        by_z = {z: (cm[cm["z"] <= z] if len(cm) else cm) for z in zs}
-        books = {p: run_portfolio(bars, by_z[p.z_max], reg, fomc, pol, equity0=equity0, atr_mult=p.atr_mult,
-                                  variant=variant, target_r=p.target_r) for p in grid}
+        subset: dict[tuple, pd.DataFrame] = {}
+        books = {}
+        for p in grid:
+            key = (p.z_max, p.entry_cutoff_m, p.vix_min)
+            if key not in subset:
+                subset[key] = filter_candidates(cm, reg, p)
+            books[p] = run_portfolio(bars, subset[key], reg, fomc, pol, equity0=equity0, atr_mult=p.atr_mult,
+                                     variant=variant, target_r=p.target_r, size_atr=p.size_atr or None)
         yield m, books
 
 

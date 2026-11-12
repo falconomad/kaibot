@@ -8,6 +8,7 @@ wins. The agent room is NOT replayed (LLM lookahead), so this is the rules-only 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -35,6 +36,14 @@ class Trade:
     reason: str
     pnl: float  # $ after shadow costs and fees
     risk: float  # $ at risk at entry (1R)
+    # Cost split (issue #109), all in $: pnl == gross_pnl - cost_spread - cost_impact - cost_slippage - cost_fees.
+    # Research columns only: they are not part of the event stream or its hash.
+    gross_pnl: float = 0.0  # bought at the fill bar's open, sold at the stop / target level or the exit bar's close
+    cost_spread: float = 0.0  # half spread paid on the buy and on every market sell
+    cost_impact: float = 0.0  # modelled impact on the buy and on every market sell
+    cost_slippage: float = 0.0  # stop bar opened below the stop: stop level minus that open
+    cost_fees: float = 0.0  # SEC + TAF on the sell
+    vix: float = math.nan  # previous day's VIX close (what the regime rule saw)
 
 
 @dataclass
@@ -58,6 +67,12 @@ def sell_px(p: float, q: float, sigma: float, vol: float) -> float:
     return shadow_fill_price("sell", q, QuoteCtx(p - hs, p + hs, sigma, max(vol, 1.0)))
 
 
+def cost_parts(mid: float, px: float) -> tuple[float, float]:
+    """(half spread, impact) per share between a no-cost price `mid` and the fill `px` the cost model returned."""
+    half = half_spread(mid)
+    return half, abs(px - mid) - half
+
+
 def first_exit(h, l, o, c, start_m, stop, target):  # noqa: E741
     """Return (exit_m, gross_price, reason) scanning bars start_m..EXIT_M."""
     seg = slice(start_m, EXIT_M + 1)
@@ -77,31 +92,40 @@ def first_exit(h, l, o, c, start_m, stop, target):  # noqa: E741
 def first_exit_trail(h, l, o, c, start_m, fill, risk_ps, atr, target_r=2.0, trail_atr=1.5):  # noqa: E741
     """Variant A: fixed 2R target; after a bar CLOSES >= +1R, stop -> breakeven, then trails trail_atr*ATR below
     the highest close. The stop used on bar m only depends on closes up to m-1 (no lookahead)."""
+    return trail_exit_level(h, l, o, c, start_m, fill, risk_ps, atr, target_r, trail_atr)[:3]
+
+
+def trail_exit_level(h, l, o, c, start_m, fill, risk_ps, atr, target_r=2.0, trail_atr=1.5):  # noqa: E741
+    """`first_exit_trail` plus the no-cost exit level (the stop in force, the target, or the close), so the replay
+    can separate a gap through the stop from the signal's own result. Same scan, same first three values."""
     stop = fill - risk_ps
     target = fill + target_r * risk_ps
     armed = False
     hi_close = -np.inf
     for m in range(start_m, EXIT_M + 1):
         if l[m] <= stop:
-            return m, float(min(stop, o[m])), "trail" if armed else "stop"
+            return m, float(min(stop, o[m])), "trail" if armed else "stop", float(stop)
         if h[m] >= target + 0.01:
-            return m, float(target), "target"
+            return m, float(target), "target", float(target)
         if m == EXIT_M:
-            return m, float(c[m]), "time"
+            return m, float(c[m]), "time", float(c[m])
         hi_close = max(hi_close, c[m])
         if not armed and c[m] >= fill + risk_ps:
             armed = True
         if armed:
             stop = max(stop, fill, hi_close - trail_atr * atr)
-    return EXIT_M, float(c[EXIT_M]), "time"
+    return EXIT_M, float(c[EXIT_M]), "time", float(c[EXIT_M])
 
 
 def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict, fomc: set, pol: RiskPolicy,
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
                   pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1",
-                  target_r: float | None = None) -> Book:
+                  target_r: float | None = None, size_atr: float | None = None) -> Book:
     """`atr_mult` (stop = atr_mult x 5-minute ATR) and `target_r` (profit target in R; None = the variant's
-    pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged."""
+    pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged.
+    `size_atr` (experiments only, None = off) keeps the dollar risk of a stop `size_atr` ATRs away: the quantity
+    is what the gate allows at that reference stop, scaled by size_atr / atr_mult, and never more than the gate
+    allows for the real stop."""
     tr = target_r if target_r is not None else (2.0 if variant == "A" else 1.5)
     book = Book(equity0)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
@@ -139,12 +163,17 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
             if not halted and realized + unreal <= -start_eq * pol.max_daily_loss_pct / 100:
                 for p in open_pos:
                     sd, r = bars[p["symbol"]], row_of[p["symbol"]][d]
-                    px = sell_px(sd.c[r, m], p["qty"], p["sigma"], sd.v[r, m])
-                    pnl = (px - p["fill"]) * p["qty"] - sell_fees(p["qty"], px)
+                    mid = float(sd.c[r, m])
+                    px = sell_px(mid, p["qty"], p["sigma"], sd.v[r, m])
+                    fees = sell_fees(p["qty"], px)
+                    pnl = (px - p["fill"]) * p["qty"] - fees
                     realized += pnl
                     t = p["trade"]
+                    x_half, x_imp = cost_parts(mid, px)
+                    e_half, e_imp = p["entry_costs"]
                     book.trades.append(Trade(t.symbol, t.date, t.entry_m, m, t.qty, t.entry, px, t.stop, t.target,
-                                             "daily_stop", pnl, t.risk))
+                                             "daily_stop", pnl, t.risk, (mid - p["mid"]) * t.qty,
+                                             (e_half + x_half) * t.qty, (e_imp + x_imp) * t.qty, 0.0, fees, t.vix))
                 open_pos, halted = [], True
             # 3) new decisions at the close of minute m (filled at m+1)
             g = cand_by_m.get(m)
@@ -171,24 +200,38 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 v = evaluate(Proposal(cnd["symbol"], Side.BUY, ref, stop), snap, pol)
                 if not v.approved:
                     continue
-                qty = v.qty * (0.5 if vix > 25 else 1.0)
+                qty = v.qty
+                if size_atr is not None:  # same $ risk as a stop size_atr ATRs away (never above the gate's qty)
+                    v0 = evaluate(Proposal(cnd["symbol"], Side.BUY, ref, ref - size_atr * cnd["atr5"]), snap, pol)
+                    if not v0.approved:
+                        continue
+                    qty = min(qty, math.floor(v0.qty * size_atr / atr_mult))
+                qty = qty * (0.5 if vix > 25 else 1.0)
                 if qty <= 0:
                     continue
                 fm = m + 1
-                fill = buy_px(sd.o[r, fm], qty, cnd["sigma_1m"], sd.v[r, fm])
+                mid = float(sd.o[r, fm])
+                fill = buy_px(mid, qty, cnd["sigma_1m"], sd.v[r, fm])
                 stop_f = fill - risk_ps
                 tgt_f = fill + (target - ref)
                 if variant == "A":
-                    xm, gross, why = first_exit_trail(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, fill, risk_ps,
-                                                      cnd["atr5"], target_r=tr)
+                    xm, gross, why, level = trail_exit_level(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, fill, risk_ps,
+                                                             cnd["atr5"], target_r=tr)
                     stop_f, tgt_f = fill - risk_ps, fill + tr * risk_ps
                 else:
                     xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, stop_f, tgt_f)
+                    level = stop_f if why == "stop" else gross
                 xp = gross if why == "target" else sell_px(gross, qty, cnd["sigma_1m"], sd.v[r, xm])
-                pnl = (xp - fill) * qty - sell_fees(qty, xp)
-                t = Trade(cnd["symbol"], d, fm, xm, qty, fill, xp, stop_f, tgt_f, why, pnl, risk_ps * qty)
+                fees = sell_fees(qty, xp)
+                pnl = (xp - fill) * qty - fees
+                e_half, e_imp = cost_parts(mid, fill)
+                x_half, x_imp = (0.0, 0.0) if why == "target" else cost_parts(gross, xp)  # a target is a limit fill
+                t = Trade(cnd["symbol"], d, fm, xm, qty, fill, xp, stop_f, tgt_f, why, pnl, risk_ps * qty,
+                          (level - mid) * qty, (e_half + x_half) * qty, (e_imp + x_imp) * qty,
+                          (level - gross) * qty, fees, float(vix))
                 open_pos.append({"symbol": cnd["symbol"], "qty": qty, "fill": fill, "exit_m": xm, "pnl": pnl,
-                                 "risk": risk_ps * qty, "sigma": cnd["sigma_1m"], "trade": t})
+                                 "risk": risk_ps * qty, "sigma": cnd["sigma_1m"], "trade": t, "mid": mid,
+                                 "entry_costs": (e_half, e_imp)})
                 entries += 1
         for p in open_pos:  # safety: anything left closes at the time exit
             realized += p["pnl"]

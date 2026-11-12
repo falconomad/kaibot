@@ -68,7 +68,11 @@ def candidates(sd: SymbolDays, etf: SymbolDays, news_times: np.ndarray, z_max=-1
     eret = ec / eo[:, :1] - 1
     z = ret / (dvol20[:, None] * t_frac)
     rz = (ret - np.nan_to_num(beta)[:, None] * eret) / (residvol20[:, None] * t_frac)
-    turnover = np.cumsum(v, axis=1) / avgcum
+    # avgcum is 0 where a stock printed no volume up to that minute in each of the 20 prior sessions (seen on
+    # 2022-2023 history). The quotient is then inf (or NaN for 0 / 0) and fails `tt <= turnover_max` below, so no
+    # candidate comes from such a minute. Values are unchanged; only numpy's divide-by-zero warning is silenced.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        turnover = np.cumsum(v, axis=1) / avgcum
     vwap = np.cumsum(vw * v, axis=1) / np.maximum(np.cumsum(v, axis=1), 1)
     atr5, hl5 = five_minute(o, h, l, c)
     ms = np.arange(4, N_MIN, 5)  # minute at which 5m bar k completes

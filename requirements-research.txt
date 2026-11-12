@@ -1,3 +1,5 @@
 # Extra packages for the replay, walk-forward and report scripts (not needed by the engine).
 # Install with: .venv/bin/pip install -r requirements-engine.txt -r requirements-research.txt
+# Checked for issue #109: walk_forward.py, trial_report.py, run_replay.py, experiments_summary.py and
+# analyze_trades.py import numpy, pandas, pyarrow, pyyaml and certifi (all in requirements-engine.txt) plus scipy.
 scipy>=1.14
