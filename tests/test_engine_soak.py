@@ -511,16 +511,17 @@ def test_d7_alpaca_close_waits_for_the_cancel_to_be_confirmed(monkeypatch):
 
 
 def test_d7_alpaca_close_wait_is_bounded(monkeypatch):
-    """A cancel that is never confirmed must not hang the engine: after about 5 s the close is sent anyway and the
-    venue's refusal goes to the caller (Engine.flatten_all retries and reports it)."""
+    """A cancel that is never confirmed must not hang the engine, and the position is not deleted while it is
+    unconfirmed: after about 5 s the close is given up with a 409 (a refusal, so Engine.flatten_all retries it and
+    reports it), and DELETE /v2/positions is never sent."""
     venue = Venue(confirm_after=10**6)
     p, slept = paper(monkeypatch, venue)
     with pytest.raises(alp.AlpacaError) as ei:
         p.close_position("AAPL")
-    assert ei.value.status == 403
+    assert ei.value.status == 409 and "AAPL" in str(ei.value) and core._refused(ei.value)
     assert len(slept) == 10 and sum(slept) == 5.0
-    assert venue.calls.count(("GET", "/v2/orders")) == 11 and venue.calls[-1] == ("DELETE", "/v2/positions/AAPL")
-    assert venue.calls.count(("DELETE", "/v2/positions/AAPL")) == 1
+    assert venue.calls.count(("GET", "/v2/orders")) == 11
+    assert ("DELETE", "/v2/positions/AAPL") not in venue.calls, "never delete before the cancel is confirmed"
     assert sum(1 for c in venue.calls if c[1].startswith("/v2/orders/")) == 2  # each cancel sent once, not per poll
 
 
