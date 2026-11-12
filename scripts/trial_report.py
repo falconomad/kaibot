@@ -22,6 +22,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.evaluation.metrics import deflated_sharpe, pbo_cscv, sharpe  # noqa: E402
+from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
 
 
 def load_trials(data: Path) -> tuple[list[dict], dict[str, pd.Series]]:
@@ -85,6 +86,7 @@ def main() -> None:
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--blocks", type=int, default=16)
     a = ap.parse_args()
+    ensure_ca_bundle()  # same root-certificate fix as the other research scripts (this one reads local files only)
     rep = report(Path(a.data), a.blocks)
     (Path(a.data) / "reports").mkdir(parents=True, exist_ok=True)
     (Path(a.data) / "reports" / "trial_report.json").write_text(json.dumps(rep, indent=1))

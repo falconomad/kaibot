@@ -96,3 +96,29 @@ E=~/Projects/kaibot-secrets/.env
   Parquet (each month is read ~5 times because of the warm-up overlap). The report records `runtime_s` and
   `peak_rss_mb`. Running the same command twice must give the same
   `input_sha256` and `events_sha256_*`.
+
+## 5. Cost split and the variant A experiments (issue #109)
+One command on the Mac, from the repo root (about an hour: five walk-forwards of about 12 minutes or less each):
+
+```
+./scripts/run_experiments.sh
+```
+
+- **What it runs:** `scripts/walk_forward.py --experiment <name>` for `control` (variant A, the 27-config grid of
+  section 4), `mornings` (no entry after 10:00 / 10:30 / 11:00), `wide_stop` (stop 2.5 / 3 / 4 ATR, shares cut so
+  the dollar risk is that of the 1.5 ATR stop), `high_vix` (entries only when the previous day's VIX close is
+  above 18 / 22 / 26) and `mornings_wide_stop` (3 x 3). Same folds and selection as section 4; everything not
+  named stays at A's defaults. The grids and fixed defaults are declared in
+  `kaibot.replay.walkforward.EXPERIMENTS`; nothing is tuned on a test month.
+- **Resumable:** an experiment with a finished report for the same dates and universe is skipped. Logs are in
+  `logs/experiment_<name>.log`.
+- **Output:** one table (trades, trades/month, net return, mean bp gross and net, t-stat, hit rate, Sharpe, max
+  drawdown, months positive, deflated Sharpe) printed and written to `data/reports/experiments_summary.md`. Each
+  run logs two trial rows; the deflated Sharpe in the table counts every configuration in `data/trials.jsonl`.
+- **Cost split:** every trades CSV now also has `gross_pnl` (bought at the fill bar's open, sold at the stop or
+  target level or the exit bar's close), `cost_spread`, `cost_impact`, `cost_slippage` (a stop bar that opened
+  below the stop), `cost_fees` and `vix`; `pnl == gross_pnl - the four costs`. The old columns and the net
+  numbers are unchanged. The report shows the totals and the mean bp per trade of each.
+- **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/trades_<...>.csv` prints
+  gross vs net and the by-year, by-exit, by-entry-time, by-VIX and by-sector tables (no network; older files
+  without the cost columns work, gross shows n/a).
