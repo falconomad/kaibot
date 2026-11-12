@@ -323,7 +323,7 @@ class MultidayWF:
 
 def walk_forward(bars: DailyBars, ind: Indicators, pol: RiskPolicy, rule, exp: MExperiment, folds: Sequence[Fold], *,
                  equity0: float = 100_000.0, min_train_trades: int = 20, hold_blk: np.ndarray | None = None,
-                 entry_blk: np.ndarray | None = None, end=None) -> MultidayWF:
+                 entry_blk: np.ndarray | None = None, end=None, costs=None) -> MultidayWF:
     if not folds:
         raise ValueError("no folds: the range is shorter than train + 1 month")
     grid, default = exp.grid, exp.default
@@ -335,7 +335,7 @@ def walk_forward(bars: DailyBars, ind: Indicators, pol: RiskPolicy, rule, exp: M
                          f"month {folds[0].test_month}")
 
     def account(schedule, i0: int) -> MBook:
-        return Engine(bars, ind, pol, rule, schedule, equity0, hold_blk, entry_blk).run(i0, i1)
+        return Engine(bars, ind, pol, rule, schedule, equity0, hold_blk, entry_blk, costs=costs).run(i0, i1)
 
     stats = {p: month_stats(account(lambda i, p=p: p, i_train0)) for p in grid}
     chosen: list[tuple[Fold, Selection]] = []
@@ -356,7 +356,7 @@ def walk_forward(bars: DailyBars, ind: Indicators, pol: RiskPolicy, rule, exp: M
 
 def variant_a_trades(load, sector_of: Mapping[str, str], news: Mapping[str, np.ndarray], regime_fn, fomc: set,
                      pol: RiskPolicy, months: Sequence[np.datetime64], *, equity0: float = 100_000.0,
-                     block_months: int = 3, end=None) -> pd.DataFrame:
+                     block_months: int = 3, end=None, costs=None) -> pd.DataFrame:
     """Every trade of variant A at its pre-registered defaults, month by month from flat equity: the same calls,
     in the same order, as the default path of `walkforward.run_walk_forward` (a test compares the two). The
     intraday replay itself is not touched."""
@@ -379,7 +379,7 @@ def variant_a_trades(load, sector_of: Mapping[str, str], news: Mapping[str, np.n
         regime = regime_fn(win.spy)
         for m in block:
             ((_, books),) = simulate_months(prep.bars, prep.cands, regime, fomc, pol, [m], [DEFAULT], "A", equity0,
-                                            end=end)
+                                            end=end, costs=costs)
             rows += [dataclasses.asdict(t) for t in books[DEFAULT].trades]
         del win, prep
     return pd.DataFrame(rows, columns=[f.name for f in dataclasses.fields(Trade)])

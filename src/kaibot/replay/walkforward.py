@@ -205,7 +205,7 @@ def month_stats(month: np.datetime64, book: Book) -> MonthStats:
 
 def simulate_months(bars: Mapping[str, SymbolDays], cands: pd.DataFrame, regime: Mapping, fomc: set,
                     pol: RiskPolicy, months: Sequence[np.datetime64], grid: Sequence[Params], variant: str,
-                    equity0: float, end=None) -> Iterator[tuple[np.datetime64, dict[Params, Book]]]:
+                    equity0: float, end=None, costs=None) -> Iterator[tuple[np.datetime64, dict[Params, Book]]]:
     """Yield (month, {params: Book}) for each month, each config from flat `equity0`. `cands` must be computed at
     the loosest z_max in the grid (stricter ones are filters on `z`)."""
     for m in months:
@@ -221,7 +221,8 @@ def simulate_months(bars: Mapping[str, SymbolDays], cands: pd.DataFrame, regime:
             if key not in subset:
                 subset[key] = filter_candidates(cm, reg, p)
             books[p] = run_portfolio(bars, subset[key], reg, fomc, pol, equity0=equity0, atr_mult=p.atr_mult,
-                                     variant=variant, target_r=p.target_r, size_atr=p.size_atr or None)
+                                     variant=variant, target_r=p.target_r, size_atr=p.size_atr or None,
+                                     costs=costs)
         yield m, books
 
 
@@ -315,9 +316,10 @@ def run_walk_forward(load: Callable[[np.datetime64, np.datetime64], Window], sec
                      pol: RiskPolicy, folds: Sequence[Fold], grid: Sequence[Params], *, variant: str = "A",
                      default: Params = DEFAULT, equity0: float = 100_000.0, min_train_trades: int = 100,
                      block_months: int = 3, warmup_days: int = WARMUP_DAYS, end=None,
-                     digest_params: Mapping | None = None) -> WalkForward:
+                     digest_params: Mapping | None = None, costs=None) -> WalkForward:
     """Simulate every month from the first train month to the last test month for every config (loading
-    `block_months` at a time), choosing each fold's parameters from its train months before its test month runs."""
+    `block_months` at a time), choosing each fold's parameters from its train months before its test month runs.
+    `costs`: the cost model (None = v1, issue #111)."""
     if not folds:
         raise ValueError("no folds: the range is shorter than train + 1 month")
     grid = list(grid)
@@ -358,7 +360,7 @@ def run_walk_forward(load: Callable[[np.datetime64, np.datetime64], Window], sec
                 pending[m] = choose({p: [wf.stats[t][p] for t in fold.train_months] for p in grid}, grid,
                                     min_train_trades, default)
             ((_, books),) = simulate_months(prep.bars, prep.cands, regime, fomc, pol, [m], grid, variant, equity0,
-                                            end=end)
+                                            end=end, costs=costs)
             wf.stats[m] = {p: month_stats(m, bk) for p, bk in books.items()}
             if fold is not None:
                 sel = pending.pop(m)

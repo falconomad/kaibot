@@ -5,9 +5,13 @@ model v1, price-only SPY; cannot pass Gate B until S71, S83 and S84 have landed.
 
 python scripts/momentum_core.py --version trend_momentum|mom_12_1_band|mom_12_1_band_nofilter --end 2026-11-06
     [--universe config/universe_history.yaml] [--start 2016-01-01] [--level balanced] [--control-runs 200]
-    [--earnings auto|off] [--refresh-daily]
+    [--earnings auto|off] [--refresh-daily] [--costs v1|v2]
 python scripts/momentum_core.py --has <version> --start ... --end ... --universe ... --control-runs N   exit 0 if done
 python scripts/momentum_core.py --summary     one table, written to data/reports/experiments_core_summary.md
+
+--costs v2 (issue #111) prices every fill with kaibot.broker.costs_v2 (2x / 3x then scale v2's spread and impact);
+the default v1 reproduces earlier reports. v2 reports carry "costs": "v2", are found only with --costs v2 (by
+--has and --summary too) and are summarised in experiments_core_summary_costsv2.md.
 
 Each frozen configuration is ONE continuous $100k account from the first test month (2017-05 with the default
 start) to --end, starting flat: no walk-forward tuning. The grid is a set of reports of one frozen rule, declared
@@ -43,6 +47,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import walk_forward_multiday as wfm  # noqa: E402
 from walk_forward import peak_rss_mb  # noqa: E402
 
+from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.replay import multiday_core as mc  # noqa: E402
 from kaibot.replay.multiday import (  # noqa: E402
     MTrade,
@@ -80,14 +85,21 @@ def run_label(spec_name: str, fill: str, cost: float, exposure_pct: float, earni
     return f"{spec_name}|{fill}|{cost:g}x|cap{exposure_pct:g}|{earnings}"
 
 
-def find_report(reports: Path, level: str, version: str, **same) -> tuple[Path, dict] | None:
-    """Newest finished report of `version` (and, when given, with the same start, end, universe, control runs)."""
+def summary_name(costs: str = "v1") -> str:
+    return SUMMARY if costs == "v1" else SUMMARY.replace(".md", f"_costs{costs}.md")
+
+
+def find_report(reports: Path, level: str, version: str, costs: str = "v1", **same) -> tuple[Path, dict] | None:
+    """Newest finished report of `version` under cost model `costs` (reports from before #111 are v1), and, when
+    given, with the same start, end, universe, control runs."""
     for f in sorted(reports.glob(f"core_{level}_{version}_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             rep = json.loads(f.read_text())
         except (OSError, ValueError):
             continue
         if rep.get("set") != "core" or rep.get("version") != version or "rows" not in rep:
+            continue
+        if rep.get("costs", "v1") != costs:
             continue
         if any(want is not None and rep.get(k) != want for k, want in same.items()):
             continue
@@ -107,6 +119,7 @@ def run_version(a: argparse.Namespace) -> None:
     spy = cfg["market"]
     symbols = [*stocks, *cfg["sectors"], spy]  # the same list as the multiday set, so its daily-bar cache is reused
     pol = load_profiles()[a.level]
+    costs = None if a.costs == "v1" else get_model(a.costs)
 
     def progress(n: int, s: str) -> None:
         if n % 25 == 0:
@@ -141,7 +154,8 @@ def run_version(a: argparse.Namespace) -> None:
                               cwd=ROOT).stdout.strip()
     input_sha = bars_fingerprint(data, symbols, a.start, a.end)
     run_at = datetime.now(UTC)
-    tag = f"core_{a.level}_{a.version}_{run_at.strftime('%Y%m%dT%H%M%S')}"
+    ctag = "" if a.costs == "v1" else f"costs{a.costs}_"
+    tag = f"core_{a.level}_{a.version}_{ctag}{run_at.strftime('%Y%m%dT%H%M%S')}"
     out = data / "reports"
     (out / tag).mkdir(parents=True, exist_ok=True)
     tdir = data / "trials"
@@ -152,7 +166,7 @@ def run_version(a: argparse.Namespace) -> None:
         exposure, earn_mode = exposure_pct, earnings
         blk = (hold_blk, entry_blk) if earn_mode == "exit_approx" else (None, None)
         book, rule = mc.run_rule(bars, ind, pol, sig, sp, i0, i1, fill=fill, cost=cost, exposure_pct=exposure,
-                                 equity0=a.equity, hold_blk=blk[0], entry_blk=blk[1])
+                                 equity0=a.equity, hold_blk=blk[0], entry_blk=blk[1], costs=costs)
         label = run_label(sp.name, fill, cost, exposure, earn_mode)
         safe = label.replace("|", "_").replace("~", "-")
         trades = pd.DataFrame([dataclasses.asdict(t) for t in book.trades],
@@ -172,7 +186,9 @@ def run_version(a: argparse.Namespace) -> None:
             tdir / f"{tid}.csv", index=False)
         trials.append({
             "ts": run_at.isoformat(timespec="seconds"), "trial_id": tid, "strategy": sp.rule,
-            "variant": "multiday_core", "label": f"momentum core {label}", "level": a.level,
+            "variant": "multiday_core",
+            "label": f"momentum core {label}{'' if a.costs == 'v1' else ' costs ' + a.costs}",
+            "level": a.level, "cost_model": a.costs,
             "universe": Path(a.universe).name, "events_sha256": row["events_sha256"], "input_sha256": input_sha,
             "code_sha": code_sha, "experiment": a.version, "status": "provisional", "prereg_sha256": pre["sha256"],
             # one configuration = one frozen rule at one exposure cap and earnings version; the same configuration
@@ -210,7 +226,7 @@ def run_version(a: argparse.Namespace) -> None:
              "spy_scaled": {**mc.series_stats(dates, spy_r * base["avg_exposure_pct"] / 100),
                             "scale_pct": base["avg_exposure_pct"]},
              "universe_ew": mc.series_stats(dates, equal_weight_benchmark(bars, ind, bars.cols(stocks), i0, i1,
-                                                                          a.equity))}
+                                                                          a.equity, costs=costs))}
     control = {}
     for exposure in mc.EXPOSURES if a.control_runs > 0 else ():
         label = run_label(spec.name, "base", 1.0, exposure, "hold")
@@ -222,14 +238,16 @@ def run_version(a: argparse.Namespace) -> None:
                       f"{time.time() - t0:.0f}s", flush=True)
 
         c = mc.matched_random_control(bars, ind, pol, sig, spec, book, rule, i0, i1, runs=a.control_runs,
-                                      seed=a.control_seed, exposure_pct=exposure, equity0=a.equity, progress=tick)
+                                      seed=a.control_seed, exposure_pct=exposure, equity0=a.equity, progress=tick,
+                                      costs=costs)
         control[label] = c
         by_label[label]["control"] = {k: c[k] for k in ("runs", "sharpe_percentile", "cagr_percentile", "median")}
     gate = mc.gate_b(base, by_label.get(run_label(spec.name, "base", 2.0, 100.0, "hold")),
                      by_label.get(run_label(spec.name, "base", 3.0, 100.0, "hold")), bench["spy"],
                      control.get(base_label), nb, break_even.get(base_label))
     rep = {
-        "run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "set": "core", "status": STATUS,
+        "run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "set": "core",
+        "status": STATUS.replace("cost model v1", f"cost model {a.costs}"), "costs": a.costs,
         "version": a.version, "rule": spec.rule, "spec": spec.params(), "prereg": pre, "level": a.level,
         "universe": Path(a.universe).name, "start": a.start, "end": a.end, "equity": a.equity,
         "control_runs": a.control_runs, "control_seed": a.control_seed, "earnings": earn,
@@ -242,7 +260,11 @@ def run_version(a: argparse.Namespace) -> None:
             "survivorship bias: today's large caps applied back to 2016",
             "prices are split-adjusted and carry no dividends, for the rule's signals, its holdings and every "
             "benchmark; SPY is price only",
-            "cost model v1 (uncalibrated, #111 / S71); the close is the last regular-hours minute, not the auction",
+            ("cost model v1 (uncalibrated, #111 / S71); the close is the last regular-hours minute, not the auction"
+             if a.costs == "v1" else
+             f"cost model {a.costs} (#111: bucket half-spreads from the report, not yet fitted to quotes or paper "
+             "fills); prices are split-adjusted, so its half-cent floor still overstates early costs of heavily "
+             "split names (audit E4); the close is the last regular-hours minute priced as the closing auction"),
             "the exit-before-earnings variant uses an estimated earnings window, not known dates (S85)",
             "at a 100% exposure cap a purchase can be cut to the cash left on the fill day (no leverage ever)",
             "the random control mirrors entry dates, entry counts, sizing and holding periods; its average "
@@ -344,7 +366,8 @@ def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] 
     out += ["",
             "How to read it: fill `base` = decided after the close of T, bought and sold at the close of T+1 at "
             "half a spread a side plus impact; `stress` = the open of T+1 with spread and impact doubled. Costs "
-            "`2x` / `3x` multiply spread and impact of cost model v1 (regulatory fees stay). Break-even is the "
+            "`2x` / `3x` multiply spread and impact of the report's cost model (v1 unless the report says v2; "
+            "regulatory fees stay). Break-even is the "
             "multiple of spread and impact at which net profit is zero, from the 0x and 1x runs of that row's fill, "
             "cap and earnings version (pre-registered); the report JSON also keeps the multiple with the 1x trades "
             "held fixed as a cross-check. "
@@ -361,10 +384,10 @@ def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] 
     return "\n".join(out) + "\n"
 
 
-def summary(data: Path, level: str) -> str:
+def summary(data: Path, level: str, costs: str = "v1") -> str:
     found, missing = {}, []
     for version in mc.VERSIONS:
-        hit = find_report(data / "reports", level, version)
+        hit = find_report(data / "reports", level, version, costs)
         if hit is None:
             missing.append(version)
         else:
@@ -389,16 +412,18 @@ def main() -> None:
     ap.add_argument("--earnings", default="auto", choices=["auto", "off"],
                     help="auto: run the approximate exit-before-earnings variant when the estimate is reliable")
     ap.add_argument("--refresh-daily", action="store_true", help="rebuild the daily-bar cache")
+    ap.add_argument("--costs", default="v1", choices=list(MODELS),
+                    help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
     a = ap.parse_args()
     data = Path(a.data)
     if a.has:
-        hit = find_report(data / "reports", a.level, a.has, start=a.start, end=a.end,
+        hit = find_report(data / "reports", a.level, a.has, a.costs, start=a.start, end=a.end,
                           universe=Path(a.universe).name, control_runs=a.control_runs)
         sys.exit(0 if hit else 1)
     if a.summary:
-        text = summary(data, a.level)
+        text = summary(data, a.level, a.costs)
         (data / "reports").mkdir(parents=True, exist_ok=True)
-        (data / "reports" / SUMMARY).write_text(text)
+        (data / "reports" / summary_name(a.costs)).write_text(text)
         print(text)
         return
     if not a.version or not a.end:
