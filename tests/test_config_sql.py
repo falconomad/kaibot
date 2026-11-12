@@ -37,8 +37,8 @@ def level_strategies_after_migrations() -> dict[str, list[str]]:
     for f in sorted((ROOT / "migrations").glob("*.sql")):
         if f.name <= "0011":
             continue
-        for arr, lv in re.findall(r"update kaibot\.level_limit set strategies = array\[([^\]]*)\] where level = '(\w+)'",
-                                  f.read_text()):
+        upd = r"update kaibot\.level_limit set strategies = array\[([^\]]*)\] where level = '(\w+)'"
+        for arr, lv in re.findall(upd, f.read_text()):
             out[lv] = _names(arr)
     return out
 
