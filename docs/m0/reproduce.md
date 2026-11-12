@@ -161,3 +161,56 @@ pass Gate B.
 - **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/trades_balanced_md_<...>.csv`
   prints gross vs net, the stops jumped by the open, and the by-year, by-exit, by-holding-period,
   by-configuration and by-sector tables.
+
+## 7. Momentum core (issue #127, decision 15 rules 1 and 2)
+One command on the Mac, from the repo root. Research only: it reads `data/`, never the engine or the broker.
+Every number is **PROVISIONAL**: today's stock list (survivorship), cost model v1 and a price-only SPY. Nothing
+here can pass Gate B until S71, S83 and S84 have landed and the test is rerun.
+
+```
+./scripts/run_experiments.sh core
+```
+
+- **What it runs:** `scripts/momentum_core.py --version <name>` for `trend_momentum` (Clenow's rules: weekly,
+  90-day regression slope x R-squared, 100-day and 15%-move conditions, ATR sizing at 10 bp of equity, SPY
+  200-day filter, exits by rank, resize every second week), `mom_12_1_band` (monthly, blend of 6 / 9 / 12-month
+  returns skipping the last month, enter in the top 10%, exit below the top 20%, at most 20 names) and
+  `mom_12_1_band_nofilter` (the same without the index filter). The constructions are frozen and pre-registered
+  in `docs/prereg/trend_momentum.md` and `docs/prereg/mom_12_1_band.md` (committed before the code; the run
+  refuses to start without them and writes their hash into the report). The rules are in
+  `kaibot.replay.multiday_core`; the simulator is the one of section 6 (`kaibot.replay.multiday`), extended with
+  a cost multiplier, a sizing hook, fills at the next close and partial resizes.
+- **No tuning:** each configuration is ONE continuous $100k account from 2017-05 to the end of the data, starting
+  flat. The grid is a set of reports of one frozen rule: fill model (base: decided after the close of T, filled
+  at the close of T+1; stress: the open of T+1 with spread and impact doubled) x costs (1x, 2x, 3x; a 0x run
+  to state the break-even multiple) x exposure cap (30 / 60 / 100%) x earnings (hold through; "exit before" is an
+  APPROXIMATE variant on the estimated earnings window of section 6 and is skipped, with a message in the log
+  and in the table's notes, when that estimate is not reliable). Then the five pre-declared neighbours of each
+  rule and the matched random entries.
+- **Time (measured on synthetic bars of the real size, 2,730 sessions x 300 symbols, on a busy shared 2-CPU
+  cloud machine; not measured on the real data):** `trend_momentum` took 4.5 minutes of wall time (1.1 minutes of
+  CPU) with the exit-before-earnings variant and 200 control runs per cap; the two band versions trade less.
+  Allow about 15 minutes for the three versions with the daily-bar cache of section 6 in place (it is reused; 5
+  to 10 minutes more when it has to be built); an idle machine is faster. About 70% of it is the random control:
+  200 seeded runs for each of the three exposure caps of each version.
+  `KAIBOT_CORE_CONTROL_RUNS=500 ./scripts/run_experiments.sh core` runs the 500 that Gate B mark 3 asks for
+  (about 35 minutes; a different number of runs is a new report, not a resume). No `.env` is needed.
+- **Resumable:** a version with a finished report for the same dates, universe and number of control runs is
+  skipped. Logs are in `logs/experiment_core_<version>.log`.
+- **Output:** ONE table printed and written to `data/reports/experiments_core_summary.md`. Per configuration:
+  total return, CAGR, annualised daily Sharpe (mark-to-market) with the 50% haircut beside it, maximum drawdown
+  (mark-to-market), each calendar year's return, positive years, average and maximum exposure, average number
+  of names, turnover a year, cost a year in bp of equity, trades, average holding days, the share of the profit
+  that came from the five best stocks, the break-even cost multiple, and the percentile of the rule's net Sharpe
+  and CAGR among the matched random entries. Benchmark rows over the same sessions: SPY buy-and-hold (price
+  only), SPY scaled to each version's average exposure, the equal-weight universe, and the median matched random
+  account. Under the table each Gate B mark of decision 15 is printed for the base version of each rule as
+  pass, fail or "cannot be judged yet (provisional data)".
+- **Files:** `data/reports/core_balanced_<version>_<ts>.json` and one trades and one daily CSV per run in the
+  folder of the same name. Every run is a row in `data/trials.jsonl` with its configuration; a configuration
+  counts once (`n_trials` 1 for the base fill at 1x costs, 0 for its cost and fill stress reports).
+- **Read it honestly:** signals and holdings use split-adjusted prices without dividends, and so do the
+  benchmarks; the close is the last regular-hours minute, not the auction; at a 100% cap a purchase can be cut
+  to the cash left on the fill day; the random control mirrors dates, entry counts, sizing and holding periods
+  but its average exposure can differ from the rule's (it is printed beside it).
+- **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/core_balanced_<...>/trades_<...>.csv`.

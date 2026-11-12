@@ -834,7 +834,7 @@ def test_nothing_the_engine_runs_knows_about_the_multiday_research():
     strategies and the intraday replay cannot be affected; and the new code charges costs with the replay's own
     functions instead of copies of them."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
-        if f.name not in ("multiday.py", "multiday_rules.py", "earnings.py"):
+        if f.name not in ("multiday.py", "multiday_rules.py", "multiday_core.py", "earnings.py"):
             text = f.read_text()
             assert "multiday" not in text and "replay.earnings" not in text, f
     from kaibot.broker import shadow_costs
