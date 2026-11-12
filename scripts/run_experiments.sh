@@ -44,8 +44,8 @@ LEVEL=balanced
 PY=.venv/bin/python
 
 [ -x "$PY" ] || { echo "No .venv here: run ./scripts/fetch_history.sh --status once (it creates it)"; exit 1; }
-"$PY" -c 'import scipy, certifi, pyarrow' 2>/dev/null \
-  || .venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt -r requirements-research.txt
+# The locked research set (engine + scipy, uv.lock export, #122); already-installed pins make this a no-op.
+.venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-research.txt
 export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -m certifi)}"  # macOS python.org builds lack root certs
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
