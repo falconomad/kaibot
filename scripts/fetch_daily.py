@@ -9,7 +9,8 @@
     python scripts/fetch_daily.py --symbols NBIS,CRWV    SPY plus exactly these instead of the universe
     python scripts/fetch_daily.py --status    what is stored
     python scripts/fetch_daily.py --check     offline checks: minute history against daily bars on a sample, and
-                                              the corporate-actions table against Alpaca's adjusted bars
+                                              the corporate-actions table against Alpaca's adjusted bars, and
+                                              the integrity of every stored series (daily_integrity, #169)
 
 A key that is already complete is skipped, so stopping and starting again costs nothing. Per key: one request for
 the raw bars and one for Alpaca's own adjusted series (used only by the check; --no-reference skips it). The
@@ -116,7 +117,9 @@ def main(argv: list[str] | None = None, api=None, now: datetime | None = None) -
         if not db.store_keys(root):
             print(f"No daily bars under {root}: run ./scripts/fetch_daily.sh first")
             return 1
+        from kaibot.ingest.daily_integrity import run_integrity
         run_check(Path(a.data), [s.strip().upper() for s in a.sample.split(",") if s.strip()] or None)
+        run_integrity(Path(a.data))
         print(f"Details: {root / 'check'}")
         return 0
     reqs = build_requests(a, now.astimezone(ET).date())
