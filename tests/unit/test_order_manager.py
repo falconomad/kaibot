@@ -175,9 +175,12 @@ def test_an_order_that_never_arrived_is_lost_only_after_two_lookups_and_a_minute
     om, _, _ = manager(b, clock)
     r = om.submit(mkt(), strategy="rule", purpose="buy", session=DAY)
     om.resolve()
+    om.resolve()  # a moment later: does not count
+    assert r.state is St.UNKNOWN and r.misses == 1
+    clock.advance(seconds=31)
     om.resolve()
     assert r.state is St.UNKNOWN and r.misses == 2  # not yet a minute old
-    clock.advance(seconds=61)
+    clock.advance(seconds=30)
     om.resolve()
     assert r.state is St.REJECTED and r.reason.startswith("lost") and om.blocked("A") is None
     coid = om.next_coid("1", "rule", "A", DAY, "buy")
@@ -355,7 +358,7 @@ def test_the_reconciler_refuses_trades_on_differences_but_never_protective_stops
     rc = Reconciler(lambda: {"ledger_qty": state["ledger"], "broker_positions": state["broker"]})
     assert rc.allows("A", "buy") == "not reconciled yet"
     rc.check("startup")
-    assert "quantity" in rc.allows("A", "sell") and rc.allows("B", "buy") is None
+    assert "quantity" in rc.allows("A", "buy") and rc.allows("B", "buy") is None
     assert rc.allows("A", "sell", purpose="stop") is None
     state["ledger"]["A"] = 12.0  # the late activity arrived
     rc.check()
@@ -376,3 +379,80 @@ def test_the_paper_adapter_sends_qty_only_when_a_replace_asks_for_it():
     a.replace("o2", stop_price=90.0, qty=7)
     assert sent == [("PATCH", "/v2/orders/o1s", {"stop_price": "98.50"}),
                     ("PATCH", "/v2/orders/o2", {"qty": "7", "stop_price": "90.00"})]
+
+
+# ---------------------------------------------------------------- QA-Ops review of #172
+
+
+def cash_reader(state):
+    return lambda: {"ledger_qty": {}, "broker_positions": {}, "ledger_cash": 100_000.0, "ledger_cash0": 100_000.0,
+                    "broker_cash": 100_000.0 + state["drift"], "broker_cash0": 100_000.0, "equity": 100_000.0}
+
+
+def test_r1_an_owner_resolution_of_a_real_cash_drift_persists_until_the_difference_changes():
+    """Review R1: $100 drift at $100k (tolerance $50), resolve, check again: buys were refused forever."""
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    rc.check()
+    assert "cash" in rc.allows("X", "buy")
+    with pytest.raises(ValueError, match="reason"):
+        rc.resolve("")
+    rc.resolve("regulatory fees the ledger does not model", by="owner")
+    assert rc.check().ok and rc.allows("X", "buy") is None
+    again = Reconciler(cash_reader(state), journal)  # a restart folds the resolution back
+    assert again.check().ok
+    state["drift"] = -130.0  # within the tolerance of the accepted difference: still fine
+    assert again.check().ok
+    state["drift"] = -200.0  # the difference changed: a new one, buys refused again
+    assert not again.check().ok and "cash" in again.allows("X", "buy")
+    kinds = [k for _, _, k, _ in journal.entries(kinds=("reconcile", "reconcile_resolved"))]
+    assert "reconcile_resolved" in kinds
+
+
+def test_r1_the_owner_command_clears_the_last_difference_from_the_journal(capsys):
+    from kaibot.engine import reconcile
+
+    journal = Journal()
+    state = {"drift": -100.0}
+    Reconciler(cash_reader(state), journal).check()
+    assert reconcile.main(["--accept", "fees", "--journal", ":memory:"], journal=journal) == 0
+    assert Reconciler(cash_reader(state), journal).check().ok
+    assert reconcile.main(["--accept", "", "--journal", ":memory:"], journal=journal) == 2
+    assert reconcile.ACCEPT_COMMAND == "accept_reconcile"
+
+
+def test_r2_a_sell_that_reduces_exposure_is_allowed_in_a_symbol_whose_shares_differ():
+    rc = Reconciler(lambda: {"ledger_qty": {"A": 10.0}, "broker_positions": {"A": {"qty": "12"}}})
+    rc.check()
+    assert rc.allows("A", "sell", "target", qty=10) is None  # <= min(ledger, broker): takes risk off
+    assert "quantity" in rc.allows("A", "sell", "target", qty=11)
+    assert "quantity" in rc.allows("A", "buy", "target", qty=1)
+    for purpose in ("exit", "stop", "cancel", "flatten"):
+        assert rc.allows("A", "sell", purpose, qty=99) is None
+
+
+def test_lost_needs_two_lookups_with_real_time_between_them():
+    """Review: recover() looked twice within milliseconds; the second miss must be >= 30 s after the first."""
+    b, clock = venue()
+    b.script.timeout("A", accepted=False)
+    om, _, _ = manager(b, clock)
+    r = om.submit(mkt(), strategy="rule", purpose="buy", session=DAY)
+    clock.advance(minutes=10)
+    om.recover()
+    assert r.state is St.UNKNOWN and r.misses == 1
+    clock.advance(seconds=31)
+    om.resolve()
+    assert r.state is St.REJECTED and r.misses == 2
+
+
+def test_adopt_takes_the_venues_terms_after_a_restart_mid_replace():
+    b, clock = venue(replace_new_id=True)
+    om, journal, _ = manager(b, clock)
+    req = OrderRequest("A", "buy", 10, "limit", "day", client_order_id("1", "rule", "A", DAY, "buy"), limit_price=90)
+    r = om.submit(req, strategy="rule", purpose="buy", session=DAY)
+    b.replace(r.order_id, limit_price=95.0)  # applied at the venue, the answer lost
+    om2 = OrderManager(b, journal, clock)
+    om2.sync()
+    r2 = om2.get(r.coid)
+    assert r2.limit == 95.0 and r2.order_id != r.order_id

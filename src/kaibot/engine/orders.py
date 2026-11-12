@@ -20,7 +20,8 @@ notes_engine_architecture.md section 4):
 - the intent is journalled before the venue is called (D5); a crash in between leaves an intent without a state;
 - a submission without an answer (timeout, network cut, crash) is `unknown`: never re-sent blind, and no new order
   in that symbol is accepted (`blocked`) until a lookup BY CLIENT ORDER ID resolves it. A lookup that finds the
-  order adopts it; an order not found on `LOST_LOOKUPS` lookups at least `LOST_AFTER_S` after the intent never
+  order adopts it; an order not found on `LOST_LOOKUPS` lookups (at least `LOOKUP_GAP_S` apart) at least
+  `LOST_AFTER_S` after the intent never
   reached the venue (`rejected`, reason `lost`), and only then may a new attempt (a new client id) go out;
 - `recover()` runs those lookups for every open record before anything else, at start-up;
 - fills come from the account activities (FILL rows), each booked once by its activity id: a duplicate event
@@ -48,6 +49,7 @@ from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 OM_KINDS = ("om_intent", "om_terms", "om_state", "om_fill", "fill")
 COID_MAX = 128  # Alpaca's limit on client_order_id
 LOST_LOOKUPS, LOST_AFTER_S = 2, 60.0
+LOOKUP_GAP_S = 30.0  # a miss counts only this long after the previous one (two lookups with real time between)
 REFUSED = (403, 422)
 FILL_LOOKBACK = timedelta(minutes=10)  # activities are read from a little before the last one seen (ids dedupe)
 
@@ -120,6 +122,7 @@ class OrderRecord:
     reason: str | None = None
     created: str = ""
     misses: int = 0  # lookups by client id that found nothing
+    last_miss: str | None = None
     expires_at: str | None = None
 
     @property
@@ -187,13 +190,16 @@ class OrderManager:
             if r is None:
                 return
             r.state = St(b["state"])
-            for k in ("venue", "reason", "expires_at"):
+            for k in ("venue", "reason", "expires_at", "last_miss"):
                 if k in b:
                     setattr(r, k, b[k])
             if b.get("cum") is not None:
                 r.cum = float(b["cum"])
             if "misses" in b:
                 r.misses = int(b["misses"])
+            for k in ("qty", "limit", "stop"):  # the venue's terms (a replace answered after a restart)
+                if b.get(k) is not None:
+                    setattr(r, k, float(b[k]))
             for i in [*(b.get("ids") or []), b.get("order_id")]:
                 if i and i not in r.ids:
                     r.ids.append(i)
@@ -342,8 +348,9 @@ class OrderManager:
         state = VENUE.get(str(o.get("status")), St.ACCEPTED)
         if state is St.ACCEPTED and float(o.get("filled_qty") or 0) > 0:
             state = St.PARTIAL
+        terms = {"qty": _num(o.get("qty")), "limit": _num(o.get("limit_price")), "stop": _num(o.get("stop_price"))}
         self._state(r, state, order_id=o.get("id"), venue=o.get("status"), cum=float(o.get("filled_qty") or 0),
-                    ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0)
+                    ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0, **terms)
 
     def _poll(self, r: OrderRecord) -> None:
         try:
@@ -366,12 +373,16 @@ class OrderManager:
 
     def _miss(self, r: OrderRecord) -> None:
         """A lookup by client id found nothing."""
+        now = self.now()
+        if r.last_miss and (now - _ts(r.last_miss)).total_seconds() < LOOKUP_GAP_S:
+            return  # looked a moment ago: this miss says nothing new
         misses = r.misses + 1
-        age = (self.now() - _ts(r.created)).total_seconds() if r.created else 1e9
+        age = (now - _ts(r.created)).total_seconds() if r.created else 1e9
         if r.state in UNCONFIRMED and misses >= LOST_LOOKUPS and age >= LOST_AFTER_S:
-            self._state(r, St.REJECTED, reason="lost: never reached the venue", misses=misses)
+            self._state(r, St.REJECTED, reason="lost: never reached the venue", misses=misses,
+                        last_miss=now.isoformat())
         else:
-            self._state(r, r.state, misses=misses)
+            self._state(r, r.state, misses=misses, last_miss=now.isoformat())
 
     def resolve(self) -> list[OrderRecord]:
         """Look up every order the venue has not confirmed, BY CLIENT ORDER ID, before anything else."""
@@ -443,6 +454,13 @@ class OrderManager:
 
     def snapshot(self) -> dict:
         return {c: {**asdict(r), "state": str(r.state)} for c, r in self.orders.items()}
+
+
+def _num(v) -> float | None:
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _reason(e: BrokerError) -> str:
