@@ -6,10 +6,15 @@ model v1, price-only SPY; cannot pass Gate B until S71, S83 and S84 have landed.
 python scripts/momentum_core.py --version trend_momentum|mom_12_1_band|mom_12_1_band_nofilter --end 2026-11-06
     [--universe today|pit|config/universe_history.yaml] [--universe-file config/universe_history.yaml]
     [--bars minute|store] [--start 2016-01-01] [--level balanced] [--control-runs 500] [--entries-control-runs 0]
-    [--earnings auto|off] [--refresh-daily]
+    [--earnings auto|off] [--refresh-daily] [--costs v1|v2]
 python scripts/momentum_core.py --has <version> --start ... --end ... --universe ... --control-runs N   exit 0 if done
 python scripts/momentum_core.py --summary [--set core|core_pit]   one table, written to
     data/reports/experiments_core_summary.md (core_pit: experiments_core_pit_summary.md, with today vs pit)
+
+--costs v2 (issue #111) prices every fill with kaibot.broker.costs_v2 (2x / 3x then scale v2's spread and impact);
+the default v1 reproduces earlier reports. v2 reports carry "costs": "v2", are found only with --costs v2 (by
+--has and --summary too) and are summarised in experiments_core[_pit]_summary_costsv2.md. With the daily store
+(--bars store, --universe pit) v2 is given raw prices, as it is meant to be (the audit E4 caveat does not apply).
 
 Universe (issue #143). `today` (the default, so earlier reports reproduce): the stocks of --universe-file, daily
 bars built from data/bars_1m (`--bars minute`, as in #127). `pit`: the S&P 500 as it was (#123,
@@ -64,6 +69,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import walk_forward_multiday as wfm  # noqa: E402
 from walk_forward import peak_rss_mb  # noqa: E402
 
+from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.replay import multiday_core as mc  # noqa: E402
@@ -139,20 +145,22 @@ def store_fingerprint(store_root: Path, keys, extra: str = "") -> str:
     return h.hexdigest()
 
 
-def spy_total_return_from_store(data: Path, spy: str, dates: np.ndarray) -> tuple[np.ndarray | None, str]:
-    """SPY's total return per session of `dates` from the daily store (NaN where the store has no bar), or None
-    with the reason."""
+def spy_total_return_from_store(data: Path, spy: str, dates: np.ndarray) -> tuple[np.ndarray | None, dict | str]:
+    """SPY's total return per session of `dates` from the daily store (NaN where the store has no bar), built by
+    `multiday_core.spy_total_return` (Alpaca's adjusted factor, or a table with every dividend, or the table
+    completed conservatively), or None with the reason."""
     from kaibot.ingest.daily_store import DailyStore
 
     root = data / "daily"
     if not (root / "bars" / f"symbol={spy}.parquet").is_file():
         return None, f"no {spy} in the daily store ({root}): run ./scripts/fetch_daily.sh"
     try:
-        tr = DailyStore(root).total_return(spy)
+        panel = DailyStore(root).panel([spy], minute_share=None)
     except (OSError, ValueError) as e:
         return None, f"daily store unreadable for {spy}: {e}"
-    s = pd.Series(tr["ret"].to_numpy(), index=tr["date"].to_numpy().astype("datetime64[D]"))
-    return s.reindex(dates.astype("datetime64[D]")).to_numpy(dtype=float), "daily store (dividends reinvested)"
+    r, info = mc.spy_total_return(panel, spy)
+    s = pd.Series(r, index=panel.dates.astype("datetime64[D]"))
+    return s.reindex(dates.astype("datetime64[D]")).to_numpy(dtype=float), info
 
 
 def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list[str], spy: str, mode: str,
@@ -176,6 +184,8 @@ def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list
         m = mc.Market.from_bars(bars, bars.cols(stocks), bars.col(spy), spy_tr)
         info = {"bars": "minute history (data/bars_1m): split-adjusted as of the download, no dividends",
                 "spy_total_return": note}
+        if spy_tr is not None:
+            print(f"SPY total return: {note['source']}", flush=True)
         return m, bars_fingerprint(data, symbols, a.start, a.end), symbols, info
     from kaibot.ingest.daily_store import DailyStore
     from kaibot.ingest.sp500_pit import Membership, read_outcomes, terminal_return
@@ -207,10 +217,11 @@ def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list
     rep = store.adjustment_report()
     bad = rep[rep.get("split_basis_days", pd.Series(dtype=float)).fillna(0) > 0]["key"].astype(str).tolist() \
         if len(rep) else []
-    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, exclude=bad)
+    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad)
     print(f"panel: {len(m.raw.dates)} sessions x {len(m.raw.symbols)} symbols, {time.time() - t0:.0f}s", flush=True)
+    print(f"SPY total return: {m.notes['spy_total_return']['source']}", flush=True)
     info = {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs and "
-                    "share counts raw; dividends credited", "spy_total_return": "daily store (dividends reinvested)",
+                    "share counts raw; dividends credited",
             "stocks": len(names), "companies_without_bars": len(missing),
             "companies_without_bars_sample": missing[:25], "excluded_split_basis": bad, **m.notes}
     extra = "|".join([a.start, a.end, mode, *symbols])
@@ -225,8 +236,13 @@ def run_label(spec_name: str, fill: str, cost: float, exposure_pct: float, earni
     return f"{spec_name}|{fill}|{cost:g}x|cap{exposure_pct:g}|{earnings}"
 
 
-def find_report(reports: Path, level: str, version: str, mode: str = "today", bars: str | None = None,
-                **same) -> tuple[Path, dict] | None:
+def summary_name(costs: str = "v1", which: str = "core") -> str:
+    name = SUMMARY_PIT if which == "core_pit" else SUMMARY
+    return name if costs == "v1" else name.replace(".md", f"_costs{costs}.md")
+
+
+def find_report(reports: Path, level: str, version: str, costs: str = "v1", mode: str = "today",
+                bars: str | None = None, **same) -> tuple[Path, dict] | None:
     """Newest finished report of `version` on universe `mode` (and `bars`: None takes minute bars for today and
     the store for pit; and, when given, with the same start, end, universe file, control runs, control kind)."""
     bars = bars or ("store" if mode == "point_in_time" else "minute")
@@ -238,6 +254,8 @@ def find_report(reports: Path, level: str, version: str, mode: str = "today", ba
         if rep.get("set") != "core" or rep.get("version") != version or "rows" not in rep:
             continue
         if rep.get("universe_mode", "today") != mode or rep.get("bars", "minute") != bars:
+            continue
+        if rep.get("costs", "v1") != costs:  # reports from before #111 are v1
             continue
         if any(want is not None and rep.get(k) != want for k, want in same.items()):
             continue
@@ -260,6 +278,7 @@ def run_version(a: argparse.Namespace) -> None:
     stocks = [s for syms in cfg["sectors"].values() for s in syms]
     spy = cfg["market"]
     pol = load_profiles()[a.level]
+    costs = None if a.costs == "v1" else get_model(a.costs)
     m, input_sha, symbols, data_info = load_market(a, data, stocks, list(cfg["sectors"]), spy, mode, bars_src, t0)
     bars = m.raw
     folds = make_folds(first_train_month(a.start, WARMUP_DAYS), np.datetime64(a.end, "D"))
@@ -283,7 +302,8 @@ def run_version(a: argparse.Namespace) -> None:
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
     run_at = datetime.now(UTC)
-    tag = f"{report_tag(a.level, a.version, mode, bars_src)}_{run_at.strftime('%Y%m%dT%H%M%S')}"
+    ctag = "" if a.costs == "v1" else f"_costs{a.costs}"
+    tag = f"{report_tag(a.level, a.version, mode, bars_src)}{ctag}_{run_at.strftime('%Y%m%dT%H%M%S')}"
     out = data / "reports"
     (out / tag).mkdir(parents=True, exist_ok=True)
     tdir = data / "trials"
@@ -294,7 +314,7 @@ def run_version(a: argparse.Namespace) -> None:
         exposure, earn_mode = exposure_pct, earnings
         blk = (hold_blk, entry_blk) if earn_mode == "exit_approx" else (None, None)
         book, rule = m.run(pol, sp, i0, i1, fill=fill, cost=cost, exposure_pct=exposure, equity0=a.equity,
-                           hold_blk=blk[0], entry_blk=blk[1])
+                           hold_blk=blk[0], entry_blk=blk[1], costs=costs)
         label = run_label(sp.name, fill, cost, exposure, earn_mode)
         safe = label.replace("|", "_").replace("~", "-")
         trades = pd.DataFrame([dataclasses.asdict(t) for t in book.trades],
@@ -314,7 +334,9 @@ def run_version(a: argparse.Namespace) -> None:
             tdir / f"{tid}.csv", index=False)
         trials.append({
             "ts": run_at.isoformat(timespec="seconds"), "trial_id": tid, "strategy": sp.rule,
-            "variant": "multiday_core", "label": f"momentum core {label}", "level": a.level,
+            "variant": "multiday_core",
+            "label": f"momentum core {label}{'' if a.costs == 'v1' else ' costs ' + a.costs}",
+            "level": a.level, "cost_model": a.costs,
             "universe": Path(uni_file).name, "universe_mode": mode, "bars": bars_src,
             "events_sha256": row["events_sha256"], "input_sha256": input_sha,
             "code_sha": code_sha, "experiment": a.version, "status": "provisional", "prereg_sha256": pre["sha256"],
@@ -354,7 +376,7 @@ def run_version(a: argparse.Namespace) -> None:
     bench = {"spy": mc.series_stats(dates, spy_r),
              "spy_scaled": {**mc.series_stats(dates, spy_r * base["avg_exposure_pct"] / 100),
                             "scale_pct": base["avg_exposure_pct"]},
-             "universe_ew": mc.series_stats(dates, m.equal_weight(i0, i1, a.equity))}
+             "universe_ew": mc.series_stats(dates, m.equal_weight(i0, i1, a.equity, costs))}
     if spy_tr is not None:
         bench["spy_total_return"] = mc.series_stats(dates, spy_tr)
         bench["spy_tr_scaled"] = {**mc.series_stats(dates, spy_tr * base["avg_exposure_pct"] / 100),
@@ -374,7 +396,8 @@ def run_version(a: argparse.Namespace) -> None:
                       f"{time.time() - t0:.0f}s", flush=True)
 
         c = mc.exposure_matched_control(m, pol, spec, book, rule, i0, i1, runs=a.control_runs,
-                                        seed=a.control_seed, exposure_pct=exposure, equity0=a.equity, progress=tick)
+                                        seed=a.control_seed, exposure_pct=exposure, equity0=a.equity, progress=tick,
+                                        costs=costs)
         control[label] = c
         if c.get("control_result"):
             safe = label.replace("|", "_")
@@ -386,15 +409,16 @@ def run_version(a: argparse.Namespace) -> None:
         book, rule = books[label]
         c = mc.matched_random_control(m.raw, m.ind, pol, m.signals, spec, book, rule, i0, i1,
                                       runs=a.entries_control_runs, seed=a.control_seed, exposure_pct=exposure,
-                                      equity0=a.equity, actions=m.actions, terminal=m.terminal)
+                                      equity0=a.equity, costs=costs, actions=m.actions, terminal=m.terminal)
         diagnostic[label] = {k: c[k] for k in ("kind", "runs", "sharpe_percentile", "cagr_percentile", "median")}
     gate = mc.gate_b(base, by_label.get(run_label(spec.name, "base", 2.0, 100.0, "hold")),
                      by_label.get(run_label(spec.name, "base", 3.0, 100.0, "hold")), bench["spy"],
                      control.get(base_label), nb, break_even.get(base_label),
                      spy_tr=bench.get("spy_total_return"), universe=mode)
-    status = STATUS_PIT if mode == "point_in_time" else STATUS
+    status = (STATUS_PIT if mode == "point_in_time" else STATUS).replace("cost model v1", f"cost model {a.costs}")
     rep = {
         "run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "set": "core", "status": status,
+        "costs": a.costs,
         "version": a.version, "rule": spec.rule, "spec": spec.params(), "prereg": pre, "gate_v2_sha256": gate_sha,
         "level": a.level, "universe": Path(uni_file).name, "universe_mode": mode, "bars": bars_src,
         "data": data_info, "start": a.start, "end": a.end, "equity": a.equity,
@@ -406,7 +430,7 @@ def run_version(a: argparse.Namespace) -> None:
         "benchmarks": bench, "control": control, "control_entries_matched_diagnostic": diagnostic, "gate_b": gate,
         "warnings": warn, "runtime_s": round(time.time() - t0, 1), "peak_rss_mb": round(peak_rss_mb(), 0),
         "files": {"spy_daily": f"{tag}/spy_daily.csv"},
-        "caveats": caveats(mode, bars_src, spy_tr is not None),
+        "caveats": caveats(mode, bars_src, spy_tr is not None, a.costs),
     }
     with (data / "trials.jsonl").open("a") as fh:
         for t in trials:
@@ -417,7 +441,7 @@ def run_version(a: argparse.Namespace) -> None:
     print(f"runtime {rep['runtime_s']}s, peak RSS {rep['peak_rss_mb']} MB")
 
 
-def caveats(mode: str, bars_src: str, total_return: bool) -> list[str]:
+def caveats(mode: str, bars_src: str, total_return: bool, costs: str = "v1") -> list[str]:
     out = []
     if mode == "point_in_time":
         out += ["point-in-time S&P 500 (#123): a company that left the index drops out of the ranked universe and is "
@@ -439,7 +463,10 @@ def caveats(mode: str, bars_src: str, total_return: bool) -> list[str]:
                 "the close is the last regular-hours minute, not the auction"]
     out += ["SPY total return from the daily store is the mark-2 benchmark; price-only SPY is shown beside it"
             if total_return else "no SPY total return (daily store missing): mark 2 is not judged",
-            "cost model v1 (uncalibrated, #111 / S71)",
+            "cost model v1 (uncalibrated, #111 / S71)" if costs == "v1" else
+            f"cost model {costs} (#111: bucket half-spreads from the report, not yet fitted to quotes or paper fills)"
+            + ("" if bars_src == "store" else "; prices are split-adjusted, so its half-cent floor still overstates "
+               "early costs of heavily split names (audit E4)"),
             "the exit-before-earnings variant uses an estimated earnings window, not known dates (S85)",
             "at a 100% exposure cap a purchase can be cut to the cash left on the fill day (no leverage ever)",
             "the random control copies the rule's positions (entry and exit sessions, share of equity, resizes) "
@@ -477,6 +504,24 @@ def _rule_row(r: dict, years: list[str]) -> dict:
         "Avg holding days": r["avg_hold_days"], "Top-5 stocks' share of profit %": r["top5_profit_share_pct"],
         "Break-even cost x": None if not be else (be["multiple"] if be["multiple"] is not None else be["note"]),
         "Sharpe pctile vs random": c.get("sharpe_percentile"), "CAGR pctile vs random": c.get("cagr_percentile")})
+
+
+def _data_note(rep: dict) -> str:
+    """Where SPY's total return came from, and the disputed splits (daily store)."""
+    d = rep.get("data") or {}
+    tr = d.get("spy_total_return")
+    if isinstance(tr, dict):
+        out = f" SPY total return: {tr.get('source')}"
+        if tr.get("points_per_year_over_price") is not None:
+            out += f" ({tr['points_per_year_over_price']} points a year over price only)"
+        out += "."
+    else:
+        out = f" SPY total return: {tr}." if tr else ""
+    disp = d.get("disputed_splits") or {}
+    if disp:
+        out += " Disputed splits (share count cannot be carried): " + "; ".join(
+            f"{k}: {v}" for k, v in sorted(disp.items())) + "."
+    return out
 
 
 def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] = ()) -> str:
@@ -536,7 +581,7 @@ def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] 
             f"exit-before-earnings variant {rep['earnings_variant']} ({rep['earnings']['note']}); random control "
             f"{rep['control_runs']} runs per exposure cap, seed {rep['control_seed']}; at most {skipped} buys of a "
             f"run skipped because one share cost more than the position size; code `{rep['code_sha']}`; report "
-            f"`{f.name}`." + "".join(f" WARNING: {w}." for w in rep.get("warnings", [])))
+            f"`{f.name}`." + _data_note(rep) + "".join(f" WARNING: {w}." for w in rep.get("warnings", [])))
     if pit:
         out = ["# Momentum core, ten-year test on the point-in-time S&P 500 (issues #127, #143)", "", PIT_HEAD, "",
                PROVISIONAL_PIT, ""]
@@ -576,21 +621,22 @@ def build_summary(found: dict[str, tuple[Path, dict]], missing: tuple[str, ...] 
     return "\n".join(out) + "\n"
 
 
-def summary(data: Path, level: str, which: str = "core") -> str:
+def summary(data: Path, level: str, which: str = "core", costs: str = "v1") -> str:
     """The one table of a set: `core` (today's list) or `core_pit` (the point-in-time universe, plus the today vs
     point-in-time comparison of the base rows)."""
     mode = "point_in_time" if which == "core_pit" else "today"
     found, missing = {}, []
     for version in mc.VERSIONS:
-        hit = find_report(data / "reports", level, version, mode)
+        hit = find_report(data / "reports", level, version, costs, mode)
         if hit is None:
             missing.append(version)
         else:
             found[version] = hit
     text = build_summary(found, tuple(missing))
     if which == "core_pit":
-        today = {v: hit for v in mc.VERSIONS if (hit := find_report(data / "reports", level, v, "today"))}
-        store = {v: hit for v in mc.VERSIONS if (hit := find_report(data / "reports", level, v, "today", "store"))}
+        today = {v: hit for v in mc.VERSIONS if (hit := find_report(data / "reports", level, v, costs, "today"))}
+        store = {v: hit for v in mc.VERSIONS if (hit := find_report(data / "reports", level, v, costs, "today",
+                                                                     "store"))}
         text += "\n" + comparison(today, found, store)
     return text
 
@@ -684,17 +730,19 @@ def main() -> None:
     ap.add_argument("--earnings", default="auto", choices=["auto", "off"],
                     help="auto: run the approximate exit-before-earnings variant when the estimate is reliable")
     ap.add_argument("--refresh-daily", action="store_true", help="rebuild the daily-bar cache")
+    ap.add_argument("--costs", default="v1", choices=list(MODELS),
+                    help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
     a = ap.parse_args()
     data = Path(a.data)
     if a.has:
         uni_file, mode, bars = universe_mode(a)
-        hit = find_report(data / "reports", a.level, a.has, mode, bars, start=a.start, end=a.end,
+        hit = find_report(data / "reports", a.level, a.has, a.costs, mode, bars, start=a.start, end=a.end,
                           universe=Path(uni_file).name, control_runs=a.control_runs, control_kind=CONTROL_KIND)
         sys.exit(0 if hit else 1)
     if a.summary:
-        text = summary(data, a.level, a.set)
+        text = summary(data, a.level, a.set, a.costs)
         (data / "reports").mkdir(parents=True, exist_ok=True)
-        (data / "reports" / (SUMMARY_PIT if a.set == "core_pit" else SUMMARY)).write_text(text)
+        (data / "reports" / summary_name(a.costs, a.set)).write_text(text)
         print(text)
         return
     if not a.version or not a.end:

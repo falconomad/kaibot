@@ -165,8 +165,8 @@ pass Gate B.
 ## 7. Momentum core (issue #127, decision 15 rules 1 and 2)
 One command on the Mac, from the repo root. Research only: it reads `data/`, never the engine or the broker.
 Every number is **PROVISIONAL**: today's stock list (survivorship), cost model v1 and minute bars without
-dividends (SPY is total return when the daily store of section 8 holds SPY, price only otherwise). Nothing here can
-pass Gate B; section 8 is the rerun on the point-in-time universe.
+dividends (SPY is total return when the daily store of section 9 holds SPY, price only otherwise). Nothing here can
+pass Gate B; section 9 is the rerun on the point-in-time universe.
 
 ```
 ./scripts/run_experiments.sh core
@@ -187,8 +187,8 @@ pass Gate B; section 8 is the rerun on the point-in-time universe.
   to state the break-even multiple) x exposure cap (30 / 60 / 100%) x earnings (hold through; "exit before" is an
   APPROXIMATE variant on the estimated earnings window of section 6 and is skipped, with a message in the log
   and in the table's notes, when that estimate is not reliable). Then the five pre-declared neighbours of each
-  rule and the exposure-matched random control (section 8; since #143, 500 runs per cap by default).
-- **Time:** see section 8 (the same runner; about 10 minutes for the three versions with the daily-bar cache of
+  rule and the exposure-matched random control (section 9; since #143, 500 runs per cap by default).
+- **Time:** see section 9 (the same runner; about 10 minutes for the three versions with the daily-bar cache of
   section 6 in place, 5 to 10 minutes more when it has to be built). `KAIBOT_CORE_CONTROL_RUNS=200` runs fewer
   control runs (then mark 3 is not judged; a different number of runs is a new report, not a resume). No `.env`
   is needed.
@@ -212,7 +212,44 @@ pass Gate B; section 8 is the rerun on the point-in-time universe.
   to the cash left on the fill day.
 - **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/core_balanced_<...>/trades_<...>.csv`.
 
-## 8. The honest rerun: point-in-time universe, daily store, gate v2 (issue #143)
+## 8. SPY noise band and the overnight carry (issue #128, decision 15 rules 3 and 4)
+One command on the Mac, from the repo root. Research only: it reads `data/bars_1m/symbol=SPY`, never the engine or
+the broker, and needs no `.env`. Every number is **PROVISIONAL**: a small SPY-only research routine
+(`kaibot.replay.spy_noise_band`, reusing the cost functions of `kaibot.replay.sim`), not the engine with
+`SimBroker`; SPY is price only and the close is the last regular-hours minute, not the auction.
+
+```
+./scripts/run_experiments.sh spy
+```
+
+- **What it runs:** `scripts/spy_noise_band.py --version <name>` for `spy_noise_band` (Zarattini, Aziz and Barbon's
+  published rule, long only, 1x: 14-day average absolute move from the open to each minute, upper band = max(open,
+  yesterday's close) x (1 + that move), checks at HH:00 and HH:30 from 10:00, long above the band, out below
+  max(band, VWAP) or at the close, every fill at the next bar's open) and `spy_noise_band_carry` (the same, but a
+  long open at the close is sold at the next open). Frozen and pre-registered in `docs/prereg/spy_noise_band.md`
+  (committed before the code; the run refuses to start without it and writes its hash into the report).
+- **No tuning:** each run is ONE continuous $100k account from 2017-05 to the end of the data. Cost scenarios: 0
+  (gross), 0.5, 1 and 2 bp a side (all-in) and cost model v1. Version 1 adds its five pre-declared neighbours
+  (10 / 20 / 30-day lookback, checks every 15 minutes, exit at 15:55), the round trips entered at the 15:30 check,
+  and a replay of the live last-30-minutes SPY trade (`kaibot.replay.spy_momentum`). Version 2 adds carry nights
+  against all other nights (SPY close to next open, mean and Welch t).
+- **Time (measured on synthetic SPY minute bars of the real size, 2,830 sessions 2016-01 to 2026-11, on a busy
+  shared 2-CPU cloud machine; not measured on the real data):** about 30 seconds for both versions and the table
+  (about 5 seconds of each version is loading the minute bars). Allow 1 to 2 minutes on the Mac; more if the
+  stored files carry many extended-hours bars, which the loader reads and drops.
+- **Resumable:** a version with a finished report for the same dates is skipped. Logs are in
+  `logs/experiment_spy_<version>.log`.
+- **Output:** ONE table printed and written to `data/reports/experiments_spy_summary.md`: per version and cost
+  scenario the round trips, net and gross bp per round trip with t, hit rate, total return, CAGR, Sharpe (daily
+  mark-to-market, 50% haircut beside it), maximum drawdown, share of sessions invested, each calendar year, the
+  June 2022-July 2023 result and the break-even cost a side (per round trip and for the whole account); the
+  neighbours, the 15:30-check round trips, the live trade and SPY buy-and-hold beside it. Under the table: the
+  seven pre-registered pass marks as pass or fail, carry nights against other nights, and the pre-declared
+  statement whether the live last-30-minutes trade is absorbed, retired or neither yet.
+- **Files:** `data/reports/spy_balanced_<version>_<ts>.json` and one trades and one daily CSV per run in the folder
+  of the same name. Every run is a row in `data/trials.jsonl`; a configuration counts once (`n_trials` 1 at 0.5 bp a
+  side, 0 for the other cost scenarios).
+## 9. The honest rerun: point-in-time universe, daily store, gate v2 (issue #143)
 
 The momentum core of section 7 on the S&P 500 as it was on each day (#123), with every price from the raw daily
 store (#124) and Gate B of decision 15 judged where its inputs exist. Research only. The exact sequence on the Mac,
@@ -252,7 +289,13 @@ The third column (today's list on the daily store) separates the data change fro
   (1 + its terminal return): -100% for SIVB, SBNY and FRC, 0% for takeovers with known terms
   (`src/kaibot/ingest/sp500/outcomes.csv`), -30% for everything else (docs/ops/pit_universe.md, hole policy). A
   company the store has no bars for cannot be bought; the report lists how many (`data.companies_without_bars`).
-  Keys whose split the store's check could not reconcile (`split_basis_days > 0`) are never bought.
+  Keys whose split the store's check could not reconcile (`split_basis_days > 0`; 13 on the stakeholder's store
+  of 12 Nov: APTV, BALL@2026-11-05, DD, DOC@2026-11-05, DOW@2017-08-24, EXE@2026-11-05, PARA@2025-07-31,
+  POM@2016-03-16, RJF@2026-11-05, RTX, STI@2019-12-01, SW@2026-11-05, TT): their share count cannot be carried
+  through the disputed date. The sessions on the other share basis are found from Alpaca's own volume factor;
+  the rule never enters such a key from 5 sessions before the first of them to 5 sessions after the last, and a
+  position still held is sold at the market (normal costs) at the close of the session before the first. A key
+  without Alpaca's factor is never bought. The report lists each window (`data.disputed_splits`).
 - **Prices.** Signals (scores, averages, the 15% move, ATR, SPY's 200-day filter) read split-adjusted closes
   without dividends, as both pre-registrations freeze; orders, costs, share counts, the price and dollar filters
   and the marks read raw prices; splits multiply held shares, cash dividends are credited on their ex-date and
@@ -261,8 +304,14 @@ The third column (today's list on the daily store) separates the data change fro
   regular-hours minute (a few basis points); the store has no minute data, so the first / last minute volumes in
   the impact term are 2% of the day's volume, and the 15:55 price is not available (the base fill is at the
   close, so the core does not use it).
-- **Benchmarks.** SPY total return from the store (dividends reinvested) is mark 2's benchmark; price-only SPY is
-  shown beside it. The equal-weight benchmark holds the index members of each month (on `today`: today's list),
+- **Benchmarks.** SPY total return is mark 2's benchmark; price-only SPY is shown beside it. A missing SPY
+  dividend would make SPY look worse and flatter every rule, and the stakeholder's table has fewer than four in
+  2016 and 2018 (price x3.780, with the table's dividends x4.455 over 2016-01-04 to 2026-11-11, 1.72 points a
+  year; a complete series is about 1.8 to 1.9). So SPY's total return is built from Alpaca's all-adjusted SPY
+  factor when the store has it (unless the table's is higher); without it, from the table if every full year has
+  four dividends; otherwise from the table with each missing quarter completed at the largest of the four
+  nearest recorded dividends. The report and the summary's notes say which source was used and how many points a
+  year it adds over price only. The equal-weight benchmark holds the index members of each month (on `today`: today's list),
   with dividends, splits and terminal returns as above.
 - **Mark 3: the exposure-matched control** (decision 15 section 10). Each random portfolio copies the rule's
   positions: the session each was bought and sold, its share of equity at entry and at every resize. Only the
@@ -285,11 +334,18 @@ The third column (today's list on the daily store) separates the data change fro
   `..._store_<ts>.json`) and its folder: trades and daily CSVs per run (the daily CSV has `cost`, `traded` and
   `dividends` per session), `spy_daily.csv` (`ret` = SPY total return, `ret_price_only` beside it) and one
   `control_<label>.json` per cap, ready for `scripts/gate_v2_report.py --daily ... --spy ... --random ...`.
-- **`--costs v2`:** not offered. Cost model v2 is PR #145 (S71), not merged when this was built; once it is, a
-  `--costs v2` flag for these runners is a small follow-up, and until then every run is on cost model v1.
+- **`--costs v2`:** cost model v2 (PR #145, S71) was merged while this was built; `momentum_core.py --costs v2`
+  (from #145) works with `--universe pit` too, and `KAIBOT_CORE_COSTS=v2 ./scripts/run_experiments.sh core_pit`
+  runs the set on it (reports and summary carry `costsv2`). On the store v2 gets raw prices, as intended. The
+  default stays v1, so the first rerun is comparable with the earlier reports.
+- **Today's column on the minute bars:** the minute history is on another split basis for DD (2016 to
+  2019-04-01) and RTX (2016 to 2020-04-02), both spin-off related, so the today-on-minute-bars run reads distorted
+  signals for those two names in those years; the store-based columns do not. The sector ETFs (and XLC's 2018
+  start, spliced with SPY in the store) are not used by the core.
 - **What can still bias the pit result:** former members the store has no bars for (they cannot be bought, so
-  the universe is short of exactly the names that later failed or were bought; `holes.csv` counts them); the
-  harsh -30% default terminal return for an unknown delisting; change dates checked only at five IVV quarter
+  the universe is short of exactly the names that later failed or were bought; `holes.csv` counts them: 15
+  spells on the stakeholder's store, 0.6% of member-days); the harsh -30% default terminal return for an unknown
+  delisting (3 `ends_early` spells get it); the 13 disputed-split keys left out around their dates; change dates checked only at five IVV quarter
   ends; the official close against the pre-registered minute close; cost model v1; earnings dates still
   estimated (S85), and on `pit` the exit-before-earnings variant usually fails the reliability bar because former
   members have no news history, so it is skipped.

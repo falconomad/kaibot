@@ -2,11 +2,14 @@
 
 python scripts/walk_forward.py --env .env --universe config/universe_history.yaml --start 2016-01-01 \\
     --end 2026-11-06 --variant A --level balanced [--grid default] [--min-train-trades 100] [--block-months 3]
-    [--experiment control|mornings|wide_stop|high_vix|mornings_wide_stop]
+    [--experiment control|mornings|wide_stop|high_vix|mornings_wide_stop] [--costs v1|v2]
 
 --experiment runs one of the pre-declared experiments of issue #109 (kaibot.replay.walkforward.EXPERIMENTS): its
 own small grid and fixed default, the same folds and selection. `control` is variant A with the default grid.
 scripts/run_experiments.sh runs all of them and prints one comparison table.
+
+--costs v2 (issue #111) prices every fill with kaibot.broker.costs_v2 instead of v1; the default v1 reproduces
+earlier reports (hashes included). A v2 run adds "-costsv2" to its label and "costs" to its input digest.
 
 --start is the first date with bars; the first train month starts after the 120-day feature warm-up (2016-05),
 so the first test month is 2017-05. Every month is simulated for every grid configuration from flat equity; each
@@ -39,6 +42,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from run_replay import load_env, vix_prev_close  # noqa: E402
 
+from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.evaluation.trials import count_file  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
@@ -227,6 +231,8 @@ def main() -> None:
     ap.add_argument("--equity", type=float, default=100_000.0)
     ap.add_argument("--label", default="")
     ap.add_argument("--refresh-vix", action="store_true")
+    ap.add_argument("--costs", default="v1", choices=list(MODELS),
+                    help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
     a = ap.parse_args()
     ensure_ca_bundle()  # python.org's macOS Python has no root certificates; before the first request (FRED VIX)
     t0 = time.time()
@@ -246,6 +252,8 @@ def main() -> None:
     grid_name, grid_axes = (a.experiment, dict(exp.axes)) if exp else (a.grid, GRIDS[a.grid])
     if exp and not a.label:
         a.label = f"exp-{a.experiment}"
+    if a.costs != "v1":
+        a.label = f"{a.label}-costs{a.costs}" if a.label else f"costs{a.costs}"
     folds = make_folds(first_train_month(a.start, WARMUP_DAYS), end, train_months=a.train_months)
     print(f"{len(folds)} folds x {len(grid)} configs; first test {folds[0].test_month}, last {folds[-1].test_month}")
 
@@ -262,10 +270,13 @@ def main() -> None:
                      "fomc": sorted(str(d) for d in fomc), "warmup_days": WARMUP_DAYS,
                      "vix": {str(k.date()): float(v) for k, v in vix.items()
                              if np.datetime64(a.start, "D") <= np.datetime64(k.date(), "D") <= end}}
+    if a.costs != "v1":  # v1 runs keep their earlier digest
+        digest_params["costs"] = a.costs
     wf = run_walk_forward(load, sector_of, news, lambda spy: regime(spy, vix), fomc, pol, folds, grid,
                           variant=a.variant, default=default, equity0=a.equity,
                           min_train_trades=a.min_train_trades, block_months=a.block_months, end=end,
-                          digest_params=digest_params)
+                          digest_params=digest_params,
+                          costs=None if a.costs == "v1" else get_model(a.costs))
     trials_f = data / "trials.jsonl"
     summary = summarize(wf, a.equity, logged_trials(trials_f), default=default)
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
@@ -273,6 +284,7 @@ def main() -> None:
     rep = {
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"), "code_sha": code_sha,
         "variant": a.variant, "level": a.level, "label": a.label, "universe": Path(a.universe).name,
+        "costs": a.costs,
         "start": a.start, "end": a.end, "grid_name": grid_name, "grid_axes": grid_axes,
         "experiment": a.experiment or None, "experiment_what": exp.what if exp else None,
         "default_params": dataclasses.asdict(default), "min_train_trades": a.min_train_trades,
@@ -287,6 +299,10 @@ def main() -> None:
             "FOMC blackout only where config/macro_calendar.yaml has dates (2025-2026)",
             "earnings-day filter relies on Alpaca news only; agent room not replayed (rules-only)",
             "fills: next-bar open at modelled bid/ask + impact, no queue model",
+            ("costs: model v1 (uncalibrated, audit F4)" if a.costs == "v1" else
+             f"costs: model {a.costs} (#111): half-spread by 20-day ADV bucket, near-zero impact, 2026 fees; on "
+             "split-adjusted prices, so the half-cent floor still overstates early costs of heavily split names "
+             "(audit E4); targets fill as limits without a fill-probability haircut"),
             "cost split: gross = bought at the fill bar's open, sold at the stop / target level or the exit bar's "
             "close; spread, impact, slippage past stops and fees add up to gross minus net",
         ],
@@ -322,7 +338,7 @@ def main() -> None:
                 "ts": rep["run_at"], "trial_id": tid, "strategy": "dip_reversal", "variant": a.variant,
                 "label": f"walkforward {which} {a.label}".strip(), "level": a.level, "universe": rep["universe"],
                 "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": wf.input_sha256,
-                "code_sha": code_sha, "n_trials": n_tr,
+                "code_sha": code_sha, "n_trials": n_tr, "cost_model": a.costs,
                 "experiment": a.experiment or None,
                 "params": (f"walk-forward grid {grid_name} ({len(grid)}) x {len(folds)} folds" if which == "tuned"
                            else f"pre-registered {default.label}"),

@@ -36,8 +36,15 @@ pinned): corporate actions on held positions (`actions=(split, div)`, the raw da
 multiplies the shares and divides every price level of the position, a cash dividend is credited to the account
 and booked as the trade's own `dividends` line beside `pnl`), and `terminal` (column -> (last bar, return)): a
 position still held at the last bar of a company whose bars stop is closed at that close times (1 + return), with
-no cost (the hole policy of docs/ops/pit_universe.md). Every daily row now also carries the session's `cost`
+no cost (the hole policy of docs/ops/pit_universe.md), and `exits` (column -> sessions): a held position is sold
+at that close at the market (used before a split the store's table and Alpaca's bars disagree about, where the
+share count cannot be carried). Every daily row now also carries the session's `cost`
 (spread, impact and fees charged), `traded` (dollars bought plus sold) and `dividends`.
+Cost model v2 (issue #111), opt-in: `Engine(costs=get_model("v2"))` prices every fill with
+`kaibot.broker.costs_v2` instead (half-spread by the stock's 20-session ADV, opening fills and gapped stops at twice
+the midday half-spread, closing fills at one half-spread, near-zero impact with a 1% participation cap, 2026 fees).
+`costs=None` (the default) is model v1 through the unchanged code path, so earlier reports reproduce. The bars are
+split-adjusted until #124: v2 is given the adjusted price as its raw price (audit E4 caveat).
 """
 
 from __future__ import annotations
@@ -52,6 +59,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from kaibot.broker.costs_v2 import CostModel, FillCtx
 from kaibot.broker.shadow_costs import sell_fees
 from kaibot.replay.data import N_MIN, SymbolDays, load_symbol
 from kaibot.replay.sim import EXIT_M, buy_px, cost_parts, half_spread, sell_px
@@ -322,10 +330,13 @@ class Engine:
     def __init__(self, bars: DailyBars, ind: Indicators, pol: RiskPolicy, rule, schedule: Callable[[int], object],
                  equity0: float = 100_000.0, hold_blk: np.ndarray | None = None,
                  entry_blk: np.ndarray | None = None, cost_mult: float = 1.0,
+                 costs: CostModel | None = None,
                  actions: tuple[np.ndarray, np.ndarray] | None = None,
-                 terminal: Mapping[int, tuple[int, float]] | None = None) -> None:
+                 terminal: Mapping[int, tuple[int, float]] | None = None,
+                 exits: Mapping[int, Sequence[int]] | None = None) -> None:
         self.b, self.ind, self.pol, self.rule, self.schedule = bars, ind, pol, rule, schedule
         self.cost_mult = float(cost_mult)  # scales spread and impact of every fill (fees are not scaled)
+        self.costs = None if costs is None or costs.name == "v1" else costs  # None: v1, the legacy path
         self.cash = float(equity0)
         self.equity = float(equity0)
         self.pos: dict[int, Pos] = {}
@@ -333,6 +344,10 @@ class Engine:
         self.hold_blk, self.entry_blk = hold_blk, entry_blk
         self.actions = actions
         self.terminal = dict(terminal or {})
+        self.exits: dict[int, list[int]] = {}  # session -> columns to sell at its close
+        for j, sessions in (exits or {}).items():
+            for i in sessions:
+                self.exits.setdefault(int(i), []).append(int(j))
         self._exits_today = 0
         self._cost_today = self._traded_today = self._div_today = 0.0
 
@@ -371,10 +386,30 @@ class Engine:
                 p.fill, p.mid, p.last, p.hi_close, p.stop = (x / s for x in (p.fill, p.mid, p.last, p.hi_close,
                                                                               p.stop))
                 p.entry_costs = (p.entry_costs[0] / s, p.entry_costs[1] / s)
+    def adv(self, i: int, j: int) -> float:
+        """20-session average dollar volume known before session i (NaN when unknown)."""
+        a = self.ind.adv[i - 1, j] if i > 0 else math.nan
+        return float(a) if math.isfinite(a) and a > 0 else math.nan
+
+    def _v2(self, side: str, i: int, j: int, mid: float, qty: float, sig: float, vol: float,
+            venue: str) -> tuple[float, float, float]:
+        """v2 fill: (price, half spread, impact) per share, spread and impact scaled by `cost_mult`."""
+        f = self.costs.fill(side, FillCtx(mid, qty, sig, vol, self.adv(i, j), venue))
+        half, imp = f.half * self.cost_mult, f.impact * self.cost_mult
+        return mid + (half + imp) * (1 if side == "buy" else -1), half, imp
+
+    def _fees(self, qty: float, px: float) -> float:
+        return sell_fees(qty, px) if self.costs is None else self.costs.sell_fees(qty, px)
 
     def _buy_px(self, mid: float, qty: float, sig: float, vol: float) -> float:
         px = buy_px(mid, qty, sig, vol)
         return px if self.cost_mult == 1.0 else mid + (px - mid) * self.cost_mult
+
+    def _buy(self, i: int, j: int, mid: float, qty: float, sig: float, vol: float, venue: str) -> float:
+        """Buy fill per share under the engine's model (v1: `venue` is ignored)."""
+        if self.costs is None:
+            return self._buy_px(mid, qty, sig, vol)
+        return self._v2("buy", i, j, mid, qty, sig, vol, venue)[0]
 
     def _sell_px(self, mid: float, qty: float, sig: float, vol: float) -> float:
         px = sell_px(mid, qty, sig, vol)
@@ -388,9 +423,10 @@ class Engine:
         return half, abs(px - mid) - half
 
     def sell(self, i: int, j: int, price: float, reason: str, vol: float, gap: bool = False,
-             qty: float | None = None, costless: bool = False) -> None:
+             qty: float | None = None, venue: str = "close", costless: bool = False) -> None:
         """Market sell of the whole position (or of `qty` shares of it) at `price` (the open, the close or the
-        stop level) minus costs. With `gap`, `price` is the open that jumped the stop; the signal is credited the
+        stop level) minus costs; `venue` (open | close | continuous) matters to cost model v2 only, and a gap is
+        always an opening fill. With `gap`, `price` is the open that jumped the stop; the signal is credited the
         stop level and the difference is the gap slippage. A partial sale books its own trade row with its share
         of the entry costs and of the risk; the rest of the position stays as it was. `costless`: the position
         is closed at exactly `price` with no spread, impact or fee (a terminal return, not a trade)."""
@@ -407,10 +443,14 @@ class Engine:
         vol = vol if math.isfinite(vol) and vol > 0 else 1.0
         if costless:
             px, fees, x_half, x_imp = price, 0.0, 0.0, 0.0
-        else:
+        elif self.costs is None:
             px = self._sell_px(price, lot, self.sigma(i, j), vol)
-            fees = sell_fees(lot, px)
             x_half, x_imp = self._parts(price, px)
+            fees = self._fees(lot, px)
+        else:
+            px, x_half, x_imp = self._v2("sell", i, j, price, lot, self.sigma(i, j), vol,
+                                         "open" if gap else venue)
+            fees = self._fees(lot, px)
         level = p.stop if gap else price
         self.cash += px * lot - fees
         self.book.sold += px * lot
@@ -428,7 +468,7 @@ class Engine:
         o = self.b.o[i, j]
         if j not in self.pos or not _ok(o):
             return False  # no bar today: the order waits (the rule asks again, or the next exit takes it)
-        self.sell(i, j, float(o), reason, self.b.v_first[i, j])
+        self.sell(i, j, float(o), reason, self.b.v_first[i, j], venue="open")
         return True
 
     def sell_close(self, i: int, j: int, reason: str) -> bool:
@@ -481,11 +521,11 @@ class Engine:
             qty = min(qty, float(carry["qty"]))
             fill, mid_e = float(carry["fill"]), float(carry["mid"])
         else:
-            fill, mid_e = (self._buy_px(float(mid), qty, sig, vol) if qty >= 1 else math.inf), float(mid)
+            fill, mid_e = (self._buy(i, j, float(mid), qty, sig, vol, at) if qty >= 1 else math.inf), float(mid)
         if qty >= 1 and fill * qty > self.cash:  # no leverage
             qty = float(math.floor(self.cash / fill))
             if carry is None and qty >= 1:
-                fill = self._buy_px(float(mid), qty, sig, vol)
+                fill = self._buy(i, j, float(mid), qty, sig, vol, at)
         if qty < 1:
             return 0.0
         self.cash -= fill * qty
@@ -493,7 +533,10 @@ class Engine:
             self.book.bought += fill * qty
             self._cost_today += (fill - mid_e) * qty
             self._traded_today += fill * qty
-        half = half_spread(mid_e) * (1.0 if carry is not None else self.cost_mult)
+        if carry is None and self.costs is not None:
+            half = self._v2("buy", i, j, float(mid), qty, sig, vol, at)[1]
+        else:
+            half = half_spread(mid_e) * (1.0 if carry is not None else self.cost_mult)
         self.pos[j] = Pos(j, qty, i, fill, mid_e, (half, fill - mid_e - half),
                           fill - stop_atr * atr if stop_atr else math.nan, trail_atr, max_hold,
                           qty * caps.gap_atr * atr, eq, config, "intraday" if carry is not None else at,
@@ -516,7 +559,7 @@ class Engine:
             return 0.0
         if target < p.qty:
             lot = p.qty - target
-            self.sell(i, j, float(mid), reason, vol, qty=lot)
+            self.sell(i, j, float(mid), reason, vol, qty=lot, venue=at)
             return -lot
         ref = float(b.c[i - 1, j]) / self.split(i, j) if _ok(b.c[i - 1, j]) and b.c[i - 1, j] > 0 else p.last
         room = min(eq * self.pol.max_position_pct / 100 - p.qty * ref,
@@ -526,17 +569,18 @@ class Engine:
             return 0.0
         sig = self.sigma(i, j)
         vol = float(vol) if _ok(vol) and vol > 0 else 1.0
-        fill = self._buy_px(float(mid), add, sig, vol)
+        fill = self._buy(i, j, float(mid), add, sig, vol, at)
         if fill * add > self.cash:  # no leverage
             add = float(math.floor(self.cash / fill))
             if add < 1:
                 return 0.0
-            fill = self._buy_px(float(mid), add, sig, vol)
+            fill = self._buy(i, j, float(mid), add, sig, vol, at)
         self.cash -= fill * add
         self.book.bought += fill * add
         self._cost_today += (fill - float(mid)) * add
         self._traded_today += fill * add
-        half = half_spread(float(mid)) * self.cost_mult
+        half = (half_spread(float(mid)) * self.cost_mult if self.costs is None
+                else self._v2("buy", i, j, float(mid), add, sig, vol, at)[1])
         q = p.qty + add
         p.entry_costs = ((p.entry_costs[0] * p.qty + half * add) / q,
                          (p.entry_costs[1] * p.qty + (fill - float(mid) - half) * add) / q)
@@ -564,7 +608,7 @@ class Engine:
             if p.entry_i < i and o <= p.stop:
                 self.sell(i, p.j, float(o), why, b.v_first[i, p.j], gap=True)
             elif lo <= p.stop:
-                self.sell(i, p.j, float(p.stop), why, b.v[i, p.j] / N_MIN)
+                self.sell(i, p.j, float(p.stop), why, b.v[i, p.j] / N_MIN, venue="continuous")
         for p in list(self.pos.values()):  # 3. the close
             c = b.c[i, p.j]
             if not _ok(c):
@@ -574,6 +618,9 @@ class Engine:
             elif self.hold_blk is not None and self.hold_blk[i, p.j]:
                 self.sell(i, p.j, float(c), "earnings", b.v_last[i, p.j])
         self.rule.at_close(i, self, cfg, eq)
+        for j in self.exits.get(i, ()):  # 4. a forced sale at this close (a split the data disagree about is next)
+            if j in self.pos and _ok(b.c[i, j]):
+                self.sell(i, j, float(b.c[i, j]), "split_dispute", b.v_last[i, j])
         for p in [p for p in self.pos.values() if self.terminal.get(p.j, (-1,))[0] == i and _ok(b.c[i, p.j])]:
             r = self.terminal[p.j][1]  # 4. the company's bars stop here: closed at the terminal return
             self.sell(i, p.j, max(float(b.c[i, p.j]) * (1.0 + r), 0.0), "delisted", b.v_last[i, p.j],
@@ -625,27 +672,35 @@ def spy_buy_and_hold(bars: DailyBars, spy: str, i0: int, i1: int) -> np.ndarray:
 
 
 def equal_weight_benchmark(bars: DailyBars, ind: Indicators, cols: np.ndarray, i0: int, i1: int,
-                           equity0: float = 100_000.0, *, eligible: np.ndarray | None = None,
+                           equity0: float = 100_000.0, costs: CostModel | None = None, *,
+                           eligible: np.ndarray | None = None,
                            actions: tuple[np.ndarray, np.ndarray] | None = None,
-                           terminal: Mapping[int, tuple[int, float]] | None = None) -> np.ndarray:
+                           terminal: Mapping[int, tuple[int, float]] | None = None,
+                           exits: Mapping[int, Sequence[int]] | None = None) -> np.ndarray:
     """Daily returns of holding every stock of the universe equal-weight, rebalanced at the open of each month's
     first session, after the same spread / impact / fee model (fractional shares, 0.1% left in cash for costs).
     A stock joins at the first rebalance after its first bar. This is what "just hold this hand-picked universe"
-    made over the same sessions; it carries the same survivorship bias as the rules.
+    made over the same sessions; it carries the same survivorship bias as the rules. `costs`: v1 when None; v2
+    prices the rebalance as opening fills.
 
     Point-in-time (issue #143): `eligible` (sessions x all columns, bool) limits each rebalance to the stocks
     eligible on the previous session (index members); a held stock that is no longer eligible is sold at that
     rebalance when it has a bar. `actions` = (split, div) of a raw panel: dividends are credited and splits
-    carried at each open. `terminal`: a stock whose bars stop is closed at its last close x (1 + return)."""
+    carried at each open. `terminal`: a stock whose bars stop is closed at its last close x (1 + return).
+    `exits` (column -> sessions): the stock is sold at that close (spread and fees ignored: a small favour to the
+    benchmark), as the engine does before a disputed split."""
     b = bars
+    v2 = None if costs is None or costs.name == "v1" else costs
     cols = np.asarray(cols, dtype=int)
     q = np.zeros(len(cols))
     last = np.full(len(cols), np.nan)
     cash, eq = float(equity0), float(equity0)
-    ends = {}
+    ends: dict[int, list[tuple[int, float]]] = {}
     for n, j in enumerate(cols.tolist()):
         if terminal and j in terminal:
             ends.setdefault(terminal[j][0], []).append((n, terminal[j][1]))
+        for i in (exits or {}).get(j, ()):
+            ends.setdefault(int(i), []).append((n, 0.0))
     rets = []
     for i in range(i0, i1 + 1):
         o, c = b.o[i, cols], b.c[i, cols]
@@ -667,7 +722,12 @@ def equal_weight_benchmark(bars: DailyBars, ind: Indicators, cols: np.ndarray, i
                     j, vol = cols[n], b.v_first[i, cols[n]]
                     sig = ind.sigma[i - 1, j] if i > 0 and np.isfinite(ind.sigma[i - 1, j]) else SIGMA_FALLBACK
                     vol = float(vol) if np.isfinite(vol) and vol > 0 else 1.0
-                    if dq[n] < 0:
+                    if v2 is not None:
+                        adv = ind.adv[i - 1, j] if i > 0 else math.nan
+                        side = "sell" if dq[n] < 0 else "buy"
+                        px = v2.fill(side, FillCtx(float(o[n]), abs(dq[n]), sig, vol, float(adv), "open")).price
+                        cash += (-dq[n] * px - v2.sell_fees(-dq[n], px)) if dq[n] < 0 else -dq[n] * px
+                    elif dq[n] < 0:
                         px = sell_px(float(o[n]), -dq[n], sig, vol)
                         cash += -dq[n] * px - sell_fees(-dq[n], px)
                     else:

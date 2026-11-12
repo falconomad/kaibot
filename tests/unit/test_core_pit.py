@@ -4,6 +4,7 @@ prices for orders and costs, split-adjusted prices without dividends for the sig
 return). Small seeded synthetic data only, no network."""
 
 import contextlib
+import dataclasses
 import io
 import json
 import math
@@ -175,7 +176,8 @@ def test_dividends_are_credited_on_raw_shares_and_spy_is_total_return():
     spec = mc.VERSIONS["mom_12_1_band_nofilter"]
     book0, _ = mc.Market.from_panel(plain, stocks, "SPY").run(POL, spec, I0, N - 1)
     t = next(x for x in book0.trades if x.date < plain.dates[400] and x.exit_date > plain.dates[430])
-    panel, _ = raw_market(actions=[(t.symbol, 420, None, 3.0), ("SPY", 420, None, 2.0), ("SPY", 480, None, 2.0)])
+    spy_divs = [("SPY", i, None, 2.0) for i in spy_quarters()]  # four a year: the table is complete
+    panel, _ = raw_market(actions=[(t.symbol, 420, None, 3.0), *spy_divs])
     m = mc.Market.from_panel(panel, stocks, "SPY")
     book, _ = m.run(POL, spec, I0, N - 1)
     got = next(x for x in book.trades if x.symbol == t.symbol and x.date == t.date)
@@ -185,10 +187,82 @@ def test_dividends_are_credited_on_raw_shares_and_spy_is_total_return():
     j = m.spy
     tr, po = m.spy_total_return(I0, N - 1), m.spy_price_only(I0, N - 1)
     c = panel.c[:, j]
-    assert tr[420 - I0] == pytest.approx((c[420] + 2.0) / c[419] - 1)
-    assert po[420 - I0] == pytest.approx(c[420] / c[419] - 1)
-    assert np.prod(1 + tr) / np.prod(1 + po) == pytest.approx((1 + 2 / c[420]) * (1 + 2 / c[480]))
+    q = next(i for i in spy_quarters() if i >= I0)
+    assert tr[q - I0] == pytest.approx((c[q] + 2.0) / c[q - 1] - 1)
+    assert po[q - I0] == pytest.approx(c[q] / c[q - 1] - 1)
+    want = np.prod([1 + 2 / c[i] for i in spy_quarters() if I0 <= i < N])
+    assert np.prod(1 + tr) / np.prod(1 + po) == pytest.approx(want)
+    assert m.notes["spy_total_return"]["source"].startswith("table (every full year has four dividends)")
     assert mc.Market.from_bars(tc.core_market()[0], np.arange(80), 80).spy_total_return(I0, N - 1) is None
+
+
+def spy_quarters() -> list[int]:
+    """Sessions of the synthetic calendar nearest the 20th of March, June, September and December."""
+    d = np.array(tm.sessions(N, FIRST), dtype="datetime64[D]")
+    out = []
+    for y in range(2022, 2025):
+        for mth in (3, 6, 9, 12):
+            t = int(np.argmin(np.abs(d - np.datetime64(f"{y}-{mth:02d}-20", "D")).astype(int)))
+            if abs(int((d[t] - np.datetime64(f"{y}-{mth:02d}-20", "D")).astype(int))) < 5:
+                out.append(t)
+    return out
+
+
+def test_spy_total_return_never_lets_a_missing_dividend_flatter_the_rules():
+    """The stakeholder's table misses SPY dividends in 2016 and 2018: a weaker SPY flatters every rule."""
+    quarters = spy_quarters()
+    full = [("SPY", i, None, 2.0) for i in quarters]
+    gappy = [a for a in full if a[1] not in quarters[5:7]]  # two dividends of 2023 missing from the table
+    p_full, _ = raw_market(actions=full)
+    p_gap, _ = raw_market(actions=gappy)
+    r_full, info_full = mc.spy_total_return(p_full, "SPY")
+    r_gap, info_gap = mc.spy_total_return(p_gap, "SPY")
+    assert info_full["source"].startswith("table (every") and info_full["dividends_per_year"][2023] == 4
+    assert info_gap["source"].startswith("table completed: 2") and info_gap["dividends_per_year"][2023] == 2
+    assert [a["date"] for a in info_gap["added"]] == [str(p_gap.dates[i]) for i in quarters[5:7]]
+    g = lambda r: float(np.nanprod(1 + r[1:]))  # noqa: E731
+    assert g(r_gap) == pytest.approx(g(r_full), rel=1e-9)  # completed at the largest nearby amount: the same here
+    assert g(r_gap) > g(p_gap.total_return("SPY"))
+    # Alpaca's all-adjusted factor is preferred when the store has it (here it knows the two dividends) ...
+    j = p_gap.col("SPY")
+    ref = np.full(p_gap.c.shape, np.nan)
+    adj_full = p_full.adjusted("total")
+    ref[:, j] = adj_full.pf_total[:, j]
+    p_ref = dataclasses.replace(p_gap, ref_total=ref)
+    r_ref, info_ref = mc.spy_total_return(p_ref, "SPY")
+    assert info_ref["source"].startswith("alpaca_adjusted") and g(r_ref) == pytest.approx(g(r_full), rel=1e-3)
+    # ... but never when it is lower than the table's
+    ref[:, j] = 1.0
+    r_low, info_low = mc.spy_total_return(dataclasses.replace(p_full, ref_total=ref), "SPY")
+    assert info_low["source"].endswith("above Alpaca's factor") and g(r_low) == pytest.approx(g(r_full))
+    assert info_full["points_per_year_over_price"] > 0
+
+
+def test_a_disputed_split_is_never_held_across_and_never_entered_near():
+    """A split the table and Alpaca's bars disagree about (the store's check: split_basis_days > 0): the share
+    count cannot be carried through it. Located from Alpaca's volume factor; no entries in a window around it,
+    and a holding is sold at the close before the first disputed session."""
+    plain, stocks = raw_market()
+    spec = mc.VERSIONS["mom_12_1_band_nofilter"]
+    book0, _ = mc.Market.from_panel(plain, stocks, "SPY").run(POL, spec, I0, N - 1)
+    t = next(x for x in book0.trades if x.date < plain.dates[400] and x.exit_date > plain.dates[460])
+    j = plain.col(t.symbol)
+    ref = np.ones(plain.c.shape)
+    ref[430:470, j] = 4.0  # Alpaca's volumes say another share basis on these sessions
+    p = dataclasses.replace(plain, ref_split=ref)
+    m = mc.Market.from_panel(p, stocks, "SPY", disputed=[t.symbol, "NOT_IN_PANEL"])
+    w = mc.DISPUTE_WINDOW
+    assert m.exits == {j: [429]} and not m.signals.ok[430 - w:470 + w, j].any() and m.signals.ok[480, j]
+    assert "sold at the close of" in m.notes["disputed_splits"][t.symbol]
+    book, rule = m.run(POL, spec, I0, N - 1)
+    out = next(x for x in book.trades if x.symbol == t.symbol and x.date == t.date)
+    assert out.reason == "split_dispute" and out.exit_date == plain.dates[429] and out.cost_spread > 0
+    assert not [x for x in book.trades if x.symbol == t.symbol and 430 - w <= p.index_from(x.date) <= 469 + w]
+    assert math.isclose(sum(x.pnl for x in book.trades), book.equity - 100_000.0, abs_tol=1e-4)
+    never = mc.Market.from_panel(plain, stocks, "SPY", disputed=[t.symbol])  # no Alpaca factor: cannot locate
+    assert not never.signals.ok[:, j].any() and "never bought" in never.notes["disputed_splits"][t.symbol]
+    ew = m.equal_weight(I0, N - 1)
+    assert np.isfinite(ew).all()
 
 
 # ---------------------------------------------------------------- 3. the point-in-time universe
@@ -404,7 +478,7 @@ def pit_runs(tmp_path_factory):
 
 def test_pit_run_reports_marks_benchmarks_hashes_and_trial_rows(pit_runs):
     data, panel, ms, keys, base, out, mp = pit_runs
-    hit = core_script.find_report(data / "reports", "balanced", "trend_momentum", "point_in_time")
+    hit = core_script.find_report(data / "reports", "balanced", "trend_momentum", mode="point_in_time")
     f, rep = hit
     assert f.name.startswith("core_balanced_trend_momentum_pit_") and rep["universe_mode"] == "point_in_time"
     assert rep["bars"] == "store" and rep["control_kind"] == "exposure_matched" and rep["status"].startswith(
@@ -442,7 +516,7 @@ def test_pit_run_reports_marks_benchmarks_hashes_and_trial_rows(pit_runs):
 def test_pit_universe_buys_only_members(pit_runs):
     data, panel, ms, keys, base, out, mp = pit_runs
     for version in mc.VERSIONS:
-        f, rep = core_script.find_report(data / "reports", "balanced", version, "point_in_time")
+        f, rep = core_script.find_report(data / "reports", "balanced", version, mode="point_in_time")
         for row in rep["rows"]:
             tr = pd.read_csv(data / "reports" / row["files"]["trades"])
             p27 = tr[tr["symbol"] == "P27"]
@@ -469,7 +543,8 @@ def test_spy_total_return_is_read_from_the_store_for_a_minute_bar_run(pit_runs, 
     data, panel, ms, keys, base, out, mp = pit_runs
     tr, note = core_script.spy_total_return_from_store(data, "SPY", panel.dates)
     c = panel.c[:, panel.col("SPY")]
-    assert tr[300] == pytest.approx((c[300] + 1.6) / c[299] - 1) and "daily store" in note
+    assert tr[300] == pytest.approx((c[300] + 1.6) / c[299] - 1)
+    assert note["source"].startswith("table completed") and note["dividends_per_year"][2023] == 4  # 2022: none
     assert tr[301] == pytest.approx(c[301] / c[300] - 1)
     none, why = core_script.spy_total_return_from_store(tmp_path, "SPY", panel.dates)
     assert none is None and "fetch_daily.sh" in why
@@ -490,3 +565,19 @@ def test_run_experiments_has_the_core_pit_set_and_it_is_documented():
     seq = [doc.index(x) for x in ("scripts/fetch_sp500_history.py\n", "./scripts/fetch_daily.sh\n",
                                   "fetch_sp500_history.py --holes", "./scripts/run_experiments.sh core_pit\n")]
     assert seq == sorted(seq)
+
+
+def test_cost_model_v2_runs_on_the_store_market_and_in_the_control():
+    from kaibot.broker.costs_v2 import get_model
+
+    panel, stocks = raw_market(actions=[("P20", 430, 4.0, None), ("SPY", 300, None, 1.5)])
+    m = mc.Market.from_panel(panel, stocks, "SPY")
+    spec = mc.VERSIONS["trend_momentum"]
+    v1, _ = m.run(POL, spec, I0, N - 1)
+    v2, rule = m.run(POL, spec, I0, N - 1, costs=get_model("v2"))
+    c1, c2 = (pd.DataFrame(b.daily)["cost"].sum() for b in (v1, v2))
+    assert c2 != c1 and c2 > 0
+    c = mc.exposure_matched_control(m, POL, spec, v2, rule, I0, N - 1, runs=3, costs=get_model("v2"))
+    r = c["control_result"]
+    assert r["simulated_strategy_sharpe"] == pytest.approx(r["strategy_sharpe"], abs=1e-9)
+    assert np.isfinite(m.equal_weight(I0, N - 1, costs=get_model("v2"))).all()

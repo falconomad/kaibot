@@ -343,21 +343,89 @@ class CoreRule:
 def run_rule(bars: DailyBars, ind: Indicators, pol: RiskPolicy, sig: Signals, spec: CoreSpec, i0: int, i1: int, *,
              fill: str = "base", cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
              hold_blk: np.ndarray | None = None, entry_blk: np.ndarray | None = None,
-             actions: tuple[np.ndarray, np.ndarray] | None = None,
-             terminal: Mapping[int, tuple[int, float]] | None = None) -> tuple[MBook, CoreRule]:
+             costs=None, actions: tuple[np.ndarray, np.ndarray] | None = None,
+             terminal: Mapping[int, tuple[int, float]] | None = None,
+             exits: Mapping[int, Sequence[int]] | None = None) -> tuple[MBook, CoreRule]:
     """One continuous account of one frozen configuration over sessions i0..i1, starting flat. `bars` and `ind`
-    are the market side (raw prices with the daily store); `actions` and `terminal` see `multiday.Engine`."""
+    are the market side (raw prices with the daily store); `costs` (None: cost model v1), `actions` and
+    `terminal` see `multiday.Engine`."""
     where, factor = FILLS[fill]
     rule = CoreRule(sig, pol, spec, where, exposure_pct)
     eng = Engine(bars, ind, pol, rule, lambda i: spec, equity0, hold_blk, entry_blk, cost_mult=cost * factor,
-                 actions=actions, terminal=terminal)
+                 costs=costs, actions=actions, terminal=terminal, exits=exits)
     return eng.run(i0, i1), rule
 
 
 # ---------------------------------------------------------------- what one run reads (issue #143)
 
+DISPUTE_WINDOW = 5  # sessions around a split the store's table and Alpaca's bars disagree about: no entries
+SPLIT_TOL = 0.01  # the share basis of the two sources differs beyond 1% (the store's check uses the same)
 EXPOSURE_TOLERANCE_PTS = 2.0  # a random run's average exposure may differ from the rule's by this much
 TERMINAL_SLACK = 7  # sessions: bars that stop this close to the end of the panel are the data's end, not a hole
+
+
+def spy_total_return(panel, spy: str = "SPY") -> tuple[np.ndarray, dict]:
+    """SPY's total return per session of a RAW panel, and where it came from. Never lets a missing dividend make
+    SPY look worse (a weaker benchmark flatters every rule):
+
+    1. Alpaca's own all-adjusted factor (`ref_total`, stored beside the bars) when the store has it for SPY,
+       unless the corporate-actions table gives a higher total (then the table);
+    2. otherwise the table, if every full calendar year has its four quarterly dividends;
+    3. otherwise the table completed: each missing quarter of a full year gets a dividend on the session nearest
+       the 20th of the quarter's last month (SPY goes ex near the third Friday of March, June, September and
+       December), as large as the largest of the four recorded dividends nearest to it.
+    `info` says which, the dividends per year, what was added and the yearly points over price only."""
+    j = panel.col(spy)
+    c = np.asarray(panel.c[:, j], dtype=float)
+    dates = np.asarray(panel.dates, dtype="datetime64[D]")
+    prev = pd.Series(c).ffill().shift(1).to_numpy()
+    with np.errstate(invalid="ignore", divide="ignore"):
+        table = panel.total_return(spy)
+        price = c * np.asarray(panel.split[:, j], dtype=float) / prev - 1.0
+        ref = np.asarray(getattr(panel, "ref_total", np.full(c.shape, np.nan)), dtype=float)[:, j]
+        r_ref = None
+        if np.isfinite(ref[np.isfinite(c)]).all() and np.isfinite(c).sum() > 1:
+            adj = c * ref
+            r_ref = adj / pd.Series(adj).ffill().shift(1).to_numpy() - 1.0
+    div = np.asarray(panel.div[:, j], dtype=float)
+    years = dates.astype("datetime64[Y]").astype(int) + 1970
+    months = dates.astype("datetime64[M]").astype(int) % 12 + 1
+    per_year = {int(y): int(((years == y) & (div > 0)).sum()) for y in np.unique(years)}
+    full = {int(y) for y in np.unique(years) if ((years == y) & (months == 1)).any() and
+            ((years == y) & (months == 12)).any() and (years == y).sum() >= 240}
+
+    def growth(r) -> float:
+        return float(np.nanprod(1.0 + np.asarray(r)[1:]))
+
+    info: dict = {"dividends_per_year": per_year, "added": []}
+    if r_ref is not None and growth(r_ref) >= growth(table):
+        out, info["source"] = r_ref, "alpaca_adjusted (Alpaca's all-adjusted SPY factor)"
+    elif all(per_year[y] >= 4 for y in full):
+        out = table
+        info["source"] = "table (every full year has four dividends)" + (
+            "; above Alpaca's factor" if r_ref is not None else "")
+    else:
+        out = np.array(table, dtype=float)
+        paid = np.flatnonzero(div > 0)
+        for y in sorted(full):
+            for q in range(4):
+                inq = (years == y) & ((months - 1) // 3 == q)
+                if (inq & (div > 0)).any() or not len(paid):
+                    continue
+                target = np.datetime64(f"{y}-{3 * q + 3:02d}-20", "D")
+                t = int(np.argmin(np.abs(dates - target).astype(int)))
+                near = paid[np.argsort(np.abs(paid - t))[:4]]
+                amount = float(div[near].max())
+                if np.isfinite(prev[t]) and prev[t] > 0:
+                    out[t] += amount / prev[t]
+                    info["added"].append({"date": str(dates[t]), "dividend": round(amount, 4)})
+        info["source"] = ("table completed: " + str(len(info["added"])) + " missing quarterly dividends added at "
+                          "the largest nearby amount")
+    n = int(np.isfinite(out[1:]).sum())
+    if n > 250:
+        tr, po = growth(out), growth(price)
+        info["points_per_year_over_price"] = round(((tr ** (252 / n)) - (po ** (252 / n))) * 100, 2)
+    return out, info
 
 
 @dataclass
@@ -378,6 +446,7 @@ class Market:
     bars_source: str = "minute"  # "minute" (data/bars_1m, as in #113 / #127) | "store" (data/daily, #124)
     actions: tuple[np.ndarray, np.ndarray] | None = None
     terminal: dict[int, tuple[int, float]] = dataclasses.field(default_factory=dict)
+    exits: dict[int, list[int]] = dataclasses.field(default_factory=dict)
     spy_tr: np.ndarray | None = None
     member: np.ndarray | None = None
     notes: dict = dataclasses.field(default_factory=dict)
@@ -392,11 +461,18 @@ class Market:
     @classmethod
     def from_panel(cls, panel, stocks: Sequence[str], spy: str, *, member: np.ndarray | None = None,
                    terminal_returns: Mapping[str, float] | None = None, exclude: Sequence[str] = (),
-                   default_terminal: float = -0.30) -> Market:
+                   disputed: Sequence[str] = (), default_terminal: float = -0.30) -> Market:
         """From a RAW `kaibot.ingest.daily_store.DailyPanel` (any duck-typed equal). The session calendar is
-        SPY's. `member` is (panel sessions x panel symbols) bool, `exclude` keys that may never be bought (the
-        store's check: a split the table and the bars disagree on), `terminal_returns` key -> return booked when
-        a held company's bars stop more than `TERMINAL_SLACK` sessions before the end (default -30%)."""
+        SPY's. `member` is (panel sessions x panel symbols) bool, `exclude` keys that may never be bought,
+        `terminal_returns` key -> return booked when a held company's bars stop more than `TERMINAL_SLACK`
+        sessions before the end (default -30%).
+
+        `disputed`: keys whose split the store's check found the table and Alpaca's bars disagree about
+        (`split_basis_days > 0`), so their share count cannot be carried through it. The sessions on the other
+        share basis are located from Alpaca's own volume factor (`ref_split` against the table's `pf_split`); no
+        entry from `DISPUTE_WINDOW` sessions before the first of them to `DISPUTE_WINDOW` after the last, and a
+        position still held is sold at the market at the close before the first (`exits`). A disputed key
+        without Alpaca's factor cannot be located and is never bought."""
         if getattr(panel, "kind", "raw") != "raw":
             raise ValueError("pass the raw panel: the market side reads raw prices")
         j_spy = panel.col(spy)
@@ -413,11 +489,34 @@ class Market:
         factor = adj.factor[keep]
         split, div = panel.split[keep], panel.div[keep]
         cols = raw.cols(stocks)
-        allowed = np.ones(len(raw.symbols), dtype=bool)
-        allowed[raw.cols(exclude)] = False
-        mem = None if member is None else (np.asarray(member, dtype=bool)[keep] & allowed[None, :])
-        if mem is None and len(exclude):
-            mem = np.broadcast_to(allowed, raw.c.shape)
+        allowed = np.ones(raw.c.shape, dtype=bool)
+        allowed[:, raw.cols(exclude)] = False
+        exits: dict[int, list[int]] = {}
+        windows: dict[str, object] = {}
+        n_s = len(raw.dates)
+        for key in disputed:
+            if key not in raw._col:
+                continue
+            j = raw.col(key)
+            ref, tab = np.asarray(panel.ref_split, dtype=float)[keep, j], np.asarray(panel.pf_split, dtype=float)[
+                keep, j]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                off = np.flatnonzero(np.isfinite(raw.c[:, j]) & (np.abs(ref / tab - 1.0) > SPLIT_TOL))
+            if not np.isfinite(ref).any() or not len(off):
+                allowed[:, j] = False
+                windows[key] = "never bought (no Alpaca factor to locate the disputed sessions)"
+                continue
+            a, b = int(off[0]), int(off[-1])
+            allowed[max(a - DISPUTE_WINDOW, 0):min(b + DISPUTE_WINDOW + 1, n_s), j] = False
+            if a > 0:
+                exits[j] = [a - 1]
+            windows[key] = (f"no entries {raw.dates[max(a - DISPUTE_WINDOW, 0)]} to "
+                            f"{raw.dates[min(b + DISPUTE_WINDOW, n_s - 1)]}; "
+                            + (f"a holding is sold at the close of {raw.dates[a - 1]}" if a > 0 else
+                               "the other basis starts with the data"))
+        mem = None if member is None else (np.asarray(member, dtype=bool)[keep] & allowed)
+        if mem is None and not allowed.all():
+            mem = allowed
         sig_ind = indicators(sig)
         with np.errstate(invalid="ignore"):
             adv = (closes(raw) * pd.DataFrame(raw.v)).rolling(20, min_periods=15).mean().to_numpy()
@@ -430,18 +529,19 @@ class Market:
             seen = np.flatnonzero(has[:, j])
             if len(seen) and seen[-1] < n - 1 - TERMINAL_SLACK:
                 terminal[j] = (int(seen[-1]), float(tr.get(raw.symbols[j], default_terminal)))
-        with np.errstate(invalid="ignore", divide="ignore"):
-            spy_tr = panel.total_return(spy)[keep]
+        spy_full, spy_info = spy_total_return(panel, spy)
+        spy_tr = spy_full[keep]
         notes = {"sessions_dropped_off_spy_calendar": int((~keep).sum()), "actions_on_dropped_sessions": lost,
                  "excluded_keys": sorted(set(exclude) & set(raw.symbols)), "terminal_closes": len(terminal),
+                 "disputed_splits": windows, "spy_total_return": spy_info,
                  "adjustment_sources": dict(sorted(pd.Series(adj.adj_source).value_counts().items()))
                  if adj.adj_source else {}, **{f"panel_{k}": v for k, v in getattr(panel, "notes", {}).items()}}
         return cls(raw, sig, ind, signals, cols, raw.col(spy), "point_in_time" if member is not None else "today",
-                   "store", (split, div), terminal, spy_tr, mem, notes)
+                   "store", (split, div), terminal, exits, spy_tr, mem, notes)
 
     def run(self, pol: RiskPolicy, spec: CoreSpec, i0: int, i1: int, **kw) -> tuple[MBook, CoreRule]:
         return run_rule(self.raw, self.ind, pol, self.signals, spec, i0, i1, actions=self.actions,
-                        terminal=self.terminal, **kw)
+                        terminal=self.terminal, exits=self.exits, **kw)
 
     def spy_price_only(self, i0: int, i1: int) -> np.ndarray:
         """SPY close-to-close returns on split-adjusted closes, no dividends."""
@@ -454,12 +554,12 @@ class Market:
         r = np.asarray(self.spy_tr[i0:i1 + 1], dtype=float)
         return r if len(r) == i1 - i0 + 1 and np.isfinite(r).all() else None
 
-    def equal_weight(self, i0: int, i1: int, equity0: float = 100_000.0) -> np.ndarray:
+    def equal_weight(self, i0: int, i1: int, equity0: float = 100_000.0, costs=None) -> np.ndarray:
         """The equal-weight benchmark on the same universe option: today's list, or the members of each month."""
         from kaibot.replay.multiday import equal_weight_benchmark
 
-        return equal_weight_benchmark(self.raw, self.ind, self.stocks, i0, i1, equity0, eligible=self.member,
-                                      actions=self.actions, terminal=self.terminal or None)
+        return equal_weight_benchmark(self.raw, self.ind, self.stocks, i0, i1, equity0, costs, eligible=self.member,
+                                      actions=self.actions, terminal=self.terminal or None, exits=self.exits)
 
 
 # ---------------------------------------------------------------- exposure-matched random control (Gate B mark 3)
@@ -611,7 +711,7 @@ class SlotReplay:
 def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, book: MBook, rule: CoreRule,
                              i0: int, i1: int, *, runs: int = 500, seed: int = 127, fill: str = "base",
                              cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-                             progress: Callable[[int], None] | None = None) -> dict:
+                             progress: Callable[[int], None] | None = None, costs=None) -> dict:
     """Gate B mark 3 (decision 15 sections 7 and 10, docs/ops/gate_v2.md hand-off 4): `runs` seeded random
     portfolios that copy the rule's positions slot by slot and draw only the names, from the stocks that pass the
     price and volume filter on the decision's data (`Signals.ok` of the session before the fill: price >= $5,
@@ -632,8 +732,8 @@ def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, bo
 
     def simulate(selection) -> np.ndarray:
         ctl = SlotReplay(sig, slots, selection, where, caps)
-        b = Engine(raw, market.ind, pol, ctl, lambda i: None, equity0, cost_mult=cost * factor,
-                   actions=market.actions, terminal=market.terminal).run(i0, i1)
+        b = Engine(raw, market.ind, pol, ctl, lambda i: None, equity0, cost_mult=cost * factor, costs=costs,
+                   actions=market.actions, terminal=market.terminal, exits=market.exits).run(i0, i1)
         r = daily_returns(b)
         if record[0]:
             got = committed_exposure(list(ctl.events.values()), i0, i1)
@@ -746,7 +846,7 @@ def matched_random_control(bars: DailyBars, ind: Indicators, pol: RiskPolicy, si
                            book: MBook, rule: CoreRule, i0: int, i1: int, *, runs: int = 200, seed: int = 127,
                            fill: str = "base", cost: float = 1.0, exposure_pct: float = 100.0,
                            equity0: float = 100_000.0, progress: Callable[[int], None] | None = None,
-                           actions: tuple[np.ndarray, np.ndarray] | None = None,
+                           costs=None, actions: tuple[np.ndarray, np.ndarray] | None = None,
                            terminal: Mapping[int, tuple[int, float]] | None = None) -> dict:
     """DIAGNOSTIC since #143 (Amendment 1 of both pre-registrations): the entries-matched control of #127. It
     does not match exposure, so its Sharpe percentile is biased low and Gate B mark 3 is never judged on it; the
@@ -766,8 +866,8 @@ def matched_random_control(bars: DailyBars, ind: Indicators, pol: RiskPolicy, si
            "return_pct": [], "avg_exposure_pct": []}
     for n in range(runs):
         ctl = RandomEntries(sig, pol, spec, where, exposure_pct, rule.entries, holds, seed + n)
-        b = Engine(bars, ind, pol, ctl, lambda i: None, equity0, cost_mult=cost * factor, actions=actions,
-                   terminal=terminal).run(i0, i1)
+        b = Engine(bars, ind, pol, ctl, lambda i: None, equity0, cost_mult=cost * factor, costs=costs,
+                   actions=actions, terminal=terminal).run(i0, i1)
         cs = curve_stats(daily_returns(b))
         out["sharpe"].append(cs["sharpe"])
         out["cagr_pct"].append(cs["cagr_pct"])

@@ -256,10 +256,14 @@ def test_alpaca_paper_http_golden(monkeypatch):
         path = url.split("alpaca.markets", 1)[1]
         sent.append({"method": method, "url": url, "params": params,
                      "body": None if body is None else json.dumps(body)})  # as text: key order is part of it
+        if method == "DELETE" and path.startswith("/v2/orders/"):  # #114 D7: the venue confirms the cancel
+            answers[("GET", "/v2/orders")] = [o for o in answers[("GET", "/v2/orders")]
+                                             if o["id"] != path.rsplit("/", 1)[1]]
         return answers.get((method, path), {"id": "o1", "status": "accepted"})
 
     monkeypatch.setattr(alp._Http, "call", call)
     b = alp.AlpacaPaper("k", "s")
+    b.http._sleep = lambda s: None  # close_position's wait for the cancel confirmation: nothing really sleeps
     calls = [
         ("account", lambda: b.account()),
         ("clock", lambda: b.clock()),

@@ -76,6 +76,16 @@
    },
    {
     "body": null,
+    "method": "GET",
+    "params": {
+     "limit": 500,
+     "nested": "true",
+     "status": "open"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   },
+   {
+    "body": null,
     "method": "DELETE",
     "params": null,
     "url": "https://paper-api.alpaca.markets/v2/positions/AAPL"

@@ -4,7 +4,7 @@ history under data/, never touches the engine or the broker. Under decision 15 t
 
 python scripts/walk_forward_multiday.py --rule trend_highs|rel_strength|winners_run|overnight_spy
     [--env .env] [--universe config/universe_history.yaml] [--start 2016-01-01] --end 2026-11-06
-    [--level balanced] [--earnings auto|on|off] [--min-train-trades 20] [--refresh-daily]
+    [--level balanced] [--earnings auto|on|off] [--min-train-trades 20] [--refresh-daily] [--costs v1|v2]
 
 Daily bars are built once from data/bars_1m and cached in data/multiday/daily_bars.parquet (rebuilt when a month
 file of the minute history changes). `winners_run` also needs variant A's intraday trades: one pass over the
@@ -18,6 +18,7 @@ the fixed account, and two trial rows in data/trials.jsonl (tuned carries n_tria
 No committed pre-registration (docs/prereg/<rule>.md), no run (`kaibot.evaluation.prereg.require`, decision 15
 Gate A; the four first-look rules are registered retroactively). The report and both trial rows carry the
 pre-registration's sha256 and the sha256 of config/gate_v2.yaml.
+--costs v2 (issue #111) prices every fill with kaibot.broker.costs_v2; the default v1 reproduces earlier reports.
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from run_replay import load_env, vix_prev_close  # noqa: E402
 from walk_forward import logged_trials, peak_rss_mb  # noqa: E402
 
+from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation import prereg  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
@@ -76,7 +78,7 @@ SURVIVORSHIP = ("Survivorship bias: the universe is today's 300 large caps appli
                 "holds these stocks is flattered by hindsight (they are the survivors and the winners); read each "
                 "result against the equal-weight universe row, not against zero.")
 STATUS = ("provisional (decision 15): a first look from the research harness of #113, on today's stock list and with "
-          "cost model v1; not a verdict, cannot pass Gate B")
+          "cost model {costs}; not a verdict, cannot pass Gate B")
 
 
 def curve_stats(rets: np.ndarray) -> dict:
@@ -134,11 +136,11 @@ def side(book: MBook, benchmarks: dict[str, dict]) -> dict:
 
 
 def summarize(wf: MultidayWF, bars: DailyBars, ind: Indicators, stocks: list[str], spy: str, equity0: float,
-              n_logged: int, blocks: int = 16) -> dict:
+              n_logged: int, blocks: int = 16, costs=None) -> dict:
     dates = np.array([r["date"] for r in wf.tuned.daily], dtype="datetime64[D]")
     bench = {"spy": curve_stats(spy_buy_and_hold(bars, spy, wf.i_test0, wf.i1)),
              "universe_ew": curve_stats(equal_weight_benchmark(bars, ind, bars.cols(stocks), wf.i_test0, wf.i1,
-                                                               equity0))}
+                                                               equity0, costs=costs))}
     r_t = np.array([r["pnl"] / r["start"] for r in wf.tuned.daily])
     r_d = np.array([r["pnl"] / r["start"] for r in wf.fixed.daily])
     _, mat = wf.oos_matrix()
@@ -244,13 +246,14 @@ def earnings_filter(data: Path, bars: DailyBars, stocks: list[str], mode: str) -
 
 
 def intraday_cache(data: Path, cfg: dict, level: str, start: str, end: str, universe: str, pol, vix, fomc,
-                   equity: float, block_months: int) -> pd.DataFrame:
+                   equity: float, block_months: int, costs: str = "v1") -> pd.DataFrame:
     """Variant A's trades at its defaults for every month from the first train month (one pass over the minute
     bars, about as long as one walk-forward of scripts/walk_forward.py), cached for the next run."""
     sector_of = {s: e for e, syms in cfg["sectors"].items() for s in syms}
     symbols = [*sector_of, *cfg["sectors"], cfg["market"]]
     fp = bars_fingerprint(data, symbols, start, end)
-    f = data / "multiday" / f"intraday_A_{level}_{Path(universe).stem}_{start}_{end}.parquet"
+    tag = "" if costs == "v1" else f"_costs{costs}"
+    f = data / "multiday" / f"intraday_A_{level}_{Path(universe).stem}_{start}_{end}{tag}.parquet"
     meta = f.with_suffix(".json")
     if f.is_file() and meta.is_file() and json.loads(meta.read_text()).get("fingerprint") == fp:
         return pd.read_parquet(f)
@@ -267,7 +270,8 @@ def intraday_cache(data: Path, cfg: dict, level: str, start: str, end: str, univ
         return w
 
     df = variant_a_trades(load, sector_of, news, lambda spy: regime(spy, vix), fomc, pol, months, equity0=equity,
-                          block_months=block_months, end=np.datetime64(end, "D"))
+                          block_months=block_months, end=np.datetime64(end, "D"),
+                          costs=None if costs == "v1" else get_model(costs))
     df["date"] = df["date"].astype("datetime64[ns]")
     f.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(f, index=False)
@@ -290,6 +294,8 @@ def main() -> None:
     ap.add_argument("--equity", type=float, default=100_000.0)
     ap.add_argument("--refresh-daily", action="store_true", help="rebuild the daily-bar cache")
     ap.add_argument("--refresh-vix", action="store_true")
+    ap.add_argument("--costs", default="v1", choices=list(MODELS),
+                    help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
     a = ap.parse_args()
     try:
         prereg_sha = prereg.require(a.rule, ROOT)
@@ -298,6 +304,7 @@ def main() -> None:
     gate_sha = GateV2.load(ROOT).sha
     print(f"pre-registration docs/prereg/{a.rule}.md sha256 {prereg_sha[:12]}; config/gate_v2.yaml sha256 "
           f"{gate_sha[:12]}", flush=True)
+    costs = None if a.costs == "v1" else get_model(a.costs)
     t0 = time.time()
     data, exp = Path(a.data), EXPERIMENTS[a.rule]
     cfg = yaml.safe_load(Path(a.universe).read_text())
@@ -330,7 +337,7 @@ def main() -> None:
         cal = yaml.safe_load((ROOT / "config" / "macro_calendar.yaml").read_text())
         fomc = {np.datetime64(str(d), "D") for d in cal["fomc_statement_1400"]}
         intraday = intraday_cache(data, cfg, a.level, a.start, a.end, a.universe, pol, vix, fomc, a.equity,
-                                  a.block_months)
+                                  a.block_months, a.costs)
     if a.rule == "overnight_spy":
         earn, hold, entry = {"mode": "not applicable", "note": "SPY has no earnings date"}, None, None
     else:
@@ -342,14 +349,15 @@ def main() -> None:
     print(f"{len(folds)} folds x {len(exp.grid)} configs; first test {folds[0].test_month}, last "
           f"{folds[-1].test_month}", flush=True)
     wf = walk_forward(bars, ind, pol, rule, exp, folds, equity0=a.equity, min_train_trades=a.min_train_trades,
-                      hold_blk=hold, entry_blk=entry, end=a.end)
+                      hold_blk=hold, entry_blk=entry, end=a.end, costs=costs)
     trials_f = data / "trials.jsonl"
-    summary = summarize(wf, bars, ind, stocks, spy, a.equity, logged_trials(trials_f))
+    summary = summarize(wf, bars, ind, stocks, spy, a.equity, logged_trials(trials_f), costs=costs)
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
     rep = {
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"), "code_sha": code_sha, "set": "multiday",
-        "status": STATUS, "prereg_sha256": prereg_sha, "gate_v2_sha256": gate_sha,
+        "status": STATUS.format(costs=a.costs), "costs": a.costs, "prereg_sha256": prereg_sha,
+        "gate_v2_sha256": gate_sha,
         "experiment": a.rule, "experiment_what": exp.what, "fixed_setting": exp.fixed, "level": a.level,
         "universe": Path(a.universe).name, "start": a.start, "end": a.end,
         "grid_axes": {k: list(v) for k, v in exp.axes.items()}, "default_params": dict(exp.default.params),
@@ -391,7 +399,7 @@ def main() -> None:
                               "the whole account: read the bp-of-position columns")
     out = data / "reports"
     out.mkdir(parents=True, exist_ok=True)
-    tag = f"md_{a.rule}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
+    tag = f"md_{a.rule}{'' if a.costs == 'v1' else '_costs' + a.costs}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
     rep["files"] = {w: {"trades": f"trades_{a.level}_{tag}_{w}.csv", "daily": f"daily_{a.level}_{tag}_{w}.csv"}
                     for w in ("tuned", "default")}
     tdir = data / "trials"
@@ -409,7 +417,8 @@ def main() -> None:
             s = summary[which]
             fh.write(json.dumps({
                 "ts": rep["run_at"], "trial_id": tid, "strategy": a.rule, "variant": "multiday",
-                "label": f"multiday walkforward {which} {a.rule}", "level": a.level, "universe": rep["universe"],
+                "label": f"multiday walkforward {which} {a.rule}{'' if a.costs == 'v1' else ' costs ' + a.costs}",
+                "level": a.level, "cost_model": a.costs, "universe": rep["universe"],
                 "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": rep["input_sha256"],
                 "code_sha": code_sha, "n_trials": n_tr, "experiment": a.rule, "prereg_sha256": prereg_sha,
                 "gate_v2_sha256": gate_sha,

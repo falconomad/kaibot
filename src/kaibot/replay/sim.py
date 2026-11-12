@@ -4,6 +4,11 @@ Fill model (conservative, research 06): decide at the close of minute m, fill at
 ask/bid plus impact; stops fill at min(stop, bar open) as a market sell; targets fill only if the bar trades
 THROUGH the limit by a cent; time exit at the 15:55 close; if stop and target are both hit in one bar the stop
 wins. The agent room is NOT replayed (LLM lookahead), so this is the rules-only strategy.
+
+Costs: model v1 (`shadow_costs`) unless `run_portfolio(costs=get_model("v2"))` (issue #111, research opt-in). Under
+v2 every intraday fill is a continuous-session marketable order priced from the stock's 20-session ADV; the
+target stays a limit that fills when the bar trades through it by a cent (no fill-probability haircut here: the
+exit scan would have to continue past a missed target), and the bars are split-adjusted (audit E4 caveat).
 """
 
 from __future__ import annotations
@@ -14,6 +19,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from kaibot.broker.costs_v2 import CostModel, FillCtx
 from kaibot.broker.shadow_costs import buy_px, cost_parts, half_spread, sell_fees, sell_px  # noqa: F401
 from kaibot.replay.data import SymbolDays
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
@@ -51,6 +57,19 @@ class Book:
     equity: float
     trades: list[Trade] = field(default_factory=list)
     daily: list[dict] = field(default_factory=list)
+
+
+def adv20(sd: SymbolDays) -> np.ndarray:
+    """20-session average dollar volume per row of `sd`, from the sessions before it (NaN with < 15)."""
+    dv = pd.Series(np.nansum(sd.c * sd.v, axis=1))
+    return dv.rolling(20, min_periods=15).mean().shift(1).to_numpy()
+
+
+def v2_fill(model: CostModel, side: str, mid: float, qty: float, sigma: float, vol: float,
+            adv: float) -> tuple[float, float, float]:
+    """(fill price, half spread, impact) per share of a continuous marketable order under a protocol model."""
+    f = model.fill(side, FillCtx(float(mid), float(qty), float(sigma), float(vol), float(adv), "continuous"))
+    return f.price, f.half, f.impact
 
 
 def first_exit(h, l, o, c, start_m, stop, target):  # noqa: E741
@@ -100,12 +119,22 @@ def trail_exit_level(h, l, o, c, start_m, fill, risk_ps, atr, target_r=2.0, trai
 def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict, fomc: set, pol: RiskPolicy,
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
                   pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1",
-                  target_r: float | None = None, size_atr: float | None = None) -> Book:
+                  target_r: float | None = None, size_atr: float | None = None,
+                  costs: CostModel | None = None) -> Book:
     """`atr_mult` (stop = atr_mult x 5-minute ATR) and `target_r` (profit target in R; None = the variant's
     pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged.
     `size_atr` (experiments only, None = off) keeps the dollar risk of a stop `size_atr` ATRs away: the quantity
     is what the gate allows at that reference stop, scaled by size_atr / atr_mult, and never more than the gate
-    allows for the real stop."""
+    allows for the real stop. `costs`: None or v1 = the unchanged v1 path; v2 = `kaibot.broker.costs_v2`."""
+    v2 = None if costs is None or costs.name == "v1" else costs
+    advs: dict[str, np.ndarray] = {}
+
+    def adv_at(sym: str, r: int) -> float:
+        if sym not in advs:
+            advs[sym] = adv20(bars[sym])
+        return float(advs[sym][r])
+
+    fees_of = sell_fees if v2 is None else v2.sell_fees
     tr = target_r if target_r is not None else (2.0 if variant == "A" else 1.5)
     book = Book(equity0)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
@@ -144,12 +173,16 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 for p in open_pos:
                     sd, r = bars[p["symbol"]], row_of[p["symbol"]][d]
                     mid = float(sd.c[r, m])
-                    px = sell_px(mid, p["qty"], p["sigma"], sd.v[r, m])
-                    fees = sell_fees(p["qty"], px)
+                    if v2 is None:
+                        px = sell_px(mid, p["qty"], p["sigma"], sd.v[r, m])
+                        x_half, x_imp = cost_parts(mid, px)
+                    else:
+                        px, x_half, x_imp = v2_fill(v2, "sell", mid, p["qty"], p["sigma"], sd.v[r, m],
+                                                    adv_at(p["symbol"], r))
+                    fees = fees_of(p["qty"], px)
                     pnl = (px - p["fill"]) * p["qty"] - fees
                     realized += pnl
                     t = p["trade"]
-                    x_half, x_imp = cost_parts(mid, px)
                     e_half, e_imp = p["entry_costs"]
                     book.trades.append(Trade(t.symbol, t.date, t.entry_m, m, t.qty, t.entry, px, t.stop, t.target,
                                              "daily_stop", pnl, t.risk, (mid - p["mid"]) * t.qty,
@@ -191,7 +224,12 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                     continue
                 fm = m + 1
                 mid = float(sd.o[r, fm])
-                fill = buy_px(mid, qty, cnd["sigma_1m"], sd.v[r, fm])
+                if v2 is None:
+                    fill = buy_px(mid, qty, cnd["sigma_1m"], sd.v[r, fm])
+                    e_half, e_imp = cost_parts(mid, fill)
+                else:
+                    adv = adv_at(cnd["symbol"], r)
+                    fill, e_half, e_imp = v2_fill(v2, "buy", mid, qty, cnd["sigma_1m"], sd.v[r, fm], adv)
                 stop_f = fill - risk_ps
                 tgt_f = fill + (target - ref)
                 if variant == "A":
@@ -201,11 +239,15 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                 else:
                     xm, gross, why = first_exit(sd.h[r], sd.l[r], sd.o[r], sd.c[r], fm, stop_f, tgt_f)
                     level = stop_f if why == "stop" else gross
-                xp = gross if why == "target" else sell_px(gross, qty, cnd["sigma_1m"], sd.v[r, xm])
-                fees = sell_fees(qty, xp)
+                if why == "target":  # a target is a limit fill
+                    xp, x_half, x_imp = gross, 0.0, 0.0
+                elif v2 is None:
+                    xp = sell_px(gross, qty, cnd["sigma_1m"], sd.v[r, xm])
+                    x_half, x_imp = cost_parts(gross, xp)
+                else:
+                    xp, x_half, x_imp = v2_fill(v2, "sell", gross, qty, cnd["sigma_1m"], sd.v[r, xm], adv)
+                fees = fees_of(qty, xp)
                 pnl = (xp - fill) * qty - fees
-                e_half, e_imp = cost_parts(mid, fill)
-                x_half, x_imp = (0.0, 0.0) if why == "target" else cost_parts(gross, xp)  # a target is a limit fill
                 t = Trade(cnd["symbol"], d, fm, xm, qty, fill, xp, stop_f, tgt_f, why, pnl, risk_ps * qty,
                           (level - mid) * qty, (e_half + x_half) * qty, (e_imp + x_imp) * qty,
                           (level - gross) * qty, fees, float(vix))

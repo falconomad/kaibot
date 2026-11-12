@@ -813,7 +813,7 @@ def test_run_experiments_script_has_the_core_command_and_it_is_documented():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
     for needle in ('"${1:-}" = "core"', "trend_momentum mom_12_1_band mom_12_1_band_nofilter", "momentum_core.py",
                    "--summary", "--has", "KAIBOT_CORE_CONTROL_RUNS", "experiments_core_summary.md",
-                   "usage: $0 [multiday|core|core_pit]"):
+                   "usage: $0 [multiday|core|core_pit|spy]"):
         assert needle in sh
     assert sh.index('"${1:-}" = "core"') < sh.index("No .env found")  # the core set needs no .env
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "run_experiments.sh")]).returncode == 0

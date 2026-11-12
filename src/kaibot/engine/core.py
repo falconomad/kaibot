@@ -12,7 +12,8 @@ Safety:
 - The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds, and so
   does the account's own buying power (the smaller wins).
 - Fail closed (S16/S18): unknown open orders or positions, position drift against the broker, three loop errors
-  in a row, an event calendar that has run out, or three daily stops in ten sessions all stop new entries.
+  in a row, three entry orders in a row refused by the broker (S74), an event calendar that has run out, or three
+  daily stops in ten sessions all stop new entries.
   Nothing here ever adds risk: protection stays at the broker and exits keep being managed.
 """
 
@@ -22,12 +23,14 @@ import hashlib
 import json
 import logging
 import subprocess
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
+from kaibot.broker.alpaca import CANCEL_WAIT_S
 from kaibot.broker.protocol import Broker
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
@@ -52,6 +55,29 @@ PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
 MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
+# S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
+# candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
+# accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
+BROKER_REJECT_STATUS = (403, 422)
+MAX_REJECT_STREAK = 3
+FLATTEN_TRIES = 2  # a close the venue refused is tried once more inside the same flatten; the loop does the rest
+# S74 review (#142): one time limit for a whole flatten, retries included, well inside the watchdog's 90 s heartbeat
+# staleness window (watchdog.STALE_S). A close is only started while CLOSE_MAX_S is left: the adapter's own
+# bounded cancel wait (CANCEL_WAIT_S) plus its reads. What is left when the budget runs out is reported and retried
+# by the next loop pass, never dropped. The heartbeat is written between positions (Engine.on_progress).
+FLATTEN_BUDGET_S = 30.0
+CLOSE_MAX_S = CANCEL_WAIT_S + 3.0
+CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": already waited, so not retried at once
+
+
+class FlattenIncomplete(RuntimeError):
+    """flatten_all tried every position and some are still open. `left` is {symbol: why}; the message names the
+    symbols first, so they survive wherever the text is cut (heartbeat, engine_error event, halt reason)."""
+
+    def __init__(self, reason: str, left: dict[str, str]):
+        self.reason, self.left = reason, dict(left)
+        why = "; ".join(f"{s}: {w}" for s, w in left.items())
+        super().__init__(f"flatten ({reason}) incomplete, still open: {', '.join(left)} ({why})")
 
 
 def _fingerprint() -> str:
@@ -125,6 +151,9 @@ class Day:
     finalized: bool = False
     spy_mom_done: bool = False
     last_m: int = -1
+    done_m: int = -1  # S74: the last minute whose work completed (last_m: the last one started). See Engine.tick
+    scan_m: int = -1  # S74: the last 5-minute bar whose entry scan finished or acted; a retry never scans it again
+    rejects: int = 0  # S74: entry orders the broker refused in a row; an accepted order resets it
     events: list = field(default_factory=list)
     rules: Rules | None = None  # M5: the owner's config for this session (None before the open)
     refused: str | None = None  # M5: entries refused for this session only (invalid config); next day re-checks
@@ -178,6 +207,8 @@ class Engine:
         self.fingerprint = _fingerprint()  # S38: strategy-code hash; trades count toward the gate only on frozen code
         self.peak: float | None = None
         self.on_progress = lambda status: None
+        self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
+        self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -533,8 +564,13 @@ class Engine:
             return {"state": "idle", "account_clean": self.account_clean}
         self.market.update(now)
         m = self.market.last_complete_minute(now)
-        if m < 0 or m == d.last_m:
-            return self._status(m)
+        if m < 0 or m == d.done_m:
+            return self._status(m)  # this minute's work is complete: it is never run twice
+        # S74 (#114, audit D6): `last_m` says the minute was started, `done_m` that it was finished. A step below
+        # that raises leaves `done_m` behind, so the main loop's retry (about 10 s later) runs the minute again
+        # instead of getting "already done" and resetting the error streak. Every failed attempt therefore counts
+        # (on_tick_error) and a failure that recurs trips the kill switch. Each step is safe to run again, except
+        # an entry scan that has acted: `scan_m` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
         self._check_drift()
@@ -551,8 +587,9 @@ class Engine:
             self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
             self.roomflow.collect(m)
-        if (m - 4) % 5 == 0 and self._may_enter(m):
+        if (m - 4) % 5 == 0 and d.scan_m != m and self._may_enter(m):
             self._entries(m)
+            d.scan_m = m
         if m == spymom.ENTRY_M and not d.spy_mom_done and self._runs("spy_late_momentum") and d.n_min == 390:
             d.spy_mom_done = True  # one decision a day, whatever happens below
             if self._may_enter(m):
@@ -561,6 +598,7 @@ class Engine:
             self._moc_exits()
         self._ledger(eq)
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
+        d.done_m = m
         return self._status(m)
 
     def _maybe_prepare(self, clk: dict, now: datetime) -> None:
@@ -650,6 +688,10 @@ class Engine:
         return d.start_equity + d.realized_reported + unreal, unreal
 
     def _risk_halts(self, m: int, eq: float) -> None:
+        if self.run is None:
+            # S74b (#137): the run has ended (run drawdown) and its flatten is out; until the closes are booked the
+            # engine only manages them. Nothing to halt any more: a second pass wrote the halt again and raised.
+            return
         d, pol = self.day, self.policy()
         if not d.halted and eq <= d.start_equity * (1 - pol.max_daily_loss_pct / 100):
             self.flatten_all("daily_stop")
@@ -783,6 +825,11 @@ class Engine:
                     veto = "extra rules unavailable"
             if veto is not None:
                 sc["vetoed"][veto] = sc["vetoed"].get(veto, 0) + 1
+            # S74: from here on this bar's scan acts (a room session, a signal row, an order), so a retry of the
+            # minute must not scan it again: a second decision would write a new signal row and, with it, a new
+            # client order id (kb-<run>-<signal>-1) that the venue's duplicate check cannot recognise. A scan
+            # that failed before this line (features, quotes, the news lookup) has done nothing and is repeated.
+            self.day.scan_m = m
             rf = self.roomflow
             if veto is None and rf is not None:
                 mode = rf.mode(m)
@@ -873,7 +920,8 @@ class Engine:
         )
         if qty <= 0:
             return sig["id"], full_qty
-        self._open(s, qty, ref, stop, target, ref - stop, atr, sigma_1m, q, sig["id"], feats, strategy)
+        if not self._open(s, qty, ref, stop, target, ref - stop, atr, sigma_1m, q, sig["id"], feats, strategy):
+            return sig["id"], full_qty  # S74: the broker refused it (now on the signal); no entry, the scan goes on
         self._bp_added += qty * ref
         d.entries += 1
         return sig["id"], full_qty
@@ -895,17 +943,26 @@ class Engine:
             return {}
 
     def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats,
-              strategy: str = "dip_reversal") -> None:
+              strategy: str = "dip_reversal") -> bool:
+        """Send the entry and write its order and trade rows. False: the broker refused the order (S74)."""
         coid = f"kb-{self._rid()}-{signal_id}-1"
         bid, ask = float(quote.get("bp") or 0), float(quote.get("ap") or 0)
         if not (0 < bid <= ask):
             hs = half_spread(ref)
             bid, ask = ref - hs, ref + hs
         shadow_entry = shadow_fill_price("buy", qty, QuoteCtx(bid, ask, sigma, max(self.market.bar_volume(s), 1)))
-        if target is None:  # exit timed by the engine (MOC): stop only, still held at the broker
-            order = self.broker.submit_oto_stop(coid, s, qty, round(stop, 2))
-        else:
-            order = self.broker.submit_bracket(coid, s, qty, round(stop, 2), round(target, 2))
+        try:
+            if target is None:  # exit timed by the engine (MOC): stop only, still held at the broker
+                order = self.broker.submit_oto_stop(coid, s, qty, round(stop, 2))
+            else:
+                order = self.broker.submit_bracket(coid, s, qty, round(stop, 2), round(target, 2))
+        except Exception as e:
+            if not _order_refused(e):
+                raise  # network error, 5xx, anything unknown: the order may be at the venue. A loop error, as before
+            if self._broker_rejected(s, qty, coid, signal_id, feats, e):
+                raise  # it keeps happening: a loop error again, and entries are halted
+            return False
+        self.day.rejects = 0
         db_order = self.store.insert(
             "order",
             {
@@ -953,6 +1010,27 @@ class Engine:
         )
         p.trade_id = trade["id"]
         self.pos[s] = p
+        return True
+
+    def _broker_rejected(self, s: str, qty: int, coid: str, signal_id, feats: dict, err: Exception) -> bool:
+        """S74 (#114, audit D4): the venue refused this entry (403 / 422), so no order exists. The signal was
+        written as approved a moment ago: say on it that the broker rejected it and why, and take the approval
+        back, so nothing downstream (the tape, "setups taken", order adoption at the next start) counts it as an
+        entry. True when it was the MAX_REJECT_STREAK-th refusal in a row: entries halt for the session and the
+        caller raises it as a loop error again. The count is per session; an accepted order resets it."""
+        d = self.day
+        d.rejects += 1
+        status, reason = getattr(err, "status", None), _reject_reason(err)
+        log.warning("broker rejected the entry for %s (%s): %s", s, status, reason)
+        self.store.update("signal", {"id": signal_id}, {
+            "rules_veto": f"broker rejected: {reason}",
+            "features": {**feats, "broker_reject": {"status": status, "reason": reason, "qty": qty,
+                                                    "client_order_id": coid}}})
+        self.store.update("gate_run", {"signal_id": signal_id}, {"approved": False, "qty": 0})
+        if d.rejects < MAX_REJECT_STREAK:
+            return False
+        self._halt_entries("broker_rejects", f"{d.rejects} entry orders in a row rejected by the broker: {reason}")
+        return True
 
     # ================= order sync =================
     def _sync_orders(self) -> None:
@@ -1099,8 +1177,55 @@ class Engine:
             self._sync_orders()
 
     def flatten_all(self, reason: str) -> None:
-        for p in list(self.pos.values()):
-            self._exit(p, reason)
+        """Close every position, each one on its own (S74, #114, audit D7), inside one time limit.
+
+        A close that fails no longer stops the loop: the other positions still go out. A close the venue refused
+        (4xx, typically while a cancel is still pending) is tried again at once, FLATTEN_TRIES in all; not an
+        unreachable venue (the adapter has already retried it for about 30 s) nor a cancel the adapter already
+        waited CANCEL_WAIT_S for (409). The whole flatten, retries included, starts no close once less than
+        CLOSE_MAX_S of FLATTEN_BUDGET_S is left, and writes the heartbeat before each close, so a slow venue
+        cannot make the heartbeat go stale (watchdog, pg_cron dead-man). What is still open after that is logged
+        and raised as FlattenIncomplete, once every position was tried or the budget ran out. So no caller
+        carries on as if the book were flat (the session is not marked flattened, the halt is not written, the run
+        is not ended), and the caller's own retry comes back for the rest: the main loop runs the tick again about
+        10 s later, `_exit` skips the positions that already have an exit order, and the positions this flatten
+        could not close are tried after the others, so a few stuck ones cannot use up every budget."""
+        t0 = self.monotonic()
+        failed: dict[str, Exception | str] = {}
+        todo = sorted(self.pos.values(), key=lambda p: p.symbol in self._flatten_slow)  # stable: book order kept
+        for _ in range(FLATTEN_TRIES):
+            again = []
+            for k, p in enumerate(todo):
+                if self.monotonic() - t0 > FLATTEN_BUDGET_S - CLOSE_MAX_S:
+                    for q in todo[k:]:  # not attempted: reported, and the next loop pass starts with the others
+                        failed.setdefault(q.symbol, f"not tried: flatten time budget ({FLATTEN_BUDGET_S:g} s) used")
+                    again = []
+                    break
+                self._flatten_beat(reason, p.symbol, len(todo) - k)
+                try:
+                    self._exit(p, reason)
+                    failed.pop(p.symbol, None)
+                except Exception as e:  # one failed close must not stop the others
+                    log.warning("flatten (%s): closing %s failed: %s: %s", reason, p.symbol, type(e).__name__, e)
+                    failed[p.symbol] = e
+                    if _refused(e) and getattr(e, "status", None) != CANCEL_UNCONFIRMED:
+                        again.append(p)
+            todo = again
+            if not todo:
+                break
+        self._flatten_slow = {s for s, e in failed.items() if isinstance(e, Exception)}  # tried and failed
+        if failed:
+            left = {s: (f"{type(e).__name__}: {e}" if isinstance(e, Exception) else e)[:160] for s, e in failed.items()}
+            log.error("flatten (%s) incomplete after %.1f s, still open: %s", reason, self.monotonic() - t0, left)
+            cause = next((e for e in failed.values() if isinstance(e, Exception)), None)
+            raise FlattenIncomplete(reason, left) from cause
+
+    def _flatten_beat(self, reason: str, symbol: str, left: int) -> None:
+        """S74: the heartbeat between the closes of a flatten (the main loop writes it only after the tick)."""
+        try:
+            self.on_progress({"state": "flattening", "reason": reason, "closing": symbol, "left": left})
+        except Exception:  # a heartbeat that fails must not stop the flatten
+            log.exception("flatten heartbeat failed")
 
     # ================= bookkeeping =================
     def _ledger(self, eq: float) -> None:
@@ -1178,7 +1303,7 @@ class Engine:
 
     def _status(self, m: int) -> dict:
         d = self.day
-        return {
+        st = {
             "state": "trading" if self._may_enter(max(m, 0)) else "managing",
             "minute": m,
             "run_id": self._rid(),
@@ -1190,6 +1315,9 @@ class Engine:
             "code_sha": self.code,
             "scan": dict(d.scan) if d else None,
         }
+        if self.run is None and d is not None and d.run_id:
+            st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
+        return st
 
 
 def new_scan() -> dict:
@@ -1206,6 +1334,32 @@ def note_scan(sc: dict, m: int, checked: int, near: list, setups: int) -> None:
     sc["setups"] += int(setups)
     sc["near"] += len(near)
     sc["recent_near"] = (sc["recent_near"] + list(near))[-5:]
+
+
+def _refused(err: Exception) -> bool:
+    """S74: the venue answered and said no (HTTP 4xx), as opposed to not answering (network error, 5xx: the
+    adapter raises those without a 4xx status after its own retries)."""
+    status = getattr(err, "status", None)
+    return isinstance(status, int) and 400 <= status < 500
+
+
+def _order_refused(err: Exception) -> bool:
+    """S74: a 403 or 422 on an entry order: the venue refused it and no order exists. Told by the status the
+    adapter's error carries, so this does not depend on which adapter raised it. One 422 is not a refusal: "client
+    order id must be unique" says an order with our id IS at the venue (an earlier attempt got through and the
+    adapter could not read it back). That stays a loop error, and the next start adopts the order."""
+    body = str(getattr(err, "body", None) or err)
+    return getattr(err, "status", None) in BROKER_REJECT_STATUS and "client_order_id" not in body
+
+
+def _reject_reason(err: Exception) -> str:
+    """S74: the venue's own words for a refused order. Alpaca answers {"code": ..., "message": ...}."""
+    body = str(getattr(err, "body", None) or err)
+    try:
+        msg = json.loads(body).get("message")
+    except (ValueError, AttributeError):
+        msg = None
+    return str(msg or body)[:160]
 
 
 def _et():
