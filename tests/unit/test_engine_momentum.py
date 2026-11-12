@@ -120,8 +120,14 @@ def test_the_committed_fixture_is_the_generator_output(tmp_path):
     for f in sorted(tmp_path.rglob("*")):
         if f.is_file():
             g = FIXTURE / f.relative_to(tmp_path)
-            if f.suffix == ".parquet":
-                assert pq.read_table(g).to_pandas().equals(pq.read_table(f).to_pandas()), g
+            if f.suffix == ".parquet":  # floats to 1e-12: numpy builds may differ in the last bit
+                a, b = pq.read_table(g).to_pandas(), pq.read_table(f).to_pandas()
+                assert list(a.columns) == list(b.columns) and len(a) == len(b), g
+                for col in a.columns:
+                    if a[col].dtype.kind == "f":
+                        assert np.allclose(a[col], b[col], rtol=1e-12, atol=0, equal_nan=True), (g, col)
+                    else:
+                        assert (a[col] == b[col]).all(), (g, col)
             else:
                 assert g.read_text() == f.read_text(), g
 
@@ -348,18 +354,24 @@ def test_a_buy_above_the_cash_at_the_print_is_cut_the_same_way_in_both(monkeypat
 def test_logged_runs_from_before_an_amendment_stay_attributable_to_the_rule():
     """Prereg hash handling: every committed version of both files is today's file minus appended amendments, so
     Gate A accepts trial rows logged with an earlier hash and reports them; an edit of the text does not pass."""
+    import subprocess
+
     from kaibot.evaluation import prereg
 
+    shallow = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--is-shallow-repository"], capture_output=True,
+                             text=True).stdout.strip() == "true"
+    base = "# Pre-registration\n\n## 2. Frozen construction\n\nATR 20\n"
+    assert prereg.amended_only(base, base + "\n## Amendment 1 (12 Nov 2026)\n\nmore text\n")
+    assert not prereg.amended_only(base, base.replace("20", "14") + "\n## Amendment 1 (12 Nov 2026)\n\nx\n")
+    assert not prereg.amended_only(base, base + "\n## 8. A new section\n\nx\n")
+    if shallow:
+        pytest.skip("a shallow clone (CI) has no history of the pre-registrations")
     for rule in ("trend_momentum", "mom_12_1_band"):
         p = prereg.load(rule, ROOT)
         assert len(p.amendments) >= 3 and "Amendment 3" in p.amendments[2]
         assert p.first_committed_at < p.committed_at and len(p.versions) >= 4
         assert all(amended for _, _, amended in p.versions) and all(p.accepts(v) for v, _, _ in p.versions)
         assert p.versions[-1][0] == p.sha256 and not p.accepts("0" * 64)
-    base = "# Pre-registration\n\n## 2. Frozen construction\n\nATR 20\n"
-    assert prereg.amended_only(base, base + "\n## Amendment 1 (12 Nov 2026)\n\nmore text\n")
-    assert not prereg.amended_only(base, base.replace("20", "14") + "\n## Amendment 1 (12 Nov 2026)\n\nx\n")
-    assert not prereg.amended_only(base, base + "\n## 8. A new section\n\nx\n")
 
 
 # ---------------------------------------------------------------- 3. the venue's closing-auction rules
