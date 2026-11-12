@@ -11,9 +11,12 @@ fixture tests/fixtures/engine_spine. A live strategy trades alone at the level; 
 shadow mode next to no live rule (its signals and day-end counterfactuals are in the summary). Multi-day
 strategies need the ledger and the order manager (S77-S78) and are refused for now.
 
-Numbers from here are research until a pre-registration exists (docs/prereg/) and, until S77, read `pnl_venue`:
-the engine's reported P&L counts SimBroker's costs twice (review of #136, D4). Nothing is written anywhere but
-`--out`; no trial row is logged by this command.
+Numbers from here are research until a pre-registration exists (docs/prereg/), and read `pnl_venue`: the engine's
+reported P&L counts SimBroker's costs twice (review of #136, D4). The engine runs on the local journal
+(engine/journal.py, S77) in a temporary file, so the run is the same fold over the same entries as on paper, with
+the ledger's mark-to-market close per session in the summary. `--corporate-actions` books dividends and splits
+from the daily store (data/daily, docs/ops/daily_bars.md) for symbols held at an open. Nothing is written anywhere
+but `--out`; no trial row is logged by this command.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.engine.config import ROOT
-from kaibot.engine.memstore import MemoryStore
+from kaibot.engine.journal import Journal, JournalStore
 from kaibot.engine.runner import simulation
 from kaibot.replay.data import ET
 from kaibot.risk.profiles import load_profiles
@@ -60,7 +63,7 @@ def load_bars(directory: Path) -> dict:
 
 
 def run(strategy: str, *, level: str = "balanced", bars: Path = FIXTURE, days: list[str] | None = None,
-        cash: float = 100_000.0) -> dict:
+        cash: float = 100_000.0, corporate_actions=None) -> dict:
     strat = registry.get(strategy)
     if strat is None:
         raise SystemExit(f"unknown strategy {strategy!r}; registered: {', '.join(registry.names())}")
@@ -69,22 +72,25 @@ def run(strategy: str, *, level: str = "balanced", bars: Path = FIXTURE, days: l
     data = load_bars(Path(bars))
     days = days or data["days"]
     live = [strategy] if strat.mode is Mode.LIVE else []
-    store = MemoryStore()
     start = pd.Timestamp(f"{days[0]} 09:00", tz=ET).tz_convert(UTC).to_pydatetime() - timedelta(minutes=30)
     with tempfile.TemporaryDirectory() as tmp:
+        store = JournalStore(Journal(Path(tmp) / "journal.sqlite"))
         sim = simulation(data["frames"], data["sector_of"], data["market"], store=store, policies=load_profiles(),
                          start=start, cache_dir=Path(tmp), vix=data["vix"], fomc=data["fomc"], news=data["news"],
-                         cash=cash, strategies={lv: live for lv in load_profiles()})
+                         cash=cash, strategies={lv: live for lv in load_profiles()},
+                         corporate_actions=corporate_actions)
         sim.engine.shadow_only = (strategy,) if strat.mode is Mode.SHADOW else ()
         store.insert("command", {"kind": "new_run", "payload": {"amount_usd": cash, "level": level},
                                  "idempotency_key": "research", "applied_at": None})
         sim.engine.startup()
         sim.engine.apply_commands()
         log = sim.run(days, strict=False)
-    return summary(strategy, level, days, store, log)
+        out = summary(strategy, level, days, store, log)
+        store.journal.close()
+    return out
 
 
-def summary(strategy: str, level: str, days: list[str], store: MemoryStore, log) -> dict:
+def summary(strategy: str, level: str, days: list[str], store: JournalStore, log) -> dict:
     t = store.tables
     trades = [r for r in t.get("trade", []) if r["strategy"] == strategy]
     signals = [r for r in t.get("signal", []) if r["strategy"] == strategy]
@@ -99,6 +105,8 @@ def summary(strategy: str, level: str, days: list[str], store: MemoryStore, log)
         "pnl_venue_usd": round(sum(venue), 2),
         "shadow_counterfactual": {"n": len(cf), "pnl_usd": round(sum(c["pnl_usd"] for c in cf), 2)} if cf else None,
         "halts": [r["kind"] for r in t.get("halt", [])],
+        "equity": [{k: r[k] for k in ("session", "start_equity", "close_equity", "close_equity_venue", "cash",
+                                      "invested", "dividends")} for r in t.get("ledger_day", [])],
     }
 
 
@@ -109,13 +117,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bars", type=Path, default=FIXTURE)
     ap.add_argument("--days", nargs="*")
     ap.add_argument("--out", type=Path)
+    ap.add_argument("--corporate-actions", type=Path, metavar="DAILY_DIR",
+                    help="book dividends and splits from this daily store (e.g. data/daily)")
     ap.add_argument("--list", action="store_true", help="list the registered strategies")
     a = ap.parse_args(argv)
     if a.list or not a.strategy:
         for s in registry.STRATEGIES:
             print(f"{s.name:22} {s.mode:7} {s.holding:10} {'retired' if s.name in registry.RETIRED else ''}")
         return 0
-    rep = run(a.strategy, level=a.level, bars=a.bars, days=a.days)
+    ca = None
+    if a.corporate_actions:
+        from kaibot.replay.corporate_actions import daily_store_actions
+
+        ca = daily_store_actions(a.corporate_actions)
+    rep = run(a.strategy, level=a.level, bars=a.bars, days=a.days, corporate_actions=ca)
     text = json.dumps(rep, indent=1, sort_keys=True, default=str)
     if a.out:
         a.out.write_text(text + "\n")

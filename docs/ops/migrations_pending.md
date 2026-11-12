@@ -11,7 +11,7 @@ Owner: backend-quant. Last checked against main on 12 Nov 2026. Only the stakeho
   `public.kb_ticker_lists`, `public.kb_save_ticker_list`.
   Missing: the new `public.kb_apply_config` (the one that also runs `config_custom_check`) and
   `public.kb_delete_ticker_list`, plus the revoke/grant block at the end of the file that names it.
-- 0015, 0016: not applied. 0017 (PR #158) is not merged yet.
+- 0015, 0016, 0017, 0018: not applied.
 
 ## Apply in this order
 
@@ -23,7 +23,8 @@ run it again. Do not reorder them.
 | 1 | `migrations/0014_m5_custom_tickers.sql`, **lines 244-268 and 351-362 only** (`kb_apply_config`, `kb_delete_ticker_list`, the final revoke/grant) | Apply checks custom tickers again; owners can delete a saved list; the ticker RPCs get their grants | **Yes**: `delete from kaibot.config_draft` (inside `kb_apply_config`) and `delete from kaibot.ticker_list` (inside `kb_delete_ticker_list`). Both run only when the RPC is called, never at apply time |
 | 2 | `migrations/0015_m7_trial_registry.sql` (whole file) | Append-only `kaibot.trial_registry`: one row per research run, so every engine reads one trial count | **Yes**: `drop trigger if exists` (it re-creates the two append-only triggers) |
 | 3 | `migrations/0016_m7_strategy_registry.sql` (whole file) | `kaibot.strategy_registry`; SPY late momentum leaves Balanced and Hunter; `config_check` reads strategy names from the registry and keeps 0014's custom-ticker check | No: no delete, drop or truncate (the registry seed is an upsert) |
-| 4 | later: `migrations/0017_deadman_early_close.sql` (PR #158, once merged) | Off-box dead-man knows early closes and holidays (12:56 ET on early-close days, never on a holiday) | **Yes**: `cron.unschedule(...)` and `net.http_delete(...)` (the paper flatten call, only when the dead-man fires) |
+| 4 | `migrations/0017_deadman_early_close.sql` (whole file) | Off-box dead-man knows early closes and holidays (12:56 ET on early-close days, never on a holiday) | **Yes**: `cron.unschedule(...)` and `net.http_delete(...)` (the paper flatten call, only when the dead-man fires) |
+| 5 | `migrations/0018_m7_ledger.sql` (whole file; PR #160, once merged) | The ledger's tables (`ledger_day`, `ledger_position`), engine-assigned ids and `jseq` for idempotent replication from the local journal, `kb_report` start equity from the mark-to-market close, and `kb_book` / `kb_equity_series` for the multi-day dashboard | No: only `alter`, `add column if not exists`, `create ... if not exists` and `create or replace` |
 
 To get step 1 as one SQL text: `sed -n '244,268p;351,362p' migrations/0014_m5_custom_tickers.sql`.
 Running the whole 0014 file again instead is also safe (every statement is `if not exists` or `create or replace`),
@@ -45,11 +46,18 @@ select count(*) from pg_proc where proname = 'kb_delete_ticker_list';           
 select pg_get_functiondef('kaibot.config_check(text,jsonb)'::regprocedure) ~ 'config_check_strategies'
    and pg_get_functiondef('kaibot.config_check(text,jsonb)'::regprocedure) ~ 'focus.custom';         -- true
 select name, retired from kaibot.strategy_registry order by position;                              -- 4 rows
+-- step 5: the ledger tables exist and the replica can take the journal's ids
+select count(*) from pg_tables where schemaname = 'kaibot' and tablename in ('ledger_day', 'ledger_position'); -- 2
+select count(*) from information_schema.columns where table_schema = 'kaibot' and column_name = 'jseq';      -- 6
 -- QA-Ops follow-up from #156: an applied Balanced/Hunter config with dip off must be re-applied with dip on
 select run_id, version from kaibot.config c join kaibot.run r on r.id = c.run_id
  where c.status = 'applied' and r.level in ('balanced', 'aggressive')
    and c.body->'strategies'->>'dip_reversal' = 'false';                                             -- 0 rows
 ```
 
-The whole sequence (simulated production state, then steps 1-3, then step 3 again) was run on a scratch
-Postgres 16; `tests/test_config_sql.py` (SQL and Python validators agree on 1500 random configs) passed against it.
+Step 5 can wait: an engine on the #160 code without 0018 keeps writing the tables the dashboard reads today
+(database ids, no ledger tables; `python -m kaibot.engine --check` shows `"schema": "pre-0018"`). After applying
+it, restart the engine once to switch (docs/ops/ledger.md, "Migrations to apply").
+
+The whole sequence (simulated production state, then steps 1-5, then 0018 again) was run on a scratch
+Postgres 16 (0001-0013 with Supabase stubs: roles, `auth.users`, vault, `cron`/`net` stand-ins); `tests/test_config_sql.py` (SQL and Python validators agree on 1500 random configs) passed against it.

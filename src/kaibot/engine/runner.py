@@ -108,8 +108,9 @@ def simulation(frames: Mapping[str, pd.DataFrame], sector_of: Mapping[str, str],
                **engine_kw) -> Simulation:
     """The engine on a simulated venue and feed. `frames`: 1-minute bars per symbol (stocks, their sector ETFs
     and the market ETF); `start`: where simulated time begins (before the first session's open);
-    `cache_dir`: the market's history cache; `store`: the engine's store (an in-memory one in tests; the
-    journal of S77 later); `quote_age`: how old the synthetic quotes are when the engine reads them."""
+    `cache_dir`: the market's history cache; `store`: the engine's store (an in-memory one in tests, the
+    local journal in research: engine/journal.JournalStore); `quote_age`: how old the synthetic quotes are when
+    the engine reads them."""
     clock = SimClock(start)
     history = BarHistory(frames)
     data = HistoricalData(history, clock, news, quote_age)

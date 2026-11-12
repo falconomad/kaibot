@@ -30,8 +30,20 @@ class Store:
             "Content-Profile": "kaibot",
         }
 
+    attempts, timeout = 4, 20.0  # defaults for every call; `quick()` makes a copy that answers within seconds
+
+    def quick(self, timeout: float = 5.0) -> Store:
+        """The same store with one try and a short timeout, for reads and writes off the order path's critical
+        steps (commands, configs, the heartbeat): Supabase being down must cost seconds, not 87 s (audit H2)."""
+        q = object.__new__(Store)
+        q.__dict__.update(self.__dict__)
+        q.attempts, q.timeout = 1, timeout
+        return q
+
     def _call(self, method: str, path: str, params: dict | None = None, body: Any = None, prefer: str | None = None,
-              attempts: int = 4, timeout: float = 20):
+              attempts: int | None = None, timeout: float | None = None):
+        attempts = self.attempts if attempts is None else attempts
+        timeout = self.timeout if timeout is None else timeout
         url = f"{self.base}/{path}"
         if params:
             url += "?" + urllib.parse.urlencode(params, safe="(),.*:")

@@ -138,6 +138,7 @@ class SimBroker(BrokerBase):
         self.orders: dict[str, dict] = {}  # entry / standalone orders by id; exit legs are nested under "legs"
         self.pos: dict[str, dict] = {}
         self.fills: list[dict] = []
+        self.non_trade: list[dict] = []  # dividends and splits a test books on the account (Alpaca's shape)
         self.script = Script()
         self.ids = itertools.count(1)
         self._calendar = dict(calendar) if calendar is not None else None
@@ -210,10 +211,17 @@ class SimBroker(BrokerBase):
     def positions(self) -> dict[str, dict]:
         return dict(self.pos)
 
-    def activities(self, after: datetime | None = None) -> list[dict]:
+    def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
+        """Fills, plus the non-trade activities a test puts in `non_trade` (dividends, splits) of the types asked."""
+        rows = (list(self.fills) if "FILL" in types else []) + [
+            a for a in self.non_trade if a.get("activity_type") in types]
         if after is None:
-            return list(self.fills)
-        return [f for f in self.fills if datetime.fromisoformat(f["transaction_time"]) > after]
+            return rows
+        def when(f: dict) -> datetime:
+            t = datetime.fromisoformat(f.get("transaction_time") or f["date"])
+            return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+        return [f for f in rows if when(f) > after]
 
     # ================= orders: reads =================
     def open_orders(self) -> list[dict]:
