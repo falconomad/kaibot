@@ -386,6 +386,13 @@ class Engine:
                 p.fill, p.mid, p.last, p.hi_close, p.stop = (x / s for x in (p.fill, p.mid, p.last, p.hi_close,
                                                                               p.stop))
                 p.entry_costs = (p.entry_costs[0] / s, p.entry_costs[1] / s)
+        # Amendment 3 of the momentum pre-registrations: a fraction of a share left by a split is paid out in cash
+        # at the split-adjusted previous close (Alpaca's rule), with no cost; the whole shares stay held
+        for p in [p for p in self.pos.values() if self.split(i, p.j) != 1.0]:
+            frac = p.qty - math.floor(p.qty + 1e-9)
+            if frac > 1e-9:
+                self.sell(i, p.j, p.last, "cash_in_lieu", 1.0, qty=frac, costless=True)
+
     def adv(self, i: int, j: int) -> float:
         """20-session average dollar volume known before session i (NaN when unknown)."""
         a = self.ind.adv[i - 1, j] if i > 0 else math.nan

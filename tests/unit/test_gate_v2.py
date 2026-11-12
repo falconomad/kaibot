@@ -140,7 +140,8 @@ def test_a_rule_that_meets_every_mark_passes():
     assert rep["verdict"] == "pass" and rep["can_pass"] and not rep["provisional"]
     assert rep["gate_sha"] == GATE.sha and rep["prereg"]["sha256"] == "ab" * 32 and rep["gate"] == "B"
     assert rep["gate_a"] == {"preregistered": True, "not_retroactive": True, "neighbours_at_most": True,
-                             "committed_before_first_run": True, "unchanged_since_logged_runs": None}
+                             "committed_before_first_run": True, "unchanged_since_logged_runs": None,
+                             "amended_since_logged_runs": None}
     json.dumps(rep)  # JSON-ready as it is
 
 

@@ -285,6 +285,8 @@ class Engine:
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
         self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> registry.DEFAULT_LIVE
+        for names in self.strategies.values():  # #161: a multi-day rule never loads on the live path
+            registry.refuse_multi_day(names)
         # S76: which registered shadow strategies run (None = all of them; the research command picks one)
         self.shadow_only: tuple[str, ...] | None = None
         # S34: the agent room (None = rules-only). It can only veto or halve a candidate the rules approved.
