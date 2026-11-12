@@ -79,7 +79,7 @@ def by_id(remote, t):
 def test_before_0018_the_old_tables_keep_updating_with_the_database_ids(tmp_path):
     remote = PreRemote()
     path = tmp_path / "journal.sqlite"
-    st = JournalStore(Journal(path), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(path), remote, live=True)
     run = st.insert("run", {"amount_usd": 5000, "status": "running", "level": "balanced"})
     sig = st.insert("signal", {"run_id": run["id"], "symbol": "A", "mode": "live"})
     st.insert("gate_run", {"signal_id": sig["id"], "approved": True}, returning=False)
@@ -109,7 +109,7 @@ def test_before_0018_the_old_tables_keep_updating_with_the_database_ids(tmp_path
     assert st.tables["ledger_day"][0]["close_equity"] == 5004.2
 
     # the engine restarts (still no 0018): updates find the rows by their database ids
-    st2 = JournalStore(Journal(path), remote, id_base=LIVE_ID_BASE)
+    st2 = JournalStore(Journal(path), remote, live=True)
     st2.update("trade", {"id": trade["id"]}, {"exit_reason": "time", "pnl_usd": 4.2})
     st2.update("run", {"id": run["id"]}, {"status": "paused"})
     st2.update("gate_run", {"signal_id": sig["id"]}, {"approved": False})
@@ -124,7 +124,7 @@ def test_before_0018_the_old_tables_keep_updating_with_the_database_ids(tmp_path
 
 def test_the_schema_is_asked_once_and_waits_for_supabase(tmp_path):
     remote = PreRemote()
-    st = JournalStore(Journal(), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(), remote, live=True)
     st.insert("run", {"amount_usd": 5000, "status": "running", "level": "balanced"})
     rep = Replicator(st.journal, remote)
     remote.down = True
@@ -140,14 +140,14 @@ def test_the_schema_is_asked_once_and_waits_for_supabase(tmp_path):
 def test_after_0018_a_restart_switches_and_keeps_the_references_to_rows_sent_before(tmp_path):
     remote = PreRemote()
     path = tmp_path / "journal.sqlite"
-    st = JournalStore(Journal(path), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(path), remote, live=True)
     run = st.insert("run", {"amount_usd": 5000, "status": "running", "level": "balanced"})
     trade = st.insert("trade", {"run_id": run["id"], "symbol": "A", "qty": 3})
     assert Replicator(st.journal, remote).pump() == 2
     db_run = remote.tables["run"][0]["id"]
 
     remote.migrated = True  # the stakeholder applies 0018; the engine restarts
-    st2 = JournalStore(Journal(path), remote, id_base=LIVE_ID_BASE)
+    st2 = JournalStore(Journal(path), remote, live=True)
     sig = st2.insert("signal", {"run_id": run["id"], "symbol": "B", "mode": "live"})
     st2.insert("halt", {"run_id": run["id"], "kind": "drift", "reason": "x"}, returning=False)
     st2.update("trade", {"id": trade["id"]}, {"exit_reason": "stop"})
@@ -164,7 +164,7 @@ def test_after_0018_a_restart_switches_and_keeps_the_references_to_rows_sent_bef
 
 def test_a_whole_session_before_0018_reaches_the_tables_the_dashboard_reads(tmp_path):
     remote = PreRemote()
-    store = JournalStore(Journal(tmp_path / "journal.sqlite"), remote, id_base=LIVE_ID_BASE)
+    store = JournalStore(Journal(tmp_path / "journal.sqlite"), remote, live=True)
     remote.insert("command", {"kind": "new_run", "payload": {"amount_usd": 5000.0, "level": "balanced"},
                               "idempotency_key": "k1", "applied_at": None})
     eng, broker, clock, _ = build(tmp_path, calm(synth_frames()), D2, store=store, new_run=False)
@@ -263,7 +263,7 @@ def _engine_session_into(tmp_path, remote):
     fake = Remote()
     fake.insert("command", {"kind": "new_run", "payload": {"amount_usd": 5000.0, "level": "balanced"},
                             "idempotency_key": "k1", "applied_at": None})
-    store = JournalStore(Journal(tmp_path / "journal.sqlite"), fake, id_base=LIVE_ID_BASE)
+    store = JournalStore(Journal(tmp_path / "journal.sqlite"), fake, live=True)
     eng, broker, clock, _ = build(tmp_path, calm(synth_frames()), D2, store=store, new_run=False)
     offer(eng, D2)
     session(eng, broker, clock, D2)

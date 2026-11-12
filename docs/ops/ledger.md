@@ -33,8 +33,33 @@ yet; a position is only held over a close when the engine was off at 15:55.
 - The first start of a new journal copies the active run from Supabase (run, segments, trades, daily results,
   halts, the random baseline, the last 200 live signals with their gate runs and orders). If Supabase cannot be
   read then, the engine exits with **code 4** and trades nothing: it would not know its own open positions.
-- Engine-assigned ids start at 1,000,000,001 (run, signal, order, trade), far above what the database sequences
-  hand out, so nothing else that inserts rows can collide with them.
+- **Identity.** Each journal file gets a uuid and an epoch (1 .. 2^21-1, from the uuid) when it is created, stored
+  in its `meta` table. Its ids (run, signal, order, trade) and its `jseq` values are `epoch * 2^32 + n`: far above
+  the database sequences, never shared by two journals (a standby, a new machine, a recreated volume), and below
+  2^53 so the dashboard reads them exactly. The heartbeat carries `journal: {id, seq}`.
+- **Every start checks the journal is the newest one Supabase has seen** (after the lease and the bootstrap,
+  before anything else). It refuses, exit **code 4** with the reason, when:
+  - *stale standby*: the engine's last heartbeat, or (with 0018) the newest row of a `jseq` table, comes from
+    another journal this one never saw (it ran the engine after this file last did);
+  - *restored backup*: the heartbeat, or (with 0018) rows of this journal's own range, are beyond the end of the
+    file (an older copy, e.g. from the #121 backup).
+
+  Starting anyway would trade on old positions and reuse keys that Supabase then rejects.
+
+### Taking over (standby, new machine, restore)
+
+1. Stop the old engine (or make sure it is dead) and let its replica drain: on the old machine
+   `.venv/bin/python -m kaibot.engine.journal --status` shows `pending 0`. If the old machine is gone, its
+   unsent rows are lost to Supabase (its file still holds them).
+2. On the new machine, start with **no** `journal.sqlite` (move an old one aside, never delete it): the new
+   journal copies the active run from Supabase, records the journal it takes over from, and starts.
+3. Never bring the old file back into service: it refuses (stale standby). To return to the old machine, move its
+   file aside too and let it start a fresh journal.
+4. `--adopt-journal` (`python -m kaibot.engine --adopt-journal`, once) is only for when *this file* is the true
+   state and Supabase is the one that is wrong (e.g. rows written by a test against the production project, or a
+   restore you have checked against the broker). The journal then records what it saw as known, skips its
+   numbering past every key of its own found in Supabase, writes a `journal_adopted` event, and starts. Run
+   `--check` and compare the broker's positions first.
 - Tables read from Supabase (other writers own them): `command`, `config`, the trial registry, news, heartbeat,
   the lease. Reads use one try with a 5 s timeout and a 30 s breaker; with Supabase down, commands wait there and
   a session open refuses entries (the config cannot be read), while stops, management and the flatten carry on.
@@ -47,7 +72,14 @@ yet; a position is only held over a close when the engine was off at 15:55.
   pending, error}`.
 - Idempotent: the four referenced tables carry the engine's id; `segment`, `gate_run`, `fill`, `halt`, `event`
   and `gate_report` carry `jseq` (unique); `ledger`, `daily_result`, `gate_random`, `room_session`, `ledger_day`,
-  `ledger_position` have natural keys. "Duplicate key" counts as already sent.
+  `ledger_position` and `order.client_order_id` are natural keys.
+- **A "duplicate key" answer** (a retry after a lost answer) reads the stored row by the key Postgres names and
+  compares it with the row sent (numbers to the cent, times as instants, JSON by value). The same row: done (for
+  `order` before 0018, its database id is mapped, so later fills point at it). A different row, or none found:
+  a **conflict**: recorded in the journal (`replica_conflict`), counted in the heartbeat's
+  `replication.conflicts`, turned by the engine into a `replica_conflict` event and halt row (shown on the
+  dashboard), and replication goes on with the next entry. It never stops for good on one row. Trading is not
+  affected: the engine's state is the journal. Before and after 0018 alike.
 - Status: `.venv/bin/python -m kaibot.engine.journal --status`.
 - **Rebuild Supabase from the journal** (after a restore, or into a fresh project with the migrations applied):
   stop the engine, then `.venv/bin/python -m kaibot.engine.journal --rebuild`. Sends every row again; rows already
@@ -82,7 +114,13 @@ enough outage still lets them act on their own rules.
   `net_amount`; `SSP` splits). Alpaca does not document the fields of a split row, so the ratio is the broker's
   share count over the ledger's; without both the split is not booked and the drift check stops entries.
   A live dividend is booked when Alpaca pays it (the activity date), not on the ex-date: the mark-to-market close
-  shows the ex-date drop first and the cash later.
+  shows the ex-date drop first and the cash later. That is exact for intraday rules (nothing is held over an
+  ex-date, so nothing is ever paid). It is **not** right for a rule held across sessions: equity is understated
+  between ex-date and pay date, and a dividend paid after the sale finds no holder and is dropped (ledger cash
+  drifts from broker cash). So the engine refuses a multi-day live rule on live dividends
+  (`MultiDayDividendsError`, test `test_multi_day_holding_on_pay_date_dividends_is_refused_until_118`): #118 must
+  replace this guard with ex-date accrual (Alpaca corporate actions: ex-date, rate, pay date; accrue a receivable
+  at the ex-date for the holders at the previous close, settle it against the `DIV` activity on the pay date).
 - A split rescales the engine's position (shares, fill, stop, target) and says `split_booked`; re-creating the
   protective orders around the split is the order manager's job (S78).
 

@@ -19,24 +19,43 @@ from kaibot.engine.store import StoreError
 
 
 class Remote(FakeStore):
-    """Supabase that can be switched off. Inserts with an id or jseq already present fail as Postgres does."""
+    """Supabase that can be switched off. Inserts that clash on a unique key (id, jseq, the natural keys of
+    migrations 0001 / 0008) fail as PostgREST does. `lose` = n: the next n writes commit, then the answer is lost."""
+
+    UNIQUE = {"ledger": ("run_id", "ts"), "order": ("client_order_id",), "room_session": ("signal_id",),
+              "daily_result": ("run_id", "session")}
 
     def __init__(self):
         super().__init__()
         self.down = False
         self.calls = 0
+        self.lose = 0
 
     def _gate(self):
         self.calls += 1
         if self.down:
             raise StoreError("POST: <urlopen error [Errno 111] Connection refused>")
 
+    def _lost(self):
+        if self.lose:
+            self.lose -= 1
+            raise StoreError("POST: The read operation timed out")  # committed; the answer never came
+
     def insert(self, table, row, returning=True):
         self._gate()
-        for k in ("id", "jseq"):
-            if k in row and any(r.get(k) == row[k] for r in self.tables.get(table, [])):
-                raise StoreError(f"POST {table} -> 409: duplicate key value violates unique constraint (23505)")
-        return super().insert(table, row, returning)
+        for key in [("id",), ("jseq",), self.UNIQUE.get(table, ())]:
+            if key and all(k in row for k in key) and any(
+                    all(r.get(k) == row[k] for k in key) for r in self.tables.get(table, [])):
+                raise StoreError(f'POST {table} -> 409: {{"code":"23505","details":"Key ({", ".join(key)})=(...) '
+                                 f'already exists.","message":"duplicate key value violates unique constraint"}}')
+        out = super().insert(table, row, returning)
+        self._lost()
+        return out
+
+    def heartbeat(self, process, detail):
+        self._gate()
+        super().upsert("heartbeat", {"process": process, "detail": detail}, "process")
+        return super().heartbeat(process, detail)
 
     def update(self, table, match, values):
         self._gate()
@@ -48,15 +67,12 @@ class Remote(FakeStore):
 
     def select(self, table, params):
         self._gate()
-        return super().select(table, params)
+        return select_rows(self.tables.get(table, []), params)
 
     def pending_commands(self):
         self._gate()
         return super().pending_commands()
 
-    def heartbeat(self, process, detail):
-        self._gate()
-        return super().heartbeat(process, detail)
 
 
 def test_the_journal_is_append_only(tmp_path):
@@ -71,9 +87,9 @@ def test_the_journal_is_append_only(tmp_path):
 
 def test_state_is_a_fold_over_the_journal_and_survives_a_restart(tmp_path):
     path = tmp_path / "j.sqlite"
-    st = JournalStore(Journal(path), id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(path), live=True)
     run = st.insert("run", {"amount_usd": 5000, "status": "scheduled", "level": "balanced"})
-    assert run["id"] == LIVE_ID_BASE + 1
+    assert run["id"] == st.id_base + 1 > LIVE_ID_BASE
     sig = st.insert("signal", {"run_id": run["id"], "symbol": "A", "mode": "live"})
     t = st.insert("trade", {"run_id": run["id"], "signal_id": sig["id"], "symbol": "A", "qty": 3})
     st.update("trade", {"id": t["id"]}, {"exit_ts": "2026-11-12T20:00:00+00:00", "pnl_usd": 4.2})
@@ -82,10 +98,10 @@ def test_state_is_a_fold_over_the_journal_and_survives_a_restart(tmp_path):
     st.update("run", {"id": run["id"]}, {"status": "running"})
     st.journal.close()
 
-    again = JournalStore(Journal(path), id_base=LIVE_ID_BASE)
+    again = JournalStore(Journal(path), live=True)
     assert again.active_run()["status"] == "running"
     assert again.open_trades(run["id"]) == [] and again.run_realized(run["id"]) == pytest.approx(4.2)
-    assert again.insert("signal", {"run_id": run["id"], "symbol": "B"})["id"] == LIVE_ID_BASE + 4, "ids go on"
+    assert again.insert("signal", {"run_id": run["id"], "symbol": "B"})["id"] == st.id_base + 4, "ids go on"
     assert again.tables == {k: v for k, v in again.tables.items()}  # one copy, rebuilt from the file
 
 
@@ -99,7 +115,7 @@ def test_select_supports_the_filters_the_engine_uses():
 
 def test_replication_is_in_order_idempotent_and_survives_an_outage():
     remote = Remote()
-    st = JournalStore(Journal(), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(), remote, live=True)
     rep = Replicator(st.journal, remote)
     run = st.insert("run", {"amount_usd": 5000, "status": "running", "level": "balanced"})
     st.insert("halt", {"run_id": run["id"], "kind": "drift", "reason": "x"}, returning=False)
@@ -124,7 +140,7 @@ def test_replication_is_in_order_idempotent_and_survives_an_outage():
 
 def test_rebuild_into_an_empty_database_gives_the_same_rows():
     remote = Remote()
-    st = JournalStore(Journal(), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(), remote, live=True)
     run = st.insert("run", {"amount_usd": 5000, "status": "running", "level": "balanced"})
     sig = st.insert("signal", {"run_id": run["id"], "symbol": "A", "mode": "live"})
     st.insert("gate_run", {"signal_id": sig["id"], "approved": True}, returning=False)
@@ -142,7 +158,7 @@ def test_commands_wait_while_supabase_is_down_and_are_never_applied_twice():
     remote = Remote()
     remote.insert("command", {"kind": "pause", "payload": {}, "applied_at": None})
     clock = [0.0]
-    st = JournalStore(Journal(), remote, id_base=LIVE_ID_BASE, mono=lambda: clock[0])
+    st = JournalStore(Journal(), remote, live=True, mono=lambda: clock[0])
     cmds = st.pending_commands()
     assert [c["kind"] for c in cmds] == ["pause"]
     remote.down = True
@@ -160,7 +176,7 @@ def test_commands_wait_while_supabase_is_down_and_are_never_applied_twice():
 def test_dashboard_tables_are_read_from_supabase_and_engine_tables_locally():
     remote = Remote()
     remote.insert("config", {"run_id": 1, "status": "applied", "version": 2})
-    st = JournalStore(Journal(), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(), remote, live=True)
     assert st.select("config", {"run_id": "eq.1"})[0]["version"] == 2
     st.insert("trade", {"run_id": 1, "symbol": "A"})
     remote.down = True
@@ -176,7 +192,7 @@ def test_bootstrap_copies_the_active_run_once_and_needs_supabase_the_first_time(
     remote.insert("trade", {"run_id": run["id"], "signal_id": sig["id"], "symbol": "A", "qty": 3, "exit_ts": None})
     remote.insert("daily_result", {"run_id": run["id"], "session": "2026-11-11", "pnl_venue": 5, "pnl_shadow": 4})
     remote.insert("event", {"type": "x", "hash": "abc"})
-    st = JournalStore(Journal(), remote, id_base=LIVE_ID_BASE)
+    st = JournalStore(Journal(), remote, live=True)
     out = st.bootstrap()
     assert out["run_id"] == run["id"] and out["imported"] >= 4
     assert st.active_run()["id"] == run["id"] and len(st.open_trades(run["id"])) == 1
@@ -187,7 +203,7 @@ def test_bootstrap_copies_the_active_run_once_and_needs_supabase_the_first_time(
 
     remote.down = True
     with pytest.raises(BootstrapError, match="Not starting"):
-        JournalStore(Journal(), remote, id_base=LIVE_ID_BASE).bootstrap()
+        JournalStore(Journal(), remote, live=True).bootstrap()
 
 
 def test_heartbeat_never_raises_when_supabase_is_down():

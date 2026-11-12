@@ -59,7 +59,7 @@ from kaibot.evaluation import gate_report
 from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
 from kaibot.strategies import registry
-from kaibot.strategies.base import CloseOut, Context, Event, MoveStop, Strategy, due, new_scan, note_scan
+from kaibot.strategies.base import CloseOut, Context, Event, Holding, MoveStop, Strategy, due, new_scan, note_scan
 
 __all__ = ["Engine", "FlattenIncomplete", "new_scan", "note_scan"]  # the scan counters live in strategies/base.py
 
@@ -964,7 +964,17 @@ class Engine:
     def live_strategies(self) -> tuple[Strategy, ...]:
         """The registered live strategies this session runs, in registry order."""
         r = self.day.rules if self.day else None
-        return registry.live(r.strategies if r is not None else self.level_strategies())
+        strats = registry.live(r.strategies if r is not None else self.level_strategies())
+        held = [s.name for s in strats if s.holding is Holding.MULTI_DAY]
+        if held and self.corporate_actions is None:
+            # Guard for #118 (QA-Ops review of #117): live dividends are booked when Alpaca pays them (DIV
+            # activities, pay date) to the rules still holding the stock. Right for intraday rules, which never
+            # hold over an ex-date. A rule held over an ex-date needs the dividend accrued AT the ex-date (equity
+            # is understated until the pay date, and a dividend paid after the sale is lost). #118 replaces this.
+            raise MultiDayDividendsError(
+                f"{', '.join(held)} hold(s) across sessions, but live dividends are booked at the pay date: "
+                "multi-day holding needs ex-date dividend accrual first (#118)")
+        return strats
 
     def context(self, m: int, event: Event = Event.BAR_CLOSE, strategy: str | None = None) -> Context:
         """`strategy`: whose positions `has_position` asks about (S77: a rule sees its own book)."""
@@ -1253,11 +1263,17 @@ class Engine:
             if leg.get("type") == "limit":
                 p.target_order_id = leg["id"]
                 if abs(float(leg["limit_price"]) - p.target) >= 0.01:
-                    p.target_order_id = self.broker.replace_limit(leg["id"], round(p.target, 2))["id"]
+                    oid, px = leg["id"], round(p.target, 2)
+                    p.target_order_id = self._order(
+                        "replace_limit", lambda oid=oid, px=px: self.broker.replace_limit(oid, px),
+                        order_id=oid, symbol=p.symbol, coid=p.coid, price=px)["id"]
             elif leg.get("type") in ("stop", "stop_limit"):
                 p.stop_order_id = leg["id"]
                 if abs(float(leg["stop_price"]) - p.stop) >= 0.01:
-                    p.stop_order_id = self.broker.replace_stop(leg["id"], round(p.stop, 2))["id"]
+                    oid, px = leg["id"], round(p.stop, 2)
+                    p.stop_order_id = self._order(
+                        "replace_stop", lambda oid=oid, px=px: self.broker.replace_stop(oid, px),
+                        order_id=oid, symbol=p.symbol, coid=p.coid, price=px)["id"]
         self.store.insert(
             "fill",
             {
@@ -1680,6 +1696,10 @@ def _refused(err: Exception) -> bool:
     adapter raises those without a 4xx status after its own retries)."""
     status = getattr(err, "status", None)
     return isinstance(status, int) and 400 <= status < 500
+
+
+class MultiDayDividendsError(NotImplementedError):
+    """A multi-day rule on live dividends (pay date): the guard #118 must replace."""
 
 
 def _order_refused(err: Exception) -> bool:

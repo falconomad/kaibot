@@ -34,7 +34,7 @@ from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
 from kaibot.engine.events import load_calendar
-from kaibot.engine.journal import LIVE_ID_BASE, BootstrapError, Journal, JournalStore, Replicator, journal_path
+from kaibot.engine.journal import BootstrapError, IdentityError, Journal, JournalStore, Replicator, journal_path
 from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
 from kaibot.engine.m3glue import LockedDesk, make_pack_fn, make_rules_extra
 from kaibot.engine.market import LiveMarket
@@ -78,7 +78,7 @@ def build(settings: Settings) -> Engine:
     )
     remote = Store(settings.supabase_url, settings.supabase_service_key)
     # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
-    store = JournalStore(Journal(journal_path(settings.data_dir)), remote, id_base=LIVE_ID_BASE)
+    store = JournalStore(Journal(journal_path(settings.data_dir)), remote, live=True)
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
     gw = gateway_from_env(remote, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
@@ -100,10 +100,25 @@ def build(settings: Settings) -> Engine:
 EXIT_JOURNAL = 4
 
 
-def start_with_lease(eng: Engine, lease: EngineLease) -> None:
+def report_conflicts(eng: Engine, replicator: Replicator) -> None:
+    """Rows Supabase refused as duplicates that are not the engine's (B2 of the #117 review): replication went on;
+    each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local)."""
+    for c in replicator.take_conflicts():
+        with contextlib.suppress(Exception):
+            detail = {k: c[k] for k in ("seq", "table", "key", "reason")}
+            eng.store.event("replica_conflict", detail, eng._rid())
+            eng.store.insert("halt", {"run_id": eng._rid(), "kind": "replica_conflict",
+                                      "reason": f"Supabase holds another row for {c['table']} {c['key']}: "
+                                                "the journal keeps the engine's (docs/ops/ledger.md)"},
+                             returning=False)
+
+
+def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> None:
     """Take the cross-machine lease, then start the engine. Without the lease nothing else happens: no order
     adoption, no start event, no heartbeat. Exits with code 3 and a message that says what to do. With the lease,
-    a new journal first copies the active run from Supabase (S77); if it cannot, exit code 4."""
+    a new journal first copies the active run from Supabase (S77); if it cannot, exit code 4. Then the journal
+    must be the newest one Supabase has seen (not a stale standby, not a restored backup); if not, exit code 4
+    and the reason, unless `adopt_journal` (`--adopt-journal`, docs/ops/ledger.md)."""
     try:
         got = lease.acquire()
     except LeaseError as e:
@@ -117,8 +132,9 @@ def start_with_lease(eng: Engine, lease: EngineLease) -> None:
             eng.store.event("engine_lease_takeover", {"host": lease.host, "previous_host": got.get("previous_host")})
     if hasattr(eng.store, "bootstrap"):
         try:
-            out = eng.store.bootstrap()
-        except BootstrapError as e:
+            out = eng.store.bootstrap(eng.process)
+            eng.store.verify_identity(eng.process, adopt=adopt_journal)
+        except (BootstrapError, IdentityError) as e:
             log.error("%s", e)
             lease.release()
             raise SystemExit(EXIT_JOURNAL) from None
@@ -151,6 +167,8 @@ def make_beat(eng: Engine, lease: EngineLease, host: str, stop: dict):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true", help="verify keys and connectivity, then exit")
+    ap.add_argument("--adopt-journal", action="store_true",
+                    help="start even though Supabase has rows from another or a newer journal (docs/ops/ledger.md)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings.from_env()
@@ -201,7 +219,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
     host = socket.gethostname()
     lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host)
-    start_with_lease(eng, lease)
+    start_with_lease(eng, lease, adopt_journal=a.adopt_journal)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
     # Once, now: with 0018 the new tables; without it the pre-0018 ones (the dashboard keeps updating).
     # Supabase unreachable: asked again at the first pass that reaches it.
@@ -242,6 +260,7 @@ def main() -> None:
                 last_error = msg
                 with contextlib.suppress(Exception):
                     eng.store.event("engine_error", {"error": msg}, eng._rid())
+        report_conflicts(eng, replicator)
         status = {**status, "replication": replicator.status()} if isinstance(status, dict) else status
         beat(status)
         for _ in range(10):

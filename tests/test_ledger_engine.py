@@ -248,7 +248,7 @@ def test_a_run_from_before_the_ledger_is_imported_with_the_same_start_equity(tmp
 # ---------------------------------------------------------------- the drill (audit H2)
 def test_drill_supabase_unreachable_for_10_minutes_keeps_stops_and_the_flatten(tmp_path):
     remote = Remote()
-    store = JournalStore(Journal(tmp_path / "journal.sqlite"), remote, id_base=LIVE_ID_BASE)
+    store = JournalStore(Journal(tmp_path / "journal.sqlite"), remote, live=True)
     remote.insert("command", {"kind": "new_run", "payload": {"amount_usd": 5000.0, "level": "balanced"},
                               "idempotency_key": "k1", "applied_at": None})
     eng, broker, clock, _ = build(tmp_path, calm(synth_frames()), D2, store=store, new_run=False)
