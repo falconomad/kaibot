@@ -16,6 +16,11 @@
 #       (busy 2-CPU cloud machine: trend_momentum 4.5 min), not on the real data: about 15 minutes with the
 #       cache and the default 200 random runs per exposure cap, about 35 with KAIBOT_CORE_CONTROL_RUNS=500
 #       (what Gate B mark 3 asks for; a different number of runs is a new report, not a resume). Needs no .env.
+#   ./scripts/run_experiments.sh spy         issue #128: the SPY noise-band rule (long only, 1x) and its overnight
+#       carry, each ONE continuous account from 2017-05 on SPY minute bars, with cost scenarios, neighbours, the
+#       15:30 check and the live last-30-minutes trade beside it, then ONE table written to
+#       data/reports/experiments_spy_summary.md. Pre-registered in docs/prereg/spy_noise_band.md. Needs no .env.
+#       A few minutes (see docs/m0/reproduce.md section 8).
 # Resumable: an experiment whose report already exists for the same dates and universe is skipped, so after
 # Ctrl-C just run it again. Research only: reads the history under data/, never touches the engine or the broker.
 # Each run takes about as long as the baseline walk-forward (about 12 minutes), so allow about an hour in all.
@@ -55,6 +60,23 @@ if [ "${1:-}" = "core" ]; then  # reads only data/bars_1m, data/news and the dai
   "$PY" scripts/momentum_core.py --summary --level "$LEVEL"
   exit 0
 fi
+if [ "${1:-}" = "spy" ]; then  # reads only data/bars_1m/symbol=SPY: no .env needed
+  for v in spy_noise_band spy_noise_band_carry; do
+    if "$PY" scripts/spy_noise_band.py --has "$v" --level "$LEVEL" --start "$START" --end "$END"; then
+      echo "== $v: report exists, skipped"
+      continue
+    fi
+    echo "== $v: running (log: logs/experiment_spy_$v.log)"
+    awake "$PY" scripts/spy_noise_band.py --start "$START" --end "$END" --level "$LEVEL" --version "$v" \
+      > "logs/experiment_spy_$v.log" 2>&1 \
+      || { echo "$v failed: see logs/experiment_spy_$v.log, then run this again (finished ones are skipped)"
+           exit 1; }
+    tail -n 1 "logs/experiment_spy_$v.log"
+  done
+  echo
+  "$PY" scripts/spy_noise_band.py --summary --level "$LEVEL"
+  exit 0
+fi
 [ -f "$ENV_FILE" ] || { echo "No .env found at $ENV_FILE (set KAIBOT_ENV_FILE=/path/to/.env)"; exit 1; }
 
 if [ "${1:-}" = "multiday" ]; then
@@ -75,7 +97,7 @@ if [ "${1:-}" = "multiday" ]; then
   "$PY" scripts/experiments_summary.py --set multiday --level "$LEVEL"
   exit 0
 elif [ -n "${1:-}" ]; then
-  echo "usage: $0 [multiday|core]   (no argument: the variant A experiments of issue #109)"; exit 2
+  echo "usage: $0 [multiday|core|spy]   (no argument: the variant A experiments of issue #109)"; exit 2
 fi
 
 for exp in control mornings wide_stop high_vix mornings_wide_stop; do

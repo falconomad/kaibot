@@ -214,3 +214,41 @@ here can pass Gate B until S71, S83 and S84 have landed and the test is rerun.
   to the cash left on the fill day; the random control mirrors dates, entry counts, sizing and holding periods
   but its average exposure can differ from the rule's (it is printed beside it).
 - **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/core_balanced_<...>/trades_<...>.csv`.
+
+## 8. SPY noise band and the overnight carry (issue #128, decision 15 rules 3 and 4)
+One command on the Mac, from the repo root. Research only: it reads `data/bars_1m/symbol=SPY`, never the engine or
+the broker, and needs no `.env`. Every number is **PROVISIONAL**: a small SPY-only research routine
+(`kaibot.replay.spy_noise_band`, reusing the cost functions of `kaibot.replay.sim`), not the engine with
+`SimBroker`; SPY is price only and the close is the last regular-hours minute, not the auction.
+
+```
+./scripts/run_experiments.sh spy
+```
+
+- **What it runs:** `scripts/spy_noise_band.py --version <name>` for `spy_noise_band` (Zarattini, Aziz and Barbon's
+  published rule, long only, 1x: 14-day average absolute move from the open to each minute, upper band = max(open,
+  yesterday's close) x (1 + that move), checks at HH:00 and HH:30 from 10:00, long above the band, out below
+  max(band, VWAP) or at the close, every fill at the next bar's open) and `spy_noise_band_carry` (the same, but a
+  long open at the close is sold at the next open). Frozen and pre-registered in `docs/prereg/spy_noise_band.md`
+  (committed before the code; the run refuses to start without it and writes its hash into the report).
+- **No tuning:** each run is ONE continuous $100k account from 2017-05 to the end of the data. Cost scenarios: 0
+  (gross), 0.5, 1 and 2 bp a side (all-in) and cost model v1. Version 1 adds its five pre-declared neighbours
+  (10 / 20 / 30-day lookback, checks every 15 minutes, exit at 15:55), the round trips entered at the 15:30 check,
+  and a replay of the live last-30-minutes SPY trade (`kaibot.replay.spy_momentum`). Version 2 adds carry nights
+  against all other nights (SPY close to next open, mean and Welch t).
+- **Time (measured on synthetic SPY minute bars of the real size, 2,830 sessions 2016-01 to 2026-11, on a busy
+  shared 2-CPU cloud machine; not measured on the real data):** about 30 seconds for both versions and the table
+  (about 5 seconds of each version is loading the minute bars). Allow 1 to 2 minutes on the Mac; more if the
+  stored files carry many extended-hours bars, which the loader reads and drops.
+- **Resumable:** a version with a finished report for the same dates is skipped. Logs are in
+  `logs/experiment_spy_<version>.log`.
+- **Output:** ONE table printed and written to `data/reports/experiments_spy_summary.md`: per version and cost
+  scenario the round trips, net and gross bp per round trip with t, hit rate, total return, CAGR, Sharpe (daily
+  mark-to-market, 50% haircut beside it), maximum drawdown, share of sessions invested, each calendar year, the
+  June 2022-July 2023 result and the break-even cost a side (per round trip and for the whole account); the
+  neighbours, the 15:30-check round trips, the live trade and SPY buy-and-hold beside it. Under the table: the
+  seven pre-registered pass marks as pass or fail, carry nights against other nights, and the pre-declared
+  statement whether the live last-30-minutes trade is absorbed, retired or neither yet.
+- **Files:** `data/reports/spy_balanced_<version>_<ts>.json` and one trades and one daily CSV per run in the folder
+  of the same name. Every run is a row in `data/trials.jsonl`; a configuration counts once (`n_trials` 1 at 0.5 bp a
+  side, 0 for the other cost scenarios).
