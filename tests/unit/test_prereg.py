@@ -79,7 +79,7 @@ def test_a_complete_file_gives_its_sha256(tmp_path: Path):
     (lambda t: re.sub(r"(## Hypothesis\n\n).*?(?=\n## )", r"\1", t, flags=re.S), "hypothesis"),
     (lambda t: t.replace("- **Rule:** `my_rule`", "- **Rule:** `another_rule`"), "'Rule' line"),
     (lambda t: t.replace("- **Status:** pre-registered", "- **Status:** draft"), "'Status' must be"),
-    (lambda t: t.replace("- **Date:** 2026-11-12", "- **Date:** next week"), "'Date' must be"),
+    (lambda t: t.replace("- **Date:** 2026-11-12", "- **Date:** next week"), "'Date' must"),
 ])
 def test_an_incomplete_file_is_refused_with_the_reason(tmp_path: Path, change, message):
     put(tmp_path, "my_rule", change(filled()))
@@ -154,3 +154,84 @@ def test_the_template_names_every_section_the_checker_wants():
         assert f"## {start}" in text
     assert "- **status:** pre-registered" in text and "<<rule_name>>" in text
     assert {"TEMPLATE", *FIRST_LOOK} <= {p.stem for p in (ROOT / "docs" / "prereg").glob("*.md")}
+
+
+# ---------------------------------------------------------------- the long numbered layout (#127)
+
+LONG = """# Pre-registration: `my_rule` (a rule, rule 9 of decision 15)
+
+- **Date:** 12 November 2026. Committed before any code that runs this rule (issue #127).
+- **Status of every result from this document:** PROVISIONAL.
+
+## 1. Hypothesis, and who is on the other side
+
+Winners keep winning for some weeks.
+
+The other side of the trade: investors who sell winners too early.
+
+Sources: `docs/research/engine_v3/report.md` section 2.
+
+## 2. Frozen construction (not tuned; published settings)
+
+| Part | Setting |
+|---|---|
+| Score | 90-session slope |
+
+### Choices where the published rule is silent
+
+1. Weekly on Wednesday.
+
+## 3. Neighbours for the plateau check (declared now; each must pass mark 1)
+
+| Neighbour | Change from the frozen rule |
+|---|---|
+{rows}
+
+## 4. Fill model
+
+Close of T+1, half a spread a side.
+
+## 7. Pass marks (Gate B of decision 15, section 7, copied)
+
+All of the marks of config/gate_v2.yaml.
+"""
+
+
+def long_layout(n: int = 5) -> str:
+    return LONG.replace("{rows}", "\n".join(f"| `nb{i}` | one step |" for i in range(n)))
+
+
+def test_the_long_numbered_layout_is_accepted(tmp_path: Path):
+    put(tmp_path, "my_rule", long_layout())
+    p = prereg.load("my_rule", tmp_path, committed=False)
+    assert (p.status, p.date.isoformat()) == ("pre-registered", "2026-11-12")
+    assert p.neighbours == ("nb0", "nb1", "nb2", "nb3", "nb4")  # the table, without its header
+    assert set(p.sections) == set(prereg.SECTIONS)
+    assert "docs/research/" in p.sections["evidence"] and "Wednesday" in p.sections["settings"]
+
+
+@pytest.mark.parametrize(("change", "message"), [
+    (lambda t: t.replace("`my_rule`", "`other_rule`", 1), "'Rule' line"),
+    (lambda t: t.replace("Sources: `docs/research/engine_v3/report.md` section 2.", ""), "published evidence"),
+    (lambda t: t.replace("## 4. Fill model", "## 4. Orders"), "fill model"),
+    (lambda t: t.replace("12 November 2026", "mid-November"), "'Date' must"),
+])
+def test_the_long_layout_is_checked_as_strictly(tmp_path: Path, change, message):
+    put(tmp_path, "my_rule", change(long_layout()))
+    with pytest.raises(PreregError, match=message):
+        prereg.require("my_rule", tmp_path, committed=False)
+
+
+def test_a_neighbour_table_counts_towards_the_five(tmp_path: Path):
+    put(tmp_path, "my_rule", long_layout(6))
+    with pytest.raises(PreregError, match="6 neighbours; at most 5"):
+        prereg.require("my_rule", tmp_path, committed=False)
+
+
+@pytest.mark.parametrize("rule", sorted(p.stem for p in (ROOT / "docs" / "prereg").glob("*.md")
+                                        if p.stem != "TEMPLATE"))
+def test_every_committed_pre_registration_is_readable(rule: str):
+    p = prereg.load(rule, ROOT, committed=False)
+    assert p.rule == rule and len(p.sha256) == 64 and set(p.sections) == set(prereg.SECTIONS)
+    if not p.retroactive:
+        assert len(p.neighbours) <= prereg.MAX_NEIGHBOURS

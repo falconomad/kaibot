@@ -22,7 +22,7 @@ create table if not exists kaibot.trial_registry (
   trial_id   text        not null unique check (length(trial_id) between 1 and 300),
   ts         timestamptz,                                         -- when the run happened (research machine)
   strategy   text        not null check (length(strategy) between 1 and 200),
-  n_trials   integer     not null default 1 check (n_trials >= 1),  -- configurations this run searched
+  n_trials   integer     not null default 1 check (n_trials >= 0),  -- configurations this run searched (0: a report of one counted elsewhere)
   "row"      jsonb       not null                                 -- the registry row as written to the file
 );
 create index if not exists trial_registry_strategy on kaibot.trial_registry (strategy);

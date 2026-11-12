@@ -19,7 +19,7 @@ changed mark is visible. Changing a mark needs a decision in `docs/decisions/` f
 3. The walk-forward calls `prereg.require(rule)` before anything else. That call fails with a plain message
    while the file is missing, unfinished or not committed; otherwise it returns the file's sha256, which is
    logged with the run. Any later edit changes the hash. (The function is built and tested; putting the call
-   into `scripts/walk_forward_multiday.py` is hand-off 1 below.)
+   into `scripts/momentum_core.py` and `scripts/walk_forward_multiday.py` is hand-off 1 below.)
 
 A file written after the first run is marked `Status: retroactive`. The run is still logged, but such a rule
 can never pass Gate B. The four first-look rules of #113 are in this state. The same holds when a run was
@@ -145,21 +145,42 @@ to `fingerprint.strategies` when it gets its own file. The engine still logs one
 
 ## Hand-offs for Backend-quant
 
-1. **Pre-registration in the walk-forward** (`scripts/walk_forward_multiday.py`, one line after
-   `a = ap.parse_args()`): `prereg_sha = prereg.require(a.rule)`. Then add `"prereg_sha256": prereg_sha` and
-   `"gate_v2_sha256": GateV2.load(ROOT).sha` to the report and to both trial rows. Gate B judges a rule with
-   frozen settings, so the report is run on the fixed account (the `_default` files), not on the account that
-   re-tunes every month.
+1. **Pre-registration in the runners.** `scripts/momentum_core.py` (#127) has its own `prereg(rule)` that hashes
+   the file but does not check that it is committed. Take the hash from `prereg.require(rule)` instead (the same
+   sha256, plus the refusal while the file is unfinished or has uncommitted edits), and exit with the
+   `PreregError` message. Do the same in
+   `scripts/walk_forward_multiday.py`, one line after `a = ap.parse_args()`. Add `"gate_v2_sha256":
+   GateV2.load(ROOT).sha` to the report and to every trial row. Both #127 files load with the checker as they
+   are (`tests/unit/test_prereg.py::test_every_committed_pre_registration_is_readable`).
 2. **Daily costs.** Add to each `book.daily` row the dollars of spread, impact and fees charged that session
    (`cost`) and the dollars bought plus sold (`traded`). Until then `gate_v2_report.py` spreads each trade's
    costs over its entry and exit day, which is exact in total and approximate in timing.
 3. **SPY per session** as a CSV (`date`, `ret`) for the test window; total return once S84 lands.
-4. **Random control.** Build the schedule from the trades: `Slot(entry=bars.index_from(t.date),
-   hold=t.hold_days, weight=t.qty * t.entry / t.equity)`. `eligible(i)` is the rule's own price and liquidity
-   filter on row `i - 1`. `simulate(selection)` runs `multiday.Engine` with a small rule whose `at_open` enters
-   the slot's name with `max_hold=slot.hold` and `max_value_pct=slot.weight * 100`, and returns `pnl / start`
-   per session. Pass the rule's own names as `strategy_selection`: if their simulated Sharpe is far from the
-   real one, the replay rule does not match the engine.
+4. **Random control: switch `multiday_core.matched_random_control` to the exposure-matched control.** Today it
+   keeps the entry dates and the number of entries per date, draws each holding period independently from the
+   rule's distribution, and sizes each random name with the rule's own ATR formula. So the random books carry a
+   different exposure from the rule's on most days, and their Sharpe is not comparable (amendment 1 of both
+   #127 pre-registrations: the Sharpe percentile, 73 to 90 on real data against the 90 mark, is provisional).
+   The switch, inside that one function (its docstring already names it):
+   - **Schedule.** One `random_control.Slot` per position the rule opened (resize rows are not slots):
+     `entry` = the session index of the entry fill, `hold` = `t.hold_days`, `weight` = the position's value
+     at entry over the account's equity at that close. The k-th random name inherits slot k whole: same entry
+     day, same exit day, same money at work.
+   - **Resizes** (`trend_momentum` resizes weekly). Keep, per slot, the rule's own resize prints as
+     `(session, value / equity)`. The control's replay rule sets the random name to that same share of equity
+     on those sessions. `random_control` never sees this: it lives in the `simulate` closure.
+   - **`eligible(i)`**: the harness's universe filter on row `i - 1` (price >= $5, 20-day dollar volume >=
+     $50M). Not the rule's own score or trend filter: those are the skill being tested.
+   - **`simulate(selection)`**: run `Engine` with a replay rule that enters `selection[k]` at the slot's fill
+     (same fill model, costs and caps as the rule's run), resizes as above and exits on the slot's exit day;
+     return `pnl / start` per session.
+   - Call `random_control.matched_random_control(rule_returns, schedule, eligible, simulate, runs=500,
+     seed=127, strategy_selection=<the rule's own name ids per slot>)`. The rule's names through `simulate`
+     must reproduce its Sharpe closely; if not, the replay rule is wrong. `evaluate_gate_b` counts the lower of
+     the two percentiles. `result.matched` is false when a slot found no free eligible name; then mark 3 is
+     not judged.
+   - Keep today's entries-matched numbers in the report as a diagnostic, labelled as such; feed the new
+     `ControlResult.to_dict()` to `gate_v2_report.py --random`.
 5. **A point-in-time run** (S83) labelled `universe="point_in_time"`, for mark 5.
 6. **Gate C inputs** (S93): the rule's live daily mark-to-market returns from the ledger, the `SimBroker`
    replay of the same days, and one ledger-equals-broker flag per session.
@@ -184,3 +205,8 @@ Each was implemented in its strictest reading. None can let a rule pass that sho
    the live record. None of these is in the decision.
 8. **Trial count:** all rules together, a tuned walk-forward counting grid size times folds (the reading
    behind the decision's 8,286). The deflated Sharpe is shown, it is not a pass mark.
+9. **Reports of one configuration.** A row with `n_trials: 0` counts nothing: `momentum_core.py` logs the 2x
+   and 3x cost runs, the stress fill and the 0x break-even input that way, as reports of the base run. The
+   exposure caps and the earnings versions do count, one configuration each.
+10. **"Same universe, liquidity filter" in mark 3** is read as the harness's price and dollar-volume filter,
+   not the rule's own trend or score filters. Exposure is matched per position, resizes included.

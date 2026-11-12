@@ -13,6 +13,12 @@ and it logs that hash with the trial row and the report. It fails when the file 
 placeholders (`<<...>>`), lacks a section, names more than five neighbours, or (in a git checkout) is not
 committed exactly as it is on disk. The hash is of the committed file, so any later edit shows.
 
+Two layouts are accepted. The template's (a `Rule`/`Status`/`Date` list, one heading per section) and the
+long numbered layout of `docs/prereg/trend_momentum.md` (the rule in the title, "## 1. Hypothesis, and who is
+on the other side", "## 2. Frozen construction", neighbours as a table, sources inside section 1, a date like
+"12 November 2026"). A heading may cover several sections. A file without a `Status` line counts as
+pre-registered.
+
 A pre-registration written AFTER the first run is marked `Status: retroactive`. `require` accepts it (the run
 is logged with its hash) and `Prereg.retroactive` is true: gate v2 never lets such a rule pass Gate B.
 """
@@ -29,7 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 PREREG_DIR = Path("docs") / "prereg"
 MAX_NEIGHBOURS = 5
-SECTIONS = {  # key -> how the heading starts (case-insensitive)
+SECTIONS = {  # key -> the name used in messages (the template's heading)
     "hypothesis": "hypothesis",
     "other_side": "who is on the other side",
     "evidence": "published evidence",
@@ -38,6 +44,18 @@ SECTIONS = {  # key -> how the heading starts (case-insensitive)
     "fill_model": "fill model",
     "pass_marks": "pass marks",
 }
+_ALIASES = {  # key -> what a heading may contain (case-insensitive, after a leading "1." is dropped)
+    "hypothesis": ("hypothesis",),
+    "other_side": ("other side",),
+    "evidence": ("published evidence", "evidence"),
+    "settings": ("frozen settings", "frozen construction"),
+    "neighbours": ("neighbours", "neighbors"),
+    "fill_model": ("fill model",),
+    "pass_marks": ("pass marks",),
+}
+_SOURCES = re.compile(r"^(?:Sources?:|Source of the construction:).*?(?=\n\s*\n|\Z)", re.M | re.S)
+_TITLE_RULE = re.compile(r"^#\s+Pre-registration:\s*`?(?P<rule>[a-z][a-z0-9_]*)`?", re.M)
+_TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$", re.M)
 _PLACEHOLDER = re.compile(r"<<.*?>>|<<|>>", re.S)
 _FIELD = re.compile(r"^\s*[-*]\s*\*\*(?P<key>[^:*]+):\*\*\s*(?P<value>.*?)\s*$", re.M)
 _ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?P<item>.+?)\s*$", re.M)
@@ -78,14 +96,26 @@ def _sections(text: str) -> dict[str, str]:
     out: dict[str, str] = {}
     parts = re.split(r"^##\s+(.+?)\s*$", text, flags=re.M)
     for title, body in zip(parts[1::2], parts[2::2], strict=False):
-        for key, start in SECTIONS.items():
-            if title.strip().lower().startswith(start):
+        head = re.sub(r"^\d+[.)]?\s*", "", title.strip().lower())
+        for key, aliases in _ALIASES.items():
+            if key not in out and any(a in head for a in aliases):
                 out[key] = body.strip()
+    if not out.get("evidence"):  # long layout: the sources are a paragraph of the hypothesis section
+        found = [m.group(0) for b in out.values() for m in _SOURCES.finditer(b) if "docs/research/" in m.group(0)]
+        if found:
+            out["evidence"] = "\n\n".join(found)
     return out
 
 
 def _neighbour_names(body: str) -> tuple[str, ...]:
     names = []
+    rows = [m.group("cells") for m in _TABLE_ROW.finditer(body)]
+    for cells in rows[1:]:  # a table: the first row is the header; a row of dashes separates it
+        first = cells.split("|")[0].strip()
+        if not first or set(first) <= set("-: "):
+            continue
+        tick = re.match(r"`([^`]+)`", first)
+        names.append(tick.group(1) if tick else first)
     for m in _ITEM.finditer(body):
         item = m.group("item")
         if item.lower().startswith("none"):  # "- none": the rule has no neighbours
@@ -120,6 +150,18 @@ def _check_committed(path: Path, root: Path) -> datetime:
     return datetime.fromisoformat(when)
 
 
+def _date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        pass
+    m = re.match(r"\s*(\d{1,2} [A-Za-z]+ \d{4})", value)
+    try:
+        return datetime.strptime(m.group(1), "%d %B %Y").date() if m else None
+    except ValueError:
+        return None
+
+
 def load(rule: str, root: Path | str | None = None, *, committed: bool = True) -> Prereg:
     """Read and check `docs/prereg/<rule>.md`. Raises PreregError with what is wrong and how to fix it."""
     root = Path(root or ROOT)
@@ -138,6 +180,10 @@ def load(rule: str, root: Path | str | None = None, *, committed: bool = True) -
         raise PreregError(f"{rel} still has {len(left)} template placeholder(s), e.g. {shown}. Replace every "
                           "<<...>> with the rule's own text before the first run.")
     fields = {m.group("key").strip().lower(): m.group("value").strip().strip("`") for m in _FIELD.finditer(text)}
+    if "rule" not in fields and (title := _TITLE_RULE.search(text)):
+        fields["rule"] = title.group("rule")
+    if "status" not in fields:  # the long layout has no Status line: it is written before the first run
+        fields["status"] = "pre-registered"
     if fields.get("rule") != rule:
         raise PreregError(f"{rel}: the 'Rule' line says {fields.get('rule')!r}, the file is for '{rule}'.")
     status = (fields.get("status") or "").lower()
@@ -148,10 +194,10 @@ def load(rule: str, root: Path | str | None = None, *, committed: bool = True) -
     else:
         raise PreregError(f"{rel}: 'Status' must be 'pre-registered' or 'retroactive', not "
                           f"{fields.get('status')!r}.")
-    try:
-        when = date.fromisoformat((fields.get("date") or "")[:10])
-    except ValueError:
-        raise PreregError(f"{rel}: 'Date' must be a date like 2026-11-12, not {fields.get('date')!r}.") from None
+    when = _date(fields.get("date") or "")
+    if when is None:
+        raise PreregError(f"{rel}: 'Date' must start with a date like 2026-11-12 or 12 November 2026, not "
+                          f"{fields.get('date')!r}.")
     sections = _sections(text)
     missing = [start for key, start in SECTIONS.items() if not sections.get(key)]
     if missing:

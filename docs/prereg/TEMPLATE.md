@@ -7,6 +7,11 @@ How to use this template (decision 15, sections 5 and 7, Gate A):
 3. Commit the file BEFORE the rule's first run. The walk-forward calls kaibot.evaluation.prereg.require(rule),
    which refuses to run while the file is missing, unfinished or uncommitted, and logs the file's sha256.
 4. Do not edit the file after the first run. A change is a new rule under a new name, with its own file.
+   An amendment written before any run on real data goes at the end ("## Amendment 1") and changes the hash.
+5. The long numbered layout of docs/prereg/trend_momentum.md is accepted too: the rule in backticks in the
+   title, a date like "12 November 2026", combined headings ("## 1. Hypothesis, and who is on the other side",
+   "## 2. Frozen construction"), neighbours as a table, and a "Sources:" paragraph pointing to docs/research/.
+   Without a Status line the file counts as pre-registered.
 -->
 
 - **Rule:** `<<rule_name>>`

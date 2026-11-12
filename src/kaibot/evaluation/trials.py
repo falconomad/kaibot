@@ -49,7 +49,11 @@ SQRT_252 = math.sqrt(252)
 
 
 def configurations_of(row: Mapping[str, Any]) -> int:
-    """Configurations one registry row stands for: its `n_trials` when that is a whole number >= 1, else 1."""
+    """Configurations one registry row stands for: its `n_trials` when that is a whole number >= 0, else 1.
+
+    0 is a run that searched nothing new: a report of a configuration counted in another row, such as the same
+    frozen rule at 2x costs or under the stress fill (`scripts/momentum_core.py` logs those with 0). Anything
+    unreadable or negative counts as 1, never less than the run itself."""
     v = row.get("n_trials")
     if isinstance(v, bool) or v is None:
         return 1
@@ -57,7 +61,7 @@ def configurations_of(row: Mapping[str, Any]) -> int:
         n = int(v)
     except (TypeError, ValueError, OverflowError):
         return 1
-    return n if n >= 1 else 1
+    return n if n >= 0 else 1
 
 
 def trial_id(row: Mapping[str, Any]) -> str | None:
@@ -157,14 +161,15 @@ def registry_file(root: Path | str, env: Mapping[str, str] | None = None) -> Pat
 def append(path: Path | str, row: Mapping[str, Any]) -> dict:
     """Append one run to the registry file and return the row as written. Never rewrites the file.
 
-    `strategy` is required; `n_trials` must be a whole number >= 1 when given (default 1). A file whose last
+    `strategy` is required; `n_trials` must be a whole number >= 0 when given (default 1; 0 for a
+    report of a configuration that another row counts). A file whose last
     line was cut off (a crashed run) gets a newline first, so the new row is not glued to the damaged one."""
     row = dict(row)
     if not isinstance(row.get("strategy"), str) or not row["strategy"].strip():
         raise ValueError("a trial row needs the rule's name in `strategy`")
     n = row.get("n_trials", 1)
-    if isinstance(n, bool) or not isinstance(n, int) or n < 1:
-        raise ValueError(f"n_trials must be a whole number >= 1 (configurations searched), got {n!r}")
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+        raise ValueError(f"n_trials must be a whole number >= 0 (configurations searched), got {n!r}")
     row["n_trials"] = n
     line = json.dumps(row, default=str)
     path = Path(path)

@@ -71,7 +71,8 @@ def test_what_one_row_stands_for():
     n = trials.configurations_of
     assert n({"n_trials": 3105}) == 3105 and n({}) == 1 and n({"n_trials": None}) == 1
     assert n({"n_trials": "27"}) == 27 and n({"n_trials": 27.0}) == 27
-    assert n({"n_trials": 0}) == 1 and n({"n_trials": -4}) == 1  # never less than the run itself
+    assert n({"n_trials": -4}) == 1 and n({"n_trials": "x"}) == 1  # unreadable: never less than the run itself
+    assert n({"n_trials": 0}) == 0  # a report of a configuration another row counts (2x costs, stress fill)
     assert n({"n_trials": True}) == 1 and n({"n_trials": float("nan")}) == 1 and n({"n_trials": "many"}) == 1
 
 
@@ -172,7 +173,7 @@ def test_append_only_adds_a_line(tmp_path: Path):
     rows, bad = trials.read_jsonl(f)
     assert [r["strategy"] for r in rows] == ["trend_highs", "rel_strength"] and bad == 1  # not glued together
     assert rows[1]["n_trials"] == 1 and trials.count_file(f) == 1035 + 1 + 1
-    for wrong in ({"n_trials": 3}, {"strategy": ""}, {"strategy": "x", "n_trials": 0},
+    for wrong in ({"n_trials": 3}, {"strategy": ""}, {"strategy": "x", "n_trials": -1},
                   {"strategy": "x", "n_trials": 2.5}, {"strategy": "x", "n_trials": True}):
         with pytest.raises(ValueError):
             trials.append(f, wrong)
@@ -207,7 +208,7 @@ def test_migration_0015_is_append_only_and_not_shared():
     assert [f.name for f in files] == ["0015_m7_trial_registry.sql"]  # the number is not shared
     sql = files[0].read_text()
     assert "create table if not exists kaibot.trial_registry" in sql and "NOT APPLIED" in sql
-    assert "trial_id   text        not null unique" in sql and "check (n_trials >= 1)" in sql
+    assert "trial_id   text        not null unique" in sql and "check (n_trials >= 0)" in sql
     assert "before update or delete on kaibot.trial_registry" in sql
     assert "before truncate on kaibot.trial_registry" in sql
     assert "revoke all on kaibot.trial_registry from public, anon, authenticated, service_role" in sql
@@ -217,3 +218,11 @@ def test_migration_0015_is_append_only_and_not_shared():
         assert col in trials.db_row({"trial_id": "a", "strategy": "x"})
         assert re.search(rf'^\s+"?{col}"?\s', sql, re.M), col
     assert trials.TABLE == "trial_registry"
+
+
+def test_momentum_core_reports_count_as_configurations_not_rows():
+    """scripts/momentum_core.py (#127) logs every grid run; only the base fill at 1x costs is a configuration."""
+    rows = [{"trial_id": f"core_{fill}_{cost}x_cap{cap}", "strategy": "trend_momentum",
+             "n_trials": int(fill == "base" and cost == 1.0)}
+            for fill in ("base", "stress") for cost in (0.0, 1.0, 2.0, 3.0) for cap in (30, 60, 100)]
+    assert len(rows) == 24 and trials.count_configurations(rows) == 3  # one per exposure cap
