@@ -162,7 +162,8 @@ class SimBroker(BrokerBase):
         "fill" (the daily path, #161 / Amendment 3 of the momentum pre-registrations): an opening or closing
         auction buy is checked at its print, after the print's earlier fills (sales first, as sent); a buy
         that does not fit is cut to the whole shares that fit at the print's price, re-priced for that quantity
-        (the rest is cancelled), so the cash book never goes below zero."""
+        (the rest is cancelled), so the cash book never goes below zero. Every other buy is still checked at
+        submission (review of #164)."""
         if cash_at not in ("submit", "fill"):
             raise ValueError("cash_at is submit or fill")
         self.cash_at = cash_at
@@ -335,7 +336,7 @@ class SimBroker(BrokerBase):
             if r.qty > free + 1e-9:
                 raise BrokerError(403, f"insufficient qty available for order (requested: {r.qty:g}, "
                                        f"available: {free:g})")
-        elif self.cash is not None and self.cash_at == "submit":
+        elif self.cash is not None and (self.cash_at == "submit" or r.time_in_force not in ("cls", "opg")):
             px = r.limit_price or r.stop_price or self.bars.last_close(r.symbol, now)
             if px is not None and r.qty * px > self.cash + 1e-9:
                 raise BrokerError(403, "insufficient buying power")
