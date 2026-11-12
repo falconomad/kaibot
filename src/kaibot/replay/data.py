@@ -65,7 +65,7 @@ def from_frame(symbol: str, df: pd.DataFrame, upto: dict | None = None) -> Symbo
     shape = (len(dates), N_MIN)
     arrs = {k: np.full(shape, np.nan) for k in ("o", "h", "l", "c", "v", "vw")}
     di = df["d"].values.astype("datetime64[D]")
-    rows = np.fromiter((idx[x] for x in di), dtype=np.int64, count=len(di))
+    rows = np.searchsorted(dates, di)  # `dates` is sorted and unique and holds every value of `di`
     cols = df["m"].to_numpy(dtype=np.int64)
     for k in arrs:
         arrs[k][rows, cols] = df[k].to_numpy(dtype=float)

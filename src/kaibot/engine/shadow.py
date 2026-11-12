@@ -3,7 +3,9 @@ live engine. They NEVER trade: this module holds no reference to the broker and 
 mode="shadow", plus a counterfactual P&L per signal at the end of the session.
 
 What a shadow signal records:
-- the strategy's rule decision at the close of minute m (strategies/orb.py, strategies/news_continuation.py),
+- the strategy's rule decision at the close of minute m: every registered strategy in shadow mode
+  (strategies/registry.py: ORB, news continuation) is asked through the same `Strategy` interface as the live
+  ones (strategies/base.py), with the session panel as its context,
 - the would-be qty, binding constraint and failed checks from risk/gate.py `evaluate` (read-only), sized on an
   isolated per-strategy book: the run's start-of-day equity, the strategy's own open shadow positions and entries
   (as if it ran alone at the run's level; the live book's positions do not crowd it out),
@@ -33,12 +35,13 @@ from kaibot.replay.data import ET, N_MIN, SymbolDays
 from kaibot.replay.sim import BLACKOUT_FOMC, EXIT_M, buy_px, first_exit, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
 from kaibot.strategies import news_continuation as news
-from kaibot.strategies import orb
+from kaibot.strategies import registry
+from kaibot.strategies.base import Event, ShadowContext, due
 from kaibot.strategies.shadow_types import Panel, ShadowCandidate, ffill_rows
 
 log = logging.getLogger("kaibot.engine.shadow")
 
-STRATEGIES = (orb.NAME, news.NAME)  # config/profiles.yaml shadow_strategies
+STRATEGIES = registry.names(registry.Mode.SHADOW)  # config/profiles.yaml shadow_strategies (a test keeps them equal)
 FIRST_ENTRY_M = 5
 MAX_NEWS_CALLS_PER_MIN = 10  # Alpaca budget is 150/min shared with the live engine (config/sources.yaml)
 NEWS_MIN_AGE = timedelta(minutes=news.NewsParams().min_news_age_min)
@@ -128,18 +131,14 @@ class ShadowBook:
 
 def step(books: dict[str, ShadowBook], panel: Panel, stats: dict, m: int,
          news_flags: Callable[[np.ndarray, int], np.ndarray], seen: set) -> list[Entry]:
-    """Evaluate both shadow strategies at the close of minute m. `news_flags(rows, m)` -> bool per row for the
-    rows passing the price/volume setup (so the live engine only queries news for a handful of symbols)."""
+    """Ask every registered shadow strategy with a book that is due at the close of minute m, in registry order.
+    `news_flags(rows, m)` -> bool per row for the rows passing a strategy's price/volume setup (so the live engine
+    only queries news for a handful of symbols)."""
     out: list[Entry] = []
-    cands = orb.decide(panel, stats[orb.NAME], m) if orb.NAME in books else []
-    if news.NAME in books:
-        mask, _ = news.setup(panel, stats[news.NAME], m)
-        rows = np.flatnonzero(mask)
-        rows = np.array([r for r in rows if (news.NAME, panel.symbols[r]) not in seen], dtype=np.int64)
-        if len(rows):
-            has = np.zeros(len(panel), dtype=bool)
-            has[rows] = news_flags(rows, m)
-            cands += news.decide(panel, stats[news.NAME], m, has)
+    cands: list[ShadowCandidate] = []
+    for strat in registry.shadow(books):
+        if due(strat.schedule, Event.BAR_CLOSE, m, books[strat.name].n_min):
+            cands += strat.on_event(ShadowContext(m, panel, stats[strat.name], news_flags, seen))
     for cand in cands:
         key = (cand.strategy, cand.symbol)
         if key in seen:  # one signal per strategy, symbol and day
@@ -152,7 +151,7 @@ def step(books: dict[str, ShadowBook], panel: Panel, stats: dict, m: int,
 def merged_stats(rows: list[dict]) -> dict:
     """Stack per-symbol stats (one dict per row: {strategy: {name: value}}) into per-strategy arrays."""
     out: dict = {}
-    for strat in (orb.NAME, news.NAME):
+    for strat in STRATEGIES:
         keys = rows[0][strat].keys() if rows else ()
         out[strat] = {k: np.array([r[strat][k] for r in rows], dtype=float) for k in keys}
     return out
@@ -160,8 +159,7 @@ def merged_stats(rows: list[dict]) -> dict:
 
 def stats_for_session(sd, i: int) -> dict:
     """Shadow statistics for session index i of a SymbolDays (i == len(dates): the next, unseen session)."""
-    so, sn = orb.prior_stats(sd), news.prior_stats(sd)
-    return {orb.NAME: {k: v[i] for k, v in so.items()}, news.NAME: {k: v[i] for k, v in sn.items()}}
+    return {st.name: {k: v[i] for k, v in st.prior_stats(sd).items()} for st in registry.shadow()}
 
 
 # ======================= live hook =======================
@@ -229,7 +227,9 @@ class ShadowRunner:
         self.seen_rows = dict.fromkeys(self.symbols, 0)
         self.vol_ratio = np.array([mk.vol_ratio.get(s, 1.0) for s in self.symbols])
         pol, fomc = engine.policy(), np.datetime64(d.day, "D") in engine.fomc
-        self.books = {k: ShadowBook(k, pol, d.start_equity, fomc, d.n_min) for k in STRATEGIES}
+        only = getattr(engine, "shadow_only", None)  # the research command runs one strategy
+        self.books = {k: ShadowBook(k, pol, d.start_equity, fomc, d.n_min) for k in STRATEGIES
+                      if only is None or k in only}
         self.seen: set = set()
         self.news_pos: set[str] = set()
         self.news_checked: dict[str, int] = {}

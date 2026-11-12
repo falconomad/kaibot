@@ -2,7 +2,7 @@
 # Download the M0 replay history (story S03): 1-minute SIP bars (09:30-16:00 ET only) and Benzinga news headlines,
 # 2016 -> now, for the 300-symbol universe in config/universe_history.yaml, plus SEC fundamentals. Resumable: stop with Ctrl-C and
 # run it again, finished months are skipped. Keeps the Mac awake while it runs.
-#   ./scripts/fetch_history.sh            download (3 parallel workers, roughly 12-18 hours, ~5 GB)
+#   ./scripts/fetch_history.sh            download (3 parallel workers, roughly 12-18 hours, ~12 GB)
 #   ./scripts/fetch_history.sh --status   show progress and exit
 # Alpaca allows 200 requests/min per account. This uses 135/min, or 60/min while the engine is running.
 set -euo pipefail
@@ -17,7 +17,7 @@ if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,
   echo "Needs Python 3.12+:  brew install python@3.13"; exit 1
 fi
 [ -d .venv ] || "$PY" -m venv .venv
-.venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt
+.venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-engine.txt  # locked (uv.lock export, #122)
 export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"  # macOS python.org builds lack root certs
 
 if [ "${1:-}" = "--status" ]; then

@@ -10,6 +10,7 @@ import {
   type AdvKey, type ConfigBody, type NumKey, type RiskKey, type TimingNumKey,
 } from "../lib/config";
 import { money } from "../lib/fmt";
+import { RETIRED_TEXT } from "../lib/explain";
 import { DayBar, ExcludeEditor, LOCKED, LockIcon, reducedMotion, useStrategy, usd0, type Ctx } from "./StrategyShared";
 
 /** Up/Down/Home/End move between the accordion's row headers (Enter/Space toggle them, as native buttons). */
@@ -91,13 +92,13 @@ export function FineTune() {
       {row("run_drawdown_end_pct")}
     </Group>
 
-    <Group title="Strategies" sub="At least one stays on.">
+    <Group title="Strategies" sub="At least one stays on. Both rules are retired and trade on paper only as a systems test while Engine v3 is built.">
       {(["dip_reversal", "spy_late_momentum"] as const).map((k) => {
         const allowed = b.strategies.includes(k);
         return (
           <div key={k} className="kb-srow-static">
             <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
-              <span>{STRATEGY_NAME[k]}</span>
+              <span title={`code: ${k}`}>{STRATEGY_NAME[k]} <span className="tag retired">{RETIRED_TEXT}</span></span>
               <span className="muted" style={{ fontSize: 12 }}>{!allowed ? `Not part of ${levelName}` : k === "dip_reversal" ? "No-news dips in the 59 stocks" : "Up to 1 a day on qualifying days · not estimated yet"}</span>
             </span>
             <Switch label={STRATEGY_NAME[k]} on={body.strategies[k]} disabled={!allowed || (body.strategies[k] && !Object.entries(body.strategies).some(([o, v]) => o !== k && v))}
@@ -105,7 +106,7 @@ export function FineTune() {
           </div>
         );
       })}
-      <div className="kb-srow-static"><span className="muted" style={{ flex: 1, fontSize: 13 }}>Opening-range breakout · News continuation</span><span className="tag downgrade">under test</span></div>
+      <div className="kb-srow-static"><span className="muted" style={{ flex: 1, fontSize: 13 }}>Opening-breakout rule · News rule</span><span className="tag">test only, never traded</span></div>
     </Group>
 
     <Group title="Timing">

@@ -1,0 +1,40 @@
+{
+ "cik": "0000000909",
+ "name": "OTHER LIFE SCIENCES CORP",
+ "tickers": [
+  "OLDC"
+ ],
+ "exchanges": [
+  "NYSE"
+ ],
+ "formerNames": [],
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0000000909-17-000001"
+   ],
+   "filingDate": [
+    "2017-05-01"
+   ],
+   "reportDate": [
+    ""
+   ],
+   "acceptanceDateTime": [
+    "2017-05-01T20:00:00.000Z"
+   ],
+   "act": [
+    "34"
+   ],
+   "form": [
+    "10-Q"
+   ],
+   "items": [
+    ""
+   ],
+   "primaryDocument": [
+    "x.htm"
+   ]
+  },
+  "files": []
+ }
+}

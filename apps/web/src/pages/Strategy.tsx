@@ -17,7 +17,7 @@ import {
   levelDefaults, matchBoldness, matchPreset, nextOpenEt, openLabel, presetBody, setBoldness, setCaution, toggleTheme, validateBody,
   type Bounds, type ConfigBody, type ConfigResp,
 } from "../lib/config";
-import { estimateTrades, paceText } from "../lib/derive";
+import { estimateTrades, paceText } from "../lib/estimator";
 import { DayBar, EST, LOCKED, NeverTraded, StrategyProvider, useCtx, useStrategy, usd0, type Ctx, type StrategyState } from "./StrategyShared";
 
 export const FINE_TUNE = "/strategy/fine-tune";
@@ -425,7 +425,7 @@ function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss
             <span className="num" style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>≈ {Math.round(est.perMonth)} trades a month
               <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}> now ≈ {Math.round(estBase)}</span></span>
             <span className="num" style={{ fontSize: 14 }}>Max loss a trade <b>{usd0(maxLoss)}</b> <span className="muted">now {usd0(maxLossBase)}</span></span>
-            <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{paceText(est)}{est.spyNotEstimated && est.perMonth > 0 ? " SPY momentum adds up to 1 a day on qualifying days (not estimated yet)." : ""}</span>
+            <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{paceText(est)}{est.spyNotEstimated && est.perMonth > 0 ? " The SPY late-day rule adds up to 1 a day on qualifying days (not estimated yet)." : ""}</span>
           </div>
           <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
             Applies at the next open, likely {openLabel(nextOpen)}. Open trades keep their rules. <b style={{ color: "var(--ink)" }}>Starts a new chapter in your report</b> (version {nextVersion}).

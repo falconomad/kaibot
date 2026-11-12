@@ -3,6 +3,8 @@
 #   ./scripts/run_engine.sh            run (Docker if it's running, otherwise Python 3.12+)
 #   ./scripts/run_engine.sh --check    test keys and connections, then exit
 #   ./scripts/run_engine.sh --docker | --python   force one way
+# Trades the release pinned with scripts/release.sh (data/RELEASE, or KAIBOT_RELEASE=<tag|main>); nothing pinned:
+# pulls main as before. Always-on (launchd, alarms, backups): scripts/install_service.sh, docs/ops/always_on.md.
 # Stop with Ctrl-C. Open trades keep their stop-loss at Alpaca either way.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,8 +18,19 @@ for k in ALPACA_API_KEY ALPACA_SECRET FRED_API_KEY; do
 done
 grep -qE "^SUPABASE_SERVICE(_ROLE)?_KEY=" "$ENV_FILE" || {
   echo "Missing SUPABASE_SERVICE_KEY in $ENV_FILE (Supabase → Project Settings → API keys → Secret key, sb_secret_…)"; exit 1; }
-git pull --ff-only -q 2>/dev/null || echo "(could not pull the latest code; running what is here)"
+# Pinned release (#121, docs/ops/always_on.md): with data/RELEASE or KAIBOT_RELEASE set, trade that tag (or main).
+# Nothing pinned: pull main, as before.
+HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
+RELEASE_LABEL="$(bash scripts/release.sh --apply)" || exit 1
+if [ -z "$RELEASE_LABEL" ]; then
+  git pull --ff-only -q 2>/dev/null || echo "(could not pull the latest code; running what is here)"
+elif [ "$(git rev-parse HEAD)" != "$HEAD_BEFORE" ] && [ -z "${KAIBOT_REEXEC:-}" ]; then
+  KAIBOT_REEXEC=1 exec bash scripts/run_engine.sh "$@"  # this script may have changed with the checkout
+fi
+CODE_SHA="${RELEASE_LABEL:-$(git rev-parse --short HEAD 2>/dev/null || echo unknown)}"  # recorded with every decision
 mkdir -p data/live
+[ -n "$RELEASE_LABEL" ] && echo "Release: $RELEASE_LABEL"
+echo "$CODE_SHA $(date -u +%FT%TZ)" > data/live/running_release
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 CHECK=0; for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = --check ] && CHECK=1; done
@@ -28,7 +41,7 @@ if [ "$CHECK" = 0 ]; then ./scripts/engine_guard.sh || exit 1; fi
 
 if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }; then
   echo "Starting with Docker…"
-  docker build -q -t kaibot-engine --build-arg CODE_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" . >/dev/null
+  docker build -q -t kaibot-engine --build-arg CODE_SHA="$CODE_SHA" . >/dev/null
   if [ "$CHECK" = 0 ] && ! docker ps -q -f name=^kaibot-watchdog$ | grep -q .; then
     docker run -d --rm --name kaibot-watchdog -e KAIBOT_ENV_FILE=/secrets/.env -v "$ENV_FILE:/secrets/.env:ro" \
       kaibot-engine python -m kaibot.engine.watchdog >/dev/null && echo "Watchdog started (container kaibot-watchdog)."
@@ -42,7 +55,7 @@ else
   fi
   echo "Starting with $("$PY" --version)…"
   [ -d .venv ] || "$PY" -m venv .venv
-  .venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt
+  .venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-engine.txt  # locked (uv.lock export, #122)
   # python.org's macOS Python has no root certificates until "Install Certificates.command" is run: use certifi's.
   export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"
   WD_PID=data/live/watchdog.pid
@@ -51,12 +64,12 @@ else
     kill "$(cat "$WD_PID")" 2>/dev/null || true; sleep 1
   fi
   if [ "$CHECK" = 0 ]; then
-    mkdir -p logs
+    LOG_DIR="${KAIBOT_LOG_DIR:-logs}"; mkdir -p "$LOG_DIR"  # the service sets ~/Library/Logs/kaibot
     KAIBOT_ENV_FILE="$ENV_FILE" PYTHONPATH="$PWD/src" nohup .venv/bin/python -m kaibot.engine.watchdog \
-      >> logs/watchdog.log 2>&1 &
-    echo $! > "$WD_PID"; echo "Watchdog started (pid $(cat "$WD_PID"), log: logs/watchdog.log)."
+      >> "$LOG_DIR/watchdog.log" 2>&1 &
+    echo $! > "$WD_PID"; echo "Watchdog started (pid $(cat "$WD_PID"), log: $LOG_DIR/watchdog.log)."
   fi
   KAIBOT_ENV_FILE="$ENV_FILE" KAIBOT_DATA_DIR="$PWD/data/live" PYTHONPATH="$PWD/src" \
-    KAIBOT_CODE_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+    KAIBOT_CODE_SHA="$CODE_SHA" \
     awake .venv/bin/python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
 fi

@@ -13,7 +13,7 @@ import {
   dollars, focusSet, hoursShape, hoursWindow, levelDefaults, matchBoldness, matchPreset, nextOpenEt, normalizeBounds, presetBody,
   setBoldness, setCaution, toggleTheme, validateBody, type Bounds, type ConfigBody, type NumKey, type Themes,
 } from "./config";
-import { estimateTrades, paceText, windowShare, type EstimatorData } from "./derive";
+import { estimateTrades, paceText, windowShare, type EstimatorData } from "./estimator";
 
 const strategySrc = strategyPageSrc + fineTuneSrc + sharedSrc;
 const EST = estimatorJson as unknown as EstimatorData;
@@ -199,7 +199,7 @@ describe("diff text", () => {
     x.focus = { ...x.focus, exclude: ["XOM"] };
     const s = diffConfig(d, x, THEMES).map(diffSentence);
     expect(s).toContain("Never traded: none → XOM");
-    expect(s).toContain("SPY end-of-day momentum: on → off");
+    expect(s).toContain("SPY late-day rule: on → off");
     expect(s).toContain("Focus: All 59 stocks → Prefer Energy (2 stocks)");
   });
 });

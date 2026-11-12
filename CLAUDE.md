@@ -9,7 +9,10 @@
 - The engine (`python -m kaibot.engine`, `scripts/run_engine.sh`) runs on the user's Mac for now and must stay portable:
   env-only settings, outgoing connections only, same Docker image anywhere (decision 11). Never run two engines at once.
 - Run `ruff check .` and `pytest -q` before committing. Deploy only outside 09:30-16:00 ET.
-- Decisions live in `docs/decisions/`; the backlog in GitHub issues (milestones M0-M5, labels team:* and epic:*).
+- Decisions live in `docs/decisions/`; the backlog in GitHub issues (milestones M0-M7, labels team:* and epic:*).
+- Engine v3 (decision 15, milestone M7): one decision core for test and live. Never add another simulator; go/no-go numbers
+  come only from the engine with `SimBroker`. A rule needs a pre-registration in `docs/prereg/` before its first run.
+  The intraday dip rule is retired (soak test only). Research notes: `docs/research/engine_v3/`.
 - Architecture board (Whiteboard, slug `b099f04b-1c74-46fe-b635-7b9b30348e4f`, https://claude.ai/artifact/NoqNs89Sbz3h5UPRQUZNFY):
   when a change adds, removes or renames an engine step in `src/kaibot/engine/` or `risk/gate.py`, or a milestone's status changes,
   update the matching blocks and the "Synced with main @ <sha>" line. Read the board first and edit only what changed.

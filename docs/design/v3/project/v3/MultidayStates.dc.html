@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kaibot · States</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0B0D}
+a{color:#7FB2FF}a:hover{color:#B3D1FF}
+.num{font-variant-numeric:tabular-nums}
+.nav a{color:#A1A8B3;text-decoration:none}.nav a:hover{color:#F4F5F7}
+/* motion: one easing, short durations; everything stops for prefers-reduced-motion */
+:root{--ease:cubic-bezier(.2,.7,.2,1)}
+@keyframes kb-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes kb-fade{from{opacity:0}to{opacity:1}}
+@keyframes kb-draw{to{stroke-dashoffset:0}}
+@keyframes kb-pulse{0%{box-shadow:0 0 0 0 rgba(61,220,151,.55)}70%{box-shadow:0 0 0 8px rgba(61,220,151,0)}100%{box-shadow:0 0 0 0 rgba(61,220,151,0)}}
+@keyframes kb-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.enter{animation:kb-rise .55s var(--ease) both}
+.d1{animation-delay:.06s}.d2{animation-delay:.12s}.d3{animation-delay:.18s}.d4{animation-delay:.24s}.d5{animation-delay:.3s}
+.draw{stroke-dasharray:1400;stroke-dashoffset:1400;animation:kb-draw 1.3s var(--ease) .25s forwards}
+.fade{animation:kb-fade .6s var(--ease) .9s both}
+.grow{transform-origin:left;animation:kb-grow .8s var(--ease) .3s both}
+.live-dot{border-radius:999px;animation:kb-pulse 2s infinite}
+.morph{transition:d .45s var(--ease),cy .45s var(--ease)}
+.press{transition:transform .15s var(--ease),background-color .2s var(--ease),border-color .2s var(--ease),color .2s var(--ease),opacity .2s}
+.press:hover{filter:brightness(1.12)}.press:active{transform:scale(.97)}
+.lift{transition:transform .2s var(--ease),background-color .2s var(--ease),border-color .2s var(--ease)}
+.lift:hover{transform:translateY(-2px);border-color:#3A404A}
+.row{transition:background-color .2s var(--ease)}.row:hover{background:#1B1E24}
+.swap{animation:kb-rise .35s var(--ease) both}
+.tabbar{display:none}
+@media (max-width: 760px){
+  .topnav{display:none!important}
+  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:5;justify-content:space-around;padding:8px 8px 20px;background:rgba(10,11,13,.92);backdrop-filter:blur(12px);border-top:1px solid #1B1E24}
+  .page{padding:16px 16px 96px!important;gap:16px!important}
+  .bar{padding:12px 16px!important;gap:12px!important}
+  .hero{font-size:44px!important}
+  .h1{font-size:30px!important}
+  .hide-sm{display:none!important}
+  .full-sm{flex:1 1 100%!important;width:100%}
+  .cols{grid-template-columns:minmax(0,1fr)!important}
+  .card{border-radius:20px!important;padding:16px!important}
+}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0}}
+@keyframes kb-riseY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes kb-ring{from{stroke-dasharray:0 239}}
+@keyframes kb-shimmer{from{background-position:-600px 0}to{background-position:600px 0}}
+.rise{transform-box:view-box;animation:kb-riseY 1.1s var(--ease) .15s both}
+.rise-bar{transform-box:view-box;animation:kb-riseY .8s var(--ease) both}
+.rise-up{transform-origin:bottom;animation:kb-riseY .6s var(--ease) both}
+.ring{animation:kb-ring 1.1s var(--ease) .3s both}
+.sk{display:block;background:linear-gradient(90deg,#16181C 0%,#23272E 50%,#16181C 100%);background-size:1200px 100%;animation:kb-shimmer 1.5s linear infinite;border-radius:10px}
+
+.show-sm,.show-sm-flex,.hd-phone{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+select.kbs{appearance:none;-webkit-appearance:none;background:#131519 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23A1A8B3' stroke-width='2'%3E%3Cpath d='M6 9l6 6l6-6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 14px center;padding:0 40px 0 16px}
+.seg{transition:background-color .25s var(--ease),color .25s var(--ease)}
+.chip{transition:background-color .2s var(--ease),border-color .2s var(--ease),color .2s var(--ease),transform .15s var(--ease)}
+.chip:active{transform:scale(.96)}
+.rowlink{transition:background-color .2s var(--ease)}.rowlink:hover{background:#1B1E24}
+.chev{transition:transform .25s var(--ease)}.open-chev{transform:rotate(90deg)}
+.expand{animation:kb-rise .3s var(--ease) both}
+.mwrap{position:fixed;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;padding:24px}
+.mpanel{width:min(440px,100%);max-height:86vh;overflow:auto;border-radius:24px;animation:kb-rise .3s var(--ease) both}
+@keyframes kb-sheet{from{transform:translateY(100%)}to{transform:none}}
+button:disabled{cursor:not-allowed}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 28px}
+.stat{display:flex;flex-direction:column;gap:3px;min-width:0}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 24px}
+.side{display:flex;flex-direction:column;gap:16px}
+.hrow{display:grid;grid-template-columns:minmax(0,2.1fr) 92px 156px 128px minmax(0,2.5fr) 172px 16px;gap:0 18px;align-items:center}
+.prow{display:grid;grid-template-columns:44px minmax(0,1.15fr) minmax(0,1.6fr) 150px;gap:6px 16px;align-items:center}
+.plrow{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:4px 14px;align-items:start}
+.two{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:20px;align-items:start}
+.gates{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 24px}
+.gsteps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 32px;padding-top:6px}
+.orow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,440px);gap:12px 28px;align-items:center}
+.kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.strip{display:flex;flex-direction:column;gap:14px}
+@media (max-width: 1080px){.two{grid-template-columns:minmax(0,1fr)}}
+@media (max-width: 1180px){.hd-desk{display:none!important}.hd-phone{display:block!important}}
+@media (max-width: 760px){
+  .show-sm{display:block!important}.show-sm-flex{display:flex!important}
+  .hd-desk{display:none!important}.hd-phone{display:block!important}
+  .mwrap{align-items:flex-end;padding:0}.mpanel{width:100%;border-radius:24px 24px 0 0;animation:kb-sheet .35s var(--ease) both}
+  .tap{min-height:44px!important}
+  .two{grid-template-columns:minmax(0,1fr)!important}
+  .stats{grid-template-columns:minmax(0,1fr);gap:8px}
+  .stat{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 10px}
+  .stat>dt{flex:1 1 auto}.stat>.sub{flex:1 1 100%;text-align:right}
+  .facts{grid-template-columns:minmax(0,1fr);gap:12px}
+  .side{gap:12px}
+  .hrow{grid-template-columns:minmax(0,1fr) auto 16px;gap:0 10px}
+  .prow{grid-template-columns:40px minmax(0,1fr);gap:4px 12px}
+  .plrow{grid-template-columns:36px minmax(0,1fr);gap:4px 12px}
+  .gates{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .gsteps{gap:6px}.gstep{padding:10px 8px!important}
+  .checks{grid-template-columns:minmax(0,1fr)}
+  .orow{grid-template-columns:minmax(0,1fr)}
+  .steps{grid-template-columns:minmax(0,1fr)}
+  .two.reflow{display:flex;flex-direction:column;gap:16px}.two.reflow>div{display:contents!important}
+  .o1{order:1}.o2{order:2}.o3{order:3}.o4{order:4}.o5{order:5}.o6{order:6}
+  .kv{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .chartcard{padding:14px 12px 10px!important}
+  .statusbar{padding:6px 8px 6px 14px!important;gap:0!important}
+  .pad-sm{padding:6px 4px 10px!important}
+  .full-row{grid-column:2}
+  .full-row-r{grid-column:2;align-items:baseline!important;flex-direction:row!important;gap:8px!important}
+}
+
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid #4F95F0;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 4960px; background: #0A0B0D; color: #F4F5F7; font-family: Inter, system-ui, sans-serif">
+  <header class="bar" style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 16px 40px; border-bottom: 1px solid #1B1E24">
+    <a href="Overview.dc.html" style="display: flex; align-items: center; gap: 10px; color: #F4F5F7; text-decoration: none; min-height: 44px">
+      <svg width="26" height="26" viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="8" fill="#F4F5F7"></rect><path d="M8 18 L12.5 12.5 L15.5 15.5 L20 9.5" stroke="#0A0B0D" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span style="font-weight: 700; font-size: 18px; letter-spacing: -0.02em">kaibot</span>
+    </a>
+    <nav class="nav topnav" aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px; font-size: 15px; font-weight: 500">
+      <a href="Overview.dc.html" style="padding: 8px 14px">Home</a>
+      <a href="Holdings.dc.html" style="padding: 8px 14px">Holdings</a>
+      <a href="NextClose.dc.html" style="padding: 8px 14px">Next close</a>
+      <a href="Evidence.dc.html" style="padding: 8px 14px">Evidence</a>
+      <a href="Report.dc.html" style="padding: 8px 14px">Report</a>
+      <a href="Engine.dc.html" style="padding: 8px 14px">Engine</a>
+      <a href="Configure.dc.html" style="padding: 8px 14px">Strategy</a>
+      <a href="Settings.dc.html" style="padding: 8px 14px">Run &amp; settings</a>
+    </nav>
+    <div style="flex: 1"></div>
+    <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #A1A8B3; background: #131519; border: 1px solid #262A31; border-radius: 999px; padding: 7px 12px">
+      <span class="live-dot" aria-hidden="true" style="width: 8px; height: 8px; background: #3DDC97"></span>
+      <span style="color: #F4F5F7; font-weight: 500">Running</span><span class="hide-sm"> · Mac mini · 6 s ago</span>
+    </span>
+    <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #0A0B0D; background: #F5B64C; border-radius: 999px; padding: 4px 9px">PAPER · BALANCED</span>
+  </header>
+  <main class="page" style="max-width: 1320px; margin: 0 auto; box-sizing: border-box; padding: 28px 40px 64px; display: flex; flex-direction: column; gap: 22px">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 12px"><h1 class="h1" style="margin: 0; flex: 1 1 auto; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">States</h1><span style="flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px dashed #3A404A; font-size: 12px; font-weight: 600; color: #A1A8B3; white-space: nowrap">Sample data</span></div>
+      <span style="font-size: 15px; color: #A1A8B3; line-height: 1.5">How the screens look when things are not normal: while loading, when empty, when buying is stopped and when something is wrong. Each strip is the real screen with different data.</span>
+    </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Loading</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">While the numbers load</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">Grey shapes stand where the content will be, in the same layout, so nothing jumps when it arrives. A number is never shown as zero while it is unknown.</span>
+      </div>
+      <div aria-busy="true" aria-label="Loading the overview" style="display: flex; flex-direction: column; gap: 24px">
+        <span class="sk" style="height: 64px; border-radius: 20px"></span>
+        <div style="display: flex; flex-wrap: wrap; gap: 24px">
+          <div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+            <span class="sk" style="width: 200px; height: 14px"></span>
+            <span class="sk" style="width: 320px; max-width: 80%; height: 56px; border-radius: 14px"></span>
+            <span class="sk" style="width: 100%; max-width: 560px; height: 40px"></span>
+            <span class="sk show-sm" style="height: 300px; border-radius: 20px"></span>
+            <div style="display: flex; gap: 6px"><span class="sk" style="width: 56px; height: 36px; border-radius: 999px"></span><span class="sk" style="width: 56px; height: 36px; border-radius: 999px"></span><span class="sk" style="width: 56px; height: 36px; border-radius: 999px"></span></div>
+            <span class="sk" style="width: 100%; height: 300px; border-radius: 24px"></span>
+          </div>
+          <div class="side hide-sm" style="flex: 1 1 340px"><span class="sk" style="height: 250px; border-radius: 24px"></span><span class="sk" style="height: 170px; border-radius: 24px"></span><span class="sk" style="height: 140px; border-radius: 24px"></span></div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Empty</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">A new run: nothing bought yet</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">The pot is all cash, the invested bar is at 0% and the page says when the first check happens. The chart area explains itself instead of showing an empty frame.</span>
+      </div>
+    <sc-if value="{{st.empty.alarm.show}}" hint-placeholder-val="{{false}}">
+      <div role="{{st.empty.alarm.role}}" class="enter" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; padding: 14px 18px; border-radius: 20px; background: {{st.empty.alarm.bg}}; border: 1px solid {{st.empty.alarm.bd}}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{{st.empty.alarm.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.empty.alarm.icon}}"></path></svg>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 3px"><b style="font-size: 15px; font-weight: 600">{{st.empty.alarm.title}}</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{st.empty.alarm.text}}</span></div>
+        <a href="{{st.empty.alarm.href}}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; color: #F4F5F7; align-self: center">{{st.empty.alarm.action}} <span aria-hidden="true">→</span></a>
+      </div>
+    </sc-if>
+    <section class="card statusbar enter" aria-labelledby="st-he" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; padding: 14px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px">
+      <div class="full-sm" style="flex: 0 1 auto; display: flex; align-items: center; gap: 12px; min-width: 200px">
+        <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 999px; background: {{st.empty.status.tint}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{st.empty.status.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{{st.empty.status.icon}}"></path></svg></span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px"><h2 id="st-he" style="margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap">{{st.empty.status.title}}</h2><span style="font-size: 13px; color: #A1A8B3"><span class="hide-sm">{{st.empty.status.sub}}</span><span class="show-sm">{{st.empty.status.short}}</span></span></div>
+        <button type="button" class="show-sm-flex press" aria-expanded="{{st.empty.status.fS}}" aria-controls="st-fe" aria-label="Show the four checks" style="flex: none; width: 44px; height: 44px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; cursor: pointer; align-items: center; justify-content: center"><svg class="chev {{st.empty.status.fChev}}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+      </div>
+      <ul id="st-fe" class="facts {{st.empty.status.fCls}}" style="flex: 1 1 560px; list-style: none; margin: 0; padding: 0">
+        <sc-for list="{{st.empty.status.facts}}" as="f" hint-placeholder-count="4">
+          <li style="display: flex; gap: 8px; align-items: flex-start; min-width: 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{f.ink}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="{{f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">{{f.label}} <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">: {{f.word}}</span></span><span style="font-size: 14px; font-weight: 500; line-height: 1.35">{{f.value}}</span></span>
+          </li>
+        </sc-for>
+      </ul>
+      <a href="Engine.dc.html" class="hide-sm" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">Engine health <span aria-hidden="true">→</span></a>
+    </section>
+      <div style="display: flex; flex-wrap: wrap; gap: 24px">
+        <section aria-labelledby="pot-he" style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; align-items: center; gap: 12px"><h2 id="pot-he" style="margin: 0; flex: 1 1 auto; font-size: 15px; font-weight: 500; color: #A1A8B3">{{st.empty.hero.label}}</h2><span style="flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px dashed #3A404A; font-size: 12px; font-weight: 600; color: #A1A8B3; white-space: nowrap">Sample data</span></div>
+          <div class="num hero" style="font-size: 64px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; color: {{st.empty.hero.ink}}">{{st.empty.hero.value}}</div>
+          <span class="num" style="font-size: 13px; color: #A1A8B3; line-height: 1.45"><span class="hide-sm">{{st.empty.hero.note}} </span>{{st.empty.hero.asof}}</span>
+        </div>
+        <dl class="stats" style="margin: 0">
+          <sc-for list="{{st.empty.stats}}" as="s" hint-placeholder-count="3">
+            <div class="stat"><dt style="font-size: 13px; color: #A1A8B3">{{s.label}}</dt><dd class="num" style="margin: 0; font-size: 16px; font-weight: 600; color: {{s.ink}}; white-space: nowrap">{{s.value}}</dd><dd class="num sub" style="margin: 0; font-size: 13px; color: #A1A8B3; line-height: 1.4">{{s.sub}}</dd></div>
+          </sc-for>
+        </dl>
+        <div class="show-sm-flex" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; flex-direction: column; overflow: hidden">
+          <section aria-labelledby="inv-me" style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; align-items: baseline; gap: 10px"><h2 id="inv-me" style="margin: 0; flex: 1; font-size: 16px; font-weight: 600">Invested</h2><span class="num" style="font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1">{{st.empty.inv.pct}}</span></div>
+          <div role="meter" aria-label="Share of the pot invested in stocks" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{st.empty.inv.now}}" aria-valuetext="{{st.empty.inv.aria}}" style="position: relative; padding-top: 22px">
+            <span class="num" style="position: absolute; top: 0; left: {{st.empty.inv.limitLeft}}; transform: translateX({{st.empty.inv.limitShift}}); font-size: 12px; color: #A1A8B3; white-space: nowrap">{{st.empty.inv.limitText}}</span>
+            <div style="position: relative; height: 12px; border-radius: 999px; background: #243A5C">
+              <div class="grow" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{st.empty.inv.w}}; border-radius: 999px; background: #4F95F0"></div>
+              <span aria-hidden="true" style="position: absolute; left: {{st.empty.inv.limitLeft}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #F4F5F7"></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 6px; font-size: 12px; color: #A1A8B3"><span>All cash</span><span>Fully invested</span></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: {{st.empty.inv.f.bg}}; border: 1px solid {{st.empty.inv.f.bd}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{st.empty.inv.f.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.empty.inv.f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 14px; font-weight: 600">{{st.empty.inv.f.title}}</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.empty.inv.f.text}}</span></span>
+          </div>
+          </section>
+          <a href="NextClose.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 16px; border-top: 1px solid #262A31; color: #F4F5F7; text-decoration: none">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 13px; color: #A1A8B3">Next close · {{st.empty.next.when}}</span><b class="num" style="font-size: 15px; font-weight: 600">{{st.empty.next.short}}</b></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+          <a href="Holdings.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 16px; border-top: 1px solid #262A31; color: #F4F5F7; text-decoration: none">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 13px; color: #A1A8B3">Holdings</span><b class="num" style="font-size: 15px; font-weight: 600">{{st.empty.held.short}}</b></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+        </div>
+        <figure class="chartcard" style="margin: 0; border: 1px dashed #3A404A; border-radius: 24px; padding: 28px 24px; min-height: 150px; display: flex; flex-direction: column; justify-content: center; gap: 6px">
+          <b style="font-size: 16px; font-weight: 600">No history yet</b>
+          <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 520px">The pot line starts at the first close. From then on it runs next to the S&amp;P 500 line, from the same day and the same amount.</span>
+        </figure>
+        </section>
+        <aside class="side hide-sm" style="flex: 1 1 340px; min-width: 0">
+        <section class="card enter d2" aria-labelledby="inv-he" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: baseline; gap: 10px"><h2 id="inv-he" style="margin: 0; flex: 1; font-size: 16px; font-weight: 600">Invested</h2><span class="num" style="font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1">{{st.empty.inv.pct}}</span></div>
+          <div role="meter" aria-label="Share of the pot invested in stocks" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{st.empty.inv.now}}" aria-valuetext="{{st.empty.inv.aria}}" style="position: relative; padding-top: 22px">
+            <span class="num" style="position: absolute; top: 0; left: {{st.empty.inv.limitLeft}}; transform: translateX({{st.empty.inv.limitShift}}); font-size: 12px; color: #A1A8B3; white-space: nowrap">{{st.empty.inv.limitText}}</span>
+            <div style="position: relative; height: 12px; border-radius: 999px; background: #243A5C">
+              <div class="grow" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{st.empty.inv.w}}; border-radius: 999px; background: #4F95F0"></div>
+              <span aria-hidden="true" style="position: absolute; left: {{st.empty.inv.limitLeft}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #F4F5F7"></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 6px; font-size: 12px; color: #A1A8B3"><span>All cash</span><span>Fully invested</span></div>
+          </div>
+          <sc-if value="{{st.empty.inv.hasRules}}" hint-placeholder-val="{{true}}">
+            <ul aria-label="Where the pot is" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+              <sc-for list="{{st.empty.inv.rules}}" as="r" hint-placeholder-count="3">
+                <li style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 40px; gap: 10px; align-items: center; font-size: 13px"><span style="color: #A1A8B3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.name}}</span><span aria-hidden="true" style="position: relative; height: 6px; border-radius: 999px; background: #243A5C"><span style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.w}}; border-radius: 999px; background: #4F95F0"></span></span><span class="num" style="text-align: right; font-weight: 600">{{r.pct}}</span></li>
+              </sc-for>
+            </ul>
+          </sc-if>
+          <div style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: {{st.empty.inv.f.bg}}; border: 1px solid {{st.empty.inv.f.bd}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{st.empty.inv.f.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.empty.inv.f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 14px; font-weight: 600">{{st.empty.inv.f.title}}</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.empty.inv.f.text}}</span></span>
+          </div>
+        </section>
+        <section class="card enter d3" aria-labelledby="nx-he" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 10px; margin: -8px 0"><h2 id="nx-he" style="margin: 0; flex: 1 1 auto; font-size: 16px; font-weight: 600">Next close</h2><a href="NextClose.dc.html" aria-label="See the plan for the next close" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">See the plan <span aria-hidden="true">→</span></a></div>
+          <span class="num" style="font-size: 13px; color: #A1A8B3">{{st.empty.next.when}} · {{st.empty.next.away}}</span>
+          <sc-if value="{{st.empty.next.hasLines}}" hint-placeholder-val="{{true}}">
+            <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{st.empty.next.lines}}" as="l" hint-placeholder-count="3"><li style="display: flex; gap: 10px; align-items: baseline; font-size: 14px"><b class="num" style="flex: none; width: 76px; font-weight: 600">{{l.k}}</b><span class="num" style="color: #A1A8B3">{{l.names}}</span></li></sc-for>
+            </ul>
+          </sc-if>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.empty.next.foot}}</span>
+        </section>
+        <section class="card enter d4" aria-labelledby="hd-he" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 10px; margin: -8px 0"><h2 id="hd-he" style="margin: 0; flex: 1 1 auto; font-size: 16px; font-weight: 600">Holdings</h2><a href="Holdings.dc.html" aria-label="See all holdings" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">See all <span aria-hidden="true">→</span></a></div>
+          <sc-if value="{{st.empty.held.has}}" hint-placeholder-val="{{true}}">
+            <div style="display: flex; align-items: center; gap: 14px">
+              <span aria-hidden="true" style="display: flex; padding-right: 8px"><sc-for list="{{st.empty.held.faces}}" as="y" hint-placeholder-count="6"><span style="width: 28px; height: 28px; margin-right: -8px; border-radius: 999px; border: 2px solid #131519; background: {{y.c}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700">{{y.i}}</span></sc-for></span>
+              <span class="num" style="flex: 1; font-size: 13px; color: #A1A8B3; white-space: nowrap">{{st.empty.held.more}}</span>
+              <span class="num" style="flex: none; font-size: 15px; font-weight: 600; white-space: nowrap">{{st.empty.held.n}}</span>
+            </div>
+            <span class="num" style="font-size: 13px; color: #A1A8B3; line-height: 1.5"><b style="color: #F4F5F7; font-weight: 600">{{st.empty.held.line}}</b> · {{st.empty.held.best}}</span>
+          </sc-if>
+          <sc-if value="{{st.empty.held.none}}" hint-placeholder-val="{{false}}"><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.empty.held.line}}</span></sc-if>
+        </section>
+        </aside>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Empty</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">No stocks yet, and nothing planned tonight</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">The Holdings list and the Next close plan say in one or two sentences why they are empty and what happens next. “Nothing planned” is the usual state: a weekly rule trades about once a week.</span>
+      </div>
+      <div class="two" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)">
+      <section class="card pad-sm enter d2" aria-label="Stocks held now" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 10px 8px 12px">
+        <sc-if value="{{st.hold.isEmpty}}" hint-placeholder-val="{{false}}">
+        <div class="swap" style="display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 28px 22px">
+          <b style="font-size: 17px; font-weight: 600">{{st.hold.emptyTitle}}</b>
+          <span style="font-size: 14px; color: #A1A8B3; line-height: 1.55; max-width: 640px">{{st.hold.emptyText}}</span>
+          <a href="NextClose.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">See what is planned <span aria-hidden="true">→</span></a>
+        </div>
+        </sc-if>
+        <sc-if value="{{st.hold.hasRows}}" hint-placeholder-val="{{true}}">
+        <div class="hrow hd-desk" aria-hidden="true" style="padding: 12px 14px 10px; font-size: 12px; color: #A1A8B3; border-bottom: 1px solid #1B1E24"><span>Stock</span><span>Held</span><span>Size, of the pot</span><span>Gain or loss</span><span>Sells when</span><span>Safety stop at the broker</span><span></span></div>
+        <sc-for list="{{st.hold.shown}}" as="g" hint-placeholder-count="2">
+          <div>
+            <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 18px 14px 10px">
+              <h2 style="margin: 0; font-size: 16px; font-weight: 600">{{g.name}}</h2>
+              <span class="num" style="font-size: 13px; color: #A1A8B3">{{g.meta}}</span>
+              <span style="flex: 1"></span>
+              <span class="num" style="font-size: 14px; font-weight: 600; color: {{g.ink}}; white-space: nowrap">{{g.gain}}</span>
+              <span style="flex: 1 1 100%; font-size: 13px; color: #A1A8B3; line-height: 1.45">{{g.what}} {{g.next}}.</span>
+            </div>
+            <ul class="hd-desk" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+              <sc-for list="{{g.rows}}" as="h" hint-placeholder-count="4">
+              <li>
+                <a href="Holding.dc.html" class="rowlink hrow" style="padding: 12px 14px; border-radius: 16px; color: #F4F5F7; text-decoration: none">
+                  <span style="display: flex; align-items: center; gap: 12px; min-width: 0"><span aria-hidden="true" style="flex: none; width: 40px; height: 40px; border-radius: 999px; background: {{h.c}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">{{h.i}}</span><span style="min-width: 0; display: flex; flex-direction: column; gap: 4px"><span style="display: flex; align-items: baseline; gap: 8px; min-width: 0"><b style="font-size: 15px; font-weight: 600">{{h.sym}}</b><span style="min-width: 0; font-size: 13px; color: #A1A8B3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{h.name}}</span></span><sc-if value="{{h.tagShow}}" hint-placeholder-val="{{false}}"><span style="align-self: flex-start; font-size: 12px; font-weight: 600; color: {{h.tagInk}}; background: {{h.tagBg}}; border: 1px solid {{h.tagBd}}; border-radius: 999px; padding: 2px 9px; white-space: nowrap">{{h.tag}}</span></sc-if></span></span>
+                  <span class="num" style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px"><span class="sr">Held </span>{{h.days}}</span><span style="font-size: 12px; color: #A1A8B3">{{h.since}}</span></span>
+                  <span class="num" style="display: flex; flex-direction: column; gap: 5px"><span style="display: flex; align-items: baseline; gap: 8px; white-space: nowrap"><b style="font-size: 14px; font-weight: 600">{{h.share}}<span class="sr"> of the pot</span></b><span style="font-size: 12px; color: #A1A8B3">{{h.value}} · {{h.sh}}</span></span><span aria-hidden="true" style="position: relative; height: 4px; border-radius: 999px; background: #243A5C"><span style="position: absolute; left: 0; top: 0; bottom: 0; width: {{h.shareW}}; border-radius: 999px; background: #4F95F0"></span></span></span>
+                  <span class="num" style="display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; font-weight: 600; color: {{h.gainInk}}; white-space: nowrap">{{h.gain}}</b><span style="font-size: 13px; color: #A1A8B3">{{h.gainPct}}</span></span>
+                  <span class="num" style="min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 1.4"><span style="color: {{h.exit1Ink}}"><sc-if value="{{h.exit1Icon}}" hint-placeholder-val="{{false}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-right: 5px; vertical-align: -2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg></sc-if><span class="sr">Sells when: </span>{{h.exit1}} <span style="color: #A1A8B3">· {{h.exit1b}}</span></span><sc-if value="{{h.hasExit2}}" hint-placeholder-val="{{true}}"><span style="color: {{h.exit2Ink}}"><sc-if value="{{h.exit2Icon}}" hint-placeholder-val="{{false}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-right: 5px; vertical-align: -2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg></sc-if>{{h.exit2}}</span></sc-if></span>
+                  <span class="num" style="display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px"><span class="sr">Safety stop </span>{{h.stop}}</span><span style="font-size: 12px; color: #A1A8B3; white-space: nowrap"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-right: 5px; vertical-align: -2px"><path d="M12 3.5 L19 6.5 V11.5 C19 15.8 16 19 12 20.5 C8 19 5 15.8 5 11.5 V6.5 Z M9 12 l2.2 2.2 L15 10"></path></svg>{{h.stopWord}} · {{h.stopSub}}</span></span>
+                  <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                </a>
+              </li>
+              </sc-for>
+            </ul>
+            <ul class="hd-phone" style="list-style: none; margin: 0; padding: 0 10px">
+              <sc-for list="{{g.rows}}" as="h" hint-placeholder-count="4">
+              <li style="border-top: 1px solid #1B1E24">
+                <button type="button" class="rowlink" aria-expanded="{{h.openS}}" style="width: 100%; display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 4px; border: 0; border-radius: 12px; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer">
+                  <span aria-hidden="true" style="flex: none; width: 40px; height: 40px; border-radius: 999px; background: {{h.c}}; color: #0A0B0D; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700">{{h.i}}</span>
+                  <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px"><span style="display: flex; align-items: baseline; gap: 8px; min-width: 0"><b style="font-size: 15px; font-weight: 600">{{h.sym}}</b><span style="min-width: 0; font-size: 13px; color: #A1A8B3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{h.name}}</span></span><span class="num" style="font-size: 13px; color: #A1A8B3">{{h.days}} · {{h.share}}<span class="sr"> of the pot</span></span><sc-if value="{{h.tagShow}}" hint-placeholder-val="{{false}}"><span style="align-self: flex-start; font-size: 12px; font-weight: 600; color: {{h.tagInk}}; background: {{h.tagBg}}; border: 1px solid {{h.tagBd}}; border-radius: 999px; padding: 2px 9px; white-space: nowrap">{{h.tag}}</span></sc-if></span>
+                  <span class="num" style="flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 3px"><b style="font-size: 15px; font-weight: 600; color: {{h.gainInk}}; white-space: nowrap">{{h.gain}}</b><span style="font-size: 13px; color: #A1A8B3">{{h.gainPct}}</span></span>
+                  <svg class="chev {{h.chev}}" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                </button>
+                <sc-if value="{{h.open}}" hint-placeholder-val="{{false}}">
+                  <div class="expand num" style="padding: 2px 4px 14px 56px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.45">
+                    <div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">Sells when</span><span style="color: {{h.exit1Ink}}"><sc-if value="{{h.exit1Icon}}" hint-placeholder-val="{{false}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-right: 5px; vertical-align: -2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg></sc-if><span class="sr">Sells when: </span>{{h.exit1}} <span style="color: #A1A8B3">· {{h.exit1b}}</span></span><sc-if value="{{h.hasExit2}}" hint-placeholder-val="{{true}}"><span style="color: {{h.exit2Ink}}"><sc-if value="{{h.exit2Icon}}" hint-placeholder-val="{{false}}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-right: 5px; vertical-align: -2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg></sc-if>{{h.exit2}}</span></sc-if></div>
+                    <div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">Safety stop at the broker</span><span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-right: 5px; vertical-align: -2px"><path d="M12 3.5 L19 6.5 V11.5 C19 15.8 16 19 12 20.5 C8 19 5 15.8 5 11.5 V6.5 Z M9 12 l2.2 2.2 L15 10"></path></svg>{{h.stop}} · {{h.stopWord}} · {{h.stopSub}}</span></div>
+                    <div style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">Size</span><span>{{h.value}} · {{h.sh}} · held {{h.since}}</span></div>
+                    <a href="Holding.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; align-self: flex-start">Why it was bought <span aria-hidden="true">→</span></a>
+                  </div>
+                </sc-if>
+              </li>
+              </sc-for>
+            </ul>
+          </div>
+        </sc-for>
+        <p class="hd-desk" style="margin: 0; padding: 12px 14px 4px; font-size: 12px; color: #A1A8B3">{{st.hold.barNote}}</p>
+        </sc-if>
+      </section>
+        <section class="card pad-sm enter d2" aria-labelledby="pl-hq" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px 8px 14px; display: flex; flex-direction: column">
+          <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 0 14px 6px"><h2 id="pl-hq" style="margin: 0; flex: 1 1 auto; font-size: 18px; font-weight: 600">Tonight’s plan</h2><span class="num" style="font-size: 13px; color: #A1A8B3">{{st.quiet.after}}</span></div>
+          <sc-if value="{{st.quiet.noPlan}}" hint-placeholder-val="{{false}}">
+            <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px 14px 10px"><b style="font-size: 17px; font-weight: 600">{{st.quiet.emptyTitle}}</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.55; max-width: 620px">{{st.quiet.emptyText}}</span></div>
+          </sc-if>
+          <sc-if value="{{st.quiet.hasPlan}}" hint-placeholder-val="{{true}}">
+            <sc-for list="{{st.quiet.groups}}" as="g" hint-placeholder-count="4">
+              <div>
+                <h3 style="margin: 0; padding: 16px 14px 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #A1A8B3">{{g.title}} · <span class="num">{{g.n}}</span></h3>
+                <ul style="list-style: none; margin: 0; padding: 0">
+                  <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="2">
+                    <li class="plrow" style="padding: 12px 14px; border-top: 1px solid #1B1E24; opacity: {{r.dim}}">
+                      <span aria-hidden="true" style="width: 36px; height: 36px; border-radius: 999px; background: #1B1E24; color: #F4F5F7; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{{r.icon}}"></path></svg></span>
+                      <span style="min-width: 0; display: flex; flex-direction: column; gap: 3px"><span style="display: flex; align-items: baseline; gap: 8px; min-width: 0"><b style="font-size: 15px; font-weight: 600">{{r.sym}}</b><span style="min-width: 0; font-size: 13px; color: #A1A8B3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.name}}</span></span><span class="num" style="font-size: 14px; font-weight: 500">{{r.line}}</span><span class="num" style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{r.why}}</span></span>
+                      <span class="full-row {{r.sCls}}" style="display: flex; align-items: center; gap: 6px; min-height: 36px; font-size: 13px; color: #A1A8B3; white-space: nowrap"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{r.sInk}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="{{r.sIcon}}"></path></svg>{{r.status}}</span>
+                    </li>
+                  </sc-for>
+                </ul>
+              </div>
+            </sc-for>
+            <p style="margin: 0; padding: 14px 14px 0; border-top: 1px solid #1B1E24; font-size: 13px; color: #A1A8B3; line-height: 1.55">{{st.quiet.note}} {{st.quiet.rule}}</p>
+          </sc-if>
+        </section>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Stopped</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">Buying stopped for today: the daily loss limit</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">An amber banner under the header on every page, in plain words: what happened, what is cancelled, what still goes ahead. The headline changes from “All good” to “Buying stopped today”. Holdings are not sold.</span>
+      </div>
+    <sc-if value="{{st.halted.alarm.show}}" hint-placeholder-val="{{false}}">
+      <div role="{{st.halted.alarm.role}}" class="enter" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; padding: 14px 18px; border-radius: 20px; background: {{st.halted.alarm.bg}}; border: 1px solid {{st.halted.alarm.bd}}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{{st.halted.alarm.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.halted.alarm.icon}}"></path></svg>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 3px"><b style="font-size: 15px; font-weight: 600">{{st.halted.alarm.title}}</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{st.halted.alarm.text}}</span></div>
+        <a href="{{st.halted.alarm.href}}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; color: #F4F5F7; align-self: center">{{st.halted.alarm.action}} <span aria-hidden="true">→</span></a>
+      </div>
+    </sc-if>
+    <section class="card statusbar enter" aria-labelledby="st-hh" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; padding: 14px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px">
+      <div class="full-sm" style="flex: 0 1 auto; display: flex; align-items: center; gap: 12px; min-width: 200px">
+        <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 999px; background: {{st.halted.status.tint}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{st.halted.status.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{{st.halted.status.icon}}"></path></svg></span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px"><h2 id="st-hh" style="margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap">{{st.halted.status.title}}</h2><span style="font-size: 13px; color: #A1A8B3"><span class="hide-sm">{{st.halted.status.sub}}</span><span class="show-sm">{{st.halted.status.short}}</span></span></div>
+        <button type="button" class="show-sm-flex press" aria-expanded="{{st.halted.status.fS}}" aria-controls="st-fh" aria-label="Show the four checks" style="flex: none; width: 44px; height: 44px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; cursor: pointer; align-items: center; justify-content: center"><svg class="chev {{st.halted.status.fChev}}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+      </div>
+      <ul id="st-fh" class="facts {{st.halted.status.fCls}}" style="flex: 1 1 560px; list-style: none; margin: 0; padding: 0">
+        <sc-for list="{{st.halted.status.facts}}" as="f" hint-placeholder-count="4">
+          <li style="display: flex; gap: 8px; align-items: flex-start; min-width: 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{f.ink}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="{{f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">{{f.label}} <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">: {{f.word}}</span></span><span style="font-size: 14px; font-weight: 500; line-height: 1.35">{{f.value}}</span></span>
+          </li>
+        </sc-for>
+      </ul>
+      <a href="Engine.dc.html" class="hide-sm" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">Engine health <span aria-hidden="true">→</span></a>
+    </section>
+      <div style="display: flex; flex-wrap: wrap; gap: 24px">
+        <section aria-labelledby="pot-hh" style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; align-items: center; gap: 12px"><h2 id="pot-hh" style="margin: 0; flex: 1 1 auto; font-size: 15px; font-weight: 500; color: #A1A8B3">{{st.halted.hero.label}}</h2><span style="flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px dashed #3A404A; font-size: 12px; font-weight: 600; color: #A1A8B3; white-space: nowrap">Sample data</span></div>
+          <div class="num hero" style="font-size: 64px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; color: {{st.halted.hero.ink}}">{{st.halted.hero.value}}</div>
+          <span class="num" style="font-size: 13px; color: #A1A8B3; line-height: 1.45"><span class="hide-sm">{{st.halted.hero.note}} </span>{{st.halted.hero.asof}}</span>
+        </div>
+        <dl class="stats" style="margin: 0">
+          <sc-for list="{{st.halted.stats}}" as="s" hint-placeholder-count="3">
+            <div class="stat"><dt style="font-size: 13px; color: #A1A8B3">{{s.label}}</dt><dd class="num" style="margin: 0; font-size: 16px; font-weight: 600; color: {{s.ink}}; white-space: nowrap">{{s.value}}</dd><dd class="num sub" style="margin: 0; font-size: 13px; color: #A1A8B3; line-height: 1.4">{{s.sub}}</dd></div>
+          </sc-for>
+        </dl>
+        <div class="show-sm-flex" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; flex-direction: column; overflow: hidden">
+          <section aria-labelledby="inv-mh" style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; align-items: baseline; gap: 10px"><h2 id="inv-mh" style="margin: 0; flex: 1; font-size: 16px; font-weight: 600">Invested</h2><span class="num" style="font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1">{{st.halted.inv.pct}}</span></div>
+          <div role="meter" aria-label="Share of the pot invested in stocks" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{st.halted.inv.now}}" aria-valuetext="{{st.halted.inv.aria}}" style="position: relative; padding-top: 22px">
+            <span class="num" style="position: absolute; top: 0; left: {{st.halted.inv.limitLeft}}; transform: translateX({{st.halted.inv.limitShift}}); font-size: 12px; color: #A1A8B3; white-space: nowrap">{{st.halted.inv.limitText}}</span>
+            <div style="position: relative; height: 12px; border-radius: 999px; background: #243A5C">
+              <div class="grow" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{st.halted.inv.w}}; border-radius: 999px; background: #4F95F0"></div>
+              <span aria-hidden="true" style="position: absolute; left: {{st.halted.inv.limitLeft}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #F4F5F7"></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 6px; font-size: 12px; color: #A1A8B3"><span>All cash</span><span>Fully invested</span></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: {{st.halted.inv.f.bg}}; border: 1px solid {{st.halted.inv.f.bd}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{st.halted.inv.f.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.halted.inv.f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 14px; font-weight: 600">{{st.halted.inv.f.title}}</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.halted.inv.f.text}}</span></span>
+          </div>
+          </section>
+          <a href="NextClose.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 16px; border-top: 1px solid #262A31; color: #F4F5F7; text-decoration: none">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 13px; color: #A1A8B3">Next close · {{st.halted.next.when}}</span><b class="num" style="font-size: 15px; font-weight: 600">{{st.halted.next.short}}</b></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+          <a href="Holdings.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 16px; border-top: 1px solid #262A31; color: #F4F5F7; text-decoration: none">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 13px; color: #A1A8B3">Holdings</span><b class="num" style="font-size: 15px; font-weight: 600">{{st.halted.held.short}}</b></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+        </div>
+
+        </section>
+        <aside class="side hide-sm" style="flex: 1 1 340px; min-width: 0">
+        <section class="card enter d3" aria-labelledby="nx-hh" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 10px; margin: -8px 0"><h2 id="nx-hh" style="margin: 0; flex: 1 1 auto; font-size: 16px; font-weight: 600">Next close</h2><a href="NextClose.dc.html" aria-label="See the plan for the next close" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">See the plan <span aria-hidden="true">→</span></a></div>
+          <span class="num" style="font-size: 13px; color: #A1A8B3">{{st.halted.next.when}} · {{st.halted.next.away}}</span>
+          <sc-if value="{{st.halted.next.hasLines}}" hint-placeholder-val="{{true}}">
+            <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{st.halted.next.lines}}" as="l" hint-placeholder-count="3"><li style="display: flex; gap: 10px; align-items: baseline; font-size: 14px"><b class="num" style="flex: none; width: 76px; font-weight: 600">{{l.k}}</b><span class="num" style="color: #A1A8B3">{{l.names}}</span></li></sc-for>
+            </ul>
+          </sc-if>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.halted.next.foot}}</span>
+        </section>
+        </aside>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Stopped</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">The market check says wait</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">Not an alarm, so no banner. The Invested card turns its market line amber with a pause icon and says which rule is waiting; the Next close card shows the buys as on hold.</span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 24px">
+        <div class="side" style="flex: 1 1 340px; max-width: 420px">
+        <section class="card enter d2" aria-labelledby="inv-hw" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: baseline; gap: 10px"><h2 id="inv-hw" style="margin: 0; flex: 1; font-size: 16px; font-weight: 600">Invested</h2><span class="num" style="font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1">{{st.wait.inv.pct}}</span></div>
+          <div role="meter" aria-label="Share of the pot invested in stocks" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{st.wait.inv.now}}" aria-valuetext="{{st.wait.inv.aria}}" style="position: relative; padding-top: 22px">
+            <span class="num" style="position: absolute; top: 0; left: {{st.wait.inv.limitLeft}}; transform: translateX({{st.wait.inv.limitShift}}); font-size: 12px; color: #A1A8B3; white-space: nowrap">{{st.wait.inv.limitText}}</span>
+            <div style="position: relative; height: 12px; border-radius: 999px; background: #243A5C">
+              <div class="grow" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{st.wait.inv.w}}; border-radius: 999px; background: #4F95F0"></div>
+              <span aria-hidden="true" style="position: absolute; left: {{st.wait.inv.limitLeft}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #F4F5F7"></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 6px; font-size: 12px; color: #A1A8B3"><span>All cash</span><span>Fully invested</span></div>
+          </div>
+          <sc-if value="{{st.wait.inv.hasRules}}" hint-placeholder-val="{{true}}">
+            <ul aria-label="Where the pot is" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+              <sc-for list="{{st.wait.inv.rules}}" as="r" hint-placeholder-count="3">
+                <li style="display: grid; grid-template-columns: minmax(0, 1fr) 96px 40px; gap: 10px; align-items: center; font-size: 13px"><span style="color: #A1A8B3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{r.name}}</span><span aria-hidden="true" style="position: relative; height: 6px; border-radius: 999px; background: #243A5C"><span style="position: absolute; left: 0; top: 0; bottom: 0; width: {{r.w}}; border-radius: 999px; background: #4F95F0"></span></span><span class="num" style="text-align: right; font-weight: 600">{{r.pct}}</span></li>
+              </sc-for>
+            </ul>
+          </sc-if>
+          <div style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: {{st.wait.inv.f.bg}}; border: 1px solid {{st.wait.inv.f.bd}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{st.wait.inv.f.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.wait.inv.f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 14px; font-weight: 600">{{st.wait.inv.f.title}}</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.wait.inv.f.text}}</span></span>
+          </div>
+        </section>
+        </div>
+        <div class="side" style="flex: 1 1 340px; max-width: 420px">
+        <section class="card enter d3" aria-labelledby="nx-hw" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 10px; margin: -8px 0"><h2 id="nx-hw" style="margin: 0; flex: 1 1 auto; font-size: 16px; font-weight: 600">Next close</h2><a href="NextClose.dc.html" aria-label="See the plan for the next close" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">See the plan <span aria-hidden="true">→</span></a></div>
+          <span class="num" style="font-size: 13px; color: #A1A8B3">{{st.wait.next.when}} · {{st.wait.next.away}}</span>
+          <sc-if value="{{st.wait.next.hasLines}}" hint-placeholder-val="{{true}}">
+            <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px">
+              <sc-for list="{{st.wait.next.lines}}" as="l" hint-placeholder-count="3"><li style="display: flex; gap: 10px; align-items: baseline; font-size: 14px"><b class="num" style="flex: none; width: 76px; font-weight: 600">{{l.k}}</b><span class="num" style="color: #A1A8B3">{{l.names}}</span></li></sc-for>
+            </ul>
+          </sc-if>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.wait.next.foot}}</span>
+        </section>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Stopped</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">You paused new buys</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">The Controls card stays where it is today, at the bottom of Home. While paused it says so in words and the button reads “Resume new buys”. “Flatten and stop” keeps its place and its two-step confirmation.</span>
+      </div>
+      <section class="card" aria-label="Controls while paused" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px">
+        <div style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 4px">
+          <h3 style="margin: 0; font-size: 16px; font-weight: 600">Controls</h3>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">No stock-by-stock control. The engine applies a command within about 10 seconds.</span>
+        </div>
+        <span role="status" style="font-size: 13px; color: #F5B64C; font-weight: 500">New buys paused · Kaibot still sells by its rules</span>
+        <button type="button" class="press full-sm" style="height: 48px; padding: 0 22px; border-radius: 999px; border: 1px solid #262A31; background: #1B1E24; color: #F4F5F7; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Resume new buys</button>
+        <button type="button" class="press full-sm" style="height: 48px; padding: 0 22px; border-radius: 999px; border: 1px solid #5A2A2E; background: transparent; color: #FF6B6B; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Flatten and stop</button>
+      </section>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Problem</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">The engine is offline</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">Amber banner: when it was last seen, what protects the holdings meanwhile and what to do. The pot turns grey and carries the time of its prices, because it may be out of date. The header chip reads “Offline”.</span>
+      </div>
+    <sc-if value="{{st.offline.alarm.show}}" hint-placeholder-val="{{false}}">
+      <div role="{{st.offline.alarm.role}}" class="enter" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; padding: 14px 18px; border-radius: 20px; background: {{st.offline.alarm.bg}}; border: 1px solid {{st.offline.alarm.bd}}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{{st.offline.alarm.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.offline.alarm.icon}}"></path></svg>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 3px"><b style="font-size: 15px; font-weight: 600">{{st.offline.alarm.title}}</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{st.offline.alarm.text}}</span></div>
+        <a href="{{st.offline.alarm.href}}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; color: #F4F5F7; align-self: center">{{st.offline.alarm.action}} <span aria-hidden="true">→</span></a>
+      </div>
+    </sc-if>
+    <section class="card statusbar enter" aria-labelledby="st-ho" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; padding: 14px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px">
+      <div class="full-sm" style="flex: 0 1 auto; display: flex; align-items: center; gap: 12px; min-width: 200px">
+        <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 999px; background: {{st.offline.status.tint}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{st.offline.status.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{{st.offline.status.icon}}"></path></svg></span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px"><h2 id="st-ho" style="margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap">{{st.offline.status.title}}</h2><span style="font-size: 13px; color: #A1A8B3"><span class="hide-sm">{{st.offline.status.sub}}</span><span class="show-sm">{{st.offline.status.short}}</span></span></div>
+        <button type="button" class="show-sm-flex press" aria-expanded="{{st.offline.status.fS}}" aria-controls="st-fo" aria-label="Show the four checks" style="flex: none; width: 44px; height: 44px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; cursor: pointer; align-items: center; justify-content: center"><svg class="chev {{st.offline.status.fChev}}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+      </div>
+      <ul id="st-fo" class="facts {{st.offline.status.fCls}}" style="flex: 1 1 560px; list-style: none; margin: 0; padding: 0">
+        <sc-for list="{{st.offline.status.facts}}" as="f" hint-placeholder-count="4">
+          <li style="display: flex; gap: 8px; align-items: flex-start; min-width: 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{f.ink}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="{{f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">{{f.label}} <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">: {{f.word}}</span></span><span style="font-size: 14px; font-weight: 500; line-height: 1.35">{{f.value}}</span></span>
+          </li>
+        </sc-for>
+      </ul>
+      <a href="Engine.dc.html" class="hide-sm" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">Engine health <span aria-hidden="true">→</span></a>
+    </section>
+      <div style="display: flex; flex-wrap: wrap; gap: 24px">
+        <section aria-labelledby="pot-ho" style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 18px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; align-items: center; gap: 12px"><h2 id="pot-ho" style="margin: 0; flex: 1 1 auto; font-size: 15px; font-weight: 500; color: #A1A8B3">{{st.offline.hero.label}}</h2><span style="flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px dashed #3A404A; font-size: 12px; font-weight: 600; color: #A1A8B3; white-space: nowrap">Sample data</span></div>
+          <div class="num hero" style="font-size: 64px; font-weight: 700; letter-spacing: -0.04em; line-height: 1; color: {{st.offline.hero.ink}}">{{st.offline.hero.value}}</div>
+          <span class="num" style="font-size: 13px; color: #A1A8B3; line-height: 1.45"><span class="hide-sm">{{st.offline.hero.note}} </span>{{st.offline.hero.asof}}</span>
+        </div>
+        <dl class="stats" style="margin: 0">
+          <sc-for list="{{st.offline.stats}}" as="s" hint-placeholder-count="3">
+            <div class="stat"><dt style="font-size: 13px; color: #A1A8B3">{{s.label}}</dt><dd class="num" style="margin: 0; font-size: 16px; font-weight: 600; color: {{s.ink}}; white-space: nowrap">{{s.value}}</dd><dd class="num sub" style="margin: 0; font-size: 13px; color: #A1A8B3; line-height: 1.4">{{s.sub}}</dd></div>
+          </sc-for>
+        </dl>
+        <div class="show-sm-flex" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; flex-direction: column; overflow: hidden">
+          <section aria-labelledby="inv-mo" style="padding: 16px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; align-items: baseline; gap: 10px"><h2 id="inv-mo" style="margin: 0; flex: 1; font-size: 16px; font-weight: 600">Invested</h2><span class="num" style="font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1">{{st.offline.inv.pct}}</span></div>
+          <div role="meter" aria-label="Share of the pot invested in stocks" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{st.offline.inv.now}}" aria-valuetext="{{st.offline.inv.aria}}" style="position: relative; padding-top: 22px">
+            <span class="num" style="position: absolute; top: 0; left: {{st.offline.inv.limitLeft}}; transform: translateX({{st.offline.inv.limitShift}}); font-size: 12px; color: #A1A8B3; white-space: nowrap">{{st.offline.inv.limitText}}</span>
+            <div style="position: relative; height: 12px; border-radius: 999px; background: #243A5C">
+              <div class="grow" style="position: absolute; left: 0; top: 0; bottom: 0; width: {{st.offline.inv.w}}; border-radius: 999px; background: #4F95F0"></div>
+              <span aria-hidden="true" style="position: absolute; left: {{st.offline.inv.limitLeft}}; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #F4F5F7"></span>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 6px; font-size: 12px; color: #A1A8B3"><span>All cash</span><span>Fully invested</span></div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; background: {{st.offline.inv.f.bg}}; border: 1px solid {{st.offline.inv.f.bd}}">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="{{st.offline.inv.f.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.offline.inv.f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 14px; font-weight: 600">{{st.offline.inv.f.title}}</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{st.offline.inv.f.text}}</span></span>
+          </div>
+          </section>
+          <a href="NextClose.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 16px; border-top: 1px solid #262A31; color: #F4F5F7; text-decoration: none">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 13px; color: #A1A8B3">Next close · {{st.offline.next.when}}</span><b class="num" style="font-size: 15px; font-weight: 600">{{st.offline.next.short}}</b></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+          <a href="Holdings.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 8px 16px; border-top: 1px solid #262A31; color: #F4F5F7; text-decoration: none">
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 13px; color: #A1A8B3">Holdings</span><b class="num" style="font-size: 15px; font-weight: 600">{{st.offline.held.short}}</b></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </a>
+        </div>
+
+        </section>
+
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Problem</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">A safety stop is missing</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">Red banner with a cross icon and the word “Needs attention”. This is the one state where a holding is unprotected, so it is the loudest. The failing check is named.</span>
+      </div>
+    <sc-if value="{{st.stop.alarm.show}}" hint-placeholder-val="{{false}}">
+      <div role="{{st.stop.alarm.role}}" class="enter" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; padding: 14px 18px; border-radius: 20px; background: {{st.stop.alarm.bg}}; border: 1px solid {{st.stop.alarm.bd}}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{{st.stop.alarm.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.stop.alarm.icon}}"></path></svg>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 3px"><b style="font-size: 15px; font-weight: 600">{{st.stop.alarm.title}}</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{st.stop.alarm.text}}</span></div>
+        <a href="{{st.stop.alarm.href}}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; color: #F4F5F7; align-self: center">{{st.stop.alarm.action}} <span aria-hidden="true">→</span></a>
+      </div>
+    </sc-if>
+    <section class="card statusbar enter" aria-labelledby="st-hs" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; padding: 14px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px">
+      <div class="full-sm" style="flex: 0 1 auto; display: flex; align-items: center; gap: 12px; min-width: 200px">
+        <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 999px; background: {{st.stop.status.tint}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{st.stop.status.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{{st.stop.status.icon}}"></path></svg></span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px"><h2 id="st-hs" style="margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap">{{st.stop.status.title}}</h2><span style="font-size: 13px; color: #A1A8B3"><span class="hide-sm">{{st.stop.status.sub}}</span><span class="show-sm">{{st.stop.status.short}}</span></span></div>
+        <button type="button" class="show-sm-flex press" aria-expanded="{{st.stop.status.fS}}" aria-controls="st-fs" aria-label="Show the four checks" style="flex: none; width: 44px; height: 44px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; cursor: pointer; align-items: center; justify-content: center"><svg class="chev {{st.stop.status.fChev}}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+      </div>
+      <ul id="st-fs" class="facts {{st.stop.status.fCls}}" style="flex: 1 1 560px; list-style: none; margin: 0; padding: 0">
+        <sc-for list="{{st.stop.status.facts}}" as="f" hint-placeholder-count="4">
+          <li style="display: flex; gap: 8px; align-items: flex-start; min-width: 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{f.ink}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="{{f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">{{f.label}} <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">: {{f.word}}</span></span><span style="font-size: 14px; font-weight: 500; line-height: 1.35">{{f.value}}</span></span>
+          </li>
+        </sc-for>
+      </ul>
+      <a href="Engine.dc.html" class="hide-sm" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">Engine health <span aria-hidden="true">→</span></a>
+    </section>
+
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Problem</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">Kaibot’s books and the broker disagree</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">Red banner. Buying stops until the two match again.</span>
+      </div>
+    <sc-if value="{{st.books.alarm.show}}" hint-placeholder-val="{{false}}">
+      <div role="{{st.books.alarm.role}}" class="enter" style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 16px; padding: 14px 18px; border-radius: 20px; background: {{st.books.alarm.bg}}; border: 1px solid {{st.books.alarm.bd}}">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="{{st.books.alarm.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px"><path d="{{st.books.alarm.icon}}"></path></svg>
+        <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 3px"><b style="font-size: 15px; font-weight: 600">{{st.books.alarm.title}}</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{st.books.alarm.text}}</span></div>
+        <a href="{{st.books.alarm.href}}" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; color: #F4F5F7; align-self: center">{{st.books.alarm.action}} <span aria-hidden="true">→</span></a>
+      </div>
+    </sc-if>
+    <section class="card statusbar enter" aria-labelledby="st-hb" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; border-radius: 20px; padding: 14px 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px">
+      <div class="full-sm" style="flex: 0 1 auto; display: flex; align-items: center; gap: 12px; min-width: 200px">
+        <span aria-hidden="true" style="flex: none; width: 36px; height: 36px; border-radius: 999px; background: {{st.books.status.tint}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{st.books.status.ink}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="{{st.books.status.icon}}"></path></svg></span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px"><h2 id="st-hb" style="margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap">{{st.books.status.title}}</h2><span style="font-size: 13px; color: #A1A8B3"><span class="hide-sm">{{st.books.status.sub}}</span><span class="show-sm">{{st.books.status.short}}</span></span></div>
+        <button type="button" class="show-sm-flex press" aria-expanded="{{st.books.status.fS}}" aria-controls="st-fb" aria-label="Show the four checks" style="flex: none; width: 44px; height: 44px; border-radius: 999px; border: 0; background: transparent; color: #A1A8B3; cursor: pointer; align-items: center; justify-content: center"><svg class="chev {{st.books.status.fChev}}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
+      </div>
+      <ul id="st-fb" class="facts {{st.books.status.fCls}}" style="flex: 1 1 560px; list-style: none; margin: 0; padding: 0">
+        <sc-for list="{{st.books.status.facts}}" as="f" hint-placeholder-count="4">
+          <li style="display: flex; gap: 8px; align-items: flex-start; min-width: 0">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{f.ink}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="{{f.icon}}"></path></svg>
+            <span style="min-width: 0; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 12px; color: #A1A8B3">{{f.label}} <span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">: {{f.word}}</span></span><span style="font-size: 14px; font-weight: 500; line-height: 1.35">{{f.value}}</span></span>
+          </li>
+        </sc-for>
+      </ul>
+      <a href="Engine.dc.html" class="hide-sm" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none">Engine health <span aria-hidden="true">→</span></a>
+    </section>
+
+      <div style="display: flex; flex-direction: column; gap: 6px; padding-top: 22px; border-top: 1px dashed #3A404A">
+        <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px"><span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #0A0B0D; background: #A1A8B3; border-radius: 999px; padding: 3px 9px">Problem</span><h2 style="margin: 0; font-size: 20px; font-weight: 600">The dashboard cannot load</h2></div>
+        <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; max-width: 900px">The screen keeps the last numbers it had, says how old they are and offers one button. It also says that trading is not affected, because that is the first worry.</span>
+      </div>
+      <div role="alert" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FF6B6B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6"></path></svg>
+        <div style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px"><b style="font-size: 16px; font-weight: 600">Couldn’t load the latest numbers</b><span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">The dashboard cannot reach the database. What you see was loaded at 19:58. Trading is not affected: the engine keeps its own records and the safety stops rest at the broker.</span></div>
+        <button type="button" class="press full-sm" style="height: 44px; padding: 0 20px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Try again</button>
+      </div>
+    <p style="margin: 0; font-size: 12px; color: #A1A8B3; text-align: center; line-height: 1.5">Sample data: every price, rank and result here is invented · paper trading only · times in Berlin (New York is 6 hours behind)</p>
+  </main>
+  <nav class="tabbar" aria-label="Main">
+    <a href="Overview.dc.html" class="press" aria-current="page" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #F4F5F7"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z" stroke-linejoin="round"></path></svg>Home</a>
+    <a href="Holdings.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 7 H20 M8 12 H20 M8 17 H20" stroke-linecap="round"></path><path d="M4 7 H4.01 M4 12 H4.01 M4 17 H4.01" stroke-linecap="round" stroke-width="2.6"></path></svg>Holdings</a>
+    <a href="NextClose.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5 V12 L15 14" stroke-linecap="round" stroke-linejoin="round"></path></svg>Next</a>
+    <a href="Evidence.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3.5 L19 6.5 V11.5 C19 15.8 16 19 12 20.5 C8 19 5 15.8 5 11.5 V6.5 Z" stroke-linejoin="round"></path><path d="M9 12 L11.2 14.2 L15 10" stroke-linecap="round" stroke-linejoin="round"></path></svg>Evidence</a>
+    <button type="button" class="press" aria-haspopup="dialog" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3; background: transparent; border: 0; padding: 0; font-family: inherit; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12 H5.01 M12 12 H12.01 M19 12 H19.01" stroke-linecap="round" stroke-width="3"></path></svg>More</button>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":4960}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.D = {"st":{"empty":{"alarm":{"show":false,"title":"","text":"","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#131519","bd":"#262A31","action":"","href":"Engine.dc.html","role":"status"},"status":{"title":"All good","sub":"No alarms","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","tint":"#12301F","facts":[{"label":"Engine","value":"Running · 6 s ago","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"None needed yet","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Books","value":"Match the broker","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"}],"short":"4 checks passed","fCls":"hide-sm","fChev":"","fS":"false"},"hero":{"label":"Pot, at today’s prices","asof":"Nothing bought yet.","value":"$5,000.00","ink":"#F4F5F7","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"No change yet","ink":"#A1A8B3","sub":""},{"label":"Today","value":"No change","ink":"#A1A8B3","sub":""},{"label":"S&P 500 (SPY), same start","value":"Starts at the first close","ink":"#A1A8B3","sub":""}],"inv":{"pct":"0%","now":0,"w":"0.0%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"No stocks yet · $5,000 in cash","aria":"0 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#0A0B0D","bd":"#0A0B0D","title":"Buying allowed","text":"The S&P 500 is 6.3% above its 200-day average."},"rules":[],"hasRules":false},"next":{"when":"Tonight 22:00","away":"nothing planned","lines":[],"foot":"Steady risers first checks its list on Wed 6 Jan, after the close. What it picks is bought at Thursday’s close.","short":"First check Wed 6 Jan","hasLines":false},"held":{"n":"None yet","faces":[],"more":"","line":"Kaibot holds no stocks yet.","best":"","short":"No stocks yet","none":true,"has":false},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"halted":{"alarm":{"show":true,"title":"Buying is stopped for today","text":"The pot is down 1.62% since yesterday’s close; the daily loss limit is 1.5%. Tonight’s 3 buys are cancelled. Sales still go ahead and every stock keeps its safety stop. Buying is allowed again tomorrow.","icon":"M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4","ink":"#F5B64C","bg":"#33280F","bd":"#5A4520","action":"What this means","href":"Engine.dc.html","role":"status"},"status":{"title":"Buying stopped today","sub":"Daily loss limit reached","icon":"M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4","ink":"#F5B64C","tint":"#33280F","facts":[{"label":"Engine","value":"Running · 6 s ago","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"12 of 12 in place","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Books","value":"Match the broker","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"}],"short":"4 checks passed","fCls":"hide-sm","fChev":"","fS":"false"},"hero":{"label":"Pot, at today’s prices","asof":"Prices as of 20:00 Berlin.","value":"$5,105.18","ink":"#F4F5F7","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"▲ +⁠$105.18 · +2.10%","ink":"#3DDC97","sub":""},{"label":"Today","value":"▼ −⁠$84.07 · −1.62%","ink":"#FF6B6B","sub":"Overnight −⁠$61.30 · since the open −⁠$22.77"},{"label":"S&P 500 (SPY), same start","value":"▲ +2.92%","ink":"#A1A8B3","sub":"The pot is $40.93 behind"}],"inv":{"pct":"53%","now":53,"w":"52.7%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"$2,728 in 12 stocks · $2,447 in cash","aria":"53 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#0A0B0D","bd":"#0A0B0D","title":"Buying allowed","text":"The S&P 500 is 6.3% above its 200-day average."},"rules":[{"name":"Steady risers","w":"37.1%","pct":"37%"},{"name":"12-month winners","w":"15.6%","pct":"16%"},{"name":"Cash","w":"47.3%","pct":"47%"}],"hasRules":true},"next":{"when":"Tonight 22:00","away":"in 1 h 46 min","lines":[{"k":"Sell 2","names":"XOM, GM"},{"k":"Trim 1","names":"NEM"},{"k":"Cancelled","names":"UBER, CVS, 1 more WMT"}],"foot":"3 orders are at the broker. 3 buys were cancelled by the daily loss limit.","short":"2 sells · 1 trim · 3 buys cancelled","hasLines":true},"held":{"n":"12 stocks","faces":[{"i":"CS","c":"#7FB2FF"},{"i":"WM","c":"#7FB2FF"},{"i":"NE","c":"#C9A8FF"},{"i":"AP","c":"#7FB2FF"},{"i":"XO","c":"#D0D5DD"}],"more":"+7","line":"9 up · 3 down","short":"12 stocks · 9 up · 3 down","best":"up most NEM +11.10% · down most GM −4.85%","none":false,"has":true},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"wait":{"alarm":{"show":false,"title":"","text":"","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#131519","bd":"#262A31","action":"","href":"Engine.dc.html","role":"status"},"status":{"title":"All good","sub":"No alarms · the market check says wait","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","tint":"#12301F","facts":[{"label":"Engine","value":"Running · 6 s ago","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"12 of 12 in place","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Books","value":"Match the broker","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"}],"short":"4 checks passed","fCls":"hide-sm","fChev":"","fS":"false"},"hero":{"label":"Pot, at today’s prices","asof":"Prices as of 20:00 Berlin.","value":"$5,175.40","ink":"#F4F5F7","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"▲ +⁠$175.40 · +3.51%","ink":"#3DDC97","sub":""},{"label":"Today","value":"▼ −⁠$13.85 · −0.27%","ink":"#FF6B6B","sub":"Overnight −⁠$23.10 · since the open +⁠$9.25"},{"label":"S&P 500 (SPY), same start","value":"▲ +4.73%","ink":"#A1A8B3","sub":"The pot is $61.10 behind"}],"inv":{"pct":"53%","now":53,"w":"52.7%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"$2,728 in 12 stocks · $2,447 in cash","aria":"53 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M10 9 V15 M14 9 V15","ink":"#F5B64C","bg":"#33280F","bd":"#5A4520","title":"Not buying for now","text":"The S&P 500 is 1.8% below its 200-day average. Steady risers buys nothing new until it is back above. Kaibot keeps what it holds and still sells by its rules."},"rules":[{"name":"Steady risers","w":"37.1%","pct":"37%"},{"name":"12-month winners","w":"15.6%","pct":"16%"},{"name":"Cash","w":"47.3%","pct":"47%"}],"hasRules":true},"next":{"when":"Tonight 22:00","away":"in 1 h 46 min","lines":[{"k":"Sell 2","names":"XOM, GM"},{"k":"Trim 1","names":"NEM"},{"k":"On hold","names":"UBER, CVS, 1 more WMT"}],"foot":"3 orders are at the broker. Buys wait until the S&P 500 is back above its 200-day average.","short":"2 sells · 1 trim · 3 buys on hold","hasLines":true},"held":{"n":"12 stocks","faces":[{"i":"CS","c":"#7FB2FF"},{"i":"WM","c":"#7FB2FF"},{"i":"NE","c":"#C9A8FF"},{"i":"AP","c":"#7FB2FF"},{"i":"XO","c":"#D0D5DD"}],"more":"+7","line":"9 up · 3 down","short":"12 stocks · 9 up · 3 down","best":"up most NEM +11.10% · down most GM −4.85%","none":false,"has":true},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"offline":{"alarm":{"show":true,"title":"Kaibot’s engine is offline","text":"Last seen at 17:02, 3 h 12 min ago. Your 12 stocks keep their safety stops, and tonight’s 6 orders are already at the broker, so they still trade at the close. The engine restarts by itself; if it is not back in a few minutes, start it on your Mac.","icon":"M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4","ink":"#F5B64C","bg":"#33280F","bd":"#5A4520","action":"How to start it","href":"Engine.dc.html","role":"status"},"status":{"title":"Engine offline","sub":"Last seen 17:02","icon":"M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4","ink":"#F5B64C","tint":"#33280F","facts":[{"label":"Engine","value":"Offline · last seen 17:02","icon":"M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4","ink":"#F5B64C","word":"needs a look"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"12 of 12 at 17:02","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12 H16","ink":"#A1A8B3","word":"unknown"},{"label":"Books","value":"Matched at the close","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12 H16","ink":"#A1A8B3","word":"unknown"}],"short":"1 of 4 checks fine","fCls":"","fChev":"open-chev","fS":"true"},"hero":{"label":"Pot, at today’s prices","asof":"Prices as of 17:02 Berlin, when the engine was last seen.","value":"$5,175.40","ink":"#A1A8B3","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"▲ +⁠$175.40 · +3.51%","ink":"#3DDC97","sub":""},{"label":"Today","value":"▼ −⁠$13.85 · −0.27%","ink":"#FF6B6B","sub":"Overnight −⁠$23.10 · since the open +⁠$9.25"},{"label":"S&P 500 (SPY), same start","value":"▲ +4.73%","ink":"#A1A8B3","sub":"The pot is $61.10 behind"}],"inv":{"pct":"53%","now":53,"w":"52.7%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"$2,728 in 12 stocks · $2,447 in cash","aria":"53 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#0A0B0D","bd":"#0A0B0D","title":"Buying allowed","text":"The S&P 500 is 6.3% above its 200-day average."},"rules":[{"name":"Steady risers","w":"37.1%","pct":"37%"},{"name":"12-month winners","w":"15.6%","pct":"16%"},{"name":"Cash","w":"47.3%","pct":"47%"}],"hasRules":true},"next":{"when":"Tonight 22:00","away":"in 1 h 46 min","lines":[{"k":"Sell 2","names":"XOM, GM"},{"k":"Buy 2","names":"UBER, CVS"},{"k":"Resize 2","names":"WMT, NEM"}],"foot":"6 orders are at the broker, waiting for the close.","short":"2 sells · 2 buys · 2 resizes","hasLines":true},"held":{"n":"12 stocks","faces":[{"i":"CS","c":"#7FB2FF"},{"i":"WM","c":"#7FB2FF"},{"i":"NE","c":"#C9A8FF"},{"i":"AP","c":"#7FB2FF"},{"i":"XO","c":"#D0D5DD"}],"more":"+7","line":"9 up · 3 down","short":"12 stocks · 9 up · 3 down","best":"up most NEM +11.10% · down most GM −4.85%","none":false,"has":true},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"stop":{"alarm":{"show":true,"title":"One stock has no safety stop","text":"General Motors (GM) has no safety stop at the broker. Kaibot is placing it again now. If this message is still here in a few minutes, open Engine health.","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6","ink":"#FF6B6B","bg":"#2A1517","bd":"#5A2A2E","action":"Engine health","href":"Engine.dc.html","role":"alert"},"status":{"title":"Needs attention","sub":"1 safety stop is missing","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6","ink":"#FF6B6B","tint":"#2A1517","facts":[{"label":"Engine","value":"Running · 6 s ago","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"11 of 12 · GM is missing","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6","ink":"#FF6B6B","word":"problem"},{"label":"Books","value":"Match the broker","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"}],"short":"3 of 4 checks fine","fCls":"","fChev":"open-chev","fS":"true"},"hero":{"label":"Pot, at today’s prices","asof":"Prices as of 20:00 Berlin.","value":"$5,175.40","ink":"#F4F5F7","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"▲ +⁠$175.40 · +3.51%","ink":"#3DDC97","sub":""},{"label":"Today","value":"▼ −⁠$13.85 · −0.27%","ink":"#FF6B6B","sub":"Overnight −⁠$23.10 · since the open +⁠$9.25"},{"label":"S&P 500 (SPY), same start","value":"▲ +4.73%","ink":"#A1A8B3","sub":"The pot is $61.10 behind"}],"inv":{"pct":"53%","now":53,"w":"52.7%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"$2,728 in 12 stocks · $2,447 in cash","aria":"53 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#0A0B0D","bd":"#0A0B0D","title":"Buying allowed","text":"The S&P 500 is 6.3% above its 200-day average."},"rules":[{"name":"Steady risers","w":"37.1%","pct":"37%"},{"name":"12-month winners","w":"15.6%","pct":"16%"},{"name":"Cash","w":"47.3%","pct":"47%"}],"hasRules":true},"next":{"when":"Tonight 22:00","away":"in 1 h 46 min","lines":[{"k":"Sell 2","names":"XOM, GM"},{"k":"Buy 2","names":"UBER, CVS"},{"k":"Resize 2","names":"WMT, NEM"}],"foot":"6 orders are at the broker, waiting for the close.","short":"2 sells · 2 buys · 2 resizes","hasLines":true},"held":{"n":"12 stocks","faces":[{"i":"CS","c":"#7FB2FF"},{"i":"WM","c":"#7FB2FF"},{"i":"NE","c":"#C9A8FF"},{"i":"AP","c":"#7FB2FF"},{"i":"XO","c":"#D0D5DD"}],"more":"+7","line":"9 up · 3 down","short":"12 stocks · 9 up · 3 down","best":"up most NEM +11.10% · down most GM −4.85%","none":false,"has":true},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"books":{"alarm":{"show":true,"title":"Kaibot’s books and the broker disagree","text":"Kaibot counts 3 shares of General Motors (GM); the broker counts 2. Buying is stopped until the two match again. Every stock keeps its safety stop.","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6","ink":"#FF6B6B","bg":"#2A1517","bd":"#5A2A2E","action":"Engine health","href":"Engine.dc.html","role":"alert"},"status":{"title":"Needs attention","sub":"Books do not match the broker","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6","ink":"#FF6B6B","tint":"#2A1517","facts":[{"label":"Engine","value":"Running · 6 s ago","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"12 of 12 in place","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Books","value":"GM: 3 here, broker 2","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M9 9 l6 6 M15 9 l-6 6","ink":"#FF6B6B","word":"problem"}],"short":"3 of 4 checks fine","fCls":"","fChev":"open-chev","fS":"true"},"hero":{"label":"Pot, at today’s prices","asof":"Prices as of 20:00 Berlin.","value":"$5,175.40","ink":"#F4F5F7","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"▲ +⁠$175.40 · +3.51%","ink":"#3DDC97","sub":""},{"label":"Today","value":"▼ −⁠$13.85 · −0.27%","ink":"#FF6B6B","sub":"Overnight −⁠$23.10 · since the open +⁠$9.25"},{"label":"S&P 500 (SPY), same start","value":"▲ +4.73%","ink":"#A1A8B3","sub":"The pot is $61.10 behind"}],"inv":{"pct":"53%","now":53,"w":"52.7%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"$2,728 in 12 stocks · $2,447 in cash","aria":"53 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#0A0B0D","bd":"#0A0B0D","title":"Buying allowed","text":"The S&P 500 is 6.3% above its 200-day average."},"rules":[{"name":"Steady risers","w":"37.1%","pct":"37%"},{"name":"12-month winners","w":"15.6%","pct":"16%"},{"name":"Cash","w":"47.3%","pct":"47%"}],"hasRules":true},"next":{"when":"Tonight 22:00","away":"in 1 h 46 min","lines":[{"k":"Sell 2","names":"XOM, GM"},{"k":"Buy 2","names":"UBER, CVS"},{"k":"Resize 2","names":"WMT, NEM"}],"foot":"6 orders are at the broker, waiting for the close.","short":"2 sells · 2 buys · 2 resizes","hasLines":true},"held":{"n":"12 stocks","faces":[{"i":"CS","c":"#7FB2FF"},{"i":"WM","c":"#7FB2FF"},{"i":"NE","c":"#C9A8FF"},{"i":"AP","c":"#7FB2FF"},{"i":"XO","c":"#D0D5DD"}],"more":"+7","line":"9 up · 3 down","short":"12 stocks · 9 up · 3 down","best":"up most NEM +11.10% · down most GM −4.85%","none":false,"has":true},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"stale":{"alarm":{"show":false,"title":"","text":"","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#131519","bd":"#262A31","action":"","href":"Engine.dc.html","role":"status"},"status":{"title":"All good","sub":"No alarms","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","tint":"#12301F","facts":[{"label":"Engine","value":"Running · 6 s ago","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Daily check","value":"Done Wed 22:21","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Safety stops","value":"12 of 12 in place","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"},{"label":"Books","value":"Match the broker","icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","word":"fine"}],"short":"4 checks passed","fCls":"hide-sm","fChev":"","fS":"false"},"hero":{"label":"Pot, at today’s prices","asof":"Loaded at 19:58 Berlin. It may be out of date.","value":"$5,175.40","ink":"#A1A8B3","note":"Cash plus every stock at its latest price, after costs."},"stats":[{"label":"Since 4 Jan","value":"▲ +⁠$175.40 · +3.51%","ink":"#3DDC97","sub":""},{"label":"Today","value":"▼ −⁠$13.85 · −0.27%","ink":"#FF6B6B","sub":"Overnight −⁠$23.10 · since the open +⁠$9.25"},{"label":"S&P 500 (SPY), same start","value":"▲ +4.73%","ink":"#A1A8B3","sub":"The pot is $61.10 behind"}],"inv":{"pct":"53%","now":53,"w":"52.7%","limitLeft":"80%","limitShift":"-50%","limitText":"Limit 80%","line":"$2,728 in 12 stocks · $2,447 in cash","aria":"53 percent of the pot is invested in stocks; the limit is 80 percent","f":{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","bg":"#0A0B0D","bd":"#0A0B0D","title":"Buying allowed","text":"The S&P 500 is 6.3% above its 200-day average."},"rules":[{"name":"Steady risers","w":"37.1%","pct":"37%"},{"name":"12-month winners","w":"15.6%","pct":"16%"},{"name":"Cash","w":"47.3%","pct":"47%"}],"hasRules":true},"next":{"when":"Tonight 22:00","away":"in 1 h 46 min","lines":[{"k":"Sell 2","names":"XOM, GM"},{"k":"Buy 2","names":"UBER, CVS"},{"k":"Resize 2","names":"WMT, NEM"}],"foot":"6 orders are at the broker, waiting for the close.","short":"2 sells · 2 buys · 2 resizes","hasLines":true},"held":{"n":"12 stocks","faces":[{"i":"CS","c":"#7FB2FF"},{"i":"WM","c":"#7FB2FF"},{"i":"NE","c":"#C9A8FF"},{"i":"AP","c":"#7FB2FF"},{"i":"XO","c":"#D0D5DD"}],"more":"+7","line":"9 up · 3 down","short":"12 stocks · 9 up · 3 down","best":"up most NEM +11.10% · down most GM −4.85%","none":false,"has":true},"chartOn":true,"chartOff":false,"chartNote":"","controls":{"show":true,"confirm":"Sell all 12 stocks at the market price and end this run?"}},"hold":{"sub":"0 stocks · $2,728.25 in stocks, 53% of the pot · $2,447.15 in cash","subShort":"No stocks · all of the pot is cash","nHeld":0,"nSold":6,"groups":[],"shown":[],"sold":[{"sym":"RTX","i":"RT","c":"#C9A8FF","name":"RTX Corporation","ruleName":"Steady risers","when":"Sold Thu 4 Mar","held":"42 days","res":"▲ +⁠$31.90","pct":"+9.6%","ink":"#3DDC97","why":"Left the top fifth of the ranking"},{"sym":"DIS","i":"DI","c":"#D0D5DD","name":"Walt Disney","ruleName":"Steady risers","when":"Sold Thu 4 Mar","held":"28 days","res":"▼ −⁠$9.40","pct":"−4.3%","ink":"#FF6B6B","why":"Closed below its 100-day average"},{"sym":"BK","i":"BK","c":"#D0D5DD","name":"Bank of New York Mellon","ruleName":"12-month winners","when":"Sold Tue 2 Mar","held":"28 days","res":"▲ +⁠$9.10","pct":"+4.4%","ink":"#3DDC97","why":"Fell out of the top fifth of its ranking"},{"sym":"KO","i":"KO","c":"#8FD8E8","name":"Coca-Cola","ruleName":"Steady risers","when":"Sold Thu 25 Feb","held":"42 days","res":"▲ +⁠$18.30","pct":"+4.4%","ink":"#3DDC97","why":"Left the top fifth of the ranking"},{"sym":"JNJ","i":"JN","c":"#C9A8FF","name":"Johnson & Johnson","ruleName":"Steady risers","when":"Sold Thu 18 Feb","held":"42 days","res":"▲ +⁠$21.60","pct":"+6.1%","ink":"#3DDC97","why":"Left the top fifth of the ranking"},{"sym":"T","i":"T","c":"#7FB2FF","name":"AT&T","ruleName":"Steady risers","when":"Sold Thu 4 Feb","held":"28 days","res":"▼ −⁠$5.85","pct":"−1.6%","ink":"#FF6B6B","why":"Closed below its 100-day average"}],"hasRows":false,"isEmpty":true,"emptyTitle":"No stocks yet","emptyText":"Kaibot buys only at a close, after a rule has checked its list. Steady risers checks every Wednesday after the close; what it picks is bought at Thursday’s close and shows up here with its safety stop.","soldSum":"6 sold · result +⁠$65.65 · dividends +⁠$3.24","barNote":"Each bar shows the stock’s share of the pot against the limit for one stock (10%)."},"quiet":{"how":"Kaibot decides once a day, after the market closes, and trades at the next close.","day":"Tonight, Fri 12 Mar","time":"22:00","zone":"Berlin · 16:00 in New York","away":"in 1 h 46 min","steps":[{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12.4 l2.7 2.7 L16 9.6","ink":"#3DDC97","k":"Decided","v":"Thu 11 Mar, 22:19","s":"nothing to do"},{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M8 12 H16","ink":"#A1A8B3","k":"At the broker","v":"No orders","s":"only the 12 safety stops"},{"icon":"M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M12 7.5 V12 l3 2","ink":"#7FB2FF","k":"Next check","v":"Tonight, after 22:00","s":"as every trading day"}],"stepsShort":"Decided Thu 11 Mar, 22:19: nothing to do. No orders are at the broker, only the 12 safety stops.","after":"Stays at 12 stocks, about 53% invested.","hasPlan":false,"noPlan":true,"groups":[],"note":"Dollar amounts are estimates at the latest price. The real price is tonight’s closing price.","rule":"If the pot is down 1.5% on the day, Kaibot cancels the buys. Sales still go ahead and every stock keeps its safety stop.","emptyTitle":"Nothing planned for tonight’s close","emptyText":"Kaibot checked after last night’s close and found nothing to do. Most days are like this. Steady risers checks its list next on Wed 17 Mar, 12-month winners on Thu 1 Apr. Every stock keeps its safety stop.","last":{"day":"Last close · Wed 10 Mar","title":"Nothing was planned and nothing traded.","checks":["Safety stops checked: 12 of 12 in place","Kaibot’s books match the broker"]},"trades":{"day":"Last trades · Thu 4 Mar","sum":"3 planned · 3 done at the closing price","rows":[{"sym":"TPR","name":"Tapestry","icon":"M12 5 V19 M5 12 H19","line":"Bought 2 at $109.80 · $219.60","res":"","ink":"#A1A8B3","hasRes":false,"why":"New in the top fifth of the ranking: 4th of 503."},{"sym":"RTX","name":"RTX Corporation","icon":"M5 12 H19","line":"Sold 2 at $181.95 after 42 days","res":"▲ +⁠$31.90 · +9.6%","ink":"#3DDC97","hasRes":true,"why":"Left the top fifth of the ranking."},{"sym":"DIS","name":"Walt Disney","icon":"M5 12 H19","line":"Sold 2 at $104.30 after 28 days","res":"▼ −⁠$9.40 · −4.3%","ink":"#FF6B6B","hasRes":true,"why":"Closed below its 100-day average."}]},"coming":[{"when":"Wed 17 Mar","what":"Steady risers checks its list","sub":"after the close · trades Thu 18 Mar"},{"when":"Wed 24 Mar","what":"Steady risers checks sizes","sub":"every second week"},{"when":"Thu 1 Apr","what":"12-month winners checks its list","sub":"first trading day of the month · trades Fri 2 Apr"}]}}}; }
+  renderVals() { return { st: this.D.st }; }
+}
+</script>
+</body>
+</html>

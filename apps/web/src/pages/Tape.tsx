@@ -2,17 +2,19 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
+import { onTabKeys, tabProps } from "../lib/a11y";
+import { poll } from "../lib/poll";
 import { api, type TapeItem } from "../lib/api";
 import { RoomBySignal } from "../components/Room";
-import { CAUSE_TEXT, fmtR, roomOutcome } from "../lib/derive";
-import { EXIT_LABEL, dateEt, money, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { fmtR } from "../lib/derive";
+import { roomOutcome } from "../lib/roomview";
+import { causeText, exitText, explainSignal, ruleLabel, ruleName } from "../lib/explain";
+import { dateEt, money, px, signedMoney, timeEt, tone } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
+import { Empty, ErrorState } from "../components/States";
 import { StockCell } from "../components/StockBadge";
 
 const PAGE = 100;
-const STRAT: Record<string, string> = {
-  dip_reversal: "dip reversal", spy_late_momentum: "SPY momentum", orb_stocks_in_play: "ORB", news_continuation: "news continuation",
-};
 type Filter = "all" | "trades" | "live" | "room" | "shadow";
 
 /** What happened, in one line, with the reason. */
@@ -24,8 +26,8 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
         <td><span className={`tag ${it.side === "buy" ? "allow" : "downgrade"}`}>{it.side === "buy" ? "bought" : "sold"}</span></td>
         <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
         <td className="num">{it.qty} @ {px(it.venue_px)} <span className="muted">(shadow {px(it.shadow_px)}, fees {money(it.fees)})</span>
-          {it.side === "sell" && it.exit_reason && <span className="muted"> · {EXIT_LABEL[it.exit_reason] ?? it.exit_reason}</span>}
-          {it.tag && <span className="muted"> · {it.tag.replace(/_/g, " ")}</span>}</td>
+          {it.side === "sell" && it.exit_reason && <span className="muted" title={`code: ${it.exit_reason}`}> · {exitText(it.exit_reason)}</span>}
+          {it.tag && <span className="muted" title={`code: ${it.tag}`}> · {it.tag.replace(/_/g, " ")}</span>}</td>
         <td className={`r num ${tone(it.pnl_usd)}`} title={`Costs on this fill vs shadow model: ${money(cost)}`}>
           {it.side === "sell" ? signedMoney(it.pnl_usd) : ""}</td>
       </>
@@ -37,16 +39,16 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
   const out = room ? roomOutcome(room.status, room.verdict) : null;
   const roomBlocked = !!room && !taken && (room.status === "done" ? room.verdict === "veto"
     : ["timeout", "invalid", "error"].includes(room.status));
-  const why = it.veto ?? (roomBlocked && out ? `room: ${out.label}${room!.cause ? ` (${CAUSE_TEXT[room!.cause] ?? room!.cause})` : ""}`
-    : it.mode === "live" && !it.approved ? `gate: ${it.binding ?? "not approved"}` : null);
+  const roomWhy = roomBlocked && out ? `${out.label}${room!.cause ? `: ${causeText(room!.cause)}` : ""}` : null;
+  const ex = explainSignal(it, { taken: !!taken, roomWhy });
   // Shadow strategies carry their own counterfactual; room-blocked setups show the rules-only arm's.
   const cf = it.counterfactual ?? (!taken ? room?.counterfactual ?? null : null);
   return (
     <>
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
       <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
-        <span className="muted"> · {STRAT[it.strategy] ?? it.strategy}</span></td>
-      <td>{it.reasons.join(" · ")}{why && <span className="muted"> — {why}</span>}
+        <span className="muted" title={`${ruleLabel(it.strategy)} · code: ${it.strategy}`}> · {ruleName(it.strategy)}</span></td>
+      <td title={ex.detail}><div>{ex.outcome}</div><div className="muted" style={{ fontSize: 13 }}>{ex.saw}</div>
         {it.entry !== null && <span className="muted num"> · ref {px(it.entry)}, stop {px(it.stop)}{it.target ? `, target ${px(it.target)}` : ""}</span>}
         {room && out && (
           <div className="room-line">
@@ -75,7 +77,7 @@ export function Tape() {
     queryFn: ({ pageParam }) => api.tape(run.id, PAGE, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => (last.length === PAGE ? last[last.length - 1].ts : undefined),
-    refetchInterval: run.kind === "paper" ? 15_000 : false,
+    ...poll(run.kind === "paper" ? 15_000 : false),
   });
   const all = q.data?.pages.flat() ?? [];
   const rows = all.filter((it) => filter === "all" || (filter === "trades" ? it.kind === "fill"
@@ -87,13 +89,15 @@ export function Tape() {
         <h2 id="tape-h" style={{ margin: 0 }}>Tape</h2>
         <span className="muted" style={{ fontSize: 13 }}>Every setup Kaibot saw, what it did, why, and every fill after costs. Newest first.</span>
         <span className="spacer" />
-        <div className="tabs" role="tablist" aria-label="Show">
+        <div className="tabs" role="tablist" onKeyDown={onTabKeys} aria-label="Show">
           {([["all", "All"], ["trades", "Fills"], ["live", "Setups"], ["room", "Agent room"], ["shadow", "Shadow"]] as [Filter, string][]).map(([k, l]) => (
-            <button key={k} role="tab" aria-selected={filter === k} onClick={() => setFilter(k)}>{l}</button>))}
+            <button key={k} {...tabProps(filter === k)} onClick={() => setFilter(k)}>{l}</button>))}
         </div>
       </div>
-      {q.isPending ? <Skeleton /> : q.isError ? <p className="loss">{String(q.error)}</p> : !rows.length ? (
-        <p className="muted">{run.kind === "replay" ? "Replays don't record a tape: only live paper runs do." : "Nothing yet. Setups are checked every 5 minutes from 09:35 to 15:45 ET."}</p>
+      {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="The tape" error={q.error} retry={() => q.refetch()} /> : !rows.length ? (
+        <Empty>{run.kind === "replay" ? "Replays don't record a tape: only live paper runs do."
+          : all.length ? "Nothing of this kind in the loaded part of the tape. Choose All, or load older entries."
+          : "Nothing yet. Setups are checked every 5 minutes from 09:35 to 15:45 ET."}</Empty>
       ) : (
         <table className="list" style={{ marginTop: 12 }}>
           <thead><tr><th>Time (ET)</th><th>What</th><th>Stock</th><th>Why</th><th className="r">Result</th></tr></thead>

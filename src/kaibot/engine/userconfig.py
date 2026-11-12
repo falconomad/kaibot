@@ -19,6 +19,7 @@ import math
 from dataclasses import dataclass, replace
 
 from kaibot.risk.gate import HARD_CEILINGS, RiskPolicy, validate_policy
+from kaibot.strategies import registry
 
 OPEN_MIN = 9 * 60 + 30
 FIRST_ENTRY_M = 5  # 09:35
@@ -116,13 +117,14 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
 
     # ---- strategies ----
     st = _obj(body.get("strategies"), "strategies")
-    known = {"dip_reversal", "spy_late_momentum"}
-    _only_keys(st, known, "strategies")
+    _only_keys(st, set(registry.owner_toggles()), "strategies")  # S76: the names come from the registry
     on = [s for s in level_strategies if st.get(s, True) is True]
     for s, v in st.items():
         if not isinstance(v, bool):
             raise ConfigError(f"strategies.{s} must be true or false")
-        if v and s not in level_strategies:
+        # A retired rule (registered, in no level) left `true` in a config saved before its retirement stays off:
+        # ignoring it can never switch it on, refusing it would stop the whole session (#128).
+        if v and s not in level_strategies and s not in registry.RETIRED:
             raise ConfigError(f"{s} is not part of this level")
     if not on:
         raise ConfigError("at least one strategy must stay on")

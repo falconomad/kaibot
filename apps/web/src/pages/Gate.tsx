@@ -4,11 +4,14 @@
 import { useQuery } from "@tanstack/react-query";
 import { useRunCtx } from "../components/Shell";
 import { api, type GateStrategy } from "../lib/api";
-import { gateOverallText, gateRows, gateStatusText } from "../lib/derive";
+import { gateOverallText, gateRows, gateStatusText } from "../lib/gateview";
 import { dateEt, day, money, timeBoth } from "../lib/fmt";
+import { ruleName } from "../lib/explain";
+import { Empty, ErrorState, RuleName } from "../components/States";
+import { Skeleton } from "../components/Skeleton";
+import { STALE, poll } from "../lib/poll";
 
 const STATE_TEXT = { pass: "pass", fail: "fail", unknown: "unknown", provisional: "on track (provisional)", pending: "not yet" };
-const NAMES: Record<string, string> = { dip_reversal: "No-news dip reversal", spy_late_momentum: "SPY last-30-minute momentum" };
 
 function StrategyCard({ name, st }: { name: string; st: GateStrategy }) {
   const s = gateStatusText(st.status);
@@ -16,7 +19,7 @@ function StrategyCard({ name, st }: { name: string; st: GateStrategy }) {
   return (
     <section className="card" aria-labelledby={`g-${name}`}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-        <h2 id={`g-${name}`} style={{ margin: 0 }}>{NAMES[name] ?? name}</h2>
+        <h2 id={`g-${name}`} style={{ margin: 0 }}><RuleName code={name} /></h2>
         <span className={`tag gate-${s.tone}`}>{s.label}</span>
       </div>
       <p className="muted" style={{ fontSize: 13 }}>
@@ -47,9 +50,10 @@ function StrategyCard({ name, st }: { name: string; st: GateStrategy }) {
 
 export function Gate() {
   const { run } = useRunCtx();
-  const q = useQuery({ queryKey: ["gate", run.id], queryFn: () => api.gate(run.id), refetchInterval: 300_000 });
-  if (q.isPending) return <p className="skeleton">Loading…</p>;
-  if (q.isError) return <p className="loss">{String(q.error)}</p>;
+  // The engine writes one report after each close: cache it for minutes, poll gently.
+  const q = useQuery({ queryKey: ["gate", run.id], queryFn: () => api.gate(run.id), staleTime: STALE.daily, ...poll(300_000) });
+  if (q.isPending) return <Skeleton />;
+  if (q.isError) return <ErrorState what="The go / no-go review" error={q.error} retry={() => q.refetch()} />;
   const latest = q.data.latest;
   return (
     <>
@@ -71,7 +75,9 @@ export function Gate() {
           </p>
         )}
       </section>
-      {latest && Object.entries(latest.report.strategies).map(([k, st]) => <StrategyCard key={k} name={k} st={st} />)}
+      {latest && (Object.keys(latest.report.strategies ?? {}).length
+        ? Object.entries(latest.report.strategies).map(([k, st]) => <StrategyCard key={k} name={k} st={st} />)
+        : <section className="card"><Empty>The latest report judged no strategy: none traded on the current code yet.</Empty></section>)}
       {q.data.history.length > 1 && (
         <section className="card" aria-labelledby="gh-h">
           <h2 id="gh-h">Verdict history</h2>
@@ -80,7 +86,7 @@ export function Gate() {
             <tbody>
               {q.data.history.slice(0, 20).map((h) => (
                 <tr key={h.id}><td>{day(h.session)}</td><td>{h.overall}</td>
-                  <td>{Object.entries(h.n_trades ?? {}).map(([k, n]) => `${NAMES[k] ?? k}: ${n}`).join(" · ")}</td></tr>
+                  <td>{Object.entries(h.n_trades ?? {}).map(([k, n]) => `${ruleName(k)}: ${n}`).join(" · ")}</td></tr>
               ))}
             </tbody>
           </table>

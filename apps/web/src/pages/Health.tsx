@@ -1,6 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type Heartbeat } from "../lib/api";
-import { ageS, ageText, budgetText, haltText, scanSummary, sessionTime } from "../lib/derive";
+import { ageS, ageText, haltResolved, haltText, scanSummary, sessionTime } from "../lib/derive";
+import { engineVersion } from "../lib/engine";
+import { commandText, ruleLabel } from "../lib/explain";
+import { Empty, ErrorState } from "../components/States";
+import { poll } from "../lib/poll";
+import { budgetText } from "../lib/roomview";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 
@@ -23,7 +28,7 @@ function Proc({ h }: { h: Heartbeat }) {
       <td className="num">{String(d.state ?? "—")}</td>
       <td className="num">{ageText(age)}</td>
       <td className="muted num" style={{ fontSize: 12 }}>
-        {d.code_sha ? `code ${d.code_sha} · ` : ""}{d.host ? `host ${String(d.host).slice(0, 12)} · ` : ""}
+        {d.code_sha ? `code version ${d.code_sha} · ` : ""}{d.host ? `host ${String(d.host).slice(0, 12)} · ` : ""}
         {d.account_clean === false ? "account NOT clean · " : ""}{d.halted ? "entries halted · " : ""}
         {typeof d.engine_heartbeat_age_s === "number" ? `sees engine ${Math.round(d.engine_heartbeat_age_s)} s` : ""}
       </td>
@@ -44,9 +49,9 @@ const usd = (v: number) => `$${v.toFixed(v < 10 ? 3 : 2)}`;
 
 /** S32/S36: today's LLM spend against the caps. */
 function LlmBudgetCard() {
-  const q = useQuery({ queryKey: ["llm_budget"], queryFn: api.llmBudget, refetchInterval: 30_000 });
-  if (q.isPending) return <section className="card"><h2>LLM budget</h2><p className="skeleton">Loading…</p></section>;
-  if (q.isError) return <section className="card"><h2>LLM budget</h2><p className="loss">{String(q.error)}</p></section>;
+  const q = useQuery({ queryKey: ["llm_budget"], queryFn: api.llmBudget, ...poll(30_000) });
+  if (q.isPending) return <section className="card"><h2>LLM budget</h2><p className="skeleton" role="status">Loading…</p></section>;
+  if (q.isError) return <section className="card"><h2>LLM budget</h2><ErrorState compact what="The LLM budget" error={q.error} retry={() => q.refetch()} /></section>;
   const b = q.data, t = budgetText(b), [cls, label] = STATE_TAG[b.state] ?? STATE_TAG.ok;
   const bar = (frac: number) => <div className="prog bar-row" aria-hidden="true"><i style={{ width: `${Math.min(100, frac * 100)}%`,
     background: frac >= 1 ? "var(--fail)" : frac >= 0.8 ? "var(--warn)" : undefined }} /></div>;
@@ -86,18 +91,46 @@ function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
           </table>
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The dip rule buys only a fall of at least 1.5σ that its sector doesn't explain, on calm volume, with no company news in 24 h, after a 5-minute higher low. Quiet up-days often have none.</p>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The dip rule (retired, systems test only) buys only a fall of at least 1.5σ that its sector doesn't explain, on calm volume, with no company news in 24 h, after a 5-minute higher low. Quiet up-days often have none.</p>
     </section>
   );
 }
 
+/** Which code the engine runs (heartbeat) and the strategy fingerprint it logged at its last start. */
+function VersionCard({ h }: { h: HealthData }) {
+  const v = engineVersion(h);
+  const fp = v.start?.fingerprint;
+  return (
+    <section className="card" aria-labelledby="ver-h">
+      <h2 id="ver-h">Engine version</h2>
+      <div className="kv">
+        <span>Code version running now</span><span /><span className="v num">{v.running ?? "not reported"}</span>
+        <span>Last start</span><span /><span className="v num">{v.start ? `${dateEt(v.start.ts)} ${timeEt(v.start.ts)} ET${v.start.codeSha ? ` · code ${v.start.codeSha}` : ""}` : "not in the recent log"}</span>
+        {fp && !fp.unknown && fp.all && (<><span>Strategy fingerprint</span><span /><span className="v num">{fp.all}</span></>)}
+        {fp?.core && (<><span>Shared core</span><span /><span className="v num" title="code: core">{fp.core}</span></>)}
+        {fp?.rules.map((p) => (
+          <span key={p.key} style={{ display: "contents" }}><span title={`code: ${p.key}`}>{ruleLabel(p.key)}</span><span /><span className="v num">{p.hash}</span></span>
+        ))}
+      </div>
+      {fp?.unknown && <p className="loss" style={{ fontSize: 13 }}>The engine couldn't compute its fingerprint at start, so no trade from this start counts toward a verdict.</p>}
+      {v.mismatch && <p className="muted" style={{ fontSize: 13 }}>The running code differs from the code at the last logged start; the start may be older than this log.</p>}
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Evidence for a rule only counts while its part of the fingerprint (shared core plus the rule's own files) stays the same.
+        Changing one rule doesn't restart another rule's count.</p>
+    </section>
+  );
+}
+
+type HealthData = Awaited<ReturnType<typeof api.health>>;
+
 export function Health() {
-  const q = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: 15_000 });
+  const q = useQuery({ queryKey: ["health"], queryFn: api.health, ...poll(15_000) });
   if (q.isPending) return <Skeleton />;
-  if (q.isError) return <p className="loss">{String(q.error)}</p>;
+  if (q.isError) return <ErrorState what="Engine health" error={q.error} retry={() => q.refetch()} />;
   const h = q.data;
   const procs = h.heartbeat.filter((b) => b.process in PROC);
   const lastDead = h.deadman.runs[0];
+  const beatTs = h.heartbeat.find((b) => b.process === "engine")?.ts;
+  const recovered = h.events.filter((e) => e.type === "watchdog_recovered").map((e) => e.ts);
   return (
     <>
       <section className="card" aria-labelledby="proc-h">
@@ -106,8 +139,10 @@ export function Health() {
           <thead><tr><th>Process</th><th>State</th><th>Last heartbeat</th><th>Detail</th></tr></thead>
           <tbody>{procs.length ? procs.map((b) => <Proc key={b.process} h={b} />) : <tr><td colSpan={4} className="muted">No process has reported yet.</td></tr>}</tbody>
         </table>
-        {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 12 }}>Waiting for the engine: {h.pending_commands.map((c) => c.kind.replace(/_/g, " ")).join(", ")}</p>}
+        {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 12 }}>Waiting for the engine: {h.pending_commands.map((c) => commandText(c.kind)).join(", ")}</p>}
       </section>
+
+      <VersionCard h={h} />
 
       <ScanCard beat={h.heartbeat.find((b) => b.process === "engine")} />
 
@@ -127,9 +162,10 @@ export function Health() {
           <h2 id="halt-h">Recent halts</h2>
           {h.halts.length ? (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{h.halts.slice(0, 12).map((x, i) => (
-              <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> {haltText(x)}
+              <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <span title={`code: ${x.kind}`}>{haltText(x)}</span>
+                {haltResolved(x, beatTs, recovered) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}
                 {x.reason && <div className="muted" style={{ fontSize: 12 }}>{x.reason}</div>}</li>))}</ul>
-          ) : <p className="muted">None.</p>}
+          ) : <Empty>No halts recorded.</Empty>}
         </section>
       </div>
 
@@ -137,10 +173,10 @@ export function Health() {
         <h2 id="ev-h">Operations log</h2>
         <table className="list">
           <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
-          <tbody>{h.events.map((e, i) => (
+          <tbody>{!h.events.length && <tr><td colSpan={3} className="muted">Nothing logged yet.</td></tr>}{h.events.map((e, i) => (
             <tr key={i}>
               <td className="num" title={timeBoth(e.ts)}>{dateEt(e.ts)} {timeEt(e.ts)}</td>
-              <td>{EV[e.type] ?? e.type.replace(/_/g, " ")}</td>
+              <td title={`code: ${e.type}`}>{eventText(e)}</td>
               <td className="muted num" style={{ fontSize: 12, maxWidth: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {summary(e.payload)}</td>
             </tr>))}</tbody>
@@ -150,7 +186,15 @@ export function Health() {
   );
 }
 
+/** One event in plain words. Halts name their kind; commands say what was asked. */
+function eventText(e: HealthData["events"][number]): string {
+  if (e.type === "halt" && typeof e.payload?.kind === "string") return `Halt: ${haltText({ kind: e.payload.kind, reason: String(e.payload.reason ?? ""), ts: e.ts })}`;
+  if (e.type.startsWith("command_")) return `You asked to ${commandText(e.type.slice("command_".length))}`;
+  return EV[e.type] ?? e.type.replace(/_/g, " ");
+}
+
+/** Payload detail: engine_start's code version and fingerprint have their own card, so only their short form shows here. */
 function summary(p: Record<string, unknown>) {
-  return Object.entries(p ?? {}).filter(([, v]) => v !== null && typeof v !== "object").slice(0, 6)
-    .map(([k, v]) => `${k.replace(/_/g, " ")}: ${String(v)}`).join(" · ");
+  return Object.entries(p ?? {}).filter(([k, v]) => v !== null && typeof v !== "object" && k !== "kind").slice(0, 6)
+    .map(([k, v]) => k === "fingerprint" ? `fingerprint: ${String(v).split(";")[0]}` : `${k.replace(/_/g, " ")}: ${String(v)}`).join(" · ");
 }

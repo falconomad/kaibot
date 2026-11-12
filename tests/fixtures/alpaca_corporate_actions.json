@@ -1,0 +1,147 @@
+{
+ "_note": "Synthetic rows in the shape of Alpaca's GET /v1/corporate-actions (per-type lists under corporate_actions, next_page_token). The reference page shows no response schema: the split fields follow a July 2024 example on Alpaca's forum, the dividend, stock-dividend and spin-off fields a third-party client library, and `cusip` / `id` are assumed (they only inform, nothing is computed from them). Rows are made up to cover what the parser must handle: optional fields missing, one payment listed under two CUSIPs, a special dividend on the same ex-date, booleans sent as strings, unusable rows, and a type the store does not read.",
+ "corporate_actions": {
+  "forward_splits": [
+   {
+    "symbol": "ZZZ",
+    "cusip": "000000001",
+    "new_rate": 4,
+    "old_rate": 1,
+    "process_date": "2026-10-27",
+    "ex_date": "2026-10-27",
+    "record_date": "2026-10-23",
+    "payable_date": "2026-10-26",
+    "id": "f-1"
+   },
+   {
+    "ex_date": "2026-10-16",
+    "new_rate": 10,
+    "old_rate": 1,
+    "process_date": "2026-10-16",
+    "record_date": "2026-10-15",
+    "symbol": "NVDX"
+   }
+  ],
+  "reverse_splits": [
+   {
+    "ex_date": "2026-10-16",
+    "new_rate": 1,
+    "old_rate": 3,
+    "payable_date": "2026-10-16",
+    "process_date": "2026-10-16",
+    "record_date": "2026-10-16",
+    "symbol": "NVDQ",
+    "old_cusip": "000000010",
+    "new_cusip": "000000011"
+   }
+  ],
+  "cash_dividends": [
+   {
+    "symbol": "ZZZ",
+    "cusip": "000000001",
+    "rate": 1.2,
+    "special": false,
+    "foreign": false,
+    "process_date": "2026-11-05",
+    "ex_date": "2026-10-22",
+    "record_date": "2026-10-22",
+    "payable_date": "2026-11-05",
+    "id": "d-1"
+   },
+   {
+    "symbol": "ZZZ",
+    "cusip": "000000002",
+    "rate": 1.2,
+    "special": false,
+    "foreign": false,
+    "process_date": "2026-11-05",
+    "ex_date": "2026-10-22",
+    "record_date": "2026-10-22",
+    "payable_date": "2026-11-05",
+    "id": "d-2"
+   },
+   {
+    "symbol": "ZZZ",
+    "cusip": "000000001",
+    "rate": 3.0,
+    "special": true,
+    "foreign": false,
+    "process_date": "2026-11-05",
+    "ex_date": "2026-10-22",
+    "record_date": "2026-10-22",
+    "payable_date": "2026-11-05",
+    "id": "d-3"
+   },
+   {
+    "symbol": "ZZZ",
+    "cusip": "000000001",
+    "rate": 0.3,
+    "special": "false",
+    "foreign": "true",
+    "process_date": "2026-11-12",
+    "ex_date": "2026-10-29",
+    "id": "d-4"
+   },
+   {
+    "symbol": "ZZZ",
+    "cusip": "000000001",
+    "rate": 0,
+    "special": false,
+    "foreign": false,
+    "process_date": "2026-11-05",
+    "ex_date": "2026-10-23",
+    "id": "d-5"
+   },
+   {
+    "symbol": "ZZZ",
+    "rate": 0.5,
+    "id": "d-6"
+   }
+  ],
+  "stock_dividends": [
+   {
+    "symbol": "SDIV",
+    "cusip": "000000020",
+    "rate": 0.05,
+    "process_date": "2026-10-21",
+    "ex_date": "2026-10-21",
+    "record_date": "2026-10-20",
+    "payable_date": "2026-10-21",
+    "id": "s-1"
+   }
+  ],
+  "spin_offs": [
+   {
+    "source_symbol": "ZZZ",
+    "source_cusip": "000000001",
+    "source_rate": 1,
+    "new_symbol": "ZZN",
+    "new_cusip": "000000030",
+    "new_rate": 0.25,
+    "process_date": "2026-10-28",
+    "ex_date": "2026-10-28",
+    "id": "o-1"
+   }
+  ],
+  "name_changes": [
+   {
+    "old_symbol": "ZZO",
+    "old_cusip": "000000000",
+    "new_symbol": "ZZZ",
+    "new_cusip": "000000001",
+    "process_date": "2026-10-20",
+    "id": "n-1"
+   }
+  ],
+  "cash_mergers": [
+   {
+    "acquirer_symbol": "BIG",
+    "acquiree_symbol": "ZZZ",
+    "rate": 110.0,
+    "process_date": "2026-11-20",
+    "id": "m-1"
+   }
+  ]
+ },
+ "next_page_token": null
+}

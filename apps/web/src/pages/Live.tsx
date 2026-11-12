@@ -5,10 +5,13 @@ import { engineChip, livePot, useRunCtx } from "../components/Shell";
 import { PotChart } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
-import { EXIT_LABEL, R, dateEt, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { R, dateEt, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { commandText, exitText, ruleName } from "../lib/explain";
 import { evidenceVerdict, levelPlan } from "../lib/derive";
 import { StockBadge, StockCell, companyName } from "../components/StockBadge";
 import { Skeleton } from "../components/Skeleton";
+import { Empty, ErrorState, TestPhaseBanner } from "../components/States";
+import { STALE, poll } from "../lib/poll";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -27,11 +30,12 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
       <thead><tr><th>Stock</th><th>Time (ET)</th><th className="hide-sm">Why it closed</th><th className="r hide-sm">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th><th className="hide-sm">Room</th></tr></thead>
       <tbody>
         {rows.map((t) => (
-          <tr key={t.id} className="click" tabIndex={0} onClick={() => nav(`/trades/${t.id}`)}
-            onKeyDown={(e) => e.key === "Enter" && nav(`/trades/${t.id}`)}>
-            <td><StockCell symbol={t.symbol} sub={`${t.qty} sh · ${t.strategy.replace(/_/g, " ")}`} /></td>
+          <tr key={t.id} className="click" tabIndex={0} aria-label={`${t.symbol} trade on ${dateEt(t.entry_ts)}: open details`}
+            onClick={() => nav(`/trades/${t.id}`)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(`/trades/${t.id}`); } }}>
+            <td title={`code: ${t.strategy}`}><StockCell symbol={t.symbol} sub={`${t.qty} sh · ${ruleName(t.strategy)}`} /></td>
             <td className="num muted">{dateEt(t.entry_ts)} {timeEt(t.entry_ts)}</td>
-            <td className="muted hide-sm">{t.exit_reason ? EXIT_LABEL[t.exit_reason] ?? t.exit_reason : "open"}</td>
+            <td className="muted hide-sm" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}</td>
             <td className="r num hide-sm">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
             <td className={`r num ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)}</td>
             <td className="r num">{R(t.pnl_usd, t.risk_usd)}</td>
@@ -80,7 +84,7 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
       )}
       {plan.next && <p className="muted" style={{ fontSize: 12 }}>{LEVELS[plan.current ?? "balanced"].name} today; {LEVELS[plan.next.level].name} from {day(plan.next.from_session)}.</p>}
       {cmd.isError && <p className="loss" role="alert">{String(cmd.error)}</p>}
-      {pending.length > 0 && <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => p.kind.replace(/_/g, " ")).join(", ")}</p>}
+      {pending.length > 0 && <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => commandText(p.kind)).join(", ")}</p>}
     </section>
   );
 }
@@ -123,15 +127,16 @@ function Positions({ positions }: { positions: Record<string, { qty: number; fil
 const RANGES = [["1W", 5], ["1M", 21], ["3M", 63], ["ALL", 0]] as const;
 
 export function Live() {
-  const { run, overview } = useRunCtx();
+  const { run, overview, overviewError, retryOverview } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
-  const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), refetchInterval: 60_000 });
+  const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), ...poll(60_000) });
   // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
-  const chapters = useQuery({ queryKey: ["chapters", run.id], queryFn: () => api.chapters(run.id), enabled: run.kind === "paper", staleTime: 300_000, retry: false });
+  const chapters = useQuery({ queryKey: ["chapters", run.id], queryFn: () => api.chapters(run.id), enabled: run.kind === "paper", staleTime: STALE.daily, retry: false });
   const lv = run.level ? LEVELS[run.level] : null;
   const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
+  if (overviewError) return <ErrorState what="The run overview" error={overviewError} retry={retryOverview} />;
+  if (trades.isError) return <ErrorState what="Trades" error={trades.error} retry={() => trades.refetch()} />;
   if (!overview || trades.isPending) return <Skeleton variant="dashboard" />;
-  if (trades.isError) return <p className="loss">{String(trades.error)}</p>;
 
   const daily = overview.daily;
   const c = curve(run.amount_usd, daily);
@@ -148,6 +153,7 @@ export function Live() {
 
   return (
     <>
+      {run.kind === "paper" && <TestPhaseBanner />}
       {run.kind === "replay" && (
         <div className="banner">
           <b>Replay, not live trading.</b> This is Variant A run on past market data from {day(run.started_on!)} to {day(run.ended_on!)}
@@ -242,7 +248,7 @@ export function Live() {
         {run.kind === "replay" && <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Open positions: none. Kaibot is flat by 15:55 every day. Select a trade for the full reasoning.</p>}
         {(run.kind === "paper" ? trades.data.rows.slice(0, 12) : lastRows).length
           ? <TradeRows rows={run.kind === "paper" ? trades.data.rows.slice(0, 12) : lastRows} />
-          : <p className="muted">No trades yet. Kaibot checks for setups every 5 minutes from 09:35 to 15:45 ET; many days have none.</p>}
+          : <Empty>No trades yet. Kaibot checks for setups every 5 minutes from 09:35 to 15:45 ET; many days have none.</Empty>}
       </section>
     </>
   );

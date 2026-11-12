@@ -4,6 +4,7 @@ import { useRunCtx } from "../components/Shell";
 import { api } from "../lib/api";
 import { TradeRows } from "./Live";
 import { Skeleton } from "../components/Skeleton";
+import { Empty, ErrorState } from "../components/States";
 
 const PAGE = 50;
 
@@ -14,16 +15,20 @@ export function Trades() {
   const total = q.data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / PAGE));
   return (
-    <section className="card">
+    <section className="card" aria-labelledby="trades-h">
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
-        <h2 style={{ margin: 0 }}>All trades · {run.label ?? `Run ${run.id}`}</h2>
+        <h2 id="trades-h" style={{ margin: 0 }}>All trades · {run.label ?? `Run ${run.id}`}</h2>
         <span className="muted num">{total} total</span>
         <span className="spacer" />
-        <button disabled={page === 0} onClick={() => setPage(page - 1)}>Newer</button>
-        <span className="num muted">{page + 1} / {pages}</span>
-        <button disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>Older</button>
+        <nav aria-label="Pages" style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          <button disabled={page === 0} onClick={() => setPage(page - 1)}>Newer</button>
+          <span className="num muted" aria-live="polite">Page {page + 1} of {pages}</span>
+          <button disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>Older</button>
+        </nav>
       </div>
-      {q.isPending ? <Skeleton /> : q.isError ? <p className="loss">{String(q.error)}</p> : <TradeRows rows={q.data.rows} />}
+      {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="Trades" error={q.error} retry={() => q.refetch()} />
+        : !q.data.rows.length ? <Empty>No trades in this run yet. Each closed or open trade appears here with the reason it was made and how it closed.</Empty>
+        : <TradeRows rows={q.data.rows} />}
     </section>
   );
 }

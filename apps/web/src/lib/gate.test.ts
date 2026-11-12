@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GateStrategy } from "./api";
 import src from "../pages/Gate.tsx?raw";
-import { gateOverallText, gateRows, gateStatusText } from "./derive";
+import { gateOverallText, gateRows, gateStatusText } from "./gateview";
 
 const crit = (met: boolean | null, value: number | null = 1, limit: number | null = 0) => ({ value, limit, met });
 const st = (over: Partial<GateStrategy> = {}): GateStrategy => ({

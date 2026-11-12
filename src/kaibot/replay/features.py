@@ -59,8 +59,10 @@ def five_minute(o, h, l, c):  # noqa: E741
 
 
 def candidates(sd: SymbolDays, etf: SymbolDays, news_times: np.ndarray, z_max=-1.5, resid_abs_max=1.5,
-               turnover_max=1.5, min_adv=50e6, first_m=5, last_m=375) -> pd.DataFrame:
-    dates, i, j, dvol20, adv20, beta, residvol20, avgcum = daily_stats(sd, etf)
+               turnover_max=1.5, min_adv=50e6, first_m=5, last_m=375, stats=None) -> pd.DataFrame:
+    """`stats`: the result of `daily_stats(sd, etf)` if the caller already has it. The live market computes it
+    once per session: every daily statistic reads earlier sessions only, so it is the same at every minute."""
+    dates, i, j, dvol20, adv20, beta, residvol20, avgcum = stats if stats is not None else daily_stats(sd, etf)
     o, h, l, c, v, vw = (getattr(sd, k)[i] for k in ("o", "h", "l", "c", "v", "vw"))  # noqa: E741
     eo, ec = etf.o[j], etf.c[j]
     t_frac = np.sqrt(np.arange(1, N_MIN + 1) / N_MIN)[None, :]
@@ -68,7 +70,11 @@ def candidates(sd: SymbolDays, etf: SymbolDays, news_times: np.ndarray, z_max=-1
     eret = ec / eo[:, :1] - 1
     z = ret / (dvol20[:, None] * t_frac)
     rz = (ret - np.nan_to_num(beta)[:, None] * eret) / (residvol20[:, None] * t_frac)
-    turnover = np.cumsum(v, axis=1) / avgcum
+    # avgcum is 0 where a stock printed no volume up to that minute in each of the 20 prior sessions (seen on
+    # 2022-2023 history). The quotient is then inf (or NaN for 0 / 0) and fails `tt <= turnover_max` below, so no
+    # candidate comes from such a minute. Values are unchanged; only numpy's divide-by-zero warning is silenced.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        turnover = np.cumsum(v, axis=1) / avgcum
     vwap = np.cumsum(vw * v, axis=1) / np.maximum(np.cumsum(v, axis=1), 1)
     atr5, hl5 = five_minute(o, h, l, c)
     ms = np.arange(4, N_MIN, 5)  # minute at which 5m bar k completes

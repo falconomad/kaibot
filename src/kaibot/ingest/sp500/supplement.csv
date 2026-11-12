@@ -1,0 +1,7 @@
+# Index changes after the last date of the fja05680/sp500 file (2026-08-18), from S&P Dow Jones Indices releases.
+# date = first session the change is in effect (the index is changed before that day's open).
+date,added,removed,source
+2026-09-21,"BE,P,ILMN","TAP,TTD,BLDR","https://press.spglobal.com/2026-09-04-Bloom-Energy,-Illumina,-and-Everpure-Set-to-Join-S-P-500-Others-to-Join-S-P-100,-S-P-MidCap-400,-and-S-P-SmallCap-600"
+2026-10-01,VYLR,,https://press.spglobal.com/2026-10-01-Vylor-Added-to-the-S-P-500-Twilio-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+2026-10-06,TWLO,"CTVA,WBD",https://press.spglobal.com/2026-10-01-Vylor-Added-to-the-S-P-500-Twilio-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600
+2026-11-04,OKTA,KVUE,https://press.spglobal.com/2026-10-30-Okta-Set-to-Join-S-P-500-Others-to-Join-S-P-MidCap-400-and-S-P-SmallCap-600

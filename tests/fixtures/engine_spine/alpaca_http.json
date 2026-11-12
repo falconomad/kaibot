@@ -1,0 +1,242 @@
+{
+ "account": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/account"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "calendar": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": {
+     "end": "2026-09-15",
+     "start": "2026-09-15"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/calendar"
+   }
+  ],
+  "returns": {
+   "close": "16:00",
+   "date": "2026-09-15",
+   "open": "09:30"
+  }
+ },
+ "cancel_order": {
+  "requests": [
+   {
+    "body": null,
+    "method": "DELETE",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders/o1"
+   }
+  ],
+  "returns": null
+ },
+ "clock": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/clock"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "close_position": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": {
+     "limit": 500,
+     "nested": "true",
+     "status": "open"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   },
+   {
+    "body": null,
+    "method": "DELETE",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders/x1"
+   },
+   {
+    "body": null,
+    "method": "GET",
+    "params": {
+     "limit": 500,
+     "nested": "true",
+     "status": "open"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   },
+   {
+    "body": null,
+    "method": "DELETE",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/positions/AAPL"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "open_orders": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": {
+     "limit": 500,
+     "nested": "true",
+     "status": "open"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   }
+  ],
+  "returns": [
+   {
+    "id": "x1",
+    "symbol": "AAPL"
+   },
+   {
+    "id": "x2",
+    "symbol": "MSFT"
+   }
+  ]
+ },
+ "order": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": {
+     "nested": "true"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/orders/o1"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "order_by_client_id": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": {
+     "client_order_id": "kb-1-2-1",
+     "nested": "true"
+    },
+    "url": "https://paper-api.alpaca.markets/v2/orders:by_client_order_id"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "positions": {
+  "requests": [
+   {
+    "body": null,
+    "method": "GET",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/positions"
+   }
+  ],
+  "returns": {
+   "AAPL": {
+    "qty": "3",
+    "symbol": "AAPL"
+   }
+  }
+ },
+ "replace_limit": {
+  "requests": [
+   {
+    "body": "{\"limit_price\": \"201.50\"}",
+    "method": "PATCH",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders/o1t"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "replace_stop": {
+  "requests": [
+   {
+    "body": "{\"stop_price\": \"191.00\"}",
+    "method": "PATCH",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders/o1s"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "submit_bracket": {
+  "requests": [
+   {
+    "body": "{\"symbol\": \"AAPL\", \"qty\": \"3\", \"side\": \"buy\", \"type\": \"market\", \"time_in_force\": \"gtc\", \"order_class\": \"bracket\", \"client_order_id\": \"kb-1-2-1\", \"take_profit\": {\"limit_price\": \"200.13\"}, \"stop_loss\": {\"stop_price\": \"190.00\"}}",
+    "method": "POST",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "submit_moc_sell": {
+  "requests": [
+   {
+    "body": "{\"symbol\": \"SPY\", \"qty\": \"22\", \"side\": \"sell\", \"type\": \"market\", \"time_in_force\": \"cls\", \"client_order_id\": \"kb-1-3-1-moc\"}",
+    "method": "POST",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ },
+ "submit_oto_stop": {
+  "requests": [
+   {
+    "body": "{\"symbol\": \"SPY\", \"qty\": \"22\", \"side\": \"buy\", \"type\": \"market\", \"time_in_force\": \"gtc\", \"order_class\": \"oto\", \"client_order_id\": \"kb-1-3-1\", \"stop_loss\": {\"stop_price\": \"641.50\"}}",
+    "method": "POST",
+    "params": null,
+    "url": "https://paper-api.alpaca.markets/v2/orders"
+   }
+  ],
+  "returns": {
+   "id": "o1",
+   "status": "accepted"
+  }
+ }
+}

@@ -29,7 +29,7 @@ scp scripts/oracle_bootstrap.sh ubuntu@<ip>:~ && ssh ubuntu@<ip> 'bash oracle_bo
 - Add a **read-only deploy key** on github.com/falconomad/kaibot → Settings → Deploy keys, then
   `git clone git@github.com:falconomad/kaibot.git /opt/kaibot`.
 - Copy the `.env` from `~/Projects/kaibot-secrets/` to `/opt/kaibot/.env` (chmod 600). Paper keys only.
-- `cd /opt/kaibot && docker compose -f docker/compose.yml up -d --build` (only outside 09:30–16:00 ET).
+- `cd /opt/kaibot && docker compose up -d --build` (only outside 09:30–16:00 ET).
 
 ## Reclaim protection
 Oracle's idle rule looks at low CPU, network and memory use over 7 days. The engine's 1-minute cycle and

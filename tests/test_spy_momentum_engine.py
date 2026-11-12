@@ -105,9 +105,13 @@ def test_regime_off_vetoes_momentum(tmp_path):
     assert not [t for t in store.tables.get("trade", []) if t["strategy"] == "spy_late_momentum"]
 
 
-def test_profiles_wire_momentum_to_balanced_and_hunter():
+def test_spy_momentum_is_retired_from_every_level_but_still_registered():
+    """Product decision on #128 (12 Nov 2026): the live last-30-minutes SPY trade is switched off. The rule stays
+    registered (the research command can run it on the engine with SimBroker); no level lists it."""
     from kaibot.risk.profiles import load_strategies
+    from kaibot.strategies import registry
 
     st = load_strategies()
-    assert "spy_late_momentum" not in st["conservative"]
-    assert "spy_late_momentum" in st["balanced"] and "spy_late_momentum" in st["aggressive"]
+    assert all("spy_late_momentum" not in v for v in st.values()), st
+    assert st == {"conservative": ["dip_reversal"], "balanced": ["dip_reversal"], "aggressive": ["dip_reversal"]}
+    assert registry.get("spy_late_momentum") is not None and "spy_late_momentum" in registry.RETIRED

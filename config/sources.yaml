@@ -5,6 +5,10 @@
 market_data:
   alpaca:           {use: primary, auth: key, limit: "200 req/min REST; WS 30 symbols, 1 conn (IEX)", budget_per_min: 150, verify_on_day1: [movers, corporate_actions_path]}
   alpaca_trading:   {use: paper_orders, auth: key, limit: "200 req/min per account (trading API, separate from data)", budget_per_min: 150}
+  alpaca_daily_bars: {use: research_daily_store, auth: key, endpoint: "/v2/stocks/{symbol}/bars timeframe=1Day adjustment=raw|all feed=sip, end >= 15 min old",
+                     note: "requests count against alpaca; two per symbol; scripts/fetch_daily.sh runs at 120/min, 40/min while the engine runs; research store data/daily, never in the live path"}
+  alpaca_corporate_actions: {use: splits_and_dividends, auth: key, endpoint: "/v1/corporate-actions, 1000 rows a page",
+                     note: "requests count against alpaca; a few dozen per run of scripts/fetch_daily.sh; free-plan access and history depth are confirmed by the first run (docs/ops/daily_bars.md)"}
   finnhub:          {use: fallback_quotes, auth: key, limit: "60/min, 30/s burst; WS 50 symbols; no candles on free", budget_per_min: 45}
   massive:          {use: nightly_universe, auth: key, limit: "5/min, EOD grouped daily bars", budget_per_min: 4}
   tiingo:           {use: third_fallback, auth: key, limit: "50/hr, 1000/day", budget_per_hour: 40}
@@ -16,6 +20,10 @@ market_data:
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:
   sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}
+  sec_earnings_8k:  {use: research_earnings_dates, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files), www.sec.gov/files/company_tickers.json, www.sec.gov/Archives/edgar/cik-lookup-data.txt",
+                     note: "requests count against sec_edgar; scripts/fetch_earnings_dates.sh: about 2,000 on the first run, about 700 per --refresh; research store data/earnings, never in the live path"}
+  finnhub_earnings_calendar: {use: research_forward_calendar, auth: key, endpoint: "/api/v1/calendar/earnings?from&to (token in X-Finnhub-Token header)",
+                     note: "requests count against finnhub; 10 per daily snapshot (64 days in 7-day chunks); free-plan access confirmed by the first run, a 401/403/429 is logged as unavailable"}
   sec_edgar_atom:   {use: 8k_and_form4_stream, poll_seconds: 30, note: "requests count against sec_edgar"}
   finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET", limit: "static CDN files", min_seconds_between_requests: 1}
   fred:             {use: regime, auth: key, limit: "120 req/min per key", budget_per_min: 30}

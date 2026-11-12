@@ -23,7 +23,7 @@ levels:
     max_positions: 5
     max_entries_per_day: 20
     run_drawdown_end_pct: 8
-    strategies: [dip_reversal, spy_late_momentum]
+    strategies: [dip_reversal]    # spy_late_momentum retired 12 Nov 2026 (#128); still registered
   aggressive:
     label: Hunter
     risk_per_trade_pct: 1.0
@@ -32,7 +32,30 @@ levels:
     max_positions: 8
     max_entries_per_day: 30
     run_drawdown_end_pct: 12
-    strategies: [dip_reversal, spy_late_momentum]
+    strategies: [dip_reversal]    # spy_late_momentum retired 12 Nov 2026 (#128); still registered
+# Book limits for MULTI-DAY sleeves (#119, risk/portfolio.py and the gate's book checks). PROVISIONAL DEFAULTS:
+# decision 15 section 6 says Product proposes the level values with the first ten-year results of rule 1 and the
+# stakeholder confirms them with the first paper start. Until then every level carries the same placeholders and
+# tests run at Balanced with a 100% cap. Each value may only tighten BOOK_HARD_CEILINGS in risk/gate.py
+# (min_cash_pct is a floor). While all_levels.allow_overnight is false the live loader sets max_overnight_pct to 0.
+multi_day:
+  provisional: true
+  levels:
+    conservative: &md_default
+      atr_risk_pct: 0.1        # k: a 1-ATR(20) day costs 0.1% of equity per position
+      max_name_pct: 10         # = the level's max_position_pct
+      max_gross_pct: 100
+      max_overnight_pct: 100
+      max_sector_pct: 30
+      max_names: 20
+      min_cash_pct: 2
+      max_gap_loss_pct: 12     # gap scenario: max(10%, 3 x ATR20) on every overnight position
+    balanced:
+      <<: *md_default
+      max_name_pct: 15
+    aggressive:
+      <<: *md_default
+      max_name_pct: 20
 shadow_strategies: [orb_stocks_in_play, news_continuation]   # logged "would have" trades, never sent
 all_levels:
   allow_short: false

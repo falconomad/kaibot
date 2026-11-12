@@ -1,17 +1,23 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link, NavLink, Outlet, useOutletContext } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, NavLink, Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { api, supa, type Overview, type Run } from "../lib/api";
 import { LEVELS, curve } from "../lib/model";
 import { pct } from "../lib/fmt";
 import { riskStatus } from "../lib/derive";
 import { Skeleton } from "./Skeleton";
+import { ErrorState } from "./States";
+import { overviewPollMs, poll } from "../lib/poll";
 import { preloadRoute } from "../routes";
 
 /** Warm a lazy route's chunk when the pointer or keyboard focus reaches its nav link. */
 const warm = (to: string) => ({ onPointerEnter: () => { preloadRoute(to); }, onFocus: () => { preloadRoute(to); } });
 
-export interface RunCtx { run: Run; runs: Run[]; overview: Overview | undefined }
+export interface RunCtx {
+  run: Run; runs: Run[]; overview: Overview | undefined;
+  /** Set when the overview failed and has no data to show; pages show an error with a retry instead of a skeleton. */
+  overviewError?: unknown; retryOverview?: () => void;
+}
 export const useRunCtx = () => useOutletContext<RunCtx>();
 
 export function Logo({ size = 26 }: { size?: number }) {
@@ -95,15 +101,24 @@ export function livePot(run: Run, o: Overview | undefined) {
 }
 
 export function Shell() {
-  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, refetchInterval: 30_000 });
+  const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, ...poll(60_000) });
   const [picked, setPicked] = useState<number | null>(() => Number(localStorage.getItem("kb.run")) || null);
   const list = runs.data ?? [];
   const run = list.find((r) => r.id === picked) ?? list[0];
+  // 5 s only while the engine is live in a session; slower when the market is closed or the engine is off (lib/poll.ts).
   const overview = useQuery({ queryKey: ["overview", run?.id], queryFn: () => api.overview(run!.id), enabled: !!run,
-    refetchInterval: run?.kind === "paper" ? 5_000 : false });
+    refetchInterval: (q) => overviewPollMs(run, q.state.data), refetchIntervalInBackground: false });
+  // Focus order: after a navigation, move focus to the page so keyboard and screen-reader users start at the content.
+  const { pathname } = useLocation();
+  const mainRef = useRef<HTMLElement>(null);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    mainRef.current?.focus({ preventScroll: false });
+  }, [pathname]);
 
   if (runs.isPending) return <div className="shell"><main><Skeleton variant="dashboard" /></main></div>;
-  if (runs.isError) return <div className="center"><div className="card"><b>Couldn't load runs</b><span className="muted">{String(runs.error)}</span></div></div>;
+  if (runs.isError) return <div className="center"><ErrorState what="Your runs" error={runs.error} retry={() => runs.refetch()} /></div>;
   if (!run) return (
     <div className="center"><div className="card">
       <b>No runs yet</b><span className="muted">Start a paper run to give Kaibot an amount and a level.</span>
@@ -126,6 +141,7 @@ export function Shell() {
 
   return (
     <div className="shell">
+      <a className="skip" href="#main">Skip to content</a>
       <header className="top">
         <Link to="/" className="brand" aria-label="kaibot home"><Logo /><span>kaibot</span></Link>
         <nav className="topnav" aria-label="Main">
@@ -159,7 +175,10 @@ export function Shell() {
         </div>
       )}
       <div className="body">
-        <main key={run.id}><Outlet context={{ run, runs: list, overview: o } satisfies RunCtx} /></main>
+        <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
+          <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
+            retryOverview: () => { void overview.refetch(); } } satisfies RunCtx} />
+        </main>
       </div>
       <TabBar />
       <div className="foot">Paper trading only · simulated money · times ET (CET in brackets) · <Link to="/start">New run</Link> · <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a></div>

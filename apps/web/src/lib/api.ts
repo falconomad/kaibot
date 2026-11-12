@@ -31,7 +31,8 @@ export interface GateHistoryRow { id: number; ts: string; session: string; overa
 export interface GateResp { latest: { id: number; ts: string; session: string; bar_sha: string; fingerprint: string; overall: GateOverall; report: GateReportBody } | null; history: GateHistoryRow[]; random_days: number }
 export interface NearMiss { symbol: string; m: number; z: number; why: string }
 export interface Scan { bars: number; checks: number; regime_off: number; setups: number; near: number; vetoed: Record<string, number>; to_room: number; recent_near: NearMiss[] }
-export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null } | null }
+export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null;
+  /** the git sha the engine runs (engine/core.py `code_sha`) */ code_sha?: string; halted?: boolean } | null }
 export interface LedgerPos { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }
 export interface Ledger { ts: string; cash: number; positions: Record<string, LedgerPos>; equity_venue: number; equity_shadow: number }
 export interface Overview {

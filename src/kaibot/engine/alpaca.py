@@ -1,185 +1,20 @@
-"""Alpaca paper trading + market data over plain HTTPS (stdlib only, rate-limited, retried).
+"""Alpaca market data over plain HTTPS (stdlib only, rate-limited, retried).
 
-Paper only: the trading base URL is fixed to the paper endpoint (config.PAPER_TRADING_URL).
 Free market-data plan: real-time bars and quotes come from the IEX feed; SIP is used only for history >= 15 min old.
+
+The trading client moved to kaibot.broker.alpaca (issue #115: one Broker protocol). `AlpacaPaper`, `AlpacaError`
+and `_Http` are re-exported here so that existing imports and tests keep working.
 """
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
+import urllib.request  # noqa: F401  (kept: tests reach urllib through this module)
 from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
-from kaibot.common.ratelimit import Budget, get_budget
-from kaibot.engine.config import DATA_URL, PAPER_TRADING_URL
-
-
-class AlpacaError(RuntimeError):
-    def __init__(self, status: int, body: str):
-        super().__init__(f"Alpaca {status}: {body[:300]}")
-        self.status = status
-        self.body = body
-
-
-class _Http:
-    """Paced by the process-wide budget of `source` (config/sources.yaml), shared by every client of that source.
-    A 429 holds the whole source for the backoff; 5xx and network errors back off this caller only."""
-
-    def __init__(self, key: str, secret: str, source: str = "alpaca", budget: Budget | None = None,
-                 opener=None, sleep=None):
-        self.h = {
-            "APCA-API-KEY-ID": key,
-            "APCA-API-SECRET-KEY": secret,
-            "User-Agent": "kaibot-engine/0.2",
-            "Content-Type": "application/json",
-        }
-        self.budget = budget or get_budget(source)
-        self._open = opener or urllib.request.urlopen
-        self._sleep = sleep or self.budget.clock.sleep
-
-    def call(self, method: str, url: str, params: dict | None = None, body: dict | None = None):
-        if params:
-            url = f"{url}?{urllib.parse.urlencode(params)}"
-        data = json.dumps(body).encode() if body is not None else None
-        for attempt in range(5):
-            self.budget.acquire()
-            try:
-                req = urllib.request.Request(url, data=data, headers=self.h, method=method)
-                with self._open(req, timeout=30) as r:
-                    raw = r.read()
-                    return json.loads(raw) if raw else None
-            except urllib.error.HTTPError as e:
-                text = e.read().decode(errors="replace")
-                if e.code == 429:
-                    self.budget.backoff(min(2**attempt, 20))
-                    continue
-                if e.code >= 500:
-                    self._sleep(min(2**attempt, 20))
-                    continue
-                raise AlpacaError(e.code, text) from None
-            except (urllib.error.URLError, TimeoutError):
-                self._sleep(min(2**attempt, 20))
-        raise AlpacaError(0, f"giving up on {method} {url}")
-
-
-class AlpacaPaper:
-    """Trading endpoints (paper account)."""
-
-    name = "alpaca_paper"
-
-    def __init__(self, key: str, secret: str):
-        self.http = _Http(key, secret, source="alpaca_trading")
-        self.base = PAPER_TRADING_URL
-
-    def _t(self, method, path, params=None, body=None):
-        return self.http.call(method, f"{self.base}{path}", params, body)
-
-    def account(self) -> dict:
-        return self._t("GET", "/v2/account")
-
-    def clock(self) -> dict:
-        return self._t("GET", "/v2/clock")
-
-    def calendar(self, day: str) -> dict | None:
-        rows = self._t("GET", "/v2/calendar", {"start": day, "end": day})
-        return rows[0] if rows else None
-
-    def positions(self) -> dict[str, dict]:
-        return {p["symbol"]: p for p in self._t("GET", "/v2/positions")}
-
-    def open_orders(self) -> list[dict]:
-        return self._t("GET", "/v2/orders", {"status": "open", "nested": "true", "limit": 500})
-
-    def order(self, order_id: str) -> dict:
-        return self._t("GET", f"/v2/orders/{order_id}", {"nested": "true"})
-
-    def order_by_client_id(self, coid: str) -> dict | None:
-        try:
-            return self._t("GET", "/v2/orders:by_client_order_id", {"client_order_id": coid, "nested": "true"})
-        except AlpacaError as e:
-            if e.status == 404:
-                return None
-            raise
-
-    def submit_bracket(self, coid: str, symbol: str, qty: int, stop: float, target: float) -> dict:
-        """Market buy with a broker-held stop and take-profit. Adopts the existing order on a duplicate id.
-
-        GTC, not DAY: day legs expire at 16:00, so if the engine is dead at the close the position would sit
-        overnight with no stop. GTC legs keep protecting it until the engine closes it at the next open."""
-        body = {
-            "symbol": symbol,
-            "qty": str(int(qty)),
-            "side": "buy",
-            "type": "market",
-            "time_in_force": "gtc",
-            "order_class": "bracket",
-            "client_order_id": coid,
-            "take_profit": {"limit_price": f"{target:.2f}"},
-            "stop_loss": {"stop_price": f"{stop:.2f}"},
-        }
-        try:
-            return self._t("POST", "/v2/orders", body=body)
-        except AlpacaError as e:
-            if e.status == 422 and "client_order_id" in e.body:
-                existing = self.order_by_client_id(coid)
-                if existing:
-                    return existing
-            raise
-
-    def submit_oto_stop(self, coid: str, symbol: str, qty: int, stop: float) -> dict:
-        """Market buy with a broker-held protective stop only (OTO), for exits the engine times itself (MOC)."""
-        body = {"symbol": symbol, "qty": str(int(qty)), "side": "buy", "type": "market", "time_in_force": "gtc",
-                "order_class": "oto", "client_order_id": coid, "stop_loss": {"stop_price": f"{stop:.2f}"}}
-        try:
-            return self._t("POST", "/v2/orders", body=body)
-        except AlpacaError as e:
-            if e.status == 422 and "client_order_id" in e.body:
-                existing = self.order_by_client_id(coid)
-                if existing:
-                    return existing
-            raise
-
-    def submit_moc_sell(self, coid: str, symbol: str, qty: int) -> dict:
-        """Market-on-close sell (time_in_force=cls; Alpaca accepts these until 15:50 ET)."""
-        body = {"symbol": symbol, "qty": str(int(qty)), "side": "sell", "type": "market", "time_in_force": "cls",
-                "client_order_id": coid}
-        try:
-            return self._t("POST", "/v2/orders", body=body)
-        except AlpacaError as e:
-            if e.status == 422 and "client_order_id" in e.body:
-                existing = self.order_by_client_id(coid)
-                if existing:
-                    return existing
-            raise
-
-    def replace_stop(self, order_id: str, stop: float) -> dict:
-        return self._t("PATCH", f"/v2/orders/{order_id}", body={"stop_price": f"{stop:.2f}"})
-
-    def replace_limit(self, order_id: str, limit: float) -> dict:
-        return self._t("PATCH", f"/v2/orders/{order_id}", body={"limit_price": f"{limit:.2f}"})
-
-    def cancel_order(self, order_id: str) -> None:
-        try:
-            self._t("DELETE", f"/v2/orders/{order_id}")
-        except AlpacaError as e:
-            if e.status not in (404, 422):
-                raise
-
-    def close_position(self, symbol: str) -> dict | None:
-        """Cancel the symbol's open orders, then sell the whole position at market."""
-        for o in self.open_orders():
-            if o["symbol"] == symbol:
-                self.cancel_order(o["id"])
-        try:
-            return self._t("DELETE", f"/v2/positions/{symbol}")
-        except AlpacaError as e:
-            if e.status == 404:
-                return None
-            raise
+from kaibot.broker.alpaca import AlpacaError, AlpacaPaper, _Http  # noqa: F401  (re-exported)
+from kaibot.engine.config import DATA_URL
 
 
 class AlpacaData:

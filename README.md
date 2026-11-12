@@ -22,8 +22,7 @@ Free data only. Paper only.
 ## Repo map
 | Path | What |
 |---|---|
-| `src/kaibot/` | engine packages: `ingest`, `features`, `strategies`, `agents`, `risk`, `broker`, `engine`, `evaluation`, `store`, `common` |
-| `apps/api` | FastAPI dashboard API |
+| `src/kaibot/` | engine packages: `ingest`, `features`, `strategies`, `agents`, `risk`, `broker`, `engine`, `evaluation`, `replay`, `common` |
 | `apps/web` | Vite + React + TS dashboard |
 | `config/` | `profiles.yaml` (levels), `sources.yaml` (free sources + request budgets) |
 | `docs/research/` | the six data-source and strategy-evidence reports (10 Nov 2026) |
@@ -33,7 +32,7 @@ Free data only. Paper only.
 
 ## Quick start
 ```bash
-uv venv && uv pip install -e ".[dev]"
+uv sync --locked        # uv.lock: the one locked dependency set (see docs/ops/hygiene.md)
 uv run pytest -q
 cp .env.example .env   # fill in free keys; paper keys only
 ```

@@ -7,7 +7,7 @@ import {
   MAX_EXCLUDED, SESSION_OPEN, canExclude, excludeStock, includeStock, normalizeBounds, toMin,
   type Bounds, type ConfigBody, type ConfigResp, type Themes, dollars,
 } from "../lib/config";
-import { type EstimatorData, estimateTrades } from "../lib/derive";
+import { type EstimatorData, estimateTrades } from "../lib/estimator";
 import { LEVELS } from "../lib/model";
 import estimatorJson from "../data/estimator.json";
 import themesJson from "../data/themes.json";

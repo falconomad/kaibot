@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Evidence, Overview, Report, RoomAB, RoomSession, Run } from "./api";
 import { coerce } from "./coerce";
-import { budgetText, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, levelPlan, liftInterval, packIndex, resolveEvidence, riskStatus,
-  roomAbVerdict, roomOutcome, roomView, safeUrl, scanSummary, sessionTime } from "./derive";
+import { dayVsBenchmarks, evidenceVerdict, flagged, fmtR, haltResolved, haltText, levelPlan, riskStatus, scanSummary, sessionTime } from "./derive";
+import { budgetText, liftInterval, packIndex, resolveEvidence, roomAbVerdict, roomOutcome, roomView, safeUrl } from "./roomview";
 
 const run = (over: Partial<Run> = {}): Run => ({
   id: 2, created_at: "2026-11-10T16:29:16Z", amount_usd: 5000, status: "running", end_reason: null, peak_equity: 5000,
@@ -46,6 +46,13 @@ describe("riskStatus (S28: red on breach)", () => {
   it("only warns for a paused run or a watchdog note", () => {
     expect(riskStatus(run({ status: "paused" }), ov(), 0, 0).severity).toBe("warn");
     expect(riskStatus(run(), ov({ halts_today: [{ kind: "watchdog", reason: "x", ts: "" }] }), 0, 0).severity).toBe("warn");
+  });
+  it("drops a watchdog note once the engine is back", () => {
+    const now = Date.parse("2026-11-12T18:01:30Z");
+    const o = ov({ halts_today: [{ kind: "watchdog", reason: "x", ts: "2026-11-12T17:52:50Z" }],
+      heartbeat: [{ process: "engine", ts: "2026-11-12T18:01:19Z", detail: {} }] });
+    expect(riskStatus(run(), o, 0, 0, now).severity).toBe("ok");
+    expect(riskStatus(run(), o, 0, 0, now + 10 * 60_000).severity).toBe("warn");
   });
 });
 
@@ -226,3 +233,21 @@ describe("scanSummary", () => {
 });
 
 it("sessionTime: bar ending at minute 29 completes at 10:00 ET", () => { expect(sessionTime(29)).toBe("10:00"); expect(sessionTime(9)).toBe("09:40"); });
+
+describe("haltResolved (watchdog halts end when the engine is back)", () => {
+  const h = { kind: "watchdog", reason: "engine heartbeat 95 s old; entry orders canceled", ts: "2026-11-12T17:52:50Z" };
+  it("is resolved by a later heartbeat or a later watchdog_recovered event", () => {
+    expect(haltResolved(h, "2026-11-12T17:53:30Z")).toBe(true);
+    expect(haltResolved(h, "2026-11-12T17:50:00Z")).toBe(false);
+    expect(haltResolved(h, null, ["2026-11-12T17:54:00Z"])).toBe(true);
+    expect(haltResolved(h, undefined, ["2026-11-12T17:00:00Z"])).toBe(false);
+  });
+  it("never resolves other kinds or a halt without a time", () => {
+    expect(haltResolved({ ...h, kind: "daily_stop" }, "2026-11-12T18:00:00Z")).toBe(false);
+    expect(haltResolved({ ...h, ts: "" }, "2026-11-12T18:00:00Z")).toBe(false);
+  });
+  it("names the newer halt kinds in plain words", () => {
+    expect(haltText({ kind: "broker_rejects", reason: "x", ts: "" })).toMatch(/broker rejected/);
+    expect(haltText({ kind: "llm_budget", reason: "x", ts: "" })).toMatch(/LLM budget/);
+  });
+});

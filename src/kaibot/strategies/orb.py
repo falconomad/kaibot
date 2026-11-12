@@ -34,6 +34,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from kaibot.replay.data import SymbolDays
+from kaibot.strategies.base import Event, ExitAction, Holding, Mode, ShadowContext, When
 from kaibot.strategies.shadow_types import Panel, ShadowCandidate, rolling_before
 
 NAME = "orb_stocks_in_play"
@@ -116,3 +117,31 @@ def decide(panel: Panel, stats: dict[str, np.ndarray], m: int, p: OrbParams = DE
              "adv14_shares": float(stats["adv14_shares"][r])},
         ))
     return out
+
+
+class OrbStocksInPlay:
+    """The rule above as an ordinary `Strategy` in shadow mode (issue #116): asked at every completed minute,
+    answers with the candidates of `decide`; engine/shadow.py sizes them on its own book and never sends them."""
+
+    name = NAME
+    mode = Mode.SHADOW
+    holding = Holding.INTRADAY
+    schedule = (When(Event.BAR_CLOSE, every=1),)
+    warmup = DEFAULT.lookback + 1
+    owner_filters = False
+    room = False
+
+    def prior_stats(self, sd: SymbolDays) -> dict[str, np.ndarray]:
+        return prior_stats(sd)
+
+    def on_event(self, ctx: ShadowContext) -> list[ShadowCandidate]:
+        return decide(ctx.panel, ctx.stats, ctx.m)
+
+    def on_fill(self, fill: float, risk_ps: float) -> tuple[float, float | None]:
+        return fill - risk_ps, None
+
+    def manage(self, ctx, pos) -> ExitAction | None:
+        return None
+
+    def close_out(self, ctx, pos) -> ExitAction | None:
+        return None  # the 15:55 flatten

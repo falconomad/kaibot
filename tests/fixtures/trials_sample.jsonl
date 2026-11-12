@@ -1,0 +1,12 @@
+{"ts": "2026-11-01T09:00:00+00:00", "trial_id": "balanced_20261101T090000", "strategy": "dip_reversal", "variant": "A", "params": "pre-registered A", "metrics": {"trades": 412, "daily_sharpe_ann": 1.587}}
+{"ts": "2026-11-02T09:00:00+00:00", "trial_id": "spymom_balanced_20261102T090000", "strategy": "spy_late_momentum", "metrics": {"trades": 90, "daily_sharpe_ann": 0.41}}
+{"ts": "2026-11-03T09:00:00+00:00", "strategy": "orb_stocks_in_play", "mode": "shadow", "metrics": {"trades": 300, "daily_sharpe_ann": -0.3}}
+{"ts": "2026-11-03T09:00:00+00:00", "strategy": "orb_stocks_in_play", "mode": "shadow", "metrics": {"trades": 300, "daily_sharpe_ann": -0.3}}
+{"ts": "2026-11-05T12:00:00+00:00", "trial_id": "ablation_20261105T120000", "kind": "ablation", "strategy": "dip_reversal", "n_trials": 12, "metrics": {"trades": 900}}
+
+{"ts": "2026-11-06T08:00:00+00:00", "trial_id": "config_r7_v3", "strategy": "dip_reversal", "params": {"kind": "config", "run_id": 7, "config_version": 3, "body": {}}, "metrics": {"trades": 55, "daily_sharpe_ann": 0.2}}
+{"ts": "2026-11-08T10:00:00+00:00", "trial_id": "balanced_wf_A_20261108T100000_tuned", "strategy": "dip_reversal", "n_trials": 3105, "params": "walk-forward grid default (27) x 115 folds", "metrics": {"trades": 10124, "daily_sharpe_ann": -2.51}}
+{"ts": "2026-11-08T10:00:00+00:00", "trial_id": "balanced_wf_A_20261108T100000_default", "strategy": "dip_reversal", "n_trials": 1, "params": "pre-registered z-1.5_atr1.5_tr2", "metrics": {"trades": 9800, "daily_sharpe_ann": -2.48}}
+{"ts": "2026-11-12T08:00:00+00:00", "trial_id": "balanced_md_trend_highs_20261112T080000_tuned", "strategy": "trend_highs", "n_trials": 1035, "params": "walk-forward grid (9) x 115 folds", "metrics": {"trades": 640, "daily_sharpe_ann": 0.55}}
+{"ts": "2026-11-12T08:00:00+00:00", "trial_id": "balanced_md_trend_highs_20261112T080000_tuned", "strategy": "trend_highs", "n_trials": 1035, "params": "walk-forward grid (9) x 115 folds", "metrics": {"trades": 640, "daily_sharpe_ann": 0.55}}
+{"ts": "2026-11-12T09:00:00+00:00", "trial_id": "balanced_md_rel_strength_2026

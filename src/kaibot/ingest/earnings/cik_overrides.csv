@@ -1,0 +1,5 @@
+# Company -> SEC CIK where the automatic mapping cannot find it (story S85, #125; kaibot.ingest.earnings_sec).
+# company = the company id of sp500/changes.csv + ticker_map.csv. A blank cik means "checked by hand: no EDGAR
+# filer" and stops the automatic search. Add a row for each line of data/earnings/cik_misses.csv you resolve
+# (EDGAR company search: https://www.sec.gov/edgar/search), with the source in `note`, then run --refresh.
+company,cik,note

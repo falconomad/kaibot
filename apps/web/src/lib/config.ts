@@ -142,7 +142,7 @@ export function validateBody(body: ConfigBody, b: Bounds, themes: Themes): strin
     err.push(`“Only these” needs at least ${MIN_FOCUS} stocks. Add a theme or switch to Prefer.`);
   if (body.focus.mode !== "all" && focusSet(body, themes).length === 0) err.push("Pick at least one theme or stock, or choose All stocks.");
   if (!body.strategies.dip_reversal && !body.strategies.spy_late_momentum) err.push("Keep at least one strategy on.");
-  if (body.strategies.spy_late_momentum && !b.strategies.includes("spy_late_momentum")) err.push("SPY momentum isn't part of this level.");
+  if (body.strategies.spy_late_momentum && !b.strategies.includes("spy_late_momentum")) err.push("The SPY late-day rule isn't part of this level.");
   const s = toMin(body.timing.entry_start), e = toMin(body.timing.entry_end);
   if (s < toMin(b.entry.start) || e > toMin(b.entry.end)) err.push(`Trading hours must stay inside ${b.entry.start}–${b.entry.end} ET.`);
   if (e - s < MIN_WINDOW_MIN) err.push(`Leave at least ${MIN_WINDOW_MIN} minutes between the first and last new trade.`);
@@ -282,7 +282,8 @@ export function fmtNum(k: NumKey, v: number): string {
     default: return String(v);
   }
 }
-export const STRATEGY_NAME: Record<StrategyKey, string> = { dip_reversal: "Dip reversal", spy_late_momentum: "SPY end-of-day momentum" };
+// Plain names, the same as everywhere else (lib/explain.ts RULES). Both rules are retired (decision 15): systems test only.
+export const STRATEGY_NAME: Record<StrategyKey, string> = { dip_reversal: "Dip rule", spy_late_momentum: "SPY late-day rule" };
 
 export function focusText(body: ConfigBody, themes: Themes): string {
   const set = focusSet(body, themes);

@@ -31,6 +31,12 @@ cd ~/Projects/kaibot
   does not happen; the engine closes any position left from an earlier day at the first tick of the next open.
   The dashboard shows "Engine offline" after 90 seconds without a heartbeat.
 
+## Always on (no daily start by hand)
+`./scripts/install_service.sh` once makes the Mac start the engine by itself (launchd), restart it after a crash,
+ping free Healthchecks.io alarms and back up local files nightly. Releases can be pinned with `./scripts/release.sh`
+(the engine then trades a tag, not `main`). Everything, including stop and recovery: `docs/ops/always_on.md`.
+Starting by hand as above keeps working unchanged.
+
 ## Moving to a cloud VM later (Google, Oracle, anything with Docker)
 
 ```
@@ -39,10 +45,63 @@ scp mac:~/Projects/kaibot-secrets/.env ./secrets.env          # or create it on 
 KAIBOT_ENV_FILE=$PWD/secrets.env docker compose up -d --build   # restarts automatically
 docker compose logs -f engine
 ```
-Stop the engine on the Mac first: two engines on one paper account would trade twice.
+Stop the engine on the Mac first: two engines on one paper account would trade twice. The engine lease (next
+section) now refuses the second one, but stopping the first cleanly is still the right order: it hands the lease over at once.
 A 1 GB VM is enough (pandas + ~70 symbols × 70 sessions of minute bars).
 
+## Engine lease (one engine, whatever the machine)
+
+`scripts/engine_guard.sh` stops a second engine on the **same** machine. The lease stops one on **another**
+machine (Mac and a cloud VM). It is one row in Supabase, `kaibot.engine_lease` (migration `0013_engine_lease.sql`):
+who holds it (`holder`, `host`), since when (`started_at`) and until when (`expires_at`).
+
+| Moment | What the engine does |
+|---|---|
+| Start-up, before it touches the broker | Takes the lease with one atomic database call. Free, expired or already its own: it starts. |
+| Every heartbeat (about every 10 s) | Renews the lease for another 90 s. The heartbeat shows `lease: ok`. |
+| Ctrl-C / SIGTERM | Releases the lease, so another machine can start at once. |
+| Crash, power loss, network gone | Nothing: the lease runs out 90 s after the last renewal and the next engine to start takes it over (event `engine_lease_takeover`). |
+| Restart on the same machine | Gets its own lease back at once (the holder id is kept in `data/live/engine_holder_id`), so a crash does not lock the machine out. |
+
+`./scripts/run_engine.sh --check` prints the current lease (`engine_lease`: host and times, or `free`) without taking it.
+
+### Messages and what to do
+
+| Log line (exit code 3 unless noted) | Meaning | Do this |
+|---|---|---|
+| `Another Kaibot engine holds the lease: host '…', started …` | An engine on that host is running, or died less than 90 s ago. This one did **not** start and touched nothing. | Stop the other engine (Ctrl-C, `docker stop kaibot-engine`, `docker compose stop engine`), then start this one. If the other machine is already dead, wait 90 s and start again. |
+| `The engine lease could not be checked (…)` | Supabase is unreachable, or migration 0013 is not applied. Without the lease the engine cannot know it is the only one, so it does not start. | Run `./scripts/run_engine.sh --check`. `supabase: FAILED` is a network or key problem. Only `engine_lease: FAILED` means the migration is missing. |
+| `engine lease renewal failed (…): no new entries until it works again` (keeps running) | A renewal call failed. The heartbeat shows `lease: unverified`. **No new entries**; open positions are still managed (stops, 15:55 flatten). | Usually a Supabase or network blip: it clears itself on the next good renewal (`engine lease renewed again`). If it lasts, check the network. |
+| `The engine lease is no longer ours` then `engine stopped: lease lost` | This engine went quiet for more than 90 s (laptop slept, network dropped) and another engine took over, or someone released the lease by hand. This one stops and writes nothing more (the new engine's `engine_lease_takeover` event is the record). | Nothing to fix: the other engine is in charge. Open positions keep their broker-held stops and the other engine manages them. Decide which machine should run, and stop the other. |
+
+With `docker compose` (`restart: unless-stopped`) a refused engine exits and Docker starts it again, with a growing
+pause between tries. It keeps being refused while the other engine lives and takes over by itself within a few
+minutes of the other one dying. That is a standby, not a second engine. If you do not want a standby, `docker compose stop engine`.
+
+### Releasing a stuck lease safely
+
+A lease cannot stay stuck longer than 90 s by itself: nothing but a running engine renews it. So if the message
+keeps coming, **an engine is alive somewhere**. Find it before touching the row:
+
+1. In the Supabase SQL editor: `select host, started_at, renewed_at, expires_at, now() from kaibot.engine_lease;`
+   If `renewed_at` moves every ~10 s, the engine on `host` is running. Stop it there. Do not delete the row.
+2. On each machine that may run Kaibot: `./scripts/engine_guard.sh --list` (prints nothing when no engine runs).
+3. After a clean stop the row is gone. After a kill, wait until `expires_at` has passed (90 s), then start.
+4. Only if `renewed_at` no longer moves, `expires_at` is in the past and a start is still refused (it should not
+   happen): outside 09:30-16:00 ET, with every engine stopped, run `delete from kaibot.engine_lease;` and start again.
+
+Never delete the row or shorten `expires_at` while `renewed_at` is moving. The running engine would notice at
+its next heartbeat and stop (`lease lost`), but in the seconds before that both engines could act on the account.
+Do not copy `data/live/engine_holder_id` to another machine: two machines with the same id would both be let in.
+
+### What the lease does not do
+- It does not replace `engine_guard.sh`: two engines on the same machine share one holder id.
+- It does not cover the watchdog or `--check`: neither trades, neither takes the lease.
+- While the lease cannot be renewed the engine still manages exits. It only stops completely when the database
+  says the lease belongs to someone else.
+
 ## What it does each minute
+0. Renews the engine lease with each heartbeat (see above). Not renewable: no new entries.
 1. Applies dashboard commands (new run, pause/resume, flatten and stop, level from next session).
 2. Pulls the latest IEX 1-minute bars; syncs order and fill status from Alpaca.
 3. Marks to market; daily stop (flatten + halt) and run-drawdown end are checked.

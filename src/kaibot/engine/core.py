@@ -1,8 +1,15 @@
-"""The live engine: Variant A no-news dip reversal on Alpaca paper, one paper run at a time.
+"""The live engine on Alpaca paper (or `SimBroker`), one paper run at a time. It knows no rule by name.
 
-Per completed minute: sync orders/fills -> mark to market -> daily stop / run drawdown -> trailing stops ->
-time exit -> (every 5-minute bar) new entries through the risk gate. All prices, sizes, stops and exits come from
-these rules and `risk/gate.py`; no LLM is involved (the agent room is off in M1).
+Per completed minute: sync orders/fills -> mark to market -> daily stop / run drawdown -> each open position's
+strategy manages its stop -> time exit -> each live strategy that is due proposes entries (strategies/base.py,
+in registry order), every one through the risk gate -> each position's strategy may close it out (MOC) ->
+ledger -> shadow strategies. Prices, stops, targets and exits come from the strategies (strategies/registry.py:
+which ones a level runs is config/profiles.yaml), sizes from `risk/gate.py`; no LLM sets any of them.
+
+Books (S77): positions are keyed by (strategy, symbol) (`Positions`), so two rules can hold one stock. Every order
+call is journaled before it is sent (`_order`: intent, then ack) and every fill, dividend, split and session close
+goes to the ledger (engine/ledger.py), a fold over the local journal (engine/journal.py). Start equity is
+yesterday's mark-to-market close; a restart with the market closed finalises the last session.
 
 Safety:
 - Every entry is a bracket order, so the stop and the 2R target live AT THE BROKER and fire even if this
@@ -12,7 +19,8 @@ Safety:
 - The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds, and so
   does the account's own buying power (the smaller wins).
 - Fail closed (S16/S18): unknown open orders or positions, position drift against the broker, three loop errors
-  in a row, an event calendar that has run out, or three daily stops in ten sessions all stop new entries.
+  in a row, three entry orders in a row refused by the broker (S74), an event calendar that has run out, or three
+  daily stops in ten sessions all stop new entries.
   Nothing here ever adds risk: protection stays at the broker and exits keep being managed.
 """
 
@@ -22,35 +30,71 @@ import hashlib
 import json
 import logging
 import subprocess
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
+from kaibot.broker.alpaca import CANCEL_WAIT_S
+from kaibot.broker.protocol import Broker, OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
 from kaibot.engine.config import ROOT
 from kaibot.engine.events import from_fomc_dates, in_blackout
+from kaibot.engine.journal import Journal, canon
+from kaibot.engine.ledger import (
+    CORPORATE_ACTIVITIES,
+    LEDGER_KINDS,
+    Action,
+    Ledger,
+    actions_from_activities,
+    price_key,
+)
 from kaibot.engine.market import LiveMarket, session_minutes
 from kaibot.engine.roomflow import RoomFlow
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
-from kaibot.replay.features import five_minute
 from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
-from kaibot.strategies import spy_momentum as spymom
+from kaibot.strategies import registry
+from kaibot.strategies.base import CloseOut, Context, Event, Holding, MoveStop, Strategy, due, new_scan, note_scan
+
+__all__ = ["Engine", "FlattenIncomplete", "new_scan", "note_scan"]  # the scan counters live in strategies/base.py
 
 log = logging.getLogger("kaibot.engine")
 
-ATR_MULT = 1.5
-TARGET_R = 2.0
-TRAIL_ATR = 1.5
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
 MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
+# S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
+# candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
+# accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
+BROKER_REJECT_STATUS = (403, 422)
+MAX_REJECT_STREAK = 3
+FLATTEN_TRIES = 2  # a close the venue refused is tried once more inside the same flatten; the loop does the rest
+# S74 review (#142): one time limit for a whole flatten, retries included, well inside the watchdog's 90 s heartbeat
+# staleness window (watchdog.STALE_S). A close is only started while CLOSE_MAX_S is left: the adapter's own
+# bounded cancel wait (CANCEL_WAIT_S) plus its reads. What is left when the budget runs out is reported and retried
+# by the next loop pass, never dropped. The heartbeat is written between positions (Engine.on_progress).
+FLATTEN_BUDGET_S = 30.0
+CLOSE_MAX_S = CANCEL_WAIT_S + 3.0
+CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": already waited, so not retried at once
+# S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
+CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
+
+
+class FlattenIncomplete(RuntimeError):
+    """flatten_all tried every position and some are still open. `left` is {symbol: why}; the message names the
+    symbols first, so they survive wherever the text is cut (heartbeat, engine_error event, halt reason)."""
+
+    def __init__(self, reason: str, left: dict[str, str]):
+        self.reason, self.left = reason, dict(left)
+        why = "; ".join(f"{s}: {w}" for s, w in left.items())
+        super().__init__(f"flatten ({reason}) incomplete, still open: {', '.join(left)} ({why})")
 
 
 def _fingerprint() -> str:
@@ -99,10 +143,83 @@ class Pos:
     db_order_id: int | None = None
     entry_ts: str | None = None
     carried: bool = False  # left over from an earlier session
-    strategy: str = "dip_reversal"
+    strategy: str = registry.DEFAULT_LIVE[0]
 
     def features(self) -> dict:
         return {k: v for k, v in asdict(self).items() if k not in ("trade_id", "symbol", "qty")}
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return self.strategy, self.symbol
+
+
+class Positions:
+    """The engine's open positions, keyed by (strategy, symbol) (S77): two rules can hold the same stock.
+
+    It still answers by symbol where a question is about the stock, not the rule: `"AAPL" in pos` (any rule holds
+    it), `pos["AAPL"]` (the one position in it; ambiguous if two rules hold it), iteration yields symbols and
+    `items()` (symbol, position) pairs, in the order the positions were opened."""
+
+    def __init__(self) -> None:
+        self._d: dict[tuple[str, str], Pos] = {}
+
+    def add(self, p: Pos) -> None:
+        self._d[p.key] = p
+
+    def pop(self, key, default=None):
+        if isinstance(key, Pos):
+            key = key.key
+        if isinstance(key, str):
+            key = next((k for k in self._d if k[1] == key), None)
+        return self._d.pop(key, default) if key is not None else default
+
+    def sleeves(self):
+        return self._d.items()
+
+    def on(self, symbol: str) -> list[Pos]:
+        return [p for (_, s), p in self._d.items() if s == symbol]
+
+    def __getitem__(self, key) -> Pos:
+        if isinstance(key, tuple):
+            return self._d[key]
+        found = self.on(key)
+        if len(found) != 1:
+            raise KeyError(key if not found else f"{key} is held by {len(found)} rules: ask by (strategy, symbol)")
+        return found[0]
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key) -> bool:
+        return key in self._d if isinstance(key, tuple) else any(s == key for _, s in self._d)
+
+    def __iter__(self):
+        return (s for _, s in self._d)
+
+    def items(self):
+        return [(s, p) for (_, s), p in self._d.items()]
+
+    def values(self):
+        return list(self._d.values())
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def __bool__(self) -> bool:
+        return bool(self._d)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, Positions):
+            return self._d == other._d
+        if isinstance(other, dict):
+            return dict(self.items()) == other and len(other) == len(self._d)
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f"Positions({ {f'{k[0]}|{k[1]}': p.status for k, p in self._d.items()} })"
 
 
 @dataclass
@@ -122,12 +239,18 @@ class Day:
     halted: bool = False
     flattened: bool = False
     finalized: bool = False
-    spy_mom_done: bool = False
     last_m: int = -1
+    done_m: int = -1  # S74: the last minute whose work completed (last_m: the last one started). See Engine.tick
+    # S74: {strategy: the last minute whose entry decision finished or acted}; a retry never decides it again
+    decided: dict = field(default_factory=dict)
+    rejects: int = 0  # S74: entry orders the broker refused in a row; an accepted order resets it
     events: list = field(default_factory=list)
     rules: Rules | None = None  # M5: the owner's config for this session (None before the open)
     refused: str | None = None  # M5: entries refused for this session only (invalid config); next day re-checks
     scan: dict = field(default_factory=lambda: new_scan())  # dashboard-only counters, never read by decisions
+    # S77: what moves today's equity besides realised and unrealised trade P&L: dividends booked today, and for a
+    # position held over the last close and closed today, minus its gain to that close (already in start_equity)
+    adjust: float = 0.0
 
     @property
     def flatten_m(self) -> int:
@@ -141,7 +264,7 @@ class Day:
 class Engine:
     def __init__(
         self,
-        broker,
+        broker: Broker,
         market: LiveMarket,
         store,
         policies: dict[str, RiskPolicy],
@@ -154,31 +277,51 @@ class Engine:
         room=None,
         pack_fn=None,
         rules_extra=None,
+        journal: Journal | None = None,
+        corporate_actions=None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
-        self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> dip reversal only
+        self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> registry.DEFAULT_LIVE
+        for names in self.strategies.values():  # #161: a multi-day rule never loads on the live path
+            registry.refuse_multi_day(names)
+        # S76: which registered shadow strategies run (None = all of them; the research command picks one)
+        self.shadow_only: tuple[str, ...] | None = None
         # S34: the agent room (None = rules-only). It can only veto or halve a candidate the rules approved.
         self.roomflow = RoomFlow(self, room, pack_fn) if room is not None else None
         self.rules_extra = rules_extra  # extra rules-only veto (S37 pump risk): (engine, symbol, m) -> str | None
         self.kill: str | None = None  # set by a fail-closed halt; blocks entries until the next session
+        # Issue #81: the cross-machine lease (engine/lease.py), set by __main__. None = not enforced (tests,
+        # replays). When set, entries need a lease that is provably ours right now.
+        self.lease = None
         self.error_streak = 0
         self._drift_seen: dict = {}
         self.run: dict | None = None
         self.day: Day | None = None
-        self.pos: dict[str, Pos] = {}
+        self.pos = Positions()
+        # S77: the local journal (the store's own when it journals, else an in-memory one) and the ledger folded
+        # from it: positions per (strategy, symbol), cash, the mark-to-market close of every session.
+        self.journal = journal or getattr(store, "journal", None) or Journal()
+        self.ledger = Ledger.fold(self.journal.entries(kinds=LEDGER_KINDS))
+        # S77: corporate actions for a session: research passes the daily store's table (day -> [Action]); None
+        # reads the broker's non-trade activities (Alpaca: dividends DIV*, splits SSP) when a position is held
+        self.corporate_actions = corporate_actions
+        self._finalize_checked: date | None = None
         self.account_clean = True
         self.code = code_sha()
         self.fingerprint = _fingerprint()  # S38: strategy-code hash; trades count toward the gate only on frozen code
         self.peak: float | None = None
         self.on_progress = lambda status: None
+        self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
+        self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
 
     # ================= lifecycle =================
     def startup(self) -> None:
         self.run = self.store.active_run()
         self._restore_positions()
+        self._attach_ledger()
         try:
             self._adopt_orphans()
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
@@ -231,17 +374,26 @@ class Engine:
     def on_tick_ok(self) -> None:
         self.error_streak = 0
 
+    def lease_ok(self) -> bool:
+        """Issue #81: no lease object means the lease is not enforced; otherwise it must be verified and fresh."""
+        return self.lease is None or bool(self.lease.ok)
+
     def _check_drift(self) -> None:
         """S18: the engine's book must match the broker's. Any difference stops new entries."""
         broker_pos = self.broker.positions()
         diffs = {}
+        # S77: per symbol, the sum over the rules holding it; a symbol with an entry or an exit under way is
+        # compared once that has settled (as a single position was before)
+        unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
+        mine: dict[str, int] = {}
         for s, p in self.pos.items():
-            if p.status != "open" or p.exit_order_id:
-                continue
+            if s not in unsettled:
+                mine[s] = mine.get(s, 0) + p.qty
+        for s, qty in mine.items():
             q = broker_pos.get(s)
             bq = int(float(q["qty"])) if q else 0
-            if bq != p.qty:
-                diffs[s] = {"engine": p.qty, "broker": bq}
+            if bq != qty:
+                diffs[s] = {"engine": qty, "broker": bq}
         for s in set(broker_pos) - set(self.pos):
             diffs[s] = {"engine": 0, "broker": int(float(broker_pos[s]["qty"]))}
         # A bracket leg can fill between our order sync and this read; that heals on the next minute's sync.
@@ -252,14 +404,70 @@ class Engine:
             self._halt_entries("drift", "positions differ from the broker", {"diffs": persistent})
 
     def _restore_positions(self) -> None:
-        self.pos = {}
+        self.pos = Positions()
         if not self.run:
             return
         for t in self.store.open_trades(self.run["id"]):
             f = t.get("features") or {}
             known = {k: f[k] for k in Pos.__dataclass_fields__ if k in f}
             p = Pos(trade_id=t["id"], symbol=t["symbol"], qty=int(float(t["qty"])), **known)
-            self.pos[p.symbol] = p
+            self.pos.add(p)
+
+    # ================= ledger (S77) =================
+    def _book(self, kind: str, body: dict) -> None:
+        """Journal first, then fold: the ledger is always what the journal says."""
+        body = canon(body)
+        self.journal.append(kind, body)
+        self.ledger.apply(kind, body)
+
+    def _attach_ledger(self) -> None:
+        """A run the ledger has not seen (it began before the ledger, or the journal is new) is imported from the
+        store: its pot, its reported daily results so far (the old start equity, to the last bit), the cash its
+        closed trades left and its open positions at their fills."""
+        if not self.run or self.ledger.book(self.run["id"]) is not None:
+            return
+        rid, amount = self.run["id"], float(self.run["amount_usd"])
+        days = self.store.select("daily_result", {"run_id": f"eq.{rid}"})
+        last = max((str(r["session"]) for r in days), default="")
+        late = [t for t in self.store.select("trade", {"run_id": f"eq.{rid}"})
+                if t.get("exit_ts") and t.get("pnl_usd") is not None and str(_et_date(t["exit_ts"])) > last]
+        cash = amount + sum(float(r["pnl_venue"]) for r in days) + sum(
+            float((t.get("features") or {}).get("pnl_venue", t["pnl_usd"])) for t in late)
+        self._book("run", {"run_id": rid, "amount": amount, "imported": True, "prior_cash": cash,
+                           "prior_days": [min(float(r["pnl_venue"]), float(r["pnl_shadow"])) for r in days]})
+        for p in self.pos.values():
+            if p.status == "open" and p.fill is not None:
+                self._book("position", {"run_id": rid, "strategy": p.strategy, "symbol": p.symbol, "qty": p.qty,
+                                        "px": p.fill, "session": str(_et_date(p.entry_ts)) if p.entry_ts else None})
+
+    def _order(self, action: str, call, **body):
+        """Every order the engine sends, changes or cancels: an `intent` in the journal BEFORE the broker call
+        (audit D5), its `ack` after. A crash in between leaves an intent without an answer, which says exactly
+        which client order id to look up."""
+        seq = self.journal.append("intent", canon({"action": action, "run_id": self._rid(), **body}))
+        try:
+            out = call()
+        except Exception as e:
+            self.journal.append("ack", {"intent": seq, "ok": False, "error": f"{type(e).__name__}: {e}"[:200]})
+            raise
+        self.journal.append("ack", {"intent": seq, "ok": True,
+                                    "order_id": out.get("id") if isinstance(out, dict) else None})
+        return out
+
+    def _basis(self, p: Pos) -> float:
+        """The price today's unrealised P&L counts from: the last close mark for a position held over it (its
+        gain up to that close is already in start_equity, audit B1 item 4), else the fill."""
+        b = self.ledger.book(self._rid()) if self.run else self.ledger.book(self.day.run_id if self.day else None)
+        s = b.sleeves.get(p.key) if b is not None else None
+        return s.mark if s is not None and s.mark is not None else p.fill
+
+    def _broker_cash(self) -> float | None:
+        try:
+            c = self.broker.account().get("cash")
+            return float(c) if c is not None else None
+        except Exception:
+            log.exception("account read failed (cash baseline)")
+            return None
 
     def _adopt_orphans(self) -> None:
         """S40: a crash between the broker accepting an entry and the engine writing its order/trade rows leaves an
@@ -280,7 +488,7 @@ class Engine:
         rows = {r["signal_id"]: r for r in self.store.select("order", {"signal_id": f"in.({ids})"})}
         for sig in sigs:
             sid, s = sig["id"], sig["symbol"]
-            if sid in traded or sid not in approved or s in self.pos:
+            if sid in traded or sid not in approved or (sig.get("strategy") or registry.DEFAULT_LIVE[0], s) in self.pos:
                 continue
             coid = f"kb-{rid}-{sid}-1"
             o = self.broker.order_by_client_id(coid)
@@ -294,7 +502,7 @@ class Engine:
         ref, stop, target = float(sig["entry"]), float(sig["stop"]), sig.get("target")
         qty = int(float(o["qty"]))
         sigma = f.get("sigma_1m")
-        if sigma is None and f.get("sigma") is not None:  # SPY momentum logs the daily sigma
+        if sigma is None and f.get("sigma") is not None:  # a rule that logs the daily sigma
             sigma = float(f["sigma"]) / np.sqrt(390)
         if db_order is None:
             db_order = self.store.insert("order", {
@@ -305,14 +513,15 @@ class Engine:
         p = Pos(trade_id=0, symbol=sig["symbol"], qty=qty, coid=coid, order_id=o["id"], ref=ref, risk_ps=ref - stop,
                 atr=float(f.get("atr5") or 0), sigma=float(sigma or 0), stop=stop,
                 target=float(target) if target is not None else 0.0, db_order_id=db_order["id"],
-                entry_ts=_iso(sig.get("ts")) or self.now().isoformat(), strategy=sig.get("strategy") or "dip_reversal")
+                entry_ts=_iso(sig.get("ts")) or self.now().isoformat(),
+                strategy=sig.get("strategy") or registry.DEFAULT_LIVE[0])
         trade = self.store.insert("trade", {
             "run_id": self._rid(), "config_version": self._cfg_version(), "signal_id": sig["id"],
             "strategy": p.strategy, "symbol": p.symbol,
             "entry_ts": p.entry_ts, "qty": qty, "entry_px": ref, "stop_px": stop, "target_px": target,
             "risk_usd": p.risk_ps * qty, "features": {**f, **p.features(), "adopted": True}})
         p.trade_id = trade["id"]
-        self.pos[p.symbol] = p  # pending: the next order sync books the fill and aligns the legs
+        self.pos.add(p)  # pending: the next order sync books the fill and aligns the legs
         log.warning("adopted %s order %s (%s) left by a crash", p.symbol, coid, o.get("status"))
         self.store.event("order_adopted", {"symbol": p.symbol, "client_order_id": coid,
                                            "broker_status": o.get("status")}, self._rid())
@@ -411,6 +620,7 @@ class Engine:
             returning=False,
         )
         self.run, self.peak = run, amount
+        self._book("run", {"run_id": run["id"], "amount": amount, "broker_cash0": self._broker_cash()})
         self.day = None  # if a session is in progress, the new run starts trading at the next 5-minute check
 
     def _set_run_status(self, status: str, reason: str | None = None) -> None:
@@ -456,7 +666,7 @@ class Engine:
     def _load_rules(self, d: Day) -> None:
         """M5 S43: the owner's latest applied config created before this session's open, tightened onto the level.
         Invalid -> entries refused for the session (fail closed); management, stops and the flatten still run."""
-        lv_pol, lv_strats = self.policies[self.level()], self.strategies.get(self.level(), ["dip_reversal"])
+        lv_pol, lv_strats = self.policies[self.level()], self.level_strategies()
         d.rules = defaults(lv_pol, lv_strats)
         try:
             rows = [c for c in self.store.select("config", {"run_id": f"eq.{d.run_id}", "status": "eq.applied"})
@@ -513,6 +723,8 @@ class Engine:
             if self.day and not self.day.finalized:
                 self._sync_orders()
                 self._finalize_day()
+            elif self.day is None:
+                self._finalize_missed(now)  # S77 (audit D8): a restart after the close still closes the day
             self._maybe_prepare(clk, now)
             return {"state": "market_closed", "next_open": clk.get("next_open"), "account_clean": self.account_clean}
         if self.run is None and not self.pos:
@@ -525,8 +737,13 @@ class Engine:
             return {"state": "idle", "account_clean": self.account_clean}
         self.market.update(now)
         m = self.market.last_complete_minute(now)
-        if m < 0 or m == d.last_m:
-            return self._status(m)
+        if m < 0 or m == d.done_m:
+            return self._status(m)  # this minute's work is complete: it is never run twice
+        # S74 (#114, audit D6): `last_m` says the minute was started, `done_m` that it was finished. A step below
+        # that raises leaves `done_m` behind, so the main loop's retry (about 10 s later) runs the minute again
+        # instead of getting "already done" and resetting the error streak. Every failed attempt therefore counts
+        # (on_tick_error) and a failure that recurs trips the kill switch. Each step is safe to run again, except
+        # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
         self._check_drift()
@@ -535,7 +752,7 @@ class Engine:
                 self._exit(p, "carried_over")
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
-        self._trail_stops(m)
+        self._manage_stops(m)
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")
             d.flattened = True
@@ -543,16 +760,15 @@ class Engine:
             self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
             self.roomflow.collect(m)
-        if (m - 4) % 5 == 0 and self._may_enter(m):
-            self._entries(m)
-        if m == spymom.ENTRY_M and not d.spy_mom_done and self._runs("spy_late_momentum") and d.n_min == 390:
-            d.spy_mom_done = True  # one decision a day, whatever happens below
-            if self._may_enter(m):
-                self._spy_momentum(m)
-        if spymom.EXIT_SUBMIT_M <= m < spymom.MOC_CUTOFF_M:
-            self._moc_exits()
+        for strat in self.live_strategies():  # S76: every live strategy the session runs, in registry order
+            if due(strat.schedule, Event.BAR_CLOSE, m, d.n_min) and d.decided.get(strat.name) != m \
+                    and self._may_enter(m):
+                self._entries(strat, m)
+                d.decided[strat.name] = m
+        self._close_outs(m)
         self._ledger(eq)
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
+        d.done_m = m
         return self._status(m)
 
     def _maybe_prepare(self, clk: dict, now: datetime) -> None:
@@ -590,11 +806,12 @@ class Engine:
         if segs and segs[0]["level"] != self.run.get("level"):
             self.store.update("run", {"id": self.run["id"]}, {"level": segs[0]["level"]})
             self.run["level"] = segs[0]["level"]
-        start_eq = float(self.run["amount_usd"]) + self.store.run_realized(self.run["id"])
+        start_eq = self._start_equity()  # S77: yesterday's mark-to-market close (audit B1 item 5)
         self.peak = max(float(self.run.get("peak_equity") or start_eq), start_eq)
         self.day = Day(self.run["id"], today, open_utc, n_min, start_eq)
         self._load_rules(self.day)
         self._restore_session(self.day)
+        self._corporate_actions(today)
         if self.market.day != today:
             self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
             self.market.prepare_day(
@@ -621,6 +838,55 @@ class Engine:
             self._rid(),
         )
 
+    def _start_equity(self) -> float:
+        se = self.ledger.start_equity(self.run["id"])
+        return se if se is not None else float(self.run["amount_usd"]) + self.store.run_realized(self.run["id"])
+
+    def _corporate_actions(self, today: date) -> None:
+        """S77: dividends and splits of the symbols held at the open, booked to every rule that holds them. Research
+        passes the daily store's table; live reads Alpaca's non-trade activities. Never raises: a failure is an
+        event, and a split the ledger missed shows as drift (entries stop)."""
+        b = self.ledger.book(self._rid())
+        if b is None or not b.sleeves:
+            return
+        try:
+            if self.corporate_actions is not None:
+                acts = list(self.corporate_actions(today) or ())
+            else:
+                rows = self.broker.activities(self.now() - timedelta(days=10), types=CORPORATE_ACTIVITIES)
+                bq = {s: float(p["qty"]) for s, p in self.broker.positions().items()}
+                acts = actions_from_activities(rows, b.qty_by_symbol(), bq)
+        except Exception as e:
+            log.exception("corporate actions unavailable")
+            self.store.event("corporate_actions_error", {"day": str(today), "error": str(e)[:200]}, self._rid())
+            return
+        for a in acts:
+            self._book_action(b, a)
+
+    def _book_action(self, b, a: Action) -> None:
+        if not b.holders(a.symbol):
+            return
+        div0, qty0 = b.dividends_total, b.qty_by_symbol().get(a.symbol, 0.0)
+        self._book(*a.entry(b.run_id))
+        if a.kind == "dividend" and self.day is not None:
+            self.day.adjust += b.dividends_total - div0
+        if a.kind == "split" and b.qty_by_symbol().get(a.symbol, 0.0) != qty0:
+            r = float(a.ratio)
+            for p in self.pos.on(a.symbol):
+                s = b.sleeves.get(p.key)
+                if s is None:
+                    continue
+                p.qty = int(round(s.qty))
+                for f in ("fill", "ref", "stop", "target", "risk_ps", "atr", "shadow_entry"):
+                    if getattr(p, f) is not None:
+                        setattr(p, f, getattr(p, f) / r)
+                self.store.update("trade", {"id": p.trade_id}, {"qty": p.qty, "features": p.features()})
+        if b.qty_by_symbol().get(a.symbol, 0.0) != qty0 or b.dividends_total != div0:
+            self.store.event(f"{a.kind}_booked", {"symbol": a.symbol, "ex_date": a.ex_date, "ref": a.ref,
+                                                  "ratio": a.ratio, "cash": round(b.dividends_total - div0, 4),
+                                                  "note": "protective orders are re-created by the order manager"
+                                                  if a.kind == "split" else None}, self._rid())
+
     def _check_recent_stops(self, today: date) -> None:
         rows = self.store.select("halt", {"run_id": f"eq.{self.run['id']}", "kind": "eq.daily_stop"})
         lo = today - timedelta(days=STOPS_WINDOW_DAYS)
@@ -637,11 +903,16 @@ class Engine:
         unreal = 0.0
         for p in self.pos.values():
             if p.status == "open" and p.fill is not None:
-                last = self.market.last_close(p.symbol) or p.fill
-                unreal += (last - p.fill) * p.qty
-        return d.start_equity + d.realized_reported + unreal, unreal
+                base = self._basis(p)
+                last = self.market.last_close(p.symbol) or base
+                unreal += (last - base) * p.qty
+        return d.start_equity + d.realized_reported + unreal + d.adjust, unreal
 
     def _risk_halts(self, m: int, eq: float) -> None:
+        if self.run is None:
+            # S74b (#137): the run has ended (run drawdown) and its flatten is out; until the closes are booked the
+            # engine only manages them. Nothing to halt any more: a second pass wrote the halt again and raised.
+            return
         d, pol = self.day, self.policy()
         if not d.halted and eq <= d.start_equity * (1 - pol.max_daily_loss_pct / 100):
             self.flatten_all("daily_stop")
@@ -670,6 +941,8 @@ class Engine:
         d = self.day
         if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
             return False
+        if not self.lease_ok():  # fail closed: the lease could not be renewed, so we may not be the only engine
+            return False
         if d.halted or d.flattened or d.refused or m < d.pause_until:
             return False
         r = d.rules
@@ -683,110 +956,86 @@ class Engine:
         r = self.day.rules if self.day else None
         if r is not None:
             return strategy in r.strategies
-        return strategy in self.strategies.get(self.level(), ["dip_reversal"])
+        return strategy in self.level_strategies()
 
-    # ================= SPY late momentum (S13) =================
-    def _spy_momentum(self, m: int) -> None:
-        spy = self.market.spy
-        if spy in self.pos:
-            return
-        sd = self.market.symbol_days(spy, m)
-        if sd is None or not len(sd.dates) or sd.dates[-1] != np.datetime64(self.day.day, "D"):
-            return
-        today = len(sd.dates) - 1
-        ret, sigma = spymom.inputs_from_days(sd, today)
-        z = ret / sigma if sigma and np.isfinite(sigma) and sigma > 0 else float("nan")
-        atr = five_minute(sd.o[today:], sd.h[today:], sd.l[today:], sd.c[today:])[0][0, (m - 4) // 5]
-        ref = float(sd.c[today, m])
-        go = spymom.should_buy(spymom.MomentumInputs(ret, sigma if np.isfinite(sigma) else 0.0, False, False))
-        if not (np.isfinite(atr) and atr > 0):
-            go = False
-        off, vix = self.market.regime_at(m)  # S15: the regime gate (incl. VIX > 35 crisis) applies here too
-        r = self.day.rules
-        if not off and r is not None and np.isfinite(vix) and vix > r.vix_max:
-            off = True  # M5: the owner's VIX limit (tighter than the crisis gate)
-        stop = ref - spymom.STOP_ATR * float(atr if np.isfinite(atr) else 0)
-        feats = {"ret_close_to_10": _num(ret), "sigma": _num(sigma), "z": _num(z), "atr5": _num(atr), "m": m}
-        self._decide(spy, "spy_late_momentum", ref, stop, None, feats,
-                     ["SPY +0.5 sigma by 10:00", "last-30-minute momentum"],
-                     "regime off" if off else (None if go else "momentum below threshold"),
-                     sigma_1m=float(sigma or 0) / np.sqrt(390), atr=float(atr if np.isfinite(atr) else 0), vix=vix)
+    # ================= strategies (S76) =================
+    def level_strategies(self) -> list[str]:
+        """The live strategies the run's level lists (config/profiles.yaml); the owner's config can only remove."""
+        return list(self.strategies.get(self.level(), registry.DEFAULT_LIVE))
 
-    def _moc_exits(self) -> None:
-        """From 15:45, close momentum positions market-on-close. Cancel the stop first (it reserves the shares);
-        if the MOC is refused, the position stays and the 15:55 market flatten closes it."""
-        for p in list(self.pos.values()):
-            if p.strategy != "spy_late_momentum" or p.status != "open" or p.exit_order_id:
-                continue
-            if p.stop_order_id:
-                self.broker.cancel_order(p.stop_order_id)
-                p.stop_order_id = None
-            try:
-                o = self.broker.submit_moc_sell(f"{p.coid}-moc", p.symbol, p.qty)
-                p.exit_order_id, p.exit_reason = o["id"], "moc"
-            except Exception as e:
-                log.warning("MOC refused for %s (%s); the 15:55 flatten will close it", p.symbol, e)
-                self.store.event("moc_refused", {"symbol": p.symbol, "error": str(e)[:200]}, self._rid())
-                p.exit_reason = None
+    def live_strategies(self) -> tuple[Strategy, ...]:
+        """The registered live strategies this session runs, in registry order."""
+        r = self.day.rules if self.day else None
+        strats = registry.live(r.strategies if r is not None else self.level_strategies())
+        held = [s.name for s in strats if s.holding is Holding.MULTI_DAY]
+        if held and self.corporate_actions is None:
+            # Guard for #118 (QA-Ops review of #117): live dividends are booked when Alpaca pays them (DIV
+            # activities, pay date) to the rules still holding the stock. Right for intraday rules, which never
+            # hold over an ex-date. A rule held over an ex-date needs the dividend accrued AT the ex-date (equity
+            # is understated until the pay date, and a dividend paid after the sale is lost). #118 replaces this.
+            raise MultiDayDividendsError(
+                f"{', '.join(held)} hold(s) across sessions, but live dividends are booked at the pay date: "
+                "multi-day holding needs ex-date dividend accrual first (#118)")
+        return strats
+
+    def context(self, m: int, event: Event = Event.BAR_CLOSE, strategy: str | None = None) -> Context:
+        """`strategy`: whose positions `has_position` asks about (S77: a rule sees its own book)."""
+        d = self.day
+
+        def held(s: str) -> bool:
+            return (strategy, s) in self.pos if strategy is not None else s in self.pos
+
+        def prefetch(symbols: list[str]) -> None:
+            self._quotes = self.broker_quotes(symbols)
+            self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
+            ctx.prefetched = True
+
+        ctx = Context(event, m, d.day, d.n_min, self.market, d.rules, self.now, held, prefetch,
+                      d.scan, lambda s, ref, vix: self._user_veto(d.rules, s, ref, vix) if d.rules else None,
+                      lambda s, mm: self.rules_extra(self, s, mm) if self.rules_extra is not None else None)
+        return ctx
 
     # ================= entries =================
-    def _entries(self, m: int) -> None:
+    def _entries(self, strat: Strategy, m: int) -> None:
+        """Ask one due strategy for its signals and decide each in turn, through the owner's filters, the room
+        (if the strategy uses it) and the risk gate. Signals come one at a time, so what an earlier one opened is
+        already in the book when the strategy computes the next."""
         sc = self.day.scan
-        off, vix = self.market.regime_at(m)
-        if off:
-            if (m + 1) % 5 == 0:
-                sc["regime_off"] += 1
-            return
-        cands = self.market.candidates_at(m)
-        note_scan(sc, m, getattr(self.market, "last_checked", 0), getattr(self.market, "last_near", []), len(cands))
-        if not len(cands) or not self._runs("dip_reversal"):
-            return
-        r = self.day.rules
-        if r is not None and r.mode != "all":  # M5 focus: Only filters; Prefer ranks focus names first
-            cands = cands[[r.tradable(x) for x in cands["symbol"]]]
-            if not len(cands):
-                return
-            cands = cands.assign(_rank=[r.rank(x) for x in cands["symbol"]]).sort_values(
-                ["_rank", "z"], kind="stable").drop(columns="_rank")
-        self._quotes = self.broker_quotes(list(cands["symbol"]))
-        self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
-        decision = self.now()
-        for _, c in cands.iterrows():
-            s = c["symbol"]
-            if s in self.pos:
-                continue
-            news = self.market.data.news_count(s, decision - timedelta(hours=24), decision)
-            ref = float(c["price"])
-            stop = ref - ATR_MULT * float(c["atr5"])
-            target = ref + TARGET_R * (ref - stop)
-            feats = {k: _num(c[k]) for k in ("z", "resid_z", "turnover", "atr5", "vwap", "sigma_1m")}
-            feats.update({"news_24h": news, "vix": vix, "m": m})
-            reasons = ["no-news dip", "5-min higher low", "sector-adjusted"]
-            veto = "company news in 24 h" if news else None
-            if veto is None and r is not None:
-                veto = self._user_veto(r, s, ref, vix)
-            if veto is None and self.rules_extra is not None:
-                try:
-                    veto = self.rules_extra(self, s, m)
-                except Exception:
-                    log.exception("extra rules veto failed for %s: skipping the candidate", s)
-                    veto = "extra rules unavailable"
-            if veto is not None:
-                sc["vetoed"][veto] = sc["vetoed"].get(veto, 0) + 1
-            rf = self.roomflow
+        ctx = self.context(m, strategy=strat.name)
+        rf = self.roomflow if strat.room else None
+        for sig in strat.on_event(ctx) or ():
+            s, ref, stop, target = sig.symbol, sig.entry, sig.stop, sig.target
+            veto = sig.veto
+            if strat.owner_filters:
+                r = self.day.rules
+                if veto is None and r is not None:
+                    veto = self._user_veto(r, s, ref, sig.vix)
+                if veto is None and self.rules_extra is not None:
+                    try:
+                        veto = self.rules_extra(self, s, m)
+                    except Exception:
+                        log.exception("extra rules veto failed for %s: skipping the candidate", s)
+                        veto = "extra rules unavailable"
+                if veto is not None:
+                    sc["vetoed"][veto] = sc["vetoed"].get(veto, 0) + 1
+            # S74: from here on this decision acts (a room session, a signal row, an order), so a retry of the
+            # minute must not decide it again: a second decision would write a new signal row and, with it, a new
+            # client order id (kb-<run>-<signal>-1) that the venue's duplicate check cannot recognise. A decision
+            # that failed before this line (features, quotes, the news lookup) has done nothing and is repeated.
+            self.day.decided[strat.name] = m
             if veto is None and rf is not None:
                 mode = rf.mode(m)
                 if mode == "ok":
                     sc["to_room"] += 1
-                    rf.submit(s, c, ref, stop, target, feats, reasons, m)
+                    rf.submit(s, sig.room, ref, stop, target, sig.features, sig.reasons, m, strategy=strat.name)
                     continue
                 if mode == "no_entries":
                     return
-            sig_id, full_qty = self._decide(s, "dip_reversal", ref, stop, target, feats, reasons, veto,
-                                            sigma_1m=float(c["sigma_1m"]), atr=float(c["atr5"]), vix=vix,
-                                            fresh_reads=False)
+            sig_id, full_qty = self._decide(s, strat.name, ref, stop, target, sig.features, sig.reasons, veto,
+                                            sigma_1m=sig.sigma_1m, atr=sig.atr, vix=sig.vix,
+                                            fresh_reads=not ctx.prefetched)
             if veto is None and rf is not None:
-                rf.record_skipped(sig_id, s, m, ref, ref - stop, float(c["atr5"]), float(c["sigma_1m"]), full_qty,
+                rf.record_skipped(sig_id, s, m, ref, ref - stop, sig.atr, sig.sigma_1m, full_qty,
                                   "daily LLM budget reached: rules-only")
             if self.day.entries >= self.policy().max_entries_per_day:
                 break
@@ -815,7 +1064,7 @@ class Engine:
             symbol_exposure=0.0,
             open_risk=sum(p.risk_ps * p.qty for p in live),
             quote_age_s=q_age,
-            kill_switch=bool(self.kill),
+            kill_switch=bool(self.kill) or not self.lease_ok(),  # second lock on the same door (#81)
             reconciled=self.account_clean,
             market_open=True,
             data_ok=(self.market.last_bar_minute(s) or -99) >= int(feats.get("m", 0)) - 2,
@@ -863,7 +1112,8 @@ class Engine:
         )
         if qty <= 0:
             return sig["id"], full_qty
-        self._open(s, qty, ref, stop, target, ref - stop, atr, sigma_1m, q, sig["id"], feats, strategy)
+        if not self._open(s, qty, ref, stop, target, ref - stop, atr, sigma_1m, q, sig["id"], feats, strategy):
+            return sig["id"], full_qty  # S74: the broker refused it (now on the signal); no entry, the scan goes on
         self._bp_added += qty * ref
         d.entries += 1
         return sig["id"], full_qty
@@ -884,18 +1134,31 @@ class Engine:
             log.exception("quotes failed")
             return {}
 
-    def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats,
-              strategy: str = "dip_reversal") -> None:
+    def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats, strategy: str) -> bool:
+        """Send the entry and write its order and trade rows. False: the broker refused the order (S74)."""
         coid = f"kb-{self._rid()}-{signal_id}-1"
         bid, ask = float(quote.get("bp") or 0), float(quote.get("ap") or 0)
         if not (0 < bid <= ask):
             hs = half_spread(ref)
             bid, ask = ref - hs, ref + hs
         shadow_entry = shadow_fill_price("buy", qty, QuoteCtx(bid, ask, sigma, max(self.market.bar_volume(s), 1)))
-        if target is None:  # exit timed by the engine (MOC): stop only, still held at the broker
-            order = self.broker.submit_oto_stop(coid, s, qty, round(stop, 2))
-        else:
-            order = self.broker.submit_bracket(coid, s, qty, round(stop, 2), round(target, 2))
+        try:
+            if target is None:  # exit timed by the engine (MOC): stop only, still held at the broker
+                order = self._order("entry", lambda: self.broker.submit_oto_stop(coid, s, qty, round(stop, 2)),
+                                    coid=coid, strategy=strategy, symbol=s, qty=qty, stop=round(stop, 2),
+                                    signal_id=signal_id)
+            else:
+                order = self._order("entry", lambda: self.broker.submit_bracket(coid, s, qty, round(stop, 2),
+                                                                                round(target, 2)),
+                                    coid=coid, strategy=strategy, symbol=s, qty=qty, stop=round(stop, 2),
+                                    target=round(target, 2), signal_id=signal_id)
+        except Exception as e:
+            if not _order_refused(e):
+                raise  # network error, 5xx, anything unknown: the order may be at the venue. A loop error, as before
+            if self._broker_rejected(s, qty, coid, signal_id, feats, e):
+                raise  # it keeps happening: a loop error again, and entries are halted
+            return False
+        self.day.rejects = 0
         db_order = self.store.insert(
             "order",
             {
@@ -942,7 +1205,28 @@ class Engine:
             },
         )
         p.trade_id = trade["id"]
-        self.pos[s] = p
+        self.pos.add(p)
+        return True
+
+    def _broker_rejected(self, s: str, qty: int, coid: str, signal_id, feats: dict, err: Exception) -> bool:
+        """S74 (#114, audit D4): the venue refused this entry (403 / 422), so no order exists. The signal was
+        written as approved a moment ago: say on it that the broker rejected it and why, and take the approval
+        back, so nothing downstream (the tape, "setups taken", order adoption at the next start) counts it as an
+        entry. True when it was the MAX_REJECT_STREAK-th refusal in a row: entries halt for the session and the
+        caller raises it as a loop error again. The count is per session; an accepted order resets it."""
+        d = self.day
+        d.rejects += 1
+        status, reason = getattr(err, "status", None), _reject_reason(err)
+        log.warning("broker rejected the entry for %s (%s): %s", s, status, reason)
+        self.store.update("signal", {"id": signal_id}, {
+            "rules_veto": f"broker rejected: {reason}",
+            "features": {**feats, "broker_reject": {"status": status, "reason": reason, "qty": qty,
+                                                    "client_order_id": coid}}})
+        self.store.update("gate_run", {"signal_id": signal_id}, {"approved": False, "qty": 0})
+        if d.rejects < MAX_REJECT_STREAK:
+            return False
+        self._halt_entries("broker_rejects", f"{d.rejects} entry orders in a row rejected by the broker: {reason}")
+        return True
 
     # ================= order sync =================
     def _sync_orders(self) -> None:
@@ -970,17 +1254,28 @@ class Engine:
     def _on_entry_fill(self, p: Pos, o: dict) -> None:
         p.fill = float(o["filled_avg_price"])
         p.status = "open"
-        p.stop = p.fill - p.risk_ps
-        p.target = p.fill + TARGET_R * p.risk_ps if p.strategy == "dip_reversal" else 0.0
+        self._book("fill", {"run_id": self._rid() or (self.day and self.day.run_id), "strategy": p.strategy,
+                            "symbol": p.symbol, "side": "buy", "qty": p.qty, "px": p.fill, "fees": 0.0,
+                            "coid": p.coid, "ts": o.get("filled_at"),
+                            "session": str(self.day.day) if self.day else None})
+        strat = registry.get(p.strategy)
+        p.stop, target = strat.on_fill(p.fill, p.risk_ps) if strat is not None else (p.fill - p.risk_ps, None)
+        p.target = target if target is not None else 0.0
         for leg in o.get("legs") or []:
             if leg.get("type") == "limit":
                 p.target_order_id = leg["id"]
                 if abs(float(leg["limit_price"]) - p.target) >= 0.01:
-                    p.target_order_id = self.broker.replace_limit(leg["id"], round(p.target, 2))["id"]
+                    oid, px = leg["id"], round(p.target, 2)
+                    p.target_order_id = self._order(
+                        "replace_limit", lambda oid=oid, px=px: self.broker.replace_limit(oid, px),
+                        order_id=oid, symbol=p.symbol, coid=p.coid, price=px)["id"]
             elif leg.get("type") in ("stop", "stop_limit"):
                 p.stop_order_id = leg["id"]
                 if abs(float(leg["stop_price"]) - p.stop) >= 0.01:
-                    p.stop_order_id = self.broker.replace_stop(leg["id"], round(p.stop, 2))["id"]
+                    oid, px = leg["id"], round(p.stop, 2)
+                    p.stop_order_id = self._order(
+                        "replace_stop", lambda oid=oid, px=px: self.broker.replace_stop(oid, px),
+                        order_id=oid, symbol=p.symbol, coid=p.coid, price=px)["id"]
         self.store.insert(
             "fill",
             {
@@ -1026,6 +1321,14 @@ class Engine:
             returning=False,
         )
         d = self.day
+        base = self._basis(p)
+        if d and base != p.fill:  # held over the last close: its gain to that mark is already in start_equity
+            d.adjust -= (base - p.fill) * p.qty
+        rid = self._rid() or (d.run_id if d else None)
+        if rid:
+            self._book("fill", {"run_id": rid, "strategy": p.strategy, "symbol": p.symbol, "side": "sell",
+                                "qty": p.qty, "px": px, "fees": fees, "coid": p.coid, "ts": ts, "reason": reason,
+                                "pnl_venue": pnl_v, "pnl_shadow": pnl_s})
         if d:
             d.realized_venue += pnl_v
             d.realized_shadow += pnl_s
@@ -1051,54 +1354,154 @@ class Engine:
                 "features": {**p.features(), **(extra or {})},
             },
         )
-        self.pos.pop(p.symbol, None)
+        self.pos.pop(p)
 
     # ================= exits =================
-    def _trail_stops(self, m: int) -> None:
-        for p in self.pos.values():
-            if p.status != "open" or p.exit_order_id or p.strategy != "dip_reversal":
+    def _open_by_strategy(self):
+        """(position, its registered strategy) for every open position without an exit order, in book order."""
+        for p in list(self.pos.values()):
+            if p.status != "open" or p.exit_order_id:
                 continue
-            c = self.market.last_close(p.symbol)
-            if c is None:
+            strat = registry.get(p.strategy)
+            if strat is not None:
+                yield p, strat
+
+    def _manage_stops(self, m: int) -> None:
+        """Each open position's strategy may move its protective stop (dip reversal: the trailing stop)."""
+        ctx = None
+        for p, strat in self._open_by_strategy():
+            ctx = ctx or self.context(m)
+            act = strat.manage(ctx, p)
+            if isinstance(act, MoveStop) and p.stop_order_id:
+                try:
+                    oid = p.stop_order_id
+                    px = round(act.price, 2)
+                    p.stop_order_id = self._order("replace_stop", lambda oid=oid, px=px: self.broker.replace_stop(
+                        oid, px), order_id=oid, symbol=p.symbol, strategy=p.strategy,
+                        stop=round(act.price, 2))["id"]
+                    p.stop = act.price
+                    self.store.update("trade", {"id": p.trade_id}, {"stop_px": act.price, "features": p.features()})
+                except Exception:
+                    log.exception("trail replace failed for %s", p.symbol)
+
+    def _close_outs(self, m: int) -> None:
+        """Each open position's strategy may ask for its own exit (SPY momentum: market-on-close from 15:45).
+        A MOC cancels the stop first (it reserves the shares); if the MOC is refused, the position stays and the
+        15:55 market flatten closes it."""
+        ctx = None
+        for p, strat in self._open_by_strategy():
+            ctx = ctx or self.context(m, Event.PRE_CLOSE)
+            act = strat.close_out(ctx, p)
+            if not isinstance(act, CloseOut):
                 continue
-            p.hi_close = max(p.hi_close, c)
-            if not p.armed and c >= p.fill + p.risk_ps:
-                p.armed = True
-            if p.armed:
-                new = max(p.stop, p.fill, p.hi_close - TRAIL_ATR * p.atr)
-                if new >= p.stop + 0.01 and p.stop_order_id:
-                    try:
-                        p.stop_order_id = self.broker.replace_stop(p.stop_order_id, round(new, 2))["id"]
-                        p.stop = new
-                        self.store.update("trade", {"id": p.trade_id}, {"stop_px": new, "features": p.features()})
-                    except Exception:
-                        log.exception("trail replace failed for %s", p.symbol)
+            if act.how != "moc":
+                self._exit(p, act.reason)
+                continue
+            if p.stop_order_id:
+                oid = p.stop_order_id
+                self._order("cancel", lambda oid=oid: self.broker.cancel_order(oid), order_id=oid, symbol=p.symbol,
+                            strategy=p.strategy)
+                p.stop_order_id = None
+            try:
+                o = self._order("moc_sell", lambda p=p: self.broker.submit_moc_sell(f"{p.coid}-moc", p.symbol, p.qty),
+                                coid=f"{p.coid}-moc", symbol=p.symbol, strategy=p.strategy, qty=p.qty)
+                p.exit_order_id, p.exit_reason = o["id"], act.reason
+            except Exception as e:
+                log.warning("MOC refused for %s (%s); the 15:55 flatten will close it", p.symbol, e)
+                self.store.event("moc_refused", {"symbol": p.symbol, "error": str(e)[:200]}, self._rid())
+                p.exit_reason = None
 
     def _exit(self, p: Pos, reason: str) -> None:
         if p.status == "pending":
-            self.broker.cancel_order(p.order_id)
+            self._order("cancel", lambda: self.broker.cancel_order(p.order_id), order_id=p.order_id,
+                        symbol=p.symbol, strategy=p.strategy)
             self._close_trade(p, None, "not_filled")
             return
         if p.exit_order_id or p.status != "open":
             return
-        o = self.broker.close_position(p.symbol)
+        if any(q is not p and q.symbol == p.symbol and q.status in ("open", "pending") for q in self.pos.values()):
+            o = self._sell_sleeve(p, reason)  # S77: another rule holds the stock too: sell this rule's shares only
+        else:
+            o = self._order("close_position", lambda: self.broker.close_position(p.symbol), symbol=p.symbol,
+                            strategy=p.strategy, qty=p.qty, reason=reason)
         p.exit_reason = reason
         if o:
             p.exit_order_id = o["id"]
         else:  # nothing to close at the broker: already flat (a leg filled meanwhile)
             self._sync_orders()
 
+    def _sell_sleeve(self, p: Pos, reason: str) -> dict:
+        """Close one rule's position in a stock another rule also holds: cancel this rule's own protective legs
+        (they reserve its shares), then sell its shares at market. The other rule's legs and shares stay."""
+        for oid in (p.stop_order_id, p.target_order_id):
+            if oid:
+                self._order("cancel", lambda oid=oid: self.broker.cancel_order(oid), order_id=oid, symbol=p.symbol,
+                            strategy=p.strategy)
+        p.stop_order_id = p.target_order_id = None
+        coid = f"{p.coid}-x"
+        return self._order("sell", lambda: self.broker.submit(OrderRequest(p.symbol, "sell", int(p.qty), "market",
+                                                                           "day", coid)),
+                           coid=coid, symbol=p.symbol, strategy=p.strategy, qty=p.qty, reason=reason)
+
     def flatten_all(self, reason: str) -> None:
-        for p in list(self.pos.values()):
-            self._exit(p, reason)
+        """Close every position, each one on its own (S74, #114, audit D7), inside one time limit.
+
+        A close that fails no longer stops the loop: the other positions still go out. A close the venue refused
+        (4xx, typically while a cancel is still pending) is tried again at once, FLATTEN_TRIES in all; not an
+        unreachable venue (the adapter has already retried it for about 30 s) nor a cancel the adapter already
+        waited CANCEL_WAIT_S for (409). The whole flatten, retries included, starts no close once less than
+        CLOSE_MAX_S of FLATTEN_BUDGET_S is left, and writes the heartbeat before each close, so a slow venue
+        cannot make the heartbeat go stale (watchdog, pg_cron dead-man). What is still open after that is logged
+        and raised as FlattenIncomplete, once every position was tried or the budget ran out. So no caller
+        carries on as if the book were flat (the session is not marked flattened, the halt is not written, the run
+        is not ended), and the caller's own retry comes back for the rest: the main loop runs the tick again about
+        10 s later, `_exit` skips the positions that already have an exit order, and the positions this flatten
+        could not close are tried after the others, so a few stuck ones cannot use up every budget."""
+        t0 = self.monotonic()
+        failed: dict[str, Exception | str] = {}
+        todo = sorted(self.pos.values(), key=lambda p: p.symbol in self._flatten_slow)  # stable: book order kept
+        for _ in range(FLATTEN_TRIES):
+            again = []
+            for k, p in enumerate(todo):
+                if self.monotonic() - t0 > FLATTEN_BUDGET_S - CLOSE_MAX_S:
+                    for q in todo[k:]:  # not attempted: reported, and the next loop pass starts with the others
+                        failed.setdefault(q.symbol, f"not tried: flatten time budget ({FLATTEN_BUDGET_S:g} s) used")
+                    again = []
+                    break
+                self._flatten_beat(reason, p.symbol, len(todo) - k)
+                try:
+                    self._exit(p, reason)
+                    failed.pop(p.symbol, None)
+                except Exception as e:  # one failed close must not stop the others
+                    log.warning("flatten (%s): closing %s failed: %s: %s", reason, p.symbol, type(e).__name__, e)
+                    failed[p.symbol] = e
+                    if _refused(e) and getattr(e, "status", None) != CANCEL_UNCONFIRMED:
+                        again.append(p)
+            todo = again
+            if not todo:
+                break
+        self._flatten_slow = {s for s, e in failed.items() if isinstance(e, Exception)}  # tried and failed
+        if failed:
+            left = {s: (f"{type(e).__name__}: {e}" if isinstance(e, Exception) else e)[:160] for s, e in failed.items()}
+            log.error("flatten (%s) incomplete after %.1f s, still open: %s", reason, self.monotonic() - t0, left)
+            cause = next((e for e in failed.values() if isinstance(e, Exception)), None)
+            raise FlattenIncomplete(reason, left) from cause
+
+    def _flatten_beat(self, reason: str, symbol: str, left: int) -> None:
+        """S74: the heartbeat between the closes of a flatten (the main loop writes it only after the tick)."""
+        try:
+            self.on_progress({"state": "flattening", "reason": reason, "closing": symbol, "left": left})
+        except Exception:  # a heartbeat that fails must not stop the flatten
+            log.exception("flatten heartbeat failed")
 
     # ================= bookkeeping =================
     def _ledger(self, eq: float) -> None:
         d = self.day
         if self.run is None:
             return
-        pos = {
-            s: {
+        pos: dict = {}
+        for s, p in self.pos.items():
+            pos[s if s not in pos else f"{s}|{p.strategy}"] = {
                 "qty": p.qty,
                 "fill": p.fill,
                 "stop": round(p.stop, 2),
@@ -1107,8 +1510,6 @@ class Engine:
                 "last": self.market.last_close(s),
                 "trade_id": p.trade_id,
             }
-            for s, p in self.pos.items()
-        }
         unreal = eq - d.start_equity - d.realized_reported
         self.store.insert(
             "ledger",
@@ -1152,6 +1553,10 @@ class Engine:
                 },
                 "run_id,session",
             )
+            try:
+                self._close_ledger(d)
+            except Exception:  # the day's trading result is written; the close is recomputable from the journal
+                log.exception("ledger close failed")
         self.store.event(
             "session_end",
             {
@@ -1166,36 +1571,156 @@ class Engine:
         gate_report.on_day_end(self, ROOT)  # S38: random baseline + append-only gate report (exceptions contained)
         d.finalized = True
 
+    def _close_price(self, p: Pos) -> float:
+        px = self.market.last_close(p.symbol)
+        if px:
+            return float(px)
+        try:
+            q = self.broker.positions().get(p.symbol) or {}
+            if q.get("current_price"):
+                return float(q["current_price"])
+        except Exception:
+            log.exception("positions read failed (close mark)")
+        return float(self._basis(p))
+
+    def _close_ledger(self, d: Day) -> None:
+        """S77: mark every open position at the close, close the day in the ledger, compare cash and positions
+        with the broker, and write the day's mark-to-market rows (ledger_day, ledger_position)."""
+        prices = {price_key(p.strategy, p.symbol): self._close_price(p) for p in self.pos.values()
+                  if p.status == "open" and p.fill is not None}
+        b = self.ledger.book(d.run_id)
+        if b is None:
+            return
+        self._book("mark", {"run_id": d.run_id, "session": str(d.day), "prices": prices, "ts": self.now(),
+                            "pnl_venue": round(d.realized_venue, 2), "pnl_shadow": round(d.realized_shadow, 2)})
+        c = b.closes[-1]
+        rec = self._reconcile(b)
+        gross = c.invested / c.close_equity_venue if c.close_equity_venue > 0 else 0.0
+        self.store.upsert("ledger_day", {
+            "run_id": d.run_id, "session": str(d.day), "start_equity": round(c.start_equity, 2),
+            "close_equity": round(c.close_equity, 2), "close_equity_venue": round(c.close_equity_venue, 2),
+            "cash": round(c.cash, 2), "invested": round(c.invested, 2), "realized_venue": round(c.realized_venue, 2),
+            "pnl_venue": c.pnl_venue, "pnl_shadow": c.pnl_shadow, "dividends": round(c.dividends, 2),
+            "gross": round(gross, 6), "overnight": round(gross, 6), "positions": len(c.positions),
+            "reconciled": rec, "ts": self.now()}, "run_id,session")
+        held = {p.key: p for p in self.pos.values()}
+        for r in c.positions:
+            p = held.get((r["strategy"], r["symbol"]))
+            self.store.upsert("ledger_position", {
+                "run_id": d.run_id, "session": str(d.day), "strategy": r["strategy"], "symbol": r["symbol"],
+                "qty": r["qty"], "avg_cost": round(r["avg_cost"], 4), "mark": round(r["mark"], 4),
+                "priced": r["priced"], "opened_session": r["opened"], "dividends": round(r["dividends"], 2),
+                "stop_px": round(p.stop, 2) if p is not None else None,
+                "stop_state": "resting" if p is not None and p.stop_order_id else "missing"},
+                "run_id,session,strategy,symbol")
+
+    def _reconcile(self, b) -> dict:
+        """Cash and positions against the broker. Positions: the ledger's shares per symbol (all rules) against
+        the broker's. Cash: the change since the run began (the paper account holds more than the run's pot)."""
+        try:
+            bpos, acct = self.broker.positions(), self.broker.account()
+        except Exception as e:
+            return {"ok": None, "error": f"{type(e).__name__}: {e}"[:160], "ts": self.now().isoformat()}
+        mine = {s: q for s, q in b.qty_by_symbol().items() if q}
+        theirs = {s: float(p["qty"]) for s, p in bpos.items()}
+        pos = {s: {"ledger": mine.get(s, 0), "broker": theirs.get(s, 0)} for s in sorted(set(mine) | set(theirs))
+               if abs(mine.get(s, 0) - theirs.get(s, 0)) > 1e-9}
+        cash_diff = None
+        if b.broker_cash0 is not None and acct.get("cash") is not None:
+            cash_diff = round((float(acct["cash"]) - float(b.broker_cash0)) - (b.cash - b.amount), 2)
+        tol = max(CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT / 100 * b.amount)
+        ok = not pos and (cash_diff is None or abs(cash_diff) <= tol)
+        out = {"ok": ok, "positions": pos, "cash_diff": cash_diff, "tolerance": tol, "ts": self.now().isoformat()}
+        if not ok:
+            log.warning("ledger and broker differ: %s", out)
+            self.store.event("ledger_mismatch", out, b.run_id)
+        return out
+
+    def _finalize_missed(self, now: datetime) -> None:
+        """S77 (audit D8): after a restart with the market closed, the last session this run traded is finalised
+        if nobody did: today's result, the ledger's close and the day-end jobs, as if the engine had been up."""
+        run = self.run
+        if run is None or run.get("status") not in ("running", "paused") or not run.get("started_on"):
+            return
+        day = self._last_closed_session(now)
+        if day is None or day == self._finalize_checked or str(day) < str(run["started_on"]):
+            return
+        self._finalize_checked = day
+        if self.store.select("daily_result", {"run_id": f"eq.{run['id']}", "session": f"eq.{day}"}):
+            return
+        b = self.ledger.book(run["id"])
+        if b is not None and b.closes and b.closes[-1].session >= str(day):
+            return
+        open_utc, n_min = session_minutes(self.broker.calendar(str(day)), day)
+        d = Day(run["id"], day, open_utc, n_min, self._start_equity())
+        d.last_m = d.done_m = n_min - 1
+        d.flattened = True
+        self.day = d
+        self._restore_session(d)
+        self.store.event("session_finalized_late", {"day": str(day), "positions": list(self.pos)}, self._rid())
+        self._sync_orders()
+        self._finalize_day()
+
+    def _last_closed_session(self, now: datetime) -> date | None:
+        today = now.astimezone(_et()).date()
+        for k in range(8):
+            day = today - timedelta(days=k)
+            cal = self.broker.calendar(str(day))
+            if not cal:
+                continue
+            open_utc, n_min = session_minutes(cal, day)
+            if now >= open_utc + timedelta(minutes=n_min):
+                return day
+        return None
+
     def _status(self, m: int) -> dict:
         d = self.day
-        return {
+        st = {
             "state": "trading" if self._may_enter(max(m, 0)) else "managing",
             "minute": m,
             "run_id": self._rid(),
             "level": self.level(),
-            "positions": {s: p.status for s, p in self.pos.items()},
+            "positions": {f"{s}|{p.strategy}" if len(self.pos.on(s)) > 1 else s: p.status
+                          for s, p in self.pos.items()},
             "entries_today": d.entries if d else 0,
             "halted": bool(d and d.halted),
             "account_clean": self.account_clean,
             "code_sha": self.code,
             "scan": dict(d.scan) if d else None,
         }
+        if self.run is None and d is not None and d.run_id:
+            st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
+        return st
 
 
-def new_scan() -> dict:
-    return {"bars": 0, "checks": 0, "regime_off": 0, "setups": 0, "near": 0, "vetoed": {}, "to_room": 0,
-            "recent_near": []}
+def _refused(err: Exception) -> bool:
+    """S74: the venue answered and said no (HTTP 4xx), as opposed to not answering (network error, 5xx: the
+    adapter raises those without a 4xx status after its own retries)."""
+    status = getattr(err, "status", None)
+    return isinstance(status, int) and 400 <= status < 500
 
 
-def note_scan(sc: dict, m: int, checked: int, near: list, setups: int) -> None:
-    """Dashboard counters for one completed 5-minute bar: symbols checked, setups, near-misses (last 5 kept)."""
-    if (m + 1) % 5 != 0:
-        return
-    sc["bars"] += 1
-    sc["checks"] += int(checked)
-    sc["setups"] += int(setups)
-    sc["near"] += len(near)
-    sc["recent_near"] = (sc["recent_near"] + list(near))[-5:]
+class MultiDayDividendsError(NotImplementedError):
+    """A multi-day rule on live dividends (pay date): the guard #118 must replace."""
+
+
+def _order_refused(err: Exception) -> bool:
+    """S74: a 403 or 422 on an entry order: the venue refused it and no order exists. Told by the status the
+    adapter's error carries, so this does not depend on which adapter raised it. One 422 is not a refusal: "client
+    order id must be unique" says an order with our id IS at the venue (an earlier attempt got through and the
+    adapter could not read it back). That stays a loop error, and the next start adopts the order."""
+    body = str(getattr(err, "body", None) or err)
+    return getattr(err, "status", None) in BROKER_REJECT_STATUS and "client_order_id" not in body
+
+
+def _reject_reason(err: Exception) -> str:
+    """S74: the venue's own words for a refused order. Alpaca answers {"code": ..., "message": ...}."""
+    body = str(getattr(err, "body", None) or err)
+    try:
+        msg = json.loads(body).get("message")
+    except (ValueError, AttributeError):
+        msg = None
+    return str(msg or body)[:160]
 
 
 def _et():

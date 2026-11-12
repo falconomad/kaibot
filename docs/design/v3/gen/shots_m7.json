@@ -1,0 +1,237 @@
+[
+ {
+  "board": "Overview.dc.html",
+  "name": "11-overview",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "OverviewMobile.dc.html",
+  "name": "11m-overview-phone-first-screen",
+  "keep": true
+ },
+ {
+  "board": "OverviewMobile.dc.html",
+  "name": "11m-overview-phone-whole-page",
+  "full": true,
+  "keep": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "Holdings.dc.html",
+  "name": "12-holdings",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "HoldingsMobile.dc.html",
+  "name": "12m-holdings-phone-first-screen",
+  "keep": true
+ },
+ {
+  "board": "HoldingsMobile.dc.html",
+  "name": "12m-holdings-phone-whole-page",
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "Holding.dc.html",
+  "name": "12b-one-holding",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "HoldingMobile.dc.html",
+  "name": "12bm-one-holding-phone-first-screen",
+  "keep": true
+ },
+ {
+  "board": "HoldingMobile.dc.html",
+  "name": "12bm-one-holding-phone-whole-page",
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "NextClose.dc.html",
+  "name": "13-next-close",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "NextCloseMobile.dc.html",
+  "name": "13m-next-close-phone-first-screen",
+  "keep": true
+ },
+ {
+  "board": "NextCloseMobile.dc.html",
+  "name": "13m-next-close-phone-whole-page",
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "Evidence.dc.html",
+  "name": "14-evidence",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "EvidenceMobile.dc.html",
+  "name": "14m-evidence-phone-first-screen",
+  "keep": true
+ },
+ {
+  "board": "EvidenceMobile.dc.html",
+  "name": "14m-evidence-phone-whole-page",
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "MultidayStates.dc.html",
+  "name": "15-states",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "MultidayStatesMobile.dc.html",
+  "name": "15m-states-phone",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "Overview.dc.html",
+  "name": "11-overview-one-month-read-a-day",
+  "full": true,
+  "clicks": [
+   "text=1M"
+  ],
+  "after": {
+   "hover": 9
+  }
+ },
+ {
+  "board": "Overview.dc.html",
+  "name": "11-overview-table-and-flatten-confirm",
+  "full": true,
+  "clicks": [
+   "text=Show table",
+   "text=Flatten and stop"
+  ]
+ },
+ {
+  "board": "Overview.dc.html",
+  "name": "11-overview-loading",
+  "props": {
+   "showLoading": true
+  }
+ },
+ {
+  "board": "OverviewMobile.dc.html",
+  "name": "11m-overview-phone-loading",
+  "props": {
+   "showLoading": true
+  }
+ },
+ {
+  "board": "OverviewMobile.dc.html",
+  "name": "11m-overview-phone-checks-open",
+  "clicks": [
+   "[aria-label='Show the four checks']"
+  ]
+ },
+ {
+  "board": "OverviewMobile.dc.html",
+  "name": "11m-overview-phone-more",
+  "clicks": [
+   "text=More"
+  ]
+ },
+ {
+  "board": "Holdings.dc.html",
+  "name": "12-holdings-one-rule-best-first",
+  "full": true,
+  "clicks": [
+   ".chip >> nth=2"
+  ],
+  "state": {
+   "sort": "gain"
+  }
+ },
+ {
+  "board": "Holdings.dc.html",
+  "name": "12-holdings-sold",
+  "full": true,
+  "clicks": [
+   "text=Sold · 6"
+  ]
+ },
+ {
+  "board": "HoldingsMobile.dc.html",
+  "name": "12m-holdings-phone-sold",
+  "full": true,
+  "clicks": [
+   "text=Sold · 6"
+  ],
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "Evidence.dc.html",
+  "name": "14-evidence-checks-open",
+  "full": true,
+  "clicks": [
+   "text=Show the checks"
+  ]
+ },
+ {
+  "board": "EvidenceMobile.dc.html",
+  "name": "14m-evidence-phone-checks-open",
+  "full": true,
+  "clicks": [
+   "text=Show the checks"
+  ],
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "Overview.dc.html",
+  "name": "x-overview-1024",
+  "width": 1024,
+  "height": 800,
+  "full": true
+ },
+ {
+  "board": "Holdings.dc.html",
+  "name": "x-holdings-1024",
+  "width": 1024,
+  "height": 800,
+  "full": true
+ },
+ {
+  "board": "NextClose.dc.html",
+  "name": "x-next-close-900",
+  "width": 900,
+  "height": 800,
+  "full": true
+ },
+ {
+  "board": "Evidence.dc.html",
+  "name": "x-evidence-800",
+  "width": 800,
+  "height": 800,
+  "full": true
+ },
+ {
+  "board": "OverviewMobile.dc.html",
+  "name": "x-overview-phone-320",
+  "width": 320,
+  "height": 640,
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "HoldingsMobile.dc.html",
+  "name": "x-holdings-phone-320",
+  "width": 320,
+  "height": 640,
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ }
+]
