@@ -35,9 +35,8 @@ def test_the_tick_after_a_run_drawdown_end_does_not_raise(tmp_path):
 
     def close_later(symbol):  # the venue takes the close but does not fill it yet: the engine still holds A
         held.append(symbol)
-        o = real(symbol)
-        o["status"] = "accepted"
-        return o
+        broker.script.hold(symbol)  # the FakeBroker is a SimBroker now (#115): its close order never trades
+        return real(symbol)
 
     broker.close_position = close_later
     rid = end_by_drawdown(sim, eng)

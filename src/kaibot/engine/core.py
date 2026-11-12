@@ -23,12 +23,14 @@ import hashlib
 import json
 import logging
 import subprocess
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
+from kaibot.broker.alpaca import CANCEL_WAIT_S
 from kaibot.broker.protocol import Broker
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
@@ -59,6 +61,13 @@ LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "
 BROKER_REJECT_STATUS = (403, 422)
 MAX_REJECT_STREAK = 3
 FLATTEN_TRIES = 2  # a close the venue refused is tried once more inside the same flatten; the loop does the rest
+# S74 review (#142): one time limit for a whole flatten, retries included, well inside the watchdog's 90 s heartbeat
+# staleness window (watchdog.STALE_S). A close is only started while CLOSE_MAX_S is left: the adapter's own
+# bounded cancel wait (CANCEL_WAIT_S) plus its reads. What is left when the budget runs out is reported and retried
+# by the next loop pass, never dropped. The heartbeat is written between positions (Engine.on_progress).
+FLATTEN_BUDGET_S = 30.0
+CLOSE_MAX_S = CANCEL_WAIT_S + 3.0
+CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": already waited, so not retried at once
 
 
 class FlattenIncomplete(RuntimeError):
@@ -198,6 +207,8 @@ class Engine:
         self.fingerprint = _fingerprint()  # S38: strategy-code hash; trades count toward the gate only on frozen code
         self.peak: float | None = None
         self.on_progress = lambda status: None
+        self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
+        self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -1166,35 +1177,55 @@ class Engine:
             self._sync_orders()
 
     def flatten_all(self, reason: str) -> None:
-        """Close every position, each one on its own (S74, #114, audit D7).
+        """Close every position, each one on its own (S74, #114, audit D7), inside one time limit.
 
         A close that fails no longer stops the loop: the other positions still go out. A close the venue refused
-        (4xx, typically while a cancel is still pending) is tried again at once, FLATTEN_TRIES in all; an
-        unreachable venue is not, because the adapter has already retried it for about 30 s. What is still open
-        after that is logged and raised as FlattenIncomplete, once every position has been tried. So no caller
+        (4xx, typically while a cancel is still pending) is tried again at once, FLATTEN_TRIES in all; not an
+        unreachable venue (the adapter has already retried it for about 30 s) nor a cancel the adapter already
+        waited CANCEL_WAIT_S for (409). The whole flatten, retries included, starts no close once less than
+        CLOSE_MAX_S of FLATTEN_BUDGET_S is left, and writes the heartbeat before each close, so a slow venue
+        cannot make the heartbeat go stale (watchdog, pg_cron dead-man). What is still open after that is logged
+        and raised as FlattenIncomplete, once every position was tried or the budget ran out. So no caller
         carries on as if the book were flat (the session is not marked flattened, the halt is not written, the run
         is not ended), and the caller's own retry comes back for the rest: the main loop runs the tick again about
-        10 s later, and `_exit` skips the positions that already have an exit order."""
-        failed: dict[str, Exception] = {}
-        todo = list(self.pos.values())
+        10 s later, `_exit` skips the positions that already have an exit order, and the positions this flatten
+        could not close are tried after the others, so a few stuck ones cannot use up every budget."""
+        t0 = self.monotonic()
+        failed: dict[str, Exception | str] = {}
+        todo = sorted(self.pos.values(), key=lambda p: p.symbol in self._flatten_slow)  # stable: book order kept
         for _ in range(FLATTEN_TRIES):
             again = []
-            for p in todo:
+            for k, p in enumerate(todo):
+                if self.monotonic() - t0 > FLATTEN_BUDGET_S - CLOSE_MAX_S:
+                    for q in todo[k:]:  # not attempted: reported, and the next loop pass starts with the others
+                        failed.setdefault(q.symbol, f"not tried: flatten time budget ({FLATTEN_BUDGET_S:g} s) used")
+                    again = []
+                    break
+                self._flatten_beat(reason, p.symbol, len(todo) - k)
                 try:
                     self._exit(p, reason)
                     failed.pop(p.symbol, None)
                 except Exception as e:  # one failed close must not stop the others
                     log.warning("flatten (%s): closing %s failed: %s: %s", reason, p.symbol, type(e).__name__, e)
                     failed[p.symbol] = e
-                    if _refused(e):
+                    if _refused(e) and getattr(e, "status", None) != CANCEL_UNCONFIRMED:
                         again.append(p)
             todo = again
             if not todo:
                 break
+        self._flatten_slow = {s for s, e in failed.items() if isinstance(e, Exception)}  # tried and failed
         if failed:
-            left = {s: f"{type(e).__name__}: {e}"[:160] for s, e in failed.items()}
-            log.error("flatten (%s) incomplete, still open: %s", reason, left)
-            raise FlattenIncomplete(reason, left) from next(iter(failed.values()))
+            left = {s: (f"{type(e).__name__}: {e}" if isinstance(e, Exception) else e)[:160] for s, e in failed.items()}
+            log.error("flatten (%s) incomplete after %.1f s, still open: %s", reason, self.monotonic() - t0, left)
+            cause = next((e for e in failed.values() if isinstance(e, Exception)), None)
+            raise FlattenIncomplete(reason, left) from cause
+
+    def _flatten_beat(self, reason: str, symbol: str, left: int) -> None:
+        """S74: the heartbeat between the closes of a flatten (the main loop writes it only after the tick)."""
+        try:
+            self.on_progress({"state": "flattening", "reason": reason, "closing": symbol, "left": left})
+        except Exception:  # a heartbeat that fails must not stop the flatten
+            log.exception("flatten heartbeat failed")
 
     # ================= bookkeeping =================
     def _ledger(self, eq: float) -> None:

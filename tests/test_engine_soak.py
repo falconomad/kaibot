@@ -533,3 +533,116 @@ def test_d7_alpaca_close_with_nothing_to_cancel_is_unchanged(monkeypatch):
     gone = Venue(confirm_after=0, legs=False, has_position=False)
     p, slept = paper(monkeypatch, gone)
     assert p.close_position("AAPL") is None and slept == []  # already flat: still None, as before
+
+
+# ---------- review of #142: one time limit for the whole flatten, and the heartbeat keeps going ----------
+class Book:
+    """A scripted Alpaca trading API for many symbols, on a fake clock. Every request costs `read_s` seconds and
+    the adapter's pauses advance the clock. Each symbol has two bracket legs; a cancel request makes them
+    `pending_cancel`, and they go away only when `confirm` is True. While a symbol has legs its close is refused."""
+
+    def __init__(self, symbols, read_s=0.2):
+        self.t, self.read_s, self.confirm = 0.0, read_s, False
+        self.legs = {s: [{"id": f"{s}-stop", "symbol": s, "status": "new"},
+                         {"id": f"{s}-target", "symbol": s, "status": "new"}] for s in symbols}
+        self.cancels: list[str] = []
+        self.closed: list[str] = []
+
+    def sleep(self, s):
+        self.t += s
+
+    def call(self, method, url, params=None, body=None):
+        self.t += self.read_s
+        path = url.removeprefix("https://paper-api.alpaca.markets")
+        if (method, path) == ("GET", "/v2/orders"):
+            if self.confirm:
+                for s in self.legs:
+                    self.legs[s] = [o for o in self.legs[s] if o["status"] != "pending_cancel"]
+            return [dict(o) for legs in self.legs.values() for o in legs]
+        if method == "DELETE" and path.startswith("/v2/orders/"):
+            oid = path.rsplit("/", 1)[1]
+            self.cancels.append(oid)
+            for legs in self.legs.values():
+                for o in legs:
+                    if o["id"] == oid:
+                        o["status"] = "pending_cancel"
+            return None
+        if method == "DELETE" and path.startswith("/v2/positions/"):
+            s = path.rsplit("/", 1)[1]
+            if self.legs[s]:
+                raise alp.AlpacaError(403, SHARES_HELD)
+            self.closed.append(s)
+            return {"id": f"close-{s}", "symbol": s, "side": "sell", "type": "market", "status": "accepted"}
+        raise AssertionError(f"unexpected call {method} {path}")
+
+
+def hunter_book(tmp_path, monkeypatch, n=8):
+    """An engine holding `n` open positions (Hunter's max_positions) on the paper adapter, all on the fake clock."""
+    from types import SimpleNamespace
+
+    from kaibot.risk.profiles import load_profiles
+
+    assert load_profiles()["aggressive"].max_positions == n
+    eng, *_ = make(tmp_path, frames_ab(climb_from(55)))
+    syms = [f"S{i}" for i in range(n)]
+    book = Book(syms)
+    monkeypatch.setattr(alp._Http, "call", lambda self, method, url, params=None, body=None:
+                        book.call(method, url, params, body))
+    eng.broker = alp.AlpacaPaper("k", "s")
+    eng.broker.http._sleep = book.sleep
+    eng.monotonic = lambda: book.t
+    eng.pos = {s: SimpleNamespace(symbol=s, status="open", exit_order_id=None, exit_reason=None) for s in syms}
+    beats: list[tuple[float, dict]] = []
+    eng.on_progress = lambda st: beats.append((book.t, st))
+    return eng, book, beats
+
+
+def test_review_a_flatten_of_eight_stuck_positions_stays_inside_its_time_budget(tmp_path, monkeypatch):
+    """Worst case for Hunter: 8 positions whose cancels are never confirmed. Before, each close waited 5 s and was
+    run twice (FLATTEN_TRIES), about 80 s of pauses plus 176 reads in one tick, while the heartbeat (written
+    only after the tick) went stale at 90 s. Now the whole flatten fits FLATTEN_BUDGET_S, the heartbeat is
+    written before each close, and what was not closed is reported, never dropped."""
+    eng, book, beats = hunter_book(tmp_path, monkeypatch)
+    with pytest.raises(core.FlattenIncomplete) as ei:
+        eng.flatten_all("time")
+    assert book.t <= core.FLATTEN_BUDGET_S <= 30, f"the flatten took {book.t:.1f} s"
+    assert set(ei.value.left) == set(eng.pos)  # every position is reported ...
+    assert all(p.exit_order_id is None and p.status == "open" for p in eng.pos.values())  # ... and still managed
+    tried = [st["closing"] for _, st in beats]
+    # each stuck close: 13 requests at 0.2 s and 10 pauses of 0.5 s = 7.6 s, so three fit before the budget stops
+    assert tried == ["S0", "S1", "S2"]  # one heartbeat before each close; no second pass after a 409
+    assert all("budget" in ei.value.left[s] for s in ("S3", "S4", "S5", "S6", "S7"))
+    assert all("cancel not confirmed" in ei.value.left[s] for s in tried)
+    gaps = [b - a for a, b in zip([0.0] + [t for t, _ in beats], [t for t, _ in beats] + [book.t], strict=True)]
+    assert max(gaps) <= core.CLOSE_MAX_S < watchdog_stale() / 10  # the heartbeat never waits long
+    assert len(book.cancels) == 6  # each leg of the three tried asked to cancel once
+
+
+def test_review_the_next_pass_starts_with_the_positions_not_tried(tmp_path, monkeypatch):
+    """The loop's next tick comes back: the positions the budget left out go first, the stuck ones after them, and
+    a cancel already pending is waited for, not sent again. Once the venue confirms, the book goes out."""
+    eng, book, beats = hunter_book(tmp_path, monkeypatch)
+    with pytest.raises(core.FlattenIncomplete):
+        eng.flatten_all("time")
+    book.confirm, start, beats[:] = True, book.t, []
+    eng.flatten_all("time")  # no error: every position has its exit order now
+    assert [st["closing"] for _, st in beats] == ["S3", "S4", "S5", "S6", "S7", "S0", "S1", "S2"]
+    assert sorted(book.closed) == sorted(eng.pos) and all(p.exit_order_id for p in eng.pos.values())
+    assert len(book.cancels) == 16  # S3-S7 asked now; S0-S2 were pending from the first pass, not asked again
+    assert book.t - start <= core.FLATTEN_BUDGET_S
+
+
+def test_review_instant_refusals_are_retried_inside_the_budget(tmp_path, monkeypatch):
+    """A 403 that comes back at once is retried in the same flatten (FLATTEN_TRIES), still inside the budget."""
+    eng, book, beats = hunter_book(tmp_path, monkeypatch)
+    eng.broker.close_position = lambda s: (_ for _ in ()).throw(alp.AlpacaError(403, SHARES_HELD))
+    with pytest.raises(core.FlattenIncomplete) as ei:
+        eng.flatten_all("daily_stop")
+    assert len(beats) == 8 * core.FLATTEN_TRIES and set(ei.value.left) == set(eng.pos)
+    assert book.t <= core.FLATTEN_BUDGET_S
+
+
+def watchdog_stale() -> float:
+    from kaibot.engine.watchdog import STALE_S
+
+    return STALE_S
