@@ -4,6 +4,8 @@
   engine ... do some research how the major algo traders ... think deep and make our engine really, really good, and do
   whatever is necessary and make any code changes that you need ... make those architectural decisions yourself and
   rebuild your architecture. Come with a plan, create extra milestones and stories and tasks, and start implementing."
+- **Goal confirmed by the stakeholder on 12 Nov 2026** (section 1): "market-like return with smaller drawdowns, proven
+  honestly ... it's enough."
 - **Milestone:** M7 Engine v3 (GitHub milestone, stories S71-S93).
 - **Evidence behind it:** `docs/research/engine_v3/report.md` (124 sources), `docs/research/engine_v3/code_audit.md`
   (file-level findings), `docs/m0/walk_forward_10y.md`, `docs/m0/experiments_001.md`.
