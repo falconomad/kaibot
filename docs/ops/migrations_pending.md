@@ -11,7 +11,7 @@ Owner: backend-quant. Last checked against main on 12 Nov 2026. Only the stakeho
   `public.kb_ticker_lists`, `public.kb_save_ticker_list`.
   Missing: the new `public.kb_apply_config` (the one that also runs `config_custom_check`) and
   `public.kb_delete_ticker_list`, plus the revoke/grant block at the end of the file that names it.
-- 0015, 0016, 0017, 0018: not applied.
+- 0015, 0016, 0017, 0018, 0019: not applied.
 
 ## Apply in this order
 
@@ -25,6 +25,7 @@ run it again. Do not reorder them.
 | 3 | `migrations/0016_m7_strategy_registry.sql` (whole file) | `kaibot.strategy_registry`; SPY late momentum leaves Balanced and Hunter; `config_check` reads strategy names from the registry and keeps 0014's custom-ticker check | No: no delete, drop or truncate (the registry seed is an upsert) |
 | 4 | `migrations/0017_deadman_early_close.sql` (whole file) | Off-box dead-man knows early closes and holidays (12:56 ET on early-close days, never on a holiday) | **Yes**: `cron.unschedule(...)` and `net.http_delete(...)` (the paper flatten call, only when the dead-man fires) |
 | 5 | `migrations/0018_m7_ledger.sql` (whole file; PR #160, once merged) | The ledger's tables (`ledger_day`, `ledger_position`), engine-assigned ids and `jseq` for idempotent replication from the local journal, `kb_report` start equity from the mark-to-market close, and `kb_book` / `kb_equity_series` for the multi-day dashboard | No: only `alter`, `add column if not exists`, `create ... if not exists` and `create or replace` |
+| 6 | `migrations/0019_deadman_overnight.sql` (whole file; PR for #120, once merged). **Before the first multi-day position is held overnight**; it can wait until then | The off-box dead-man no longer flattens the whole account: while the engine is silent it cancels entry orders, verifies (re-creates) every multi-day protective stop and raises the alarm; in the last 4 minutes it sells intraday shares only. One pg_cron job `kaibot_deadman` replaces the four `kaibot_deadman_*` jobs (docs/ops/failsafe.md) | **Yes**: `cron.unschedule(...)`, `net.http_delete(...)` and `net.http_post(...)` (paper orders, only when the dead-man acts) |
 
 To get step 1 as one SQL text: `sed -n '244,268p;351,362p' migrations/0014_m5_custom_tickers.sql`.
 Running the whole 0014 file again instead is also safe (every statement is `if not exists` or `create or replace`),
@@ -49,6 +50,9 @@ select name, retired from kaibot.strategy_registry order by position;           
 -- step 5: the ledger tables exist and the replica can take the journal's ids
 select count(*) from pg_tables where schemaname = 'kaibot' and tablename in ('ledger_day', 'ledger_position'); -- 2
 select count(*) from information_schema.columns where table_schema = 'kaibot' and column_name = 'jseq';      -- 6
+-- step 6: one dead-man job, and it knows the multi-day rules
+select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';    -- kaibot_deadman | * 13-21 * * 1-5
+select count(*) from kaibot.strategy_holding where holding = 'multi_day';                          -- 3
 -- QA-Ops follow-up from #156: an applied Balanced/Hunter config with dip off must be re-applied with dip on
 select run_id, version from kaibot.config c join kaibot.run r on r.id = c.run_id
  where c.status = 'applied' and r.level in ('balanced', 'aggressive')

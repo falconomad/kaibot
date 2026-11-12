@@ -1,15 +1,23 @@
-"""Watchdog (story S16): a separate process with its own Alpaca client that fails the account closed when the
-engine stops beating. See docs/decisions/08_tech_design_v2.md section 3.
+"""Watchdog (story S16; overnight-safe since S80, #120): a separate process with its own Alpaca client that fails
+the account closed when the engine stops beating. See docs/decisions/08_tech_design_v2.md section 3 and
+docs/ops/failsafe.md.
 
 While the market is open, every 15 s:
-- engine heartbeat older than 90 s -> cancel every unfilled Kaibot ENTRY order (client_order_id "kb-..."),
-  record a halt and an event. Broker-held stops and targets are left alone: they protect what is open.
-- still stale at 15:55 ET (5 minutes before the close) -> close every position, so nothing is held overnight.
-  The day counts as flattened only when every close was accepted; otherwise the next poll tries again, until
-  the dead-man time (15:56 ET, DEADMAN_BEFORE_CLOSE) when the off-box dead-man takes over (S74c, #147).
+- engine heartbeat older than 90 s -> cancel every open, unfilled Kaibot ENTRY order (a buy whose client_order_id
+  starts with "kb": intraday "kb-<run>-..." and the order manager's "kb<run>-<strategy>-..."), record a halt and an
+  event (the alarm). Protective stops and sales are left alone: they take risk off.
+- the same, at most once a minute while stale: verify that every multi-day sleeve has its protective GTC stop at the
+  broker and re-create a missing one (whole shares, at the sleeve's last stop, else 10% below the last price;
+  engine/failsafe.py). The book (which sleeve holds what) comes from the engine's local journal, read-only, else
+  from the ledger rows in Supabase, else from the multi-day stops' own client ids.
+- still stale at 15:55 ET (5 minutes before the close) -> sell the INTRADAY shares only: every position no
+  multi-day sleeve explains is closed; multi-day shares stay, with their stops (decision 15 section 4). With no
+  multi-day shares at all this is exactly the old flatten of every position. The day counts as flattened only when
+  every close was accepted; otherwise the next poll tries again, until the dead-man time (15:56 ET,
+  DEADMAN_BEFORE_CLOSE) when the off-box dead-man takes over (S74c, #147).
 - early-close days (S74d, #154): "the close" is the broker calendar's close for the day (13:00 ET), or the
   clock's next_close if that is earlier or the calendar cannot be read. So the flatten starts at 12:55 and is
-  retried until 12:56, when the dead-man for early closes (migration 0017) takes over.
+  retried until 12:56, when the dead-man for early closes (migration 0017, 0019) takes over.
 - the first flatten pass of the day always tries every position, as before S74d. A retry starts no close within
   CLOSE_BUDGET_S of the dead-man time, and only when the dead-man will act: the engine heartbeat will be older
   than DEADMAN_STALE_S (3 min) at the dead-man time. If it will not be (the engine stopped less than 3 min before
@@ -17,13 +25,13 @@ While the market is open, every 15 s:
   Symbols a retry does not start count as failed. A watchdog that first sees the stale engine after the dead-man
   time still gets its single late pass.
 - a failed open-orders read (entry cancels) is logged and recorded, and the poll's flatten still runs.
-It never opens anything. If the heartbeat cannot be read (Supabase down) it counts as stale: failing closed
-costs at most a flat afternoon, failing open could cost an overnight gap. None of this runs while the engine
-beats: the happy path makes the same calls as before.
+It never buys. The only orders it sends are protective stop sells and the sales of intraday shares. If the
+heartbeat cannot be read (Supabase down) it counts as stale: failing closed costs at most a flat afternoon for the
+intraday sleeves, and the multi-day sleeves keep their stops either way.
 
 Limits: it runs on the same machine as the engine, so it does not survive the laptop sleeping or losing power.
-For that, the broker-held GTC stops protect open positions, and the off-box dead-man (migration 0006, Supabase
-pg_cron at 15:56 ET; 0017 adds 12:56 ET on early-close days) flattens the account if the heartbeat is stale.
+For that, the broker-held GTC stops protect open positions, and the off-box dead-man (Supabase pg_cron; migration
+0019 replaces the flatten of 0006/0017 with the same plan as this file) acts if the heartbeat is stale.
 
 python -m kaibot.engine.watchdog            (started by scripts/run_engine.sh next to the engine)
 """
@@ -37,7 +45,8 @@ from datetime import UTC, datetime, timedelta
 from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
-from kaibot.broker.protocol import Broker
+from kaibot.broker.protocol import Broker, OrderRequest
+from kaibot.engine import failsafe
 
 log = logging.getLogger("kaibot.watchdog")
 
@@ -54,15 +63,23 @@ DEADMAN_STALE_S = 180
 CLOSE_BUDGET_S = 25.0
 NY = ZoneInfo("America/New_York")
 POLL_S = 15
-ENTRY_PREFIX = "kb-"
-OPEN_ENTRY_STATES = {"new", "accepted", "pending_new", "partially_filled", "held"}
+ENTRY_PREFIX = "kb"  # S80: intraday "kb-<run>-..." and the order manager's "kb<run>-<strategy>-..."
+OPEN_ENTRY_STATES = failsafe.OPEN_STATES
+PROTECT_EVERY_S = 60.0  # S80: the stop check runs at most once a minute while the engine is stale
+SENT_COVERS_S = 180.0  # a stop this watchdog sent counts as resting for this long (the venue may list it late)
 
 
 class Watchdog:
     def __init__(self, broker: Broker, store, engine_process: str = "engine", stale_s: float = STALE_S,
-                 now=lambda: datetime.now(UTC)):
+                 now=lambda: datetime.now(UTC), book=None):
+        """`book`: a callable returning the book (failsafe.BookView: which sleeve holds which shares, at which stop),
+        or None. main() reads the engine's local journal, else the ledger rows in Supabase."""
         self.broker, self.store, self.engine_process = broker, store, engine_process
         self.stale_s, self.now = stale_s, now
+        self.book = book
+        self._protected_at: datetime | None = None
+        self._sent: dict[tuple[str, str], tuple[datetime, int]] = {}  # stops sent: (strategy, symbol) -> (when, qty)
+        self._alarms: tuple = ()
         self.tripped = False
         self.flattened_on = None
         self._flatten_tries: tuple = (None, 0)  # (day, flatten attempts that day)
@@ -81,10 +98,74 @@ class Watchdog:
         ts = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
         return max(0.0, (self.now() - ts).total_seconds())
 
-    def _entry_orders(self) -> list[dict]:
-        return [o for o in self.broker.open_orders()
-                if o.get("side") == "buy" and str(o.get("client_order_id") or "").startswith(ENTRY_PREFIX)
-                and o.get("status") in OPEN_ENTRY_STATES and not o.get("filled_at")]
+    def _entry_orders(self, orders: list[dict]) -> list[dict]:
+        return [o for o in orders if failsafe.is_entry(o)]
+
+    def _read_book(self) -> failsafe.BookView | None:
+        if self.book is None:
+            return None
+        try:
+            return self.book()
+        except Exception:
+            log.exception("book unreadable: multi-day shares are taken from the resting multi-day stops")
+            return None
+
+    def _plan(self, flatten: bool, orders: list[dict] | None = None) -> failsafe.Plan:
+        positions = self.broker.positions()
+        if orders is None:
+            try:
+                orders = self.broker.open_orders()
+            except Exception:  # the flatten must still run: multi-day shares then come from the book alone
+                log.exception("open-orders read failed: multi-day shares from the book only")
+                orders = []
+        p = failsafe.plan(positions, orders, self._read_book(), flatten=flatten)
+        now = self.now()
+        kept = []
+        for st in p.stops:  # a stop this watchdog sent a moment ago may not be listed yet: never send it twice
+            sent = self._sent.get((st.strategy, st.symbol))
+            if sent is not None and (now - sent[0]).total_seconds() < SENT_COVERS_S and sent[1] >= st.qty:
+                continue
+            kept.append(st)
+        p.stops = kept
+        return p
+
+    def protect(self, out: dict, orders: list[dict] | None) -> None:
+        """S80 (#120): every multi-day sleeve keeps a protective stop at the broker while the engine is silent."""
+        now = self.now()
+        if self._protected_at is not None and (now - self._protected_at).total_seconds() < PROTECT_EVERY_S:
+            return
+        self._protected_at = now
+        try:
+            p = self._plan(False, orders)
+        except Exception as e:
+            log.exception("stop check failed: positions or orders unreadable")
+            out["protect_failed"] = f"{type(e).__name__}: {e}"[:200]
+            return
+        made, failed = [], {}
+        for st in p.stops:
+            coid = failsafe_coid(st.strategy, st.symbol, now)
+            try:
+                # #179's lesson: a stop that filled since the read leaves no shares; a sell stop then would open a
+                # short. So the position is read again right before each new stop, and it must still hold them.
+                held = float((self.broker.positions().get(st.symbol) or {}).get("qty") or 0)
+                if held < st.qty:
+                    failed[st.symbol] = f"position now {held:g} shares: no new stop"
+                    continue
+                self.broker.submit(OrderRequest(st.symbol, "sell", st.qty, "stop", "gtc", coid,
+                                                stop_price=st.stop))
+                self._sent[(st.strategy, st.symbol)] = (now, st.qty)
+                made.append({"strategy": st.strategy, "symbol": st.symbol, "qty": st.qty, "stop": st.stop,
+                             "why": st.why, "client_order_id": coid})
+            except Exception as e:
+                log.exception("protective stop for %s failed", st.symbol)
+                failed[st.symbol] = f"{type(e).__name__}: {e}"[:200]
+        out["stops"], out["multi_day"] = made, p.multi_day
+        alarms = tuple(p.alarms) + tuple(f"{s}: stop not accepted ({w})" for s, w in failed.items())
+        if made or failed or alarms != self._alarms:
+            log.error("engine silent: protective stops re-created %s, failed %s, alarms %s", made, failed, alarms)
+            self._event("watchdog_protect", {"stops": made, "failed": failed, "multi_day": p.multi_day,
+                                             "unprotected": p.unprotected, "alarms": list(alarms)})
+        self._alarms = alarms
 
     def step(self) -> dict:
         clk = self.broker.clock()
@@ -100,8 +181,10 @@ class Watchdog:
             self.tripped = False
             return {"state": "ok", "age_s": age}
         out = {"state": "engine_stale", "age_s": age, "canceled": [], "closed": []}
+        orders = None
         try:
-            entries = self._entry_orders()
+            orders = self.broker.open_orders()
+            entries = self._entry_orders(orders)
         except Exception as e:  # S74d (#154): the flatten below must still run
             log.exception("open-orders read failed: no entry cancels this poll")
             entries, out["entry_read_failed"] = [], f"{type(e).__name__}: {e}"[:200]
@@ -114,7 +197,8 @@ class Watchdog:
         if not self.tripped:
             self.tripped = True
             log.error("engine heartbeat %.0f s old: entries canceled %s", age, out["canceled"])
-            self._halt("watchdog", f"engine heartbeat {age:.0f} s old; entry orders canceled")
+            self._halt("watchdog", f"engine heartbeat {age:.0f} s old; entry orders canceled, protective stops "
+                                   "checked; multi-day positions are kept")
         now, today = self.now(), self.now().date()
         close = self.session_close(clk, now)
         deadman = close - DEADMAN_BEFORE_CLOSE
@@ -127,6 +211,9 @@ class Watchdog:
             cutoff = (tries > 0 and now < deadman and age != float("inf")
                       and age + (deadman - now).total_seconds() > DEADMAN_STALE_S)
             self._flatten(today, tries + 1, out, deadman if cutoff else None)
+        if orders is not None:  # S80: after the flatten, which is the time-critical step of its window
+            canceled = {o["id"] for o in entries}
+            self.protect(out, [o for o in orders if o.get("id") not in canceled])
         return out
 
     def session_close(self, clk: dict, now: datetime) -> datetime:
@@ -157,21 +244,34 @@ class Watchdog:
         return min(close, cal) if cal is not None else close
 
     def _flatten(self, today, attempt: int, out: dict, deadman: datetime | None = None) -> None:
-        """Close every position. Done for the day only if every close was accepted (S74c, #147). With `deadman`,
-        (retries only, when the dead-man will act) a close is started only while CLOSE_BUDGET_S still fits
-        before it (S74d, #154)."""
+        """Sell the intraday shares (S80, #120): every position no multi-day sleeve explains is closed, and a symbol
+        both hold sells only its intraday shares; multi-day shares keep their stops. With no multi-day shares this
+        is the old flatten of every position. Done for the day only if every close was accepted (S74c, #147). With
+        `deadman` (retries only, when the dead-man will act) a close is started only while CLOSE_BUDGET_S still
+        fits before it (S74d, #154)."""
         failed: dict[str, str] = {}
+        out.setdefault("kept", {})
         try:
-            symbols = list(self.broker.positions())
+            p = self._plan(True)
+            if not p.multi_day:
+                p.close = list(self.broker.positions())  # nothing held overnight: exactly the old flatten
+            jobs = [(s, None, []) for s in p.close] + list(p.sell)
+            out["kept"] = p.multi_day
         except Exception as e:
             log.exception("positions read failed")
-            symbols, failed["positions"] = [], f"{type(e).__name__}: {e}"[:200]
-        for sym in symbols:
+            jobs, failed["positions"] = [], f"{type(e).__name__}: {e}"[:200]
+        for sym, qty, cancel in jobs:
             if deadman is not None and self.now() + timedelta(seconds=CLOSE_BUDGET_S) > deadman:
                 failed[sym] = "not started: the dead-man time is too close"
                 continue
             try:
-                self.broker.close_position(sym)
+                if qty is None:
+                    self.broker.close_position(sym)
+                else:  # free the intraday shares (their legs), keep the multi-day stop, sell the rest
+                    for oid in cancel:
+                        self.broker.cancel(oid)
+                    self.broker.submit(OrderRequest(sym, "sell", qty, "market", "day",
+                                                    failsafe_coid("intraday", sym, self.now(), "x")))
                 out["closed"].append(sym)
             except Exception as e:
                 log.exception("close failed for %s", sym)
@@ -182,9 +282,10 @@ class Watchdog:
                       "retrying until the dead-man time", attempt, out["closed"], list(failed))
         else:
             self.flattened_on = today
-            log.error("close minus 5 min with the engine down: closed %s", out["closed"])
+            log.error("close minus 5 min with the engine down: closed %s, kept (multi-day) %s", out["closed"],
+                      out["kept"])
         self._event("watchdog_flatten", {"closed": out["closed"], "failed": failed, "complete": not failed,
-                                         "attempt": attempt})
+                                         "attempt": attempt, "kept": out["kept"]})
 
     def _beat(self, detail: dict) -> None:
         try:
@@ -206,15 +307,38 @@ class Watchdog:
         self._event("halt", {"kind": kind, "reason": reason})
 
 
+def failsafe_coid(strategy: str, symbol: str, now: datetime, purpose: str = "wdstop") -> str:
+    """kbwd-<strategy>-<symbol>-<yyyymmddHHMMSS>-<purpose>: unique per second, never taken for an entry (not a buy),
+    and the strategy stays readable for the next check (failsafe.is_multi_day)."""
+    t = now.astimezone(NY).strftime("%Y%m%d%H%M%S")
+    return f"kbwd-{failsafe.clean(strategy)[:40]}-{failsafe.clean(symbol)[:12]}-{t}-{purpose}"
+
+
+def book_reader(journal_path, store):
+    """The book for the fail-safes: the engine's local journal (read-only), else the ledger rows in Supabase."""
+    ro = failsafe.ReadOnlyJournal(journal_path)
+
+    def read() -> failsafe.BookView:
+        try:
+            return failsafe.book_from_journal(ro)
+        except Exception:
+            log.exception("local journal unreadable: reading the ledger rows in Supabase")
+        return failsafe.book_from_store(store)
+
+    return read
+
+
 def main() -> None:
     from kaibot.broker.alpaca import AlpacaPaper
     from kaibot.engine.config import Settings
+    from kaibot.engine.journal import journal_path
     from kaibot.engine.store import Store
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s watchdog %(message)s")
     settings = Settings.from_env()
-    wd = Watchdog(AlpacaPaper(settings.alpaca_key, settings.alpaca_secret),
-                  Store(settings.supabase_url, settings.supabase_service_key), settings.engine_name)
+    store = Store(settings.supabase_url, settings.supabase_service_key)
+    wd = Watchdog(AlpacaPaper(settings.alpaca_key, settings.alpaca_secret), store, settings.engine_name,
+                  book=book_reader(journal_path(settings.data_dir), store))
     stop = {"now": False}
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True))
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))

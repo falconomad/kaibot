@@ -9,7 +9,7 @@ services:
     volumes:
       - ${KAIBOT_ENV_FILE:-~/Projects/kaibot-secrets/.env}:/secrets/.env:ro
       - ./data/live:/data
-  watchdog:  # separate process with its own broker client (S16): cancels entries / flattens if the engine dies
+  watchdog:  # separate process with its own broker client (S16): cancels entries, keeps stops, flattens intraday
     image: kaibot-engine
     restart: unless-stopped
     command: ["python", "-m", "kaibot.engine.watchdog"]
@@ -17,3 +17,4 @@ services:
       KAIBOT_ENV_FILE: /secrets/.env
     volumes:
       - ${KAIBOT_ENV_FILE:-~/Projects/kaibot-secrets/.env}:/secrets/.env:ro
+      - ./data/live:/data  # S80: it reads the engine's journal (opened read-only) to know the multi-day sleeves

@@ -16,6 +16,8 @@ module, add one line below, list its files under `fingerprint.strategies` in con
 
 from __future__ import annotations
 
+import os
+
 from kaibot.strategies.base import Holding, Mode, Strategy
 from kaibot.strategies.dip import DipReversal
 from kaibot.strategies.momentum import VERSIONS as _MOMENTUM
@@ -37,9 +39,10 @@ DEFAULT_LIVE: tuple[str, ...] = (DipReversal.name,)
 RETIRED: frozenset[str] = frozenset({SpyLateMomentum.name})
 
 
-# Multi-day rules (issue #161): runnable only by the research command through the engine's daily path
-# (engine/daily.py). They are NOT in STRATEGIES (so not in the SQL registry, no level, no owner toggle), and the live
-# engine refuses them by name: no multi-day rule trades until #118-#120 and Gate B (decision 15 section 7).
+# Multi-day rules (issue #161): runnable by the research command through the engine's daily path (engine/daily.py).
+# They are NOT in STRATEGIES (so not in the SQL registry, no level, no owner toggle), and the live engine refuses
+# them by name unless KAIBOT_MULTIDAY=on (S80, #120): the fail-safes for overnight positions are in place, so the
+# first paper start of a multi-day rule (#133, after Gate B) is one explicit switch, off by default.
 MULTI_DAY: tuple = tuple(_MOMENTUM.values())
 RESEARCH_ONLY: dict = {s.name: s for s in MULTI_DAY}
 assert not set(RESEARCH_ONLY) & set(BY_NAME), "a multi-day rule must not share a name with a registered one"
@@ -49,12 +52,27 @@ class RefusedStrategy(ValueError):
     """A multi-day strategy was asked for on the live path."""
 
 
+MULTIDAY_FLAG = "KAIBOT_MULTIDAY"
+
+
+def multi_day_enabled() -> bool:
+    """S80 (#120): the live engine accepts multi-day rules only with KAIBOT_MULTIDAY=on (default off). Read at each
+    call, from the environment only (decision 11: env-only settings)."""
+    return os.environ.get(MULTIDAY_FLAG, "off").strip().lower() == "on"
+
+
+def multi_day_names(names_on) -> list[str]:
+    return sorted(n for n in set(names_on or ()) if n in RESEARCH_ONLY
+                  or (n in BY_NAME and BY_NAME[n].holding is Holding.MULTI_DAY))
+
+
 def refuse_multi_day(names_on) -> None:
-    """Raise when `names_on` names a multi-day strategy: the live engine trades intraday rules only (#161)."""
-    bad = sorted(n for n in set(names_on or ()) if n in RESEARCH_ONLY
-                 or (n in BY_NAME and BY_NAME[n].holding is Holding.MULTI_DAY))
-    if bad:
-        raise RefusedStrategy(f"multi-day strategies cannot run live yet (#118-#120 and Gate B): {', '.join(bad)}")
+    """Raise when `names_on` names a multi-day strategy and KAIBOT_MULTIDAY is not on: by default the live engine
+    trades intraday rules only (#161, #120)."""
+    bad = multi_day_names(names_on)
+    if bad and not multi_day_enabled():
+        raise RefusedStrategy(f"multi-day strategies are off on the live path ({MULTIDAY_FLAG}=on turns them on, "
+                              f"after Gate B, #133): {', '.join(bad)}")
 
 
 def get(name: str) -> Strategy | None:
@@ -66,11 +84,13 @@ def names(mode: Mode | None = None) -> tuple[str, ...]:
 
 
 def live(names_on) -> tuple[Strategy, ...]:
-    """The registered live strategies among `names_on`, in registry order. Unknown names are ignored; a multi-day
-    strategy is refused (`RefusedStrategy`)."""
+    """The registered live strategies among `names_on`, in registry order, then (KAIBOT_MULTIDAY=on only) the
+    multi-day rules named. Unknown names are ignored; a multi-day strategy with the flag off is refused
+    (`RefusedStrategy`)."""
     refuse_multi_day(names_on)
     on = set(names_on)
-    return tuple(s for s in STRATEGIES if s.mode is Mode.LIVE and s.name in on)
+    out = tuple(s for s in STRATEGIES if s.mode is Mode.LIVE and s.name in on)
+    return out + tuple(s for s in MULTI_DAY if s.name in on)
 
 
 def shadow(only=None) -> tuple[Strategy, ...]:

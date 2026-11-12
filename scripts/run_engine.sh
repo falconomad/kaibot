@@ -37,14 +37,15 @@ CHECK=0; for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = --check ] && CHECK=1; don
 # Never two engines at once (one paper account would trade twice): refuse if one already runs on this machine.
 if [ "$CHECK" = 0 ]; then ./scripts/engine_guard.sh || exit 1; fi
 # The watchdog (separate process, own broker client) is left running when the engine stops or crashes:
-# that is its job. It cancels entries if the engine goes quiet and flattens at 15:55. One copy at a time.
+# that is its job. It cancels entries if the engine goes quiet, keeps every multi-day stop and sells the intraday
+# shares at 15:55 (S80). One copy at a time.
 
 if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }; then
   echo "Starting with Docker…"
   docker build -q -t kaibot-engine --build-arg CODE_SHA="$CODE_SHA" . >/dev/null
   if [ "$CHECK" = 0 ] && ! docker ps -q -f name=^kaibot-watchdog$ | grep -q .; then
     docker run -d --rm --name kaibot-watchdog -e KAIBOT_ENV_FILE=/secrets/.env -v "$ENV_FILE:/secrets/.env:ro" \
-      kaibot-engine python -m kaibot.engine.watchdog >/dev/null && echo "Watchdog started (container kaibot-watchdog)."
+      -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine.watchdog >/dev/null && echo "Watchdog started (container kaibot-watchdog)."
   fi
   awake docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env \
     -v "$ENV_FILE:/secrets/.env:ro" -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
@@ -65,7 +66,8 @@ else
   fi
   if [ "$CHECK" = 0 ]; then
     LOG_DIR="${KAIBOT_LOG_DIR:-logs}"; mkdir -p "$LOG_DIR"  # the service sets ~/Library/Logs/kaibot
-    KAIBOT_ENV_FILE="$ENV_FILE" PYTHONPATH="$PWD/src" nohup .venv/bin/python -m kaibot.engine.watchdog \
+    KAIBOT_ENV_FILE="$ENV_FILE" KAIBOT_DATA_DIR="$PWD/data/live" PYTHONPATH="$PWD/src" \
+      nohup .venv/bin/python -m kaibot.engine.watchdog \
       >> "$LOG_DIR/watchdog.log" 2>&1 &
     echo $! > "$WD_PID"; echo "Watchdog started (pid $(cat "$WD_PID"), log: $LOG_DIR/watchdog.log)."
   fi

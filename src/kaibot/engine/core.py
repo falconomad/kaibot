@@ -14,8 +14,9 @@ yesterday's mark-to-market close; a restart with the market closed finalises the
 Safety:
 - Every entry is a bracket order, so the stop and the 2R target live AT THE BROKER and fire even if this
   process (or the laptop) stops.
-- On startup, positions the engine doesn't know about block all entries (account not clean); positions it does
-  know from an earlier session are closed at the first tick of the next open.
+- On startup, positions the engine doesn't know about block all entries (account not clean); intraday positions it
+  knows from an earlier session are closed at the first tick of the next open. Multi-day sleeves (the ledger's,
+  S80 #120) are known positions, are never "carried", and keep their protective stops over the close.
 - The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds, and so
   does the account's own buying power (the smaller wins).
 - Fail closed (S16/S18): unknown open orders or positions, position drift against the broker, three loop errors
@@ -78,6 +79,9 @@ LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "
 # accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
 BROKER_REJECT_STATUS = (403, 422)
 MAX_REJECT_STREAK = 3
+# S80 (#120, decision 15 sections 4 and 6): the close-minus-5 flatten and the daily stop sell intraday sleeves only;
+# multi-day sleeves keep their protective stops. Run drawdown, a new run and "Flatten and stop" sell everything.
+INTRADAY_ONLY = ("time", "daily_stop")
 FLATTEN_TRIES = 2  # a close the venue refused is tried once more inside the same flatten; the loop does the rest
 # S74 review (#142): one time limit for a whole flatten, retries included, well inside the watchdog's 90 s heartbeat
 # staleness window (watchdog.STALE_S). A close is only started while CLOSE_MAX_S is left: the adapter's own
@@ -326,6 +330,9 @@ class Engine:
         self.on_progress = lambda status: None
         self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
+        # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
+        self._md_exits: dict[str, dict] = {}
+        self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -353,8 +360,9 @@ class Engine:
         blindly could double the position, so we stop instead and say so. (One whose client_order_id is exactly
         ours for an approved signal has already been adopted by `_adopt_orphans` at startup.)"""
         broker_pos = self.broker.positions()
-        foreign = sorted(set(broker_pos) - set(self.pos))
-        orders = sorted({o["symbol"] for o in self.broker.open_orders() if o["symbol"] not in self.pos})
+        known = set(self.pos) | {sym for _, sym in self._md_sleeves()}  # S80: the ledger's multi-day sleeves too
+        foreign = sorted(set(broker_pos) - known)
+        orders = sorted({o["symbol"] for o in self.broker.open_orders() if o["symbol"] not in known})
         self.account_clean = not foreign and not orders
         if not self.account_clean:
             msg = {"foreign_positions": foreign, "unknown_open_orders": orders,
@@ -436,20 +444,25 @@ class Engine:
     def _check_drift(self) -> None:
         """S18: the engine's book must match the broker's. Any difference stops new entries."""
         broker_pos = self.broker.positions()
+        self._bpos = broker_pos
         diffs = {}
         # S77: per symbol, the sum over the rules holding it; a symbol with an entry or an exit under way is
         # compared once that has settled (as a single position was before)
         unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
-        mine: dict[str, int] = {}
+        unsettled |= {k[1] for x in self._md_exits.values() for k, _ in x["keys"]}
+        mine: dict[str, float] = {}
         for s, p in self.pos.items():
             if s not in unsettled:
                 mine[s] = mine.get(s, 0) + p.qty
+        for (_, s), sl in self._md_sleeves().items():  # S80: multi-day sleeves are the engine's too
+            if s not in unsettled:
+                mine[s] = mine.get(s, 0) + sl.qty
         for s, qty in mine.items():
             q = broker_pos.get(s)
-            bq = int(float(q["qty"])) if q else 0
-            if bq != qty:
+            bq = float(q["qty"]) if q else 0
+            if abs(bq - qty) > 1e-9:
                 diffs[s] = {"engine": qty, "broker": bq}
-        for s in set(broker_pos) - set(self.pos):
+        for s in set(broker_pos) - set(self.pos) - set(mine) - unsettled:
             diffs[s] = {"engine": 0, "broker": int(float(broker_pos[s]["qty"]))}
         # A bracket leg can fill between our order sync and this read; that heals on the next minute's sync.
         # Only a difference seen on two consecutive minutes is drift.
@@ -472,8 +485,147 @@ class Engine:
     def _book(self, kind: str, body: dict) -> None:
         """Journal first, then fold: the ledger is always what the journal says."""
         body = canon(body)
+        if kind == "fill":
+            self._md_realized(body)
         self.journal.append(kind, body)
         self.ledger.apply(kind, body)
+
+    # ================= multi-day sleeves (S80, #120) =================
+    def _md_sleeves(self) -> dict:
+        """The run's multi-day sleeves that are not a `Pos` of this engine: the ledger's (strategy, symbol) books of
+        rules that hold across sessions (their fills come from the order manager's daily path). Empty for an
+        intraday-only book, so nothing in the intraday path changes while no multi-day rule holds anything."""
+        rid = self._rid() or (self.day.run_id if self.day else None)
+        b = self.ledger.book(rid) if rid is not None else None
+        if b is None:
+            return {}
+        return {k: sl for k, sl in b.sleeves.items()
+                if sl.qty > 1e-9 and k not in self.pos and not flatten_at_close(_holding(k[0]))}
+
+    def _md_price(self, symbol: str) -> float | None:
+        """The last price of a multi-day holding: the minute bars if the symbol is in the live universe, else the
+        broker's own `current_price` (Alpaca marks positions)."""
+        px = self.market.last_close(symbol)
+        if px:
+            return float(px)
+        cp = (self._bpos.get(symbol) or {}).get("current_price")
+        return float(cp) if cp else None
+
+    def _md_realized(self, body: dict) -> None:
+        """A sale of a multi-day sleeve: its result against cost is today's realised P&L (as an intraday exit's is),
+        less the gain up to the last close mark, which start_equity already holds (audit B1 item 4)."""
+        d = self.day
+        key = (body.get("strategy"), body.get("symbol"))
+        if d is None or body.get("side") != "sell" or key in self.pos or flatten_at_close(_holding(key[0])):
+            return
+        b = self.ledger.book(body.get("run_id"))
+        sl = b.sleeves.get(key) if b is not None else None
+        if sl is None:
+            return
+        qty, px, fees = float(body["qty"]), float(body["px"]), float(body.get("fees") or 0.0)
+        pnl = qty * px - fees - sl.avg_cost * qty
+        d.realized_venue += pnl
+        d.realized_shadow += pnl
+        d.realized_reported += pnl
+        if sl.mark is not None:
+            d.adjust -= (sl.mark - sl.avg_cost) * qty
+
+    def entry_block(self) -> str | None:
+        """S80: why no new position may be opened now (None: it may), for the multi-day target path as for the
+        intraday entries: no running run, the account not clean, a fail-closed halt, the lease, the daily stop,
+        an invalid owner config. Sales and protective stops are never blocked."""
+        d = self.day
+        if self.run is None or self.run.get("status") != "running":
+            return "no running run"
+        if not self.account_clean:
+            return "account not clean"
+        if not self._reconciled():
+            return "ledger and broker differ (reconciliation)"
+        if self.kill:
+            return f"halted: {self.kill}"
+        if not self.lease_ok():
+            return "lease unverified"
+        if d is not None and d.halted:
+            return "daily stop"
+        if d is not None and d.refused:
+            return f"config refused: {d.refused}"
+        return None
+
+    def _md_stops(self) -> dict:
+        """(strategy, symbol) -> the price of the multi-day protective stop resting at the broker now."""
+        from kaibot.engine.failsafe import _md_stop, multi_day_names
+
+        names = multi_day_names()
+        out: dict = {}
+        try:
+            orders = self.broker.open_orders()
+        except Exception:
+            log.exception("open orders unreadable (stop state of the multi-day sleeves)")
+            return out
+        for o in orders:
+            k = _md_stop(o, names)
+            if k is not None and o.get("stop_price") is not None:
+                out[k] = float(o["stop_price"])
+        return out
+
+    def _flatten_md(self, reason: str, failed: dict, t0: float) -> None:
+        """A full flatten (run drawdown, new run, "Flatten and stop") also sells every multi-day sleeve: a symbol
+        held by no `Pos` is closed at the broker (its stops are cancelled first); in a symbol a `Pos` also holds,
+        the sleeve's own stops are cancelled and its shares sold at market. Booked when the venue reports the
+        fill (`_sync_md_exits`)."""
+        from kaibot.engine.failsafe import clean, parse_coid
+
+        pending = {k for x in self._md_exits.values() for k, _ in x["keys"]}
+        by_sym: dict[str, list] = {}
+        for k, sl in self._md_sleeves().items():
+            if k not in pending:
+                by_sym.setdefault(k[1], []).append((k, sl.qty))
+        rid = self._rid() or (self.day.run_id if self.day else None)
+        for sym, keys in by_sym.items():
+            if self.monotonic() - t0 > FLATTEN_BUDGET_S - CLOSE_MAX_S:
+                failed.setdefault(sym, f"not tried: flatten time budget ({FLATTEN_BUDGET_S:g} s) used")
+                continue
+            self._flatten_beat(reason, sym, len(by_sym))
+            try:
+                if not self.pos.on(sym):
+                    o = self._order("close_position", lambda sym=sym: self.broker.close_position(sym), symbol=sym,
+                                    strategy=",".join(k[0] for k, _ in keys), qty=sum(q for _, q in keys),
+                                    reason=reason)
+                    if o:
+                        self._md_exits[o["id"]] = {"run_id": rid, "keys": keys, "reason": reason}
+                    continue
+                for k, q in keys:
+                    for oo in self.broker.open_orders():
+                        pc = parse_coid(oo.get("client_order_id"))
+                        if oo.get("symbol") == sym and oo.get("side") == "sell" and pc and pc[0] == clean(k[0]):
+                            self._order("cancel", lambda oid=oo["id"]: self.broker.cancel_order(oid),
+                                        order_id=oo["id"], symbol=sym, strategy=k[0])
+                    coid = f"kbfl-{clean(k[0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
+                    o = self._order("sell", lambda sym=sym, q=q, coid=coid: self.broker.submit(
+                        OrderRequest(sym, "sell", q, "market", "day", coid)), coid=coid, symbol=sym,
+                        strategy=k[0], qty=q, reason=reason)
+                    self._md_exits[o["id"]] = {"run_id": rid, "keys": [(k, q)], "reason": reason}
+                failed.pop(sym, None)
+            except Exception as e:
+                log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
+                failed[sym] = e
+
+    def _sync_md_exits(self) -> None:
+        for oid, x in list(self._md_exits.items()):
+            o = self.broker.order(oid)
+            if o["status"] == "filled":
+                px, ts = float(o["filled_avg_price"]), o.get("filled_at")
+                for (strategy, sym), q in x["keys"]:
+                    if x["run_id"] is not None:
+                        self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
+                                            "side": "sell", "qty": q, "px": px, "fees": sell_fees(q, px),
+                                            "coid": o.get("client_order_id"), "ts": ts, "reason": x["reason"]})
+                keys = [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]
+                self.store.event("multi_day_sold", {"order_id": oid, "keys": keys, "px": px,
+                                                    "reason": x["reason"]}, self._rid())
+                self._md_exits.pop(oid)
+            elif o["status"] in ("canceled", "expired", "rejected"):
+                self._md_exits.pop(oid)  # not sold: the next full flatten tries again
 
     def _attach_ledger(self) -> None:
         """A run the ledger has not seen (it began before the ledger, or the journal is new) is imported from the
@@ -619,8 +771,8 @@ class Engine:
             kind, pl = c["kind"], c.get("payload") or {}
             try:
                 if kind == "new_run":
-                    if self.pos:  # close the old run's positions first; the command waits until we are flat
-                        self.flatten_all("manual")
+                    if self.pos or self._md_sleeves() or self._md_exits:  # close the old run's positions first
+                        self.flatten_all("manual")  # (multi-day sleeves too, S80); the command waits until flat
                         continue
                     self._new_run(float(pl["amount_usd"]), pl["level"])
                 elif kind == "pause" and self.run:
@@ -785,7 +937,7 @@ class Engine:
                 self._finalize_missed(now)  # S77 (audit D8): a restart after the close still closes the day
             self._maybe_prepare(clk, now)
             return {"state": "market_closed", "next_open": clk.get("next_open"), "account_clean": self.account_clean}
-        if self.run is None and not self.pos:
+        if self.run is None and not self.pos and not self._md_exits:  # S80: a multi-day sale still to book
             return {"state": "idle", "note": "no paper run: start one from the dashboard",
                     "account_clean": self.account_clean}
         if self.run is not None and (self.day is None or self.day.day != now.astimezone(_et()).date()):
@@ -880,8 +1032,9 @@ class Engine:
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
                 ),
             )
-        for p in self.pos.values():  # positions opened on an earlier session are closed at the first tick
-            p.carried = bool(p.entry_ts) and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today
+        for p in self.pos.values():  # intraday positions opened on an earlier session are closed at the first tick
+            p.carried = (flatten_at_close(_holding(p.strategy)) and bool(p.entry_ts)
+                         and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today)
         if self.kill:
             self.store.event("halt_cleared", {"kind": self.kill, "day": str(today)}, self._rid())
         self.kill, self.error_streak = None, 0
@@ -1013,6 +1166,10 @@ class Engine:
                 base = self._basis(p)
                 last = self.market.last_close(p.symbol) or base
                 unreal += (last - base) * p.qty
+        for (_, sym), sl in self._md_sleeves().items():  # S80: multi-day sleeves, from the last close mark (the gap
+            base = sl.mark if sl.mark is not None else sl.avg_cost  # since that close counts: audit B1 item 4)
+            last = self._md_price(sym) or base
+            unreal += (last - base) * sl.qty
         return d.start_equity + d.realized_reported + unreal + d.adjust, unreal
 
     def _risk_halts(self, m: int, eq: float) -> None:
@@ -1022,11 +1179,17 @@ class Engine:
             return
         d, pol = self.day, self.policy()
         if not d.halted and eq <= d.start_equity * (1 - pol.max_daily_loss_pct / 100):
+            # S80 (#120): the day's change in mark-to-market equity, overnight gaps included. Entries are blocked;
+            # intraday sleeves are flattened as before, multi-day sleeves keep their protective stops.
             self.flatten_all("daily_stop")
             d.halted = True
+            kept = sorted({k[1] for k in self._md_sleeves()})
             self.store.insert(
                 "halt",
-                {"run_id": self._rid(), "kind": "daily_stop", "reason": f"day P&L reached -{pol.max_daily_loss_pct}%",
+                {"run_id": self._rid(), "kind": "daily_stop",
+                 "reason": f"day P&L reached -{pol.max_daily_loss_pct}%"
+                           + (f"; entries blocked, multi-day positions keep their stops: {', '.join(kept)}"
+                              if kept else ""),
                  "session": str(d.day)},
                 returning=False,
             )
@@ -1163,6 +1326,8 @@ class Engine:
         eq, _ = self.equity_now()
         live = [p for p in self.pos.values() if p.status in ("pending", "open")]
         exposure = sum((p.fill or p.ref) * p.qty for p in live)
+        for (_, sym), sl in self._md_sleeves().items():  # S80: the cash multi-day sleeves hold is not buying power
+            exposure += (self._md_price(sym) or sl.avg_cost) * sl.qty
         bp = self._bp_read
         snap = Snapshot(
             equity=eq,
@@ -1337,6 +1502,8 @@ class Engine:
 
     # ================= order sync =================
     def _sync_orders(self) -> None:
+        if self._md_exits:
+            self._sync_md_exits()
         for p in list(self.pos.values()):
             if p.status == "closed":
                 continue
@@ -1567,7 +1734,7 @@ class Engine:
         t0 = self.monotonic()
         failed: dict[str, Exception | str] = {}
         todo = sorted(self.pos.values(), key=lambda p: p.symbol in self._flatten_slow)  # stable: book order kept
-        if reason == "time":  # S78 (#118): the close-minus-5 flatten takes intraday sleeves only
+        if reason in INTRADAY_ONLY:  # S78/S80: the close-minus-5 flatten and the daily stop: intraday sleeves only
             todo = [p for p in todo if flatten_at_close(_holding(p.strategy))]
         for _ in range(FLATTEN_TRIES):
             again = []
@@ -1589,6 +1756,8 @@ class Engine:
             todo = again
             if not todo:
                 break
+        if reason not in INTRADAY_ONLY:  # S80: run drawdown, new run, "Flatten and stop": multi-day sleeves too
+            self._flatten_md(reason, failed, t0)
         self._flatten_slow = {s for s, e in failed.items() if isinstance(e, Exception)}  # tried and failed
         if failed:
             left = {s: (f"{type(e).__name__}: {e}" if isinstance(e, Exception) else e)[:160] for s, e in failed.items()}
@@ -1643,9 +1812,11 @@ class Engine:
                 self.roomflow.finalize()  # S36: rules-only counterfactuals for today's room sessions
             except Exception:
                 log.exception("room finalize failed")
-        if self.pos:
-            log.warning("session ended with open positions %s; they will be closed at the next open", list(self.pos))
-            for p in self.pos.values():
+        left = [p for p in self.pos.values() if flatten_at_close(_holding(p.strategy))]
+        if left:  # S80: intraday sleeves only; a multi-day sleeve is meant to be held over the close
+            log.warning("session ended with open intraday positions %s; they will be closed at the next open",
+                        [p.symbol for p in left])
+            for p in left:
                 p.carried = True
         rid = d.run_id
         if rid:
@@ -1697,6 +1868,12 @@ class Engine:
         with the broker, and write the day's mark-to-market rows (ledger_day, ledger_position)."""
         prices = {price_key(p.strategy, p.symbol): self._close_price(p) for p in self.pos.values()
                   if p.status == "open" and p.fill is not None}
+        md = self._md_sleeves()
+        for (strategy, sym) in md:  # S80: multi-day sleeves are marked at the close too (unpriced: last mark)
+            px = self._md_price(sym)
+            if px:
+                prices[price_key(strategy, sym)] = px
+        md_stops = self._md_stops() if md else {}
         b = self.ledger.book(d.run_id)
         if b is None:
             return
@@ -1715,12 +1892,15 @@ class Engine:
         held = {p.key: p for p in self.pos.values()}
         for r in c.positions:
             p = held.get((r["strategy"], r["symbol"]))
+            from kaibot.engine.failsafe import clean
+
+            ms = md_stops.get((clean(r["strategy"]), clean(r["symbol"])))
             self.store.upsert("ledger_position", {
                 "run_id": d.run_id, "session": str(d.day), "strategy": r["strategy"], "symbol": r["symbol"],
                 "qty": r["qty"], "avg_cost": round(r["avg_cost"], 4), "mark": round(r["mark"], 4),
                 "priced": r["priced"], "opened_session": r["opened"], "dividends": round(r["dividends"], 2),
-                "stop_px": round(p.stop, 2) if p is not None else None,
-                "stop_state": "resting" if p is not None and p.stop_order_id else "missing"},
+                "stop_px": round(p.stop, 2) if p is not None else (round(ms, 2) if ms is not None else None),
+                "stop_state": "resting" if (p is not None and p.stop_order_id) or ms is not None else "missing"},
                 "run_id,session,strategy,symbol")
 
     def _reconcile(self, b) -> dict:
