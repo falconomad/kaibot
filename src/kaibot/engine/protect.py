@@ -4,8 +4,12 @@ off. Sent through the order manager like every other order.
 
 - `ensure` keeps exactly one working stop per sleeve at the sleeve's whole shares and stop price: it creates a
   missing one (a new position, a partial fill: protected at the quantity filled), resizes or re-prices one that
-  differs (replace), cancels stops whose sleeve is gone, and re-arms a stop within `REARM_DAYS` of Alpaca's
-  90-day GTC expiry (cancel, then a new stop once the cancel is confirmed);
+  differs (replace), cancels stops whose sleeve is gone, and re-arms a stop within `REARM_DAYS` (10) of Alpaca's
+  90-day GTC expiry, or of its age (created + 90 days) when the venue gave no `expires_at`. The new stop cannot be
+  placed BEFORE the old one is cancelled (the old stop holds the shares: Alpaca refuses a second sell for them), so
+  the re-arm cancels, polls the cancel to its confirmation (`confirm_polls`, `wait`) and sends the new stop in the
+  same call: the gap is the cancel's round trip, seconds, and starts 10 days before the expiry, so a re-arm that
+  cannot finish is tried again at every later call long before the stop would lapse;
 - `release(key, keep)` frees shares for a sale: the stop shrinks to what is kept, or is cancelled. A sale is sent
   only once the venue confirmed it (a working stop holds the shares: Alpaca refuses the sale otherwise);
 - splits: `before_split` cancels the symbol's stops before the ex-date (bracket legs and stops are not adjusted
@@ -23,24 +27,31 @@ from datetime import datetime, timedelta
 from kaibot.broker.protocol import OrderRequest
 from kaibot.engine.orders import TERMINAL, UNCONFIRMED, OrderManager, St
 
-REARM_DAYS = 5  # re-arm a GTC stop this many days before its expiry
+REARM_DAYS = 10  # re-arm a GTC stop this many days before its expiry
+GTC_DAYS = 90  # Alpaca cancels GTC orders 90 days after creation
 Key = tuple[str, str]
 
 
 class ProtectiveStops:
-    def __init__(self, om: OrderManager, run="0") -> None:
+    def __init__(self, om: OrderManager, run="0", confirm_polls: int = 5, wait=lambda s: None) -> None:
+        """`confirm_polls`, `wait`: how often (and how long between, live: a sleep) a re-arm's cancel is polled for
+        its confirmation before the new stop is sent."""
         self.om, self.run = om, run
+        self.confirm_polls, self.wait = confirm_polls, wait
         self.suspended: set[str] = set()  # symbols with a split under way: no stop is re-created yet
 
     def stops_of(self, key: Key):
         return self.om.working(symbol=key[1], strategy=key[0], purposes=("stop",))
 
     def ensure(self, sleeves: Mapping[Key, float], prices: Mapping[Key, float], now: datetime,
-               session: str) -> list[str]:
-        """`sleeves`: shares per (strategy, symbol); `prices`: the stop price of each. Returns what it did."""
+               session: str, only: set[str] | None = None) -> list[str]:
+        """`sleeves`: shares per (strategy, symbol); `prices`: the stop price of each. `only`: look at these
+        symbols alone (every other stop is left as it is). Returns what it did."""
         done: list[str] = []
         for key in sorted(set(sleeves) | {(r.strategy, r.symbol) for r in self.om.working(purposes=("stop",))}):
             strategy, symbol = key
+            if only is not None and symbol not in only:
+                continue
             if symbol in self.suspended:
                 continue
             whole = int(math.floor(float(sleeves.get(key, 0.0)) + 1e-9))
@@ -57,11 +68,16 @@ class ProtectiveStops:
             r = recs[0] if recs else None
             if r is not None and (r.state in UNCONFIRMED or r.state in (St.PENDING_CANCEL, St.PENDING_REPLACE)):
                 continue  # wait for the venue
-            if r is not None and _expiring(r.expires_at, now):
+            if r is not None and _expiring(r.expires_at, r.created, now):
                 self.om.cancel(r.coid)
                 done.append(f"rearm {r.coid}")
+                for _ in range(self.confirm_polls):
+                    if r.state in TERMINAL:
+                        break
+                    self.wait(0.5)
+                    self.om._poll(r)
                 if r.state not in TERMINAL:
-                    continue  # the new stop goes out once the cancel is confirmed
+                    continue  # not confirmed yet: the next call sends the new stop (10 days of headroom)
                 r = None
             if r is None:
                 coid = self.om.next_coid(self.run, strategy, symbol, session, "stop")
@@ -99,7 +115,11 @@ class ProtectiveStops:
         self.suspended.discard(symbol)
 
 
-def _expiring(expires_at: str | None, now: datetime) -> bool:
-    if not expires_at:
-        return False
-    return datetime.fromisoformat(expires_at) - now <= timedelta(days=REARM_DAYS)
+def _expiring(expires_at: str | None, created: str | None, now: datetime) -> bool:
+    if expires_at:
+        end = datetime.fromisoformat(expires_at)
+    elif created:  # no expiry from the venue: by age, never silently lapsing
+        end = datetime.fromisoformat(created) + timedelta(days=GTC_DAYS)
+    else:
+        return True
+    return end - now <= timedelta(days=REARM_DAYS)

@@ -124,6 +124,33 @@ enough outage still lets them act on their own rules.
 - A split rescales the engine's position (shares, fill, stop, target) and says `split_booked`; re-creating the
   protective orders around the split is the order manager's job (S78).
 
+## Reconciliation with the broker (S78, #118)
+
+At start-up, at every session start, and every 15 minutes while a difference is open, the engine compares the ledger
+with the broker (`engine/reconcile.py`):
+
+- **What is checked:** shares per symbol, and the cash change since the run began. The cash change is net of
+  dividends accrued at the ex-date that are not paid yet.
+- **Tolerance (cash):** the larger of **$1 and 0.05% of the run's pot** ($50 at $100k). It covers what the ledger
+  does not model to the cent:
+  - regulatory sale fees (SEC, FINRA TAF);
+  - cash in lieu and dividend amounts rounded by the broker;
+  - dividend withholding.
+- **Tolerance (shares):** none.
+- **While a difference is open:**
+  - entries (buys) are blocked; on the daily path, buys in the affected symbol, and every buy on a cash difference;
+  - a sale that only reduces exposure goes out: at most min(ledger, broker) shares in a symbol whose shares differ;
+  - exits, flattens, protective stops and cancels are never blocked;
+  - a failed read counts as a difference (fail closed).
+- **Clearing a real difference.** The owner accepts it with a reason:
+  - command line: `python -m kaibot.engine.reconcile --status`, then `--accept "reason"`;
+  - engine command: `accept_reconcile` with `{"reason": ...}`;
+  - dashboard: `kb_command('accept_reconcile', ...)` is a design only. It needs a migration of the `command`
+    kind check and `kb_command`.
+
+  The accepted difference is journalled as an offset (`reconcile_resolved`) and survives restarts. The same
+  difference stays accepted; a difference that changes by more than the tolerance blocks again.
+
 ## Migrations to apply
 
 `0018_m7_ledger.sql`. Additive and re-runnable. Apply it before or after this code starts on paper:

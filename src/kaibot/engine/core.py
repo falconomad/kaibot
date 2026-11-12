@@ -55,6 +55,7 @@ from kaibot.engine.ledger import (
     price_key,
 )
 from kaibot.engine.market import LiveMarket, session_minutes
+from kaibot.engine.reconcile import ACCEPT_COMMAND, Difference, Reconciler, Reconciliation
 from kaibot.engine.roomflow import RoomFlow
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
@@ -87,6 +88,7 @@ CLOSE_MAX_S = CANCEL_WAIT_S + 3.0
 CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": already waited, so not retried at once
 # S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
+RECHECK_MINUTES = 15  # S78: a blocking reconciliation difference is checked again this often
 
 
 class FlattenIncomplete(RuntimeError):
@@ -314,6 +316,8 @@ class Engine:
         # S78 (#118): live, dividends are accrued at the ex-date (engine/dividends.ExDateDividends: (day, symbols)
         # -> ex-dividends) and Alpaca's later payment is matched to the accrual; None: booked when paid
         self.ex_dividends = ex_dividends
+        # S78: the ledger against the broker (engine/reconcile.py); accepted offsets fold from the journal
+        self.recon = Reconciler(lambda: self._recon_inputs(), self.journal)
         self._finalize_checked: date | None = None
         self.account_clean = True
         self.code = code_sha()
@@ -333,7 +337,7 @@ class Engine:
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
             log.exception("order adoption failed")
         self.check_account()
-        self._startup_reconcile()
+        self._startup_reconcile("startup")
         self.store.event(
             "engine_start",
             {"code_sha": self.code, "fingerprint": self.fingerprint, "run_id": self.run and self.run["id"],
@@ -358,23 +362,49 @@ class Engine:
             log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
 
-    def _startup_reconcile(self) -> None:
-        """S78 (#118, audit D8): at start-up the ledger is compared with the broker, shares per symbol and cash
-        (account activities and positions, `_reconcile`). A difference blocks entries until the next session
-        start checks again (fail closed). A symbol with an entry or exit under way is compared once it settles
-        (the per-minute drift check does that), as is a symbol already reported as foreign by check_account."""
+    def _recon_inputs(self) -> dict:
+        """What `reconcile.compare` needs: the ledger's shares per settled symbol against the broker's, and the cash
+        change since the run began against the ledger's, net of dividends accrued and not yet paid. A symbol with
+        an entry or exit under way is left to the per-minute drift check until it settles."""
         b = self.ledger.book(self._rid()) if self.run else None
         if b is None:
-            return
-        out = self._reconcile(b)
+            return {"ledger_qty": {}, "broker_positions": {}}
         unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
-        pos = {s: v for s, v in (out.get("positions") or {}).items() if s not in unsettled and v.get("ledger")}
-        cash = out.get("cash_diff")
-        if pos or (cash is not None and abs(cash) > out["tolerance"]):
-            self.account_clean = False
-            self.store.event("startup_reconcile", {"positions": pos, "cash_diff": cash,
-                                                   "action": "entries blocked until the book matches the broker"},
-                             self._rid())
+        acct = self.broker.account()
+        bpos = {s: p for s, p in self.broker.positions().items() if s not in unsettled}
+        cash = acct.get("cash")
+        return {"ledger_qty": {s: q for s, q in b.qty_by_symbol().items() if q and s not in unsettled},
+                "broker_positions": bpos, "ledger_cash": b.cash, "ledger_cash0": b.amount,
+                "broker_cash": float(cash) if cash is not None and b.broker_cash0 is not None else None,
+                "broker_cash0": b.broker_cash0,
+                "receivable": receivable(self.journal.entries(kinds=("div_accrual", "div_paid"))),
+                "equity": b.amount}
+
+    def _startup_reconcile(self, when: str = "startup") -> None:
+        """S78 (#118, audit D8; QA-Ops review B1): the ledger against the broker, shares and cash, at start-up and
+        at every session start. Its own flag (`recon`), not `account_clean` (which the session start recomputes):
+        entries stay blocked until a check succeeds or the owner accepts the difference with a reason (command
+        `accept_reconcile`, or `python -m kaibot.engine.reconcile --accept`). A failed read counts as a difference
+        (fail closed). Exits, stops and flattens never look at it."""
+        try:
+            self.recon.check(when)
+        except Exception as e:
+            log.exception("reconciliation read failed")
+            self.recon.last = Reconciliation([Difference("unavailable", None, {"error": f"{type(e).__name__}: "
+                                                                                       f"{e}"[:160]})])
+            self.recon.checked = True
+        if self.recon.last.diffs:
+            self.store.event("reconcile_blocked", {"when": when, **self.recon.last.summary(),
+                                                   "action": "entries blocked until the book matches the broker "
+                                                             "or the owner accepts the difference"}, self._rid())
+
+    def _recheck_reconcile(self, m: int | None = None, force: bool = False) -> None:
+        """While entries are blocked by a difference: check again every RECHECK_MINUTES (a late activity heals)."""
+        if self.recon.last.diffs and (force or (m is not None and m % RECHECK_MINUTES == 0)):
+            self._startup_reconcile("recheck")
+
+    def _reconciled(self) -> bool:
+        return not self.recon.last.diffs
 
     # ================= fail-closed halts =================
     def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
@@ -600,6 +630,9 @@ class Engine:
                 elif kind == "flatten_and_stop" and self.run:
                     self.flatten_all("manual")
                     self._end_run("stopped", "stopped by user")
+                elif kind == ACCEPT_COMMAND and self.run:  # S78: the owner accepts the open differences
+                    self.recon.resolve(str(pl.get("reason") or ""), by="owner (command)")
+                    self._startup_reconcile("accepted")
                 elif kind == "set_level" and self.run and pl.get("level") in self.policies:
                     nxt = self._next_session_date()
                     self.store.insert(
@@ -771,6 +804,7 @@ class Engine:
         # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
+        self._recheck_reconcile(m)
         self._check_drift()
         if any(p.carried for p in self.pos.values()):
             for p in [p for p in self.pos.values() if p.carried and p.status in ("open", "pending")]:
@@ -857,6 +891,7 @@ class Engine:
                                                 "action": "update config/macro_calendar.yaml"}, self._rid())
             self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
         self.check_account()
+        self._startup_reconcile("session_start")  # S78: run again, never reset
         self.store.event(
             "session_start",
             {"day": str(today), "start_equity": start_eq, "level": self.level(), "minutes": n_min},
@@ -899,7 +934,7 @@ class Engine:
         """S78 (#118): the dividends going ex today, booked to the sleeves holding the stock at this open (they held
         it over the last close) and journalled as receivables until Alpaca pays them."""
         held = sorted({sym for (_, sym), sl in b.sleeves.items() if sl.qty > 0})
-        known = open_accruals(self.journal.entries(kinds=("div_accrual", "div_paid")))
+        known = {e[3]["ref"] for e in self.journal.entries(kinds=("div_accrual",))}  # ever accrued (review B3)
         for x in self.ex_dividends(today, held) or ():
             if x.ref in known or not b.holders(x.symbol):
                 continue
@@ -1012,6 +1047,8 @@ class Engine:
     def _may_enter(self, m: int) -> bool:
         d = self.day
         if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
+            return False
+        if not self._reconciled():  # S78: an open ledger/broker difference blocks entries (exits go on)
             return False
         if not self.lease_ok():  # fail closed: the lease could not be renewed, so we may not be the only engine
             return False

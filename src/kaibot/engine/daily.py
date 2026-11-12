@@ -600,6 +600,10 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                 led.apply("split", {"symbol": s, "ex_date": str(d), "ratio": r, "i": i})
                 if (name, s) in run.stops:
                     run.stops[(name, s)] = round(run.stops[(name, s)] / r, 2)
+                if stops is not None:  # re-protected at once, before the open: no session without a stop
+                    stops.after_split(s)
+                    q = led.pos[s].qty if s in led.pos else 0.0
+                    stops.ensure({(name, s): q}, run.stops, clock(), str(d), only={s})
                 frac = led.pos[s].qty - math.floor(led.pos[s].qty + 1e-9)
                 if frac > 1e-9:  # the fraction of a share is paid in cash (Alpaca), at the previous close / ratio
                     px = led.pos[s].last
@@ -620,9 +624,9 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         pending = {s: r for s, r in pending.items() if s in held}
         forced = {data.symbols[j] for j in exits_on.get(i, ()) if data.symbols[j] in held}
         targets: list[Target] = []
-        if recon.check("startup" if i == i0 else "periodic").diffs:  # the ledger and the venue disagree: no trade
-            run.refused.append((i, recon.last.summary()["diffs"]))
-        elif tl is not None:
+        if recon.check("startup" if i == i0 else "periodic").diffs:  # the ledger and the venue disagree:
+            run.refused.append((i, recon.last.summary()["diffs"]))  # the target loop refuses buys, sales go out
+        if tl is not None:
             plan = atr_risk_sizing(tl, held, pending, data, i, eq, pol, exposure_pct, led.cash)
             run.skipped += plan.skipped
             run.orders += [(i, "sell", s, r) for s, r in plan.sell.items()]
@@ -634,11 +638,10 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             pending = {}
         else:  # a sale whose stock had no bar: try again every session
             targets += [Target(name, s, 0, "sell", {"why": r}) for s, r in pending.items()]
-        if not recon.last.diffs:
-            send(i, targets, policy)
-            sold = {t.symbol for t in targets if t.shares == 0}
-            send(i, [Target(name, s, 0, "split_dispute", {"why": "split_dispute"}) for s in forced if s not in sold],
-                 at_close)  # at the close, always
+        send(i, targets, policy)
+        sold = {t.symbol for t in targets if t.shares == 0}
+        send(i, [Target(name, s, 0, "split_dispute", {"why": "split_dispute"}) for s in forced if s not in sold],
+             at_close)  # at the close, always
         # -- the session: opening print, closing print
         broker.advance(_at(d, OPEN_BAR))
         clock.set(_at(d, CLOSE_BAR))

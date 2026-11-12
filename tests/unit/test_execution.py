@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from test_order_manager import DAY, NEXT, bar, et, manager, run, venue
 
+from kaibot.broker.sim import NY
 from kaibot.engine.dividends import ExDateDividends, match_payment, parse_cash_dividends, receivable
 from kaibot.engine.execution import ExecutionPolicy, ExecutionRefused, flatten_at_close
 from kaibot.engine.orders import St
@@ -187,9 +188,9 @@ def test_a_stop_is_re_armed_before_alpacas_90_day_expiry():
     b, clock, om, ps = protected(30)
     ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
     (r,) = ps.stops_of(K)
-    clock.set(clock() + timedelta(days=84))
+    clock.set(clock() + timedelta(days=79))
     assert ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY) == []
-    clock.set(clock() + timedelta(days=2))  # within 5 days of the expiry
+    clock.set(clock() + timedelta(days=2))  # within 10 days of the expiry
     did = ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-10")
     (new,) = ps.stops_of(K)
     assert did[0] == f"rearm {r.coid}" and om.get(r.coid).state is St.CANCELED and new.coid != r.coid
@@ -241,8 +242,10 @@ def test_the_daily_runner_keeps_a_protective_stop_on_every_position_and_reconcil
     seen = []
     real = ProtectiveStops.ensure
 
-    def ensure(self, sleeves, prices, now, session):
-        out = real(self, sleeves, prices, now, session)
+    def ensure(self, sleeves, prices, now, session, only=None):
+        out = real(self, sleeves, prices, now, session, only=only)
+        if only is not None:
+            return out  # a split's re-protection before the open (checked below)
         stops = {x.symbol: x for x in self.om.working(purposes=("stop",))}
         seen.append(set(stops) == {s for _, s in sleeves} and all(
             stops[s].qty == int(q) and stops[s].tif == "gtc" and stops[s].state is St.ACCEPTED
@@ -296,3 +299,120 @@ def test_time_flatten_takes_intraday_sleeves_only(monkeypatch):
     monkeypatch.setattr(core.registry, "get", lambda name: multi if name == "held_rule" else None)
     assert core._holding("held_rule") is Holding.MULTI_DAY and core._holding("dip_reversal") is Holding.INTRADAY
     assert bar(0) < et(DAY, "10:00")
+
+
+# ---------------------------------------------------------------- QA-Ops review of #173
+
+
+def test_b2_the_daily_runner_on_a_difference_still_sells_and_keeps_stops_and_skips_only_buys():
+    import numpy as np
+    from test_engine_momentum import FIXTURE, POL
+
+    from kaibot.engine import daily_report as dr
+    from kaibot.engine.daily import DailyData, run_daily
+    from kaibot.strategies import momentum as mom
+
+    m, info = dr.load_fixture(FIXTURE)
+    data = DailyData.from_market(m)
+    i0 = int(np.searchsorted(data.dates, np.datetime64(info["window"][0])))
+    box = {}
+    real_init = ProtectiveStops.__init__
+
+    def keep(self, om, run="0"):
+        real_init(self, om, run)
+        box["om"] = om
+
+    ProtectiveStops.__init__ = keep
+    drift_at = i0 + 60
+
+    def on_session(i):
+        if i == drift_at:  # the venue's cash moves by $1,000 the ledger does not know about
+            box["om"].broker.cash -= 1000.0
+
+    try:
+        run_ = run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, len(data.dates) - 1, protect_atr=10.0,
+                         on_session=on_session)
+    finally:
+        ProtectiveStops.__init__ = real_init
+    after = [f for f in run_.fills if f["i"] > drift_at and f["reason"] != "end_of_data"]
+    assert run_.refused and all(i > drift_at for i, _ in run_.refused)
+    assert any(f["side"] == "sell" for f in after), "sales still go out"
+    assert not any(f["side"] == "buy" for f in after), "buys are skipped"
+    held = run_.ledger.pos
+    assert held is not None and any(r.purpose == "stop" and r.created > "" for r in run_.om.orders.values())
+    assert any("cash" in why for _, _, why in run_.rejected)
+
+
+def test_a_split_session_is_never_without_a_stop_in_the_daily_runner():
+    import numpy as np
+    from test_engine_momentum import FIXTURE, POL
+
+    from kaibot.engine import daily_report as dr
+    from kaibot.engine.daily import DailyData, run_daily
+    from kaibot.strategies import momentum as mom
+
+    m, info = dr.load_fixture(FIXTURE)
+    data = DailyData.from_market(m)
+    i0 = int(np.searchsorted(data.dates, np.datetime64(info["window"][0])))
+    calls = []
+    real = ProtectiveStops.ensure
+
+    def ensure(self, sleeves, prices, now, session, only=None):
+        before = {x.symbol for x in self.om.working(purposes=("stop",))} - set(only or ())
+        out = real(self, sleeves, prices, now, session, only=only)
+        stops = {x.symbol for x in self.om.working(purposes=("stop",))}
+        calls.append((now.astimezone(NY).strftime("%H:%M"), session, {s for _, s in sleeves} | before, stops))
+        return out
+
+    ProtectiveStops.ensure = ensure
+    try:
+        run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, len(data.dates) - 1, protect_atr=10.0)
+    finally:
+        ProtectiveStops.ensure = real
+    morning = [c for c in calls if c[0] == "08:00"]
+    assert morning, "a split is re-protected before the open, not after the close"
+    assert all(syms <= stops for _, _, syms, stops in morning), "the split name and every other stop are kept"
+
+
+def stopped(**kw):
+    b, clock = venue(replace_new_id=True)
+    om, _, _ = manager(b, clock)
+    b.pos["A"] = {"qty": 30, "avg_entry_price": 100.0}
+    return b, clock, om, ProtectiveStops(om, run="1", **kw)
+
+
+def test_the_re_arm_confirms_the_cancel_and_sends_the_new_stop_in_the_same_call():
+    b, clock, om, ps = stopped(confirm_polls=3)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    (r,) = ps.stops_of(K)
+    pending = {"n": 0}
+
+    def slow_cancel(oid):  # Alpaca: 204 now, canceled a moment later
+        b.orders[oid]["status"] = "pending_cancel"
+        pending["n"] = 1
+
+    real_order = b.order
+
+    def order(oid):
+        o = real_order(oid)
+        if o["status"] == "pending_cancel" and pending["n"] >= 2:
+            o.update(status="canceled")
+        pending["n"] += 1
+        return o
+
+    b.cancel, b.order = slow_cancel, order
+    clock.set(clock() + timedelta(days=81))  # inside the re-arm window (10 days before the 90-day expiry)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    (new,) = ps.stops_of(K)
+    assert om.get(r.coid).state is St.CANCELED and new.coid != r.coid and new.state is St.ACCEPTED
+
+
+def test_a_stop_without_expires_at_is_re_armed_by_its_age():
+    b, clock, om, ps = stopped()
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    (r,) = ps.stops_of(K)
+    r.expires_at = None
+    clock.set(clock() + timedelta(days=82))
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-06")
+    (new,) = ps.stops_of(K)
+    assert new.coid != r.coid
