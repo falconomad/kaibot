@@ -102,18 +102,18 @@ def test_gap_scenario_per_share():
 
 def test_gross_headroom_binds():
     # 90% invested, 98% allowed (2% cash buffer): $8,000 left = 80 shares at $100
-    v = evaluate(Proposal("X", Side.BUY, 100, 80, atr=2), book_snap(gross_exposure=90_000, overnight_exposure=0),
+    v = evaluate(Proposal("X", Side.BUY, 100, 99, atr=2), book_snap(gross_exposure=90_000, overnight_exposure=0),
                  POL, BOOK)
     assert v.approved and v.qty == 80 and v.binding == "gross_headroom"
 
 
 def test_sector_headroom_binds():
-    v = evaluate(Proposal("X", Side.BUY, 100, 80, atr=2), book_snap(sector_exposure=29_000), POL, BOOK)
+    v = evaluate(Proposal("X", Side.BUY, 100, 99, atr=2), book_snap(sector_exposure=29_000), POL, BOOK)
     assert v.approved and v.qty == 10 and v.binding == "sector_headroom"
 
 
 def test_overnight_headroom_binds_and_zero_cap_blocks():
-    v = evaluate(Proposal("X", Side.BUY, 100, 80, atr=2), book_snap(overnight_exposure=95_000), POL,
+    v = evaluate(Proposal("X", Side.BUY, 100, 99, atr=2), book_snap(overnight_exposure=95_000), POL,
                  replace(BOOK, max_overnight_pct=97))
     assert v.approved and v.qty == 20 and v.binding == "overnight_headroom"
     v0 = evaluate(Proposal("X", Side.BUY, 100, 80, atr=2), book_snap(), POL, replace(BOOK, max_overnight_pct=0))
@@ -122,7 +122,7 @@ def test_overnight_headroom_binds_and_zero_cap_blocks():
 
 def test_gap_headroom_binds():
     # book already loses $11,500 in the gap scenario, 12% = $12,000 allowed: $500 / $10 per share = 50 shares
-    v = evaluate(Proposal("X", Side.BUY, 100, 80, atr=2), book_snap(gap_loss=11_500), POL, BOOK)
+    v = evaluate(Proposal("X", Side.BUY, 100, 99, atr=2), book_snap(gap_loss=11_500), POL, BOOK)
     assert v.approved and v.qty == 50 and v.binding == "gap_headroom"
 
 

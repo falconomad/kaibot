@@ -248,12 +248,15 @@ def _book_fits(sc, book):
     """The caps hold for `book` (used to keep the property to books that start inside them)."""
     lim, eq, m = sc["lim"], sc["equity"], sc["m"]
     ex = exposures(book, m)
+    by_sym: dict[str, float] = {}
+    for (_, s), q in book.items():
+        by_sym[s] = by_sym.get(s, 0) + q * m[s].px
     return (ex.gross <= eq * min(lim.max_gross_pct, 100 - lim.min_cash_pct) / 100
             and ex.overnight <= eq * lim.max_overnight_pct / 100
             and all(v <= eq * lim.max_sector_pct / 100 for v in ex.sectors.values())
             and ex.gap_loss <= eq * lim.max_gap_loss_pct / 100
-            and all(q * m[s].px <= eq * lim.max_name_pct / 100 for (_, s), q in book.items())
-            and len({s for (_, s), q in book.items() if q > 0}) <= lim.max_names)
+            and all(v <= eq * lim.max_name_pct / 100 for v in by_sym.values())
+            and len([s for s, v in by_sym.items() if v > 0]) <= lim.max_names)
 
 
 @hyp.settings(max_examples=400, deadline=None, suppress_health_check=[hyp.HealthCheck.too_slow])
