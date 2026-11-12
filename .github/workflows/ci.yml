@@ -9,9 +9,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
-      - run: uv venv && uv pip install -e ".[dev]"
+        with: {version: "0.11.32", enable-cache: true}  # same uv as scripts/lock_deps.sh was run with
+      - run: ./scripts/lock_deps.sh --check  # uv.lock and the requirements exports agree (one locked set, #122)
+      - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run pytest -q
+  hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: mypy
+        run: |
+          set +e; uv run mypy > mypy.txt 2>&1; rc=$?; tail -1 mypy.txt
+          echo "mypy: $(tail -1 mypy.txt)" >> "$GITHUB_STEP_SUMMARY"; exit $rc
+      - name: import rules
+        if: always()
+        run: |
+          set +e; PYTHONPATH=src uv run lint-imports > imports.txt 2>&1; rc=$?
+          n=$(grep -c '^-   ' imports.txt); grep -E 'KEPT|BROKEN|^Contracts:' imports.txt
+          echo "import rules: $(grep '^Contracts:' imports.txt) ($n broken import chains)" >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
+  image:  # the engine image builds from the locked requirements and its entry points import (#122); runs in parallel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          base=$(sed -n 's/^FROM //p' Dockerfile); docker pull -q "$base" >/dev/null
+          echo "base: $base"; docker buildx imagetools inspect python:3.13-slim | head -3
+          docker run --rm "$base" sh -c 'python --version; . /etc/os-release; echo $VERSION_CODENAME'
+      - run: docker build -q -t kaibot-engine --build-arg CODE_SHA=ci .
+      - run: >-
+          docker run --rm kaibot-engine python -c "import kaibot.engine.__main__, kaibot.engine.watchdog,
+          kaibot.evaluation.gate_report; print('engine image ok')"
   web:
     runs-on: ubuntu-latest
     defaults:

@@ -17,7 +17,7 @@ if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3,
   echo "Needs Python 3.12+:  brew install python@3.13"; exit 1
 fi
 [ -d .venv ] || "$PY" -m venv .venv
-.venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt
+.venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-engine.txt  # locked (uv.lock export, #122)
 export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"  # macOS python.org builds lack root certs
 
 if [ "${1:-}" = "--status" ]; then

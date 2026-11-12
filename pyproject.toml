@@ -4,39 +4,30 @@ version = "0.1.0"
 description = "Autonomous paper day-trading engine for US stocks: free data, multi-agent decision room, deterministic risk gate"
 readme = "README.md"
 requires-python = ">=3.12"  # tech design targets 3.13
-dependencies = [
-  "fastapi>=0.115",
-  "uvicorn[standard]>=0.30",
-  "pydantic>=2.8",
-  "pydantic-settings>=2.4",
-  "httpx>=0.27",
-  "websockets>=12",
-  "sqlalchemy>=2.0",
-  "psycopg[binary]>=3.2",
-  "alembic>=1.13",
-  "apscheduler>=3.10,<4",
-  "pandas>=2.2",
+# One locked dependency set (#122): uv.lock is the lock; requirements-engine.txt and requirements-research.txt are
+# hash-pinned exports of it for pip (Dockerfile, scripts on the Mac). Regenerate all three with scripts/lock_deps.sh.
+dependencies = [  # the engine image installs exactly these (requirements-engine.txt)
   "numpy>=2.0",
-  "anthropic>=0.40",
-  "feedparser>=6.0",
-  "pyyaml>=6.0",
+  "pandas>=2.2",
   "pyarrow>=17",
-  "duckdb>=1.1",
-  "datasketch>=1.6",
-  "structlog>=24.1",
-  "tenacity>=9.0",
+  "pyyaml>=6.0",
+  "certifi>=2024.8.30",  # CA bundle: python.org's macOS Python ships without root certificates
+  "pydantic>=2.8",       # agent-room contracts: every model output is validated before it can matter
+  "anthropic>=0.40",     # imported only when ANTHROPIC_API_KEY is set and KAIBOT_ROOM=on
 ]
 
 [project.optional-dependencies]
-dev = ["import-linter>=2.1", "pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "ruff>=0.6", "mypy>=1.11", "respx>=0.21", "freezegun>=1.5"]
-nlp = ["transformers>=4.44", "torch>=2.4"]
+research = ["scipy>=1.14"]  # replay, walk-forward and report scripts; tests compare metrics.py with scipy
+
+[dependency-groups]
+dev = ["kaibot[research]", "pytest>=8", "hypothesis>=6.100", "ruff>=0.6", "mypy>=1.11", "types-PyYAML", "import-linter>=2.1"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kaibot", "apps/api/kaibot_api"]
+packages = ["src/kaibot"]
 
 [tool.ruff]
 line-length = 120
@@ -48,4 +39,26 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "apps/api"]
+pythonpath = ["src"]
+
+[tool.mypy]  # non-blocking in CI for now (#122); the count of errors on main is in docs/ops/hygiene.md
+python_version = "3.12"
+mypy_path = "src"
+packages = ["kaibot"]
+ignore_missing_imports = true
+
+[tool.importlinter]  # non-blocking in CI for now (#122): live code and research code must not import each other
+root_package = "kaibot"
+
+[[tool.importlinter.contracts]]
+name = "Live code does not import research code (replay)"
+type = "forbidden"
+source_modules = ["kaibot.engine", "kaibot.risk", "kaibot.broker", "kaibot.agents", "kaibot.strategies",
+                  "kaibot.features", "kaibot.news"]
+forbidden_modules = ["kaibot.replay"]
+
+[[tool.importlinter.contracts]]
+name = "Research code (replay) does not import the live engine"
+type = "forbidden"
+source_modules = ["kaibot.replay"]
+forbidden_modules = ["kaibot.engine"]

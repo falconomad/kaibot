@@ -3,7 +3,7 @@
 FROM python:3.13-slim
 WORKDIR /app
 COPY requirements-engine.txt .
-RUN pip install --no-cache-dir -r requirements-engine.txt
+RUN pip install --no-cache-dir --require-hashes -r requirements-engine.txt  # hash-locked export of uv.lock (#122)
 COPY src ./src
 COPY config ./config
 ARG CODE_SHA=unknown

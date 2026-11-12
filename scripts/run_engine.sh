@@ -55,7 +55,7 @@ else
   fi
   echo "Starting with $("$PY" --version)…"
   [ -d .venv ] || "$PY" -m venv .venv
-  .venv/bin/pip install -q --disable-pip-version-check -r requirements-engine.txt
+  .venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-engine.txt  # locked (uv.lock export, #122)
   # python.org's macOS Python has no root certificates until "Install Certificates.command" is run: use certifi's.
   export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"
   WD_PID=data/live/watchdog.pid
