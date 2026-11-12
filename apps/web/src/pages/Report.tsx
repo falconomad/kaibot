@@ -115,6 +115,8 @@ function EvidenceCard({ runId }: { runId: number }) {
       <h2 id="ev-h">Evidence counter</h2>
       {q.isError && <ErrorState compact what="The evidence counter" error={q.error} retry={() => q.refetch()} />}
       {q.isPending && <p className="skeleton" role="status">Loading…</p>}
+      {/* Only real numbers: while loading or after an error the counter would read "0 / 900" and "No closed trades yet". */}
+      {e && (<>
       <div className="kv">
         <span>Closed trades</span>
         <div className="prog" aria-hidden="true"><i style={{ width: `${v.frac * 100}%` }} /></div>
@@ -125,9 +127,10 @@ function EvidenceCard({ runId }: { runId: number }) {
         <span>Sessions</span><span /><span className="v">{e?.sessions ?? 0}</span>
       </div>
       <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 13, marginBottom: 0 }}>{v.text}</p>
-      {e && e.by_strategy.length > 1 && (
+      {e.by_strategy.length > 1 && (
         <p className="muted" style={{ fontSize: 12 }}>{e.by_strategy.map((s) => `${ruleLabel(s.strategy)}: ${s.n} trades, ${fmtR(s.mean_r)}`).join(" · ")}</p>
       )}
+      </>)}
     </section>
   );
 }
