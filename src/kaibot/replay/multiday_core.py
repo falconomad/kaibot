@@ -290,11 +290,13 @@ class CoreRule:
 
 def run_rule(bars: DailyBars, ind: Indicators, pol: RiskPolicy, sig: Signals, spec: CoreSpec, i0: int, i1: int, *,
              fill: str = "base", cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-             hold_blk: np.ndarray | None = None, entry_blk: np.ndarray | None = None) -> tuple[MBook, CoreRule]:
+             hold_blk: np.ndarray | None = None, entry_blk: np.ndarray | None = None,
+             costs=None) -> tuple[MBook, CoreRule]:
     """One continuous account of one frozen configuration over sessions i0..i1, starting flat."""
     where, factor = FILLS[fill]
     rule = CoreRule(sig, pol, spec, where, exposure_pct)
-    eng = Engine(bars, ind, pol, rule, lambda i: spec, equity0, hold_blk, entry_blk, cost_mult=cost * factor)
+    eng = Engine(bars, ind, pol, rule, lambda i: spec, equity0, hold_blk, entry_blk, cost_mult=cost * factor,
+                 costs=costs)
     return eng.run(i0, i1), rule
 
 
@@ -351,7 +353,7 @@ def matched_random_control(bars: DailyBars, ind: Indicators, pol: RiskPolicy, si
                            book: MBook, rule: CoreRule, i0: int, i1: int, *, runs: int = 200, seed: int = 127,
                            fill: str = "base", cost: float = 1.0, exposure_pct: float = 100.0,
                            equity0: float = 100_000.0,
-                           progress: Callable[[int], None] | None = None) -> dict:
+                           progress: Callable[[int], None] | None = None, costs=None) -> dict:
     """The random-entry control of Gate B mark 3 for one account of a rule: `runs` seeded accounts with the same
     decision dates, the same number of new entries per date, the same sizing, caps, fill model and costs, random
     stocks of the same universe filter, exits after holding periods drawn from the rule's own (every closed
@@ -367,7 +369,7 @@ def matched_random_control(bars: DailyBars, ind: Indicators, pol: RiskPolicy, si
            "return_pct": [], "avg_exposure_pct": []}
     for n in range(runs):
         ctl = RandomEntries(sig, pol, spec, where, exposure_pct, rule.entries, holds, seed + n)
-        b = Engine(bars, ind, pol, ctl, lambda i: None, equity0, cost_mult=cost * factor).run(i0, i1)
+        b = Engine(bars, ind, pol, ctl, lambda i: None, equity0, cost_mult=cost * factor, costs=costs).run(i0, i1)
         cs = curve_stats(daily_returns(b))
         out["sharpe"].append(cs["sharpe"])
         out["cagr_pct"].append(cs["cagr_pct"])
