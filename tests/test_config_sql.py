@@ -25,6 +25,24 @@ PROF = yaml.safe_load((ROOT / "config" / "profiles.yaml").read_text())
 UNI = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
 
 
+def _names(arr: str) -> list[str]:
+    return [s.strip(" '") for s in arr.split(",") if s.strip(" '")]
+
+
+def level_strategies_after_migrations() -> dict[str, list[str]]:
+    """The level -> strategies of 0011's seed with every later `update kaibot.level_limit set strategies` applied in
+    file order (0016 retired SPY late momentum, #128)."""
+    rows = re.findall(r"\('(\w+)', ([\d.]+), (\d+), ([\d.]+), (\d+), ([\d.]+), ([\d.]+), array\[([^\]]*)\]\)", SQL)
+    out = {r[0]: _names(r[7]) for r in rows}
+    for f in sorted((ROOT / "migrations").glob("*.sql")):
+        if f.name <= "0011":
+            continue
+        for arr, lv in re.findall(r"update kaibot\.level_limit set strategies = array\[([^\]]*)\] where level = '(\w+)'",
+                                  f.read_text()):
+            out[lv] = _names(arr)
+    return out
+
+
 def test_level_limits_match_profiles():
     rows = re.findall(r"\('(\w+)', ([\d.]+), (\d+), ([\d.]+), (\d+), ([\d.]+), ([\d.]+), array\[([^\]]*)\]\)", SQL)
     got = {r[0]: r for r in rows}
@@ -34,7 +52,23 @@ def test_level_limits_match_profiles():
         assert float(r[1]) == lv["risk_per_trade_pct"] and int(r[2]) == lv["max_positions"]
         assert float(r[3]) == lv["max_position_pct"] and int(r[4]) == lv["max_entries_per_day"]
         assert float(r[5]) == lv["daily_stop_pct"] and float(r[6]) == lv["run_drawdown_end_pct"]
-        assert [s.strip(" '") for s in r[7].split(",")] == lv["strategies"]
+    assert level_strategies_after_migrations() == {k: lv["strategies"] for k, lv in PROF["levels"].items()}
+
+
+def test_sql_strategy_registry_is_the_python_registry():
+    """S76 (#116): the SQL validator reads its strategy names from kaibot.strategy_registry; the rows seeded by the
+    latest migration that writes it must be exactly strategies/registry.py."""
+    from kaibot.strategies import registry
+    from kaibot.strategies.base import Mode
+
+    files = [f for f in sorted((ROOT / "migrations").glob("*.sql")) if "into kaibot.strategy_registry" in f.read_text()]
+    text = files[-1].read_text()
+    block = text[text.index("insert into kaibot.strategy_registry"):]
+    rows = re.findall(r"\('(\w+)', (\d+), '(\w+)', '(\w+)', (true|false), (true|false)\)", block[: block.index(";")])
+    want = [(s.name, str(i + 1), str(s.mode), str(s.holding), str(s.mode is Mode.LIVE).lower(),
+             str(s.name in registry.RETIRED).lower()) for i, s in enumerate(registry.STRATEGIES)]
+    assert rows == want
+    assert "'spy_late_momentum'" not in text[text.index("create or replace function kaibot.config_check(") :]
 
 
 def test_themes_and_universe_match_yaml():

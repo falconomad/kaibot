@@ -339,7 +339,8 @@ def test_d4_a_reject_of_the_stop_only_entry_is_contained_too(tmp_path):
     assert sent == ["SPY"] and status["minute"] == ENTRY_M and status["positions"] == {}
     ((sig, gate),) = by_symbol(store)["SPY"]
     assert sig["strategy"] == "spy_late_momentum" and sig["rules_veto"].startswith("broker rejected: stop_loss")
-    assert gate["approved"] is False and eng.day.entries == 0 and eng.day.spy_mom_done and eng.kill is None
+    assert gate["approved"] is False and eng.day.entries == 0 and eng.day.decided["spy_late_momentum"] == ENTRY_M
+    assert eng.kill is None
 
 
 # =====================================================================================================

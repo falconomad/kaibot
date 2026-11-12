@@ -3,6 +3,7 @@ config is rejected, or every resulting rule is at least as strict as the level (
 
 from __future__ import annotations
 
+import pytest
 import yaml
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -47,7 +48,6 @@ def test_rejects_anything_looser():
         {"risk": {"risk_per_trade_pct": True}},                     # booleans are not numbers
         {"risk": {"risk_per_trade_pct": float("nan")}},
         {"risk": {"max_quote_age_s": 10}},                          # not configurable at all
-        {"strategies": {"spy_late_momentum": True}},                # not part of Steady
         {"strategies": {"dip_reversal": False}},                    # nothing left on
         {"timing": {"entry_start": "09:31"}},                       # before 09:35
         {"timing": {"entry_end": "15:50"}},                         # after 15:45
@@ -66,6 +66,26 @@ def test_rejects_anything_looser():
         except ConfigError:
             continue
         raise AssertionError(f"accepted {b}")
+
+
+def test_a_retired_strategy_left_on_is_ignored_not_refused():
+    """#128: SPY late momentum is retired from every level. Configs saved before (the panel sent
+    `spy_late_momentum: true` for Balanced and Hunter) must not refuse the session; the rule stays off."""
+    for lv in PROFILES:
+        r = T(lv, {"strategies": {"spy_late_momentum": True, "dip_reversal": True}})
+        assert r.strategies == ("dip_reversal",)
+    with pytest.raises(ConfigError, match="at least one"):
+        T("balanced", {"strategies": {"spy_late_momentum": True, "dip_reversal": False}})
+
+
+def test_strategy_names_come_from_the_registry(monkeypatch):
+    from kaibot.strategies import registry
+
+    with pytest.raises(ConfigError, match="unknown strategies"):
+        T("balanced", {"strategies": {"orb_stocks_in_play": True}})  # registered, but shadow: not an owner toggle
+    monkeypatch.setattr(registry, "owner_toggles", lambda: frozenset({"dip_reversal"}))
+    with pytest.raises(ConfigError, match="unknown strategies"):
+        T("balanced", {"strategies": {"spy_late_momentum": False}})
 
 
 def test_focus_modes():

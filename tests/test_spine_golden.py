@@ -34,13 +34,18 @@ from kaibot.engine.core import Engine
 from kaibot.engine.market import LiveMarket
 from kaibot.replay.data import ET
 from kaibot.replay.events import events, events_digest, input_digest
-from kaibot.risk.profiles import load_profiles, load_strategies
+from kaibot.risk.profiles import load_profiles
 
 GOLDEN = sf.DIR
 ROOT = Path(__file__).resolve().parents[1]
 UPDATE = bool(os.environ.get("KAIBOT_UPDATE_GOLDEN"))
 # Not behaviour: the git commit, the hash of the strategy files and wall-clock timings.
 VOLATILE = {"code_sha", "fingerprint", "cost_ms"}
+# The level -> strategies map the engine golden was recorded with (config/profiles.yaml before #128 retired SPY
+# late momentum on 12 Nov 2026). The golden pins what the engine does with these rules on, so it keeps them on;
+# that the profiles no longer list SPY momentum is tested in test_spy_momentum_engine.py.
+RECORDED_STRATEGIES = {"conservative": ["dip_reversal"], "balanced": ["dip_reversal", "spy_late_momentum"],
+                       "aggressive": ["dip_reversal", "spy_late_momentum"]}
 
 
 def canon(x):
@@ -145,7 +150,8 @@ def engine_on_fakes(tmp_path, fx: sf.SpineFixture, level: str = "balanced"):
     broker = FakeBroker(data, clock, fx.test_days[0])
     market = LiveMarket(data, fx.stocks, fx.sector_of, fx.market, tmp_path / "hist", lambda: fx.vix)
     store = FakeStore()
-    eng = Engine(broker, market, store, load_profiles(), set(fx.fomc), now=clock, strategies=load_strategies())
+    eng = Engine(broker, market, store, load_profiles(), set(fx.fomc), now=clock,
+                 strategies=RECORDED_STRATEGIES)
     store.insert("command", {"kind": "new_run", "payload": {"amount_usd": sf.EQUITY, "level": level},
                              "idempotency_key": "k1", "applied_at": None})
     eng.startup()

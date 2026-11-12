@@ -276,11 +276,11 @@ def test_runner_with_a_strict_simbroker_reproduces_the_engine_golden(tmp_path):
     import json
 
     from fakes import FakeData, FakeStore
-    from test_spine_golden import canon, engine_summary
+    from test_spine_golden import RECORDED_STRATEGIES, canon, engine_summary
 
     from kaibot.broker.sim import SimBroker
     from kaibot.engine.core import Engine
-    from kaibot.risk.profiles import load_profiles, load_strategies
+    from kaibot.risk.profiles import load_profiles
 
     fx = sf.load()
     day = fx.test_days[0]
@@ -290,7 +290,8 @@ def test_runner_with_a_strict_simbroker_reproduces_the_engine_golden(tmp_path):
     broker = SimBroker(data.history, clock, costs=None, cash=None)
     market = LiveMarket(data, fx.stocks, fx.sector_of, fx.market, tmp_path / "hist", lambda: fx.vix)
     store = FakeStore()
-    eng = Engine(broker, market, store, load_profiles(), set(fx.fomc), now=clock, strategies=load_strategies())
+    eng = Engine(broker, market, store, load_profiles(), set(fx.fomc), now=clock,
+                 strategies=RECORDED_STRATEGIES)
     store.insert("command", {"kind": "new_run", "payload": {"amount_usd": sf.EQUITY, "level": "balanced"},
                              "idempotency_key": "k1", "applied_at": None})
     eng.startup()
