@@ -5,6 +5,10 @@ Stops cleanly on Ctrl-C / SIGTERM. Open positions keep their broker-held stops e
 
 Before anything touches the broker the engine takes the cross-machine lease (issue #81, engine/lease.py): if
 another engine holds it, or it cannot be checked, this process exits with code 3 and trades nothing.
+
+S77 (#117): the engine's state lives in the local journal `<KAIBOT_DATA_DIR>/journal.sqlite` (engine/journal.py),
+written before every broker call; Supabase is a replica fed by a background thread. The first start of a new
+journal copies the active run from Supabase and exits with code 4 if Supabase cannot be read.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
 from kaibot.engine.events import load_calendar
+from kaibot.engine.journal import LIVE_ID_BASE, BootstrapError, Journal, JournalStore, Replicator, journal_path
 from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
 from kaibot.engine.m3glue import LockedDesk, make_pack_fn, make_rules_extra
 from kaibot.engine.market import LiveMarket
@@ -71,14 +76,16 @@ def build(settings: Settings) -> Engine:
     market = LiveMarket(
         data, sorted(etf_of), etf_of, cfg["market"], settings.data_dir / "history", vix_loader(settings.fred_key)
     )
-    store = Store(settings.supabase_url, settings.supabase_service_key)
+    remote = Store(settings.supabase_url, settings.supabase_service_key)
+    # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
+    store = JournalStore(Journal(journal_path(settings.data_dir)), remote, id_base=LIVE_ID_BASE)
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
-    gw = gateway_from_env(store, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
+    gw = gateway_from_env(remote, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
     room = Room(gw) if gw.enabled else None
     log.info("agent room: %s", "ON (Sonnet, capped budget)" if room else "off (rules-only)")
     # S33: one news desk per engine; it triages through the gateway only when the room is on.
-    desk = NewsDesk(store, source=data, gateway=gw if gw.enabled else None)
+    desk = NewsDesk(remote, source=data, gateway=gw if gw.enabled else None)
     try:
         log.info("news window: %d items reloaded", desk.load_window())
     except Exception:
@@ -90,9 +97,13 @@ def build(settings: Settings) -> Engine:
                   pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked))
 
 
+EXIT_JOURNAL = 4
+
+
 def start_with_lease(eng: Engine, lease: EngineLease) -> None:
     """Take the cross-machine lease, then start the engine. Without the lease nothing else happens: no order
-    adoption, no start event, no heartbeat. Exits with code 3 and a message that says what to do."""
+    adoption, no start event, no heartbeat. Exits with code 3 and a message that says what to do. With the lease,
+    a new journal first copies the active run from Supabase (S77); if it cannot, exit code 4."""
     try:
         got = lease.acquire()
     except LeaseError as e:
@@ -104,6 +115,15 @@ def start_with_lease(eng: Engine, lease: EngineLease) -> None:
         log.warning("took over an expired lease from host %r", got.get("previous_host"))
         with contextlib.suppress(Exception):
             eng.store.event("engine_lease_takeover", {"host": lease.host, "previous_host": got.get("previous_host")})
+    if hasattr(eng.store, "bootstrap"):
+        try:
+            out = eng.store.bootstrap()
+        except BootstrapError as e:
+            log.error("%s", e)
+            lease.release()
+            raise SystemExit(EXIT_JOURNAL) from None
+        if out.get("imported"):
+            log.info("journal started: %d rows of run %s copied from Supabase", out["imported"], out.get("run_id"))
     eng.startup()
 
 
@@ -149,11 +169,13 @@ def main() -> None:
         step("positions_in_account", lambda: sorted(eng.broker.positions()))
         step("market_data", lambda: f"{len(eng.market.data.latest_quotes(['SPY']))} quote(s) from IEX")
 
+        remote = getattr(eng.store, "remote", None) or eng.store
+
         def supa():
-            eng.store.heartbeat("engine-check", {"state": "check", "host": socket.gethostname()})
-            if not eng.store.select("heartbeat", {"process": "eq.engine-check"}):
+            remote.heartbeat("engine-check", {"state": "check", "host": socket.gethostname()})
+            if not remote.select("heartbeat", {"process": "eq.engine-check"}):
                 raise RuntimeError("write/read did not round-trip")
-            run = eng.store.active_run()
+            run = remote.active_run()
             return {"write_read": "ok", "active_run": run and {"id": run["id"], "status": run["status"]}}
 
         step("supabase", supa)
@@ -163,6 +185,7 @@ def main() -> None:
             return row and {k: row[k] for k in ("host", "started_at", "expires_at")} or "free"
 
         step("engine_lease", lease_state)
+        step("journal", lambda: {"path": eng.journal.path, **Replicator(eng.journal, remote).status()})
         step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
         print(json.dumps(report, indent=1, default=str))
         ok = not any(isinstance(v, str) and v.startswith("FAILED") for v in report.values())
@@ -174,6 +197,8 @@ def main() -> None:
     host = socket.gethostname()
     lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host)
     start_with_lease(eng, lease)
+    replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
+    replicator.start()
     status: dict = {"state": "starting"}
     last_minute = None
     log.info("engine up (code %s). Ctrl-C to stop; broker-held stops stay in place.", eng.code)
@@ -209,6 +234,7 @@ def main() -> None:
                 last_error = msg
                 with contextlib.suppress(Exception):
                     eng.store.event("engine_error", {"error": msg}, eng._rid())
+        status = {**status, "replication": replicator.status()} if isinstance(status, dict) else status
         beat(status)
         for _ in range(10):
             if stop["now"]:
@@ -219,12 +245,14 @@ def main() -> None:
         # here would fork the hash-chained event log it is now appending to. Its `engine_lease_takeover` event
         # is the record; this side has the log line.
         log.error("engine stopped: lease lost (positions it was managing: %s)", sorted(eng.pos))
+        replicator.stop(flush_s=5.0)  # our own rows only (engine-assigned ids): safe to finish sending
         raise SystemExit(EXIT_LEASE)
     try:
         eng.store.heartbeat(eng.process, {"state": "stopped", "host": host})
         eng.store.event("engine_stop", {"positions": list(eng.pos)}, eng._rid())
     except Exception:
         pass
+    replicator.stop()
     lease.release()  # clean stop: another machine may start at once
     log.info("engine stopped")
 

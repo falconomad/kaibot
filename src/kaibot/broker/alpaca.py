@@ -122,11 +122,11 @@ class AlpacaPaper(BrokerBase):
     def account(self) -> dict:
         return self._t("GET", "/v2/account")
 
-    def activities(self, after: datetime | None = None) -> list[dict]:
-        """Fills booked on the account, oldest first (GET /v2/account/activities, 100 a page). Not used by the
-        engine yet: the order manager (S78) reconciles from it."""
+    def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
+        """Account activities, oldest first (GET /v2/account/activities, 100 a page). Fills: the order manager
+        (S78) reconciles from them. Dividends and splits (DIV*, SSP): the ledger books them (S77)."""
         out: list[dict] = []
-        params = {"activity_types": "FILL", "direction": "asc", "page_size": ACTIVITY_PAGE}
+        params = {"activity_types": ",".join(types), "direction": "asc", "page_size": ACTIVITY_PAGE}
         if after is not None:
             params["after"] = after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         for _ in range(ACTIVITY_MAX_PAGES):

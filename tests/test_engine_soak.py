@@ -592,7 +592,8 @@ def hunter_book(tmp_path, monkeypatch, n=8):
     eng.broker = alp.AlpacaPaper("k", "s")
     eng.broker.http._sleep = book.sleep
     eng.monotonic = lambda: book.t
-    eng.pos = {s: SimpleNamespace(symbol=s, status="open", exit_order_id=None, exit_reason=None) for s in syms}
+    eng.pos = {s: SimpleNamespace(symbol=s, strategy="dip_reversal", qty=1, status="open", exit_order_id=None,
+                                  exit_reason=None) for s in syms}
     beats: list[tuple[float, dict]] = []
     eng.on_progress = lambda st: beats.append((book.t, st))
     return eng, book, beats

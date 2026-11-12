@@ -106,8 +106,9 @@ class Broker(Protocol):
 
     def account(self) -> dict: ...
 
-    def activities(self, after: datetime | None = None) -> list[dict]:
-        """Fills booked on the account, oldest first, optionally only those after a time."""
+    def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
+        """Account activities of these types (Alpaca's codes: FILL, DIV, SSP, ...), oldest first, optionally only
+        those after a time. The ledger (S77) reads dividends and splits through it."""
 
     # ---- time ----
     def clock(self) -> dict:
