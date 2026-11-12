@@ -7,11 +7,32 @@ What stops Kaibot from adding risk when something breaks, from the inside out.
 | Broker-held brackets, **GTC** legs | Alpaca | engine or laptop dead at any time | stop (and 2R target) stay at the broker until filled or the engine closes the position; nothing sits overnight unprotected |
 | Engine halts | engine | bad state | no new entries for the session (exits keep being managed) |
 | Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)) |
-| Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel unfilled `kb-` entry orders; still stale at 15:55 ET: close every position |
-| Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | 15:56 ET, heartbeat > 3 min old: `DELETE /v2/positions?cancel_orders=true` on the **paper** account |
+| Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel unfilled `kb-` entry orders; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): close every position, retried until close minus 4 min |
+| Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | close minus 4 min (15:56 ET; 12:56 on early closes once 0017 is applied), heartbeat > 3 min old: `DELETE /v2/positions?cancel_orders=true` on the **paper** account |
 
 Restart and recovery (crash, 10-minute outage, API outage, half-written order, two engines): see
 [outage_drill.md](outage_drill.md) and `scripts/outage_drill.sh`.
+
+## Watchdog and dead-man on the last minutes of a session (S74c #147, S74d #154)
+- **The close** is the earlier of the broker clock's `next_close` and the broker calendar's close for the day,
+  so on early-close days (13:00 ET) the watchdog flattens at 12:55. The calendar is read once a day, and only
+  when the engine is already stale; the happy path makes no extra calls.
+- **Retries** run until close minus 4 minutes, the dead-man time. Before each close the watchdog checks that
+  `CLOSE_BUDGET_S` (25 s: one order-path deadline plus the cancel wait) still fits before the dead-man time; a
+  symbol it does not start counts as failed, so the day is not marked flattened. With quick refusals that leaves
+  two passes (:10 and :25 past the minute); a blackholed venue cannot push a pass past the dead-man time. A
+  watchdog that first sees the stale engine after the dead-man time still makes one pass, as a backstop.
+- **A failed open-orders read** (entry cancels) is logged and returned as `entry_read_failed`; the halt and the
+  flatten of that poll still happen.
+- **Order-path budget:** a trading call that gives up because its rate-limit slot comes after its deadline no
+  longer books that slot, so it does not push other callers back.
+- **Dead-man on early closes:** migration `0017_deadman_early_close.sql` (**not applied yet; the stakeholder
+  applies it**) adds `kaibot.market_calendar_exception` (holidays and 13:00 closes, NYSE calendar 2026-2028) and
+  two more pg_cron jobs at 12:56 ET. `deadman_flatten()` then acts at the day's close minus 4 minutes and never on
+  a holiday. Before 0017, early-close days have no off-box dead-man (the GTC stops still protect positions).
+  **Every autumn** add the next year's holidays and early closes to that table, next to `macro_calendar.yaml`.
+  Check after applying: `select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';` shows four
+  jobs, and `select kaibot.deadman_flatten();` outside the due minutes returns `not 15:56 ET` (or `not 12:56 ET`).
 
 ## Engine halts (fail closed)
 Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume).

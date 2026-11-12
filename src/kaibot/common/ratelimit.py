@@ -91,13 +91,17 @@ class Budget:
         self._blocked_until = -math.inf
         self.waited = 0.0  # total seconds callers were held back (observability)
 
-    def reserve(self) -> float:
-        """Book the next allowed slot and return its time on the budget's clock (no sleeping)."""
+    def reserve(self, latest: float | None = None) -> float | None:
+        """Book the next allowed slot and return its time on the budget's clock (no sleeping). With `latest`, a
+        slot after that time is not booked and None is returned, so a caller that gives up on it (an order-path
+        deadline, S74d #154) does not hold back the other callers of the source."""
         with self._lock:
             t = max(self.clock.monotonic(), self._blocked_until, self._last + self.spec.min_interval)
             for (cap, per), dq in zip(self.spec.windows, self._grants, strict=True):
                 if len(dq) == cap:
                     t = max(t, dq[0] + per)
+            if latest is not None and t > latest:
+                return None
             for dq in self._grants:
                 dq.append(t)
             self._last = t

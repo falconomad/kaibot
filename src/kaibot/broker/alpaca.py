@@ -54,14 +54,16 @@ class _Http:
         return float("inf") if end is None else end - self.budget.clock.monotonic()
 
     def _acquire(self, end: float | None) -> bool:
-        """The budget's slot; with a deadline, False instead of waiting for a slot that comes too late."""
+        """The budget's slot; with a deadline, False instead of waiting for a slot that comes too late. That slot
+        is then not booked at all, so it does not push the other callers back (S74d, #154)."""
         if end is None:
             self.budget.acquire()
             return True
-        wait = self.budget.reserve() - self.budget.clock.monotonic()
+        t = self.budget.reserve(latest=end - MIN_ATTEMPT_S)
+        if t is None:
+            return False
+        wait = t - self.budget.clock.monotonic()
         if wait > 0:
-            if wait > self._left(end) - MIN_ATTEMPT_S:
-                return False
             self.budget.waited += wait
             self.budget.clock.sleep(wait)
         return True

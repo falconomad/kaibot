@@ -4,16 +4,23 @@ engine stops beating. See docs/decisions/08_tech_design_v2.md section 3.
 While the market is open, every 15 s:
 - engine heartbeat older than 90 s -> cancel every unfilled Kaibot ENTRY order (client_order_id "kb-..."),
   record a halt and an event. Broker-held stops and targets are left alone: they protect what is open.
-- still stale at 15:55 ET (5 minutes before the close, early closes included) -> close every position, so
-  nothing is held overnight. The day counts as flattened only when every close was accepted; otherwise the
-  next poll tries again, until the dead-man time (15:56 ET, DEADMAN_BEFORE_CLOSE) when the off-box dead-man
-  takes over (S74c, #147).
+- still stale at 15:55 ET (5 minutes before the close) -> close every position, so nothing is held overnight.
+  The day counts as flattened only when every close was accepted; otherwise the next poll tries again, until
+  the dead-man time (15:56 ET, DEADMAN_BEFORE_CLOSE) when the off-box dead-man takes over (S74c, #147).
+- early-close days (S74d, #154): "the close" is the broker calendar's close for the day (13:00 ET), or the
+  clock's next_close if that is earlier or the calendar cannot be read. So the flatten starts at 12:55 and is
+  retried until 12:56, when the dead-man for early closes (migration 0017) takes over.
+- a flatten pass never runs past the dead-man time: before each close it checks that CLOSE_BUDGET_S, the worst
+  case of one close on the order path, still fits before it. Symbols it does not start count as failed. Only a
+  watchdog that first sees the stale engine after the dead-man time gets its single late pass without a budget.
+- a failed open-orders read (entry cancels) is logged and recorded, and the poll's flatten still runs.
 It never opens anything. If the heartbeat cannot be read (Supabase down) it counts as stale: failing closed
-costs at most a flat afternoon, failing open could cost an overnight gap.
+costs at most a flat afternoon, failing open could cost an overnight gap. None of this runs while the engine
+beats: the happy path makes the same calls as before.
 
 Limits: it runs on the same machine as the engine, so it does not survive the laptop sleeping or losing power.
 For that, the broker-held GTC stops protect open positions, and the off-box dead-man (migration 0006, Supabase
-pg_cron at 15:56 ET) flattens the account if the heartbeat is stale.
+pg_cron at 15:56 ET; 0017 adds 12:56 ET on early-close days) flattens the account if the heartbeat is stale.
 
 python -m kaibot.engine.watchdog            (started by scripts/run_engine.sh next to the engine)
 """
@@ -24,6 +31,8 @@ import logging
 import signal
 import time
 from datetime import UTC, datetime, timedelta
+from datetime import time as dtime
+from zoneinfo import ZoneInfo
 
 from kaibot.broker.protocol import Broker
 
@@ -31,7 +40,12 @@ log = logging.getLogger("kaibot.watchdog")
 
 STALE_S = 90
 FLATTEN_BEFORE_CLOSE = timedelta(minutes=5)
-DEADMAN_BEFORE_CLOSE = timedelta(minutes=4)  # the pg_cron dead-man at 15:56 ET (migration 0006)
+DEADMAN_BEFORE_CLOSE = timedelta(minutes=4)  # the pg_cron dead-man: 15:56 ET (0006), 12:56 on early closes (0017)
+# One close_position on the order path, worst case: an open-orders read at the 20 s order deadline plus the 5 s
+# cancel wait (broker.alpaca ORDER_DEADLINE_S + CANCEL_WAIT_S). A close is started only if this fits before the
+# dead-man time.
+CLOSE_BUDGET_S = 25.0
+NY = ZoneInfo("America/New_York")
 POLL_S = 15
 ENTRY_PREFIX = "kb-"
 OPEN_ENTRY_STATES = {"new", "accepted", "pending_new", "partially_filled", "held"}
@@ -45,6 +59,7 @@ class Watchdog:
         self.tripped = False
         self.flattened_on = None
         self._flatten_tries: tuple = (None, 0)  # (day, flatten attempts that day)
+        self._calendar_close: tuple = (None, None)  # (ET day, the broker calendar's close as UTC, or None)
 
     def heartbeat_age(self) -> float:
         try:
@@ -77,7 +92,12 @@ class Watchdog:
             self.tripped = False
             return {"state": "ok", "age_s": age}
         out = {"state": "engine_stale", "age_s": age, "canceled": [], "closed": []}
-        for o in self._entry_orders():
+        try:
+            entries = self._entry_orders()
+        except Exception as e:  # S74d (#154): the flatten below must still run
+            log.exception("open-orders read failed: no entry cancels this poll")
+            entries, out["entry_read_failed"] = [], f"{type(e).__name__}: {e}"[:200]
+        for o in entries:
             try:
                 self.broker.cancel_order(o["id"])
                 out["canceled"].append(o["symbol"])
@@ -87,17 +107,39 @@ class Watchdog:
             self.tripped = True
             log.error("engine heartbeat %.0f s old: entries canceled %s", age, out["canceled"])
             self._halt("watchdog", f"engine heartbeat {age:.0f} s old; entry orders canceled")
-        close = datetime.fromisoformat(str(clk["next_close"]).replace("Z", "+00:00"))
         now, today = self.now(), self.now().date()
+        close = self.session_close(clk, now)
+        deadman = close - DEADMAN_BEFORE_CLOSE
         tries = self._flatten_tries[1] if self._flatten_tries[0] == today else 0
         if (now >= close - FLATTEN_BEFORE_CLOSE and self.flattened_on != today
-                and (now < close - DEADMAN_BEFORE_CLOSE or not tries)):  # after the dead-man time: one try at most
+                and (now < deadman or not tries)):  # after the dead-man time: one try at most
             self._flatten_tries = (today, tries + 1)
-            self._flatten(today, tries + 1, out)
+            self._flatten(today, tries + 1, out, deadman if now < deadman else None)
         return out
 
-    def _flatten(self, today, attempt: int, out: dict) -> None:
-        """Close every position. Done for the day only if every close was accepted (S74c, #147)."""
+    def session_close(self, clk: dict, now: datetime) -> datetime:
+        """Today's close (UTC): the earlier of the clock's next_close and the broker calendar's close (S74d,
+        #154). The calendar is read once a day and only on this failure path; if it cannot be read, the clock
+        alone decides and the next poll reads it again."""
+        close = datetime.fromisoformat(str(clk["next_close"]).replace("Z", "+00:00"))
+        day = now.astimezone(NY).date()
+        if self._calendar_close[0] != day:
+            try:
+                row = self.broker.calendar(day.isoformat())
+                cal = None
+                if row and row.get("close"):
+                    hh, mm = str(row["close"]).split(":")[:2]
+                    cal = datetime.combine(day, dtime(int(hh), int(mm)), NY).astimezone(UTC)
+                self._calendar_close = (day, cal)
+            except Exception:
+                log.exception("calendar read failed: using the clock's next_close")
+                return close
+        cal = self._calendar_close[1]
+        return min(close, cal) if cal is not None else close
+
+    def _flatten(self, today, attempt: int, out: dict, deadman: datetime | None = None) -> None:
+        """Close every position. Done for the day only if every close was accepted (S74c, #147). With `deadman`,
+        a close is started only while CLOSE_BUDGET_S still fits before it (S74d, #154)."""
         failed: dict[str, str] = {}
         try:
             symbols = list(self.broker.positions())
@@ -105,6 +147,9 @@ class Watchdog:
             log.exception("positions read failed")
             symbols, failed["positions"] = [], f"{type(e).__name__}: {e}"[:200]
         for sym in symbols:
+            if deadman is not None and self.now() + timedelta(seconds=CLOSE_BUDGET_S) > deadman:
+                failed[sym] = "not started: the dead-man time is too close"
+                continue
             try:
                 self.broker.close_position(sym)
                 out["closed"].append(sym)
@@ -113,11 +158,11 @@ class Watchdog:
                 failed[sym] = f"{type(e).__name__}: {e}"[:200]
         out["flatten_failed"] = failed
         if failed:
-            log.error("15:55 with the engine down, flatten attempt %d incomplete: closed %s, failed %s; "
+            log.error("close minus 5 min with the engine down, flatten attempt %d incomplete: closed %s, failed %s; "
                       "retrying until the dead-man time", attempt, out["closed"], list(failed))
         else:
             self.flattened_on = today
-            log.error("15:55 with the engine down: closed %s", out["closed"])
+            log.error("close minus 5 min with the engine down: closed %s", out["closed"])
         self._event("watchdog_flatten", {"closed": out["closed"], "failed": failed, "complete": not failed,
                                          "attempt": attempt})
 

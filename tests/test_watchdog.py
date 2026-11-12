@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pandas as pd
+import pytest
 from test_engine import fake_candidate, make, synth_frames
 
 from kaibot.engine.watchdog import Watchdog
@@ -167,8 +168,8 @@ def test_a_close_that_keeps_failing_is_retried_until_the_dead_man_time_only(tmp_
     while clock() < deadman + timedelta(minutes=3):
         wd.step()
         clock.t += timedelta(seconds=POLL_S)
-    # 15:55:10, :25, :40, :55 are before 15:56; the dead-man takes over after that
-    assert len(tries) == 4 and wd.flattened_on is None
+    # 15:55:10 and :25 leave CLOSE_BUDGET_S before 15:56; :40 and :55 do not (S74d, #154): the dead-man takes over
+    assert len(tries) == 2 and wd.flattened_on is None
     assert all(_payload(e)["complete"] is False for e in _flatten_events(store))
 
 
@@ -199,3 +200,177 @@ def test_a_watchdog_that_first_sees_the_stale_engine_after_the_dead_man_time_sti
     clock.t += timedelta(seconds=POLL_S)
     wd.step()
     assert tries == ["A"]
+
+
+# --- S74d (#154): early closes, a flatten pass that stops at the dead-man time, a failed open-orders read ---
+
+from kaibot.broker.alpaca import CANCEL_WAIT_S, ORDER_DEADLINE_S  # noqa: E402
+from kaibot.engine.watchdog import CLOSE_BUDGET_S  # noqa: E402
+from kaibot.replay.data import ET  # noqa: E402
+
+
+def _early_close(broker, day="2026-08-04", clock_says_close="13:00"):
+    """The broker calendar says the session ends at 13:00 ET. The clock reports `clock_says_close`."""
+    o = pd.Timestamp(f"{day} 09:30", tz=ET)
+    cal_close = pd.Timestamp(f"{day} 13:00", tz=ET)
+    clk_close = pd.Timestamp(f"{day} {clock_says_close}", tz=ET)
+    calls = []
+
+    def clock():
+        now = pd.Timestamp(broker.clk()).tz_convert(ET)
+        return {"is_open": bool(o <= now < cal_close), "next_open": (o + pd.Timedelta(days=1)).isoformat(),
+                "next_close": clk_close.isoformat(), "timestamp": now.isoformat()}
+
+    def calendar(d):
+        calls.append(d)
+        return {"date": d, "open": "09:30", "close": "13:00"}
+    broker.clock, broker.calendar = clock, calendar
+    return calls
+
+
+def _stale(tmp_path):
+    eng, broker, clock, store, open_utc = setup(tmp_path)
+    assert "A" in broker.pos
+    beat(store, clock() - timedelta(minutes=5))
+    return Watchdog(broker, store, now=clock), broker, clock, store, open_utc
+
+
+def _until(wd, clock, end):
+    while clock() < end:
+        wd.step()
+        clock.t += timedelta(seconds=POLL_S)
+
+
+def test_the_close_budget_covers_one_close_on_the_order_path():
+    assert CLOSE_BUDGET_S == ORDER_DEADLINE_S + CANCEL_WAIT_S
+    assert (FLATTEN_BEFORE_CLOSE - DEADMAN_BEFORE_CLOSE).total_seconds() > CLOSE_BUDGET_S
+
+
+@pytest.mark.parametrize("clock_says_close", ["13:00", "16:00"])
+def test_early_close_flattens_at_1255_and_retries_until_1256(tmp_path, clock_says_close):
+    # the broker calendar's 13:00 wins even if the clock still says 16:00 (the earlier close decides)
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    cal_calls = _early_close(broker, clock_says_close=clock_says_close)
+    tries = _failing_closes(broker, 10**6)
+    clock.t = open_utc + timedelta(minutes=205, seconds=10)  # 12:55:10
+    _until(wd, clock, open_utc + timedelta(minutes=215))  # to 13:05
+    # 12:55:10 and :25 leave CLOSE_BUDGET_S before 12:56; then the early-close dead-man (0017) takes over
+    assert len(tries) == 2 and wd.flattened_on is None
+    assert all("not started" in v for v in _payload(_flatten_events(store)[-1])["failed"].values())
+    assert cal_calls == ["2026-08-04"]  # read once a day
+
+
+def test_early_close_flatten_completes_at_1255(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    _early_close(broker)
+    clock.t = open_utc + timedelta(minutes=204)  # 12:54: not yet
+    assert wd.step()["closed"] == []
+    clock.t = open_utc + timedelta(minutes=205, seconds=10)
+    assert wd.step()["closed"] == ["A"] and wd.flattened_on == clock().date()
+
+
+def test_a_calendar_read_that_fails_falls_back_to_the_clock_and_is_read_again(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    _early_close(broker)  # the clock says 13:00 too
+    n = []
+
+    def calendar(d):
+        n.append(d)
+        raise RuntimeError("Alpaca 0: giving up on GET /v2/calendar (deadline)")
+    broker.calendar = calendar
+    clock.t = open_utc + timedelta(minutes=205, seconds=10)
+    assert wd.step()["closed"] == ["A"]
+    assert len(n) == 1
+    clock.t += timedelta(seconds=POLL_S)
+    wd.step()
+    assert len(n) == 2  # not cached while it fails
+
+
+def test_a_market_holiday_row_does_not_move_the_close(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    broker.calendar = lambda d: None  # no session row: the clock decides
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)
+    assert wd.step()["closed"] == ["A"]
+
+
+def test_the_happy_path_does_not_read_the_calendar(tmp_path):
+    eng, broker, clock, store, open_utc = setup(tmp_path)
+    beat(store, clock())
+    calls = []
+    broker.calendar = lambda d: calls.append(d)
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)
+    beat(store, clock())
+    assert Watchdog(broker, store, now=clock).step()["state"] == "ok"
+    assert calls == []
+
+
+def _slow_closes(broker, clock, seconds, fail=True):
+    """Every close takes `seconds` on the fake clock (a blackholed venue) and fails."""
+    started = []
+
+    def close(sym, *a, **k):
+        started.append((sym, clock()))
+        clock.t += timedelta(seconds=seconds)
+        if fail:
+            raise RuntimeError("Alpaca 0: giving up (deadline)")
+    broker.close_position = close
+    return started
+
+
+def test_a_flatten_pass_does_not_start_a_close_that_could_run_past_the_dead_man(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    syms = {s: {"symbol": s} for s in ("A", "B", "C", "D", "E")}
+    broker.positions = lambda: dict(syms)
+    started = _slow_closes(broker, clock, ORDER_DEADLINE_S)
+    deadman = open_utc + timedelta(minutes=390) - DEADMAN_BEFORE_CLOSE  # 15:56:00
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)  # 15:55:10
+    out = wd.step()
+    # 15:55:10 and 15:55:30 fit (each ends by 15:55:55 at the latest); 15:55:50 + 25 s would not
+    assert [s for s, _ in started] == ["A", "B"]
+    assert all(t + timedelta(seconds=CLOSE_BUDGET_S) <= deadman for _, t in started)
+    assert set(out["flatten_failed"]) == set(syms) and wd.flattened_on is None
+    assert "dead-man" in out["flatten_failed"]["C"]
+    _until(wd, clock, deadman + timedelta(minutes=3))
+    assert len(started) == 2  # no pass after it and no close started past 15:56 - 25 s
+    assert clock() > deadman
+
+
+def test_a_flatten_pass_never_runs_past_the_dead_man_with_a_blackholed_venue(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    broker.positions = lambda: {s: {"symbol": s} for s in "ABCDEFGHIJ"}
+    started = _slow_closes(broker, clock, CLOSE_BUDGET_S)  # every close takes its whole budget
+    deadman = open_utc + timedelta(minutes=390) - DEADMAN_BEFORE_CLOSE
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)
+    ends = []
+    while clock() < deadman + timedelta(minutes=2):
+        wd.step()
+        ends.append(clock())
+        clock.t += timedelta(seconds=POLL_S)
+    assert started and all(t + timedelta(seconds=CLOSE_BUDGET_S) <= deadman for _, t in started)
+    assert max(t for _, t in started) + timedelta(seconds=CLOSE_BUDGET_S) <= deadman
+
+
+def test_a_late_watchdog_keeps_its_one_pass_without_the_budget(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    broker.positions = lambda: {"A": {"symbol": "A"}, "B": {"symbol": "B"}}
+    started = _slow_closes(broker, clock, 1)
+    clock.t = open_utc + timedelta(minutes=387)  # 15:57: the dead-man has run, this is a backstop
+    wd.step()
+    assert [s for s, _ in started] == ["A", "B"]
+
+
+def test_a_failed_open_orders_read_does_not_skip_the_flatten(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    real = broker.open_orders
+
+    def open_orders():
+        if clock() < open_utc + timedelta(minutes=386):
+            raise RuntimeError("Alpaca 0: giving up on GET /v2/orders (deadline)")
+        return real()
+    broker.open_orders = open_orders
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)
+    out = wd.step()
+    assert "entry_read_failed" in out and out["canceled"] == []
+    assert out["closed"] == ["A"] and wd.flattened_on == clock().date()
+    assert any(h["kind"] == "watchdog" for h in store.tables["halt"])  # the trip is still recorded
+    assert _payload(_flatten_events(store)[-1])["complete"] is True
