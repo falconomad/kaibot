@@ -23,6 +23,8 @@ import signal
 import time
 from datetime import UTC, datetime, timedelta
 
+from kaibot.broker.protocol import Broker
+
 log = logging.getLogger("kaibot.watchdog")
 
 STALE_S = 90
@@ -33,7 +35,7 @@ OPEN_ENTRY_STATES = {"new", "accepted", "pending_new", "partially_filled", "held
 
 
 class Watchdog:
-    def __init__(self, broker, store, engine_process: str = "engine", stale_s: float = STALE_S,
+    def __init__(self, broker: Broker, store, engine_process: str = "engine", stale_s: float = STALE_S,
                  now=lambda: datetime.now(UTC)):
         self.broker, self.store, self.engine_process = broker, store, engine_process
         self.stale_s, self.now = stale_s, now
@@ -116,7 +118,7 @@ class Watchdog:
 
 
 def main() -> None:
-    from kaibot.engine.alpaca import AlpacaPaper
+    from kaibot.broker.alpaca import AlpacaPaper
     from kaibot.engine.config import Settings
     from kaibot.engine.store import Store
 
