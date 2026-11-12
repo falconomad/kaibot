@@ -233,5 +233,135 @@
   "height": 640,
   "full": true,
   "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings",
+  "full": true,
+  "keep": true
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-changed",
+  "full": true,
+  "clicks": [
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "[aria-label='Lower: Most stocks at once']",
+   "text=More limits",
+   "[aria-label='Market check for 12-month winners']"
+  ]
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-review",
+  "clicks": [
+   "[aria-label='Lower: Most of the pot invested']",
+   "[aria-label='Raise: Cash always kept aside']",
+   "text=Review"
+  ],
+  "keep": true
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-saved",
+  "clicks": [
+   "[aria-label='Lower: Most of the pot invested']",
+   "text=Review",
+   "text=Save and replay"
+  ]
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-switch-off",
+  "clicks": [
+   "[aria-label='Multi-day holding']",
+   "text=Sell everything at the next close"
+  ],
+  "keep": true
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-not-started",
+  "props": {
+   "notStartedYet": true
+  }
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-earnings-tested",
+  "props": {
+   "earningsTested": true
+  },
+  "full": true,
+  "clicks": [
+   "text=Sell before"
+  ]
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-loading",
+  "props": {
+   "showLoading": true
+  }
+ },
+ {
+  "board": "HoldingSettingsMobile.dc.html",
+  "name": "16m-holding-settings-phone-first-screen",
+  "keep": true
+ },
+ {
+  "board": "HoldingSettingsMobile.dc.html",
+  "name": "16m-holding-settings-phone-whole-page",
+  "full": true,
+  "css": ".tabbar{display:none!important}",
+  "keep": true
+ },
+ {
+  "board": "HoldingSettingsMobile.dc.html",
+  "name": "16m-holding-settings-phone-changed",
+  "clicks": [
+   "[aria-label='Lower: Most of the pot invested']"
+  ]
+ },
+ {
+  "board": "HoldingSettingsMobile.dc.html",
+  "name": "16m-holding-settings-phone-review",
+  "clicks": [
+   "[aria-label='Lower: Most of the pot invested']",
+   "text=Review"
+  ]
+ },
+ {
+  "board": "HoldingSettingsMobile.dc.html",
+  "name": "16m-holding-settings-phone-switch-off",
+  "clicks": [
+   "[aria-label='Multi-day holding']"
+  ]
+ },
+ {
+  "board": "HoldingSettingsMobile.dc.html",
+  "name": "16m-holding-settings-320",
+  "width": 320,
+  "full": true,
+  "css": ".tabbar{display:none!important}"
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-1024",
+  "width": 1024,
+  "full": true
+ },
+ {
+  "board": "HoldingSettings.dc.html",
+  "name": "16-holding-settings-800",
+  "width": 800,
+  "full": true
  }
 ]
