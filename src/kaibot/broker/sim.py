@@ -153,9 +153,19 @@ class SimBroker(BrokerBase):
     strict_time = True  # bars trade once, in order, and never fill an order submitted after they began
 
     def __init__(self, bars: BarHistory, clock: Callable[[], datetime], *, costs: ShadowCosts | None = COSTS_V1,
-                 cash: float | None = 100_000.0, calendar: Mapping[str, tuple[str, str]] | None = None):
+                 cash: float | None = 100_000.0, calendar: Mapping[str, tuple[str, str]] | None = None,
+                 cash_at: str = "submit"):
         """`costs=None` fills at raw bar prices; `cash=None` keeps no cash book (the account then reports no
-        buying power); `calendar` {date: (open, close)} in ET, by default every date with bars, 09:30-16:00."""
+        buying power); `calendar` {date: (open, close)} in ET, by default every date with bars, 09:30-16:00.
+
+        `cash_at`: when a buy must fit in the cash. "submit" (default): at submission, at the last close.
+        "fill" (the daily path, #161 / Amendment 3 of the momentum pre-registrations): an opening or closing
+        auction buy is checked at its print, after the print's earlier fills (sales first, as sent); a buy
+        that does not fit is cut to the whole shares that fit at the print's price, re-priced for that quantity
+        (the rest is cancelled), so the cash book never goes below zero."""
+        if cash_at not in ("submit", "fill"):
+            raise ValueError("cash_at is submit or fill")
+        self.cash_at = cash_at
         self.bars, self.clk = bars, clock
         self.costs = costs
         self.cash = cash
@@ -325,7 +335,7 @@ class SimBroker(BrokerBase):
             if r.qty > free + 1e-9:
                 raise BrokerError(403, f"insufficient qty available for order (requested: {r.qty:g}, "
                                        f"available: {free:g})")
-        elif self.cash is not None:
+        elif self.cash is not None and self.cash_at == "submit":
             px = r.limit_price or r.stop_price or self.bars.last_close(r.symbol, now)
             if px is not None and r.qty * px > self.cash + 1e-9:
                 raise BrokerError(403, "insufficient buying power")
@@ -463,12 +473,20 @@ class SimBroker(BrokerBase):
             plan = None
         side, left = o["side"], float(o["qty"]) - float(o.get("filled_qty") or 0)
         tif = o.get("time_in_force")
-        if tif == "cls":
-            if sess is not None and t == sess[1] - timedelta(minutes=1):
-                self._fill(o, o, left, self._auction(side, bar.c, left, o["symbol"], bar, t), t)
-        elif tif == "opg":
-            if sess is not None and t == sess[0]:
-                self._fill(o, o, left, self._auction(side, bar.o, left, o["symbol"], bar, t), t)
+        if tif in ("cls", "opg"):
+            at = None if sess is None else sess[1] - timedelta(minutes=1) if tif == "cls" else sess[0]
+            if at is not None and t == at:
+                price = bar.c if tif == "cls" else bar.o
+                px = self._auction(side, price, left, o["symbol"], bar, t)
+                if side == "buy" and self.cash is not None and self.cash_at == "fill" and px * left > self.cash:
+                    left = float(math.floor(self.cash / px))  # cut to the whole shares that fit at the print
+                    if left < 1:
+                        self._end(o, "canceled")
+                        return
+                    px = self._auction(side, price, left, o["symbol"], bar, t)
+                self._fill(o, o, left, px, t)
+                if o["status"] == "partially_filled":
+                    self._end(o, "canceled")  # the rest of a cut auction order does not trade
         elif o["type"] == "market":
             qty = left
             if plan is not None:  # scripted partial fills: one part per bar, the rest never

@@ -42,12 +42,15 @@ N, FIRST, I0 = 560, "2022-01-03", 280
 
 # Written down from the code of #127 as merged (main @ af35af9) BEFORE any change of #143: trades, final equity
 # and the events digest of the base and a stress account of each version on the synthetic market of #127.
+# Re-pinned for Amendment 3 of both pre-registrations (#161, 12 Nov 2026): the two 100%-cap accounts whose buys
+# bound on cash changed (a 3% of equity cash reserve; trend_momentum was (109, 125685.6006, "1beb63952bbc1c17"),
+# mom_12_1_band_nofilter (27, 141053.8994, "447b67ce1c3af51a")); the others did not bind and are unchanged.
 PINNED_CORE = {
-    ("trend_momentum", "base", 100.0): (109, 125685.6006, "1beb63952bbc1c17"),
+    ("trend_momentum", "base", 100.0): (110, 125272.0285, "b1823770ddb944f0"),
     ("trend_momentum", "stress", 60.0): (64, 120772.5994, "5ae6cf3d94af54d7"),
     ("mom_12_1_band", "base", 100.0): (22, 136827.0345, "63195d1dcee90cf0"),
     ("mom_12_1_band", "stress", 60.0): (16, 129887.3954, "2429859c52c03a19"),
-    ("mom_12_1_band_nofilter", "base", 100.0): (27, 141053.8994, "447b67ce1c3af51a"),
+    ("mom_12_1_band_nofilter", "base", 100.0): (27, 140793.9177, "91a4a9bfdb2eb9df"),
     ("mom_12_1_band_nofilter", "stress", 60.0): (20, 132386.1183, "9e418d4cd644ee21"),
 }
 

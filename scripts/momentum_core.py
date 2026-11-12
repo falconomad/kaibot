@@ -468,7 +468,9 @@ def caveats(mode: str, bars_src: str, total_return: bool, costs: str = "v1") -> 
             + ("" if bars_src == "store" else "; prices are split-adjusted, so its half-cent floor still overstates "
                "early costs of heavily split names (audit E4)"),
             "the exit-before-earnings variant uses an estimated earnings window, not known dates (S85)",
-            "at a 100% exposure cap a purchase can be cut to the cash left on the fill day (no leverage ever)",
+            "Amendment 3: purchases are sized against cash minus a 3% of equity reserve and a buy still above the "
+            "cash at the fill is cut to whole shares (no leverage ever); split fractions are paid in cash. Reports "
+            "written before Amendment 3 had no reserve and kept split fractions",
             "the random control copies the rule's positions (entry and exit sessions, share of equity, resizes) "
             "and draws only the names; the marked exposure still differs because the names' prices differ"]
     return out

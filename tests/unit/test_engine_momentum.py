@@ -5,8 +5,10 @@ Parity, as stated in the PR: on the committed fixture (tests/fixtures/daily_mome
 dividends, data holes, a late index joiner, a leaver, a delisting and a forced exit before a disputed split) the
 engine reproduces the harness ORDER BY ORDER (same sessions, kinds, symbols, share targets and sell reasons) and
 FILL BY FILL (same sessions, symbols, sides and share counts; prices within 1e-9 relative), with the daily equity
-within one cent, for all three versions, base and stress fills, 100% and 60% caps. Remaining differences are
-listed in `DIFFERENCES` and pinned below. Small synthetic data only, no network."""
+within one cent, for all three versions, base and stress fills, 100% and 60% caps. Amendment 3 of both
+pre-registrations (a 3% cash reserve; a buy above the cash at the print cut to whole shares; split fractions paid
+in cash) is implemented the same way in both, so the two differences first found here (the harness's fill-time cash
+cut, the kept half share) are gone; what remains is listed in `DIFFERENCES`. Small synthetic data only."""
 
 from __future__ import annotations
 
@@ -43,11 +45,6 @@ N, FIRST, I0 = 560, "2022-01-03", 280
 
 # Every difference between the engine path and the harness, and where each is pinned.
 DIFFERENCES = {
-    "cash_cut": "the harness cuts the last buy of a decision to the cash at the fill price; a closing-auction order "
-                "is sized on the decision's close and cannot be (the ledger shows the overdraft): "
-                "test_a_buy_the_harness_cuts_to_the_cash_is_an_overdraft_in_the_engine",
-    "cash_in_lieu": "a split that leaves a fraction of a share: the venue pays the fraction in cash (Alpaca), the "
-                    "harness keeps it: test_a_fraction_of_a_share_after_a_split_is_paid_in_cash",
     "sale_waiting_cap": "a sale that finds no bar on a decision day: the harness still counts it as held at the fill "
                         "(names and exposure caps); the sizing rule counts it as sold, as the harness's own plan "
                         "does (does not occur on the fixture; documented in engine/daily.atr_risk_sizing)",
@@ -274,17 +271,9 @@ def test_the_engine_reproduces_the_harness_order_by_order_and_fill_by_fill(fx, v
     m, data, i0, i1 = fx
     c = compare(m, data, version, i0, i1, fill, cap)
     assert c["orders_equal"] and c["n_orders"] > 10
-    if version == "mom_12_1_band":  # the only difference on the fixture: P22's half share after the 3:2 split
-        extra = [f for f in c["e_fills"] if f[5] == "cash_in_lieu"]
-        assert len(extra) == 1 and extra[0][1] == "P22" and extra[0][3] == pytest.approx(0.5)
-        h = c["h_fills"]
-        e = [f for f in c["e_fills"] if f[5] != "cash_in_lieu"]
-        assert [f[:3] for f in h] == [f[:3] for f in e]
-        diff = [(a, b) for a, b in zip(h, e, strict=True) if a[3] != b[3] or not math.isclose(a[4], b[4], rel_tol=1e-9)]
-        assert diff and {(a[1], a[3] - b[3]) for a, b in diff} == {("P22", 0.5)}  # the half share, nothing else
-        return
     assert c["fills_equal"] and c["n_fills"] > 10, c["fills_diff"][:3]
     assert c["max_equity_gap"] <= 0.01 and c["digest_equal"]
+    assert c["run"].ledger.overdrafts == [] and c["run"].cash_gap < 1e-6  # never below zero; venue = ledger
     reasons = {f[5] for f in c["e_fills"]}
     assert {"delisted", "end_of_data"} <= reasons
     if version == "trend_momentum":
@@ -306,36 +295,71 @@ def test_the_fixture_exercises_every_event_on_held_positions(fx):
     # ... filled on a later session (the harness's "waiting" sale): the venue was sent it again
 
 
-def test_a_fraction_of_a_share_after_a_split_is_paid_in_cash(fx):
-    """Pinned difference `cash_in_lieu`: the orders are the same; the equity differs by the half share's value."""
+def test_a_fraction_of_a_share_after_a_split_is_paid_in_cash_in_both(fx):
+    """Amendment 3: P22's 3:2 split leaves half a share; harness and engine both pay it out at the adjusted close."""
     m, data, i0, i1 = fx
     c = compare(m, data, "mom_12_1_band", i0, i1)
-    assert c["orders_equal"]
-    assert c["book"].equity == pytest.approx(102715.0470, abs=1e-3)
-    assert c["run"].book.equity == pytest.approx(102629.6022, abs=1e-3)
+    lieu = [f for f in c["h_fills"] if f[5] == "cash_in_lieu"]
+    assert lieu == [f for f in c["e_fills"] if f[5] == "cash_in_lieu"]
+    assert len(lieu) == 1 and lieu[0][1] == "P22" and lieu[0][3] == pytest.approx(0.5)
+    assert all(float(t.qty).is_integer() for t in c["book"].trades if t.reason != "cash_in_lieu")
+    assert c["fills_equal"] and c["digest_equal"] and c["book"].equity == pytest.approx(102629.6022, abs=1e-3)
 
 
-def test_a_buy_the_harness_cuts_to_the_cash_is_an_overdraft_in_the_engine():
-    """Pinned difference `cash_cut` on the harness's own synthetic market (#127, today's list, 100% cap): identical
-    until the first decision whose last buy the harness cuts to the cash at the fill price."""
+def core_today():
     import sys
 
     sys.path.insert(0, str(ROOT / "tests" / "unit"))
     import test_multiday_core as tc
 
     b, stocks = tc.core_market()
-    m = mc.Market.from_bars(b, b.cols(stocks), b.col("SPY"))
+    return mc.Market.from_bars(b, b.cols(stocks), b.col("SPY")), tc.I0, len(b.dates) - 1
+
+
+def test_the_cash_reserve_keeps_both_inside_the_cash_and_identical():
+    """Amendment 3 on #127's market at a 100% cap, where the harness used to cut buys at the fill and the engine
+    overdrew: both now keep 3% of equity back, the engine never goes below zero, and they agree exactly."""
+    m, i0, i1 = core_today()
     data = DailyData.from_market(m)
-    c = compare(m, data, "trend_momentum", tc.I0, len(b.dates) - 1)
-    first = next(n for n, (a, e) in enumerate(zip(c["h_orders"], c["run"].orders, strict=False)) if a != e)
-    assert first == 14 and c["h_orders"][first] == (287, "buy", "S38", 1.0)  # the harness bought one share
-    assert c["h_orders"][:first] == c["run"].orders[:first]
-    od = c["run"].ledger.overdrafts
-    assert len(od) == 30 and min(x for _, x in od) == pytest.approx(-767.7, abs=1)  # at most 0.64% of equity
-    assert c["book"].equity == pytest.approx(125685.6006, abs=1e-3)
-    assert c["run"].book.equity == pytest.approx(125730.7433, abs=1e-3)
-    c60 = compare(m, data, "trend_momentum", tc.I0, len(b.dates) - 1, cap=60.0)  # under a 60% cap: identical
-    assert c60["orders_equal"] and c60["fills_equal"] and c60["digest_equal"]
+    for v in ("trend_momentum", "mom_12_1_band_nofilter"):
+        c = compare(m, data, v, i0, i1)
+        assert c["orders_equal"] and c["fills_equal"] and c["digest_equal"] and c["max_equity_gap"] <= 0.01
+        assert c["run"].ledger.overdrafts == [] and c["run"].cash_gap < 1e-6
+        assert min(r["end"] - r["exposure"] * r["end"] for r in c["run"].book.daily) >= 0  # cash never negative
+    assert compare(m, data, "trend_momentum", i0, i1)["book"].equity == pytest.approx(125272.0285, abs=1e-3)
+
+
+def test_a_buy_above_the_cash_at_the_print_is_cut_the_same_way_in_both(monkeypatch):
+    """With no reserve the last buys of a decision outgrow the cash at the auction: the harness cuts them at the
+    fill, `SimBroker(cash_at="fill")` cuts the auction order to the whole shares that fit, at the same price."""
+    from kaibot.engine import daily
+
+    monkeypatch.setattr(mc, "CASH_RESERVE", 0.0)
+    monkeypatch.setattr(daily, "CASH_RESERVE", 0.0)
+    m, i0, i1 = core_today()
+    data = DailyData.from_market(m)
+    c = compare(m, data, "trend_momentum", i0, i1)
+    cut = [o for o in c["run"].broker.orders.values() if o["side"] == "buy" and o["status"] == "canceled"]
+    assert cut and any(float(o["filled_qty"]) < float(o["qty"]) for o in cut)
+    assert c["orders_equal"] and c["fills_equal"] and c["digest_equal"] and c["max_equity_gap"] <= 0.01
+    assert c["run"].ledger.overdrafts == [] and c["run"].cash_gap < 1e-6
+
+
+def test_logged_runs_from_before_an_amendment_stay_attributable_to_the_rule():
+    """Prereg hash handling: every committed version of both files is today's file minus appended amendments, so
+    Gate A accepts trial rows logged with an earlier hash and reports them; an edit of the text does not pass."""
+    from kaibot.evaluation import prereg
+
+    for rule in ("trend_momentum", "mom_12_1_band"):
+        p = prereg.load(rule, ROOT)
+        assert len(p.amendments) >= 3 and "Amendment 3" in p.amendments[2]
+        assert p.first_committed_at < p.committed_at and len(p.versions) >= 4
+        assert all(amended for _, _, amended in p.versions) and all(p.accepts(v) for v, _, _ in p.versions)
+        assert p.versions[-1][0] == p.sha256 and not p.accepts("0" * 64)
+    base = "# Pre-registration\n\n## 2. Frozen construction\n\nATR 20\n"
+    assert prereg.amended_only(base, base + "\n## Amendment 1 (12 Nov 2026)\n\nmore text\n")
+    assert not prereg.amended_only(base, base.replace("20", "14") + "\n## Amendment 1 (12 Nov 2026)\n\nx\n")
+    assert not prereg.amended_only(base, base + "\n## 8. A new section\n\nx\n")
 
 
 # ---------------------------------------------------------------- 3. the venue's closing-auction rules

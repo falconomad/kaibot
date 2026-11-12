@@ -233,10 +233,10 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
                "mark 3: the random portfolios are replayed in the research harness (the rule's positions are the "
                "engine's); the lower of the two percentiles counts",
                "the exit-before-earnings variant is not run (approximate earnings window; S85)",
-               "the ledger is the stand-in of engine/daily.py until #117 merges; the venue has no cash book (see "
-               "`max_overdraft_pct`: a closing-auction buy is sized on the decision's close, so it cannot be cut "
-               "to the cash at the auction price as the research harness does)",
-               "a split leaving a fraction of a share pays it in cash (Alpaca); the research harness keeps it"],
+               "the ledger is the stand-in of engine/daily.py until #117 merges",
+               "Amendment 3: buys are sized against cash minus 3% of equity, a buy above the cash at the print is "
+               "cut to whole shares (the venue's cash book never goes below zero), split fractions are paid in "
+               "cash; the same in the research harness"],
            "runtime_s": round(time.time() - t0, 1)}
     if out_dir is not None:
         out_dir = Path(out_dir)

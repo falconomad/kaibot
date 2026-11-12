@@ -31,11 +31,12 @@ Pieces that later stories replace, each behind one seam:
 - `_venue_actions` applies splits and delistings to `SimBroker`'s positions. Alpaca does this itself; #160's
   `SimBroker.non_trade` activities and `ledger.actions_from_activities` replace it.
 
-The venue runs without a cash book (`SimBroker(cash=None)`): Kaibot's paper account is a margin account, so a
-closing-auction buy funded by sales at the same print is accepted live, while `SimBroker`'s cash rule would refuse
-it at submission. "Never more than the cash" is the sizing rule's job; the harness also cuts the last buy to the
-cash at the fill price, which an order sent before the auction cannot know. When that would have bitten, the
-ledger shows a negative cash balance (`overdrafts`), reported, never hidden.
+Never more than the cash (Amendment 3 of both pre-registrations, the same in the research harness): the sizing
+rule fits a decision's purchases in the cash plus its sales at the decision's prices, less a reserve of 3% of
+equity, and the venue keeps a cash book checked at the print (`SimBroker(cash_at="fill")`): a buy that would still
+exceed the cash at the auction price is cut to the whole shares that fit. Sales of the same print fill first, as
+they are sent first, so a rotation funds its purchases. The venue's cash and the ledger's agree at every close
+(`DailyRun.cash_gap`); `StandInLedger.overdrafts` stays empty.
 """
 
 from __future__ import annotations
@@ -62,6 +63,7 @@ MIN_PRICE, MIN_ADV = 5.0, 50e6  # the universe filter: price >= $5, 20-day avera
 ATR_SESSIONS, ATR_MIN = 20, 15
 ATR14, ATR14_MIN, GAP_ATR = 14, 10, 3.0  # the harness's entry also needs a 14-session ATR (its risk column)
 SIGMA_FALLBACK = 0.02 / math.sqrt(390)  # the cost model's 1-minute sigma without 20 returns
+CASH_RESERVE = 0.03  # Amendment 3 of both pre-registrations: buys are sized against cash minus 3% of equity
 AFTER_CLOSE, CORP_ACTIONS, SEND = time(16, 30), time(8, 0), time(9, 0)
 OPEN_BAR, CLOSE_BAR = time(9, 30), time(15, 59)
 FILLS = {"base": ("close", 1.0), "stress": ("open", 2.0)}  # where orders fill, spread / impact factor
@@ -233,11 +235,14 @@ def target_shares(data: DailyData, pol: RiskPolicy, atr_risk: float, k: int, j: 
 
 
 def atr_risk_sizing(tl: TargetList, held: Mapping[str, tuple[float, float]], pending: Mapping[str, str],
-                    data: DailyData, i: int, eq: float, pol: RiskPolicy, exposure_pct: float) -> Plan:
+                    data: DailyData, i: int, eq: float, pol: RiskPolicy, exposure_pct: float, cash: float) -> Plan:
     """The shared ATR sizing rule of decision 15 as the research harness applies it (`CoreRule.plan`), behind one
     function the portfolio builder (#119) replaces. `held`: symbol -> (shares, last mark) after the session's
     corporate actions; `pending`: sales still waiting for a bar (they stay sales); `eq`: equity marked at the
-    close of i - 1. Room is counted at that close's prices, as if every order of the plan fills."""
+    close of i - 1; `cash`: the account's cash before the session's fills. Room is counted at that close's
+    prices, as if every order of the plan fills. Amendment 3 of both pre-registrations: purchases (new buys and
+    resize increases) also fit in the cash plus the plan's sales and reductions at those prices, less a reserve
+    of `CASH_RESERVE` x equity; a buy still above the cash at the auction price is cut by the venue."""
     f, k = tl.features, i - 1
     sell = {s: pending.get(s, r) for s, r in f["sell"].items()}
     sell.update({s: r for s, r in pending.items() if s in held and s not in sell})
@@ -245,6 +250,11 @@ def atr_risk_sizing(tl: TargetList, held: Mapping[str, tuple[float, float]], pen
     cap = exposure_pct / 100 * eq
     exposure = sum(q * last for s, (q, last) in held.items() if s not in sell)
     names = len(held) - len(sell)
+    money = cash + sum(q * last for s, (q, last) in held.items() if s in sell) - CASH_RESERVE * eq
+
+    def fits(px: float) -> float:  # whole shares that fit under the cap and in the cash
+        return min(math.floor(max(cap - exposure, 0.0) / px), math.floor(max(money, 0.0) / px))
+
     resize: list[tuple[str, float]] = []
     if f.get("resize"):
         want = []
@@ -255,10 +265,11 @@ def atr_risk_sizing(tl: TargetList, held: Mapping[str, tuple[float, float]], pen
                 want.append((s, q, last, t))
         for s, q, last, t in sorted(want, key=lambda w: w[3] - w[1]):  # reductions first: they make room
             if t > q:
-                t = q + min(t - q, math.floor(max(cap - exposure, 0.0) / last))
+                t = q + min(t - q, fits(last))
                 if t <= q:
                     continue
             exposure += (t - q) * last
+            money -= (t - q) * last
             resize.append((s, float(t)))
     buy: list[tuple[str, float]] = []
     skipped = 0
@@ -274,10 +285,11 @@ def atr_risk_sizing(tl: TargetList, held: Mapping[str, tuple[float, float]], pen
             skipped += 1  # one share is more than the position size (decision 15: skipped, counted)
             continue
         px = data.px[k, j] / sj
-        room = math.floor(max(cap - exposure, 0.0) / px)
+        room = fits(px)
         if room < 1:
             break  # no room left: buying stops here
         exposure += min(t, room) * px
+        money -= min(t, room) * px
         names += 1
         buy.append((s, float(min(t, room))))
         if room < t:
@@ -472,6 +484,7 @@ class DailyRun:
     broker: SimBroker
     i0: int
     i1: int
+    cash_gap: float = 0.0  # largest |venue cash - ledger cash| at any close
 
     @property
     def entries(self) -> dict[int, int]:
@@ -512,7 +525,8 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     tif = "cls" if where == "close" else "opg"
     costs = AuctionImpactCosts(sigma=lambda sym, day: data.sigma_at(data.index_of(day), data.col(sym)), mult=mult)
     clock = SimClock(_at(data.day(i0 - 1), AFTER_CLOSE) - timedelta(minutes=1))
-    broker = SimBroker(data.bar_history(), clock, costs=costs, cash=None, calendar=data.calendar())
+    broker = SimBroker(data.bar_history(), clock, costs=costs, cash=equity0, calendar=data.calendar(),
+                       cash_at="fill")
     led = StandInLedger(strategy.name, strategy.rule, data, equity0, mult)
     run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1)
     pending: dict[str, str] = {}
@@ -551,6 +565,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             j = data.col(s)
             dv = float(data.div[i, j]) if data.div is not None else 0.0
             if math.isfinite(dv) and dv > 0:
+                broker.cash += led.pos[s].qty * dv  # the venue credits the dividend too (Alpaca: DIV activity)
                 led.apply("dividend", {"symbol": s, "ex_date": str(d), "per_share": dv, "i": i})
             r = data.split_at(i, j)
             if r != 1.0:
@@ -560,6 +575,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                 if frac > 1e-9:  # the fraction of a share is paid in cash (Alpaca), at the previous close / ratio
                     px = led.pos[s].last
                     broker.pos[s]["qty"] = int(math.floor(float(broker.pos[s]["qty"]) + 1e-9))
+                    broker.cash += frac * px
                     led.apply("fill", {"i": i, "symbol": s, "side": "sell", "qty": frac, "px": px, "mid": px,
                                        "fees": 0.0, "reason": "cash_in_lieu", "at": "open"})
                     run.fills.append({"i": i, "symbol": s, "side": "sell", "qty": frac, "px": px, "fees": 0.0,
@@ -575,7 +591,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         pending = {s: r for s, r in pending.items() if s in held}
         forced = {data.symbols[j] for j in exits_on.get(i, ()) if data.symbols[j] in held}
         if tl is not None:
-            plan = atr_risk_sizing(tl, held, pending, data, i, eq, pol, exposure_pct)
+            plan = atr_risk_sizing(tl, held, pending, data, i, eq, pol, exposure_pct, led.cash)
             run.skipped += plan.skipped
             run.orders += [(i, "sell", s, r) for s, r in plan.sell.items()]
             run.orders += [(i, "resize", s, t) for s, t in plan.resize] + [(i, "buy", s, t) for s, t in plan.buy]
@@ -631,6 +647,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             if term is not None and term[0] == i and math.isfinite(data.raw_c[i, j]):
                 px = max(float(data.raw_c[i, j]) * (1.0 + term[1]), 0.0)  # bars stop: closed at the terminal return
                 _venue_actions(broker, s, delist=True)
+                broker.cash += led.pos[s].qty * px
                 run.fills.append({"i": i, "symbol": s, "side": "sell", "qty": led.pos[s].qty, "px": px, "fees": 0.0,
                                   "reason": "delisted"})
                 led.apply("fill", {"i": i, "symbol": s, "side": "sell", "qty": led.pos[s].qty, "px": px, "mid": px,
@@ -638,6 +655,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                 pending.pop(s, None)
         led.apply("mark", {"i": i, "session": str(d),
                            "prices": {s: float(data.raw_c[i, data.col(s)]) for s in led.pos}})
+        run.cash_gap = max(run.cash_gap, abs(broker.cash - led.cash))  # the venue's cash book against the ledger
         if on_session:
             on_session(i)
         if i < i1:
