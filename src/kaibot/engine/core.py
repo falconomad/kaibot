@@ -677,6 +677,10 @@ class Engine:
         return d.start_equity + d.realized_reported + unreal, unreal
 
     def _risk_halts(self, m: int, eq: float) -> None:
+        if self.run is None:
+            # S74b (#137): the run has ended (run drawdown) and its flatten is out; until the closes are booked the
+            # engine only manages them. Nothing to halt any more: a second pass wrote the halt again and raised.
+            return
         d, pol = self.day, self.policy()
         if not d.halted and eq <= d.start_equity * (1 - pol.max_daily_loss_pct / 100):
             self.flatten_all("daily_stop")
@@ -1268,7 +1272,7 @@ class Engine:
 
     def _status(self, m: int) -> dict:
         d = self.day
-        return {
+        st = {
             "state": "trading" if self._may_enter(max(m, 0)) else "managing",
             "minute": m,
             "run_id": self._rid(),
@@ -1280,6 +1284,9 @@ class Engine:
             "code_sha": self.code,
             "scan": dict(d.scan) if d else None,
         }
+        if self.run is None and d is not None and d.run_id:
+            st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
+        return st
 
 
 def new_scan() -> dict:
