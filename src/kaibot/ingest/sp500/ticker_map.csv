@@ -1,0 +1,46 @@
+# Which company a point-in-time ticker of changes.csv denotes. On dates <= `until` the ticker `ticker` is the
+# company `company`; after `until` (or when no row matches) the ticker is its own company. A company id is today's
+# ticker, or TICKER#YEAR when the ticker was later reused by a different company. kind: rename (same listed company,
+# new ticker), reuse (the ticker later went to another company), dup (the source lists one company under two tickers
+# at once: on dates <= until the row's ticker is dropped while the company is also listed under another ticker).
+# Checked against S&P DJI releases, company releases and IVV's holdings on five dates (docs/ops/pit_universe.md).
+ticker,until,company,kind,note
+SNDK,2016-05-11,SNDK#2016,reuse,SanDisk (acquired by Western Digital 2016); SNDK 2025- is the Sandisk spin-off
+CCEP,2016-05-30,CCE,dup,Coca-Cola Enterprises; the source lists CCEP from 2016-01-04 beside CCE
+DD,2017-08-31,DD#2017,reuse,E.I. du Pont de Nemours (merged into DowDuPont 2017-09-01); DD 2019- is DowDuPont renamed
+DOW,2017-08-31,DOW#2017,reuse,Dow Chemical (merged into DowDuPont 2017-09-01); DOW 2019- is the Dow Inc. spin-off
+KORS,2018-12-31,CPRI,rename,Michael Kors Holdings renamed Capri Holdings (2018-12-31)
+CPRI,2018-12-31,CPRI,dup,the source lists CPRI from 2016-01-04 beside KORS (IVV 2016-12-31 holds Michael Kors only)
+DWDP,2019-06-02,DD,rename,DowDuPont renamed DuPont de Nemours
+HRS,2019-05-31,LHX,rename,Harris merged with L3 and renamed L3Harris
+TMK,2019-08-07,GL,rename,Torchmark renamed Globe Life
+BHGE,2019-10-17,BKR,rename,Baker Hughes a GE company renamed Baker Hughes
+SYMC,2019-11-04,GEN,rename,Symantec renamed NortonLifeLock (then Gen Digital)
+NLOK,2022-11-07,GEN,rename,NortonLifeLock renamed Gen Digital
+HCP,2019-11-04,DOC,rename,HCP renamed Healthpeak (PEAK; DOC from 2024)
+PEAK,2024-03-03,DOC,rename,Healthpeak took the DOC ticker after merging with Physicians Realty
+CBS,2019-12-04,PARA,rename,CBS merged with Viacom and renamed ViacomCBS (VIAC; PARA from 2022)
+VIAC,2022-02-16,PARA,rename,ViacomCBS renamed Paramount Global
+BBT,2019-12-08,TFC,rename,BB&T merged with SunTrust and renamed Truist
+JEC,2019-12-09,J,rename,Jacobs Engineering ticker change
+IR,2020-03-02,TT,rename,Ingersoll-Rand plc renamed Trane Technologies; IR from 2020-03-03 is Ingersoll Rand Inc.
+UTX,2020-04-02,RTX,rename,United Technologies merged with Raytheon and renamed Raytheon Technologies
+ARNC,2020-04-05,HWM,rename,Arconic Inc. renamed Howmet Aerospace
+CTL,2020-09-17,LUMN,rename,CenturyLink renamed Lumen Technologies
+LB,2021-08-02,BBWI,rename,L Brands renamed Bath & Body Works
+COG,2021-10-03,CTRA,rename,Cabot Oil & Gas merged with Cimarex and renamed Coterra
+WLTW,2022-01-09,WTW,rename,Willis Towers Watson ticker change
+DISCA,2022-04-10,WBD,rename,Discovery merged with WarnerMedia and renamed Warner Bros. Discovery
+BLL,2022-05-09,BALL,rename,Ball Corp ticker change
+FB,2022-06-08,META,rename,Meta Platforms ticker change
+ANTM,2022-06-27,ELV,rename,Anthem renamed Elevance Health
+PKI,2023-05-15,RVTY,rename,PerkinElmer renamed Revvity
+FI,2025-11-10,FISV,rename,Fiserv traded as FI from 2023-06-07 and went back to FISV on 2025-11-11
+RE,2023-07-09,EG,rename,Everest Re renamed Everest Group
+ABC,2023-08-29,COR,rename,AmerisourceBergen renamed Cencora
+CDAY,2024-01-31,DAY,rename,Ceridian renamed Dayforce
+FLT,2024-03-24,CPAY,rename,FleetCor renamed Corpay
+MMC,2026-01-13,MRSH,rename,Marsh & McLennan ticker change
+BK,2026-05-20,BNY,rename,Bank of New York Mellon ticker change
+SATS,2026-06-23,ECHO,rename,EchoStar ticker change
+EQR,2026-08-17,VMRK,rename,Equity Residential acquired AvalonBay and was renamed Vivmark Residential

@@ -1,0 +1,11 @@
+# Known end of a company's listed life, used by the hole policy (kaibot.ingest.sp500_pit.terminal_return).
+# terminal_return is applied to a position at the company's last stored bar when the bars stop while it is still
+# held. Companies not listed here get DEFAULT_TERMINAL_RETURN (-30%). 0.0 = taken over at about the last price.
+company,terminal_return,outcome,source
+SIVB,-1.0,bank failure (FDIC receivership 2023-03-10),FDIC press release 2023-03-10
+SBNY,-1.0,bank failure (NYDFS closed it 2023-03-12),FDIC press release 2023-03-12
+FRC,-1.0,bank failure (FDIC receivership 2023-05-01; deposits sold to JPMorgan),FDIC press release 2023-05-01
+EA,0.0,"taken private by PIF, Silver Lake and Affinity Partners",S&P DJI release for 2026-08-05
+AVB,0.0,acquired by Equity Residential (now Vivmark Residential),S&P DJI release for 2026-08-18
+WBD,0.0,acquired by Paramount Skydance,S&P DJI release 2026-10-01
+KVUE,0.0,acquired by Kimberly-Clark,S&P DJI release 2026-10-30
