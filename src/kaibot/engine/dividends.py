@@ -35,8 +35,8 @@ class ExDividend:
 
 
 def parse_cash_dividends(payload: dict) -> list[ExDividend]:
-    """Alpaca's GET /v1/corporate-actions answer -> its cash dividends (unusable rows skipped). The same reading
-    of the fields as `ingest.daily_bars.normalise_action` (rate per share, ex_date, payable_date, special)."""
+    """Alpaca's GET /v1/corporate-actions answer -> its cash dividends (unusable rows skipped). The fields are
+    read as the daily store's fetch reads them (rate per share, ex_date, payable_date, special)."""
     out = []
     for r in ((payload or {}).get("corporate_actions") or {}).get("cash_dividends") or []:
         if not isinstance(r, dict) or not r.get("symbol"):
