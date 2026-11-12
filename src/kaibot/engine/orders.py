@@ -167,6 +167,8 @@ class OrderManager:
         self.broker, self.journal, self.now, self.run_id = broker, journal, now, run_id
         self.on_fill = on_fill
         self.orders: dict[str, OrderRecord] = {}
+        self.live: dict[str, OrderRecord] = {}  # the open ones (index: ten-year research runs make many orders)
+        self.bases: dict[str, int] = {}  # client id without its attempt number -> orders made for it
         self.by_id: dict[str, str] = {}  # venue id -> coid
         self.seen: set[str] = set()  # activity ids booked
         self.foreign: dict[str, dict] = {}  # activity id -> a fill on an order this manager does not know
@@ -180,6 +182,9 @@ class OrderManager:
         if kind == "om_intent":
             r = OrderRecord(**{k: b[k] for k in OrderRecord.__dataclass_fields__ if k in b and k not in ("state",)})
             self.orders[r.coid] = r
+            self.live[r.coid] = r
+            base = _base(r.coid)
+            self.bases[base] = self.bases.get(base, 0) + 1
         elif kind == "om_terms":
             r = self.orders.get(b["coid"])
             for k in ("stop", "limit", "qty"):
@@ -190,6 +195,8 @@ class OrderManager:
             if r is None:
                 return
             r.state = St(b["state"])
+            if r.state in TERMINAL:
+                self.live.pop(r.coid, None)
             for k in ("venue", "reason", "expires_at", "last_miss"):
                 if k in b:
                     setattr(r, k, b[k])
@@ -232,24 +239,24 @@ class OrderManager:
     def working(self, symbol: str | None = None, strategy: str | None = None,
                 purposes: Iterable[str] | None = None) -> list[OrderRecord]:
         ps = set(purposes) if purposes is not None else None
-        return [r for r in self.orders.values() if r.open and (symbol is None or r.symbol == symbol)
+        return [r for r in list(self.live.values()) if r.open and (symbol is None or r.symbol == symbol)
                 and (strategy is None or r.strategy == strategy) and (ps is None or r.purpose in ps)]
 
     def blocked(self, symbol: str) -> str | None:
         """Why no new order may go out in `symbol` (None: it may): an order the venue has not confirmed yet."""
-        for r in self.orders.values():
+        for r in self.live.values():
             if r.symbol == symbol and r.state in UNCONFIRMED:
                 return f"order {r.coid} is {r.state}: look it up by its client order id first"
         return None
 
     def attempts(self, base: str) -> int:
         """How many orders were already made for this decision (the client id without its attempt number)."""
-        return sum(1 for c in self.orders if c.rsplit("-", 1)[0] == base)
+        return self.bases.get(base, 0)
 
     def next_coid(self, run, strategy: str, symbol: str, session: str, purpose: str) -> str:
-        base = client_order_id(run, strategy, symbol, session, purpose, 1).rsplit("-", 1)[0]
-        for r in self.orders.values():  # an open order of this decision is reused, never doubled
-            if r.coid.rsplit("-", 1)[0] == base and r.open:
+        base = _base(client_order_id(run, strategy, symbol, session, purpose, 1))
+        for r in self.live.values():  # an open order of this decision is reused, never doubled
+            if r.open and _base(r.coid) == base:
                 return r.coid
         return client_order_id(run, strategy, symbol, session, purpose, self.attempts(base) + 1)
 
@@ -387,7 +394,7 @@ class OrderManager:
     def resolve(self) -> list[OrderRecord]:
         """Look up every order the venue has not confirmed, BY CLIENT ORDER ID, before anything else."""
         out = []
-        for r in list(self.orders.values()):
+        for r in list(self.live.values()):
             if r.state in UNCONFIRMED:
                 try:
                     o = self.broker.order_by_client_id(r.coid)
@@ -412,7 +419,7 @@ class OrderManager:
         """Book new fills from the account activities, then poll every open order the venue knows."""
         self.resolve()
         fills = self.read_fills()
-        for r in list(self.orders.values()):
+        for r in list(self.live.values()):
             if r.open and r.order_id and r.state not in UNCONFIRMED:
                 self._poll(r)
         return fills
@@ -461,6 +468,10 @@ def _num(v) -> float | None:
         return None if v is None else float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _base(coid: str) -> str:
+    return coid.rsplit("-", 1)[0]
 
 
 def _reason(e: BrokerError) -> str:

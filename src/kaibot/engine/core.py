@@ -42,7 +42,9 @@ from kaibot.broker.protocol import Broker, OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
 from kaibot.engine.config import ROOT
+from kaibot.engine.dividends import match_payment, open_accruals, receivable
 from kaibot.engine.events import from_fomc_dates, in_blackout
+from kaibot.engine.execution import flatten_at_close
 from kaibot.engine.journal import Journal, canon
 from kaibot.engine.ledger import (
     CORPORATE_ACTIVITIES,
@@ -279,6 +281,7 @@ class Engine:
         rules_extra=None,
         journal: Journal | None = None,
         corporate_actions=None,
+        ex_dividends=None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
@@ -308,6 +311,9 @@ class Engine:
         # S77: corporate actions for a session: research passes the daily store's table (day -> [Action]); None
         # reads the broker's non-trade activities (Alpaca: dividends DIV*, splits SSP) when a position is held
         self.corporate_actions = corporate_actions
+        # S78 (#118): live, dividends are accrued at the ex-date (engine/dividends.ExDateDividends: (day, symbols)
+        # -> ex-dividends) and Alpaca's later payment is matched to the accrual; None: booked when paid
+        self.ex_dividends = ex_dividends
         self._finalize_checked: date | None = None
         self.account_clean = True
         self.code = code_sha()
@@ -327,6 +333,7 @@ class Engine:
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
             log.exception("order adoption failed")
         self.check_account()
+        self._startup_reconcile()
         self.store.event(
             "engine_start",
             {"code_sha": self.code, "fingerprint": self.fingerprint, "run_id": self.run and self.run["id"],
@@ -350,6 +357,24 @@ class Engine:
                    "action": "entries blocked until the paper account is clean"}
             log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
+
+    def _startup_reconcile(self) -> None:
+        """S78 (#118, audit D8): at start-up the ledger is compared with the broker, shares per symbol and cash
+        (account activities and positions, `_reconcile`). A difference blocks entries until the next session
+        start checks again (fail closed). A symbol with an entry or exit under way is compared once it settles
+        (the per-minute drift check does that), as is a symbol already reported as foreign by check_account."""
+        b = self.ledger.book(self._rid()) if self.run else None
+        if b is None:
+            return
+        out = self._reconcile(b)
+        unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
+        pos = {s: v for s, v in (out.get("positions") or {}).items() if s not in unsettled and v.get("ledger")}
+        cash = out.get("cash_diff")
+        if pos or (cash is not None and abs(cash) > out["tolerance"]):
+            self.account_clean = False
+            self.store.event("startup_reconcile", {"positions": pos, "cash_diff": cash,
+                                                   "action": "entries blocked until the book matches the broker"},
+                             self._rid())
 
     # ================= fail-closed halts =================
     def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
@@ -754,7 +779,7 @@ class Engine:
         self._risk_halts(m, eq)
         self._manage_stops(m)
         if m >= d.flatten_m and not d.flattened:
-            self.flatten_all("time")
+            self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
         if self.roomflow is not None and self.roomflow.jobs:
             self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
@@ -847,13 +872,20 @@ class Engine:
         passes the daily store's table; live reads Alpaca's non-trade activities. Never raises: a failure is an
         event, and a split the ledger missed shows as drift (entries stop)."""
         b = self.ledger.book(self._rid())
-        if b is None or not b.sleeves:
+        if b is None:
+            return
+        due = self.corporate_actions is None and bool(open_accruals(self.journal.entries(kinds=("div_accrual",
+                                                                                                "div_paid"))))
+        if not b.sleeves and not due:  # nothing held and no accrued dividend waiting for its payment
             return
         try:
             if self.corporate_actions is not None:
                 acts = list(self.corporate_actions(today) or ())
             else:
+                if self.ex_dividends is not None:
+                    self._accrue_dividends(b, today)
                 rows = self.broker.activities(self.now() - timedelta(days=10), types=CORPORATE_ACTIVITIES)
+                rows = self._match_dividend_payments(rows)
                 bq = {s: float(p["qty"]) for s, p in self.broker.positions().items()}
                 acts = actions_from_activities(rows, b.qty_by_symbol(), bq)
         except Exception as e:
@@ -862,6 +894,46 @@ class Engine:
             return
         for a in acts:
             self._book_action(b, a)
+
+    def _accrue_dividends(self, b, today: date) -> None:
+        """S78 (#118): the dividends going ex today, booked to the sleeves holding the stock at this open (they held
+        it over the last close) and journalled as receivables until Alpaca pays them."""
+        held = sorted({sym for (_, sym), sl in b.sleeves.items() if sl.qty > 0})
+        known = open_accruals(self.journal.entries(kinds=("div_accrual", "div_paid")))
+        for x in self.ex_dividends(today, held) or ():
+            if x.ref in known or not b.holders(x.symbol):
+                continue
+            amount = x.per_share * b.qty_by_symbol().get(x.symbol, 0.0)
+            self._book_action(b, Action(x.symbol, x.ex_date, "dividend", per_share=x.per_share, ref=x.ref))
+            self.journal.append("div_accrual", {"ref": x.ref, "symbol": x.symbol, "ex_date": x.ex_date,
+                                                "pay_date": x.pay_date, "per_share": x.per_share,
+                                                "amount": round(amount, 6), "run_id": b.run_id})
+
+    def _match_dividend_payments(self, rows: list[dict]) -> list[dict]:
+        """S78: a DIV payment that pays an accrual is not booked again (journalled as `div_paid`); every other row
+        goes on to be booked as before (a payment with no accrual is booked when paid)."""
+        entries = self.journal.entries(kinds=("div_accrual", "div_paid"))
+        paid = {e[3].get("activity") for e in entries if e[2] == "div_paid"}
+        acc = open_accruals(entries)
+        out = []
+        for r in rows:
+            aid = f"alpaca:{r.get('id')}"
+            if r.get("activity_type") != "DIV":
+                out.append(r)
+                continue
+            if aid in paid:
+                continue  # matched on an earlier day
+            ref = match_payment(r, acc)
+            if ref is None:
+                out.append(r)
+                continue
+            accrued, net = float(acc[ref]["amount"]), float(r.get("net_amount") or 0.0)
+            self.journal.append("div_paid", {"ref": ref, "activity": aid, "net_amount": net, "accrued": accrued})
+            acc.pop(ref)
+            if abs(net - accrued) > 0.01:
+                self.store.event("dividend_difference", {"ref": ref, "accrued": round(accrued, 2),
+                                                         "paid": round(net, 2)}, self._rid())
+        return out
 
     def _book_action(self, b, a: Action) -> None:
         if not b.holders(a.symbol):
@@ -968,14 +1040,12 @@ class Engine:
         r = self.day.rules if self.day else None
         strats = registry.live(r.strategies if r is not None else self.level_strategies())
         held = [s.name for s in strats if s.holding is Holding.MULTI_DAY]
-        if held and self.corporate_actions is None:
-            # Guard for #118 (QA-Ops review of #117): live dividends are booked when Alpaca pays them (DIV
-            # activities, pay date) to the rules still holding the stock. Right for intraday rules, which never
-            # hold over an ex-date. A rule held over an ex-date needs the dividend accrued AT the ex-date (equity
-            # is understated until the pay date, and a dividend paid after the sale is lost). #118 replaces this.
-            raise MultiDayDividendsError(
-                f"{', '.join(held)} hold(s) across sessions, but live dividends are booked at the pay date: "
-                "multi-day holding needs ex-date dividend accrual first (#118)")
+        if held and self.corporate_actions is None and self.ex_dividends is None:
+            # S78 (#118): a rule held over an ex-date earns the dividend at the ex-date, so it needs the ex-date
+            # source (engine/dividends.ExDateDividends, wired by __main__). Without one: fail closed.
+            raise ExDateSourceMissing(
+                f"{', '.join(held)} hold(s) across sessions: dividends must be accrued at the ex-date, and this "
+                "engine has no ex-date source (ex_dividends)")
         return strats
 
     def context(self, m: int, event: Event = Event.BAR_CLOSE, strategy: str | None = None) -> Context:
@@ -1460,6 +1530,8 @@ class Engine:
         t0 = self.monotonic()
         failed: dict[str, Exception | str] = {}
         todo = sorted(self.pos.values(), key=lambda p: p.symbol in self._flatten_slow)  # stable: book order kept
+        if reason == "time":  # S78 (#118): the close-minus-5 flatten takes intraday sleeves only
+            todo = [p for p in todo if flatten_at_close(_holding(p.strategy))]
         for _ in range(FLATTEN_TRIES):
             again = []
             for k, p in enumerate(todo):
@@ -1626,8 +1698,9 @@ class Engine:
         pos = {s: {"ledger": mine.get(s, 0), "broker": theirs.get(s, 0)} for s in sorted(set(mine) | set(theirs))
                if abs(mine.get(s, 0) - theirs.get(s, 0)) > 1e-9}
         cash_diff = None
+        due = receivable(self.journal.entries(kinds=("div_accrual", "div_paid")))  # S78: accrued, not yet paid
         if b.broker_cash0 is not None and acct.get("cash") is not None:
-            cash_diff = round((float(acct["cash"]) - float(b.broker_cash0)) - (b.cash - b.amount), 2)
+            cash_diff = round((float(acct["cash"]) - float(b.broker_cash0)) - (b.cash - due - b.amount), 2)
         tol = max(CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT / 100 * b.amount)
         ok = not pos and (cash_diff is None or abs(cash_diff) <= tol)
         out = {"ok": ok, "positions": pos, "cash_diff": cash_diff, "tolerance": tol, "ts": self.now().isoformat()}
@@ -1700,8 +1773,13 @@ def _refused(err: Exception) -> bool:
     return isinstance(status, int) and 400 <= status < 500
 
 
-class MultiDayDividendsError(NotImplementedError):
-    """A multi-day rule on live dividends (pay date): the guard #118 must replace."""
+class ExDateSourceMissing(RuntimeError):
+    """A multi-day rule on an engine without an ex-date dividend source (S78, #118: accrual at the ex-date)."""
+
+
+def _holding(strategy: str | None):
+    s = registry.get(strategy) if strategy else None
+    return getattr(s, "holding", Holding.INTRADAY)
 
 
 def _order_refused(err: Exception) -> bool:

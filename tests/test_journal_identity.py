@@ -313,11 +313,13 @@ def test_every_broker_call_is_preceded_by_its_intent_in_the_journal(tmp_path):
     assert {"entry", "replace_limit", "replace_stop"} <= set(intents)
 
 
-# ---------------------------------------------------------------- dividends: the guard #118 replaces
-def test_multi_day_holding_on_pay_date_dividends_is_refused_until_118(tmp_path, monkeypatch):
-    """Live dividends are booked at the pay date (Alpaca DIV activities), which is exact for intraday rules (never
-    held over an ex-date). A rule held across sessions needs ex-date accrual: #118 must replace this guard."""
-    from kaibot.engine.core import MultiDayDividendsError
+# ---------------------------------------------------------------- dividends: accrued at the ex-date (#118)
+def test_multi_day_holding_needs_the_ex_date_dividend_source(tmp_path, monkeypatch):
+    """#118 replaced #117's pay-date guard with ex-date accrual (engine/dividends.py, tests in
+    tests/unit/test_execution.py). A rule held across sessions on an engine without an ex-date source still fails
+    closed; with the source (wired by __main__) or the daily store's ex-dates it loads. (The registry keeps
+    refusing every multi-day rule live until #120 and Gate B: test_engine_momentum.)"""
+    from kaibot.engine.core import ExDateSourceMissing
     from kaibot.strategies import registry
     from kaibot.strategies.base import Holding
 
@@ -326,7 +328,9 @@ def test_multi_day_holding_on_pay_date_dividends_is_refused_until_118(tmp_path, 
     held = registry.live(names)[0]
     multi = SimpleNamespace(**{k: getattr(held, k) for k in ("name", "mode")}, holding=Holding.MULTI_DAY)
     monkeypatch.setattr(registry, "STRATEGIES", tuple(multi if s is held else s for s in registry.STRATEGIES))
-    with pytest.raises(MultiDayDividendsError, match="#118"):
+    with pytest.raises(ExDateSourceMissing, match="ex-date"):
         eng.live_strategies()
-    eng.corporate_actions = lambda day: []  # ex-date actions given (research: the daily store): allowed
+    eng.ex_dividends = lambda day, symbols: []  # Alpaca's corporate actions (live)
+    assert eng.live_strategies()
+    eng.ex_dividends, eng.corporate_actions = None, lambda day: []  # the daily store's ex-dates (research)
     assert eng.live_strategies()

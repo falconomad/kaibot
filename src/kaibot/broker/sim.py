@@ -180,6 +180,7 @@ class SimBroker(BrokerBase):
         self.down = False  # a network cut: every call raises BrokerError(0) until it is False again
         self.calls: list[str] = []  # every write the venue received (submit / cancel / replace), for drills
         self._dup: set[str] = set()
+        self._fill_ts: list[datetime] = []  # transaction time of each row of `fills`
         self._gone: dict[str, dict] = {}  # legs a nested replace took out of their parent's list
         self.cash_at = cash_at
         self.bars, self.clk = bars, clock
@@ -271,8 +272,13 @@ class SimBroker(BrokerBase):
     def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
         """Fills, plus the non-trade activities a test puts in `non_trade` (dividends, splits) of the types asked."""
         self._net()
-        rows = (list(self.fills) if "FILL" in types else []) + [
-            a for a in self.non_trade if a.get("activity_type") in types]
+        # fills are booked in time order: start after `after` (unless a test wrote rows into `fills` itself)
+        if after is not None and "FILL" in types and len(self._fill_ts) == len(self.fills):
+            k = bisect.bisect_right(self._fill_ts, _utc(after))
+            rows = self.fills[k:] + [a for a in self.non_trade if a.get("activity_type") in types]
+        else:
+            rows = (list(self.fills) if "FILL" in types else []) + [
+                a for a in self.non_trade if a.get("activity_type") in types]
         if after is None:
             return rows
         def when(f: dict) -> datetime:
@@ -654,8 +660,10 @@ class SimBroker(BrokerBase):
                            "price": str(px), "qty": str(_num(qty)), "side": side, "symbol": symbol,
                            "leaves_qty": str(_num(max(total - done - qty, 0.0))), "cum_qty": str(_num(done + qty)),
                            "order_id": o["id"], "order_status": o["status"], "fees": fees})
+        self._fill_ts.append(t)
         if parent["id"] in self._dup or o["id"] in self._dup:
             self.fills.append(dict(self.fills[-1]))  # the same activity reported twice (same id)
+            self._fill_ts.append(t)
 
     def _end(self, o: dict, status: str) -> None:
         o["status"] = status
