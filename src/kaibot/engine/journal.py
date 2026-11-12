@@ -28,7 +28,9 @@ looks once, at its first contact with Supabase, for `ledger_day` and `segment.js
 pre-0018 tables the way the engine always did: the database assigns the ids of run / signal / order / trade (the
 journal keeps a map from the engine's id to the database's and translates every reference), no `jseq`, and the
 ledger's own tables stay in the journal. A send whose answer was lost may then be duplicated on retry, as before
-S77, and `rebuild()` is refused. Apply 0018 and restart the engine to switch; references to rows sent before the
+S77: every table without a natural key, so run, signal, trade, fill, event, halt, segment, gate_run and
+gate_report (a doubled trade or fill count on the dashboard, a duplicate in the event hash chain; decisions are not
+affected, the engine's state is local). This goes away once 0018 is applied (#165). `rebuild()` is refused. Apply 0018 and restart the engine to switch; references to rows sent before the
 switch still go through the map.
 
 Reads of the engine's own tables are answered locally. Only tables other writers own (the dashboard's commands
@@ -50,6 +52,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -664,7 +667,9 @@ class Replicator:
         return done
 
     def rebuild(self) -> int:
-        """Send the whole journal again (into an empty or a partly filled database): idempotent. Needs 0018."""
+        """Send the whole journal again: inserts are idempotent, updates are not ordered against newer rows. So only
+        into an empty project, or with the journal that wrote the newest rows (after the start check or an adopt):
+        replaying an older file's `update` entries reverts newer values in Supabase (#165 N4). Needs 0018."""
         if self.detect() == SCHEMA_PRE_0018:
             raise RuntimeError("rebuild needs migration 0018 (without jseq a second send duplicates rows): "
                                "apply migrations/0018_m7_ledger.sql first")
@@ -818,8 +823,9 @@ def _eq_filter(v) -> str:
 
 
 def same_row(sent: dict, stored: dict) -> bool:
-    """Is the stored row the one sent? Every column sent, as Postgres gives it back: numbers to the cent (numeric
-    columns round), times as instants, JSON by value. Columns the database fills itself are not compared."""
+    """Is the stored row the one sent? Every column sent, as Postgres gives it back: floats to the cent (numeric
+    columns round), integers (ids, references, jseq) exactly, times as instants, JSON by value. Columns the database
+    fills itself are not compared."""
     return all(_same(v, stored.get(k)) for k, v in sent.items() if k != "id" or "id" in stored)
 
 
@@ -828,12 +834,17 @@ def _same(a, b) -> bool:
         return a is None and b is None
     if isinstance(a, bool) or isinstance(b, bool):
         return str(a).lower() == str(b).lower()
-    if isinstance(a, int | float) or isinstance(b, int | float):
-        try:
+    if isinstance(a, float) or (isinstance(b, float) and not isinstance(a, int)):
+        try:  # the engine sent a float (a price, money): numeric columns round it to the cent
             x, y = float(a), float(b)
         except (TypeError, ValueError):
             return False
         return abs(x - y) <= 0.005 + 1e-9 * max(abs(x), abs(y))
+    if isinstance(a, int) or isinstance(b, int):  # ids, FKs, jseq, counts: never rounded, so exact (#165 N1)
+        try:
+            return Decimal(str(a)) == Decimal(str(b))
+        except InvalidOperation:
+            return False
     if isinstance(a, dict) and isinstance(b, dict):
         return all(_same(a.get(k), b.get(k)) for k in set(a) | set(b))
     if isinstance(a, list | tuple) and isinstance(b, list | tuple):
@@ -853,8 +864,10 @@ def _schema_missing(e: Exception) -> bool:
 
 
 def _duplicate(e: Exception) -> bool:
+    """A unique violation only (23505). PostgREST answers 409 for a foreign-key violation (23503) too: that is a
+    real error, so replication pauses on the entry and retries it, it is never dropped as a conflict (#165 N2)."""
     text = str(e)
-    return "409" in text or "23505" in text or "duplicate key" in text
+    return "23505" in text or "duplicate key" in text
 
 
 def send(remote, jseq: int, op: dict) -> None:
@@ -874,7 +887,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="the engine's local journal")
     ap.add_argument("--path", type=Path, default=None)
     ap.add_argument("--status", action="store_true")
-    ap.add_argument("--rebuild", action="store_true", help="send every row to Supabase again (idempotent)")
+    ap.add_argument("--rebuild", action="store_true",
+                    help="send every row to Supabase again: only into an empty project or from the newest journal "
+                         "(an older file's updates revert newer values; never after restoring a backup)")
     a = ap.parse_args(argv)
     from kaibot.engine.config import Settings
     from kaibot.engine.store import Store
