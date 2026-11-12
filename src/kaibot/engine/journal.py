@@ -15,7 +15,15 @@ Supabase is a replica. `Replicator` sends the `row` entries in journal order, fr
 outage only makes the replica late. Every send is idempotent (engine-assigned ids for the four tables other rows
 point to, a `jseq` column with the journal sequence number elsewhere, natural keys for the rest; "duplicate key"
 counts as done), so a retry after an unknown outcome and a full `rebuild()` never duplicate a row. Migration
-0017 makes the ids and `jseq` acceptable to the database; it must be applied before this code runs live.
+0018 makes the ids and `jseq` acceptable to the database.
+
+Before 0018 is applied the replica degrades instead of stopping (the dashboard keeps updating): the replicator
+looks once, at its first contact with Supabase, for `ledger_day` and `segment.jseq`. Without them it writes the
+pre-0018 tables the way the engine always did: the database assigns the ids of run / signal / order / trade (the
+journal keeps a map from the engine's id to the database's and translates every reference), no `jseq`, and the
+ledger's own tables stay in the journal. A send whose answer was lost may then be duplicated on retry, as before
+S77, and `rebuild()` is refused. Apply 0018 and restart the engine to switch; references to rows sent before the
+switch still go through the map.
 
 Reads of the engine's own tables are answered locally. Only tables other writers own (the dashboard's commands
 and configs, the trial registry, the news desk) are read from Supabase, with a short timeout and a breaker.
@@ -47,6 +55,9 @@ ID_TABLES = frozenset({"run", "signal", "order", "trade"})  # other rows point a
 JSEQ_TABLES = frozenset({"segment", "gate_run", "fill", "halt", "event", "gate_report"})  # deduplicated on jseq
 DEFAULT_TS = {"halt": "ts", "gate_report": "ts", "gate_random": "created_at"}  # set when written, not replicated
 LIVE_ID_BASE = 1_000_000_000  # engine-assigned ids live above every id the database's own sequences hand out
+LEDGER_TABLES = frozenset({"ledger_day", "ledger_position"})  # created by 0018: not replicated before it
+FK_COLUMNS = {"run_id": "run", "signal_id": "signal", "order_id": "order", "trade_id": "trade"}
+SCHEMA_0018, SCHEMA_PRE_0018 = "0018", "pre-0018"
 
 SCHEMA = """
 create table if not exists entry (
@@ -60,6 +71,8 @@ create trigger if not exists entry_no_update before update on entry
 create trigger if not exists entry_no_delete before delete on entry
   begin select raise(abort, 'the journal is append-only'); end;
 create table if not exists cursor (name text primary key, seq integer not null);
+create table if not exists idmap (name text not null, tbl text not null, engine_id integer not null,
+  db_id integer not null, primary key (name, tbl, engine_id));
 """
 
 
@@ -129,6 +142,17 @@ class Journal:
         with self.lock:
             self.db.execute("insert into cursor (name, seq) values (?, ?) on conflict(name) do update set seq = ?",
                             (name, seq, seq))
+
+    def id_map(self, name: str) -> dict[tuple[str, int], int]:
+        """Engine id -> database id, for rows a replica received before migration 0018 (it assigned the id)."""
+        with self.lock:
+            rows = self.db.execute("select tbl, engine_id, db_id from idmap where name = ?", (name,)).fetchall()
+        return {(t, int(e)): int(d) for t, e, d in rows}
+
+    def map_id(self, name: str, table: str, engine_id: int, db_id: int) -> None:
+        with self.lock:
+            self.db.execute("insert or replace into idmap (name, tbl, engine_id, db_id) values (?, ?, ?, ?)",
+                            (name, table, int(engine_id), int(db_id)))
 
     def close(self) -> None:
         with self.lock:
@@ -395,8 +419,11 @@ class Replicator:
     """Sends the journal's `row` entries to Supabase in order. Never raises out of `pump`: a failure stops this
     pass, is remembered (`last_error`) and retried by the next one."""
 
-    def __init__(self, journal: Journal, remote, name: str = "supabase", batch: int = 500):
+    def __init__(self, journal: Journal, remote, name: str = "supabase", batch: int = 500,
+                 schema: str | None = None):
         self.journal, self.remote, self.name, self.batch = journal, remote, name, batch
+        self.schema = schema  # SCHEMA_0018 / SCHEMA_PRE_0018; None: not known yet (detect() at the first contact)
+        self.ids = journal.id_map(name)
         self.last_error: str | None = None
         self.sent = 0
         self._stop = threading.Event()
@@ -405,7 +432,30 @@ class Replicator:
     def pending(self) -> int:
         return self.journal.count(("row",), after=self.journal.cursor(self.name))
 
+    def detect(self) -> str | None:
+        """Is migration 0018 applied? Asked once, at the first answer from Supabase; the answer holds until the
+        engine restarts. None while Supabase cannot be reached (then nothing is sent and the next pass asks)."""
+        if self.schema is not None:
+            return self.schema
+        q = getattr(self.remote, "quick", None)
+        r = q() if q is not None else self.remote
+        try:
+            r.select("ledger_day", {"select": "run_id", "limit": "1"})
+            r.select("segment", {"select": "jseq", "limit": "1"})
+            self.schema = SCHEMA_0018
+        except Exception as e:
+            if not _schema_missing(e):
+                self.last_error = f"{type(e).__name__}: {e}"[:300]
+                return None
+            self.schema = SCHEMA_PRE_0018
+            log.warning("migration 0018 is not applied: replicating to the pre-0018 tables (database ids, no "
+                        "ledger_day / ledger_position) so the dashboard keeps updating. Apply "
+                        "migrations/0018_m7_ledger.sql, then restart the engine to switch.")
+        return self.schema
+
     def pump(self, max_n: int | None = None) -> int:
+        if self.detect() is None:
+            return 0
         done = 0
         while max_n is None or done < max_n:
             cur = self.journal.cursor(self.name)
@@ -414,7 +464,7 @@ class Replicator:
                 break
             for seq, _, _, op in todo:
                 try:
-                    send(self.remote, seq, op)
+                    self._send(seq, op)
                 except Exception as e:
                     if self.last_error is None:
                         log.warning("replication to %s paused at entry %d: %s", self.name, seq, str(e)[:200])
@@ -431,7 +481,10 @@ class Replicator:
         return done
 
     def rebuild(self) -> int:
-        """Send the whole journal again (into an empty or a partly filled database): idempotent."""
+        """Send the whole journal again (into an empty or a partly filled database): idempotent. Needs 0018."""
+        if self.detect() == SCHEMA_PRE_0018:
+            raise RuntimeError("rebuild needs migration 0018 (without jseq a second send duplicates rows): "
+                               "apply migrations/0018_m7_ledger.sql first")
         self.journal.set_cursor(self.name, 0)
         return self.pump()
 
@@ -455,7 +508,58 @@ class Replicator:
 
     def status(self) -> dict:
         return {"cursor": self.journal.cursor(self.name), "last_seq": self.journal.last_seq(),
-                "pending": self.pending(), "error": self.last_error}
+                "pending": self.pending(), "error": self.last_error, "schema": self.schema}
+
+    def _db_id(self, table: str, v):
+        return self.ids.get((table, v), v) if isinstance(v, int) else v
+
+    def _translate(self, op: dict) -> dict:
+        """References to rows the database numbered itself (sent before 0018) take the database's id."""
+        if not self.ids:
+            return op
+        op = dict(op)
+
+        def fks(d: dict) -> dict:
+            return {k: self._db_id(FK_COLUMNS[k], v) if k in FK_COLUMNS else v for k, v in d.items()}
+
+        if op["op"] in ("insert", "upsert"):
+            op["row"] = fks(op["row"])
+        else:
+            m = fks(op["match"])
+            if op["table"] in ID_TABLES and "id" in m:
+                m["id"] = self._db_id(op["table"], m["id"])
+            op["match"], op["values"] = m, fks(op["values"])
+        return op
+
+    def _send(self, seq: int, op: dict) -> None:
+        t = op["table"]
+        op = self._translate(op)
+        if self.schema != SCHEMA_PRE_0018:
+            return send(self.remote, seq, op)
+        if t in LEDGER_TABLES:  # no such tables before 0018: the ledger stays in the journal
+            return None
+        if op["op"] != "insert":
+            return send(self.remote, seq, op)
+        row = dict(op["row"])
+        eid = row.pop("id", None)
+        if t not in ID_TABLES:
+            self.remote.insert(t, row, returning=False)
+            return None
+        if (t, eid) in self.ids:  # sent already
+            return None
+        out = self.remote.insert(t, row, returning=True)
+        out = out[0] if isinstance(out, list) else out
+        if not out or out.get("id") is None:
+            raise RuntimeError(f"insert into {t} returned no id")
+        self.journal.map_id(self.name, t, eid, out["id"])
+        self.ids[(t, eid)] = int(out["id"])
+        return None
+
+
+def _schema_missing(e: Exception) -> bool:
+    """PostgREST's answers for a table or column that does not exist (as opposed to Supabase being down)."""
+    text = str(e)
+    return any(c in text for c in ("PGRST205", "PGRST204", "42P01", "42703", "does not exist", "Could not find"))
 
 
 def _duplicate(e: Exception) -> bool:
@@ -497,7 +601,11 @@ def main(argv: list[str] | None = None) -> int:
     j = Journal(a.path or journal_path(s.data_dir))
     rep = Replicator(j, Store(s.supabase_url, s.supabase_service_key))
     if a.rebuild:
-        print(json.dumps({"sent": rep.rebuild(), **rep.status()}))
+        try:
+            print(json.dumps({"sent": rep.rebuild(), **rep.status()}))
+        except RuntimeError as e:
+            print(str(e), file=sys.stderr)
+            return 2
     else:
         print(json.dumps(rep.status()))
     return 0

@@ -1,7 +1,7 @@
 # Ledger and local journal (story S77, issue #117)
 
 Decision 15 section 3 (`Ledger`), audit B1 items 4, 5, 13, 14 and D5, D8, H2. Code: `src/kaibot/engine/journal.py`,
-`src/kaibot/engine/ledger.py`, `src/kaibot/engine/core.py`. Migration: `migrations/0017_m7_ledger.sql`.
+`src/kaibot/engine/ledger.py`, `src/kaibot/engine/core.py`. Migration: `migrations/0018_m7_ledger.sql`.
 
 ## What changed
 
@@ -88,8 +88,19 @@ enough outage still lets them act on their own rules.
 
 ## Migrations to apply
 
-`0017_m7_ledger.sql`, **before** this code runs on paper (until it is applied, replication stops at the first row
-and the dashboard shows nothing new, while the engine trades on its journal). Additive and re-runnable.
+`0018_m7_ledger.sql`. Additive and re-runnable. Apply it before or after this code starts on paper:
+
+- Before (or while today's engine runs): the replicator sees `ledger_day` and `segment.jseq` and replicates with
+  engine ids and `jseq` (idempotent), including the ledger tables.
+- Not applied yet: at its first contact with Supabase the replicator finds them missing and writes the pre-0018
+  tables as the engine always did (database ids, mapped in the journal's `idmap`; no `jseq`; `ledger_day` and
+  `ledger_position` stay in the journal). The dashboard keeps updating with today's RPCs; `kb_book` and
+  `kb_equity_series` do not exist yet. A lost answer may duplicate a row on retry (as before S77), and
+  `python -m kaibot.engine.journal --rebuild` is refused. `--check` shows `"schema": "pre-0018"` on the
+  journal line.
+- Applied while the engine runs: nothing changes until the engine restarts (the check is done once); then it
+  switches to the new tables. Rows sent before the switch keep their database ids; references to them go through
+  the map. The ledger rows of the sessions before the switch are not sent (they stay in the journal).
 
 ## RPC contract for the multi-day dashboard (S90)
 

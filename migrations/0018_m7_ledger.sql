@@ -1,4 +1,4 @@
--- 0017: Engine v3 S77 (#117, decision 15 section 3): the ledger and the local journal.
+-- 0018: Engine v3 S77 (#117, decision 15 section 3): the ledger and the local journal.
 --
 -- APPLY BEFORE the engine with the journal (PR for #117) starts on paper. Safe to apply while today's engine runs:
 -- every change is additive, and rows written without the new columns keep working.

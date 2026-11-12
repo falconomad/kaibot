@@ -185,7 +185,12 @@ def main() -> None:
             return row and {k: row[k] for k in ("host", "started_at", "expires_at")} or "free"
 
         step("engine_lease", lease_state)
-        step("journal", lambda: {"path": eng.journal.path, **Replicator(eng.journal, remote).status()})
+        def journal_state():
+            rep = Replicator(eng.journal, remote)
+            rep.detect()  # "schema": "0018", or "pre-0018" (the dashboard still updates; apply 0018, then restart)
+            return {"path": eng.journal.path, **rep.status()}
+
+        step("journal", journal_state)
         step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
         print(json.dumps(report, indent=1, default=str))
         ok = not any(isinstance(v, str) and v.startswith("FAILED") for v in report.values())
@@ -198,6 +203,9 @@ def main() -> None:
     lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host)
     start_with_lease(eng, lease)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
+    # Once, now: with 0018 the new tables; without it the pre-0018 ones (the dashboard keeps updating).
+    # Supabase unreachable: asked again at the first pass that reaches it.
+    log.info("replica schema: %s", replicator.detect() or "not known yet (Supabase unreachable)")
     replicator.start()
     status: dict = {"state": "starting"}
     last_minute = None
