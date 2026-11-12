@@ -9,8 +9,12 @@
 --    list written into the function. A retired rule left `true` in a config saved before its retirement is
 --    ignored, exactly as engine/userconfig.py does: ignoring it can never switch the rule on, refusing it would
 --    refuse every saved Balanced and Hunter config.
--- Note for #103 (0014_m5_custom_tickers.sql also replaces config_check): keep its strategies block as the call to
--- kaibot.config_check_strategies below, or applying 0014 after this file brings the old hard-coded list back.
+--
+-- Order and safety (production already has 0001-0013 and 0014's config_check, see docs/ops/migrations_pending.md):
+-- apply AFTER 0014. config_check below is 0014's version (focus.custom kept) with only the strategies block
+-- replaced, so applying this file on production as it is now keeps the custom-ticker check. Never re-apply 0014's
+-- config_check after this file: that brings the hard-coded strategy list back. Every statement is idempotent
+-- (if not exists / upsert / create or replace), so applying the file twice gives the same result.
 
 create table if not exists kaibot.strategy_registry (
   name text primary key,
@@ -23,12 +27,13 @@ create table if not exists kaibot.strategy_registry (
 alter table kaibot.strategy_registry enable row level security;
 revoke all on kaibot.strategy_registry from public, anon, authenticated;
 grant select on kaibot.strategy_registry to service_role;
-delete from kaibot.strategy_registry;
 insert into kaibot.strategy_registry (name, position, mode, holding, owner_toggle, retired) values
   ('dip_reversal', 1, 'live', 'intraday', true, false),
   ('spy_late_momentum', 2, 'live', 'intraday', true, true),
   ('orb_stocks_in_play', 3, 'shadow', 'intraday', false, false),
-  ('news_continuation', 4, 'shadow', 'intraday', false, false);
+  ('news_continuation', 4, 'shadow', 'intraday', false, false)
+on conflict (name) do update set position = excluded.position, mode = excluded.mode, holding = excluded.holding,
+  owner_toggle = excluded.owner_toggle, retired = excluded.retired;
 
 update kaibot.level_limit set strategies = array['dip_reversal'] where level = 'balanced';
 update kaibot.level_limit set strategies = array['dip_reversal'] where level = 'aggressive';
@@ -53,12 +58,15 @@ begin
 end $$;
 revoke all on function kaibot.config_check_strategies(text[], jsonb) from public, anon, authenticated;
 
--- config_check as in 0012, with the strategies block calling the function above.
+-- config_check exactly as in 0014 (custom tickers, already in production), with its hard-coded strategies block
+-- replaced by the call to the function above. Nothing else in it changes.
 create or replace function kaibot.config_check(p_level text, p_body jsonb) returns text
 language plpgsql stable set search_path = '' as $$
 declare
   lim kaibot.level_limit;
   k text; v jsonb; n numeric; sec jsonb; sel text[]; mode text; first_m int; last_m int;
+  cust jsonb; tk jsonb;
+  refs text[] := array['SPY','XLK','XLC','XLY','XLP','XLV','XLF','XLI','XLE','XLU','XLRE','XLB'];
   floors jsonb := '{"risk_per_trade_pct":0.10,"max_positions":1,"max_position_pct":5,"max_entries_per_day":1,
                     "daily_stop_pct":0.25,"run_drawdown_end_pct":2}';
   ints text[] := array['max_positions', 'max_entries_per_day'];
@@ -98,7 +106,7 @@ begin
   -- focus
   sec := coalesce(p_body->'focus', '{}');
   for k in select jsonb_object_keys(sec) loop
-    if k not in ('themes', 'symbols', 'exclude', 'mode') then return 'unknown focus setting: ' || k; end if;
+    if k not in ('themes', 'symbols', 'exclude', 'mode', 'custom') then return 'unknown focus setting: ' || k; end if;
   end loop;
   mode := coalesce(sec->>'mode', 'all');
   if mode not in ('all', 'prefer', 'only') then return 'focus.mode must be all, prefer or only'; end if;
@@ -114,10 +122,42 @@ begin
   if exists (select 1 from jsonb_array_elements_text(coalesce(sec->'symbols', '[]') || coalesce(sec->'exclude', '[]')) s
              where not exists (select 1 from kaibot.config_universe u where u.symbol = s)) then
     return 'a focus symbol is not in the universe'; end if;
+  -- S68: a custom ticker list, stored by value (symbol + sector ETF). Shape only here; kaibot.config_custom_check
+  -- (called by kb_save_config / kb_apply_config) requires every ticker to be ACCEPTED by kb_check_ticker.
+  if sec ? 'custom' then
+    -- Approved 11 Nov 2026: custom tickers trade only in 'Only these' mode. All and Prefer keep the catalogue.
+    if mode <> 'only' then
+      return 'A custom list can only be used with ''Only these''. Choose ''Only these'' or remove the list.'; end if;
+    cust := sec->'custom';
+    if jsonb_typeof(cust) <> 'object' then return 'focus.custom must be an object'; end if;
+    for k in select jsonb_object_keys(cust) loop
+      if k not in ('name', 'tickers') then return 'unknown focus.custom setting: ' || k; end if;
+    end loop;
+    if cust ? 'name' and (jsonb_typeof(cust->'name') <> 'string' or length(cust->>'name') > 40) then
+      return 'the list name must be text of at most 40 characters'; end if;
+    if not cust ? 'tickers' or jsonb_typeof(cust->'tickers') <> 'array' or jsonb_array_length(cust->'tickers') = 0 then
+      return 'a custom list needs at least one ticker'; end if;
+    if jsonb_array_length(cust->'tickers') > 40 then return 'a custom list can hold at most 40 tickers'; end if;
+    for tk in select * from jsonb_array_elements(cust->'tickers') loop
+      if jsonb_typeof(tk) <> 'object' or (select count(*) from jsonb_object_keys(tk)) <> 2
+         or not (tk ? 'symbol' and tk ? 'etf') then
+        return 'each custom ticker needs a symbol and its sector fund'; end if;
+      if jsonb_typeof(tk->'symbol') <> 'string' or (tk->>'symbol') !~ '^[A-Z]{1,5}([.][A-Z])?$' then
+        return 'a custom ticker is not a valid US stock symbol'; end if;
+      if (tk->>'symbol') = any(refs) then return (tk->>'symbol') || ' is a reference fund and cannot be traded'; end if;
+      if exists (select 1 from kaibot.config_universe u where u.symbol = tk->>'symbol') then
+        return (tk->>'symbol') || ' is already in the catalogue: pick it as a stock instead'; end if;
+      if jsonb_typeof(tk->'etf') <> 'string' or not ((tk->>'etf') = any(refs)) then
+        return (tk->>'symbol') || ' has an unknown sector fund'; end if;
+    end loop;
+    if (select count(distinct e->>'symbol') from jsonb_array_elements(cust->'tickers') e)
+       <> jsonb_array_length(cust->'tickers') then return 'a custom ticker is listed twice'; end if;
+  end if;
   select coalesce(array_agg(distinct x), '{}') into sel from (
     select c.symbol x from kaibot.config_theme c
       where c.theme in (select jsonb_array_elements_text(coalesce(sec->'themes', '[]')))
     union select jsonb_array_elements_text(coalesce(sec->'symbols', '[]'))
+    union select e->>'symbol' from jsonb_array_elements(coalesce(sec->'custom'->'tickers', '[]')) e
   ) q where x not in (select jsonb_array_elements_text(coalesce(sec->'exclude', '[]')));
   if mode = 'only' and cardinality(sel) < 5 then return '''Only these'' needs at least 5 stocks'; end if;
 

@@ -1,0 +1,55 @@
+# Pending production migrations
+
+Owner: backend-quant. Last checked against main on 12 Nov 2026. Only the stakeholder applies production migrations.
+
+## What production has now
+
+- 0001-0013: applied.
+- 0014 (custom tickers, #96 / PR #103): applied except two functions. In production: tables `kaibot.ticker_check`,
+  `kaibot.ticker_list`; functions `kaibot.config_check` (0014's version, with `focus.custom`), `kaibot.ticker_latest`,
+  `kaibot.config_custom_check`, `kaibot.ticker_view`, `public.kb_save_config`, `public.kb_check_ticker`,
+  `public.kb_ticker_lists`, `public.kb_save_ticker_list`.
+  Missing: the new `public.kb_apply_config` (the one that also runs `config_custom_check`) and
+  `public.kb_delete_ticker_list`, plus the revoke/grant block at the end of the file that names it.
+- 0015, 0016: not applied. 0017 (PR #158) is not merged yet.
+
+## Apply in this order
+
+Apply them one after the other in the same sitting. Each step is idempotent, so if one fails you can fix it and
+run it again. Do not reorder them.
+
+| # | What to apply | What it does | Supabase asks to confirm? |
+|---|---------------|--------------|---------------------------|
+| 1 | `migrations/0014_m5_custom_tickers.sql`, **lines 244-268 and 351-362 only** (`kb_apply_config`, `kb_delete_ticker_list`, the final revoke/grant) | Apply checks custom tickers again; owners can delete a saved list; the ticker RPCs get their grants | **Yes**: `delete from kaibot.config_draft` (inside `kb_apply_config`) and `delete from kaibot.ticker_list` (inside `kb_delete_ticker_list`). Both run only when the RPC is called, never at apply time |
+| 2 | `migrations/0015_m7_trial_registry.sql` (whole file) | Append-only `kaibot.trial_registry`: one row per research run, so every engine reads one trial count | **Yes**: `drop trigger if exists` (it re-creates the two append-only triggers) |
+| 3 | `migrations/0016_m7_strategy_registry.sql` (whole file) | `kaibot.strategy_registry`; SPY late momentum leaves Balanced and Hunter; `config_check` reads strategy names from the registry and keeps 0014's custom-ticker check | No: no delete, drop or truncate (the registry seed is an upsert) |
+| 4 | later: `migrations/0017_deadman_early_close.sql` (PR #158, once merged) | Off-box dead-man knows early closes and holidays (12:56 ET on early-close days, never on a holiday) | **Yes**: `cron.unschedule(...)` and `net.http_delete(...)` (the paper flatten call, only when the dead-man fires) |
+
+To get step 1 as one SQL text: `sed -n '244,268p;351,362p' migrations/0014_m5_custom_tickers.sql`.
+Running the whole 0014 file again instead is also safe (every statement is `if not exists` or `create or replace`),
+**but only before step 3**: 0014's `config_check` has the old hard-coded strategy list, and 0016 replaces it.
+
+## Never
+
+- Never apply 0014's `config_check` after 0016. 0016's `config_check` is 0014's with only the strategies block
+  replaced; going back would restore the hard-coded list (`tests/test_migrations_config_check.py` guards the files,
+  not the database).
+
+## Checks after applying (read-only)
+
+```sql
+-- step 1: the new apply function runs the custom-ticker check
+select prosrc like '%config_custom_check%' from pg_proc where proname = 'kb_apply_config';          -- true
+select count(*) from pg_proc where proname = 'kb_delete_ticker_list';                              -- 1
+-- step 3: config_check keeps custom tickers and reads the registry
+select pg_get_functiondef('kaibot.config_check(text,jsonb)'::regprocedure) ~ 'config_check_strategies'
+   and pg_get_functiondef('kaibot.config_check(text,jsonb)'::regprocedure) ~ 'focus.custom';         -- true
+select name, retired from kaibot.strategy_registry order by position;                              -- 4 rows
+-- QA-Ops follow-up from #156: an applied Balanced/Hunter config with dip off must be re-applied with dip on
+select run_id, version from kaibot.config c join kaibot.run r on r.id = c.run_id
+ where c.status = 'applied' and r.level in ('balanced', 'aggressive')
+   and c.body->'strategies'->>'dip_reversal' = 'false';                                             -- 0 rows
+```
+
+The whole sequence (simulated production state, then steps 1-3, then step 3 again) was run on a scratch
+Postgres 16; `tests/test_config_sql.py` (SQL and Python validators agree on 1500 random configs) passed against it.
