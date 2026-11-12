@@ -10,12 +10,15 @@ bars with the same number of dip entries, sizing and exits as replay (kaibot.rep
 by (run, session). Run k of the period is the sum of run k of each day, so months of minute bars never need to be
 kept. The strategy's percentile is its total P&L against those sums.
 
-Frozen code: trades count only from the first engine start of the latest unbroken stretch of starts with the
-current strategy-code fingerprint (hash of the files listed in gate.yaml)."""
+Frozen code: a strategy's trades count only from the first engine start of the latest unbroken stretch of starts
+with that strategy's current fingerprint. A fingerprint covers the shared core plus the rule's own files
+(`kaibot.evaluation.fingerprint`, spec in gate.yaml), so a change to another rule does not restart the clock.
+
+Trials: the deflated Sharpe is deflated by the number of CONFIGURATIONS in the one trial registry
+(`kaibot.evaluation.trials`), the same count the walk-forward scripts use, not by the number of rows."""
 
 from __future__ import annotations
 
-import glob
 import hashlib
 import logging
 import math
@@ -28,6 +31,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from kaibot.evaluation import fingerprint as fpr
+from kaibot.evaluation import trials as registry
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, random_entry_percentile, sharpe, t_stat
 
 log = logging.getLogger(__name__)
@@ -46,21 +51,25 @@ class Bar:
         return cls(yaml.safe_load(raw), hashlib.sha256(raw).hexdigest())
 
 
-def fingerprint(root: Path, patterns: list[str]) -> str:
-    """sha256 over the strategy-relevant files (sorted relative paths and contents): changes with trading code only."""
-    h = hashlib.sha256()
-    files = sorted({p for pat in patterns for p in glob.glob(str(root / pat))})
-    for f in files:
-        rel = Path(f).relative_to(root).as_posix()
-        h.update(rel.encode() + b"\0" + Path(f).read_bytes() + b"\0")
-    return h.hexdigest()[:16]
+def fingerprint(root: Path, patterns) -> str:
+    """The code fingerprint the engine logs at start-up (the engine calls this with gate.yaml's `fingerprint`).
+
+    A mapping {core, strategies} gives `<all>;core=<h>;<rule>=<h>;...` (one part per rule plus the shared core);
+    a plain list of globs gives one 16-character hash, as before. See kaibot.evaluation.fingerprint."""
+    return fpr.fingerprint(root, patterns)
 
 
-def frozen_since(starts: list[dict], current_fp: str) -> datetime | None:
-    """Earliest start of the final unbroken stretch of engine starts with `current_fp` (starts: {ts, fingerprint})."""
+def frozen_since(starts: list[dict], current_fp: str, strategy: str | None = None) -> datetime | None:
+    """Earliest start of the final unbroken stretch of engine starts on the current code (starts: {ts,
+    fingerprint}). With `strategy`, only that rule's part of each fingerprint is compared (core + its own
+    files); without, the whole string. An engine that could not compute its fingerprint ("unknown") freezes
+    nothing."""
+    now = fpr.for_strategy(current_fp, strategy)
+    if not now or now == fpr.UNKNOWN:
+        return None
     since = None
     for s in sorted(starts, key=lambda s: _ts(s.get("ts")) or datetime.min.replace(tzinfo=UTC)):
-        if s.get("fingerprint") == current_fp:
+        if fpr.for_strategy(s.get("fingerprint"), strategy) == now:
             since = since or (_ts(s.get("ts")) or datetime.min.replace(tzinfo=UTC))
         else:
             since = None
@@ -71,14 +80,17 @@ def frozen_since(starts: list[dict], current_fp: str) -> datetime | None:
 def evaluate(bar: Bar, *, strategies: list[str], trades: list[dict], sessions: list[dict], random_days: list[dict],
              starts: list[dict], fingerprint_now: str, amount: float, dd_cap_pct: float,
              trials: dict[str, list[float]] | None = None, as_of: datetime | None = None,
-             config_version: int | None = None) -> dict:
+             config_version: int | None = None, n_configurations: int | None = None) -> dict:
     """The gate report as JSON-ready data.
 
     trades: closed trades {strategy, entry_ts, exit_ts, pnl_usd}. sessions: {session, spy_ret}.
     random_days: {strategy, session, fingerprint, totals: [random_runs floats]}. starts: {ts, fingerprint}.
-    trials: per strategy, the daily (not annualised) Sharpe of every logged research trial (deflated Sharpe)."""
+    trials: per strategy, the daily (not annualised) Sharpe of every logged research trial; their variance is
+    the V of the deflated Sharpe. n_configurations: configurations in the trial registry, all rules together
+    (`trials.Registry.configurations`); the deflated Sharpe uses it as the number of trials. Without it the
+    number of Sharpes given for the strategy is used."""
     cfg, b, k = bar.cfg, bar.cfg["bar"], bar.cfg["kill"]
-    since = frozen_since(starts, fingerprint_now)
+    since = frozen_since(starts, fingerprint_now)  # the whole code: what the dashboard header shows
     other_cfg = 0
     if config_version is not None:  # M5: the gate judges one frozen configuration only
         keep = [t for t in trades if int(t.get("config_version") or 0) == config_version]
@@ -90,14 +102,17 @@ def evaluate(bar: Bar, *, strategies: list[str], trades: list[dict], sessions: l
            "excluded_other_config": other_cfg, "bar": b, "kill": k, "strategies": {}}
     sess = pd.DataFrame(sessions or [], columns=["session", "spy_ret"])
     sess["session"] = pd.to_datetime(sess["session"]).dt.date
-    for strat in strategies:
-        out["strategies"][strat] = _one(strat, b, k, cfg, trades, sess, random_days, since, fingerprint_now,
-                                        amount, dd_cap_pct, (trials or {}).get(strat, []))
+    for strat in strategies:  # each rule on its own clock: the shared core plus its own files
+        out["strategies"][strat] = _one(strat, b, k, cfg, trades, sess, random_days,
+                                        frozen_since(starts, fingerprint_now, strat), fingerprint_now,
+                                        amount, dd_cap_pct, (trials or {}).get(strat, []), n_configurations)
     out["overall"] = _overall(out["strategies"])
     return out
 
 
-def _one(strat, b, k, cfg, trades, sess, random_days, since, fp, amount, dd_cap_pct, trial_sharpes) -> dict:
+def _one(strat, b, k, cfg, trades, sess, random_days, since, fp, amount, dd_cap_pct, trial_sharpes,
+         n_configurations=None) -> dict:
+    fp_s = fpr.for_strategy(fp, strat)
     tr = pd.DataFrame([t for t in trades if t.get("strategy") == strat and t.get("exit_ts") and
                        t.get("pnl_usd") is not None], columns=["strategy", "entry_ts", "exit_ts", "pnl_usd"])
     tr["entry_ts"] = pd.to_datetime(tr["entry_ts"], utc=True, format="mixed")
@@ -131,16 +146,20 @@ def _one(strat, b, k, cfg, trades, sess, random_days, since, fp, amount, dd_cap_
     dd = max_drawdown(np.r_[amount, equity])
 
     t = t_stat(ret)
-    # Deflated Sharpe on daily returns, against the variance of the daily Sharpe across every logged research trial
-    # of this strategy (one trial counts at least: the live strategy itself).
+    # Deflated Sharpe on daily returns. Number of trials: the configurations in the one trial registry (audit
+    # F5: configurations, not rows, and the same count as the walk-forward); at least one, the live strategy
+    # itself. V: the variance of the daily Sharpe across the logged research trials of this strategy. With
+    # fewer than two logged Sharpes V is unknown and taken as zero, so the hurdle is zero: `n_trial_sharpes`
+    # in the report shows when that is the case.
     var = float(np.var(trial_sharpes, ddof=1)) if len(trial_sharpes) > 1 else 0.0
-    dsr = deflated_sharpe(daily_ret, max(len(trial_sharpes), 1), var) if n and len(daily_ret) >= 3 else 0.0
+    n_cfg = max(int(n_configurations or 0), len(trial_sharpes), 1)
+    dsr = deflated_sharpe(daily_ret, n_cfg, var) if n and len(daily_ret) >= 3 else 0.0
 
     pct, rnd_days, rnd_missing = None, 0, None
     if strat in cfg.get("random_baseline", []):
         start_day = _et_date(since) if since else date.max
-        rows = [r for r in random_days if r.get("strategy") == strat and r.get("fingerprint") == fp
-                and _d(r["session"]) >= start_day]
+        rows = [r for r in random_days if r.get("strategy") == strat
+                and fpr.for_strategy(r.get("fingerprint"), strat) == fp_s and _d(r["session"]) >= start_day]
         trade_days = set(tr["entry_ts"].dt.tz_convert("America/New_York").dt.date) if n else set()
         have = {_d(r["session"]) for r in rows}
         rnd_missing = sorted(str(d) for d in trade_days - have)
@@ -178,7 +197,8 @@ def _one(strat, b, k, cfg, trades, sess, random_days, since, fp, amount, dd_cap_
     return {"status": status, "kills": kills, "criteria": crit, "n_trades": n, "excluded_older_code": excluded,
             "pnl_usd": round(float(pnl.sum()), 2), "mean_r_pct": round(float(ret.mean() * 100), 4) if n else None,
             "sessions": len(days), "random_days": rnd_days, "random_missing_days": rnd_missing,
-            "n_trials": len(trial_sharpes), "trades_to_go": max(b["min_trades"] - n, 0)}
+            "n_trials": n_cfg, "n_trial_sharpes": len(trial_sharpes), "trades_to_go": max(b["min_trades"] - n, 0),
+            "fingerprint": fp_s, "frozen_since": _iso(since) if since else None}
 
 
 def _overall(st: dict) -> str:
@@ -237,7 +257,7 @@ def on_day_end(engine, root: Path) -> dict | None:
         strategies = list(rules.strategies) if rules is not None else list(
             engine.strategies.get(engine.level(), ["dip_reversal"]))
         report = build(engine.store, bar, rid, fp, engine.run, engine.policy().run_drawdown_end_pct, strategies,
-                       root / "data" / "trials.jsonl", config_version=rules.version if rules is not None else 0)
+                       registry.registry_file(root), config_version=rules.version if rules is not None else 0)
         engine.store.insert("gate_report", {"run_id": rid, "session": str(engine.day.day), "bar_sha": bar.sha,
                                             "fingerprint": fp, "overall": report["overall"], "report": report},
                             returning=False)
@@ -248,30 +268,8 @@ def on_day_end(engine, root: Path) -> dict | None:
 
 
 def load_trials(store, trials_file: Path | None) -> dict[str, list[float]]:
-    """Daily Sharpe per research trial, by strategy: the kaibot.trial table plus the local data/trials.jsonl."""
-    rows = []
-    try:
-        rows += store.select("trial", {"select": "strategy,metrics"})
-    except Exception:
-        log.warning("trial table unreadable; using the local trial log only")
-    if trials_file is not None and trials_file.exists():
-        import json
-
-        for line in trials_file.read_text().splitlines():
-            try:
-                rows.append(json.loads(line))
-            except ValueError:
-                continue
-    out: dict[str, list[float]] = {}
-    for t in rows:
-        v = (t.get("metrics") or {}).get("daily_sharpe_ann")
-        try:
-            v = float(v)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(v):
-            out.setdefault(t.get("strategy") or "?", []).append(v / math.sqrt(252))
-    return out
+    """Daily Sharpe per research trial, by strategy, from the one trial registry (database tables plus the file)."""
+    return registry.load(store, trials_file).daily_sharpes()
 
 
 def build(store, bar: Bar, run_id: int, fp: str, run: dict | None, dd_cap_pct: float, strategies: list[str],
@@ -282,10 +280,13 @@ def build(store, bar: Bar, run_id: int, fp: str, run: dict | None, dd_cap_pct: f
     random_days = store.select("gate_random", {"select": "strategy,session,fingerprint,totals,config_version", **q})
     starts = [{"ts": e.get("ts"), "fingerprint": (e.get("payload") or {}).get("fingerprint")}
               for e in store.select("event", {"select": "ts,payload", "type": "eq.engine_start", **q})]
-    trials = load_trials(store, trials_file)
-    return evaluate(bar, strategies=strategies, trades=trades, sessions=sessions, random_days=random_days,
-                    starts=starts, fingerprint_now=fp, amount=float((run or {}).get("amount_usd") or 0) or 1.0,
-                    dd_cap_pct=dd_cap_pct, trials=trials, config_version=config_version)
+    reg = registry.load(store, trials_file)
+    out = evaluate(bar, strategies=strategies, trades=trades, sessions=sessions, random_days=random_days,
+                   starts=starts, fingerprint_now=fp, amount=float((run or {}).get("amount_usd") or 0) or 1.0,
+                   dd_cap_pct=dd_cap_pct, trials=reg.daily_sharpes(), config_version=config_version,
+                   n_configurations=reg.configurations)
+    out["trial_registry"] = reg.summary()
+    return out
 
 
 # ---------------- helpers ----------------

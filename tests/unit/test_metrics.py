@@ -1,5 +1,9 @@
-import numpy as np
+import math
 
+import numpy as np
+import pytest
+
+from kaibot.evaluation import metrics
 from kaibot.evaluation.metrics import (
     GateReport,
     deflated_sharpe,
@@ -10,6 +14,37 @@ from kaibot.evaluation.metrics import (
     random_entry_percentile,
     t_stat,
 )
+
+
+def test_helpers_match_scipy():
+    """metrics.py no longer imports scipy (the engine image has none): its replacements give scipy's numbers."""
+    stats = pytest.importorskip("scipy.stats")
+    rng = np.random.default_rng(0)
+    for p in [*rng.uniform(1e-12, 1 - 1e-12, 500), 1 - 1 / 8286, 1 - 1 / (8286 * math.e), 0.5, 1e-300]:
+        assert metrics.norm_ppf(p) == pytest.approx(stats.norm.ppf(p), rel=1e-12, abs=1e-12)
+    for x in [*rng.normal(0, 4, 500), -40.0, -10.0, 0.0, 10.0]:
+        assert metrics.norm_cdf(x) == pytest.approx(stats.norm.cdf(x), rel=1e-11, abs=1e-300)
+    assert metrics.norm_ppf(0.0) == -math.inf and metrics.norm_ppf(1.0) == math.inf  # scipy's answers at the ends
+    for n in (5, 60, 900):
+        r = rng.standard_t(4, n) * 0.01 + 0.0004
+        skew, kurt = metrics.skew_kurtosis(r)
+        assert skew == pytest.approx(stats.skew(r), rel=1e-12)
+        assert kurt == pytest.approx(stats.kurtosis(r, fisher=False), rel=1e-12)
+    for x in (rng.integers(0, 6, 40).astype(float), rng.normal(size=33), np.zeros(4)):
+        assert np.array_equal(metrics.rank_average(x), stats.rankdata(x))  # ties share the average rank
+
+
+def test_deflated_sharpe_of_a_series_that_never_moved_is_not_a_number():
+    """scripts/experiments_summary.py prints "n/a" for it: there is nothing to deflate."""
+    assert all(math.isnan(v) for v in metrics.skew_kurtosis(np.zeros(30)))
+    assert math.isnan(deflated_sharpe(np.zeros(30), n_trials=40, trial_sharpe_var=0.001))
+    assert math.isnan(metrics.rank_average([1.0, float("nan")])[0])
+
+
+def test_expected_best_sharpe_of_unskilled_trials():
+    assert metrics.expected_max_sharpe(1, 0.01) == 0.0 and metrics.expected_max_sharpe(50, 0.0) == 0.0
+    few, many = metrics.expected_max_sharpe(20, 0.0004), metrics.expected_max_sharpe(8286, 0.0004)
+    assert few == pytest.approx(0.02 * 1.9, rel=0.02) and many == pytest.approx(0.02 * 3.82, rel=0.02)
 
 
 def test_min_trades_matches_research():
