@@ -1,8 +1,10 @@
-"""The live engine: Variant A no-news dip reversal on Alpaca paper, one paper run at a time.
+"""The live engine on Alpaca paper (or `SimBroker`), one paper run at a time. It knows no rule by name.
 
-Per completed minute: sync orders/fills -> mark to market -> daily stop / run drawdown -> trailing stops ->
-time exit -> (every 5-minute bar) new entries through the risk gate. All prices, sizes, stops and exits come from
-these rules and `risk/gate.py`; no LLM is involved (the agent room is off in M1).
+Per completed minute: sync orders/fills -> mark to market -> daily stop / run drawdown -> each open position's
+strategy manages its stop -> time exit -> each live strategy that is due proposes entries (strategies/base.py,
+in registry order), every one through the risk gate -> each position's strategy may close it out (MOC) ->
+ledger -> shadow strategies. Prices, stops, targets and exits come from the strategies (strategies/registry.py:
+which ones a level runs is config/profiles.yaml), sizes from `risk/gate.py`; no LLM sets any of them.
 
 Safety:
 - Every entry is a bracket order, so the stop and the 2R target live AT THE BROKER and fire even if this
@@ -40,16 +42,15 @@ from kaibot.engine.market import LiveMarket, session_minutes
 from kaibot.engine.roomflow import RoomFlow
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
-from kaibot.replay.features import five_minute
 from kaibot.replay.sim import half_spread, sell_px
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
-from kaibot.strategies import spy_momentum as spymom
+from kaibot.strategies import registry
+from kaibot.strategies.base import CloseOut, Context, Event, MoveStop, Strategy, due, new_scan, note_scan
+
+__all__ = ["Engine", "FlattenIncomplete", "new_scan", "note_scan"]  # the scan counters live in strategies/base.py
 
 log = logging.getLogger("kaibot.engine")
 
-ATR_MULT = 1.5
-TARGET_R = 2.0
-TRAIL_ATR = 1.5
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
 MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
@@ -126,7 +127,7 @@ class Pos:
     db_order_id: int | None = None
     entry_ts: str | None = None
     carried: bool = False  # left over from an earlier session
-    strategy: str = "dip_reversal"
+    strategy: str = registry.DEFAULT_LIVE[0]
 
     def features(self) -> dict:
         return {k: v for k, v in asdict(self).items() if k not in ("trade_id", "symbol", "qty")}
@@ -149,10 +150,10 @@ class Day:
     halted: bool = False
     flattened: bool = False
     finalized: bool = False
-    spy_mom_done: bool = False
     last_m: int = -1
     done_m: int = -1  # S74: the last minute whose work completed (last_m: the last one started). See Engine.tick
-    scan_m: int = -1  # S74: the last 5-minute bar whose entry scan finished or acted; a retry never scans it again
+    # S74: {strategy: the last minute whose entry decision finished or acted}; a retry never decides it again
+    decided: dict = field(default_factory=dict)
     rejects: int = 0  # S74: entry orders the broker refused in a row; an accepted order resets it
     events: list = field(default_factory=list)
     rules: Rules | None = None  # M5: the owner's config for this session (None before the open)
@@ -189,7 +190,9 @@ class Engine:
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
-        self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> dip reversal only
+        self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> registry.DEFAULT_LIVE
+        # S76: which registered shadow strategies run (None = all of them; the research command picks one)
+        self.shadow_only: tuple[str, ...] | None = None
         # S34: the agent room (None = rules-only). It can only veto or halve a candidate the rules approved.
         self.roomflow = RoomFlow(self, room, pack_fn) if room is not None else None
         self.rules_extra = rules_extra  # extra rules-only veto (S37 pump risk): (engine, symbol, m) -> str | None
@@ -333,7 +336,7 @@ class Engine:
         ref, stop, target = float(sig["entry"]), float(sig["stop"]), sig.get("target")
         qty = int(float(o["qty"]))
         sigma = f.get("sigma_1m")
-        if sigma is None and f.get("sigma") is not None:  # SPY momentum logs the daily sigma
+        if sigma is None and f.get("sigma") is not None:  # a rule that logs the daily sigma
             sigma = float(f["sigma"]) / np.sqrt(390)
         if db_order is None:
             db_order = self.store.insert("order", {
@@ -344,7 +347,8 @@ class Engine:
         p = Pos(trade_id=0, symbol=sig["symbol"], qty=qty, coid=coid, order_id=o["id"], ref=ref, risk_ps=ref - stop,
                 atr=float(f.get("atr5") or 0), sigma=float(sigma or 0), stop=stop,
                 target=float(target) if target is not None else 0.0, db_order_id=db_order["id"],
-                entry_ts=_iso(sig.get("ts")) or self.now().isoformat(), strategy=sig.get("strategy") or "dip_reversal")
+                entry_ts=_iso(sig.get("ts")) or self.now().isoformat(),
+                strategy=sig.get("strategy") or registry.DEFAULT_LIVE[0])
         trade = self.store.insert("trade", {
             "run_id": self._rid(), "config_version": self._cfg_version(), "signal_id": sig["id"],
             "strategy": p.strategy, "symbol": p.symbol,
@@ -495,7 +499,7 @@ class Engine:
     def _load_rules(self, d: Day) -> None:
         """M5 S43: the owner's latest applied config created before this session's open, tightened onto the level.
         Invalid -> entries refused for the session (fail closed); management, stops and the flatten still run."""
-        lv_pol, lv_strats = self.policies[self.level()], self.strategies.get(self.level(), ["dip_reversal"])
+        lv_pol, lv_strats = self.policies[self.level()], self.level_strategies()
         d.rules = defaults(lv_pol, lv_strats)
         try:
             rows = [c for c in self.store.select("config", {"run_id": f"eq.{d.run_id}", "status": "eq.applied"})
@@ -570,7 +574,7 @@ class Engine:
         # that raises leaves `done_m` behind, so the main loop's retry (about 10 s later) runs the minute again
         # instead of getting "already done" and resetting the error streak. Every failed attempt therefore counts
         # (on_tick_error) and a failure that recurs trips the kill switch. Each step is safe to run again, except
-        # an entry scan that has acted: `scan_m` (set below and in _entries) keeps a retry from repeating it.
+        # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
         self._check_drift()
@@ -579,7 +583,7 @@ class Engine:
                 self._exit(p, "carried_over")
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
-        self._trail_stops(m)
+        self._manage_stops(m)
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")
             d.flattened = True
@@ -587,15 +591,12 @@ class Engine:
             self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
             self.roomflow.collect(m)
-        if (m - 4) % 5 == 0 and d.scan_m != m and self._may_enter(m):
-            self._entries(m)
-            d.scan_m = m
-        if m == spymom.ENTRY_M and not d.spy_mom_done and self._runs("spy_late_momentum") and d.n_min == 390:
-            d.spy_mom_done = True  # one decision a day, whatever happens below
-            if self._may_enter(m):
-                self._spy_momentum(m)
-        if spymom.EXIT_SUBMIT_M <= m < spymom.MOC_CUTOFF_M:
-            self._moc_exits()
+        for strat in self.live_strategies():  # S76: every live strategy the session runs, in registry order
+            if due(strat.schedule, Event.BAR_CLOSE, m, d.n_min) and d.decided.get(strat.name) != m \
+                    and self._may_enter(m):
+                self._entries(strat, m)
+                d.decided[strat.name] = m
+        self._close_outs(m)
         self._ledger(eq)
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
         d.done_m = m
@@ -735,115 +736,72 @@ class Engine:
         r = self.day.rules if self.day else None
         if r is not None:
             return strategy in r.strategies
-        return strategy in self.strategies.get(self.level(), ["dip_reversal"])
+        return strategy in self.level_strategies()
 
-    # ================= SPY late momentum (S13) =================
-    def _spy_momentum(self, m: int) -> None:
-        spy = self.market.spy
-        if spy in self.pos:
-            return
-        sd = self.market.symbol_days(spy, m)
-        if sd is None or not len(sd.dates) or sd.dates[-1] != np.datetime64(self.day.day, "D"):
-            return
-        today = len(sd.dates) - 1
-        ret, sigma = spymom.inputs_from_days(sd, today)
-        z = ret / sigma if sigma and np.isfinite(sigma) and sigma > 0 else float("nan")
-        atr = five_minute(sd.o[today:], sd.h[today:], sd.l[today:], sd.c[today:])[0][0, (m - 4) // 5]
-        ref = float(sd.c[today, m])
-        go = spymom.should_buy(spymom.MomentumInputs(ret, sigma if np.isfinite(sigma) else 0.0, False, False))
-        if not (np.isfinite(atr) and atr > 0):
-            go = False
-        off, vix = self.market.regime_at(m)  # S15: the regime gate (incl. VIX > 35 crisis) applies here too
-        r = self.day.rules
-        if not off and r is not None and np.isfinite(vix) and vix > r.vix_max:
-            off = True  # M5: the owner's VIX limit (tighter than the crisis gate)
-        stop = ref - spymom.STOP_ATR * float(atr if np.isfinite(atr) else 0)
-        feats = {"ret_close_to_10": _num(ret), "sigma": _num(sigma), "z": _num(z), "atr5": _num(atr), "m": m}
-        self._decide(spy, "spy_late_momentum", ref, stop, None, feats,
-                     ["SPY +0.5 sigma by 10:00", "last-30-minute momentum"],
-                     "regime off" if off else (None if go else "momentum below threshold"),
-                     sigma_1m=float(sigma or 0) / np.sqrt(390), atr=float(atr if np.isfinite(atr) else 0), vix=vix)
+    # ================= strategies (S76) =================
+    def level_strategies(self) -> list[str]:
+        """The live strategies the run's level lists (config/profiles.yaml); the owner's config can only remove."""
+        return list(self.strategies.get(self.level(), registry.DEFAULT_LIVE))
 
-    def _moc_exits(self) -> None:
-        """From 15:45, close momentum positions market-on-close. Cancel the stop first (it reserves the shares);
-        if the MOC is refused, the position stays and the 15:55 market flatten closes it."""
-        for p in list(self.pos.values()):
-            if p.strategy != "spy_late_momentum" or p.status != "open" or p.exit_order_id:
-                continue
-            if p.stop_order_id:
-                self.broker.cancel_order(p.stop_order_id)
-                p.stop_order_id = None
-            try:
-                o = self.broker.submit_moc_sell(f"{p.coid}-moc", p.symbol, p.qty)
-                p.exit_order_id, p.exit_reason = o["id"], "moc"
-            except Exception as e:
-                log.warning("MOC refused for %s (%s); the 15:55 flatten will close it", p.symbol, e)
-                self.store.event("moc_refused", {"symbol": p.symbol, "error": str(e)[:200]}, self._rid())
-                p.exit_reason = None
+    def live_strategies(self) -> tuple[Strategy, ...]:
+        """The registered live strategies this session runs, in registry order."""
+        r = self.day.rules if self.day else None
+        return registry.live(r.strategies if r is not None else self.level_strategies())
+
+    def context(self, m: int, event: Event = Event.BAR_CLOSE) -> Context:
+        d = self.day
+
+        def prefetch(symbols: list[str]) -> None:
+            self._quotes = self.broker_quotes(symbols)
+            self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
+            ctx.prefetched = True
+
+        ctx = Context(event, m, d.day, d.n_min, self.market, d.rules, self.now, lambda s: s in self.pos, prefetch,
+                      d.scan, lambda s, ref, vix: self._user_veto(d.rules, s, ref, vix) if d.rules else None,
+                      lambda s, mm: self.rules_extra(self, s, mm) if self.rules_extra is not None else None)
+        return ctx
 
     # ================= entries =================
-    def _entries(self, m: int) -> None:
+    def _entries(self, strat: Strategy, m: int) -> None:
+        """Ask one due strategy for its signals and decide each in turn, through the owner's filters, the room
+        (if the strategy uses it) and the risk gate. Signals come one at a time, so what an earlier one opened is
+        already in the book when the strategy computes the next."""
         sc = self.day.scan
-        off, vix = self.market.regime_at(m)
-        if off:
-            if (m + 1) % 5 == 0:
-                sc["regime_off"] += 1
-            return
-        cands = self.market.candidates_at(m)
-        note_scan(sc, m, getattr(self.market, "last_checked", 0), getattr(self.market, "last_near", []), len(cands))
-        if not len(cands) or not self._runs("dip_reversal"):
-            return
-        r = self.day.rules
-        if r is not None and r.mode != "all":  # M5 focus: Only filters; Prefer ranks focus names first
-            cands = cands[[r.tradable(x) for x in cands["symbol"]]]
-            if not len(cands):
-                return
-            cands = cands.assign(_rank=[r.rank(x) for x in cands["symbol"]]).sort_values(
-                ["_rank", "z"], kind="stable").drop(columns="_rank")
-        self._quotes = self.broker_quotes(list(cands["symbol"]))
-        self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
-        decision = self.now()
-        for _, c in cands.iterrows():
-            s = c["symbol"]
-            if s in self.pos:
-                continue
-            news = self.market.data.news_count(s, decision - timedelta(hours=24), decision)
-            ref = float(c["price"])
-            stop = ref - ATR_MULT * float(c["atr5"])
-            target = ref + TARGET_R * (ref - stop)
-            feats = {k: _num(c[k]) for k in ("z", "resid_z", "turnover", "atr5", "vwap", "sigma_1m")}
-            feats.update({"news_24h": news, "vix": vix, "m": m})
-            reasons = ["no-news dip", "5-min higher low", "sector-adjusted"]
-            veto = "company news in 24 h" if news else None
-            if veto is None and r is not None:
-                veto = self._user_veto(r, s, ref, vix)
-            if veto is None and self.rules_extra is not None:
-                try:
-                    veto = self.rules_extra(self, s, m)
-                except Exception:
-                    log.exception("extra rules veto failed for %s: skipping the candidate", s)
-                    veto = "extra rules unavailable"
-            if veto is not None:
-                sc["vetoed"][veto] = sc["vetoed"].get(veto, 0) + 1
-            # S74: from here on this bar's scan acts (a room session, a signal row, an order), so a retry of the
-            # minute must not scan it again: a second decision would write a new signal row and, with it, a new
-            # client order id (kb-<run>-<signal>-1) that the venue's duplicate check cannot recognise. A scan
+        ctx = self.context(m)
+        rf = self.roomflow if strat.room else None
+        for sig in strat.on_event(ctx) or ():
+            s, ref, stop, target = sig.symbol, sig.entry, sig.stop, sig.target
+            veto = sig.veto
+            if strat.owner_filters:
+                r = self.day.rules
+                if veto is None and r is not None:
+                    veto = self._user_veto(r, s, ref, sig.vix)
+                if veto is None and self.rules_extra is not None:
+                    try:
+                        veto = self.rules_extra(self, s, m)
+                    except Exception:
+                        log.exception("extra rules veto failed for %s: skipping the candidate", s)
+                        veto = "extra rules unavailable"
+                if veto is not None:
+                    sc["vetoed"][veto] = sc["vetoed"].get(veto, 0) + 1
+            # S74: from here on this decision acts (a room session, a signal row, an order), so a retry of the
+            # minute must not decide it again: a second decision would write a new signal row and, with it, a new
+            # client order id (kb-<run>-<signal>-1) that the venue's duplicate check cannot recognise. A decision
             # that failed before this line (features, quotes, the news lookup) has done nothing and is repeated.
-            self.day.scan_m = m
-            rf = self.roomflow
+            self.day.decided[strat.name] = m
             if veto is None and rf is not None:
                 mode = rf.mode(m)
                 if mode == "ok":
                     sc["to_room"] += 1
-                    rf.submit(s, c, ref, stop, target, feats, reasons, m)
+                    rf.submit(s, sig.room, ref, stop, target, sig.features, sig.reasons, m, strategy=strat.name)
                     continue
                 if mode == "no_entries":
                     return
-            sig_id, full_qty = self._decide(s, "dip_reversal", ref, stop, target, feats, reasons, veto,
-                                            sigma_1m=float(c["sigma_1m"]), atr=float(c["atr5"]), vix=vix,
-                                            fresh_reads=False)
+            sig_id, full_qty = self._decide(s, strat.name, ref, stop, target, sig.features, sig.reasons, veto,
+                                            sigma_1m=sig.sigma_1m, atr=sig.atr, vix=sig.vix,
+                                            fresh_reads=not ctx.prefetched)
             if veto is None and rf is not None:
-                rf.record_skipped(sig_id, s, m, ref, ref - stop, float(c["atr5"]), float(c["sigma_1m"]), full_qty,
+                rf.record_skipped(sig_id, s, m, ref, ref - stop, sig.atr, sig.sigma_1m, full_qty,
                                   "daily LLM budget reached: rules-only")
             if self.day.entries >= self.policy().max_entries_per_day:
                 break
@@ -942,8 +900,7 @@ class Engine:
             log.exception("quotes failed")
             return {}
 
-    def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats,
-              strategy: str = "dip_reversal") -> bool:
+    def _open(self, s, qty, ref, stop, target, risk_ps, atr, sigma, quote, signal_id, feats, strategy: str) -> bool:
         """Send the entry and write its order and trade rows. False: the broker refused the order (S74)."""
         coid = f"kb-{self._rid()}-{signal_id}-1"
         bid, ask = float(quote.get("bp") or 0), float(quote.get("ap") or 0)
@@ -1058,8 +1015,9 @@ class Engine:
     def _on_entry_fill(self, p: Pos, o: dict) -> None:
         p.fill = float(o["filled_avg_price"])
         p.status = "open"
-        p.stop = p.fill - p.risk_ps
-        p.target = p.fill + TARGET_R * p.risk_ps if p.strategy == "dip_reversal" else 0.0
+        strat = registry.get(p.strategy)
+        p.stop, target = strat.on_fill(p.fill, p.risk_ps) if strat is not None else (p.fill - p.risk_ps, None)
+        p.target = target if target is not None else 0.0
         for leg in o.get("legs") or []:
             if leg.get("type") == "limit":
                 p.target_order_id = leg["id"]
@@ -1142,25 +1100,52 @@ class Engine:
         self.pos.pop(p.symbol, None)
 
     # ================= exits =================
-    def _trail_stops(self, m: int) -> None:
-        for p in self.pos.values():
-            if p.status != "open" or p.exit_order_id or p.strategy != "dip_reversal":
+    def _open_by_strategy(self):
+        """(position, its registered strategy) for every open position without an exit order, in book order."""
+        for p in list(self.pos.values()):
+            if p.status != "open" or p.exit_order_id:
                 continue
-            c = self.market.last_close(p.symbol)
-            if c is None:
+            strat = registry.get(p.strategy)
+            if strat is not None:
+                yield p, strat
+
+    def _manage_stops(self, m: int) -> None:
+        """Each open position's strategy may move its protective stop (dip reversal: the trailing stop)."""
+        ctx = None
+        for p, strat in self._open_by_strategy():
+            ctx = ctx or self.context(m)
+            act = strat.manage(ctx, p)
+            if isinstance(act, MoveStop) and p.stop_order_id:
+                try:
+                    p.stop_order_id = self.broker.replace_stop(p.stop_order_id, round(act.price, 2))["id"]
+                    p.stop = act.price
+                    self.store.update("trade", {"id": p.trade_id}, {"stop_px": act.price, "features": p.features()})
+                except Exception:
+                    log.exception("trail replace failed for %s", p.symbol)
+
+    def _close_outs(self, m: int) -> None:
+        """Each open position's strategy may ask for its own exit (SPY momentum: market-on-close from 15:45).
+        A MOC cancels the stop first (it reserves the shares); if the MOC is refused, the position stays and the
+        15:55 market flatten closes it."""
+        ctx = None
+        for p, strat in self._open_by_strategy():
+            ctx = ctx or self.context(m, Event.PRE_CLOSE)
+            act = strat.close_out(ctx, p)
+            if not isinstance(act, CloseOut):
                 continue
-            p.hi_close = max(p.hi_close, c)
-            if not p.armed and c >= p.fill + p.risk_ps:
-                p.armed = True
-            if p.armed:
-                new = max(p.stop, p.fill, p.hi_close - TRAIL_ATR * p.atr)
-                if new >= p.stop + 0.01 and p.stop_order_id:
-                    try:
-                        p.stop_order_id = self.broker.replace_stop(p.stop_order_id, round(new, 2))["id"]
-                        p.stop = new
-                        self.store.update("trade", {"id": p.trade_id}, {"stop_px": new, "features": p.features()})
-                    except Exception:
-                        log.exception("trail replace failed for %s", p.symbol)
+            if act.how != "moc":
+                self._exit(p, act.reason)
+                continue
+            if p.stop_order_id:
+                self.broker.cancel_order(p.stop_order_id)
+                p.stop_order_id = None
+            try:
+                o = self.broker.submit_moc_sell(f"{p.coid}-moc", p.symbol, p.qty)
+                p.exit_order_id, p.exit_reason = o["id"], act.reason
+            except Exception as e:
+                log.warning("MOC refused for %s (%s); the 15:55 flatten will close it", p.symbol, e)
+                self.store.event("moc_refused", {"symbol": p.symbol, "error": str(e)[:200]}, self._rid())
+                p.exit_reason = None
 
     def _exit(self, p: Pos, reason: str) -> None:
         if p.status == "pending":
@@ -1318,22 +1303,6 @@ class Engine:
         if self.run is None and d is not None and d.run_id:
             st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
         return st
-
-
-def new_scan() -> dict:
-    return {"bars": 0, "checks": 0, "regime_off": 0, "setups": 0, "near": 0, "vetoed": {}, "to_room": 0,
-            "recent_near": []}
-
-
-def note_scan(sc: dict, m: int, checked: int, near: list, setups: int) -> None:
-    """Dashboard counters for one completed 5-minute bar: symbols checked, setups, near-misses (last 5 kept)."""
-    if (m + 1) % 5 != 0:
-        return
-    sc["bars"] += 1
-    sc["checks"] += int(checked)
-    sc["setups"] += int(setups)
-    sc["near"] += len(near)
-    sc["recent_near"] = (sc["recent_near"] + list(near))[-5:]
 
 
 def _refused(err: Exception) -> bool:

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from kaibot.replay.data import N_MIN, SymbolDays
+from kaibot.strategies.base import Event, ExitAction, Holding, Mode, ShadowContext, When
 from kaibot.strategies.shadow_types import Panel, ShadowCandidate, rolling_before, rolling_before_rows
 
 NAME = "news_continuation"
@@ -115,3 +116,39 @@ def decide(panel: Panel, stats: dict[str, np.ndarray], m: int, has_news: np.ndar
                                                       "sigma_1m": float(stats["sigma_1m"][r])},
         ))
     return out
+
+
+class NewsContinuation:
+    """The rule above as an ordinary `Strategy` in shadow mode (issue #116). The news lookup costs API calls, so
+    it is asked only for the rows that pass the price/volume setup and have not signalled today."""
+
+    name = NAME
+    mode = Mode.SHADOW
+    holding = Holding.INTRADAY
+    schedule = (When(Event.BAR_CLOSE, every=5, offset=4),)
+    warmup = DEFAULT.lookback + 1
+    owner_filters = False
+    room = False
+
+    def prior_stats(self, sd: SymbolDays) -> dict[str, np.ndarray]:
+        return prior_stats(sd)
+
+    def on_event(self, ctx: ShadowContext) -> list[ShadowCandidate]:
+        panel, m = ctx.panel, ctx.m
+        mask, _ = setup(panel, ctx.stats, m)
+        rows = np.flatnonzero(mask)
+        rows = np.array([r for r in rows if (NAME, panel.symbols[r]) not in ctx.seen], dtype=np.int64)
+        if not len(rows):
+            return []
+        has = np.zeros(len(panel), dtype=bool)
+        has[rows] = ctx.news_flags(rows, m)
+        return decide(panel, ctx.stats, m, has)
+
+    def on_fill(self, fill: float, risk_ps: float) -> tuple[float, float | None]:
+        return fill - risk_ps, None
+
+    def manage(self, ctx, pos) -> ExitAction | None:
+        return None
+
+    def close_out(self, ctx, pos) -> ExitAction | None:
+        return None  # the 15:55 flatten

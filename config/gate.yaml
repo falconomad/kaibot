@@ -44,7 +44,7 @@ fingerprint:
     - config/universe_seed.yaml
   strategies:
     dip_reversal:
-      - src/kaibot/strategies/dip_reversal.py
+      - src/kaibot/strategies/dip.py
     spy_late_momentum:
       - src/kaibot/strategies/spy_momentum.py
       - src/kaibot/replay/spy_momentum.py

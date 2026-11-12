@@ -1,6 +1,7 @@
 """The agent room inside the live engine (stories S34, S36), asynchronous so the minute loop never waits on it.
 
-1. A dip candidate passes every deterministic rule (incl. the 24 h news veto and pump risk) at minute m.
+1. A candidate of a strategy that uses the room (`room = True`: dip reversal) passes every deterministic rule
+   (incl. the 24 h news veto and pump risk) at minute m.
 2. submit(): the room deliberates in a worker thread (evidence pack + Proposer/Critic/Judge, <= 45 s).
 3. collect(): on each later tick, finished sessions go through the normal decision path: the risk gate with a
    fresh quote, at full size (allow), half size (downgrade) or not at all (veto, timeout, invalid, error).
@@ -44,6 +45,7 @@ class Job:
     reasons: list
     future: Future
     pack: dict = field(default_factory=dict)
+    strategy: str = ""  # S76: the strategy that proposed it (the room only vetoes or halves its signal)
 
 
 class RoomFlow:
@@ -66,7 +68,7 @@ class RoomFlow:
         return self._state
 
     # ---------- 1-2: submit ----------
-    def submit(self, s: str, c, ref, stop, target, feats: dict, reasons: list, m: int) -> None:
+    def submit(self, s: str, c, ref, stop, target, feats: dict, reasons: list, m: int, *, strategy: str) -> None:
         if s in self.jobs:
             return
         d = self.e.day
@@ -81,7 +83,7 @@ class RoomFlow:
             return pack, self.room.deliberate(cid, cand, pack)
 
         self.jobs[s] = Job(s, m, cand, ref, stop, target, float(feats.get("atr5") or 0),
-                           float(feats.get("sigma_1m") or 0), feats, reasons, self.ex.submit(run))
+                           float(feats.get("sigma_1m") or 0), feats, reasons, self.ex.submit(run), strategy=strategy)
 
     # ---------- 3: collect ----------
     def collect(self, m: int) -> None:
@@ -111,7 +113,7 @@ class RoomFlow:
             dist, tdist = j.ref - j.stop, j.target - j.ref
             reasons = [*j.reasons, f"room: {out.verdict or out.status}"]
             feats = {**j.feats, "room_submitted_m": j.m, "room_latency_ms": out.latency_ms}
-            sig_id, full_qty = self.e._decide(s, "dip_reversal", ref, ref - dist, ref + tdist, feats, reasons, veto,
+            sig_id, full_qty = self.e._decide(s, j.strategy, ref, ref - dist, ref + tdist, feats, reasons, veto,
                                               sigma_1m=j.sigma_1m, atr=j.atr, size_mult=mult)
             self._store(sig_id, out, pack)
             self.sessions.append({"signal_id": sig_id, "symbol": s, "m": m, "ref": ref, "risk_ps": dist,
