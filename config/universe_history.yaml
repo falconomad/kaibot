@@ -7,7 +7,7 @@
 # simply have no bars before their listing. Renamed tickers (META, ELV, WBD) come back under today's symbol.
 sectors:
   XLK: [AAPL, MSFT, NVDA, AVGO, ORCL, CRM, ADBE, AMD, CSCO, INTC, QCOM, TXN, IBM, ACN, NOW, INTU, AMAT, MU, LRCX,
-        KLAC, ADI, SNPS, CDNS, PANW, FTNT, ANET, MRVL, NXPI, MCHP, ON, ADSK, ROP, HPQ, HPE, DELL, GLW, APH, TEL,
+        KLAC, ADI, SNPS, CDNS, PANW, FTNT, ANET, MRVL, NXPI, MCHP, "ON", ADSK, ROP, HPQ, HPE, DELL, GLW, APH, TEL,
         WDAY, PLTR]
   XLC: [GOOGL, META, NFLX, DIS, TMUS, CMCSA, VZ, T, CHTR, EA, TTWO, WBD, OMC, IPG, LYV, MTCH, PINS, SNAP]
   XLY: [AMZN, TSLA, HD, MCD, NKE, LOW, SBUX, BKNG, TJX, ROST, CMG, ORLY, AZO, MAR, HLT, GM, F, EBAY, DHI, LEN, YUM,

@@ -4,7 +4,7 @@
 `./scripts/fetch_history.sh` on the Mac downloads 1-minute SIP bars (09:30–16:00 ET only), Benzinga headlines and
 SEC fundamentals for the 300 symbols in `config/universe_history.yaml`, from Jan 2016 to now. It is resumable:
 Ctrl-C and run it again. `./scripts/fetch_history.sh --status` shows progress. It uses 135 of Alpaca's 200
-requests/min (60 while the engine runs). Expect roughly 12–18 hours and about 5 GB under `data/`.
+requests/min (60 while the engine runs). Expect roughly 12–18 hours and about 12 GB under `data/` (measured: 12.2 GB for 300 symbols, Nov 2026).
 
 Survivorship bias: the universe is today's large caps applied back to 2016. Companies delisted before Nov 2026
 are missing, so long replays on it are optimistic. M1 replaces it with a point-in-time universe.
