@@ -69,16 +69,18 @@ def load() -> SpineFixture:
                         meta["market"], frozenset(np.datetime64(d, "D") for d in meta["fomc"]), vix, news)
 
 
-def prepared(fx: SpineFixture) -> tuple[Prepared, dict]:
-    """Candidates and the regime per test session, exactly as scripts/run_replay.py builds them."""
-    days = fx.days()
-    start, end = np.datetime64(fx.test_days[0], "D"), np.datetime64(fx.test_days[-1], "D")
-    etfs = {e: days[e] for e in set(fx.sector_of.values())}
-    prep = prepare({s: days[s] for s in fx.stocks}, etfs, fx.sector_of, fx.news, start, end)
-    reg = {d: v for d, v in regime(days[fx.market], fx.vix).items() if start <= d <= end}
+def prepared(fx: SpineFixture, days: tuple[str, ...] | None = None) -> tuple[Prepared, dict]:
+    """Candidates and the regime per test session (or only `days`), as scripts/run_replay.py builds them."""
+    sd = fx.days()
+    want = days or fx.test_days
+    start, end = np.datetime64(want[0], "D"), np.datetime64(want[-1], "D")
+    etfs = {e: sd[e] for e in set(fx.sector_of.values())}
+    prep = prepare({s: sd[s] for s in fx.stocks}, etfs, fx.sector_of, fx.news, start, end)
+    reg = {d: v for d, v in regime(sd[fx.market], fx.vix).items() if start <= d <= end}
     return prep, reg
 
 
-def replay(fx: SpineFixture, pol: RiskPolicy, equity0: float = EQUITY, variant: str = "A") -> Book:
-    prep, reg = prepared(fx)
+def replay(fx: SpineFixture, pol: RiskPolicy, equity0: float = EQUITY, variant: str = "A",
+           days: tuple[str, ...] | None = None) -> Book:
+    prep, reg = prepared(fx, days)
     return run_portfolio(prep.bars, prep.cands, reg, set(fx.fomc), pol, equity0=equity0, variant=variant)

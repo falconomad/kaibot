@@ -39,3 +39,25 @@ def max_fill_qty(q: QuoteCtx, participation: float = 0.05) -> float:
 
 def sell_fees(qty: float, price: float) -> float:
     return qty * price * SEC_FEE_PER_DOLLAR_SOLD + qty * TAF_PER_SHARE_SOLD
+
+
+# ---- fills priced from a single reference price (no quote): the replay's and the simulated venue's rule ----
+# Moved here unchanged from replay/sim.py (issue #115) so that broker/sim.py does not import the replay.
+def half_spread(price: float) -> float:
+    return max(price * 0.0001, 0.005)  # >= 1 bp and >= half a cent (large caps)
+
+
+def buy_px(o: float, q: float, sigma: float, vol: float) -> float:
+    hs = half_spread(o)
+    return shadow_fill_price("buy", q, QuoteCtx(o - hs, o + hs, sigma, max(vol, 1.0)))
+
+
+def sell_px(p: float, q: float, sigma: float, vol: float) -> float:
+    hs = half_spread(p)
+    return shadow_fill_price("sell", q, QuoteCtx(p - hs, p + hs, sigma, max(vol, 1.0)))
+
+
+def cost_parts(mid: float, px: float) -> tuple[float, float]:
+    """(half spread, impact) per share between a no-cost price `mid` and the fill `px` the cost model returned."""
+    half = half_spread(mid)
+    return half, abs(px - mid) - half
