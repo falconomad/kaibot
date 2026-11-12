@@ -1,0 +1,88 @@
+# Evidence gate v2 for MULTI-DAY rules (decision 15, section 7). Intraday rules stay under config/gate.yaml (M4).
+#
+# The pass marks below are those of the decision, word for word in numbers; tests/unit/test_gate_v2.py
+# compares this file with the decision's text. Every gate v2 report records this file's sha256 (`gate_sha`), the
+# same mechanism as the M4 gate, so a change is visible. Changing a mark needs a decision in docs/decisions/ first.
+#
+# Passing Gate B lets Product start a rule on PAPER (decision 15, section 9). Nothing here trades, and there is
+# no live path (CLAUDE.md: paper only). Real money is Gate D: the stakeholder's decision.
+version: 2
+applies_to: multi_day
+
+# ---------------------------------------------------------------- Gate A: reason
+# "pre-registration committed before the first run; published evidence for the family; frozen settings;
+#  <= 5 neighbours". The file is docs/prereg/<rule>.md (kaibot.evaluation.prereg checks it).
+gate_a:
+  prereg_dir: docs/prereg
+  committed_before_first_run: true
+  max_neighbours: 5
+
+# ---------------------------------------------------------------- Gate B: ten-year test
+# Engine + SimBroker, out of sample 2017-05 onward. ALL six marks must hold.
+gate_b:
+  out_of_sample_from: 2017-05-01
+  mark_1:                          # net return positive overall and in at least 6 of 10 calendar years
+    net_return_positive: true
+    min_positive_years: 6
+    of_years: 10
+  mark_2:                          # EITHER branch, against SPY total return over the same sessions
+    defensive:                     #   CAGR >= SPY CAGR - 2 points with max drawdown <= 0.75 x SPY's
+      cagr_vs_spy_points_min: -2.0
+      max_drawdown_vs_spy_max: 0.75
+    growth:                        #   CAGR >= SPY CAGR + 1 point with max drawdown <= 1.1 x SPY's
+      cagr_vs_spy_points_min: 1.0
+      max_drawdown_vs_spy_max: 1.1
+  mark_3:                          # net Sharpe at or above the 90th percentile of matched random entries
+    random_percentile_min: 90.0    #   (same universe, liquidity filter, exposure and holding-period distribution)
+    random_runs_min: 500
+  mark_4:                          # marks 1-2 still hold at 2x costs; 3x and the break-even are reported
+    costs_multiple: 2.0
+    reported_multiples: [1.0, 2.0, 3.0]
+  mark_5:                          # holds on the point-in-time universe, not only on today's list
+    universe: point_in_time
+  mark_6:                          # every pre-declared neighbour passes mark 1
+    neighbours_pass_mark: 1
+  # "Until S71 (cost model v2), S83-S85 (data repairs) and S75 (SimBroker) land, results from the research
+  #  harness of #113 are labelled provisional and cannot pass Gate B." A run passes only when its source says:
+  final_requires:
+    engine: simbroker              # S75
+    cost_model: v2                 # S71
+    data_repairs: true             # S83 point-in-time universe, S84 raw bars / corporate actions / total return,
+                                   # S85 earnings dates
+    benchmark: spy_total_return    # S84: SPY with dividends, not price only
+
+# ---------------------------------------------------------------- Gate C: paper incubation
+gate_c:
+  min_months: 3.0                  # >= 3 months (of 30.44 days, as in the M4 gate) ...
+  min_sessions: 60                 # ... and >= 60 sessions
+  ledger_equals_broker_every_day: true
+  tracks_simbroker_replay: true    # live daily returns track the SimBroker replay of the same days
+  drawdown_band: 0.95              # live drawdown inside the 95% block-bootstrap band of the test
+  retirement:                      # written before the start: this file is committed before a rule starts
+    drawdown_band: 0.99            #   live drawdown outside the 99% band, or
+    tracking_breach_sessions: 10   #   tracking outside tolerance for 10 sessions
+  # NOT in decision 15 (Product must settle these before the first paper start; see docs/ops/gate_v2.md):
+  tracking:
+    tolerance_bp_per_session: null # |live - replay| daily return, in basis points of equity. null = not set:
+                                   # the tracking mark then fails closed and the tracking trigger cannot fire.
+    breach_rule: cumulative        # the 10 sessions are counted over the whole incubation, not in a row
+  bootstrap:                       # how the bands are drawn (kaibot.evaluation.mtm.drawdown_bands)
+    method: stationary             # Politis & Romano (1994): blocks of random length, mean below
+    mean_block_sessions: 20
+    runs: 5000
+    seed: 15
+    horizon: live_sessions         # the band is for a stretch as long as the live record so far
+
+# ---------------------------------------------------------------- Gate D: real money
+gate_d:
+  decided_by: stakeholder          # starts small
+
+# ---------------------------------------------------------------- statistics
+# Computed on daily mark-to-market returns, not per trade (kaibot.evaluation.mtm).
+statistics:
+  periods_per_year: 252
+  newey_west_lag: nw1994           # floor(4 * (T / 100)^(2/9)); fixed by the sample length alone
+  sharpe_haircut: 0.5              # a 50% haircut quoted beside every backtested Sharpe
+  sharpe_warning_above: 1.0        # a backtested Sharpe above about 1.0 for a long-only stock rule is a warning sign
+  benchmark: SPY total return
+  trial_count: configurations      # deflated Sharpe against one trial registry: configurations, not rows

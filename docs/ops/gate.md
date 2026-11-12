@@ -3,6 +3,9 @@
 The gate answers one question: has a strategy earned a go-live *discussion*? It never switches anything. Kaibot
 trades paper only, and there is no live path in the code.
 
+This is the gate for **intraday** rules. Rules that hold for days are judged by evidence gate v2
+(`docs/ops/gate_v2.md`, decision 15).
+
 ## The bar (pre-registered)
 `config/gate.yaml` holds the PRD v2 §1 bar. Each strategy is judged separately, on frozen code:
 
@@ -11,7 +14,7 @@ trades paper only, and there is no live path in the code.
 | Trades | ≥ 900 |
 | Forward paper | ≥ 3 months |
 | Expectancy after shadow costs | t > 3 (per-trade P&L) |
-| Deflated Sharpe | > 0.5 as a probability (= z > 0), deflated by every logged research trial |
+| Deflated Sharpe | > 0.5 as a probability (= z > 0), deflated by every configuration in the trial registry |
 | Random entries | ≥ 95th percentile of 1,000 runs (same days, entry counts, sizing and exits) |
 | Sharpe | above SPY's, same sessions, annualised |
 | Drawdown | within the level's cap (`run_drawdown_end_pct`) |
@@ -27,10 +30,22 @@ page shows unmet rows in slate ("not yet"), not red.
 Every report records the sha256 of `gate.yaml`. Changing the bar needs a decision in `docs/decisions/` first.
 
 ## Frozen code
-At start-up the engine hashes the strategy-relevant files listed in `gate.yaml` (engine, risk, replay, features,
-agents, news, profiles, LLM config, universe). It logs that fingerprint in the `engine_start` event. Only trades
-since the first start of the latest unbroken stretch with the current fingerprint count. Dashboard, docs and test
-changes don't reset the clock; any trading-code change does. The report shows how many older trades it excluded.
+At start-up the engine hashes the files listed in `gate.yaml` and logs the fingerprint in the `engine_start`
+event. Since decision 15 there is one fingerprint per rule plus a shared core:
+
+- the **core** (engine, risk, broker, evaluation, replay, features, agents, news, shared strategy files,
+  profiles, LLM config, universe): a change restarts every rule's clock;
+- a **rule's own files** (for example `strategies/spy_momentum.py` for SPY momentum): a change restarts that
+  rule's clock only.
+
+Only a rule's trades since the first start of the latest unbroken stretch with its current fingerprint count.
+Dashboard, docs and test changes don't reset the clock. The report shows how many older trades it excluded, and
+each rule's own `fingerprint` and `frozen_since`. The header's "frozen since" is for the whole code.
+
+**Trial count.** The deflated Sharpe is deflated by the number of configurations in the one trial registry
+(`docs/ops/gate_v2.md`), the same count the walk-forward uses, not by the number of logged rows. The report
+lists what it read under `trial_registry`. With fewer than two logged Sharpes for a rule the spread of trial
+Sharpes is unknown and the hurdle stays zero; `n_trial_sharpes` shows when that is the case.
 
 ## How it is computed
 After each session (`_finalize_day`) the engine does two things:

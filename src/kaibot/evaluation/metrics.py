@@ -3,6 +3,10 @@ above the 95th percentile of 1,000 random-entry runs, Sharpe above SPY, drawdown
 
 References: Harvey, Liu & Zhu (2016) for t > 3; Bailey & Lopez de Prado (2014) deflated Sharpe ratio;
 Bailey, Borwein, Lopez de Prado & Zhu (2015) probability of backtest overfitting (CSCV).
+
+No scipy: the engine imports this module through `gate_report`, and the engine image installs only
+requirements-engine.txt. The normal distribution comes from the standard library and the moments from numpy;
+tests/unit/test_metrics.py compares each helper with scipy where scipy is installed.
 """
 
 from __future__ import annotations
@@ -11,9 +15,69 @@ import itertools
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from statistics import NormalDist
 
 import numpy as np
-from scipy import stats
+
+_NORMAL = NormalDist()
+EULER_GAMMA = 0.5772156649
+
+
+def norm_cdf(x: float) -> float:
+    """Standard normal CDF, accurate in both tails (erfc)."""
+    return 0.5 * math.erfc(-x / math.sqrt(2.0)) if not math.isnan(x) else math.nan
+
+
+def norm_ppf(p: float) -> float:
+    """Standard normal quantile; -inf / +inf at p <= 0 / p >= 1 (the standard library raises there)."""
+    if math.isnan(p):
+        return math.nan
+    if p <= 0.0:
+        return -math.inf
+    if p >= 1.0:
+        return math.inf
+    return _NORMAL.inv_cdf(p)
+
+
+def skew_kurtosis(returns: Sequence[float]) -> tuple[float, float]:
+    """Population skewness m3 / m2^1.5 and (non-excess) kurtosis m4 / m2^2, as scipy.stats.skew and
+    scipy.stats.kurtosis(fisher=False) give them. A constant series has neither: (nan, nan), as in scipy, so a
+    deflated Sharpe of a series that never moved is NaN ("nothing to deflate") and not a number."""
+    r = np.asarray(returns, dtype=float)
+    mean = float(r.mean())
+    d = r - mean
+    m2 = float(np.mean(d * d))
+    if m2 <= (np.finfo(float).resolution * mean) ** 2:  # scipy's test for "no variance left after rounding"
+        return math.nan, math.nan
+    return float(np.mean(d**3) / m2**1.5), float(np.mean(d**4) / m2**2)
+
+
+def rank_average(x: Sequence[float]) -> np.ndarray:
+    """Ranks from 1 (smallest); ties share the average of their ranks. NaN anywhere gives all NaN."""
+    a = np.asarray(x, dtype=float)
+    if np.isnan(a).any():
+        return np.full(a.shape, np.nan)
+    order = np.argsort(a, kind="mergesort")
+    xs = a[order]
+    new = np.r_[True, xs[1:] != xs[:-1]]  # first element of each group of equal values
+    starts = np.flatnonzero(new)
+    ends = np.r_[starts[1:], len(xs)]
+    out = np.empty(len(xs))
+    out[order] = ((starts + ends + 1) / 2.0)[np.cumsum(new) - 1]
+    return out
+
+
+def expected_max_sharpe(n_trials: int, trial_sharpe_var: float) -> float:
+    """Expected maximum Sharpe of `n_trials` unskilled trials whose Sharpe estimates have variance
+    `trial_sharpe_var` (Bailey & Lopez de Prado 2014, eq. 6):
+
+        SR0 = sqrt(V) * ((1 - g) * Z^-1(1 - 1/N) + g * Z^-1(1 - 1/(N e))),   g = Euler-Mascheroni constant.
+
+    Zero for a single trial. Same units as the Sharpes behind V (per period when V is per period)."""
+    if n_trials <= 1 or not trial_sharpe_var > 0.0:
+        return 0.0
+    return math.sqrt(trial_sharpe_var) * ((1 - EULER_GAMMA) * norm_ppf(1 - 1 / n_trials)
+                                          + EULER_GAMMA * norm_ppf(1 - 1 / (n_trials * math.e)))
 
 
 def t_stat(returns: Sequence[float]) -> float:
@@ -52,16 +116,10 @@ def deflated_sharpe(returns: Sequence[float], n_trials: int, trial_sharpe_var: f
     if n < 3 or n_trials < 1:
         return 0.0
     sr = sharpe(r)
-    euler = 0.5772156649
-    if n_trials == 1:
-        sr0 = 0.0
-    else:
-        sr0 = math.sqrt(trial_sharpe_var) * ((1 - euler) * stats.norm.ppf(1 - 1 / n_trials)
-                                             + euler * stats.norm.ppf(1 - 1 / (n_trials * math.e)))
-    skew = float(stats.skew(r))
-    kurt = float(stats.kurtosis(r, fisher=False))
+    sr0 = expected_max_sharpe(n_trials, trial_sharpe_var)
+    skew, kurt = skew_kurtosis(r)
     denom = math.sqrt(max(1 - skew * sr + (kurt - 1) / 4 * sr**2, 1e-12))
-    return float(stats.norm.cdf((sr - sr0) * math.sqrt(n - 1) / denom))
+    return float(norm_cdf((sr - sr0) * math.sqrt(n - 1) / denom))
 
 
 @dataclass(frozen=True)
@@ -103,7 +161,7 @@ def pbo_cscv(returns: np.ndarray, n_blocks: int = 16) -> PBOResult:
         oos = np.vstack([blocks[i] for i in range(n_blocks) if i not in is_set])
         sr_is, sr_oos = _block_sharpe(ins), _block_sharpe(oos)
         best = int(np.argmax(sr_is))
-        rank = float(stats.rankdata(sr_oos)[best])  # 1 = worst, n = best (ties averaged)
+        rank = float(rank_average(sr_oos)[best])  # 1 = worst, n = best (ties averaged)
         w = rank / (n + 1)
         logits.append(math.log(w / (1 - w)))
         is_best.append(sr_is[best])

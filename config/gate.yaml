@@ -21,18 +21,37 @@ kill:
   random_pct_max: 5.0        # at or below the 5th percentile of random entries (needs random data)
   drawdown_breach: true      # drawdown beyond the cap
 
-# Frozen code: trades count only since the strategy code last changed. The fingerprint hashes these files
-# (dashboard, docs and tests are excluded). The macro calendar is data, so it is excluded too.
+# Frozen code: a rule's trades count only since the code behind that rule last changed. The fingerprint hashes
+# these files (dashboard, docs and tests are excluded). The macro calendar is data, so it is excluded too.
+# Since decision 15 (audit G2) there is one fingerprint per rule plus a shared core, and strategies/, broker/
+# and evaluation/ are covered (kaibot.evaluation.fingerprint):
+#   core        every rule's clock restarts when one of these files changes;
+#   strategies  a rule's own files: only that rule's clock restarts. A file listed here leaves the core.
+# A strategies/ file that no rule claims stays in the core (the safe side). The same spec serves gate v2.
 fingerprint:
-  - src/kaibot/engine/*.py
-  - src/kaibot/risk/*.py
-  - src/kaibot/replay/*.py
-  - src/kaibot/features/*.py
-  - src/kaibot/agents/*.py
-  - src/kaibot/news/*.py
-  - config/profiles.yaml
-  - config/llm.yaml
-  - config/universe_seed.yaml
+  core:
+    - src/kaibot/engine/*.py
+    - src/kaibot/risk/*.py
+    - src/kaibot/broker/*.py
+    - src/kaibot/evaluation/*.py
+    - src/kaibot/replay/*.py
+    - src/kaibot/features/*.py
+    - src/kaibot/agents/*.py
+    - src/kaibot/news/*.py
+    - src/kaibot/strategies/*.py
+    - config/profiles.yaml
+    - config/llm.yaml
+    - config/universe_seed.yaml
+  strategies:
+    dip_reversal:
+      - src/kaibot/strategies/dip_reversal.py
+    spy_late_momentum:
+      - src/kaibot/strategies/spy_momentum.py
+      - src/kaibot/replay/spy_momentum.py
+    orb_stocks_in_play:
+      - src/kaibot/strategies/orb.py
+    news_continuation:
+      - src/kaibot/strategies/news_continuation.py
 
 # Strategies with a random-entry baseline computed each evening. Others report "unknown" (it fails closed).
 random_baseline: [dip_reversal]

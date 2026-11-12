@@ -22,11 +22,12 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.evaluation.metrics import deflated_sharpe, pbo_cscv, sharpe  # noqa: E402
+from kaibot.evaluation.trials import count_file, read_jsonl  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
 
 
 def load_trials(data: Path) -> tuple[list[dict], dict[str, pd.Series]]:
-    rows = [json.loads(x) for x in (data / "trials.jsonl").read_text().splitlines() if x.strip()]
+    rows, _ = read_jsonl(data / "trials.jsonl")  # the registry's reader: a damaged line is counted, not fatal
     series = {}
     for r in rows:
         f = data / "trials" / f"{r.get('trial_id', '')}.csv"
@@ -46,8 +47,8 @@ def pick_blocks(t: int, wanted: int) -> int:
 def report(data: Path, blocks: int = 16) -> dict:
     rows, series = load_trials(data)
     # every logged trial counts against the DSR, even without a stored series; a walk-forward row carries
-    # n_trials = grid size x folds (the configurations it searched)
-    n_trials = sum(int(r.get("n_trials", 1)) for r in rows)
+    # n_trials = grid size x folds (the configurations it searched). One count for every consumer (audit F5).
+    n_trials = count_file(data / "trials.jsonl")
     srs = [sharpe(s.to_numpy()) for s in series.values() if len(s) > 2]
     sr_var = float(np.var(srs, ddof=1)) if len(srs) > 1 else 0.0
     out = {"n_trials_logged": n_trials, "n_series": len(series), "trial_sharpe_var": sr_var, "trials": [],

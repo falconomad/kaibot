@@ -73,6 +73,69 @@ def test_frozen_since_uses_last_unbroken_stretch():
     assert gr.frozen_since(s, "C") is None
 
 
+def composed(core="c1", dip="d1", spy="s1"):
+    """An engine-start fingerprint in the per-rule format (kaibot.evaluation.fingerprint)."""
+    return f"all-{core}{dip}{spy};core={core};dip_reversal={dip};spy_late_momentum={spy}"
+
+
+def test_a_change_to_another_rule_does_not_restart_the_clock():
+    """Audit G1/G2: one fingerprint for the whole engine meant a change to rule B reset rule A's evidence."""
+    day = timedelta(days=1)
+    starts = [{"ts": T0.isoformat(), "fingerprint": composed()},
+              {"ts": (T0 + 30 * day).isoformat(), "fingerprint": composed(spy="s2")},  # only SPY momentum changed
+              {"ts": (T0 + 31 * day).isoformat(), "fingerprint": composed(spy="s2")}]
+    now = composed(spy="s2")
+    assert gr.frozen_since(starts, now, "dip_reversal") == T0
+    assert gr.frozen_since(starts, now, "spy_late_momentum") == T0 + 30 * day
+    assert gr.frozen_since(starts, now) == T0 + 30 * day  # the whole code, as the dashboard header shows it
+    tr = trades(100, 4.0, 10.0, days=60) + trades(100, 4.0, 10.0, days=60, strategy="spy_late_momentum")
+    out = gr.evaluate(BAR, strategies=["dip_reversal", "spy_late_momentum"], trades=tr, sessions=sessions(),
+                      random_days=[], starts=starts, fingerprint_now=now, amount=5000.0, dd_cap_pct=12.0,
+                      as_of=T0 + timedelta(days=200))
+    dip, spy = out["strategies"]["dip_reversal"], out["strategies"]["spy_late_momentum"]
+    assert dip["n_trades"] == 100 and dip["excluded_older_code"] == 0 and dip["fingerprint"] == "d1"
+    assert spy["n_trades"] == 50 and spy["excluded_older_code"] == 50 and spy["fingerprint"] == "s2"
+    assert dip["frozen_since"] == "2026-01-05T15:00:00Z" and spy["frozen_since"] == "2026-02-04T15:00:00Z"
+    assert out["frozen_since"] == spy["frozen_since"] and out["fingerprint"] == now
+
+
+def test_a_change_to_the_shared_core_restarts_every_clock():
+    starts = [{"ts": T0.isoformat(), "fingerprint": composed()},
+              {"ts": (T0 + timedelta(days=30)).isoformat(), "fingerprint": composed(core="c2", dip="d2", spy="s3")}]
+    now = starts[-1]["fingerprint"]
+    for strat in ("dip_reversal", "spy_late_momentum", "a_rule_without_files_of_its_own"):
+        assert gr.frozen_since(starts, now, strat) == T0 + timedelta(days=30)
+
+
+def test_starts_logged_before_per_rule_fingerprints_never_match():
+    """The first start on this code restarts the retired dip rule's clock: its old starts carry a plain hash."""
+    starts = [{"ts": (T0 - timedelta(days=90)).isoformat(), "fingerprint": "0123456789abcdef"},
+              {"ts": T0.isoformat(), "fingerprint": composed()}]
+    assert gr.frozen_since(starts, composed(), "dip_reversal") == T0
+    assert gr.frozen_since(starts[:1], composed(), "dip_reversal") is None
+    r = ev(trades(300, 4.0, 10.0, start=T0 - timedelta(days=90), days=80) + trades(100, 4.0, 10.0),
+           starts=starts, fp=composed(), rnd=[])["strategies"]["dip_reversal"]
+    assert r["n_trades"] == 100 and r["excluded_older_code"] == 300
+
+
+def test_an_engine_that_could_not_fingerprint_its_code_freezes_nothing():
+    starts = [{"ts": T0.isoformat(), "fingerprint": "unknown"}]
+    assert gr.frozen_since(starts, "unknown") is None and gr.frozen_since(starts, "unknown", "dip_reversal") is None
+    assert ev(trades(100, 4.0, 10.0), starts=starts, fp="unknown")["strategies"]["dip_reversal"]["n_trades"] == 0
+
+
+def test_random_baseline_rows_are_matched_on_the_rules_own_fingerprint():
+    tr = trades(950, 4.0, 10.0)
+    rnd = random_for(tr, total_scale=-1.0, fp=composed())
+    now = composed(spy="s2")  # SPY momentum changed since those rows were written: the dip baseline still counts
+    starts = [{"ts": T0.isoformat(), "fingerprint": composed()},
+              {"ts": (T0 + timedelta(days=100)).isoformat(), "fingerprint": now}]
+    assert ev(tr, rnd=rnd, starts=starts, fp=now)["strategies"]["dip_reversal"]["status"] == "pass"
+    other = composed(dip="d9")
+    r = ev(tr, rnd=rnd, starts=[{"ts": T0.isoformat(), "fingerprint": other}], fp=other)["strategies"]["dip_reversal"]
+    assert r["criteria"]["random_pct"]["value"] is None  # rows written by other dip-rule code are ignored
+
+
 def test_provisional_below_900_never_passes():
     r = ev(trades(300, 5.0, 10.0))["strategies"]["dip_reversal"]
     assert r["status"] == "provisional" and r["trades_to_go"] == 600
@@ -138,6 +201,19 @@ def test_trials_deflate_the_sharpe():
     many = ev(tr, trials={"dip_reversal": list(np.random.default_rng(5).normal(0, 0.08, 200))})
     assert many["strategies"]["dip_reversal"]["criteria"]["deflated_sharpe"]["value"] < lone
     assert many["strategies"]["dip_reversal"]["n_trials"] == 200
+
+
+def test_configurations_deflate_the_sharpe_not_rows():
+    """Audit F5: twenty logged rows that searched 8,286 configurations deflate by 8,286, not by twenty."""
+    tr = trades(950, 1.2, 10.0)
+    sharpes = {"dip_reversal": list(np.random.default_rng(5).normal(0, 0.08, 20))}
+    kw = dict(strategies=["dip_reversal"], trades=tr, sessions=sessions(), random_days=random_for(tr),
+              starts=[{"ts": T0.isoformat(), "fingerprint": "F1"}], fingerprint_now="F1", amount=5000.0,
+              dd_cap_pct=12.0, trials=sharpes, as_of=T0 + timedelta(days=200))
+    by_rows = gr.evaluate(BAR, **kw)["strategies"]["dip_reversal"]
+    by_cfg = gr.evaluate(BAR, **kw, n_configurations=8286)["strategies"]["dip_reversal"]
+    assert by_rows["n_trials"] == 20 and by_cfg["n_trials"] == 8286 and by_cfg["n_trial_sharpes"] == 20
+    assert by_cfg["criteria"]["deflated_sharpe"]["value"] < by_rows["criteria"]["deflated_sharpe"]["value"]
 
 
 def test_load_trials_reads_daily_sharpe(tmp_path: Path):

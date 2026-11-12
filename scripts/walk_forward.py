@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from run_replay import load_env, vix_prev_close  # noqa: E402
 
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
+from kaibot.evaluation.trials import count_file  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
 from kaibot.replay.features import regime  # noqa: E402
@@ -73,10 +74,9 @@ COST_KEYS = ("gross_pnl", "cost_spread", "cost_impact", "cost_slippage", "cost_f
 
 
 def logged_trials(trials_f: Path) -> int:
-    """Configurations already tried, from the trial log: a walk-forward row counts its whole search (n_trials)."""
-    if not trials_f.exists():
-        return 0
-    return sum(int(json.loads(x).get("n_trials", 1)) for x in trials_f.read_text().splitlines() if x.strip())
+    """Configurations already tried, from the trial log: a walk-forward row counts its whole search (n_trials).
+    The count is the trial registry's (kaibot.evaluation.trials), the same one the gate reports use."""
+    return count_file(trials_f)
 
 
 def cost_split(trades, equity0: float) -> dict:
