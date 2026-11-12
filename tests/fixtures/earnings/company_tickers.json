@@ -1,0 +1,22 @@
+{
+ "0": {
+  "cik_str": 101,
+  "ticker": "ACME",
+  "title": "ACME CORP"
+ },
+ "1": {
+  "cik_str": 303,
+  "ticker": "BETA",
+  "title": "BETA INC"
+ },
+ "2": {
+  "cik_str": 909,
+  "ticker": "OLDC",
+  "title": "OTHER LIFE SCIENCES CORP"
+ },
+ "3": {
+  "cik_str": "bad",
+  "ticker": "BAD",
+  "title": "x"
+ }
+}

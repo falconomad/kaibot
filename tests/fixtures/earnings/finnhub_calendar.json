@@ -1,0 +1,38 @@
+{
+ "earningsCalendar": [
+  {
+   "date": "2026-11-17",
+   "epsActual": null,
+   "epsEstimate": 1.2,
+   "hour": "amc",
+   "quarter": 3,
+   "revenueActual": null,
+   "revenueEstimate": 1500000000.0,
+   "symbol": "ACME",
+   "year": 2026
+  },
+  {
+   "date": "2026-11-18",
+   "epsEstimate": null,
+   "hour": "bmo",
+   "quarter": 3,
+   "symbol": "BETA",
+   "year": 2026
+  },
+  {
+   "date": "2026-11-18",
+   "hour": "",
+   "quarter": 3,
+   "symbol": "NOTOURS",
+   "year": 2026
+  },
+  {
+   "date": "bad",
+   "hour": "bmo",
+   "symbol": "ACME"
+  },
+  {
+   "symbol": null
+  }
+ ]
+}
