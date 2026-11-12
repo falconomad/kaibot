@@ -133,7 +133,10 @@ class TargetList:
     into whole shares). A symbol held by this strategy and missing here is to be sold.
 
     `index_filter`: the rule declares the index trend filter (pre-registered): while SPY is below its 200-day
-    average (or that is unknown) the portfolio builder allows no new buys for it; sells still go through."""
+    average (or that is unknown) the portfolio builder allows no new buys for it; sells still go through.
+    `resize`: the builder may re-size held names this time (False: they keep their shares; a pre-registration that
+    resizes only on some decisions says so here). The order of `weights` is the list's priority, best first (the
+    builder's ranked fill buys in it)."""
 
     strategy: str
     session: date
@@ -142,6 +145,7 @@ class TargetList:
     reasons: tuple[str, ...] = ()
     features: dict = field(default_factory=dict)
     index_filter: bool = False
+    resize: bool = True
 
 
 @dataclass(frozen=True)

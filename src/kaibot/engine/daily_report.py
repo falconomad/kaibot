@@ -76,7 +76,7 @@ def load_fixture(directory: Path = FIXTURE):
     for sym, sessions in meta.get("exits", {}).items():
         m.exits[m.raw.col(sym)] = list(sessions)
     where = directory.relative_to(ROOT) if directory.is_relative_to(ROOT) else directory
-    return m, {"bars": f"committed fixture {where}", "window": meta["window"]}
+    return m, {"bars": f"committed fixture {where}", "window": meta["window"], "sectors": meta.get("sectors", {})}
 
 
 def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str):
@@ -116,8 +116,10 @@ def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str)
     bad = rep[rep.get("split_basis_days", pd.Series(dtype=float)).fillna(0) > 0]["key"].astype(str).tolist() \
         if len(rep) else []
     m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad)
+    sectors = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}  # others: the unknown bucket
     return m, {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs "
-                       "and share counts raw; dividends credited", "stocks": len(names), "excluded_split_basis": bad}
+                       "and share counts raw; dividends credited", "stocks": len(names), "excluded_split_basis": bad,
+               "sectors": sectors}
 
 
 # ---------------------------------------------------------------- one account and its statistics
@@ -131,6 +133,8 @@ def run_stats(run: DailyRun) -> dict:
     eq = {str(r["date"]): r["end"] for r in run.book.daily}
     st.update({"new_entries": len(run.opened), "skipped_under_one_share": run.skipped,
                "orders_rejected": len(run.rejected), "fills": len(run.fills),
+               # cuts by the level's outer guards (sector, gap, cash floor): any > 0 is not the pre-registered sizing
+               "guard_cuts": len(run.guards), "basis_gaps": len(run.basis_gaps),
                "overdraft_days": len(od),
                "max_overdraft_pct": round(max((-c / eq[d] * 100 for d, c in od if eq.get(d)), default=0.0), 3)})
     return st
@@ -161,6 +165,7 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
     t0 = time.time()
     pol = load_profiles()[level]
     data = DailyData.from_market(market)
+    data.sector = dict(info.get("sectors") or {})
     w = info.get("window") or [start or "2017-05-01", end or str(data.dates[-1])]
     i0, i1 = sessions_window(data, w[0], w[1])
     if i0 > i1:
@@ -178,6 +183,9 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
         runs[lab] = (r, row, st)
         log(f"  {lab}: CAGR {st['cagr_pct']}%, max drawdown {st['max_drawdown_pct']}%, {st['trades']} trades, "
             f"{row['runtime_s']}s")
+        if st["guard_cuts"]:
+            log(f"  {lab}: WARNING {st['guard_cuts']} purchases cut by the level's outer guards: this run is not the "
+                "pre-registered sizing (#168)")
         return row
 
     log(f"{version}: engine + SimBroker, sessions {data.dates[i0]} to {data.dates[i1]} ({i1 - i0 + 1}), "
