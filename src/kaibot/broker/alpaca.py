@@ -22,12 +22,23 @@ class AlpacaError(BrokerError):
         super().__init__(status, body, f"Alpaca {status}: {body[:300]}")
 
 
+# S74c (#147): every call of the trading client (submit, cancel, replace, close, positions, open orders, clock)
+# ends within ORDER_DEADLINE_S, retries, back-off and the budget wait included, well inside the 90 s heartbeat
+# window (watchdog.STALE_S). Each attempt waits at most ORDER_TIMEOUT_S for the venue; Alpaca answers in well
+# under a second, so a 6 s silence is a stuck connection. Worst case: 6 + 1 + 6 + 2 + 5 = 20 s, three attempts.
+# The market-data client keeps the long retries (30 s a try, 5 tries) and no deadline: it is not on the order path.
+ORDER_TIMEOUT_S, ORDER_DEADLINE_S = 6.0, 20.0
+MIN_ATTEMPT_S = 1.0  # no attempt is started with less than this left
+
+
 class _Http:
     """Paced by the process-wide budget of `source` (config/sources.yaml), shared by every client of that source.
-    A 429 holds the whole source for the backoff; 5xx and network errors back off this caller only."""
+    A 429 holds the whole source for the backoff; 5xx and network errors back off this caller only.
+    With `deadline_s` the whole call, budget waits, attempts and back-off included, ends by then: an attempt's
+    timeout is cut to what is left, and no wait is started that would end past it (AlpacaError 0, "deadline")."""
 
     def __init__(self, key: str, secret: str, source: str = "alpaca", budget: Budget | None = None,
-                 opener=None, sleep=None):
+                 opener=None, sleep=None, timeout_s: float = 30.0, deadline_s: float | None = None):
         self.h = {
             "APCA-API-KEY-ID": key,
             "APCA-API-SECRET-KEY": secret,
@@ -37,30 +48,55 @@ class _Http:
         self.budget = budget or get_budget(source)
         self._open = opener or urllib.request.urlopen
         self._sleep = sleep or self.budget.clock.sleep
+        self.timeout_s, self.deadline_s = timeout_s, deadline_s
+
+    def _left(self, end: float | None) -> float:
+        return float("inf") if end is None else end - self.budget.clock.monotonic()
+
+    def _acquire(self, end: float | None) -> bool:
+        """The budget's slot; with a deadline, False instead of waiting for a slot that comes too late."""
+        if end is None:
+            self.budget.acquire()
+            return True
+        wait = self.budget.reserve() - self.budget.clock.monotonic()
+        if wait > 0:
+            if wait > self._left(end) - MIN_ATTEMPT_S:
+                return False
+            self.budget.waited += wait
+            self.budget.clock.sleep(wait)
+        return True
 
     def call(self, method: str, url: str, params: dict | None = None, body: dict | None = None):
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
         data = json.dumps(body).encode() if body is not None else None
+        end = None if self.deadline_s is None else self.budget.clock.monotonic() + self.deadline_s
         for attempt in range(5):
-            self.budget.acquire()
+            if self._left(end) < MIN_ATTEMPT_S or not self._acquire(end):
+                break
+            delay = min(2**attempt, 20)
             try:
                 req = urllib.request.Request(url, data=data, headers=self.h, method=method)
-                with self._open(req, timeout=30) as r:
+                with self._open(req, timeout=min(self.timeout_s, self._left(end))) as r:
                     raw = r.read()
                     return json.loads(raw) if raw else None
             except urllib.error.HTTPError as e:
                 text = e.read().decode(errors="replace")
+                if e.code < 500 and e.code != 429:
+                    raise AlpacaError(e.code, text) from None
+                if self._left(end) - delay < MIN_ATTEMPT_S:
+                    break
                 if e.code == 429:
-                    self.budget.backoff(min(2**attempt, 20))
-                    continue
-                if e.code >= 500:
-                    self._sleep(min(2**attempt, 20))
-                    continue
-                raise AlpacaError(e.code, text) from None
+                    self.budget.backoff(delay)
+                else:
+                    self._sleep(delay)
             except (urllib.error.URLError, TimeoutError):
-                self._sleep(min(2**attempt, 20))
-        raise AlpacaError(0, f"giving up on {method} {url}")
+                if self._left(end) - delay < MIN_ATTEMPT_S:
+                    break
+                self._sleep(delay)
+        else:
+            raise AlpacaError(0, f"giving up on {method} {url}")
+        raise AlpacaError(0, f"giving up on {method} {url}: deadline {self.deadline_s:g} s")
 
 
 ACTIVITY_PAGE, ACTIVITY_MAX_PAGES = 100, 50
@@ -75,7 +111,7 @@ class AlpacaPaper(BrokerBase):
     name = "alpaca_paper"
 
     def __init__(self, key: str, secret: str):
-        self.http = _Http(key, secret, source="alpaca_trading")
+        self.http = _Http(key, secret, source="alpaca_trading", timeout_s=ORDER_TIMEOUT_S, deadline_s=ORDER_DEADLINE_S)
         self.base = PAPER_TRADING_URL
 
     def _t(self, method, path, params=None, body=None):
