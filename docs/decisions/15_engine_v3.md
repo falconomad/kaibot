@@ -173,3 +173,17 @@ harness of #113 are labelled **provisional** and cannot pass Gate B.
   agent room on, the cloud move, real money, the level limits of section 6.
 - Unchanged everywhere: paper only; no LLM output sets price, size, stop or exit; profiles and owner settings only
   tighten `HARD_CEILINGS`; free data only; one engine at a time.
+
+## 10. Gate v2 clarifications (Product, 12 Nov 2026, settled before any rule was judged)
+
+Raised by QA-Ops while building #126 (PR #140). The conservative reading is chosen each time.
+
+| Question | Decision |
+|---|---|
+| Gate C tracking tolerance | Mean absolute difference between live daily returns and the `SimBroker` replay of the same days ≤ 10 bp per session, over a rolling 20 sessions |
+| "Outside tolerance for 10 sessions" | 10 sessions in a row |
+| Part-years in "6 of 10" | A partial calendar year counts only if it has at least 6 months of out-of-sample data. The threshold is then 60% of the counted years, rounded up |
+| Mark 3 for SPY-only rules (no stock universe) | Random-timing control: the same number of SPY round trips at random decision times, with the rule's holding-duration distribution and exposure, ≥ 500 seeded runs; the rule must be at or above the 90th percentile |
+| "Same universe" for the random control | Names are drawn from the stocks that pass the price and volume filter on that date. The rule's own selection filters (trend, rank) are not applied to them. The rule's exposure path, which includes its market filter, is copied |
+| Bootstrap settings | Stationary bootstrap, mean block length 20 sessions, 2,000 resamples, fixed seed |
+| Cost and fill re-runs of the same configuration | Not new trials (`n_trials = 0`). Every new configuration counts 1 |
