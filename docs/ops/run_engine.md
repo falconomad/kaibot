@@ -31,6 +31,12 @@ cd ~/Projects/kaibot
   does not happen; the engine closes any position left from an earlier day at the first tick of the next open.
   The dashboard shows "Engine offline" after 90 seconds without a heartbeat.
 
+## Always on (no daily start by hand)
+`./scripts/install_service.sh` once makes the Mac start the engine by itself (launchd), restart it after a crash,
+ping free Healthchecks.io alarms and back up local files nightly. Releases can be pinned with `./scripts/release.sh`
+(the engine then trades a tag, not `main`). Everything, including stop and recovery: `docs/ops/always_on.md`.
+Starting by hand as above keeps working unchanged.
+
 ## Moving to a cloud VM later (Google, Oracle, anything with Docker)
 
 ```
