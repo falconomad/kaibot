@@ -3,10 +3,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api, type PackItem, type Room, type RoomSession } from "../lib/api";
-import { CAUSE_TEXT, fmtR, roomOutcome, roomView, safeDate, type ResolvedRef } from "../lib/derive";
+import { fmtR } from "../lib/derive";
+import { causeText } from "../lib/explain";
+import { ErrorState } from "./States";
+import { roomOutcome, roomView, safeDate, type ResolvedRef } from "../lib/roomview";
 import { dateEt, signedMoney, timeEt, tone } from "../lib/fmt";
 
-const cause = (c: string) => (c ? CAUSE_TEXT[c] ?? c.replace(/_/g, " ") : "—");
+const cause = causeText;
 const when = (iso: string | undefined) => {
   const d = iso ? safeDate(iso) : null;
   return d ? `${dateEt(d.toISOString())} ${timeEt(d.toISOString())} ET` : iso || "time unknown";
@@ -137,7 +140,7 @@ export function RoomTranscript({ s, trade, compact }: { s: RoomSession; trade?: 
 export function RoomBySignal({ signalId }: { signalId: number }) {
   const q = useQuery({ queryKey: ["room", signalId], queryFn: () => api.room(signalId) });
   if (q.isPending) return <p className="skeleton">Loading the transcript…</p>;
-  if (q.isError) return <p className="loss">{String(q.error)}</p>;
+  if (q.isError) return <ErrorState compact what="The transcript" error={q.error} retry={() => q.refetch()} />;
   if (!q.data) return <p className="muted">No room session for this setup.</p>;
   return (
     <>

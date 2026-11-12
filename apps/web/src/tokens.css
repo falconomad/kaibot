@@ -6,7 +6,7 @@
 :root {
   color-scheme: dark;
   --paper: #0A0B0D; --surface: #131519; --surface-2: #1B1E24; --rule: #262A31; --rule-strong: #3A404A;
-  --ink: #F4F5F7; --slate: #A1A8B3; --stale: #7E8693;
+  --ink: #F4F5F7; --slate: #A1A8B3; --stale: #8A929E; /* #8A929E: >= 4.5:1 on every surface and tint (was #7E8693, 3.9:1 on the warn and gain tints) */
   --sea: #4F95F0; --sea-ink: #7FB2FF; --sea-tint: #132A4A;
   --gain: #3DDC97; --gain-tint: #12301F; --loss: #FF6B6B; --loss-tint: #2A1517;
   --pass: #3DDC97; --warn: #F5B64C; --warn-tint: #33280F; --fail: #FF6B6B;

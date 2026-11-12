@@ -4,11 +4,11 @@ import type { Daily, Level, Trade } from "./api";
 export const LEVELS: Record<Level, { name: string; risk: number; stop: number; pos: number; maxPositions: number;
   entries: number; runDd: number; strategies: string }> = {
   conservative: { name: "Steady", risk: 0.25, stop: 0.75, pos: 10, maxPositions: 3, entries: 10, runDd: 4,
-    strategies: "Dip reversal only" },
+    strategies: "Dip rule only (retired, systems test only)" },
   balanced: { name: "Balanced", risk: 0.5, stop: 1.5, pos: 15, maxPositions: 5, entries: 20, runDd: 8,
-    strategies: "Dip reversal + SPY end-of-day momentum" },
+    strategies: "Dip rule + SPY late-day rule (both retired, systems test only)" },
   aggressive: { name: "Hunter", risk: 1.0, stop: 3.0, pos: 20, maxPositions: 8, entries: 30, runDd: 12,
-    strategies: "Dip reversal + SPY end-of-day momentum" },
+    strategies: "Dip rule + SPY late-day rule (both retired, systems test only)" },
 };
 
 // Go-live bar (docs/decisions): fixed in advance, shown as progress, never relaxed in the UI.

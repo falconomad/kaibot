@@ -11,6 +11,7 @@ import { SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
 import { Skeleton } from "./components/Skeleton";
 import { ROUTE_LOADERS as load } from "./routes";
+import { STALE } from "./lib/poll";
 
 // Lazy routes (see routes.ts). Sign-in, the shell and Home stay in the first load so the first screen is one round trip.
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
@@ -28,7 +29,10 @@ const Trades = lazy(() => load["/trades"]().then((m) => ({ default: m.Trades }))
 /** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton. */
 const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense>;
 
-const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: 15_000 } } });
+// Polls pause in hidden tabs; a refocus refetches only data older than 30 s (lib/poll.ts), so switching back to the tab
+// doesn't fire every query at once.
+const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: STALE.default,
+  refetchIntervalInBackground: false } } });
 
 function Gate() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -45,8 +49,9 @@ function Gate() {
   if (owner.isError || owner.data === false)
     return (
       <div className="center"><div className="card">
-        <h1 style={{ margin: 0, fontSize: 18 }}>Not your dashboard</h1>
-        <p className="muted">This Kaibot belongs to another account. Nothing here is visible to you.</p>
+        <h1 style={{ margin: 0, fontSize: 18 }}>{owner.isError ? "Couldn't check who owns this dashboard" : "Not your dashboard"}</h1>
+        <p className="muted">{owner.isError ? "The server didn't answer. Try again in a moment." : "This Kaibot belongs to another account. Nothing here is visible to you."}</p>
+        {owner.isError && <button onClick={() => owner.refetch()}>Try again</button>}
         <button onClick={() => supa.auth.signOut()}>Sign out</button>
       </div></div>
     );

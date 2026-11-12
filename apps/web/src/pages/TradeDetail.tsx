@@ -2,8 +2,12 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { RoomTranscript } from "../components/Room";
+import { onTabKeys, tabProps } from "../lib/a11y";
 import { api, type Trade, type TradeDetail } from "../lib/api";
-import { EXIT_LABEL, R, dateEt, money, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
+import { R, dateEt, money, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
+import { RULES, bindingText, checkText, exitText, ruleName } from "../lib/explain";
+import { ErrorState, RuleName } from "../components/States";
+import { STALE } from "../lib/poll";
 import { Skeleton } from "../components/Skeleton";
 import { StockBadge, companyName } from "../components/StockBadge";
 
@@ -54,8 +58,8 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
       .map(([k, v]) => [LABELS[k], typeof v === "number" ? Number(v.toFixed(3)) : v]));
     return (
       <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
-        <span>Setup</span><span className="v">{t.strategy.replace("_", " ")}: dip with no company news, sector-adjusted</span>
-        <span>Exit</span><span className="v">{t.exit_reason ? EXIT_LABEL[t.exit_reason] ?? t.exit_reason : "open"}{t.exit_ts ? ` · ${timeEt(t.exit_ts)} ET` : ""}</span>
+        <span>Rule</span><span className="v"><RuleName code={t.strategy} />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>{RULES[t.strategy].what}</div>}</span>
+        <span>Exit</span><span className="v" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}{t.exit_ts ? ` · ${timeEt(t.exit_ts)} ET` : ""}</span>
         <span>Risk (1R)</span><span className="v">{money(t.risk_usd)}</span>
         <span>Result</span><span className={`v ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         {Object.entries(f).map(([k, v]) => <Fragment key={k}><span>{k}</span><span className="v">{String(v)}</span></Fragment>)}
@@ -68,10 +72,11 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
     const rows = Object.entries(d.gate.checks as Record<string, { state: string; actual: unknown; limit: unknown }>);
     return (
       <>
-        <p className="muted num" style={{ marginTop: 0, fontSize: 12 }}>policy {d.gate.policy_hash} · code {d.gate.code_sha} · {d.gate.qty} sh · size bound by {d.gate.binding}</p>
+        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>{d.gate.qty} shares; the size was limited by <span title={d.gate.binding ? `code: ${d.gate.binding}` : undefined}>{bindingText(d.gate.binding)}</span>.</p>
+        <p className="muted num" style={{ marginTop: 0, fontSize: 12 }}>policy {d.gate.policy_hash} · code version {d.gate.code_sha}</p>
         <table className="list"><thead><tr><th>Check</th><th>Result</th><th className="r">Actual</th><th className="r">Limit</th></tr></thead>
           <tbody>{rows.map(([k, v]) => (
-            <tr key={k}><td>{k.replace(/_/g, " ")}</td>
+            <tr key={k}><td title={`code: ${k}`}>{checkText(k)}</td>
               <td className={v.state === "pass" ? "" : v.state === "warn" ? "loss" : "loss"} style={{ color: v.state === "pass" ? "var(--pass)" : v.state === "warn" ? "var(--warn)" : "var(--fail)" }}>
                 {v.state === "pass" ? "✓ pass" : v.state === "warn" ? "▲ warn" : "✕ fail"}</td>
               <td className="r num">{String(v.actual)}</td><td className="r num">{String(v.limit)}</td></tr>
@@ -82,7 +87,7 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
   }
   if (id === "room") {
     if (!d.room) return replay ? <NotRecorded what="The agent room's debate" replay /> :
-      <p className="muted">No room session for this trade. Only dip-reversal candidates that pass every rule go to the room (SPY momentum never uses it);
+      <p className="muted">No room session for this trade. Only dip-rule candidates that pass every rule go to the room (the SPY late-day rule never uses it);
         trades from before M3, or with the room switched off, are rules-only. The room can only ever veto or halve a trade, never size or price it.</p>;
     return <RoomTranscript s={d.room} trade={{ id: t.id, qty: t.qty, pnl_usd: t.pnl_usd, risk_usd: t.risk_usd, exit_reason: t.exit_reason, exit_ts: t.exit_ts }} />;
   }
@@ -101,17 +106,19 @@ export function TradeDetailPage() {
   const [params] = useSearchParams();
   const initial = TABS.find(([k]) => k === params.get("tab"))?.[0] ?? "why";
   const [tab, setTab] = useState<(typeof TABS)[number][0]>(initial);
-  const q = useQuery({ queryKey: ["trade", id], queryFn: () => api.trade(Number(id)) });
+  // A closed trade no longer changes: keep it for minutes instead of refetching on every focus.
+  const q = useQuery({ queryKey: ["trade", id], queryFn: () => api.trade(Number(id)),
+    staleTime: (qq) => (qq.state.data?.trade.exit_ts ? STALE.daily : STALE.default) });
   if (q.isPending) return <Skeleton variant="detail" />;
-  if (q.isError) return <p className="loss">{String(q.error)}</p>;
-  if (!q.data) return <p>Trade not found. <Link to="/trades">All trades</Link></p>;
+  if (q.isError) return <ErrorState what="This trade" error={q.error} retry={() => q.refetch()} />;
+  if (!q.data) return <section className="card"><p style={{ marginTop: 0 }}>Trade not found. It may belong to a run you can't see.</p><Link to="/trades">All trades</Link></section>;
   const d = q.data, t = d.trade;
   return (
     <>
-      <Link to="/">← Live</Link>
+      <Link to="/">← Home</Link>
       <section className="card">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · {t.strategy.replace(/_/g, " ")} · {t.exit_ts ? "closed" : "open"}</span></span></span>
+          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}</span></span></span>
           <span className={`num ${tone(t.pnl_usd)}`} style={{ fontSize: 18 }}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         </div>
         <p className="muted num" style={{ margin: "4px 0 0" }}>
@@ -121,10 +128,10 @@ export function TradeDetailPage() {
       <div className="grid trade-grid">
         <section className="card"><h2>Price levels</h2><Ladder t={t} /></section>
         <section className="card">
-          <div className="tabs" role="tablist">
-            {TABS.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}>{l}</button>)}
+          <div className="tabs" role="tablist" aria-label="Trade details" onKeyDown={onTabKeys}>
+            {TABS.map(([k, l]) => <button key={k} id={`tab-${k}`} aria-controls="trade-panel" {...tabProps(tab === k)} onClick={() => setTab(k)}>{l}</button>)}
           </div>
-          <div role="tabpanel" style={{ paddingTop: 12 }}><Tab id={tab} d={d} /></div>
+          <div role="tabpanel" id="trade-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} style={{ paddingTop: 12 }}><Tab id={tab} d={d} /></div>
         </section>
       </div>
     </>
