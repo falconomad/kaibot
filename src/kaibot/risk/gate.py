@@ -2,12 +2,22 @@
 
 No LLM output can bypass or alter a verdict. Sizing is computed here, never by an agent.
 Policy numbers come from the aggressiveness profile (config/profiles.yaml).
+
+Book-level checks (issue #119, decision 15 sections 3 and 6): a `Snapshot` may carry the book's gross, overnight and
+sector exposure and its gap-scenario loss, checked against `BookLimits` (their own hard ceilings,
+`BOOK_HARD_CEILINGS`). A snapshot without them (every intraday snapshot today) gets exactly the verdict it got
+before; a proposal for a multi-day sleeve (`overnight=True`) without them is refused (`book_known`).
+A multi-day buy whose ATR(20) (`Proposal.atr`) is missing, non-finite or not positive is refused (`atr_known`):
+the gap scenario is max(10%, 3 x ATR20), so the flat 10% alone would under-count it. The 10%-only value of
+`gap_loss_ps(px, None)` is never used to approve a multi-day buy. Sells and the intraday path are not affected.
+`BookLimits` is a separate policy so that `RiskPolicy`, its hash and every trial digest built from it stay
+byte-identical for the intraday path.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
 
 
@@ -42,6 +52,72 @@ HARD_CEILINGS = RiskPolicy(risk_per_trade_pct=1.0, max_position_pct=20, max_open
                            run_drawdown_end_pct=12.0, max_quote_age_s=5.0)
 
 
+@dataclass(frozen=True)
+class BookLimits:
+    """Book-level limits for multi-day sleeves (all % of equity unless noted). Level values are PROVISIONAL
+    (decision 15 section 6: confirmed by the stakeholder with the first paper start)."""
+
+    atr_risk_pct: float = 0.1  # k: a 1-ATR(20) move costs this % of equity per position (shares = E x k / ATR)
+    max_name_pct: float = 10.0  # one symbol, all sleeves together
+    max_gross_pct: float = 100.0  # everything held (intraday included)
+    max_overnight_pct: float = 100.0  # multi-day sleeves held over the close
+    max_sector_pct: float = 30.0
+    max_names: int = 20  # distinct symbols in the multi-day book
+    min_cash_pct: float = 2.0  # a FLOOR: cash kept aside (gross may not exceed 100 - this)
+    max_gap_loss_pct: float = 12.0  # loss of the overnight book in the gap scenario (gap_loss_ps)
+
+
+# Ceilings for book limits; no profile or owner setting may loosen them (min_cash_pct is a floor).
+BOOK_HARD_CEILINGS = BookLimits(atr_risk_pct=0.25, max_name_pct=HARD_CEILINGS.max_position_pct, max_gross_pct=100.0,
+                                max_overnight_pct=100.0, max_sector_pct=40.0, max_names=30, min_cash_pct=1.0,
+                                max_gap_loss_pct=15.0)
+BOOK_FLOORS = ("min_cash_pct",)
+
+# The gap scenario: every overnight position opens this far below its last price; a resting stop does not help
+# (a stop gapped through fills at the open, decision 15 section 5).
+GAP_SCENARIO_PCT = 10.0
+GAP_SCENARIO_ATR = 3.0
+
+
+def gap_loss_ps(px: float, atr: float | None) -> float:
+    """$ lost per share in the gap scenario: the larger of a 10% gap and a 3-ATR(20) gap.
+
+    `atr=None` gives the 10% floor only; `evaluate` refuses a multi-day buy without a usable ATR (`atr_known`), so
+    that value is used only to measure positions already held, never to approve a new one."""
+    return max(px * GAP_SCENARIO_PCT / 100, GAP_SCENARIO_ATR * (atr or 0.0))
+
+
+def validate_book(lim: BookLimits, ceil: BookLimits = BOOK_HARD_CEILINGS) -> None:
+    for f in fields(BookLimits):
+        v, c = getattr(lim, f.name), getattr(ceil, f.name)
+        if not isinstance(v, int | float) or isinstance(v, bool) or not math.isfinite(v) or v < 0:
+            raise ValueError(f"book limit {f.name}={v!r} must be a number >= 0")
+        if f.name in BOOK_FLOORS:
+            if v < c or v > 100:
+                raise ValueError(f"book limit loosens hard floor: {f.name}={v} < {c}")
+        elif v > c:
+            raise ValueError(f"book limit loosens hard ceiling: {f.name}={v} > {c}")
+
+
+def tighten_book(level: BookLimits, owner: dict | None) -> BookLimits:
+    """The owner's book settings on top of the level's: each may only tighten (lower a cap, raise the cash
+    buffer). Anything looser, unknown or of the wrong type is refused (ValueError), never clamped."""
+    if not owner:
+        return level
+    names = {f.name: f for f in fields(BookLimits)}
+    changes = {}
+    for k, v in owner.items():
+        if k not in names:
+            raise ValueError(f"unknown book setting {k!r}")
+        if isinstance(v, bool) or not isinstance(v, int | float) or (k == "max_names" and v != int(v)):
+            raise ValueError(f"book setting {k}={v!r} has the wrong type")
+        changes[k] = int(v) if k == "max_names" else float(v)
+    out = replace(level, **changes)
+    validate_book(out, level)
+    validate_book(out)
+    return out
+
+
 def validate_policy(pol: RiskPolicy, ceil: RiskPolicy = HARD_CEILINGS) -> None:
     for f in ("risk_per_trade_pct", "max_position_pct", "max_open_risk_pct", "max_daily_loss_pct",
               "max_positions", "max_entries_per_day", "run_drawdown_end_pct", "max_quote_age_s"):
@@ -71,6 +147,12 @@ class Snapshot:
     entries_today: int = 0
     run_peak_equity: float | None = None
     buying_power: float | None = None  # ledger-capped; never exceeds the onboarding amount
+    # Book-level fields (#119). None = not known; checked only when given, required when `overnight`.
+    gross_exposure: float | None = None  # $ of everything held
+    overnight_exposure: float | None = None  # $ of multi-day sleeves
+    sector_exposure: float | None = None  # $ held in this symbol's sector
+    gap_loss: float | None = None  # $ the overnight book loses in the gap scenario
+    overnight: bool = False  # the proposal is for a multi-day sleeve (held over the close)
 
 
 @dataclass(frozen=True)
@@ -80,6 +162,7 @@ class Proposal:
     entry: float
     stop: float
     target: float | None = None
+    atr: float | None = None  # ATR(20), for the gap scenario of a multi-day proposal
 
 
 @dataclass
@@ -110,7 +193,36 @@ def open_risk_budget(s: Snapshot, pol: RiskPolicy) -> float:
     return min(s.equity * pol.max_open_risk_pct / 100, room_to_stop)
 
 
-def size_position(p: Proposal, s: Snapshot, pol: RiskPolicy) -> tuple[int, str, dict[str, int]]:
+def _book_caps(p: Proposal, s: Snapshot, book: BookLimits | None) -> list[tuple[str, str, float, float, float]]:
+    """(rule, candidate, current $, per-share $, limit %) for every book check that applies to this buy."""
+    if book is None or p.side is not Side.BUY:
+        return []
+    out = []
+    if s.gross_exposure is not None:
+        out.append(("gross_pct", "gross_headroom", s.gross_exposure, p.entry,
+                    min(book.max_gross_pct, 100 - book.min_cash_pct)))
+    if s.sector_exposure is not None:
+        out.append(("sector_pct", "sector_headroom", s.sector_exposure, p.entry, book.max_sector_pct))
+    if s.overnight:
+        if s.overnight_exposure is not None:
+            out.append(("overnight_pct", "overnight_headroom", s.overnight_exposure, p.entry,
+                        book.max_overnight_pct))
+        if s.gap_loss is not None:
+            out.append(("gap_loss_pct", "gap_headroom", s.gap_loss, gap_loss_ps(p.entry, p.atr),
+                        book.max_gap_loss_pct))
+    return out
+
+
+def _book_known(s: Snapshot, book: BookLimits | None) -> bool:
+    return book is not None and None not in (s.gross_exposure, s.overnight_exposure, s.sector_exposure, s.gap_loss)
+
+
+def _atr_known(atr: float | None) -> bool:
+    return isinstance(atr, int | float) and not isinstance(atr, bool) and math.isfinite(atr) and atr > 0
+
+
+def size_position(p: Proposal, s: Snapshot, pol: RiskPolicy,
+                  book: BookLimits | None = None) -> tuple[int, str, dict[str, int]]:
     """Return (qty, binding_constraint, candidates). Long-only unless policy allows shorts."""
     per_share_risk = abs(p.entry - p.stop)
     if per_share_risk <= 0 or p.entry <= 0:
@@ -122,11 +234,13 @@ def size_position(p: Proposal, s: Snapshot, pol: RiskPolicy) -> tuple[int, str, 
     }
     if s.buying_power is not None:
         cands["buying_power"] = math.floor(max(s.buying_power, 0) / p.entry)
+    for _, cand, cur, per_share, lim in _book_caps(p, s, book):
+        cands[cand] = math.floor(max(s.equity * lim / 100 - cur, 0) / per_share) if per_share > 0 else 0
     binding = min(cands, key=cands.get)
     return max(cands[binding], 0), binding, cands
 
 
-def evaluate(p: Proposal, s: Snapshot, pol: RiskPolicy) -> Verdict:
+def evaluate(p: Proposal, s: Snapshot, pol: RiskPolicy, book: BookLimits | None = None) -> Verdict:
     checks: list[Check] = []
 
     def hard(rule: str, ok: bool, actual, limit) -> None:
@@ -152,8 +266,12 @@ def evaluate(p: Proposal, s: Snapshot, pol: RiskPolicy) -> Verdict:
     day_loss_pct = max(0.0, (s.day_start_equity - s.equity) / s.day_start_equity * 100)
     hard("daily_loss_pct", day_loss_pct < pol.max_daily_loss_pct, round(day_loss_pct, 3), pol.max_daily_loss_pct)
     hard("max_positions", s.open_positions < pol.max_positions, s.open_positions, pol.max_positions)
+    if s.overnight:  # a multi-day sleeve is only sized against a known book (fail closed)
+        hard("book_known", _book_known(s, book), _book_known(s, book), True)
+        if p.side is Side.BUY:  # and a multi-day buy against a known ATR(20): no flat-10% gap fallback
+            hard("atr_known", _atr_known(p.atr), p.atr, "> 0")
 
-    qty, binding, _ = size_position(p, s, pol) if stop_ok else (0, "invalid_stop", {})
+    qty, binding, _ = size_position(p, s, pol, book) if stop_ok else (0, "invalid_stop", {})
     hard("qty_positive", qty > 0, qty, "> 0")
 
     max_loss = qty * abs(p.entry - p.stop)
@@ -166,6 +284,10 @@ def evaluate(p: Proposal, s: Snapshot, pol: RiskPolicy) -> Verdict:
     ):
         state = State.FAIL if val > lim + 1e-9 else (State.WARN if val >= pol.warn_fraction * lim else State.PASS)
         checks.append(Check(rule, state, round(val, 3), lim))
+    for rule, _, cur, per_share, lim in _book_caps(p, s, book):
+        val = (cur + qty * per_share) / s.equity * 100
+        state = State.FAIL if val > lim + 1e-9 else (State.WARN if val >= pol.warn_fraction * lim else State.PASS)
+        checks.append(Check(rule, state, round(val, 3), round(lim, 6)))
 
     approved = not any(c.state is State.FAIL for c in checks)
     return Verdict(approved, qty if approved else 0, binding, round(max_loss, 2) if approved else 0.0, checks)

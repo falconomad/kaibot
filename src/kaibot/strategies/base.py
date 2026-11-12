@@ -45,8 +45,8 @@ shows the shape the next rule plugs into::
         def manage(self, ctx, pos): return None
         def close_out(self, ctx, pos): return None
 
-The portfolio builder (S80) turns the weights into whole shares (shares = equity x 0.001 / ATR(20) under the
-level's caps), and the order manager (S78) sends only the difference to the broker's positions.
+The portfolio builder (S79, `risk/portfolio.py`) turns the weights into whole shares (shares = equity x 0.001 /
+ATR(20) under the level's caps), and the order manager (S78) sends only the difference to the broker's positions.
 """
 
 from __future__ import annotations
@@ -130,7 +130,10 @@ class Signal:
 @dataclass(frozen=True)
 class TargetList:
     """What a multi-day strategy wants to hold after the next fill: symbol -> relative weight (sizing turns it
-    into whole shares). A symbol held by this strategy and missing here is to be sold."""
+    into whole shares). A symbol held by this strategy and missing here is to be sold.
+
+    `index_filter`: the rule declares the index trend filter (pre-registered): while SPY is below its 200-day
+    average (or that is unknown) the portfolio builder allows no new buys for it; sells still go through."""
 
     strategy: str
     session: date
@@ -138,6 +141,7 @@ class TargetList:
     sizing: str = "atr_risk"
     reasons: tuple[str, ...] = ()
     features: dict = field(default_factory=dict)
+    index_filter: bool = False
 
 
 @dataclass(frozen=True)
