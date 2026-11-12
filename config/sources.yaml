@@ -5,6 +5,10 @@
 market_data:
   alpaca:           {use: primary, auth: key, limit: "200 req/min REST; WS 30 symbols, 1 conn (IEX)", budget_per_min: 150, verify_on_day1: [movers, corporate_actions_path]}
   alpaca_trading:   {use: paper_orders, auth: key, limit: "200 req/min per account (trading API, separate from data)", budget_per_min: 150}
+  alpaca_daily_bars: {use: research_daily_store, auth: key, endpoint: "/v2/stocks/{symbol}/bars timeframe=1Day adjustment=raw|all feed=sip, end >= 15 min old",
+                     note: "requests count against alpaca; two per symbol; scripts/fetch_daily.sh runs at 120/min, 40/min while the engine runs; research store data/daily, never in the live path"}
+  alpaca_corporate_actions: {use: splits_and_dividends, auth: key, endpoint: "/v1/corporate-actions, 1000 rows a page",
+                     note: "requests count against alpaca; a few dozen per run of scripts/fetch_daily.sh; free-plan access and history depth are confirmed by the first run (docs/ops/daily_bars.md)"}
   finnhub:          {use: fallback_quotes, auth: key, limit: "60/min, 30/s burst; WS 50 symbols; no candles on free", budget_per_min: 45}
   massive:          {use: nightly_universe, auth: key, limit: "5/min, EOD grouped daily bars", budget_per_min: 4}
   tiingo:           {use: third_fallback, auth: key, limit: "50/hr, 1000/day", budget_per_hour: 40}
