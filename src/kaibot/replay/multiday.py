@@ -31,6 +31,15 @@ that fill at the close (`enter(at="close", prev_close=True)`, `sell_close`), and
 held position (`adjust`). A partial sale is its own trade row with its share of the entry costs, so
 `pnl == gross_pnl - costs` and "the trades explain the equity" still hold.
 
+Added for the honest rerun (issue #143), also off by default (the first-look and today-universe results are
+pinned): corporate actions on held positions (`actions=(split, div)`, the raw daily store's arrays: a split
+multiplies the shares and divides every price level of the position, a cash dividend is credited to the account
+and booked as the trade's own `dividends` line beside `pnl`), and `terminal` (column -> (last bar, return)): a
+position still held at the last bar of a company whose bars stop is closed at that close times (1 + return), with
+no cost (the hole policy of docs/ops/pit_universe.md), and `exits` (column -> sessions): a held position is sold
+at that close at the market (used before a split the store's table and Alpaca's bars disagree about, where the
+share count cannot be carried). Every daily row now also carries the session's `cost`
+(spread, impact and fees charged), `traded` (dollars bought plus sold) and `dividends`.
 Cost model v2 (issue #111), opt-in: `Engine(costs=get_model("v2"))` prices every fill with
 `kaibot.broker.costs_v2` instead (half-spread by the stock's 20-session ADV, opening fills and gapped stops at twice
 the midday half-spread, closing fills at one half-spread, near-zero impact with a 1% participation cap, 2026 fees).
@@ -265,6 +274,7 @@ class MTrade:
     rule: str
     config: str
     entry_at: str  # open | close | intraday
+    dividends: float = 0.0  # cash dividends received on these shares while held (not in pnl: its own line)
 
 
 @dataclass
@@ -286,6 +296,7 @@ class Pos:
     hi_close: float = -math.inf
     raised: bool = False  # the stop has moved above its first level
     exit_next_open: bool = False
+    dividends: float = 0.0  # cash dividends received so far on the shares still held
 
 
 @dataclass
@@ -295,6 +306,7 @@ class MBook:
     daily: list[dict] = field(default_factory=list)
     bought: float = 0.0  # $ paid for shares by the engine's own buys (turnover; not the replayed intraday leg)
     sold: float = 0.0  # $ received for shares, before fees
+    dividends: float = 0.0  # cash dividends credited (raw store only)
 
 
 def _ok(*xs: float) -> bool:
@@ -309,12 +321,19 @@ class Engine:
     `rule.at_close(i, eng, cfg, eq)` may call `enter(at="close")` and reads session i up to 15:55.
     `schedule(i)` is the configuration in force on session i (the walk-forward changes it at month starts; a
     position keeps the exit settings it was opened with).
+
+    `actions` = (split, div), (sessions x symbols) arrays of the raw daily store: shares per share held taking
+    effect at session i's open, and cash per share held at the previous close (ex-date i). `bars` are then raw
+    prices. `terminal` maps a column whose bars stop early to (index of its last bar, return booked at that close).
     """
 
     def __init__(self, bars: DailyBars, ind: Indicators, pol: RiskPolicy, rule, schedule: Callable[[int], object],
                  equity0: float = 100_000.0, hold_blk: np.ndarray | None = None,
                  entry_blk: np.ndarray | None = None, cost_mult: float = 1.0,
-                 costs: CostModel | None = None) -> None:
+                 costs: CostModel | None = None,
+                 actions: tuple[np.ndarray, np.ndarray] | None = None,
+                 terminal: Mapping[int, tuple[int, float]] | None = None,
+                 exits: Mapping[int, Sequence[int]] | None = None) -> None:
         self.b, self.ind, self.pol, self.rule, self.schedule = bars, ind, pol, rule, schedule
         self.cost_mult = float(cost_mult)  # scales spread and impact of every fill (fees are not scaled)
         self.costs = None if costs is None or costs.name == "v1" else costs  # None: v1, the legacy path
@@ -323,7 +342,14 @@ class Engine:
         self.pos: dict[int, Pos] = {}
         self.book = MBook(float(equity0))
         self.hold_blk, self.entry_blk = hold_blk, entry_blk
+        self.actions = actions
+        self.terminal = dict(terminal or {})
+        self.exits: dict[int, list[int]] = {}  # session -> columns to sell at its close
+        for j, sessions in (exits or {}).items():
+            for i in sessions:
+                self.exits.setdefault(int(i), []).append(int(j))
         self._exits_today = 0
+        self._cost_today = self._traded_today = self._div_today = 0.0
 
     # -- helpers
 
@@ -334,6 +360,32 @@ class Engine:
     def exposure(self) -> float:
         return sum(p.qty * p.last for p in self.pos.values())
 
+    def split(self, i: int, j: int) -> float:
+        """Shares per share held that take effect at session i's open (1.0 without corporate actions). An order
+        sized from the close of i - 1 is in shares of that close; divide its price levels by this to get the
+        shares of session i."""
+        if self.actions is None:
+            return 1.0
+        s = float(self.actions[0][i, j])
+        return s if math.isfinite(s) and s > 0 else 1.0
+
+    def _corporate_actions(self, i: int) -> None:
+        """At the open of session i, before anything else: dividends of the previous close's shares, then splits."""
+        split, div = self.actions
+        for p in self.pos.values():
+            d = float(div[i, p.j])
+            if math.isfinite(d) and d > 0:
+                paid = p.qty * d
+                self.cash += paid
+                p.dividends += paid
+                self.book.dividends += paid
+                self._div_today += paid
+            s = self.split(i, p.j)
+            if s != 1.0:
+                p.qty *= s
+                p.fill, p.mid, p.last, p.hi_close, p.stop = (x / s for x in (p.fill, p.mid, p.last, p.hi_close,
+                                                                              p.stop))
+                p.entry_costs = (p.entry_costs[0] / s, p.entry_costs[1] / s)
     def adv(self, i: int, j: int) -> float:
         """20-session average dollar volume known before session i (NaN when unknown)."""
         a = self.ind.adv[i - 1, j] if i > 0 else math.nan
@@ -371,37 +423,45 @@ class Engine:
         return half, abs(px - mid) - half
 
     def sell(self, i: int, j: int, price: float, reason: str, vol: float, gap: bool = False,
-             qty: float | None = None, venue: str = "close") -> None:
+             qty: float | None = None, venue: str = "close", costless: bool = False) -> None:
         """Market sell of the whole position (or of `qty` shares of it) at `price` (the open, the close or the
         stop level) minus costs; `venue` (open | close | continuous) matters to cost model v2 only, and a gap is
         always an opening fill. With `gap`, `price` is the open that jumped the stop; the signal is credited the
         stop level and the difference is the gap slippage. A partial sale books its own trade row with its share
-        of the entry costs and of the risk; the rest of the position stays as it was."""
+        of the entry costs and of the risk; the rest of the position stays as it was. `costless`: the position
+        is closed at exactly `price` with no spread, impact or fee (a terminal return, not a trade)."""
         p = self.pos[j]
         lot = p.qty if qty is None else min(float(qty), p.qty)
         risk = p.risk * (lot / p.qty)
+        divs = p.dividends * (lot / p.qty)
         if lot >= p.qty:
             del self.pos[j]
         else:
             p.qty -= lot
             p.risk -= risk
+            p.dividends -= divs
         vol = vol if math.isfinite(vol) and vol > 0 else 1.0
-        if self.costs is None:
+        if costless:
+            px, fees, x_half, x_imp = price, 0.0, 0.0, 0.0
+        elif self.costs is None:
             px = self._sell_px(price, lot, self.sigma(i, j), vol)
             x_half, x_imp = self._parts(price, px)
+            fees = self._fees(lot, px)
         else:
             px, x_half, x_imp = self._v2("sell", i, j, price, lot, self.sigma(i, j), vol,
                                          "open" if gap else venue)
-        fees = self._fees(lot, px)
+            fees = self._fees(lot, px)
         level = p.stop if gap else price
         self.cash += px * lot - fees
         self.book.sold += px * lot
+        self._cost_today += (price - px) * lot + fees
+        self._traded_today += px * lot
         e_half, e_imp = p.entry_costs
         self.book.trades.append(MTrade(
             self.b.symbols[j], self.b.dates[p.entry_i], self.b.dates[i], i - p.entry_i, lot, p.fill, px, p.stop,
             reason, (px - p.fill) * lot - fees, risk, (level - p.mid) * lot, (e_half + x_half) * lot,
             (e_imp + x_imp) * lot, (level - price) * lot, fees, gap, p.equity, self.rule.name, p.config,
-            p.entry_at))
+            p.entry_at, divs))
         self._exits_today += 1
 
     def sell_open(self, i: int, j: int, reason: str) -> bool:
@@ -436,9 +496,10 @@ class Engine:
         b, k = self.b, i - 1
         if k < 0 or j in self.pos or len(self.pos) >= caps.max_positions:
             return 0.0
-        atr = float(self.ind.atr[k, j])
-        ref, mid, vol = ((b.c[k, j], b.o[i, j], b.v_first[i, j]) if at == "open"
-                         else (b.c[k, j] if prev_close else b.c1555[i, j], b.c[i, j], b.v_last[i, j]))
+        s = self.split(i, j)  # a level of the close of i - 1 in the shares of session i (1.0: no split)
+        atr = float(self.ind.atr[k, j]) / s
+        ref, mid, vol = ((b.c[k, j] / s, b.o[i, j], b.v_first[i, j]) if at == "open"
+                         else (b.c[k, j] / s if prev_close else b.c1555[i, j], b.c[i, j], b.v_last[i, j]))
         if not _ok(ref, mid, atr) or atr <= 0 or ref <= 0 or mid <= 0:
             return 0.0
         row = k if at == "open" or prev_close else i  # the last session whose news the decision can have read
@@ -470,6 +531,8 @@ class Engine:
         self.cash -= fill * qty
         if carry is None:
             self.book.bought += fill * qty
+            self._cost_today += (fill - mid_e) * qty
+            self._traded_today += fill * qty
         if carry is None and self.costs is not None:
             half = self._v2("buy", i, j, float(mid), qty, sig, vol, at)[1]
         else:
@@ -498,7 +561,7 @@ class Engine:
             lot = p.qty - target
             self.sell(i, j, float(mid), reason, vol, qty=lot, venue=at)
             return -lot
-        ref = float(b.c[i - 1, j]) if _ok(b.c[i - 1, j]) and b.c[i - 1, j] > 0 else p.last
+        ref = float(b.c[i - 1, j]) / self.split(i, j) if _ok(b.c[i - 1, j]) and b.c[i - 1, j] > 0 else p.last
         room = min(eq * self.pol.max_position_pct / 100 - p.qty * ref,
                    caps.max_exposure_pct / 100 * eq - self.exposure())
         add = min(target - p.qty, float(math.floor(room / ref))) if room > 0 else 0.0
@@ -514,6 +577,8 @@ class Engine:
             fill = self._buy(i, j, float(mid), add, sig, vol, at)
         self.cash -= fill * add
         self.book.bought += fill * add
+        self._cost_today += (fill - float(mid)) * add
+        self._traded_today += fill * add
         half = (half_spread(float(mid)) * self.cost_mult if self.costs is None
                 else self._v2("buy", i, j, float(mid), add, sig, vol, at)[1])
         q = p.qty + add
@@ -529,6 +594,9 @@ class Engine:
     def step(self, i: int) -> None:
         b, cfg, eq = self.b, self.schedule(i), self.equity
         self._exits_today = 0
+        self._cost_today = self._traded_today = self._div_today = 0.0
+        if self.actions is not None:  # 0. corporate actions take effect before the open
+            self._corporate_actions(i)
         for p in [p for p in self.pos.values() if p.exit_next_open]:  # 1. the open
             self.sell_open(i, p.j, "open")
         self.rule.at_open(i, self, cfg, eq)
@@ -550,6 +618,13 @@ class Engine:
             elif self.hold_blk is not None and self.hold_blk[i, p.j]:
                 self.sell(i, p.j, float(c), "earnings", b.v_last[i, p.j])
         self.rule.at_close(i, self, cfg, eq)
+        for j in self.exits.get(i, ()):  # 4. a forced sale at this close (a split the data disagree about is next)
+            if j in self.pos and _ok(b.c[i, j]):
+                self.sell(i, j, float(b.c[i, j]), "split_dispute", b.v_last[i, j])
+        for p in [p for p in self.pos.values() if self.terminal.get(p.j, (-1,))[0] == i and _ok(b.c[i, p.j])]:
+            r = self.terminal[p.j][1]  # 4. the company's bars stop here: closed at the terminal return
+            self.sell(i, p.j, max(float(b.c[i, p.j]) * (1.0 + r), 0.0), "delisted", b.v_last[i, p.j],
+                      costless=True)
         for p in self.pos.values():
             c, atr = b.c[i, p.j], self.ind.atr[i, p.j]
             if not _ok(c):
@@ -565,7 +640,9 @@ class Engine:
         self.equity = self.cash + self.exposure()
         self.book.daily.append({"date": b.dates[i], "start": eq, "end": self.equity, "pnl": self.equity - eq,
                                 "trades": self._exits_today, "positions": len(self.pos),
-                                "exposure": self.exposure() / self.equity if self.equity > 0 else 0.0})
+                                "exposure": self.exposure() / self.equity if self.equity > 0 else 0.0,
+                                "cost": self._cost_today, "traded": self._traded_today,
+                                "dividends": self._div_today})
 
     def run(self, i0: int, i1: int, close_at_end: bool = True) -> MBook:
         """Sessions i0..i1 inclusive. What is still open after the last session is sold at its close
@@ -573,12 +650,14 @@ class Engine:
         for i in range(i0, i1 + 1):
             self.step(i)
         if close_at_end and self.pos and self.book.daily:
+            self._cost_today = self._traded_today = 0.0
             for p in list(self.pos.values()):
                 self.sell(i1, p.j, p.last, "end_of_data", self.b.v_last[i1, p.j])
             row = self.book.daily[-1]
             self.equity = self.cash
             row.update(end=self.equity, pnl=self.equity - row["start"], positions=0, exposure=0.0,
-                       trades=self._exits_today)
+                       trades=self._exits_today, cost=row["cost"] + self._cost_today,
+                       traded=row["traded"] + self._traded_today)
         self.book.equity = self.equity
         return self.book
 
@@ -593,28 +672,52 @@ def spy_buy_and_hold(bars: DailyBars, spy: str, i0: int, i1: int) -> np.ndarray:
 
 
 def equal_weight_benchmark(bars: DailyBars, ind: Indicators, cols: np.ndarray, i0: int, i1: int,
-                           equity0: float = 100_000.0, costs: CostModel | None = None) -> np.ndarray:
+                           equity0: float = 100_000.0, costs: CostModel | None = None, *,
+                           eligible: np.ndarray | None = None,
+                           actions: tuple[np.ndarray, np.ndarray] | None = None,
+                           terminal: Mapping[int, tuple[int, float]] | None = None,
+                           exits: Mapping[int, Sequence[int]] | None = None) -> np.ndarray:
     """Daily returns of holding every stock of the universe equal-weight, rebalanced at the open of each month's
     first session, after the same spread / impact / fee model (fractional shares, 0.1% left in cash for costs).
     A stock joins at the first rebalance after its first bar. This is what "just hold this hand-picked universe"
     made over the same sessions; it carries the same survivorship bias as the rules. `costs`: v1 when None; v2
-    prices the rebalance as opening fills."""
+    prices the rebalance as opening fills.
+
+    Point-in-time (issue #143): `eligible` (sessions x all columns, bool) limits each rebalance to the stocks
+    eligible on the previous session (index members); a held stock that is no longer eligible is sold at that
+    rebalance when it has a bar. `actions` = (split, div) of a raw panel: dividends are credited and splits
+    carried at each open. `terminal`: a stock whose bars stop is closed at its last close x (1 + return).
+    `exits` (column -> sessions): the stock is sold at that close (spread and fees ignored: a small favour to the
+    benchmark), as the engine does before a disputed split."""
     b = bars
     v2 = None if costs is None or costs.name == "v1" else costs
     cols = np.asarray(cols, dtype=int)
     q = np.zeros(len(cols))
     last = np.full(len(cols), np.nan)
     cash, eq = float(equity0), float(equity0)
+    ends: dict[int, list[tuple[int, float]]] = {}
+    for n, j in enumerate(cols.tolist()):
+        if terminal and j in terminal:
+            ends.setdefault(terminal[j][0], []).append((n, terminal[j][1]))
+        for i in (exits or {}).get(j, ()):
+            ends.setdefault(int(i), []).append((n, 0.0))
     rets = []
     for i in range(i0, i1 + 1):
         o, c = b.o[i, cols], b.c[i, cols]
+        if actions is not None:
+            split, div = actions[0][i, cols], actions[1][i, cols]
+            cash += float(np.nansum(q * np.where(np.isfinite(div), div, 0.0)))
+            s = np.where(np.isfinite(split) & (split > 0), split, 1.0)
+            q, last = q * s, last / s
         if i == i0 or b.dates[i].astype("datetime64[M]") != b.dates[i - 1].astype("datetime64[M]"):
             ok = np.isfinite(o) & (np.isfinite(b.c[i - 1, cols]) if i > 0 else True)
+            want = ok if eligible is None else ok & eligible[max(i - 1, 0), cols]
             last = np.where(np.isfinite(o), o, last)
             value = q * np.nan_to_num(last)
             total = cash + float(value[ok].sum())  # what can be traded today (a stock without a bar keeps its shares)
-            if ok.any():
-                dq = np.where(ok, total * 0.999 / ok.sum() / np.where(ok, o, 1.0) - q, 0.0)
+            if want.any() or (ok & (q > 0)).any():
+                n_want = max(int(want.sum()), 1)
+                dq = np.where(want, total * 0.999 / n_want / np.where(ok, o, 1.0) - q, np.where(ok, -q, 0.0))
                 for n in sorted(np.flatnonzero(np.abs(dq) > 1e-9), key=lambda n: dq[n]):  # sells first
                     j, vol = cols[n], b.v_first[i, cols[n]]
                     sig = ind.sigma[i - 1, j] if i > 0 and np.isfinite(ind.sigma[i - 1, j]) else SIGMA_FALLBACK
@@ -631,6 +734,10 @@ def equal_weight_benchmark(bars: DailyBars, ind: Indicators, cols: np.ndarray, i
                         cash -= dq[n] * buy_px(float(o[n]), dq[n], sig, vol)
                     q[n] += dq[n]
         last = np.where(np.isfinite(c), c, last)
+        for n, r in ends.get(i, ()):
+            if q[n] > 0 and np.isfinite(c[n]):
+                cash += q[n] * max(float(c[n]) * (1.0 + r), 0.0)
+                q[n] = 0.0
         end = cash + float(np.nansum(q * np.nan_to_num(last)))
         rets.append(end / eq - 1)
         eq = end

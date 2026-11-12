@@ -609,24 +609,43 @@ def stats(ret: float, pos: int, cagr: float = 10.0, dd: float = 12.0) -> dict:
 
 def test_gate_b_marks_say_pass_fail_or_cannot_be_judged():
     spy = {"cagr_pct": 11.0, "max_drawdown_pct": 20.0}
-    ctl = {"runs": 200, "sharpe_percentile": 93.0, "cagr_percentile": 88.0}
+    ctl = {"runs": 200, "sharpe_percentile": 93.0, "cagr_percentile": 88.0}  # the entries-matched diagnostic
     be = mc.break_even_cost(900.0, 1000.0, 100.0)
-    g = mc.gate_b(stats(150.0, 7), stats(140.0, 6), stats(130.0, 6), spy, ctl, {"a": stats(5.0, 6), "b": stats(9.0, 8)},
-                  be)
+    nb = {"a": stats(5.0, 6), "b": stats(9.0, 8)}
+    g = mc.gate_b(stats(150.0, 7), stats(140.0, 6), stats(130.0, 6), spy, ctl, nb, be)
     assert [x["mark"] for x in g] == [1, 2, 3, 4, 5, 6] and [x["text"] for x in g] == list(mc.GATE_B_MARKS)
-    v = [x["verdict"] for x in g]
-    assert v == ["pass", mc.CANNOT, mc.CANNOT, mc.CANNOT, mc.CANNOT, "pass"]
+    assert [x["verdict"] for x in g] == ["pass", mc.CANNOT, mc.CANNOT, mc.CANNOT, mc.CANNOT, "pass"]
     assert mc.CANNOT == "cannot be judged yet (provisional data)"
-    assert "would pass" in g[1]["detail"] and "price only until S84" in g[1]["detail"]  # 10 >= 11 - 2, 12 <= 15
-    assert "needs >= 500 runs" in g[2]["detail"] and "percentile 93.0 of 200" in g[2]["detail"]
+    assert "would pass" in g[1]["detail"] and "no SPY total return" in g[1]["detail"]  # 10 >= 11 - 2, 12 <= 15
+    assert "entries-matched control (diagnostic, Amendment 1)" in g[2]["detail"]
     assert "at 3x: net return 130.0%" in g[3]["detail"] and "break-even at 10.0x" in g[3]["detail"]
-    assert "S83" in g[4]["detail"]
-    g = mc.gate_b(stats(150.0, 5), stats(-1.0, 6), None, spy, {**ctl, "runs": 500, "sharpe_percentile": 71.0},
-                  {"a": stats(5.0, 6), "b": stats(-9.0, 8)}, None)
-    assert [x["verdict"] for x in g] == ["fail", mc.CANNOT, "fail", "fail", mc.CANNOT, "fail"]
+    assert "--universe pit" in g[4]["detail"]
+    # Amendment 1: the entries-matched control is never judged, even with 500 runs
+    assert mc.gate_b(stats(150.0, 7), None, None, spy, {**ctl, "runs": 500}, {}, None)[2]["verdict"] == mc.CANNOT
+    # with SPY total return, the exposure-matched control and a point-in-time run, marks 2-5 are judged for real
+    em = {"kind": "exposure_matched", "runs": 500, "sharpe_percentile": 93.0, "cagr_percentile": 91.0,
+          "matched": True, "sharpe_percentile_rule_run": 95.0, "sharpe_percentile_replayed_names": 93.0,
+          "committed_exposure_gap_pts": {"mean": 0.3, "max": 0.9}, "exposure_tolerance_pts": 2.0}
+    tr = {"cagr_pct": 12.0, "max_drawdown_pct": 20.0}  # SPY with dividends: 10 >= 12 - 2 and 12 <= 15
+    g = mc.gate_b(stats(150.0, 7), stats(140.0, 6), stats(130.0, 6), spy, em, nb, be, spy_tr=tr,
+                  universe="point_in_time")
+    assert [x["verdict"] for x in g] == ["pass"] * 6
+    assert "SPY total return CAGR 12.0%" in g[1]["detail"] and "percentile 93.0 of 500" in g[2]["detail"]
+    assert "point-in-time base row" in g[4]["detail"]
+    today = mc.gate_b(stats(150.0, 7), stats(140.0, 6), None, spy, em, nb, be, spy_tr=tr)
+    assert today[4]["verdict"] == mc.CANNOT  # today's list, no point-in-time row given
+    assert mc.gate_b(stats(150.0, 7), stats(140.0, 6), None, spy, em, nb, be, spy_tr=tr,
+                     pit_base=stats(-1.0, 6))[4]["verdict"] == "fail"
+    hard = {"cagr_pct": 13.5, "max_drawdown_pct": 20.0}  # 10 < 13.5 - 2, and 10 < 13.5 + 1
+    g = mc.gate_b(stats(150.0, 5), stats(-1.0, 6), None, spy, {**em, "sharpe_percentile": 71.0}, nb, None,
+                  spy_tr=hard, universe="point_in_time")
+    assert [x["verdict"] for x in g] == ["fail", "fail", "fail", "fail", "fail", "pass"]
+    for bad in ({**em, "runs": 200}, {**em, "matched": False}):
+        v = mc.gate_b(stats(150.0, 7), None, None, spy, bad, {}, None, spy_tr=tr)[2]
+        assert v["verdict"] == mc.CANNOT and ("needs >= 500" in v["detail"] or "not matched" in v["detail"])
+    g = mc.gate_b(stats(150.0, 5), stats(-1.0, 6), None, spy, None, {"a": stats(5.0, 6), "b": stats(-9.0, 8)}, None)
+    assert [x["verdict"] for x in g] == ["fail", mc.CANNOT, mc.CANNOT, "fail", mc.CANNOT, "fail"]
     assert "failing: b" in g[5]["detail"]
-    g = mc.gate_b(stats(150.0, 7), None, None, spy, {**ctl, "runs": 500}, {}, None)
-    assert [x["verdict"] for x in g] == ["pass", mc.CANNOT, "pass", mc.CANNOT, mc.CANNOT, mc.CANNOT]
     assert mc.mark2_price_only(stats(1, 1, cagr=12.0, dd=22.0), spy)  # +1 point with drawdown <= 1.1x
     assert not mc.mark2_price_only(stats(1, 1, cagr=11.5, dd=16.0), spy)
     assert not mc.mark2_price_only(stats(1, 1, cagr=8.9, dd=5.0), spy)
@@ -768,12 +787,12 @@ def test_core_summary_is_one_table_with_benchmarks_and_gate_marks(core_runs, mon
     assert first.count("BENCHMARK: equal-weight universe, rebalanced monthly, after costs") == 1
     for version in mc.VERSIONS:
         assert first.count(f"BENCHMARK: SPY (price only) scaled to {version}'s average exposure, rest in cash") == 1
-        assert first.count(f"BENCHMARK: random entries matched to {version} (median of 3 runs)") == 3
+        assert first.count(f"BENCHMARK: exposure-matched random portfolios for {version} (median of 3 runs)") == 3
         assert f"### `{version}` (base fill, 1x costs, 100% cap, hold through earnings)" in text
     assert sum("neighbour" in x for x in first) == 15
     assert any("exit before (APPROXIMATE)" in x for x in body)
     assert text.count("- Mark ") == 18 and text.count("**cannot be judged yet (provisional data)**") >= 9
-    assert text.count("Overall: cannot pass Gate B yet") == 3 and "Not run yet" not in text
+    assert text.count("- Overall: ") == 3 == text.count(mc.NOT_A_PASS) and "Not run yet" not in text
     assert "docs/prereg/mom_12_1_band.md" in text and "exit-before-earnings variant skipped" in text
     for f in (data / "reports").glob("core_balanced_mom_12_1_band_nofilter_*.json"):
         f.unlink()
@@ -794,13 +813,13 @@ def test_run_experiments_script_has_the_core_command_and_it_is_documented():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
     for needle in ('"${1:-}" = "core"', "trend_momentum mom_12_1_band mom_12_1_band_nofilter", "momentum_core.py",
                    "--summary", "--has", "KAIBOT_CORE_CONTROL_RUNS", "experiments_core_summary.md",
-                   "usage: $0 [multiday|core|spy]"):
+                   "usage: $0 [multiday|core|core_pit|spy]"):
         assert needle in sh
     assert sh.index('"${1:-}" = "core"') < sh.index("No .env found")  # the core set needs no .env
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "run_experiments.sh")]).returncode == 0
     doc = (ROOT / "docs" / "m0" / "reproduce.md").read_text()
     for needle in ("./scripts/run_experiments.sh core", "experiments_core_summary.md", "docs/prereg/", "PROVISIONAL",
-                   "KAIBOT_CORE_CONTROL_RUNS=500"):
+                   "KAIBOT_CORE_CONTROL_RUNS=200"):
         assert needle in doc
 
 
