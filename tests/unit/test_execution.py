@@ -416,3 +416,87 @@ def test_a_stop_without_expires_at_is_re_armed_by_its_age():
     ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-06")
     (new,) = ps.stops_of(K)
     assert new.coid != r.coid
+
+
+# ---------------------------------------------------------------- issue #179: the old stop fills during the re-arm
+
+
+def _cancel_loses_race(b, filled=None, pos=None):
+    """The stop triggered at the venue before the re-arm's cancel arrived: (partly) filled, then cancelled."""
+    def cancel(oid):
+        o = b.orders[oid]
+        q = o["qty"] if filled is None else filled
+        o["filled_qty"] = q
+        o["status"] = "filled" if float(q) >= float(o["qty"]) else "canceled"
+        if pos is not None:
+            b.pos["A"]["qty"] = pos
+    return cancel
+
+
+def _rearm_entries(om):
+    return [body for _, _, k, body in om.journal.entries(kinds=("stop_rearm",))]
+
+
+def test_179_a_re_arm_whose_old_stop_filled_during_the_cancel_places_no_stop_on_the_flat_position():
+    """QA-Ops re-review of #173 (probe test_qa_rearm_race): the caller's sleeves are not yet re-booked."""
+    b, clock, om, ps = stopped(confirm_polls=3)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    (r,) = ps.stops_of(K)
+    b.cancel = _cancel_loses_race(b, pos=0)
+    clock.set(clock() + timedelta(days=81))
+    did = ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    assert om.get(r.coid).state is St.FILLED
+    assert ps.stops_of(K) == [] and not [d for d in did if d.startswith("stop ")], did
+    (j,) = _rearm_entries(om)
+    assert j["coid"] == r.coid and j["old_state"] == "filled" and j["placed"] is None
+    # the next call, still before the fill is booked to the sleeve: no stop either
+    assert not [d for d in ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05") if d.startswith("stop ")]
+    assert ps.stops_of(K) == []
+    # once the fill is booked the sleeve is gone: nothing to protect
+    r.booked = r.cum
+    assert ps.ensure({}, {}, clock(), "2026-12-05") == [] and ps.stops_of(K) == []
+
+
+def test_179_a_partial_fill_during_the_cancel_re_arms_only_the_shares_still_held():
+    b, clock, om, ps = stopped(confirm_polls=3)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    (r,) = ps.stops_of(K)
+    b.cancel = _cancel_loses_race(b, filled=10, pos=20)
+    clock.set(clock() + timedelta(days=81))
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    assert om.get(r.coid).state is St.CANCELED and om.get(r.coid).cum == 10
+    (new,) = ps.stops_of(K)
+    assert int(new.qty) == 20 and new.coid != r.coid
+    (j,) = _rearm_entries(om)
+    assert (j["old_state"], j["old_filled"], j["broker_qty"], j["placed"]) == ("canceled", 10, 20, new.coid)
+
+
+def test_179_a_re_arm_reads_the_position_again_and_places_nothing_when_the_venue_holds_no_shares():
+    b, clock, om, ps = stopped(confirm_polls=3)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    b.cancel = _cancel_loses_race(b, filled=0, pos=0)  # cancelled cleanly, but the shares are gone at the venue
+    clock.set(clock() + timedelta(days=81))
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    assert ps.stops_of(K) == []
+    (j,) = _rearm_entries(om)
+    assert j["old_state"] == "canceled" and j["broker_qty"] == 0 and j["placed"] is None
+
+
+def test_179_a_re_arm_whose_position_read_fails_places_nothing_and_tries_again_at_the_next_call():
+    from kaibot.broker.protocol import BrokerError
+
+    b, clock, om, ps = stopped(confirm_polls=3)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    real = b.positions
+
+    def down():
+        raise BrokerError(503, "unavailable")
+
+    b.positions = down
+    clock.set(clock() + timedelta(days=81))
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    assert ps.stops_of(K) == [] and _rearm_entries(om)[0]["placed"] is None
+    b.positions = real
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    (new,) = ps.stops_of(K)
+    assert int(new.qty) == 30

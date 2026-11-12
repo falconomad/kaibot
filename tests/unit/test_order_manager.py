@@ -456,3 +456,104 @@ def test_adopt_takes_the_venues_terms_after_a_restart_mid_replace():
     om2.sync()
     r2 = om2.get(r.coid)
     assert r2.limit == 95.0 and r2.order_id != r.order_id
+
+
+# ---------------------------------------------------------------- issue #179: accept-command edge cases
+
+
+def test_179_accept_refuses_a_difference_that_has_already_healed(capsys):
+    from kaibot.engine import reconcile
+
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    assert not rc.check().ok
+    state["drift"] = 0.0  # a late activity: the difference heals at the next check
+    assert rc.check().ok
+    assert reconcile.main(["--accept", "fees", "--journal", ":memory:"], journal=journal) == 2
+    assert "healed" in capsys.readouterr().err
+    assert journal.entries(kinds=("reconcile_resolved",)) == []
+    state["drift"] = -100.0  # the same amount again later: NOT silently accepted
+    assert not rc.check().ok
+
+
+def test_179_the_engine_command_re_reads_and_refuses_a_difference_healed_since_the_last_check():
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    rc.check()
+    state["drift"] = 0.0  # healed after the owner was shown it, before the command is applied
+    with pytest.raises(ValueError, match="healed"):
+        rc.resolve("fees")
+    assert journal.entries(kinds=("reconcile_resolved",)) == [] and rc.last.ok
+    state["drift"] = -100.0
+    assert not rc.check().ok
+    mem = Reconciler(cash_reader({"drift": -100.0}))  # without a journal: the same rule
+    mem.check()
+    mem.read = cash_reader({"drift": 0.0})
+    with pytest.raises(ValueError, match="healed"):
+        mem.resolve("fees")
+
+
+def test_179_the_engine_command_accepts_only_what_is_still_there_at_the_value_shown():
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    rc.check()
+    state["drift"] = -400.0  # changed since the owner looked: not what was accepted
+    with pytest.raises(ValueError, match="changed"):
+        rc.resolve("fees")
+    assert not rc.last.ok and journal.entries(kinds=("reconcile_resolved",)) == []
+    rc.check()
+    rc.resolve("fees, looked again")  # accepts the value now shown
+    assert rc.check().ok
+
+
+def test_179_an_accepted_offset_expires_at_the_next_session_start_unless_the_difference_is_still_there():
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    rc.check("startup")
+    rc.resolve("fees")
+    assert rc.check().ok
+    # still there at the next session start, at the accepted value: carried into the new session
+    assert rc.check("session_start").ok and rc.accepted
+    # healed during the session: the offset still stands until the next session start ...
+    state["drift"] = 0.0
+    assert rc.check().ok and rc.accepted
+    # ... where it is re-evaluated, found healed, and expires (journalled)
+    assert rc.check("session_start").ok and rc.accepted == {}
+    (exp,) = [b for _, _, k, b in journal.entries(kinds=("reconcile_expired",))]
+    assert exp["offsets"] == [{"kind": "cash", "symbol": None, "offset": -100.0}] and exp["when"] == "session_start"
+    # the same amount again: a new difference, blocked, also after a restart
+    state["drift"] = -100.0
+    assert not rc.check().ok
+    assert not Reconciler(cash_reader(state), journal).check("startup").ok
+
+
+def test_179_a_changed_difference_at_the_session_start_expires_the_old_offset_and_blocks():
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    rc.check()
+    rc.resolve("fees")
+    state["drift"] = -400.0
+    assert not rc.check("session_start").ok and rc.accepted == {}
+    state["drift"] = -100.0  # back to the old value: the expired offset does not cover it
+    assert not rc.check().ok
+
+
+def test_179_a_failed_read_at_the_session_start_expires_nothing():
+    journal = Journal()
+    state = {"drift": -100.0}
+    rc = Reconciler(cash_reader(state), journal)
+    rc.check()
+    rc.resolve("fees")
+
+    def down():
+        raise RuntimeError("broker unreachable")
+
+    rc.read = down
+    with pytest.raises(RuntimeError):
+        rc.check("session_start")
+    assert rc.accepted
