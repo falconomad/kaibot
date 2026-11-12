@@ -64,6 +64,9 @@ class _Http:
 
 
 ACTIVITY_PAGE, ACTIVITY_MAX_PAGES = 100, 50
+# S74 (#114, D7): close_position waits at most CANCEL_POLLS x CANCEL_POLL_S for its cancels to be confirmed.
+CANCEL_POLLS, CANCEL_POLL_S = 10, 0.5
+CANCEL_WAIT_S = CANCEL_POLLS * CANCEL_POLL_S
 
 
 class AlpacaPaper(BrokerBase):
@@ -147,11 +150,29 @@ class AlpacaPaper(BrokerBase):
             if e.status not in (404, 422):
                 raise
 
-    def close_position(self, symbol: str) -> dict | None:
-        """Cancel the symbol's open orders, then sell the whole position at market."""
-        for o in self.open_orders():
-            if o["symbol"] == symbol:
-                self.cancel_order(o["id"])
+    def close_position(self, symbol: str, polls: int = CANCEL_POLLS, poll_s: float = CANCEL_POLL_S) -> dict | None:
+        """Cancel the symbol's open orders, wait until they are gone, then sell the whole position at market.
+
+        A cancel is only a request (204 = accepted): until the venue confirms it the order still holds the
+        shares, and the close is refused (403). So after asking, read the open orders again every `poll_s`
+        seconds, at most `polls` times (CANCEL_WAIT_S, 5 s), and close once none is left for the symbol. If some
+        still are, the position is NOT deleted: AlpacaError(409) is raised, a refusal that Engine.flatten_all
+        reports and the next loop pass retries. An order already `pending_cancel` (asked on an earlier attempt)
+        is only waited for, not asked again. With nothing to cancel the calls are the same two as before
+        (S74, #114, audit D7). The extra arguments are optional: the `Broker` protocol call is close_position(s)."""
+        asked: set[str] = set()
+        for left in range(polls, -1, -1):
+            mine = [o for o in self.open_orders() if o["symbol"] == symbol]
+            for o in mine:
+                if o["id"] not in asked and o.get("status") != "pending_cancel":
+                    asked.add(o["id"])  # each cancel is sent once; the later reads only wait for it
+                    self.cancel_order(o["id"])
+            if not mine:
+                break
+            if not left:
+                ids = ", ".join(o["id"] for o in mine)
+                raise AlpacaError(409, f"close {symbol}: cancel not confirmed after {polls * poll_s:g} s ({ids})")
+            self.http._sleep(poll_s)
         try:
             return self._t("DELETE", f"/v2/positions/{symbol}")
         except AlpacaError as e:
