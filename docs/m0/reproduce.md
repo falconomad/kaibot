@@ -122,3 +122,42 @@ One command on the Mac, from the repo root (about an hour: five walk-forwards of
 - **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/trades_<...>.csv` prints
   gross vs net and the by-year, by-exit, by-entry-time, by-VIX and by-sector tables (no network; older files
   without the cost columns work, gross shows n/a).
+
+## 6. Multi-day rules (issue #113, decision 14)
+One command on the Mac, from the repo root. Research only: it reads `data/`, never the engine or the broker.
+Under decision 15 this is the first look (candidate 0): the numbers are provisional, not a verdict, and cannot
+pass Gate B.
+
+```
+./scripts/run_experiments.sh multiday
+```
+
+- **What it runs:** `scripts/walk_forward_multiday.py --rule <name>` for `trend_highs`, `rel_strength`,
+  `overnight_spy` and `winners_run`, the same 115 folds and selection as section 4. Rules, grids (at most 9
+  configurations) and caps are declared in `kaibot.replay.multiday_rules.EXPERIMENTS`; the simulator is
+  `kaibot.replay.multiday` (daily bars, entries at the next open or at the close, stops that fill at the open when
+  it gaps through them, sizing on a 3 ATR gap, caps on positions and on the total held).
+- **Time (estimated, not measured on the real data):** allow about 25 minutes for the first run. Building the
+  daily bars from the minute bars takes about 5 to 10 minutes (1.8 s per symbol on a cloud machine) and is cached
+  in `data/multiday/daily_bars.parquet`; `winners_run` replays variant A's intraday trades once (about as long as
+  the loading part of one walk-forward of section 4) and caches them in `data/multiday/` too. Both caches are
+  rebuilt when a month file under `data/bars_1m` changes. With the caches a run takes a few minutes.
+- **Resumable:** a rule with a finished report for the same dates and universe is skipped. Logs are in
+  `logs/experiment_multiday_<name>.log`.
+- **Output:** one table printed and written to `data/reports/experiments_multiday_summary.md`: per rule (tuned
+  monthly, and its fixed setting) trades, trades a month, average holding, net return, CAGR, gross and net bp of
+  equity per trade, t-stat, hit rate, Sharpe, max drawdown, months positive, % of time invested and deflated
+  Sharpe; then SPY buy-and-hold and the universe held equal-weight (rebalanced monthly, after costs) over the same
+  sessions, each rule's return and Sharpe minus both, and the cost split with the gap slippage on its own. Each
+  run logs two trial rows.
+- **One account per row:** equity and positions are carried across months and nothing is force-closed at a month
+  end; the configuration chosen for a month applies to that month's new entries.
+- **Earnings:** the history has no earnings calendar, so the date of the next report cannot be known in advance.
+  The run estimates it from past results headlines (`kaibot.replay.earnings`), keeps positions out of a window
+  around it, measures how well that window would have worked, and switches the filter off (and says so in the
+  table's notes) when it is not reliable. `--earnings off` / `on` on `walk_forward_multiday.py` forces it.
+- **Read the results against the benchmarks:** the universe is today's large caps (survivorship), prices carry no
+  dividends, entries fill at the next open, and the cost model is the uncalibrated one of #111.
+- **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/trades_balanced_md_<...>.csv`
+  prints gross vs net, the stops jumped by the open, and the by-year, by-exit, by-holding-period,
+  by-configuration and by-sector tables.
