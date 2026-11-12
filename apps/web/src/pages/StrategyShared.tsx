@@ -37,6 +37,8 @@ export function useCtx(resp: ConfigResp): Ctx {
 export interface StrategyState {
   body: ConfigBody; edit: (b: ConfigBody) => void; ctx: Ctx; baseline: ConfigBody; est: ReturnType<typeof estimateTrades>;
   usd: ReturnType<typeof dollars>; pot: number; reset: () => void; busy: boolean;
+  /** The 'My lists' editor tells the Editor how many tickers are still being checked (apply waits for them). */
+  reportList: (i: { checking: number; refused: string[] }) => void;
 }
 const StrategyContext = createContext<StrategyState | null>(null);
 export const StrategyProvider = StrategyContext.Provider;

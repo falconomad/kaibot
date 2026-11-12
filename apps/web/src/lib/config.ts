@@ -17,12 +17,15 @@ export interface ConfigBody {
   schema: 1;
   preset: PresetKey;
   boldness: number | null;
-  focus: { themes: string[]; symbols: string[]; exclude: string[]; mode: FocusMode };
+  /** `custom` (S68/S69): the owner's own accepted tickers, stored by value. Only ever present with mode "only". */
+  focus: { themes: string[]; symbols: string[]; exclude: string[]; mode: FocusMode; custom?: CustomList };
   risk: Record<RiskKey, number>;
   strategies: Record<StrategyKey, boolean>;
   timing: { entry_start: string; entry_end: string } & Record<TimingNumKey, number>;
   advanced: Record<AdvKey, number>;
 }
+export interface CustomTicker { symbol: string; etf: string }
+export interface CustomList { name: string; tickers: CustomTicker[] }
 export interface Range { min: number; max: number }
 export type Bounds = Record<NumKey, Range> & { entry: { start: string; end: string }; strategies: StrategyKey[] };
 export type Themes = Record<string, { label: string; symbols: string[] }>;
@@ -93,6 +96,23 @@ export function levelDefaults(b: Bounds): ConfigBody {
   };
 }
 
+/** focus.custom, cleaned: only with Only mode, at most 40, no duplicates, no catalogue stocks, each with a sector fund.
+ * The server checks each ticker's acceptance again on save and apply; this only keeps the shape right. */
+export function cleanCustom(raw: unknown, mode: FocusMode, uni: Set<string>): CustomList | undefined {
+  if (mode !== "only" || !raw || typeof raw !== "object") return undefined;
+  const r = raw as { name?: unknown; tickers?: unknown };
+  const seen = new Set<string>();
+  const tickers: CustomTicker[] = [];
+  for (const t of Array.isArray(r.tickers) ? r.tickers : []) {
+    const symbol = String((t as CustomTicker)?.symbol ?? "").toUpperCase(), etf = String((t as CustomTicker)?.etf ?? "");
+    if (!/^[A-Z][A-Z.-]{0,9}$/.test(symbol) || !etf || uni.has(symbol) || seen.has(symbol)) continue;
+    seen.add(symbol);
+    tickers.push({ symbol, etf });
+  }
+  if (!tickers.length) return undefined;
+  return { name: String(r.name ?? "").slice(0, 40), tickers: tickers.slice(0, 40) };
+}
+
 const uniq = (xs: unknown, allowed: Set<string>) => [...new Set(Array.isArray(xs) ? xs.map(String) : [])].filter((x) => allowed.has(x));
 
 /** Merge a (possibly partial or stale) body onto the level defaults and force every value inside the bounds.
@@ -111,11 +131,13 @@ export function clampBody(partial: Partial<ConfigBody> | null | undefined, b: Bo
     return Math.min(hi, Math.max(lo, m));
   };
   const s = p.strategies ?? d.strategies;
+  const custom = cleanCustom(f.custom, mode, uni);
   return {
     schema: 1,
     preset: (["default", "big_tech", "calm", "custom"] as const).includes(p.preset as PresetKey) ? (p.preset as PresetKey) : "custom",
     boldness: typeof p.boldness === "number" && p.boldness >= 0 && p.boldness <= 4 ? Math.round(p.boldness) : null,
-    focus: { themes: uniq(f.themes, new Set(Object.keys(themes))), symbols: uniq(f.symbols, uni), exclude: uniq(f.exclude, uni).slice(0, MAX_EXCLUDED), mode },
+    focus: { themes: uniq(f.themes, new Set(Object.keys(themes))), symbols: uniq(f.symbols, uni), exclude: uniq(f.exclude, uni).slice(0, MAX_EXCLUDED), mode,
+      ...(custom ? { custom } : {}) },
     risk: pick(RISK_KEYS, p.risk),
     strategies: Object.fromEntries(STRATEGY_KEYS.map((k) => [k, (s[k] === undefined || s[k] === null ? d.strategies[k] : !!s[k]) && b.strategies.includes(k)])) as Record<StrategyKey, boolean>,
     timing: { entry_start: toHhmm(tm(p.timing?.entry_start, lo)), entry_end: toHhmm(tm(p.timing?.entry_end, hi)), ...pick(TIMING_KEYS, p.timing) },
@@ -128,6 +150,7 @@ export function focusSet(body: ConfigBody, themes: Themes): string[] {
   const out: string[] = [];
   for (const t of body.focus.themes) for (const s of themes[t]?.symbols ?? []) if (!out.includes(s)) out.push(s);
   for (const s of body.focus.symbols) if (!out.includes(s)) out.push(s);
+  if (body.focus.mode === "only") for (const t of body.focus.custom?.tickers ?? []) if (!out.includes(t.symbol)) out.push(t.symbol);
   return out.filter((s) => !body.focus.exclude.includes(s));
 }
 
@@ -140,6 +163,8 @@ export function validateBody(body: ConfigBody, b: Bounds, themes: Themes): strin
   }
   if (body.focus.mode === "only" && focusSet(body, themes).length < MIN_FOCUS)
     err.push(`“Only these” needs at least ${MIN_FOCUS} stocks. Add a theme or switch to Prefer.`);
+  if (body.focus.custom && body.focus.mode !== "only") err.push("A custom list can only be used with 'Only these'. Choose 'Only these' or remove the list.");
+  if (body.focus.custom && !body.focus.custom.name.trim()) err.push("Give your list a name first.");
   if (body.focus.mode !== "all" && focusSet(body, themes).length === 0) err.push("Pick at least one theme or stock, or choose All stocks.");
   if (!body.strategies.dip_reversal && !body.strategies.spy_late_momentum) err.push("Keep at least one strategy on.");
   if (body.strategies.spy_late_momentum && !b.strategies.includes("spy_late_momentum")) err.push("The SPY late-day rule isn't part of this level.");
@@ -288,7 +313,8 @@ export const STRATEGY_NAME: Record<StrategyKey, string> = { dip_reversal: "Dip r
 export function focusText(body: ConfigBody, themes: Themes): string {
   const set = focusSet(body, themes);
   if (body.focus.mode === "all") return "All 59 stocks";
-  const names = [...body.focus.themes.map((t) => themes[t]?.label ?? t), ...body.focus.symbols];
+  const c = body.focus.mode === "only" ? body.focus.custom : undefined;
+  const names = c ? [`“${c.name}”`] : [...body.focus.themes.map((t) => themes[t]?.label ?? t), ...body.focus.symbols];
   const list = names.length > 3 ? `${names.slice(0, 3).join(", ")} +${names.length - 3}` : names.join(", ");
   return `${body.focus.mode === "only" ? "Only" : "Prefer"} ${list} (${set.length} stock${set.length === 1 ? "" : "s"})`;
 }
@@ -301,6 +327,8 @@ export function diffConfig(a: ConfigBody, c: ConfigBody, themes: Themes): DiffRo
   add("focus", "Focus", focusText(a, themes), focusText(c, themes));
   const ex = (x: ConfigBody) => (!x.focus.exclude.length ? "none" : [...x.focus.exclude].sort().join(", "));
   add("exclude", "Never traded", ex(a), ex(c));
+  const own = (x: ConfigBody) => (x.focus.custom?.tickers.length ? x.focus.custom.tickers.map((t) => t.symbol).sort().join(", ") : "none");
+  add("custom", "Your own tickers", own(a), own(c));
   for (const k of RISK_KEYS) add(k, LABEL[k], fmtNum(k, a.risk[k]), fmtNum(k, c.risk[k]));
   for (const s of STRATEGY_KEYS) add(s, STRATEGY_NAME[s], a.strategies[s] ? "on" : "off", c.strategies[s] ? "on" : "off");
   add("hours", "New trades between", `${a.timing.entry_start}–${a.timing.entry_end} ET`, `${c.timing.entry_start}–${c.timing.entry_end} ET`);

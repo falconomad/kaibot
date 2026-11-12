@@ -17,7 +17,9 @@ import {
   levelDefaults, matchBoldness, matchPreset, nextOpenEt, openLabel, presetBody, setBoldness, setCaution, toggleTheme, validateBody,
   type Bounds, type ConfigBody, type ConfigResp,
 } from "../lib/config";
-import { estimateTrades, paceText } from "../lib/estimator";
+import { estShort, estimateTrades, paceText } from "../lib/estimator";
+import { applyBlockers, dropCustomUnlessOnly, isMissingFunction, listWords, withoutCustom, POLL_MS, type TickerCheck } from "../lib/tickers";
+import { MyListsCard, ThisListCard, useListEditor, type ListInfo } from "./MyLists";
 import { DayBar, EST, LOCKED, NeverTraded, StrategyProvider, useCtx, useStrategy, usd0, type Ctx, type StrategyState } from "./StrategyShared";
 
 export const FINE_TUNE = "/strategy/fine-tune";
@@ -68,8 +70,19 @@ function focusHeading(root: HTMLElement | null) {
 type SaveState = { kind: "idle" | "saving" | "saved" } | { kind: "error"; text: string };
 const errText = (e: unknown) => {
   const x = e as { message?: string; code?: string };
+  if (isMissingFunction(e)) return "Waiting for a database update: this can't be saved or applied until it is. Nothing was changed.";
   return x?.code === "22023" ? `The server refused this setting: ${x.message}` : `Couldn't reach the server: ${x?.message ?? String(e)}`;
 };
+
+/** kb_check_ticker for the pre-apply guard: waits out a short `pending` (the answer is cached for the day). */
+async function recheck(symbol: string): Promise<TickerCheck | null> {
+  for (let i = 0; i < 5; i++) {
+    const c = await api.checkTicker(symbol);
+    if (c?.status !== "pending") return c ?? null;
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
+  return null;
+}
 
 function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: number }) {
   const ctx = useCtx(resp);
@@ -87,6 +100,8 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [justApplied, setJustApplied] = useState<{ version: number; applies_from: string } | null>(null);
   const [sheet, setSheet] = useState(false);
+  const [listInfo, setListInfo] = useState<ListInfo>({ checking: 0, refused: [] });
+  const reportList = useRef((i: ListInfo) => setListInfo((p) => (p.checking === i.checking && p.refused.join() === i.refused.join() ? p : i))).current;
   const dirty = useRef(false);
   const timer = useRef<number | undefined>(undefined);
   const root = useRef<HTMLDivElement>(null);
@@ -127,7 +142,8 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
   const usd = dollars(body, pot);
   const diff = diffConfig(baseline, body, themes);
   const errors = validateBody(body, b, themes);
-  const canApply = diff.length > 0 && errors.length === 0 && !busy;
+  const canApply = diff.length > 0 && errors.length === 0 && !busy && listInfo.checking === 0;
+  const invalid = errors[0] ?? (listInfo.checking ? "Wait for the ticker checks to finish." : null);
   const pending = justApplied ?? (resp.pending ? { version: resp.pending.version, applies_from: resp.pending.applies_from } : null);
   const nextVersion = Math.max(0, ...(resp.versions ?? []).map((v) => Number(v.version) || 0), resp.applied?.version ?? 0, resp.pending?.version ?? 0) + 1;
 
@@ -135,6 +151,19 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
     setBusy(true); setActionErr(null);
     window.clearTimeout(timer.current);
     try {
+      // Last guard for custom tickers: check each one again now. Anything not accepted (or with a changed sector fund)
+      // is taken out of the draft and nothing is applied, so a refused ticker can never be applied. The server
+      // (kb_save_config, and the new kb_apply_config once its migration is in) and the engine at the open check again.
+      const custom = body.focus.custom?.tickers ?? [];
+      if (custom.length) {
+        const checks = await Promise.all(custom.map((t) => recheck(t.symbol)));
+        const bad = applyBlockers(custom, checks);
+        if (bad.length) {
+          edit(withoutCustom(body, bad.map((x) => x.symbol)));
+          setActionErr(`Not applied. ${listWords(bad.map((x) => x.symbol))} can't be used right now (${bad.map((x) => `${x.symbol}: ${x.why}`).join("; ")}), so ${bad.length === 1 ? "it was" : "they were"} taken out of your draft. Review it and apply again.`);
+          return;
+        }
+      }
       await api.saveConfig(runId, clampBody(body, b, themes, universe));
       dirty.current = false;
       const r = await api.applyConfig(runId);
@@ -157,7 +186,7 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
   }
   const undo = () => edit(baseline);
 
-  const shared: StrategyState = { body, edit, ctx, baseline, est, usd, pot, reset, busy };
+  const shared: StrategyState = { body, edit, ctx, baseline, est, usd, pot, reset, busy, reportList };
   return (
     <StrategyProvider value={shared}>
     <div className="kb-strategy" ref={root}>
@@ -167,11 +196,12 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
           <b>Version {pending.version} is scheduled.</b> It applies at the next open, {openLabel(pending.applies_from)}. Open trades keep the rules they were opened under.
         </p>
       )}
-      <OutcomeBar est={est.perMonth} maxLoss={usd.maxLoss} changes={diff.length} save={save} pendingDate={pending?.applies_from ?? null}
-        canApply={canApply} invalid={errors[0] ?? null} onReview={() => { setActionErr(null); setSheet(true); }} onUndo={diff.length ? undo : null} />
+      <OutcomeBar est={estShort(est)} maxLoss={usd.maxLoss} changes={diff.length} save={save} pendingDate={pending?.applies_from ?? null}
+        canApply={canApply} invalid={invalid} onReview={() => { setActionErr(null); setSheet(true); }} onUndo={diff.length ? undo : null} />
       <ReviewSheet open={sheet} onClose={() => setSheet(false)} fallbackFocus={() => focusHeading(root.current)} diff={diff} est={est} estBase={estBase.perMonth} maxLoss={usd.maxLoss}
         maxLossBase={dollars(baseline, pot).maxLoss} nextOpen={nextOpenEt()} nextVersion={nextVersion} canApply={canApply} busy={busy}
-        error={actionErr ?? (save.kind === "error" ? save.text : null)} errors={errors} onApply={apply} onReset={reset} levelName={ctx.levelName} />
+        error={actionErr ?? (save.kind === "error" ? save.text : null)} errors={errors} onApply={apply} onReset={reset} levelName={ctx.levelName}
+        refused={body.focus.custom || body.focus.mode === "only" ? listInfo.refused : []} />
     </div>
     </StrategyProvider>
   );
@@ -180,7 +210,9 @@ function Editor({ runId, resp, pot }: { runId: number; resp: ConfigResp; pot: nu
 // ---------------------------------------------------------------- Strategy (one screen)
 /** /strategy (index route): the one-screen tune page (boards 09 / 09m). */
 export function StrategyHome() {
-  const { body, edit, ctx, est, usd, pot } = useStrategy();
+  const { body, edit, ctx, est, usd, pot, reportList } = useStrategy();
+  const [source, setSource] = useState<"themes" | "lists">(body.focus.custom ? "lists" : "themes");
+  const ed = useListEditor(body, edit, ctx.universe, reportList, source === "lists");
   const navigate = useNavigate();
   const toFine = (hash = "") => navigate(FINE_TUNE + hash);
   const { b, themes, universe, levelName } = ctx;
@@ -218,8 +250,9 @@ export function StrategyHome() {
     </section>
 
     <div className="kb-twocol">
-      <FocusCard body={body} edit={edit} ctx={ctx} toFine={toFine} />
+      <FocusCard body={body} edit={edit} ctx={ctx} toFine={toFine} source={source} setSource={setSource} ed={ed} />
       <div className="sk-stack" style={{ gap: 20 }}>
+        {source === "lists" && <ThisListCard ed={ed} est={est} nextOpen={openLabel(nextOpenEt())} />}
         <BoldCard body={body} edit={edit} ctx={ctx} usd={usd} />
         <HoursCard body={body} edit={edit} ctx={ctx} />
         <SafetyCard body={body} edit={edit} ctx={ctx} toFine={toFine} />
@@ -245,7 +278,8 @@ function themeRate(symbols: string[], body: ConfigBody, b: Bounds) {
   return estimateTrades(x, EST, {}, b.entry).perMonth;
 }
 
-function FocusCard({ body, edit, ctx, toFine }: { body: ConfigBody; edit: (b: ConfigBody) => void; ctx: Ctx; toFine: (hash?: string) => void }) {
+function FocusCard({ body, edit, ctx, toFine, source, setSource, ed }: { body: ConfigBody; edit: (b: ConfigBody) => void; ctx: Ctx; toFine: (hash?: string) => void;
+  source: "themes" | "lists"; setSource: (s: "themes" | "lists") => void; ed: ReturnType<typeof useListEditor> }) {
   const { b, themes, universe } = ctx;
   const set = focusSet(body, themes);
   const all = body.focus.mode === "all";
@@ -262,9 +296,12 @@ function FocusCard({ body, edit, ctx, toFine }: { body: ConfigBody; edit: (b: Co
       <div className="kb-row">
         <h2 id="fo-h" className="kb-h2" style={{ flex: 1 }}>Focus</h2>
         <RadioGroup label="Focus mode" className="kb-seg" optClass="kb-seg-opt" value={all ? null : body.focus.mode}
-          onChange={(m) => edit({ ...body, focus: { ...body.focus, mode: m } })}
+          onChange={(m) => edit(dropCustomUnlessOnly({ ...body, focus: { ...body.focus, mode: m } }))}
           options={[{ value: "prefer" as const, label: "Prefer", disabled: all }, { value: "only" as const, label: "Only", disabled: all }]} />
       </div>
+      <RadioGroup label="Focus source" className="kb-pills" optClass="kb-pill" value={source} onChange={setSource}
+        options={[{ value: "themes" as const, label: "Themes" }, { value: "lists" as const, label: "My lists" }]} />
+      {source === "lists" ? <MyListsCard ed={ed} mode={body.focus.mode} /> : <>
       <div className="kb-tgrid" role="group" aria-label="Themes">
         {cards.map((c) => (
           <button key={c.key ?? "_all"} type="button" aria-pressed={c.on} className="kb-tcard" onClick={() => edit(toggleTheme(body, c.key))}>
@@ -279,6 +316,7 @@ function FocusCard({ body, edit, ctx, toFine }: { body: ConfigBody; edit: (b: Co
         <span className={`num swap ${tooFew ? "kb-warn" : "muted"}`} style={{ flex: 1 }} role={tooFew ? "alert" : undefined}>{note}</span>
         <button type="button" className="linkbtn" style={{ fontSize: 13, fontWeight: 600, textDecoration: "none" }} onClick={() => toFine("#exclude")}>Exclude a stock</button>
       </div>
+      </>}
       <NeverTraded body={body} edit={edit} />
       {!all && body.focus.mode === "prefer" && <span className="muted" style={{ fontSize: 12 }}>Prefer still trades all {universe.length} stocks; your focus goes first when slots compete.</span>}
     </section>
@@ -362,14 +400,14 @@ function SafetyCard({ body, edit, ctx, toFine }: { body: ConfigBody; edit: (b: C
 
 // ---------------------------------------------------------------- outcome bar + review sheet (S47)
 function OutcomeBar({ est, maxLoss, changes, save, pendingDate, canApply, invalid, onReview, onUndo }: {
-  est: number; maxLoss: number; changes: number; save: SaveState; pendingDate: string | null; canApply: boolean; invalid: string | null;
+  est: string; maxLoss: number; changes: number; save: SaveState; pendingDate: string | null; canApply: boolean; invalid: string | null;
   onReview: () => void; onUndo: (() => void) | null;
 }) {
   const saveText = save.kind === "saving" ? "Saving draft…" : save.kind === "saved" ? "Draft saved" : save.kind === "error" ? "Draft not saved" : "";
   return (
     <div className="kb-dock" role="region" aria-label="Result of these settings">
       <div className="num kb-dock-stats">
-        <span><b className="swap">≈ {Math.round(est)}</b> trades/mo</span>
+        <span>trades/mo <b className="swap">{est}</b></span>
         <span><b className="swap">{usd0(maxLoss)}</b> max a trade</span>
         <span className="hide-sm" style={{ color: changes ? "var(--sea-ink)" : "var(--stale)", fontWeight: 600 }}>
           {changes ? `${changes} change${changes === 1 ? "" : "s"}` : pendingDate ? `Applies ${openLabel(pendingDate)}` : "Same as now"}
@@ -383,10 +421,10 @@ function OutcomeBar({ est, maxLoss, changes, save, pendingDate, canApply, invali
   );
 }
 
-function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss, maxLossBase, nextOpen, nextVersion, canApply, busy, error, errors, onApply, onReset, levelName }: {
+function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss, maxLossBase, nextOpen, nextVersion, canApply, busy, error, errors, onApply, onReset, levelName, refused }: {
   open: boolean; onClose: () => void; fallbackFocus: () => void; diff: ReturnType<typeof diffConfig>; est: ReturnType<typeof estimateTrades>; estBase: number; maxLoss: number;
   maxLossBase: number; nextOpen: string; nextVersion: number; canApply: boolean; busy: boolean; error: string | null; errors: string[];
-  onApply: () => void; onReset: () => void; levelName: string;
+  onApply: () => void; onReset: () => void; levelName: string; refused: string[];
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const wasOpen = useRef(false);
@@ -422,7 +460,7 @@ function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss
           ) : <p className="muted" style={{ margin: 0 }}>Nothing differs from the settings that apply now.</p>}
           <div className="kb-impact">
             <span className="cap">Impact</span>
-            <span className="num" style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>≈ {Math.round(est.perMonth)} trades a month
+            <span className="num" style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>{est.unmeasured.length ? "Trades a month not measured yet" : `≈ ${Math.round(est.perMonth)} trades a month`}
               <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}> now ≈ {Math.round(estBase)}</span></span>
             <span className="num" style={{ fontSize: 14 }}>Max loss a trade <b>{usd0(maxLoss)}</b> <span className="muted">now {usd0(maxLossBase)}</span></span>
             <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{paceText(est)}{est.spyNotEstimated && est.perMonth > 0 ? " The SPY late-day rule adds up to 1 a day on qualifying days (not estimated yet)." : ""}</span>
@@ -430,6 +468,7 @@ function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss
           <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
             Applies at the next open, likely {openLabel(nextOpen)}. Open trades keep their rules. <b style={{ color: "var(--ink)" }}>Starts a new chapter in your report</b> (version {nextVersion}).
           </span>
+          {refused.length > 0 && <span style={{ fontSize: 13, color: "var(--loss)", lineHeight: 1.5 }}>Left out, never traded: {refused.join(", ")}.</span>}
           {errors.length > 0 && <ul className="kb-warn" style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{errors.map((x) => <li key={x}>{x}</li>)}</ul>}
           {error && <p className="loss" role="alert" style={{ margin: 0, fontSize: 13 }}>{error}</p>}
           <button type="button" className="primary" style={{ minHeight: 52, fontSize: 16 }} disabled={!canApply} onClick={onApply}>{busy ? "Applying…" : "Apply at next open"}</button>
