@@ -14,8 +14,9 @@ What it may do, and nothing else:
   could let another name into the freed room (maximum names, pro-rata caps). Clamping the finished plan cannot:
   every reviewed target lies between the current position and the rules' target, so it only tightens.
 
-Fail closed, as in the intraday room: a review that times out, errors, answers for another session, misses a
-candidate, names an unknown or duplicate candidate, or fails the contract vetoes every increase of that session.
+Fail closed, as in the intraday room: a review that takes longer than `total_s`, errors, answers for another
+session, misses a candidate, names an unknown or duplicate candidate, or fails the contract vetoes every increase of
+that session. So does a review that is switched on with no reviewer wired (a configuration error, not "off").
 Budget: at the daily soft cap (`rules_only`) or with an unknown budget state the review is skipped and the rules'
 plan goes through unchanged (status "skipped"); at the monthly hard cap (`no_entries`) no increase goes through.
 Off (the default) leaves the plan unchanged and calls nothing. Switching it on is the stakeholder's decision.
@@ -43,6 +44,8 @@ ON = ("1", "on", "true", "yes")
 STATUSES = ("off", "skipped", "done", "invalid", "timeout", "error", "no_entries")
 
 # What the reviewer is shown about a candidate. Shares, prices and ATR stay out: the review judges events, not size.
+TOTAL_S = 120.0  # the whole review's time limit; the daily orders wait for the auction, so this is generous
+
 SHOWN_FEATURES = ("score", "rank", "ret_12_1", "earnings_in_days", "corporate_action", "news_7d", "sector_etf")
 
 Reviewer = Callable[[date, list["ReviewCandidate"]], "PreopenVerdicts | dict | None"]
@@ -139,9 +142,10 @@ def check_answer(answer, session: date, cands: list[ReviewCandidate]) -> tuple[P
     """Validate the reviewer's answer against the contract and the candidate list. Any doubt -> (None, reason)."""
     if answer is None:
         return None, "no answer (budget, timeout or API error)"
-    try:
-        v = answer if isinstance(answer, PreopenVerdicts) else PreopenVerdicts.model_validate(answer)
-    except ValidationError as e:
+    try:  # a model instance is dumped and validated again: model_construct() would skip every field check
+        raw = answer.model_dump(mode="json") if isinstance(answer, PreopenVerdicts) else answer
+        v = PreopenVerdicts.model_validate(raw)
+    except (ValidationError, TypeError, ValueError) as e:
         return None, f"schema: {str(e)[:200]}"
     if v.session != session.isoformat():
         return None, f"answer is for session {v.session!r}, not {session.isoformat()}"
@@ -161,7 +165,9 @@ def check_answer(answer, session: date, cands: list[ReviewCandidate]) -> tuple[P
 def apply(plan: Mapping[Key, int], current: Mapping[Key, float], outcome: ReviewOutcome) -> dict[Key, int]:
     """The reviewed plan. Each growing key becomes current + floor((rules - current) x multiplier) whole shares,
     so it lies between the current position and the rules' target; every other key is the rules' target.
-    (A fractional current position counts as its whole shares: a veto never rounds it up.)"""
+    (A fractional current position counts as its whole shares: a veto never rounds it up. The reviewed target can
+    then sit below the fractional holding, e.g. 3 for 3.5 held; whether that trims the fraction is the order
+    layer's whole-share rule, not the review's: open question for Backend-quant before wiring.)"""
     out = {}
     for key, tgt in plan.items():
         cur = float(current.get(key, 0) or 0)
@@ -177,17 +183,20 @@ def apply(plan: Mapping[Key, int], current: Mapping[Key, float], outcome: Review
 
 def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int], current: Mapping[Key, float],
            reviewer: Reviewer | None, *, env: Mapping[str, str] | None = None, budget_state: str | None = None,
+           total_s: float = TOTAL_S,
            clock=time.monotonic) -> tuple[dict[Key, int], ReviewOutcome, list[ReviewCandidate]]:
     """Run the pre-open review on the builder's plan. Returns (reviewed plan, outcome, candidates)."""
     targets = list(targets)
-    if not enabled(env) or reviewer is None:
+    if not enabled(env):
         out = ReviewOutcome("off", session)
         return dict(plan), out, []
     cands = candidates(session, targets, plan, current)
     out = ReviewOutcome("done", session)
     if not cands:
         return dict(plan), out, cands
-    if budget_state == "no_entries":
+    if reviewer is None:
+        out.status, out.error = "error", "pre-open review is on but no reviewer is wired"
+    elif budget_state == "no_entries":
         out.status, out.error = "no_entries", "monthly LLM budget reached: no new entries"
     elif budget_state != "ok":
         out.status, out.error = "skipped", f"LLM budget state {budget_state!r}: the rules decide alone"
@@ -200,6 +209,8 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
         except Exception as ex:  # a crash in the review is a no-increase, never a crash of the engine
             answer, out.status, out.error = None, "error", str(ex)[:200]
         out.latency_ms = int((clock() - t0) * 1000)
+        if out.status == "done" and out.latency_ms > total_s * 1000:
+            out.status, out.error = "timeout", f"review took {out.latency_ms} ms (limit {int(total_s * 1000)} ms)"
         if out.status == "done":
             v, err = check_answer(answer, session, cands)
             if v is None:

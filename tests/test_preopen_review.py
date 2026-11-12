@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from kaibot.agents import preopen
-from kaibot.agents.contracts import CandidateVerdict, PreopenVerdicts
+from kaibot.agents.contracts import CandidateVerdict, Confidence, PreopenVerdicts, ReviewFlag
 from kaibot.agents.evalset.preopen import ON_ENV, PREOPEN_SET, StubReviewer, evaluate, load_lists
 from kaibot.agents.preopen import MAX_CANDIDATES, apply, candidates, check_answer, enabled, review, violations
 from kaibot.agents.room import FORBIDDEN_FIELDS, _field_names, tool_for
@@ -152,6 +152,30 @@ def test_no_candidates_no_call():
     rev = StubReviewer()
     reviewed, out, cands = run(rev, plan={(S, "A"): 3}, cur={(S, "A"): 5})
     assert reviewed == {(S, "A"): 3} and cands == [] and rev.calls == 0
+
+
+def test_on_without_a_reviewer_fails_closed():
+    reviewed, out, cands = run(None)
+    assert out.status == "error" and "no reviewer" in out.error and len(cands) == 3
+    assert reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
+
+
+def test_slow_review_times_out_and_vetoes_every_increase():
+    ticks = iter([0.0, preopen.TOTAL_S + 1.0])
+    reviewed, out, _ = review(D, [tl({"A": 0.5, "B": 0.3, "C": 0.2})], {(S, "A"): 40, (S, "B"): 21, (S, "C"): 10},
+                              {(S, "B"): 1}, lambda d, cs: answer(cs), env=ON_ENV, budget_state="ok",
+                              clock=lambda: next(ticks))
+    assert out.status == "timeout" and out.verdicts == {}
+    assert reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
+
+
+def test_unvalidated_model_instance_is_rejected():
+    cs = candidates(D, [tl({"A": 1.0})], {(S, "A"): 5}, {})
+    bad = PreopenVerdicts.model_construct(session=D.isoformat(), verdicts=[
+        CandidateVerdict.model_construct(candidate_id=f"{S}:A", verdict="double", flag=ReviewFlag.NONE,
+                                         confidence=Confidence.LOW, reason="x", evidence_ids=[])])
+    v, err = check_answer(bad, D, cs)
+    assert v is None and err.startswith("schema")
 
 
 def test_check_answer_accepts_the_model():
