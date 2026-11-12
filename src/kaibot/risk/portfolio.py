@@ -17,7 +17,9 @@ Target lists of multi-day strategies + the current book + limits -> whole-share 
    position goes to its target instead).
 
 Positions of strategies that sent no list this time are left alone and count against the caps. A listed name
-without usable data (price or ATR missing) keeps its current position and is logged. The intraday path does not
+that is not held and has no usable price or ATR is skipped and logged; a held name with a price but no usable ATR
+keeps its current position and is logged. A held name with no usable price is an error for the whole build
+(`ValueError`, fail closed): the book's exposure cannot be measured without it. The intraday path does not
 use the builder (it keeps the gate's per-trade sizing until #118); the same builder serves the ten-year test and
 live paper trading, because it only sees numbers.
 """

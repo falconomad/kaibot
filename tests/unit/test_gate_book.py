@@ -86,6 +86,36 @@ def test_overnight_proposal_without_book_limits_is_refused():
     assert not v.approved and "book_known" in {c.rule for c in v.failures}
 
 
+def _reviewer_case(atr):
+    """QA-Ops review of PR #163: balanced research limits, equity 100k, the book already loses $11,900 in the gap
+    scenario, entry 100, stop 50."""
+    from kaibot.risk.profiles import load_book_limits, load_profiles
+    pol, book = load_profiles()["balanced"], load_book_limits(research=True)["balanced"]
+    return evaluate(Proposal("X", Side.BUY, 100, 50, atr=atr), book_snap(gap_loss=11_900), pol, book), book
+
+
+@pytest.mark.parametrize("atr", [None, 0.0, -1.0, float("nan"), float("inf")])
+def test_overnight_buy_without_a_usable_atr_is_refused(atr):
+    """Fail closed: without ATR(20) the gap scenario would fall back to the flat 10% gap and under-count the loss
+    (reviewer's repro: 10 shares approved at 12.0% reported; with the real ATR of 30 the loss is 12.8% > 12%)."""
+    v, _ = _reviewer_case(atr)
+    assert not v.approved
+    assert "atr_known" in {c.rule for c in v.failures}
+
+
+def test_overnight_buy_with_the_real_atr_is_sized_by_the_gap_cap():
+    v, book = _reviewer_case(30.0)
+    assert v.approved and v.qty == 1 and v.binding == "gap_headroom"
+    assert 11_900 + v.qty * gap_loss_ps(100, 30.0) <= 100_000 * book.max_gap_loss_pct / 100
+
+
+def test_atr_rule_leaves_intraday_and_sells_alone():
+    intraday = evaluate(Proposal("X", Side.BUY, 100, 80), snap(), POL, BOOK)
+    assert "atr_known" not in {c.rule for c in intraday.checks}
+    sell = evaluate(Proposal("X", Side.SELL, 100, 120), book_snap(symbol_exposure=10_000), POL, BOOK)
+    assert "atr_known" not in {c.rule for c in sell.failures}
+
+
 def test_overnight_proposal_with_the_book_passes():
     v = evaluate(Proposal("X", Side.BUY, 100, 80, atr=2), book_snap(), POL, BOOK)
     assert v.approved and v.qty > 0

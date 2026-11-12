@@ -7,6 +7,9 @@ Book-level checks (issue #119, decision 15 sections 3 and 6): a `Snapshot` may c
 sector exposure and its gap-scenario loss, checked against `BookLimits` (their own hard ceilings,
 `BOOK_HARD_CEILINGS`). A snapshot without them (every intraday snapshot today) gets exactly the verdict it got
 before; a proposal for a multi-day sleeve (`overnight=True`) without them is refused (`book_known`).
+A multi-day buy whose ATR(20) (`Proposal.atr`) is missing, non-finite or not positive is refused (`atr_known`):
+the gap scenario is max(10%, 3 x ATR20), so the flat 10% alone would under-count it. The 10%-only value of
+`gap_loss_ps(px, None)` is never used to approve a multi-day buy. Sells and the intraday path are not affected.
 `BookLimits` is a separate policy so that `RiskPolicy`, its hash and every trial digest built from it stay
 byte-identical for the intraday path.
 """
@@ -77,7 +80,10 @@ GAP_SCENARIO_ATR = 3.0
 
 
 def gap_loss_ps(px: float, atr: float | None) -> float:
-    """$ lost per share in the gap scenario: the larger of a 10% gap and a 3-ATR(20) gap."""
+    """$ lost per share in the gap scenario: the larger of a 10% gap and a 3-ATR(20) gap.
+
+    `atr=None` gives the 10% floor only; `evaluate` refuses a multi-day buy without a usable ATR (`atr_known`), so
+    that value is used only to measure positions already held, never to approve a new one."""
     return max(px * GAP_SCENARIO_PCT / 100, GAP_SCENARIO_ATR * (atr or 0.0))
 
 
@@ -211,6 +217,10 @@ def _book_known(s: Snapshot, book: BookLimits | None) -> bool:
     return book is not None and None not in (s.gross_exposure, s.overnight_exposure, s.sector_exposure, s.gap_loss)
 
 
+def _atr_known(atr: float | None) -> bool:
+    return isinstance(atr, int | float) and not isinstance(atr, bool) and math.isfinite(atr) and atr > 0
+
+
 def size_position(p: Proposal, s: Snapshot, pol: RiskPolicy,
                   book: BookLimits | None = None) -> tuple[int, str, dict[str, int]]:
     """Return (qty, binding_constraint, candidates). Long-only unless policy allows shorts."""
@@ -258,6 +268,8 @@ def evaluate(p: Proposal, s: Snapshot, pol: RiskPolicy, book: BookLimits | None 
     hard("max_positions", s.open_positions < pol.max_positions, s.open_positions, pol.max_positions)
     if s.overnight:  # a multi-day sleeve is only sized against a known book (fail closed)
         hard("book_known", _book_known(s, book), _book_known(s, book), True)
+        if p.side is Side.BUY:  # and a multi-day buy against a known ATR(20): no flat-10% gap fallback
+            hard("atr_known", _atr_known(p.atr), p.atr, "> 0")
 
     qty, binding, _ = size_position(p, s, pol, book) if stop_ok else (0, "invalid_stop", {})
     hard("qty_positive", qty > 0, qty, "> 0")
