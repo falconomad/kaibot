@@ -2,25 +2,30 @@ import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
+import { onTabKeys, tabProps } from "../lib/a11y";
 import { api, type AttributionGroup } from "../lib/api";
-import { DIM_LABEL, FLAG_TEXT, MIN_VETOES, dayVsBenchmarks, evidenceVerdict, flagged, fmtR, haltText, roomAbVerdict } from "../lib/derive";
+import { DIM_LABEL, FLAG_TEXT, dayVsBenchmarks, etToday, evidenceVerdict, flagged, fmtR, haltResolved, haltText } from "../lib/derive";
+import { MIN_VETOES, roomAbVerdict } from "../lib/roomview";
 import { BAR } from "../lib/model";
-import { EXIT_LABEL, R, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { R, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { exitText, ruleLabel, ruleName, vetoText } from "../lib/explain";
+import { Empty, ErrorState, RuleName, TestPhaseBanner } from "../components/States";
+import { STALE, poll } from "../lib/poll";
+import type { Heartbeat } from "../lib/api";
 import { Skeleton } from "../components/Skeleton";
 import { StockCell } from "../components/StockBadge";
 
-const STRAT: Record<string, string> = {
-  dip_reversal: "Dip reversal", spy_late_momentum: "SPY end-of-day momentum",
-  orb_stocks_in_play: "Opening-range breakout (shadow)", news_continuation: "News continuation (shadow)",
-};
-const strat = (s: string) => STRAT[s] ?? s.replace(/_/g, " ");
+const strat = ruleName;
 
 /** S30: the daily report card. Available once the engine closes the session (~16:00 ET, 22:00 CET). */
-function DayCard({ runId }: { runId: number }) {
+function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }) {
   const [session, setSession] = useState<string | undefined>();
-  const q = useQuery({ queryKey: ["report", runId, session], queryFn: () => api.report(runId, session) });
-  if (q.isPending) return <Skeleton />;
-  if (q.isError) return <section className="card"><p className="loss">{String(q.error)}</p></section>;
+  // A past session's report card never changes once written; today's (or "latest") is refreshed after the close.
+  const past = !!session && session < etToday();
+  const q = useQuery({ queryKey: ["report", runId, session], queryFn: () => api.report(runId, session),
+    staleTime: past ? STALE.immutable : STALE.daily });
+  if (q.isPending) return <section className="card" aria-label="Daily report card"><Skeleton /></section>;
+  if (q.isError) return <ErrorState what="The daily report card" error={q.error} retry={() => q.refetch()} />;
   const r = q.data;
   if (!r.session) return (
     <section className="card">
@@ -62,8 +67,8 @@ function DayCard({ runId }: { runId: number }) {
             <tr key={t.id}>
               <td className="num">{timeEt(t.entry_ts)}</td>
               <td><Link to={`/trades/${t.id}`} style={{ color: "inherit" }}><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
-              <td className="muted">{strat(t.strategy)}</td>
-              <td className="muted">{t.exit_reason ? EXIT_LABEL[t.exit_reason] ?? t.exit_reason : "open"}</td>
+              <td className="muted" title={`code: ${t.strategy}`}>{strat(t.strategy)}</td>
+              <td className="muted" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}</td>
               <td className="r num">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
               <td className={`r num ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)}</td>
               <td className="r num">{R(t.pnl_usd, t.risk_usd)}</td>
@@ -76,7 +81,7 @@ function DayCard({ runId }: { runId: number }) {
 
       {(r.vetoes?.length ?? 0) > 0 && (<>
         <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Setups not taken, and why</h3>
-        <div className="kv">{r.vetoes!.map((v) => (<Fragment key={v.reason}><span>{v.reason}</span><span /><span className="v">{v.n}</span></Fragment>))}</div>
+        <div className="kv">{r.vetoes!.map((v) => (<Fragment key={v.reason}><span title={`code: ${v.reason}`}>{vetoText(v.reason)}</span><span /><span className="v">{v.n}</span></Fragment>))}</div>
       </>)}
 
       {(r.shadow?.length ?? 0) > 0 && (<>
@@ -84,15 +89,17 @@ function DayCard({ runId }: { runId: number }) {
         <table className="list">
           <thead><tr><th>Time (ET)</th><th>Strategy</th><th>Stock</th><th className="r">Would have made</th><th className="r">R</th></tr></thead>
           <tbody>{r.shadow!.map((s, i) => (
-            <tr key={i}><td className="num">{timeEt(s.ts)}</td><td className="muted">{strat(s.strategy)}</td><td><StockCell symbol={s.symbol} /></td>
-              <td className={`r num ${tone(s.pnl_usd)}`}>{s.pnl_usd === null ? (s.veto ?? "—") : signedMoney(s.pnl_usd)}</td>
+            <tr key={i}><td className="num">{timeEt(s.ts)}</td><td className="muted" title={`code: ${s.strategy}`}>{strat(s.strategy)}</td><td><StockCell symbol={s.symbol} /></td>
+              <td className={`r num ${tone(s.pnl_usd)}`} title={s.veto ? `code: ${s.veto}` : undefined}>{s.pnl_usd === null ? (s.veto ? vetoText(s.veto) : "—") : signedMoney(s.pnl_usd)}</td>
               <td className="r num">{fmtR(s.r)}</td></tr>))}</tbody>
         </table>
       </>)}
 
       {(r.halts?.length ?? 0) > 0 && (<>
         <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Halts</h3>
-        <ul style={{ margin: 0, paddingLeft: 18 }}>{r.halts!.map((h, i) => <li key={i}><span className="num">{timeEt(h.ts)}</span> {haltText(h)}</li>)}</ul>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>{r.halts!.map((h, i) => (
+          <li key={i}><span className="num">{timeEt(h.ts)}</span> <span title={`code: ${h.kind}`}>{haltText(h)}</span>
+            {haltResolved(h, beat?.ts) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}</li>))}</ul>
       </>)}
     </section>
   );
@@ -100,12 +107,14 @@ function DayCard({ runId }: { runId: number }) {
 
 /** S29: the evidence counter with a confidence interval. */
 function EvidenceCard({ runId }: { runId: number }) {
-  const q = useQuery({ queryKey: ["evidence", runId], queryFn: () => api.evidence(runId), refetchInterval: 60_000 });
+  const q = useQuery({ queryKey: ["evidence", runId], queryFn: () => api.evidence(runId), ...poll(60_000) });
   const v = evidenceVerdict(q.data);
   const e = q.data;
   return (
-    <section className="card" aria-labelledby="ev-h">
+    <section className="card" aria-labelledby="ev-h" aria-busy={q.isPending}>
       <h2 id="ev-h">Evidence counter</h2>
+      {q.isError && <ErrorState compact what="The evidence counter" error={q.error} retry={() => q.refetch()} />}
+      {q.isPending && <p className="skeleton" role="status">Loading…</p>}
       <div className="kv">
         <span>Closed trades</span>
         <div className="prog" aria-hidden="true"><i style={{ width: `${v.frac * 100}%` }} /></div>
@@ -117,7 +126,7 @@ function EvidenceCard({ runId }: { runId: number }) {
       </div>
       <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 13, marginBottom: 0 }}>{v.text}</p>
       {e && e.by_strategy.length > 1 && (
-        <p className="muted" style={{ fontSize: 12 }}>{e.by_strategy.map((s) => `${strat(s.strategy)}: ${s.n} trades, ${fmtR(s.mean_r)}`).join(" · ")}</p>
+        <p className="muted" style={{ fontSize: 12 }}>{e.by_strategy.map((s) => `${ruleLabel(s.strategy)}: ${s.n} trades, ${fmtR(s.mean_r)}`).join(" · ")}</p>
       )}
     </section>
   );
@@ -129,7 +138,7 @@ function GroupTable({ rows }: { rows: AttributionGroup[] }) {
       <thead><tr><th>Group</th><th className="r">Trades</th><th className="r">P&amp;L</th><th className="r">Avg R</th><th className="r">Win rate</th><th className="r">t</th><th>Flag</th></tr></thead>
       <tbody>{rows.map((g) => (
         <tr key={g.dim + g.key}>
-          <td>{g.dim === "strategy" ? strat(g.key) : g.dim === "exit_reason" ? (EXIT_LABEL[g.key] ?? g.key) : g.key}</td>
+          <td title={g.dim === "strategy" || g.dim === "exit_reason" ? `code: ${g.key}` : undefined}>{g.dim === "strategy" ? <RuleName code={g.key} /> : g.dim === "exit_reason" ? exitText(g.key) : g.key}</td>
           <td className="r num">{g.n}</td><td className={`r num ${tone(g.pnl)}`}>{signedMoney(g.pnl)}</td>
           <td className="r num">{fmtR(g.mean_r)}</td><td className="r num">{(g.win * 100).toFixed(0)}%</td>
           <td className="r num">{g.t?.toFixed(2) ?? "—"}</td>
@@ -143,7 +152,7 @@ function GroupTable({ rows }: { rows: AttributionGroup[] }) {
 function Attribution({ runId }: { runId: number }) {
   const [weeks, setWeeks] = useState(4);
   const [dim, setDim] = useState("strategy");
-  const q = useQuery({ queryKey: ["attribution", runId, weeks], queryFn: () => api.attribution(runId, weeks) });
+  const q = useQuery({ queryKey: ["attribution", runId, weeks], queryFn: () => api.attribution(runId, weeks), staleTime: STALE.daily });
   const a = q.data;
   const flags = a ? flagged(a.groups) : [];
   const weeksList = a ? [...new Set(a.weekly.map((w) => w.week))] : [];
@@ -152,13 +161,13 @@ function Attribution({ runId }: { runId: number }) {
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <h2 id="attr-h" style={{ margin: 0 }}>Where the P&amp;L comes from</h2>
         <span className="spacer" />
-        <div className="tabs" role="tablist" aria-label="Period">
+        <div className="tabs" role="tablist" onKeyDown={onTabKeys} aria-label="Period">
           {[[4, "4 weeks"], [13, "13 weeks"], [520, "All"]].map(([w, l]) => (
-            <button key={w} role="tab" aria-selected={weeks === w} onClick={() => setWeeks(Number(w))}>{l}</button>))}
+            <button key={w} {...tabProps(weeks === w)} onClick={() => setWeeks(Number(w))}>{l}</button>))}
         </div>
       </div>
-      {q.isPending ? <Skeleton /> : q.isError ? <p className="loss">{String(q.error)}</p> : !a || a.n === 0 ? (
-        <p className="muted">No closed trades in this period.</p>
+      {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="Attribution" error={q.error} retry={() => q.refetch()} /> : !a || a.n === 0 ? (
+        <Empty>No closed trades in this period. Try a longer period.</Empty>
       ) : (<>
         <p className="muted" style={{ fontSize: 13 }}>{a.n} closed trades since {day(a.since.slice(0, 10))}. A <b>kill</b> flag means ≥ 20 trades with t ≤ −2;
           {" "}<b>watch</b> means losing on average over ≥ 10. Flags are prompts to investigate, never automatic changes.</p>
@@ -167,8 +176,8 @@ function Attribution({ runId }: { runId: number }) {
             <b>{flags.length} flagged:</b> {flags.slice(0, 6).map((f) => `${DIM_LABEL[f.dim] ?? f.dim} ${f.dim === "strategy" ? strat(f.key) : f.key} (${f.flag})`).join(", ")}
           </div>
         )}
-        <div className="tabs" role="tablist" aria-label="Group by" style={{ margin: "12px 0" }}>
-          {Object.entries(DIM_LABEL).map(([k, l]) => <button key={k} role="tab" aria-selected={dim === k} onClick={() => setDim(k)}>{l}</button>)}
+        <div className="tabs" role="tablist" onKeyDown={onTabKeys} aria-label="Group by" style={{ margin: "12px 0" }}>
+          {Object.entries(DIM_LABEL).map(([k, l]) => <button key={k} {...tabProps(dim === k)} onClick={() => setDim(k)}>{l}</button>)}
         </div>
         <GroupTable rows={a.groups.filter((g) => g.dim === dim)} />
         {weeksList.length > 1 && (<>
@@ -194,7 +203,7 @@ const usd3 = (v: number | null | undefined) => (v === null || v === undefined ? 
 /** S36: room vs rules-only. The rules-only arm is every candidate traded at full size (counterfactual, scored at day end). */
 function RoomAbCard({ runId }: { runId: number }) {
   const [weeks, setWeeks] = useState(13);
-  const q = useQuery({ queryKey: ["room_ab", runId, weeks], queryFn: () => api.roomAb(runId, weeks), refetchInterval: 300_000 });
+  const q = useQuery({ queryKey: ["room_ab", runId, weeks], queryFn: () => api.roomAb(runId, weeks), staleTime: STALE.daily, ...poll(300_000) });
   const ab = q.data;
   const v = roomAbVerdict(ab);
   const st = ab?.by_status ?? {};
@@ -204,12 +213,12 @@ function RoomAbCard({ runId }: { runId: number }) {
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <h2 id="ab-h" style={{ margin: 0 }}>Room vs rules-only</h2>
         <span className="spacer" />
-        <div className="tabs" role="tablist" aria-label="Period">
+        <div className="tabs" role="tablist" onKeyDown={onTabKeys} aria-label="Period">
           {[[4, "4 weeks"], [13, "13 weeks"], [520, "All"]].map(([w, l]) => (
-            <button key={w} role="tab" aria-selected={weeks === w} onClick={() => setWeeks(Number(w))}>{l}</button>))}
+            <button key={w} {...tabProps(weeks === w)} onClick={() => setWeeks(Number(w))}>{l}</button>))}
         </div>
       </div>
-      {q.isPending ? <p className="skeleton">Loading…</p> : q.isError ? <p className="loss">{String(q.error)}</p> : !ab || ab.n === 0 ? (
+      {q.isPending ? <p className="skeleton" role="status">Loading…</p> : q.isError ? <ErrorState compact what="Room vs rules-only" error={q.error} retry={() => q.refetch()} /> : !ab || ab.n === 0 ? (
         <p className="muted">No agent-room sessions in this period. Dip-reversal candidates that pass every rule go to the room from M3 on;
           until then every trade is rules-only.</p>
       ) : (<>
@@ -242,14 +251,14 @@ function RoomAbCard({ runId }: { runId: number }) {
 
 /** S48: results split by config version. A chapter is one applied version of the Strategy settings (0 = level defaults). */
 function ChaptersCard({ runId }: { runId: number }) {
-  const q = useQuery({ queryKey: ["chapters", runId], queryFn: () => api.chapters(runId), staleTime: 300_000 });
+  const q = useQuery({ queryKey: ["chapters", runId], queryFn: () => api.chapters(runId), staleTime: STALE.daily });
   return (
     <section className="card" aria-labelledby="ch-h">
       <h2 id="ch-h">Chapters</h2>
       <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Each time you apply new Strategy settings, a new chapter starts at the next open, so each setup is judged on its own trades.
         The go-live review judges one frozen setup only.</p>
       {q.isPending ? <Skeleton /> : q.isError ? <p className="muted" style={{ fontSize: 13 }}>Chapters aren't available yet: {String((q.error as Error).message)}</p>
-        : !q.data.length ? <p className="muted">No chapters yet. Everything so far ran on the level's defaults.</p> : (
+        : !q.data.length ? <Empty>No chapters yet. Everything so far ran on the level's defaults.</Empty> : (
         <table className="list">
           <thead><tr><th>Chapter</th><th>Dates</th><th className="r">Trades</th><th className="r">P&amp;L</th><th className="r">Mean R</th><th className="r">t</th><th>Verdict</th></tr></thead>
           <tbody>{q.data.map((c) => {
@@ -274,9 +283,10 @@ function ChaptersCard({ runId }: { runId: number }) {
 }
 
 export function Report() {
-  const { run } = useRunCtx();
+  const { run, overview } = useRunCtx();
   return (
     <>
+      {run.kind === "paper" && <TestPhaseBanner />}
       {run.kind === "replay" && <div className="banner"><b>Replay.</b> These numbers come from past data, not live paper trading.</div>}
       <div className="grid">
         <EvidenceCard runId={run.id} />
@@ -289,7 +299,7 @@ export function Report() {
         </section>
       </div>
       {run.kind === "paper" && <ChaptersCard runId={run.id} />}
-      <DayCard runId={run.id} />
+      <DayCard runId={run.id} beat={overview?.heartbeat.find((h) => h.process === "engine")} />
       {run.kind === "paper" && <RoomAbCard runId={run.id} />}
       <Attribution runId={run.id} />
     </>

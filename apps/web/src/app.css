@@ -378,3 +378,13 @@ dialog.kb-sheet::backdrop { background: rgba(0, 0, 0, .6); }
 @keyframes kb-sheet { from { transform: translateY(100%); } to { transform: none; } }
 /* S48 chapters */
 .chapter-tag { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; background: var(--surface-2); color: var(--slate); white-space: nowrap; }
+/* Shared states (components/States.tsx) */
+.state { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; }
+.state-error b { color: var(--loss); }
+.state-detail { font-size: 12px; word-break: break-word; }
+.tag.retired { color: var(--warn); background: var(--warn-tint); }
+.skip { position: absolute; left: 12px; top: -60px; z-index: 50; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: #0A0B0D; font-weight: 600; }
+.skip:focus { top: 12px; }
+main:focus { outline: none; }
+tr.click:focus-visible { outline: 2px solid var(--sea); outline-offset: -2px; }
+.banner a, .state a { text-decoration: underline; text-underline-offset: 2px; }
