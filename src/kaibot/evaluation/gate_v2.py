@@ -303,17 +303,22 @@ def evaluate_gate_b(gate: GateV2, *, rule: str, run: Run, pit_run: Run | None = 
     src = dict(source or {})
     reasons = [f"{k} is {src.get(k, 'not stated')!r}, a pass needs {v!r}" for k, v in need.items() if src.get(k) != v]
     before = None
-    if prereg is not None and prereg.committed_at is not None and first_run_at is not None:
-        before = _utc(prereg.committed_at) <= _utc(first_run_at)
+    first = None if prereg is None else (prereg.first_committed_at or prereg.committed_at)
+    if first is not None and first_run_at is not None:
+        before = _utc(first) <= _utc(first_run_at)  # the pre-registration itself; amendments are appended later
     logged = {r.get("prereg_sha256") for r in (registry.rows if registry is not None else ())
               if r.get("strategy") == rule and r.get("prereg_sha256")}
-    unchanged = None if prereg is None or not logged else logged == {prereg.sha256}
+    # a logged hash of an earlier version that today's file only amends (dated "## Amendment n" sections
+    # appended, #161) is the same pre-registration; any other change of the file is not
+    unchanged = None if prereg is None or not logged else all(prereg.accepts(h) for h in logged)
+    amended = None if prereg is None or not logged else bool(logged - {prereg.sha256}) and unchanged
     checks = {"preregistered": prereg is not None,
               "not_retroactive": None if prereg is None else not prereg.retroactive,
               "neighbours_at_most": None if prereg is None else
               len(prereg.neighbours) <= gate.cfg["gate_a"]["max_neighbours"],
               "committed_before_first_run": before,
-              "unchanged_since_logged_runs": unchanged}  # None: no run of this rule logged a hash
+              "unchanged_since_logged_runs": unchanged,  # None: no run of this rule logged a hash
+              "amended_since_logged_runs": amended}  # runs logged before an amendment (reported, not a reason)
     if prereg is None:
         reasons.append("no pre-registration was supplied (Gate A)")
     else:
@@ -325,8 +330,8 @@ def evaluate_gate_b(gate: GateV2, *, rule: str, run: Run, pit_run: Run | None = 
         if before is not True:
             reasons.append("the pre-registration is not shown to be committed before the first run (Gate A)")
         if unchanged is False:
-            reasons.append("a run of this rule was logged with a different pre-registration hash: the file "
-                           "changed after a run (Gate A)")
+            reasons.append("a run of this rule was logged with a different pre-registration hash, neither today's "
+                           "file nor an earlier version it only amends: the file changed after a run (Gate A)")
 
     met = [m["met"] for m in marks.values()]
     if any(v is False for v in met):

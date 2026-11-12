@@ -107,6 +107,6 @@ def test_research_runs_the_dip_rule_alone_and_refuses_unknown_or_multi_day(monke
         research.run("nope")
     md = BuyFirstAtTen(name="toy_multi_day", holding=Holding.MULTI_DAY)
     monkeypatch.setattr(registry, "BY_NAME", {**registry.BY_NAME, md.name: md})
-    with pytest.raises(SystemExit, match="S77-S78"):
+    with pytest.raises(SystemExit, match="--universe"):  # #161: the daily path (engine/daily_report.py)
         research.run(md.name)
     assert np.isfinite(rep["pnl_venue_usd"])

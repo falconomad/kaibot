@@ -78,6 +78,30 @@ class ShadowCosts:
 COSTS_V1 = ShadowCosts()
 
 
+@dataclass(frozen=True)
+class AuctionImpactCosts(ShadowCosts):
+    """Cost model v1 at the opening and closing prints as the momentum pre-registrations price a daily rule's fill
+    (docs/prereg/trend_momentum.md section 4: half a spread a side PLUS the model's impact, `sim.buy_px` /
+    `sim.sell_px`), with `mult` scaling spread and impact (2x / 3x cost runs; regulatory fees are not scaled).
+    Issue #161. Opt-in: `COSTS_V1` keeps pricing the prints at half a spread, so every other run is unchanged.
+
+    `sigma(symbol, day)`: the 1-minute volatility the impact term uses for a fill on `day` (the daily path gives
+    the 20 split-adjusted daily returns before it, as the research harness does); the volume is the print's bar
+    volume (the first or the last minute)."""
+
+    sigma: Callable[[str, date], float] | None = None
+    mult: float = 1.0
+
+    def price(self, side: str, mid: float, qty: float, sigma: float, vol: float) -> float:
+        px = (buy_px if side == "buy" else sell_px)(mid, qty, sigma, vol)
+        return px if self.mult == 1.0 else mid + (px - mid) * self.mult
+
+    def auction_fill(self, side: str, price: float, qty: float, symbol: str, day: date, vol: float) -> float:
+        sig = self.sigma(symbol, day) if self.sigma is not None else 0.0
+        vol = float(vol) if math.isfinite(vol) and vol > 0 else 1.0
+        return self.price(side, price, qty, sig, vol)
+
+
 @dataclass
 class _Plan:
     kind: str  # reject | timeout | fills | hold
@@ -129,9 +153,19 @@ class SimBroker(BrokerBase):
     strict_time = True  # bars trade once, in order, and never fill an order submitted after they began
 
     def __init__(self, bars: BarHistory, clock: Callable[[], datetime], *, costs: ShadowCosts | None = COSTS_V1,
-                 cash: float | None = 100_000.0, calendar: Mapping[str, tuple[str, str]] | None = None):
+                 cash: float | None = 100_000.0, calendar: Mapping[str, tuple[str, str]] | None = None,
+                 cash_at: str = "submit"):
         """`costs=None` fills at raw bar prices; `cash=None` keeps no cash book (the account then reports no
-        buying power); `calendar` {date: (open, close)} in ET, by default every date with bars, 09:30-16:00."""
+        buying power); `calendar` {date: (open, close)} in ET, by default every date with bars, 09:30-16:00.
+
+        `cash_at`: when a buy must fit in the cash. "submit" (default): at submission, at the last close.
+        "fill" (the daily path, #161 / Amendment 3 of the momentum pre-registrations): an opening or closing
+        auction buy is checked at its print, after the print's earlier fills (sales first, as sent); a buy
+        that does not fit is cut to the whole shares that fit at the print's price, re-priced for that quantity
+        (the rest is cancelled), so the cash book never goes below zero."""
+        if cash_at not in ("submit", "fill"):
+            raise ValueError("cash_at is submit or fill")
+        self.cash_at = cash_at
         self.bars, self.clk = bars, clock
         self.costs = costs
         self.cash = cash
@@ -301,7 +335,7 @@ class SimBroker(BrokerBase):
             if r.qty > free + 1e-9:
                 raise BrokerError(403, f"insufficient qty available for order (requested: {r.qty:g}, "
                                        f"available: {free:g})")
-        elif self.cash is not None:
+        elif self.cash is not None and self.cash_at == "submit":
             px = r.limit_price or r.stop_price or self.bars.last_close(r.symbol, now)
             if px is not None and r.qty * px > self.cash + 1e-9:
                 raise BrokerError(403, "insufficient buying power")
@@ -439,12 +473,20 @@ class SimBroker(BrokerBase):
             plan = None
         side, left = o["side"], float(o["qty"]) - float(o.get("filled_qty") or 0)
         tif = o.get("time_in_force")
-        if tif == "cls":
-            if sess is not None and t == sess[1] - timedelta(minutes=1):
-                self._fill(o, o, left, self._auction(side, bar.c), t)
-        elif tif == "opg":
-            if sess is not None and t == sess[0]:
-                self._fill(o, o, left, self._auction(side, bar.o), t)
+        if tif in ("cls", "opg"):
+            at = None if sess is None else sess[1] - timedelta(minutes=1) if tif == "cls" else sess[0]
+            if at is not None and t == at:
+                price = bar.c if tif == "cls" else bar.o
+                px = self._auction(side, price, left, o["symbol"], bar, t)
+                if side == "buy" and self.cash is not None and self.cash_at == "fill" and px * left > self.cash:
+                    left = float(math.floor(self.cash / px))  # cut to the whole shares that fit at the print
+                    if left < 1:
+                        self._end(o, "canceled")
+                        return
+                    px = self._auction(side, price, left, o["symbol"], bar, t)
+                self._fill(o, o, left, px, t)
+                if o["status"] == "partially_filled":
+                    self._end(o, "canceled")  # the rest of a cut auction order does not trade
         elif o["type"] == "market":
             qty = left
             if plan is not None:  # scripted partial fills: one part per bar, the rest never
@@ -488,8 +530,13 @@ class SimBroker(BrokerBase):
         sigma = self.bars.sigma_1m(symbol, t.astimezone(NY).date())
         return self.costs.market(side, price, qty, sigma if math.isfinite(sigma) else 0.0, bar.v)
 
-    def _auction(self, side: str, price: float) -> float:
-        return price if self.costs is None else self.costs.auction(side, price)
+    def _auction(self, side: str, price: float, qty: float, symbol: str, bar: Bar, t: datetime) -> float:
+        if self.costs is None:
+            return price
+        full = getattr(self.costs, "auction_fill", None)  # AuctionImpactCosts: spread plus impact (#161)
+        if full is not None:
+            return full(side, price, qty, symbol, t.astimezone(NY).date(), bar.v)
+        return self.costs.auction(side, price)
 
     # ---------- booking ----------
     def _fill(self, parent: dict, o: dict, qty: float, px: float, t: datetime) -> None:

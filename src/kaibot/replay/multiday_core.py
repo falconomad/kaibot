@@ -46,6 +46,7 @@ SMA_STOCK, SMA_MARKET = 100, 200
 MOVE_WINDOW, MOVE_MAX = 90, 0.15
 ANNUAL_SESSIONS = 250  # the published annualisation of the regression slope
 RESIZE_BUFFER = 0.10  # no resize trade within 10% of the target
+CASH_RESERVE = 0.03  # Amendment 3: every decision's buys are sized against cash minus 3% of equity
 DECISION_WEEKDAY = 2  # Wednesday (Monday = 0)
 FILLS = {"base": ("close", 1.0), "stress": ("open", 2.0)}  # where an order fills, and the spread / impact factor
 COSTS = (1.0, 2.0, 3.0)
@@ -249,10 +250,14 @@ class CoreRule:
         js = np.flatnonzero(np.isfinite(sc) & self.sig.ok[k])
         return js[np.argsort(-sc[js], kind="stable")]
 
-    def plan(self, i: int, held: Mapping[int, tuple[float, float]], eq: float) -> dict:
+    def plan(self, i: int, held: Mapping[int, tuple[float, float]], eq: float, cash: float | None = None) -> dict:
         """The orders of decision session i, from `held` (column -> (shares, last mark)) and equity `eq`, both as
         of the close of i - 1: {"sell": {column: reason}, "resize": [(column, shares)], "buy": [(column, shares)]}.
-        Room is counted at the previous close's prices, as if every order of this plan fills."""
+        Room is counted at the previous close's prices, as if every order of this plan fills.
+
+        `cash` (the account's cash before the session's fills): Amendment 3 of both pre-registrations. Purchases
+        (new buys and resize increases) also fit in the cash plus the plan's sales and reductions at those prices,
+        less a reserve of `CASH_RESERVE` x equity. None: no cash limit (unit tests of the ranking only)."""
         sig, spec, k = self.sig, self.spec, i - 1
         order = self.ranking(k)
         n = len(order)
@@ -270,6 +275,13 @@ class CoreRule:
         cap = self.caps.max_exposure_pct / 100 * eq
         exposure = sum(q * last for j, (q, last) in held.items() if j not in sell)
         names = len(held) - len(sell)
+        money = None if cash is None else (cash + sum(q * last for j, (q, last) in held.items() if j in sell)
+                                           - CASH_RESERVE * eq)
+
+        def fits(px: float) -> float:  # whole shares that fit under the cap and (Amendment 3) in the cash
+            n = math.floor(max(cap - exposure, 0.0) / px)
+            return n if money is None else min(n, math.floor(max(money, 0.0) / px))
+
         resize: list[tuple[int, float]] = []
         if spec.resize and sig.week[i] % 2 == 0:
             want = []
@@ -279,10 +291,12 @@ class CoreRule:
                     want.append((j, q, last, t))
             for j, q, last, t in sorted(want, key=lambda w: w[3] - w[1]):  # reductions first: they make room
                 if t > q:
-                    t = q + min(t - q, math.floor(max(cap - exposure, 0.0) / last))
+                    t = q + min(t - q, fits(last))
                     if t <= q:
                         continue
                 exposure += (t - q) * last
+                if money is not None:
+                    money -= (t - q) * last
                 resize.append((j, float(t)))
         buy: list[tuple[int, float]] = []
         if not spec.market_filter or sig.market_on[k]:
@@ -299,10 +313,12 @@ class CoreRule:
                     self.skipped += 1  # one share is more than the position size (decision 15: skipped, counted)
                     continue
                 px = sig.px[k, j] / sj
-                room = math.floor(max(cap - exposure, 0.0) / px)
+                room = fits(px)
                 if room < 1:
                     break  # no room left: buying stops here
                 exposure += min(t, room) * px
+                if money is not None:
+                    money -= min(t, room) * px
                 names += 1
                 buy.append((j, float(min(t, room))))
                 if room < t:
@@ -322,7 +338,7 @@ class CoreRule:
                 if j not in eng.pos or self._sell(i, eng, j, reason):
                     del self.waiting[j]
             return
-        p = self.plan(i, {j: (x.qty, x.last) for j, x in eng.pos.items()}, eq)
+        p = self.plan(i, {j: (x.qty, x.last) for j, x in eng.pos.items()}, eq, eng.cash)
         self.orders += [(i, "sell", j, r) for j, r in p["sell"].items()]
         self.orders += [(i, "resize", j, t) for j, t in p["resize"]] + [(i, "buy", j, t) for j, t in p["buy"]]
         self.waiting = {j: r for j, r in p["sell"].items() if not self._sell(i, eng, j, r)}
