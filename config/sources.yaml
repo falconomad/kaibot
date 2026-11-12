@@ -16,7 +16,7 @@ market_data:
                      max_cost_usd: 10, credit_usd: 125, cost_estimate_before_download: required, default_dataset: EQUS.MINI, default_schema: ohlcv-1m,
                      cache: "data/databento (Parquet, per symbol; cached symbols never re-requested)",
                      ledger: "data/databento/ledger.jsonl (estimated spend of every confirmed download; total never past credit_usd)", budget_per_min: 20,
-                     note: "historical validation only, never in the live path; scripts/fetch_databento.py is dry-run unless --confirm"}
+                     note: "historical validation only, never in the live path; scripts/fetch_databento.py is dry-run unless --confirm; bbo-1m spread calibration of cost model v2: scripts/fetch_spread_calibration.py plan / report (offline)"}
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:
   sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}
