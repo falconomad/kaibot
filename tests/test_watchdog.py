@@ -257,7 +257,8 @@ def test_early_close_flattens_at_1255_and_retries_until_1256(tmp_path, clock_say
     # 12:55:10 and :25 leave CLOSE_BUDGET_S before 12:56; then the early-close dead-man (0017) takes over
     assert len(tries) == 2 and wd.flattened_on is None
     assert all("not started" in v for v in _payload(_flatten_events(store)[-1])["failed"].values())
-    assert cal_calls == ["2026-08-04"]  # read once a day
+    # read once a day; never inside the clock's flatten window (with the clock at 13:00 it is never needed)
+    assert cal_calls == ([] if clock_says_close == "13:00" else ["2026-08-04"])
 
 
 def test_early_close_flatten_completes_at_1255(tmp_path):
@@ -269,7 +270,7 @@ def test_early_close_flatten_completes_at_1255(tmp_path):
     assert wd.step()["closed"] == ["A"] and wd.flattened_on == clock().date()
 
 
-def test_a_calendar_read_that_fails_falls_back_to_the_clock_and_is_read_again(tmp_path):
+def test_a_calendar_read_that_fails_falls_back_to_the_clock_and_is_not_retried_in_the_window(tmp_path):
     wd, broker, clock, store, open_utc = _stale(tmp_path)
     _early_close(broker)  # the clock says 13:00 too
     n = []
@@ -278,12 +279,22 @@ def test_a_calendar_read_that_fails_falls_back_to_the_clock_and_is_read_again(tm
         n.append(d)
         raise RuntimeError("Alpaca 0: giving up on GET /v2/calendar (deadline)")
     broker.calendar = calendar
-    clock.t = open_utc + timedelta(minutes=205, seconds=10)
-    assert wd.step()["closed"] == ["A"]
-    assert len(n) == 1
+    clock.t = open_utc + timedelta(minutes=204, seconds=30)  # 12:54:30, stale, before the window
+    assert wd.step()["closed"] == []
     clock.t += timedelta(seconds=POLL_S)
     wd.step()
-    assert len(n) == 2  # not cached while it fails
+    assert len(n) == 2  # retried before the window
+    clock.t = open_utc + timedelta(minutes=205, seconds=10)  # 12:55:10: the clock decides, no calendar read
+    assert wd.step()["closed"] == ["A"]
+    assert len(n) == 2
+
+
+def test_the_calendar_is_not_read_when_the_engine_first_goes_stale_in_the_window(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)
+    calls = []
+    broker.calendar = lambda d: calls.append(d)
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)  # 15:55:10
+    assert wd.step()["closed"] == ["A"] and calls == []
 
 
 def test_a_market_holiday_row_does_not_move_the_close(tmp_path):
@@ -317,37 +328,85 @@ def _slow_closes(broker, clock, seconds, fail=True):
     return started
 
 
-def test_a_flatten_pass_does_not_start_a_close_that_could_run_past_the_dead_man(tmp_path):
+def test_the_first_pass_tries_every_position_even_past_the_budget(tmp_path):
+    # review of #158: a first pass is never cut; the dead-man (heartbeat 5 min old) acts anyway
     wd, broker, clock, store, open_utc = _stale(tmp_path)
-    syms = {s: {"symbol": s} for s in ("A", "B", "C", "D", "E")}
-    broker.positions = lambda: dict(syms)
+    broker.positions = lambda: {s: {"symbol": s} for s in "ABCDE"}
     started = _slow_closes(broker, clock, ORDER_DEADLINE_S)
     deadman = open_utc + timedelta(minutes=390) - DEADMAN_BEFORE_CLOSE  # 15:56:00
     clock.t = open_utc + timedelta(minutes=385, seconds=10)  # 15:55:10
     out = wd.step()
-    # 15:55:10 and 15:55:30 fit (each ends by 15:55:55 at the latest); 15:55:50 + 25 s would not
-    assert [s for s, _ in started] == ["A", "B"]
-    assert all(t + timedelta(seconds=CLOSE_BUDGET_S) <= deadman for _, t in started)
-    assert set(out["flatten_failed"]) == set(syms) and wd.flattened_on is None
-    assert "dead-man" in out["flatten_failed"]["C"]
+    assert [s for s, _ in started] == list("ABCDE")  # 15:56:30 for E: the old code tried it too
+    assert set(out["flatten_failed"]) == set("ABCDE") and wd.flattened_on is None
     _until(wd, clock, deadman + timedelta(minutes=3))
-    assert len(started) == 2  # no pass after it and no close started past 15:56 - 25 s
-    assert clock() > deadman
+    assert len(started) == 5  # the pass ended after the dead-man time: no retry
 
 
-def test_a_flatten_pass_never_runs_past_the_dead_man_with_a_blackholed_venue(tmp_path):
+def test_a_retry_does_not_start_a_close_that_could_run_past_the_dead_man(tmp_path):
+    wd, broker, clock, store, open_utc = _stale(tmp_path)  # heartbeat 5 min old: the dead-man will act
+    broker.positions = lambda: {s: {"symbol": s} for s in "ABCDE"}
+    started = _slow_closes(broker, clock, 0)  # the first pass: quick refusals
+    deadman = open_utc + timedelta(minutes=390) - DEADMAN_BEFORE_CLOSE
+    clock.t = open_utc + timedelta(minutes=385, seconds=10)  # 15:55:10
+    wd.step()
+    assert len(started) == 5
+    retry = _slow_closes(broker, clock, ORDER_DEADLINE_S)
+    clock.t += timedelta(seconds=POLL_S)  # 15:55:25
+    out = wd.step()
+    # 15:55:25 fits (ends by 15:55:50 at the latest); 15:55:45 + 25 s would not
+    assert [s for s, _ in retry] == ["A"]
+    assert all(t + timedelta(seconds=CLOSE_BUDGET_S) <= deadman for _, t in retry)
+    assert "dead-man" in out["flatten_failed"]["B"] and wd.flattened_on is None
+    _until(wd, clock, deadman + timedelta(minutes=3))
+    assert len(retry) == 1
+
+
+def test_a_blackholed_venue_retry_never_starts_a_close_near_the_dead_man(tmp_path):
     wd, broker, clock, store, open_utc = _stale(tmp_path)
-    broker.positions = lambda: {s: {"symbol": s} for s in "ABCDEFGHIJ"}
-    started = _slow_closes(broker, clock, CLOSE_BUDGET_S)  # every close takes its whole budget
+    broker.positions = lambda: {s: {"symbol": s} for s in "AB"}
+    first = _slow_closes(broker, clock, 1)
     deadman = open_utc + timedelta(minutes=390) - DEADMAN_BEFORE_CLOSE
     clock.t = open_utc + timedelta(minutes=385, seconds=10)
-    ends = []
-    while clock() < deadman + timedelta(minutes=2):
-        wd.step()
-        ends.append(clock())
-        clock.t += timedelta(seconds=POLL_S)
+    wd.step()
+    assert len(first) == 2
+    started = _slow_closes(broker, clock, CLOSE_BUDGET_S)  # every retry close takes its whole budget
+    clock.t += timedelta(seconds=POLL_S)
+    _until(wd, clock, deadman + timedelta(minutes=2))
     assert started and all(t + timedelta(seconds=CLOSE_BUDGET_S) <= deadman for _, t in started)
-    assert max(t for _, t in started) + timedelta(seconds=CLOSE_BUDGET_S) <= deadman
+
+
+def test_ten_positions_with_a_dead_man_that_will_not_act_are_all_closed(tmp_path):
+    # the review case: the engine stopped at 15:53:30, so at 15:56 the heartbeat is 150 s old and the dead-man
+    # (older than 3 min only) closes nothing. The first poll in the window is 15:55:14, each close takes ~3 s.
+    eng, broker, clock, store, open_utc = setup(tmp_path)
+    syms = [f"S{i}" for i in range(10)]
+    left = set(syms)
+    broker.positions = lambda: {s: {"symbol": s} for s in sorted(left)}
+    started = []
+
+    def close(sym, *a, **k):
+        started.append((sym, clock()))
+        clock.t += timedelta(seconds=3)
+        left.discard(sym)
+    broker.close_position = close
+    beat(store, open_utc + timedelta(minutes=383, seconds=30))  # 15:53:30
+    wd = Watchdog(broker, store, now=clock)
+    clock.t = open_utc + timedelta(minutes=385, seconds=14)  # 15:55:14
+    out = wd.step()
+    assert sorted(out["closed"]) == syms and not out["flatten_failed"] and not left
+    assert wd.flattened_on == clock().date()
+    assert clock() > open_utc + timedelta(minutes=385, seconds=35)  # past the budget line: nothing was cut
+
+
+def test_retries_are_not_cut_when_the_dead_man_will_not_act(tmp_path):
+    eng, broker, clock, store, open_utc = setup(tmp_path)
+    tries = _failing_closes(broker, 10**6)
+    beat(store, open_utc + timedelta(minutes=383, seconds=30))  # 15:53:30: 150 s old at 15:56
+    wd = Watchdog(broker, store, now=clock)
+    deadman = open_utc + timedelta(minutes=390) - DEADMAN_BEFORE_CLOSE
+    clock.t = open_utc + timedelta(minutes=385, seconds=14)
+    _until(wd, clock, deadman + timedelta(minutes=2))
+    assert len(tries) == 4  # :14, :29, :44, :59: every poll before the dead-man time, as before S74d
 
 
 def test_a_late_watchdog_keeps_its_one_pass_without_the_budget(tmp_path):

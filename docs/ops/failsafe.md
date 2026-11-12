@@ -15,13 +15,17 @@ Restart and recovery (crash, 10-minute outage, API outage, half-written order, t
 
 ## Watchdog and dead-man on the last minutes of a session (S74c #147, S74d #154)
 - **The close** is the earlier of the broker clock's `next_close` and the broker calendar's close for the day,
-  so on early-close days (13:00 ET) the watchdog flattens at 12:55. The calendar is read once a day, and only
-  when the engine is already stale; the happy path makes no extra calls.
-- **Retries** run until close minus 4 minutes, the dead-man time. Before each close the watchdog checks that
-  `CLOSE_BUDGET_S` (25 s: one order-path deadline plus the cancel wait) still fits before the dead-man time; a
-  symbol it does not start counts as failed, so the day is not marked flattened. With quick refusals that leaves
-  two passes (:10 and :25 past the minute); a blackholed venue cannot push a pass past the dead-man time. A
-  watchdog that first sees the stale engine after the dead-man time still makes one pass, as a backstop.
+  so on early-close days (13:00 ET) the watchdog flattens at 12:55. The calendar is read once a day, only when
+  the engine is already stale, and never inside the flatten window (from the clock's close minus 5 minutes the
+  clock's `next_close`, already calendar-aware, decides alone); the happy path makes no extra calls.
+- **The first flatten pass** of the day always tries every position, however long it takes.
+- **Retries** run until close minus 4 minutes, the dead-man time. If the dead-man will act (the engine heartbeat
+  will be older than 3 minutes at the dead-man time, `DEADMAN_STALE_S`), a retry starts no close within
+  `CLOSE_BUDGET_S` (25 s) of the dead-man time; a symbol it does not start counts as failed, so the day is not
+  marked flattened. 25 s is a slow close, not a worst case: one close can overrun it (several order-path calls,
+  each with a 20 s deadline), but only that one close. If the dead-man will not act (the engine stopped less
+  than 3 minutes before it), retries are not cut. A watchdog that first sees the stale engine after the dead-man
+  time still makes one pass, as a backstop.
 - **A failed open-orders read** (entry cancels) is logged and returned as `entry_read_failed`; the halt and the
   flatten of that poll still happen.
 - **Order-path budget:** a trading call that gives up because its rate-limit slot comes after its deadline no

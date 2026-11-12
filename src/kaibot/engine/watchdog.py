@@ -10,9 +10,12 @@ While the market is open, every 15 s:
 - early-close days (S74d, #154): "the close" is the broker calendar's close for the day (13:00 ET), or the
   clock's next_close if that is earlier or the calendar cannot be read. So the flatten starts at 12:55 and is
   retried until 12:56, when the dead-man for early closes (migration 0017) takes over.
-- a flatten pass never runs past the dead-man time: before each close it checks that CLOSE_BUDGET_S, the worst
-  case of one close on the order path, still fits before it. Symbols it does not start count as failed. Only a
-  watchdog that first sees the stale engine after the dead-man time gets its single late pass without a budget.
+- the first flatten pass of the day always tries every position, as before S74d. A retry starts no close within
+  CLOSE_BUDGET_S of the dead-man time, and only when the dead-man will act: the engine heartbeat will be older
+  than DEADMAN_STALE_S (3 min) at the dead-man time. If it will not be (the engine stopped less than 3 min before
+  15:56), the dead-man does nothing, so retries run without the cutoff until the dead-man time, as before.
+  Symbols a retry does not start count as failed. A watchdog that first sees the stale engine after the dead-man
+  time still gets its single late pass.
 - a failed open-orders read (entry cancels) is logged and recorded, and the poll's flatten still runs.
 It never opens anything. If the heartbeat cannot be read (Supabase down) it counts as stale: failing closed
 costs at most a flat afternoon, failing open could cost an overnight gap. None of this runs while the engine
@@ -41,9 +44,13 @@ log = logging.getLogger("kaibot.watchdog")
 STALE_S = 90
 FLATTEN_BEFORE_CLOSE = timedelta(minutes=5)
 DEADMAN_BEFORE_CLOSE = timedelta(minutes=4)  # the pg_cron dead-man: 15:56 ET (0006), 12:56 on early closes (0017)
-# One close_position on the order path, worst case: an open-orders read at the 20 s order deadline plus the 5 s
-# cancel wait (broker.alpaca ORDER_DEADLINE_S + CANCEL_WAIT_S). A close is started only if this fits before the
-# dead-man time.
+# The dead-man acts only if the engine heartbeat is older than this at its run (mirrors `interval '3 minutes'` in
+# deadman_flatten(), migrations 0006 and 0017). Keep the two in step.
+DEADMAN_STALE_S = 180
+# Retry cutoff: a retry starts no close within CLOSE_BUDGET_S of the dead-man time. 25 s is one order-path
+# deadline plus the cancel wait (broker.alpaca ORDER_DEADLINE_S + CANCEL_WAIT_S), a slow close, NOT a bound: a
+# close_position makes up to CANCEL_POLLS + 1 open-orders reads, one cancel per leg and the DELETE, each with its
+# own 20 s deadline, so a slow-but-answering venue can take minutes. The overrun is at most that one close.
 CLOSE_BUDGET_S = 25.0
 NY = ZoneInfo("America/New_York")
 POLL_S = 15
@@ -60,6 +67,7 @@ class Watchdog:
         self.flattened_on = None
         self._flatten_tries: tuple = (None, 0)  # (day, flatten attempts that day)
         self._calendar_close: tuple = (None, None)  # (ET day, the broker calendar's close as UTC, or None)
+        self._calendar_failed: tuple = (None, False)  # (ET day, the read failed that day)
 
     def heartbeat_age(self) -> float:
         try:
@@ -114,16 +122,26 @@ class Watchdog:
         if (now >= close - FLATTEN_BEFORE_CLOSE and self.flattened_on != today
                 and (now < deadman or not tries)):  # after the dead-man time: one try at most
             self._flatten_tries = (today, tries + 1)
-            self._flatten(today, tries + 1, out, deadman if now < deadman else None)
+            # S74d (#154) review: the first pass tries everything; a retry stops short of the dead-man time only
+            # if the dead-man will act (an unreadable heartbeat counts as "may not": no cutoff, as before)
+            cutoff = (tries > 0 and now < deadman and age != float("inf")
+                      and age + (deadman - now).total_seconds() > DEADMAN_STALE_S)
+            self._flatten(today, tries + 1, out, deadman if cutoff else None)
         return out
 
     def session_close(self, clk: dict, now: datetime) -> datetime:
         """Today's close (UTC): the earlier of the clock's next_close and the broker calendar's close (S74d,
-        #154). The calendar is read once a day and only on this failure path; if it cannot be read, the clock
-        alone decides and the next poll reads it again."""
+        #154). The clock's next_close is already calendar-aware; the calendar is a cross-check, read once a day and
+        only on this failure path. It is never read (or a failed read retried) from the clock's close minus
+        FLATTEN_BEFORE_CLOSE on, so it cannot eat the flatten window; until then a failed read is retried."""
         close = datetime.fromisoformat(str(clk["next_close"]).replace("Z", "+00:00"))
         day = now.astimezone(NY).date()
         if self._calendar_close[0] != day:
+            if now >= close - FLATTEN_BEFORE_CLOSE:
+                if self._calendar_failed != (day, True):
+                    log.warning("calendar not read inside the flatten window: using the clock's next_close")
+                self._calendar_failed = (day, True)
+                return close
             try:
                 row = self.broker.calendar(day.isoformat())
                 cal = None
@@ -133,13 +151,15 @@ class Watchdog:
                 self._calendar_close = (day, cal)
             except Exception:
                 log.exception("calendar read failed: using the clock's next_close")
+                self._calendar_failed = (day, True)
                 return close
         cal = self._calendar_close[1]
         return min(close, cal) if cal is not None else close
 
     def _flatten(self, today, attempt: int, out: dict, deadman: datetime | None = None) -> None:
         """Close every position. Done for the day only if every close was accepted (S74c, #147). With `deadman`,
-        a close is started only while CLOSE_BUDGET_S still fits before it (S74d, #154)."""
+        (retries only, when the dead-man will act) a close is started only while CLOSE_BUDGET_S still fits
+        before it (S74d, #154)."""
         failed: dict[str, str] = {}
         try:
             symbols = list(self.broker.positions())
