@@ -419,3 +419,150 @@ def live_trade_statement(v1_marks: Sequence[dict], at_base: dict, at_1bp: dict) 
     else:
         verdict, why = "retire", "the rule fails and its 15:30 entries do not pass on their own"
     return {"verdict": verdict, "why": why, "check_1530_base": at_base, "check_1530_1bp": at_1bp}
+
+
+# ---------------------------------------------------------------- Gate B mark 3: random-timing control (issue #149)
+#
+# Decision 15 section 10: for a SPY-only rule there is no stock universe to draw names from, so mark 3 asks whether
+# the rule's TIMING beats random timing. Each random account makes the same number of SPY round trips as the rule,
+# with the rule's own holding durations (the same multiset, in a random order), entered at random check times
+# (:00/:30 from 10:00, the rule's eligible decision times) on random sessions of the window, never two at once
+# (one account, fully invested when long), priced by `run_account` under the same cost scenario. What differs is
+# only WHEN the trips happen, which is the skill being tested.
+#
+# Time is counted in minute boundaries: boundary k of a session is the open of bar k, and boundary cm + 1 is the
+# close of its last bar cm. A trip fills at boundary decide_m + 1; an intraday trip of duration d exits at boundary
+# e + d (the open of that bar, or the close when e + d = cm + 1). A carried trip (version 2) keeps its distance to
+# the close and is sold at the next session's open, so on a full session it copies the rule's time of day and only
+# the session is random.
+
+CONTROL_RUNS = 500
+CONTROL_SEED = 149
+_SLOT = 400  # boundaries per session on the global timeline (> N_MIN + 1)
+_TRIES = 200  # random placements tried before the free positions are listed
+
+
+def trip_duration(t: Trip, close_m: np.ndarray) -> tuple[int, bool]:
+    """(boundaries held inside the entry session, carried overnight)."""
+    if t.reason == "next_open":
+        return int(close_m[t.i_entry]) + 1 - t.entry_m, True
+    end = t.exit_m + 1 if t.reason == "close" else t.exit_m
+    return end - t.entry_m, False
+
+
+def timing_candidates(spy: SymbolDays, spec: Spec, i0: int, i1: int, d: int, carried: bool) -> np.ndarray:
+    """Every (session, decision minute) at which a trip of duration d can be placed, as global start boundaries."""
+    cm = close_minute(spy)
+    op = session_open(spy)
+    n = len(spy.dates)
+    out = []
+    for i in range(max(i0, 1), min(i1, n - 1) + 1):
+        for m in spec.checks():
+            e = m + 1
+            if e > cm[i] or not math.isfinite(spy.o[i, e]):
+                continue
+            if carried:
+                ok = e + d == cm[i] + 1 and i + 1 <= i1 and math.isfinite(op[i + 1])
+            else:
+                ok = d >= 1 and e + d <= cm[i] + 1 and (e + d == cm[i] + 1 or math.isfinite(spy.o[i, e + d]))
+            if ok:
+                out.append(i * _SLOT + e)
+    return np.asarray(out, dtype=np.int64)
+
+
+def _trip_at(spy: SymbolDays, cm: np.ndarray, op: np.ndarray, start: int, d: int, carried: bool) -> Trip:
+    i, e = divmod(int(start), _SLOT)
+    if carried:
+        return Trip(i, e - 1, e, float(spy.o[i, e]), i + 1, 0, float(op[i + 1]), "next_open")
+    x = e + d
+    if x == cm[i] + 1:
+        return Trip(i, e - 1, e, float(spy.o[i, e]), i, int(cm[i]), float(spy.c[i, cm[i]]), "close")
+    return Trip(i, e - 1, e, float(spy.o[i, e]), i, x, float(spy.o[i, x]), "timed")
+
+
+def random_timing_trips(spy: SymbolDays, spec: Spec, i0: int, i1: int, durations: Sequence[tuple[int, bool]],
+                        rng: np.random.Generator, cands: dict | None = None) -> tuple[list[Trip], int]:
+    """One random account's round trips: every duration placed once, at a random free (session, check), with no
+    overlap and no exit and entry at the same boundary (prereg choice 5). -> (trips, durations not placed)."""
+    cm, op = close_minute(spy), session_open(spy)
+    cands = {} if cands is None else cands
+    span = lambda s, d, c: (s, (s // _SLOT + 1) * _SLOT if c else s + d)  # noqa: E731  occupied [a, b]
+    busy = np.zeros((len(spy.dates) + 1) * _SLOT + 1, dtype=bool)
+    trips, unplaced = [], 0
+    for k in rng.permutation(len(durations)):
+        d, carried = durations[k]
+        key = (int(d), bool(carried))
+        if key not in cands:
+            cands[key] = timing_candidates(spy, spec, i0, i1, *key)
+        pool = cands[key]
+        placed = None
+        for s in rng.choice(pool, size=min(_TRIES, len(pool)), replace=True) if len(pool) else ():
+            a, b = span(int(s), *key)
+            if not busy[a:b + 1].any():
+                placed = int(s)
+                break
+        if placed is None and len(pool):  # crowded: list the free positions once
+            cs = np.r_[0, np.cumsum(busy)]
+            ends = (pool // _SLOT + 1) * _SLOT if carried else pool + d
+            free = pool[cs[ends + 1] - cs[pool] == 0]
+            placed = int(rng.choice(free)) if len(free) else None
+        if placed is None:
+            unplaced += 1
+            continue
+        a, b = span(placed, *key)
+        busy[a:b + 1] = True
+        trips.append(_trip_at(spy, cm, op, placed, *key))
+    trips.sort(key=lambda t: (t.i_entry, t.entry_m))
+    return trips, unplaced
+
+
+def _sharpe_raw(rets: np.ndarray) -> float:
+    r = np.asarray(rets, dtype=float)
+    sd = r.std(ddof=1) if r.size > 1 else 0.0
+    return float(r.mean() / sd * math.sqrt(252)) if sd > 0 else 0.0
+
+
+def _curve(book: Book) -> tuple[float, float]:
+    rets = np.array([r["pnl"] / r["start"] for r in book.daily], dtype=float)
+    return _sharpe_raw(rets), book.equity / book.equity0 - 1
+
+
+def random_timing_control(spy: SymbolDays, spec: Spec, trips: Sequence[Trip], i0: int, i1: int,
+                          cost: float | str = BASE_COST, *, runs: int = CONTROL_RUNS, seed: int = CONTROL_SEED,
+                          equity0: float = 100_000.0) -> dict:
+    """Gate B mark 3 for a SPY-only rule (decision 15 section 10): the percentile of the rule's net Sharpe and total
+    return among `runs` seeded random-timing accounts (see the block comment above). Run k uses its own stream
+    seeded by (seed, k). Percentile = share of random accounts strictly below the rule, in %; ties count against
+    the rule. `matched` is true when every run placed every round trip, so the number of trips, the holding
+    durations and the time invested are the rule's exactly."""
+    if runs < 1:
+        raise ValueError("runs must be at least 1")
+    cm = close_minute(spy)
+    done = [t for t in trips if t.i_exit <= i1]  # a carry still open at the end is not a finished round trip
+    if not done:
+        raise ValueError("the rule made no round trip: there is nothing to match")
+    own_sh, own_ret = _curve(run_account(spy, trips, i0, i1, cost, equity0))
+    durations = [trip_duration(t, cm) for t in done]
+    cands: dict = {}
+    sh, ret = np.empty(runs), np.empty(runs)
+    unplaced = 0
+    for k in range(runs):
+        rng = np.random.default_rng(np.random.SeedSequence([seed, k]))
+        rt, miss = random_timing_trips(spy, spec, i0, i1, durations, rng, cands)
+        unplaced += miss
+        sh[k], ret[k] = _curve(run_account(spy, rt, i0, i1, cost, equity0))
+    qs = lambda x: [round(float(v), 4) for v in np.quantile(x, [0.05, 0.5, 0.9, 0.95])]  # noqa: E731
+    s_q, r_q = qs(sh), [round(v, 2) for v in qs(ret * 100)]
+    held = np.array([d for d, _ in durations], dtype=float)
+    return {
+        "kind": "random_timing", "rule": spec.name, "cost": cost, "runs": runs, "seed": seed,
+        "round_trips": len(done), "carried_trips": int(sum(c for _, c in durations)), "unfilled": int(unplaced),
+        "matched": unplaced == 0, "checks": [_clock(m) for m in spec.checks()],
+        "median_hold_min": float(np.median(held)), "mean_hold_min": round(float(held.mean()), 1),
+        "strategy_sharpe": round(own_sh, 4), "strategy_return_pct": round(own_ret * 100, 2),
+        "percentile": float((sh < own_sh).mean() * 100), "return_percentile": float((ret < own_ret).mean() * 100),
+        "random_p05": s_q[0], "random_median": s_q[1], "random_p90": s_q[2], "random_p95": s_q[3],
+        "random_return_pct_p05": r_q[0], "random_return_pct_median": r_q[1], "random_return_pct_p90": r_q[2],
+        "random_return_pct_p95": r_q[3],
+        "per_run": {"sharpe": [round(float(x), 4) for x in sh], "return_pct": [round(float(x) * 100, 3) for x in ret]},
+    }

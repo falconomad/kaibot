@@ -271,6 +271,14 @@ def test_script_end_to_end_resumable_with_one_table(tmp_path):
     assert rep["oos_window"][0] >= "2017-05-01" and rep["prereg"]["file"] == "docs/prereg/spy_noise_band.md"
     trials = [json.loads(x) for x in (data / "trials.jsonl").read_text().splitlines()]
     assert sum(t["n_trials"] for t in trials) == 7  # v1, carry and five neighbours at 0.5 bp a side
+    # Gate B mark 3 (issue #149): the random-timing control, 500 runs, printed under the table; not a trial
+    assert "## Gate B mark 3: random-timing control" in text and text.count("random-timing runs") == 2
+    assert text.index("BENCHMARK: SPY buy-and-hold") < text.index("## Gate B mark 3") < text.index("## Pass marks")
+    ctl = rep["timing_control"]["control"]
+    assert ctl["runs"] == 500 and ctl["matched"] and ctl["cost"] == nb.BASE_COST and "per_run" not in ctl
+    assert len(pd.read_csv(data / "reports" / ctl["file"])) == 500
+    assert rep["timing_control"]["mark"]["limit"] == {"percentile_min": 90.0, "runs_min": 500}
+    assert subprocess.run([py, script, "--has", "spy_noise_band", *common, "--control-runs", "600"]).returncode == 1
 
 
 def test_research_only_and_costs_come_from_the_replay():
