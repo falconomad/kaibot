@@ -1,4 +1,5 @@
-"""In-memory fakes for engine tests: a broker that fills on replay bars, a data feed, and a Store."""
+"""In-memory fakes for engine tests: a Store and an LLM, plus thin test flavours of the simulated broker, feed
+and clock from src (kaibot.broker.sim.SimBroker, kaibot.replay.history.HistoricalData, kaibot.engine.clock)."""
 
 from __future__ import annotations
 
@@ -9,7 +10,10 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pandas as pd
 
+from kaibot.broker.sim import REGULAR_HOURS, SimBroker
+from kaibot.engine.clock import SimClock
 from kaibot.replay.data import ET, SymbolDays
+from kaibot.replay.history import HistoricalData
 
 
 def frame_from_days(sd: SymbolDays) -> pd.DataFrame:
@@ -25,54 +29,26 @@ def frame_from_days(sd: SymbolDays) -> pd.DataFrame:
     return pd.concat(rows, ignore_index=True)
 
 
-class Clock:
-    def __init__(self, t: datetime):
-        self.t = t
-
-    def __call__(self) -> datetime:
-        return self.t
+class Clock(SimClock):
+    """Simulated time for tests; `clock.t = ...` sets it directly."""
 
 
-class FakeData:
-    """Serves bars from full-day frames, never returning anything at or after the fake clock."""
+class FakeData(HistoricalData):
+    """`HistoricalData` (bars from full-day frames, never anything at or after the fake clock) with the quotes
+    and news the engine tests were written against: a two-cent quote one second old, and a headline count per
+    symbol that the test sets."""
 
     def __init__(self, frames: dict[str, pd.DataFrame], clock: Clock):
-        self.frames, self.clock = frames, clock
+        super().__init__(frames, clock)
         self.news: dict[str, int] = {}
-
-    def bars(self, symbols, start, end, feed, timeframe="1Min", adjustment="split"):
-        end = min(end, self.clock())
-        out = {}
-        for s in symbols:
-            f = self.frames.get(s)
-            if f is None:
-                continue
-            g = f[(f["ts"] >= start) & (f["ts"] < end)]
-            if timeframe == "1Day":
-                g = (
-                    g.assign(day=g["ts"].dt.tz_convert(ET).dt.date)
-                    .groupby("day", as_index=False)
-                    .agg(
-                        ts=("ts", "first"),
-                        o=("o", "first"),
-                        h=("h", "max"),
-                        l=("l", "min"),
-                        c=("c", "last"),
-                        v=("v", "sum"),
-                        vw=("vw", "mean"),
-                    )[["ts", "o", "h", "l", "c", "v", "vw"]]
-                )
-            out[s] = g.reset_index(drop=True)
-        return out
 
     def latest_quotes(self, symbols):
         now = self.clock()
         out = {}
         for s in symbols:
-            f = self.frames[s]
-            g = f[f["ts"] < now]
-            if len(g):
-                c = float(g["c"].iloc[-1])
+            self.frames[s]  # an unknown symbol fails the whole read, as before
+            c = self.history.last_close(s, now)
+            if c is not None:
                 out[s] = {"bp": c - 0.01, "ap": c + 0.01, "t": (now - timedelta(seconds=1)).isoformat()}
         return out
 
@@ -80,20 +56,28 @@ class FakeData:
         return self.news.get(symbol, 0)
 
 
-class FakeBroker:
-    """Market orders fill at the next bar's open; bracket legs trigger on later bars (stop first)."""
+class FakeBroker(SimBroker):
+    """`SimBroker` as the engine tests use it: fills at raw bar prices (no cost model), no cash book, one
+    session (`day`, 09:30-16:00) and a duplicate client_order_id raises, so a double submission in a test fails
+    loudly. Market orders fill at the next bar's open; bracket legs trigger on later bars (stop first)."""
 
     name = "fake"
+    strict_time = False  # the engine tests step back in time (run_day ends after the close, then goes on mid-day)
 
     def __init__(self, data: FakeData, clock: Clock, day: str):
-        self.data, self.clk, self.day = data, clock, day
-        self.orders: dict[str, dict] = {}
-        self.pos: dict[str, dict] = {}
-        self.ids = itertools.count(1)
+        super().__init__(data.history, clock, costs=None, cash=None)
+        self.data, self.day = data, day
         self.foreign: dict[str, dict] = {}
+
+    def _days(self):
+        return [self.day]
+
+    def _hours(self, day):
+        return REGULAR_HOURS  # every day a test asks about is a regular session
 
     def clock(self):
         now = pd.Timestamp(self.clk()).tz_convert(ET)
+        self._expire(now.to_pydatetime())
         o = pd.Timestamp(f"{self.day} 09:30", tz=ET)
         c = pd.Timestamp(f"{self.day} 16:00", tz=ET)
         nxt = o + pd.Timedelta(days=1) if now >= o else o
@@ -104,164 +88,19 @@ class FakeBroker:
             "timestamp": now.isoformat(),
         }
 
-    def _bar(self, s, t):
-        f = self.data.frames[s]
-        g = f[f["ts"] == t]
-        return None if not len(g) else g.iloc[0]
-
-    def advance(self, t: datetime) -> None:
-        """Process the bar that started at minute t (fills happen at its open, triggers within it)."""
-        for o in list(self.orders.values()):
-            b = self._bar(o["symbol"], t)
-            if b is None:
-                continue
-            if o["status"] == "new" and o.get("time_in_force") == "cls":
-                if self._is_last_bar(o["symbol"], t):  # market-on-close: fills at the closing print
-                    px = float(b["c"])
-                    o.update(status="filled", filled_avg_price=str(px), filled_at=t.isoformat())
-                    self.pos.pop(o["symbol"], None)
-                continue
-            if o["status"] == "new" and o["type"] == "market":
-                px = float(b["o"])
-                o.update(status="filled", filled_avg_price=str(px), filled_at=t.isoformat())
-                if o["side"] == "buy":
-                    self.pos[o["symbol"]] = {"qty": o["qty"], "avg_entry_price": px}
-                    for leg in o["legs"]:
-                        leg["status"] = "new"
-                else:
-                    self.pos.pop(o["symbol"], None)
-                continue
-            if o["status"] == "filled" and o.get("legs"):
-                stop = next(x for x in o["legs"] if x["type"] == "stop")
-                tgt = next((x for x in o["legs"] if x["type"] == "limit"), None)
-                if stop["status"] != "new":
-                    continue
-                if b["l"] <= float(stop["stop_price"]):
-                    px = min(float(stop["stop_price"]), float(b["o"]))
-                    stop.update(status="filled", filled_avg_price=str(px), filled_at=t.isoformat())
-                    if tgt:
-                        tgt["status"] = "canceled"
-                    self.pos.pop(o["symbol"], None)
-                elif tgt and b["h"] >= float(tgt["limit_price"]) + 0.01:
-                    tgt.update(status="filled", filled_avg_price=tgt["limit_price"], filled_at=t.isoformat())
-                    stop["status"] = "canceled"
-                    self.pos.pop(o["symbol"], None)
-
-    def _is_last_bar(self, s, t) -> bool:
-        f = self.data.frames[s]
-        day = f[f["ts"].dt.date == pd.Timestamp(t).date()]
-        return len(day) > 0 and pd.Timestamp(t) == day["ts"].max()
-
-    # --- broker API used by the engine ---
     def account(self):
         a = {"status": "ACTIVE", "equity": "100000"}
         if getattr(self, "buying_power", None) is not None:
             a["buying_power"] = str(self.buying_power)
         return a
 
-    def calendar(self, day):
-        return {"date": day, "open": "09:30", "close": "16:00"}
-
     def positions(self):
         return {**self.foreign, **self.pos}
 
-    def open_orders(self):
-        return [o for o in self.orders.values() if o["status"] == "new"]
-
-    def order(self, oid):
-        return self.orders[oid]
-
-    def order_by_client_id(self, coid):
-        return next((o for o in self.orders.values() if o.get("client_order_id") == coid), None)
-
-    def _new_coid(self, coid):
+    def _duplicate(self, existing, order):
         """Alpaca refuses a reused client_order_id (422; the adapter then returns the existing order). Raising
         here makes any duplicate submission in a test fail loudly."""
-        if coid and self.order_by_client_id(coid) is not None:
-            raise ValueError(f"422 client_order_id must be unique: {coid}")
-
-    def submit_bracket(self, coid, symbol, qty, stop, target):
-        self._new_coid(coid)
-        oid = f"o{next(self.ids)}"
-        o = {
-            "id": oid,
-            "client_order_id": coid,
-            "symbol": symbol,
-            "qty": qty,
-            "side": "buy",
-            "type": "market",
-            "status": "new",
-            "legs": [
-                {"id": f"{oid}s", "type": "stop", "stop_price": f"{stop:.2f}", "status": "held"},
-                {"id": f"{oid}t", "type": "limit", "limit_price": f"{target:.2f}", "status": "held"},
-            ],
-        }
-        self.orders[oid] = o
-        return o
-
-    def submit_oto_stop(self, coid, symbol, qty, stop):
-        self._new_coid(coid)
-        oid = f"o{next(self.ids)}"
-        o = {"id": oid, "client_order_id": coid, "symbol": symbol, "qty": qty, "side": "buy", "type": "market",
-             "status": "new", "order_class": "oto",
-             "legs": [{"id": f"{oid}s", "type": "stop", "stop_price": f"{stop:.2f}", "status": "held"}]}
-        self.orders[oid] = o
-        return o
-
-    def submit_moc_sell(self, coid, symbol, qty):
-        self._new_coid(coid)
-        oid = f"o{next(self.ids)}"
-        o = {"id": oid, "client_order_id": coid, "symbol": symbol, "qty": qty, "side": "sell", "type": "market",
-             "time_in_force": "cls", "status": "new", "legs": []}
-        self.orders[oid] = o
-        return o
-
-    def _leg(self, leg_id):
-        for o in self.orders.values():
-            for leg in o.get("legs") or []:
-                if leg["id"] == leg_id:
-                    return leg
-        raise KeyError(leg_id)
-
-    def replace_stop(self, leg_id, stop):
-        leg = self._leg(leg_id)
-        leg["stop_price"] = f"{stop:.2f}"
-        return leg
-
-    def replace_limit(self, leg_id, limit):
-        leg = self._leg(leg_id)
-        leg["limit_price"] = f"{limit:.2f}"
-        return leg
-
-    def cancel_order(self, oid):
-        if oid in self.orders and self.orders[oid]["status"] == "new":
-            self.orders[oid]["status"] = "canceled"
-            return
-        for o in self.orders.values():  # a leg
-            for leg in o.get("legs") or []:
-                if leg["id"] == oid and leg["status"] in ("new", "held"):
-                    leg["status"] = "canceled"
-
-    def close_position(self, symbol):
-        if symbol not in self.pos:
-            return None
-        for o in self.orders.values():
-            if o["symbol"] == symbol:
-                for leg in o.get("legs") or []:
-                    if leg["status"] in ("new", "held"):
-                        leg["status"] = "canceled"
-        oid = f"o{next(self.ids)}"
-        o = {
-            "id": oid,
-            "symbol": symbol,
-            "qty": self.pos[symbol]["qty"],
-            "side": "sell",
-            "type": "market",
-            "status": "new",
-            "legs": [],
-        }
-        self.orders[oid] = o
-        return o
+        raise ValueError(f"422 client_order_id must be unique: {order.client_order_id}")
 
 
 class FakeStore:

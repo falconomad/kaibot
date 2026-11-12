@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
+from kaibot.broker.shadow_costs import buy_px, cost_parts, half_spread, sell_fees, sell_px  # noqa: F401
 from kaibot.replay.data import SymbolDays
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
 
@@ -51,26 +51,6 @@ class Book:
     equity: float
     trades: list[Trade] = field(default_factory=list)
     daily: list[dict] = field(default_factory=list)
-
-
-def half_spread(price: float) -> float:
-    return max(price * 0.0001, 0.005)  # >= 1 bp and >= half a cent (large caps)
-
-
-def buy_px(o: float, q: float, sigma: float, vol: float) -> float:
-    hs = half_spread(o)
-    return shadow_fill_price("buy", q, QuoteCtx(o - hs, o + hs, sigma, max(vol, 1.0)))
-
-
-def sell_px(p: float, q: float, sigma: float, vol: float) -> float:
-    hs = half_spread(p)
-    return shadow_fill_price("sell", q, QuoteCtx(p - hs, p + hs, sigma, max(vol, 1.0)))
-
-
-def cost_parts(mid: float, px: float) -> tuple[float, float]:
-    """(half spread, impact) per share between a no-cost price `mid` and the fill `px` the cost model returned."""
-    half = half_spread(mid)
-    return half, abs(px - mid) - half
 
 
 def first_exit(h, l, o, c, start_m, stop, target):  # noqa: E741

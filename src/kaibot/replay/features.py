@@ -59,8 +59,10 @@ def five_minute(o, h, l, c):  # noqa: E741
 
 
 def candidates(sd: SymbolDays, etf: SymbolDays, news_times: np.ndarray, z_max=-1.5, resid_abs_max=1.5,
-               turnover_max=1.5, min_adv=50e6, first_m=5, last_m=375) -> pd.DataFrame:
-    dates, i, j, dvol20, adv20, beta, residvol20, avgcum = daily_stats(sd, etf)
+               turnover_max=1.5, min_adv=50e6, first_m=5, last_m=375, stats=None) -> pd.DataFrame:
+    """`stats`: the result of `daily_stats(sd, etf)` if the caller already has it. The live market computes it
+    once per session: every daily statistic reads earlier sessions only, so it is the same at every minute."""
+    dates, i, j, dvol20, adv20, beta, residvol20, avgcum = stats if stats is not None else daily_stats(sd, etf)
     o, h, l, c, v, vw = (getattr(sd, k)[i] for k in ("o", "h", "l", "c", "v", "vw"))  # noqa: E741
     eo, ec = etf.o[j], etf.c[j]
     t_frac = np.sqrt(np.arange(1, N_MIN + 1) / N_MIN)[None, :]

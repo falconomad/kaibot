@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.replay.data import ET, N_MIN, SymbolDays, from_frame
-from kaibot.replay.features import candidates, regime
+from kaibot.replay.features import candidates, daily_stats, regime
 
 HISTORY_SESSIONS = 70
 EMPTY_NEWS = np.array([], dtype="datetime64[s]")
@@ -42,6 +42,8 @@ class LiveMarket:
         self.cache = cache_dir
         self.vix_loader = vix_loader
         self.history: dict[str, pd.DataFrame] = {}
+        self._hist_days: dict[str, tuple[pd.DataFrame, int, SymbolDays | None]] = {}
+        self._stats: dict[str, tuple] = {}
         self.last_checked, self.last_near = 0, []
         self.min_adv = 50e6  # M5: the owner may only raise the $-volume floor
         self.today_bars: dict[str, pd.DataFrame] = {}
@@ -112,11 +114,60 @@ class LiveMarket:
         self._last_fetch = now.replace(second=0, microsecond=0) - timedelta(minutes=2)  # re-read late bars
 
     def symbol_days(self, s: str, upto_m: int) -> SymbolDays | None:
+        """History plus today's bars up to minute `upto_m`, as per-session arrays.
+
+        The history does not change during a session, so its arrays are built once (`_history_days`) and only
+        today's row is rebuilt on each call: every session is forward-filled on its own, so stacking the two
+        gives exactly what one pass over both frames gives (`_symbol_days_one_pass`, kept as the reference
+        and used whenever the history is not strictly older than today)."""
+        today = self._today_scaled(s)
+        hist = self._history_days(s)
+        if hist is None or today is None or self.day is None:
+            return self._symbol_days_one_pass(s, upto_m)
+        td = from_frame(s, today, upto={self.day: upto_m})
+        day = np.datetime64(self.day, "D")
+        if (len(hist.dates) and hist.dates[-1] >= day) or (len(td.dates) and td.dates[0] < day):
+            return self._symbol_days_one_pass(s, upto_m)
+        return SymbolDays(s, np.concatenate([hist.dates, td.dates]),
+                          *(np.vstack([getattr(hist, k), getattr(td, k)]) for k in ("o", "h", "l", "c", "v", "vw")))
+
+    def _today_scaled(self, s: str) -> pd.DataFrame | None:
         today = self.today_bars.get(s)
-        if today is not None and len(today):
-            today = today.copy()
-            today["v"] = today["v"].astype(float) * self.vol_ratio.get(s, 1.0)
-        frames = [f for f in (self.history.get(s), today) if f is not None and len(f)]
+        if today is None or not len(today):
+            return None
+        today = today.copy()
+        today["v"] = today["v"].astype(float) * self.vol_ratio.get(s, 1.0)
+        return today
+
+    def _history_days(self, s: str) -> SymbolDays | None:
+        """The stored history as arrays, cached until `history[s]` is replaced (once per session)."""
+        f = self.history.get(s)
+        if f is None or not len(f):
+            return None
+        hit = self._hist_days.get(s)
+        if hit is None or hit[0] is not f or hit[1] != len(f):
+            hit = (f, len(f), from_frame(s, f))
+            self._hist_days[s] = hit
+        return hit[2]
+
+    def _session_stats(self, s: str, sd: SymbolDays, ed: SymbolDays):
+        """`daily_stats(sd, ed)` for this session, computed once per symbol. Each statistic is shifted by one
+        session (point-in-time), so today's bars cannot change it. Reused only while `sd` and `ed` are exactly
+        this session's cached history plus today; otherwise None and `candidates` computes it itself."""
+        hs, he = self._history_days(s), self._history_days(self.etf_of[s])
+        today = np.datetime64(self.day, "D") if self.day is not None else None
+        if hs is None or he is None or today is None or not (
+                len(sd.dates) == len(hs.dates) + 1 and len(ed.dates) == len(he.dates) + 1
+                and sd.dates[-1] == today and ed.dates[-1] == today):
+            return None
+        hit = self._stats.get(s)
+        if hit is None or hit[0] is not hs or hit[1] is not he or hit[2] != self.day:
+            hit = (hs, he, self.day, daily_stats(sd, ed))
+            self._stats[s] = hit
+        return hit[3]
+
+    def _symbol_days_one_pass(self, s: str, upto_m: int) -> SymbolDays | None:
+        frames = [f for f in (self.history.get(s), self._today_scaled(s)) if f is not None and len(f)]
         if not frames:
             return None
         return from_frame(s, pd.concat(frames, ignore_index=True), upto={self.day: upto_m})
@@ -140,7 +191,8 @@ class LiveMarket:
             if self.has_today(sd) is None or self.has_today(ed) is None:
                 continue
             checked += 1
-            c = candidates(sd, ed, EMPTY_NEWS, min_adv=max(self.min_adv, 50e6), **NEAR)
+            c = candidates(sd, ed, EMPTY_NEWS, min_adv=max(self.min_adv, 50e6), stats=self._session_stats(s, sd, ed),
+                           **NEAR)
             if len(c):
                 c = c[(c["date"] == np.datetime64(self.day, "D")) & (c["m"] == m)]
             if not len(c):
