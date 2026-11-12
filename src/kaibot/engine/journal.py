@@ -30,8 +30,8 @@ journal keeps a map from the engine's id to the database's and translates every 
 ledger's own tables stay in the journal. A send whose answer was lost may then be duplicated on retry, as before
 S77: every table without a natural key, so run, signal, trade, fill, event, halt, segment, gate_run and
 gate_report (a doubled trade or fill count on the dashboard, a duplicate in the event hash chain; decisions are not
-affected, the engine's state is local). This goes away once 0018 is applied (#165). `rebuild()` is refused. Apply 0018 and restart the engine to switch; references to rows sent before the
-switch still go through the map.
+affected, the engine's state is local). This goes away once 0018 is applied (#165). `rebuild()` is refused.
+Apply 0018 and restart the engine to switch; references to rows sent before the switch still go through the map.
 
 Reads of the engine's own tables are answered locally. Only tables other writers own (the dashboard's commands
 and configs, the trial registry, the news desk) are read from Supabase, with a short timeout and a breaker.
