@@ -23,6 +23,13 @@ reads session i up to 15:55 plus the calendar):
 Costs reuse the intraday replay's functions (`sim.buy_px`, `sim.sell_px`, `sim.cost_parts`, `shadow_costs.
 sell_fees`), so `pnl == gross_pnl - cost_spread - cost_impact - cost_slippage - cost_fees` here too.
 Long only, no leverage: a buy never spends more than the cash in the account.
+
+Added for the momentum core (issue #127), all off by default so the first-look rules are unchanged (a test pins
+them): a cost multiplier on spread and impact (`cost_mult`; fees are regulatory and stay), a sizing hook
+(`enter(shares=...)`: the rule names the shares, the caps still apply), orders sized from the previous close
+that fill at the close (`enter(at="close", prev_close=True)`, `sell_close`), and partial buys and sells of a
+held position (`adjust`). A partial sale is its own trade row with its share of the entry costs, so
+`pnl == gross_pnl - costs` and "the trades explain the equity" still hold.
 """
 
 from __future__ import annotations
@@ -237,7 +244,8 @@ class MTrade:
     entry: float  # fill after costs
     exit: float  # fill after costs
     stop: float  # stop in force at the exit (NaN: the rule has none)
-    reason: str  # stop | trail | max_hold | earnings | rebalance | market_filter | open | end_of_data | intraday's
+    # stop | trail | max_hold | earnings | rebalance | market_filter | open | end_of_data | resize | intraday's
+    reason: str
     pnl: float  # $ after all costs
     risk: float  # $ lost if the stock had opened `gap_atr` daily ATRs below the sizing price
     gross_pnl: float  # bought at the open / close print, sold at the stop level or the open / close print
@@ -278,6 +286,8 @@ class MBook:
     equity: float
     trades: list[MTrade] = field(default_factory=list)
     daily: list[dict] = field(default_factory=list)
+    bought: float = 0.0  # $ paid for shares by the engine's own buys (turnover; not the replayed intraday leg)
+    sold: float = 0.0  # $ received for shares, before fees
 
 
 def _ok(*xs: float) -> bool:
@@ -296,8 +306,9 @@ class Engine:
 
     def __init__(self, bars: DailyBars, ind: Indicators, pol: RiskPolicy, rule, schedule: Callable[[int], object],
                  equity0: float = 100_000.0, hold_blk: np.ndarray | None = None,
-                 entry_blk: np.ndarray | None = None) -> None:
+                 entry_blk: np.ndarray | None = None, cost_mult: float = 1.0) -> None:
         self.b, self.ind, self.pol, self.rule, self.schedule = bars, ind, pol, rule, schedule
+        self.cost_mult = float(cost_mult)  # scales spread and impact of every fill (fees are not scaled)
         self.cash = float(equity0)
         self.equity = float(equity0)
         self.pos: dict[int, Pos] = {}
@@ -314,22 +325,47 @@ class Engine:
     def exposure(self) -> float:
         return sum(p.qty * p.last for p in self.pos.values())
 
-    def sell(self, i: int, j: int, price: float, reason: str, vol: float, gap: bool = False) -> None:
-        """Market sell of the whole position at `price` (the open, the close or the stop level) minus costs.
-        With `gap`, `price` is the open that jumped the stop; the signal is credited the stop level and the
-        difference is the gap slippage."""
-        p = self.pos.pop(j)
+    def _buy_px(self, mid: float, qty: float, sig: float, vol: float) -> float:
+        px = buy_px(mid, qty, sig, vol)
+        return px if self.cost_mult == 1.0 else mid + (px - mid) * self.cost_mult
+
+    def _sell_px(self, mid: float, qty: float, sig: float, vol: float) -> float:
+        px = sell_px(mid, qty, sig, vol)
+        return px if self.cost_mult == 1.0 else mid - (mid - px) * self.cost_mult
+
+    def _parts(self, mid: float, px: float) -> tuple[float, float]:
+        """(half spread, impact) per share actually charged between `mid` and the fill `px`."""
+        if self.cost_mult == 1.0:
+            return cost_parts(mid, px)
+        half = half_spread(mid) * self.cost_mult
+        return half, abs(px - mid) - half
+
+    def sell(self, i: int, j: int, price: float, reason: str, vol: float, gap: bool = False,
+             qty: float | None = None) -> None:
+        """Market sell of the whole position (or of `qty` shares of it) at `price` (the open, the close or the
+        stop level) minus costs. With `gap`, `price` is the open that jumped the stop; the signal is credited the
+        stop level and the difference is the gap slippage. A partial sale books its own trade row with its share
+        of the entry costs and of the risk; the rest of the position stays as it was."""
+        p = self.pos[j]
+        lot = p.qty if qty is None else min(float(qty), p.qty)
+        risk = p.risk * (lot / p.qty)
+        if lot >= p.qty:
+            del self.pos[j]
+        else:
+            p.qty -= lot
+            p.risk -= risk
         vol = vol if math.isfinite(vol) and vol > 0 else 1.0
-        px = sell_px(price, p.qty, self.sigma(i, j), vol)
-        fees = sell_fees(p.qty, px)
-        x_half, x_imp = cost_parts(price, px)
+        px = self._sell_px(price, lot, self.sigma(i, j), vol)
+        fees = sell_fees(lot, px)
+        x_half, x_imp = self._parts(price, px)
         level = p.stop if gap else price
-        self.cash += px * p.qty - fees
+        self.cash += px * lot - fees
+        self.book.sold += px * lot
         e_half, e_imp = p.entry_costs
         self.book.trades.append(MTrade(
-            self.b.symbols[j], self.b.dates[p.entry_i], self.b.dates[i], i - p.entry_i, p.qty, p.fill, px, p.stop,
-            reason, (px - p.fill) * p.qty - fees, p.risk, (level - p.mid) * p.qty, (e_half + x_half) * p.qty,
-            (e_imp + x_imp) * p.qty, (level - price) * p.qty, fees, gap, p.equity, self.rule.name, p.config,
+            self.b.symbols[j], self.b.dates[p.entry_i], self.b.dates[i], i - p.entry_i, lot, p.fill, px, p.stop,
+            reason, (px - p.fill) * lot - fees, risk, (level - p.mid) * lot, (e_half + x_half) * lot,
+            (e_imp + x_imp) * lot, (level - price) * lot, fees, gap, p.equity, self.rule.name, p.config,
             p.entry_at))
         self._exits_today += 1
 
@@ -340,52 +376,114 @@ class Engine:
         self.sell(i, j, float(o), reason, self.b.v_first[i, j])
         return True
 
+    def sell_close(self, i: int, j: int, reason: str) -> bool:
+        """Sell the whole position at the close of session i (an order placed before that close)."""
+        c = self.b.c[i, j]
+        if j not in self.pos or not _ok(c):
+            return False  # no bar today: the order waits
+        self.sell(i, j, float(c), reason, self.b.v_last[i, j])
+        return True
+
     def enter(self, i: int, j: int, eq: float, config: str, caps: Caps, *, at: str = "open", stop_atr: float = 0.0,
               trail_atr: float = 0.0, max_hold: int = 0, max_value_pct: float | None = None,
-              exit_next_open: bool = False, carry: Mapping | None = None) -> float:
+              exit_next_open: bool = False, carry: Mapping | None = None, shares: float | None = None,
+              prev_close: bool = False) -> float:
         """Buy at the open of session i (sized from the close of i - 1) or at its close (sized from the 15:55
-        price). Returns the quantity bought, 0 when a cap, the blackout or missing data stops the entry.
+        price, or with `prev_close` from the close of i - 1: an order placed the evening before). Returns the
+        quantity bought, 0 when a cap, the blackout or missing data stops the entry.
 
         Quantity: the loss if the stock opens `caps.gap_atr` ATRs lower <= the level's per-trade risk; position
         <= the level's max position %; everything held <= `caps.max_exposure_pct` of equity; never more than the
         cash. `carry` (qty, fill, mid) hands over a position bought intraday: at most that quantity, at its fill.
+        `shares` is the sizing hook: the rule's own number of shares replaces the gap sizing (the position cap,
+        the exposure cap and the cash still apply).
         """
         b, k = self.b, i - 1
         if k < 0 or j in self.pos or len(self.pos) >= caps.max_positions:
             return 0.0
         atr = float(self.ind.atr[k, j])
         ref, mid, vol = ((b.c[k, j], b.o[i, j], b.v_first[i, j]) if at == "open"
-                         else (b.c1555[i, j], b.c[i, j], b.v_last[i, j]))
+                         else (b.c[k, j] if prev_close else b.c1555[i, j], b.c[i, j], b.v_last[i, j]))
         if not _ok(ref, mid, atr) or atr <= 0 or ref <= 0 or mid <= 0:
             return 0.0
-        row = k if at == "open" else i  # the last session whose news the decision can have read
+        row = k if at == "open" or prev_close else i  # the last session whose news the decision can have read
         if self.entry_blk is not None and (self.entry_blk[row, j] or self.hold_blk[row, j]):
             return 0.0
-        value = min(eq * self.pol.risk_per_trade_pct / 100 / (caps.gap_atr * atr) * ref,
-                    eq * self.pol.max_position_pct / 100, caps.max_exposure_pct / 100 * eq - self.exposure())
+        if shares is None:
+            value = min(eq * self.pol.risk_per_trade_pct / 100 / (caps.gap_atr * atr) * ref,
+                        eq * self.pol.max_position_pct / 100, caps.max_exposure_pct / 100 * eq - self.exposure())
+        else:
+            value = min(eq * self.pol.max_position_pct / 100, caps.max_exposure_pct / 100 * eq - self.exposure())
         if max_value_pct is not None:
             value = min(value, eq * max_value_pct / 100)
         qty = float(math.floor(value / ref)) if value > 0 else 0.0
+        if shares is not None:
+            qty = min(qty, float(math.floor(shares))) if math.isfinite(shares) else 0.0
         sig = self.sigma(i, j)
         vol = float(vol) if _ok(vol) and vol > 0 else 1.0
         if carry is not None:
             qty = min(qty, float(carry["qty"]))
             fill, mid_e = float(carry["fill"]), float(carry["mid"])
         else:
-            fill, mid_e = (buy_px(float(mid), qty, sig, vol) if qty >= 1 else math.inf), float(mid)
+            fill, mid_e = (self._buy_px(float(mid), qty, sig, vol) if qty >= 1 else math.inf), float(mid)
         if qty >= 1 and fill * qty > self.cash:  # no leverage
             qty = float(math.floor(self.cash / fill))
             if carry is None and qty >= 1:
-                fill = buy_px(float(mid), qty, sig, vol)
+                fill = self._buy_px(float(mid), qty, sig, vol)
         if qty < 1:
             return 0.0
         self.cash -= fill * qty
-        half = half_spread(mid_e)
+        if carry is None:
+            self.book.bought += fill * qty
+        half = half_spread(mid_e) * (1.0 if carry is not None else self.cost_mult)
         self.pos[j] = Pos(j, qty, i, fill, mid_e, (half, fill - mid_e - half),
                           fill - stop_atr * atr if stop_atr else math.nan, trail_atr, max_hold,
                           qty * caps.gap_atr * atr, eq, config, "intraday" if carry is not None else at,
                           float(ref), exit_next_open=exit_next_open)  # marked at the sizing price until the close
         return qty
+
+    def adjust(self, i: int, j: int, target: float, eq: float, caps: Caps, *, at: str = "close",
+               reason: str = "resize") -> float:
+        """Partial buy or sell of a held position so that it holds `target` whole shares, at the open or the
+        close of session i (an order sized from the close of i - 1). Returns the signed shares traded: 0 when
+        there is no bar, nothing to do, or no room. A purchase obeys the same position cap, exposure cap and cash
+        limit as `enter`; the position keeps its first entry day, and its fill and entry costs become the
+        share-weighted averages."""
+        p, b = self.pos.get(j), self.b
+        if p is None or i < 1 or not math.isfinite(target):
+            return 0.0
+        mid, vol = (b.o[i, j], b.v_first[i, j]) if at == "open" else (b.c[i, j], b.v_last[i, j])
+        target = max(float(math.floor(target)), 0.0)
+        if not _ok(mid) or mid <= 0 or target == p.qty:
+            return 0.0
+        if target < p.qty:
+            lot = p.qty - target
+            self.sell(i, j, float(mid), reason, vol, qty=lot)
+            return -lot
+        ref = float(b.c[i - 1, j]) if _ok(b.c[i - 1, j]) and b.c[i - 1, j] > 0 else p.last
+        room = min(eq * self.pol.max_position_pct / 100 - p.qty * ref,
+                   caps.max_exposure_pct / 100 * eq - self.exposure())
+        add = min(target - p.qty, float(math.floor(room / ref))) if room > 0 else 0.0
+        if add < 1:
+            return 0.0
+        sig = self.sigma(i, j)
+        vol = float(vol) if _ok(vol) and vol > 0 else 1.0
+        fill = self._buy_px(float(mid), add, sig, vol)
+        if fill * add > self.cash:  # no leverage
+            add = float(math.floor(self.cash / fill))
+            if add < 1:
+                return 0.0
+            fill = self._buy_px(float(mid), add, sig, vol)
+        self.cash -= fill * add
+        self.book.bought += fill * add
+        half = half_spread(float(mid)) * self.cost_mult
+        q = p.qty + add
+        p.entry_costs = ((p.entry_costs[0] * p.qty + half * add) / q,
+                         (p.entry_costs[1] * p.qty + (fill - float(mid) - half) * add) / q)
+        p.fill, p.mid = (p.fill * p.qty + fill * add) / q, (p.mid * p.qty + float(mid) * add) / q
+        p.risk *= q / p.qty
+        p.qty = q
+        return add
 
     # -- one session
 
