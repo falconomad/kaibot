@@ -8,7 +8,7 @@ Nine primitives carry everything (`submit`, `cancel`, `replace`, `open_orders`, 
 `activities`, `clock`, `calendar`), plus three reads the engine needs (`order`, `order_by_client_id`,
 `close_position`). The engine's present call sites (`submit_bracket`, `replace_stop`, ...) are one-line wrappers
 defined once in `BrokerBase`, so the paper venue and the simulator receive the SAME `OrderRequest` for the same
-engine call. The order manager (S78) will call the primitives directly.
+engine call. The order manager (S78, engine/orders.py) calls the primitives directly.
 """
 
 from __future__ import annotations
@@ -87,8 +87,10 @@ class Broker(Protocol):
     def cancel(self, order_id: str) -> None:
         """Cancel an open order or leg. An order that is already gone is not an error."""
 
-    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None) -> dict:
-        """Change the price of a working order; returns the order that now works (its id may be new)."""
+    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
+                qty: float | None = None) -> dict:
+        """Change the price (or the quantity) of a working order; returns the order that now works (its id may be
+        new: Alpaca replaces the order, the old one turns `replaced`)."""
 
     def order(self, order_id: str) -> dict:
         """One order with its legs nested."""

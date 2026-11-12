@@ -26,7 +26,11 @@ and as time passes: day orders (and day legs) expire at the session's close, GTC
 90 days after creation at 16:15 ET.
 
 Deterministic: time comes from the injected clock, prices from the bars, ids from a counter; no randomness.
-`script` lets a test make the venue reject, time out, fill in parts or sit on an order.
+`script` lets a test make the venue reject, time out, fill in parts, sit on an order or report a fill twice;
+`down` cuts the network (every call raises BrokerError 0). `replace_new_id` makes `replace` behave as Alpaca's
+PATCH does (the old order becomes `replaced`, a new order id works on); `replaced_leg` says where a replaced
+bracket leg is listed then, under its parent ("nested") or as an order of its own ("detached"): which one Alpaca
+does is the open question of issue #11, so the order manager is tested against both (#118).
 """
 
 from __future__ import annotations
@@ -104,7 +108,7 @@ class AuctionImpactCosts(ShadowCosts):
 
 @dataclass
 class _Plan:
-    kind: str  # reject | timeout | fills | hold
+    kind: str  # reject | timeout | fills | hold | duplicate
     symbol: str | None
     times: int = 1
     status: int = 403
@@ -138,6 +142,11 @@ class Script:
         """The next order does not trade for `bars` bars (None: never), like a slow or halted venue."""
         self._plans.append(_Plan("hold", symbol, bars=bars))
 
+    def duplicate(self, symbol: str | None = None) -> None:
+        """Every fill of the next order is reported twice in the account activities (same activity id), as a
+        replayed websocket or a repeated page would."""
+        self._plans.append(_Plan("duplicate", symbol))
+
     def _take(self, symbol: str, kinds: tuple[str, ...]) -> _Plan | None:
         for p in self._plans:
             if p.kind in kinds and p.symbol in (None, symbol):
@@ -154,7 +163,7 @@ class SimBroker(BrokerBase):
 
     def __init__(self, bars: BarHistory, clock: Callable[[], datetime], *, costs: ShadowCosts | None = COSTS_V1,
                  cash: float | None = 100_000.0, calendar: Mapping[str, tuple[str, str]] | None = None,
-                 cash_at: str = "submit"):
+                 cash_at: str = "submit", replace_new_id: bool = False, replaced_leg: str = "nested"):
         """`costs=None` fills at raw bar prices; `cash=None` keeps no cash book (the account then reports no
         buying power); `calendar` {date: (open, close)} in ET, by default every date with bars, 09:30-16:00.
 
@@ -166,6 +175,13 @@ class SimBroker(BrokerBase):
         submission (review of #164)."""
         if cash_at not in ("submit", "fill"):
             raise ValueError("cash_at is submit or fill")
+        if replaced_leg not in ("nested", "detached"):
+            raise ValueError("replaced_leg is nested or detached")
+        self.replace_new_id, self.replaced_leg = replace_new_id, replaced_leg
+        self.down = False  # a network cut: every call raises BrokerError(0) until it is False again
+        self.calls: list[str] = []  # every write the venue received (submit / cancel / replace), for drills
+        self._dup: set[str] = set()
+        self._gone: dict[str, dict] = {}  # legs a nested replace took out of their parent's list
         self.cash_at = cash_at
         self.bars, self.clk = bars, clock
         self.costs = costs
@@ -182,6 +198,10 @@ class SimBroker(BrokerBase):
         self._last_bar: datetime | None = None
         self._live: dict[str, dict] = {}
         self._seen = 0
+
+    def _net(self) -> None:
+        if self.down:
+            raise BrokerError(0, "sim: network down")
 
     # ================= time =================
     def _days(self) -> list[str]:
@@ -218,6 +238,7 @@ class SimBroker(BrokerBase):
         return None
 
     def clock(self) -> dict:
+        self._net()
         now = _utc(self.clk())
         self._expire(now)
         cur = self._next_session(now, still_open=True)
@@ -235,6 +256,7 @@ class SimBroker(BrokerBase):
 
     # ================= account =================
     def account(self) -> dict:
+        self._net()
         if self.cash is None:
             return {"status": "ACTIVE"}
         now = _utc(self.clk())
@@ -244,10 +266,12 @@ class SimBroker(BrokerBase):
                 "buying_power": str(max(self.cash, 0.0))}
 
     def positions(self) -> dict[str, dict]:
+        self._net()
         return dict(self.pos)
 
     def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
         """Fills, plus the non-trade activities a test puts in `non_trade` (dividends, splits) of the types asked."""
+        self._net()
         rows = (list(self.fills) if "FILL" in types else []) + [
             a for a in self.non_trade if a.get("activity_type") in types]
         if after is None:
@@ -260,19 +284,24 @@ class SimBroker(BrokerBase):
 
     # ================= orders: reads =================
     def open_orders(self) -> list[dict]:
+        self._net()
         self._expire(_utc(self.clk()))
         return [o for o in self.orders.values() if o["status"] in WORKING]
 
     def order(self, order_id: str) -> dict:
+        self._net()
         self._expire(_utc(self.clk()))
         o = self.orders.get(order_id)
         if o is None:
             _, o = self._leg(order_id)
         if o is None:
+            o = self._gone.get(order_id)
+        if o is None:
             raise BrokerError(404, f"order not found: {order_id}")
         return o
 
     def order_by_client_id(self, coid: str) -> dict | None:
+        self._net()
         return next((o for o in self.orders.values() if o.get("client_order_id") == coid), None)
 
     def _leg(self, leg_id: str) -> tuple[dict | None, dict | None]:
@@ -284,6 +313,8 @@ class SimBroker(BrokerBase):
 
     # ================= orders: writes =================
     def submit(self, order: OrderRequest) -> dict:
+        self._net()
+        self.calls.append(f"submit {order.client_order_id}")
         now = _utc(self.clk())
         self._expire(now)
         plan = self.script._take(order.symbol, ("reject", "timeout"))
@@ -375,6 +406,8 @@ class SimBroker(BrokerBase):
         plan = self.script._take(r.symbol, ("fills", "hold"))
         if plan is not None:
             self._plans[oid] = plan
+        if self.script._take(r.symbol, ("duplicate",)) is not None:
+            self._dup.add(oid)
         self.orders[oid] = o
         return o
 
@@ -385,24 +418,67 @@ class SimBroker(BrokerBase):
         s = self._next_session(now, still_open=True)  # day, opg, cls: good for the session it can trade in
         return None if s is None else s[1]
 
-    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None) -> dict:
-        """Change a working order's or leg's price in place. Alpaca answers with a NEW order id; whether a
-        replaced leg is still listed under its parent is open (issue #11), so the simulator keeps the id."""
+    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
+                qty: float | None = None) -> dict:
+        """Change a working order's or leg's price (and an order's quantity). By default in place, keeping the id.
+        With `replace_new_id` as Alpaca's PATCH does: the old order turns `replaced` (`replaced_by` names the new
+        one) and a new order with a new id and a new client order id works on (`replaces` names the old one); a
+        replaced bracket leg is then listed under its parent (`replaced_leg="nested"`) or as an order of its own
+        (`"detached"`, still cancelled when its sibling fills, and cancelling it when the stop fills)."""
+        self._net()
+        self.calls.append(f"replace {order_id}")
         self._expire(_utc(self.clk()))
+        parent = None
         o = self.orders.get(order_id)
         if o is None:
-            _, o = self._leg(order_id)
+            parent, o = self._leg(order_id)
         if o is None:
             raise BrokerError(404, f"order not found: {order_id}")
         if o["status"] not in (*WORKING, "held"):
             raise BrokerError(422, f"order is not open: {order_id} is {o['status']}")
-        if stop_price is not None:
-            o["stop_price"] = f"{stop_price:.2f}"
-        if limit_price is not None:
-            o["limit_price"] = f"{limit_price:.2f}"
-        return o
+        if qty is not None:
+            done = float(o.get("filled_qty") or 0)
+            if parent is not None or not (float(qty).is_integer() and qty > done):
+                raise BrokerError(422, f"qty {qty:g} cannot replace {order_id}")
+            if o["side"] == "sell" and qty - float(o["qty"]) > self._free_shares(o["symbol"]) + 1e-9:
+                raise BrokerError(403, "insufficient qty available for order")
+        if not self.replace_new_id:
+            _reprice(o, stop_price, limit_price, qty)
+            return o
+        now = _utc(self.clk())
+        nid = f"o{next(self.ids)}"
+        if parent is None:
+            if float(o.get("filled_qty") or 0):
+                raise BrokerError(422, "sim: replacing a partly filled order is not modelled")
+            new = {**o, "id": nid, "client_order_id": f"sim-{nid}", "replaces": o["id"], "status": "new",
+                   "created_at": now.isoformat(), "submitted_at": now.isoformat(),
+                   "expires_at": _iso(self._expiry(o["time_in_force"], now)),
+                   "legs": [dict(x) for x in o.get("legs") or []]}
+            _reprice(new, stop_price, limit_price, qty)
+            o.update(status="replaced", replaced_by=nid)
+            if o["id"] in self._plans:
+                self._plans[nid] = self._plans.pop(o["id"])
+            self.orders[nid] = new
+            return new
+        if o["status"] != "new":
+            raise BrokerError(422, "sim: replacing a leg that is not armed is not modelled")
+        new = {**o, "id": nid, "replaces": o["id"], "status": "new"}
+        _reprice(new, stop_price, limit_price, None)
+        o.update(status="replaced", replaced_by=nid)
+        if self.replaced_leg == "nested":
+            parent["legs"] = [new if x is o else x for x in parent["legs"]]
+            self._gone[o["id"]] = o
+        else:  # an order of its own: Alpaca's answer to issue #11 may be this
+            new.update(client_order_id=f"sim-{nid}", time_in_force="gtc", order_class="simple", legs=[],
+                       filled_qty=0, filled_avg_price=None, filled_at=None, parent_id=parent["id"],
+                       created_at=now.isoformat(), submitted_at=now.isoformat(),
+                       expires_at=_iso(self._expiry("gtc", now)))
+            self.orders[nid] = new
+        return new
 
     def cancel(self, order_id: str) -> None:
+        self._net()
+        self.calls.append(f"cancel {order_id}")
         o = self.orders.get(order_id)
         if o is not None:
             if o["status"] in WORKING:  # also drops the exit legs: they only arm on a complete fill
@@ -508,6 +584,10 @@ class SimBroker(BrokerBase):
             for leg in o.get("legs") or []:
                 if leg["status"] == "held":
                     leg["status"] = "new"  # the exit legs arm only now
+            parent = self.orders.get(o.get("parent_id") or "")
+            for leg in parent.get("legs") or [] if parent is not None else []:
+                if leg["status"] in ("new", "held"):
+                    leg["status"] = "canceled"  # a detached replaced leg filled: its sibling goes (one-cancels-other)
 
     def _work_legs(self, o: dict, bar: Bar, t: datetime) -> None:
         legs = o.get("legs") or []
@@ -523,6 +603,9 @@ class SimBroker(BrokerBase):
             self._fill(o, tgt, qty, float(tgt["limit_price"]), t)
             if stop is not None:
                 stop["status"] = "canceled"
+            for child in self.orders.values():
+                if child.get("parent_id") == o["id"] and child["status"] in WORKING:
+                    child["status"] = "canceled"
 
     # ---------- prices ----------
     def _market(self, side: str, price: float, qty: float, symbol: str, bar: Bar, t: datetime) -> float:
@@ -572,6 +655,8 @@ class SimBroker(BrokerBase):
                            "price": str(px), "qty": str(_num(qty)), "side": side, "symbol": symbol,
                            "leaves_qty": str(_num(max(total - done - qty, 0.0))), "cum_qty": str(_num(done + qty)),
                            "order_id": o["id"], "order_status": o["status"], "fees": fees})
+        if parent["id"] in self._dup or o["id"] in self._dup:
+            self.fills.append(dict(self.fills[-1]))  # the same activity reported twice (same id)
 
     def _end(self, o: dict, status: str) -> None:
         o["status"] = status
@@ -592,6 +677,15 @@ class SimBroker(BrokerBase):
                 for leg in o.get("legs") or []:
                     if leg["status"] in ("new", "held"):
                         leg["status"] = status
+
+
+def _reprice(o: dict, stop: float | None, limit: float | None, qty: float | None) -> None:
+    if stop is not None:
+        o["stop_price"] = f"{stop:.2f}"
+    if limit is not None:
+        o["limit_price"] = f"{limit:.2f}"
+    if qty is not None:
+        o["qty"] = _num(qty)
 
 
 def _alive(o: dict) -> bool:
