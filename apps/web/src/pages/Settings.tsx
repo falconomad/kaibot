@@ -5,6 +5,7 @@ import type { Level } from "../lib/api";
 import { levelPlan } from "../lib/derive";
 import { LEVELS } from "../lib/model";
 import { day, money } from "../lib/fmt";
+import { ErrorState } from "../components/States";
 import { Controls } from "./Live";
 
 const STATUS: Record<string, string> = {
@@ -13,7 +14,7 @@ const STATUS: Record<string, string> = {
 };
 
 export function Settings() {
-  const { run, runs, overview } = useRunCtx();
+  const { run, runs, overview, overviewError, retryOverview } = useRunCtx();
   const plan = levelPlan(run, overview?.segments);
   const live = ["scheduled", "running", "paused"].includes(run.status);
   return (
@@ -32,7 +33,10 @@ export function Settings() {
           level's statistics stay clean.</p>
       </section>
 
-      {run.kind === "paper" && overview && live && <Controls run={run} overview={overview} />}
+      {/* The controls need the overview: say so while it loads or if it failed, rather than leaving them out without a word. */}
+      {run.kind === "paper" && live && (overview ? <Controls run={run} overview={overview} />
+        : overviewError ? <ErrorState what="The run controls" error={overviewError} retry={retryOverview} />
+        : <section className="card" aria-labelledby="ctl-h"><h2 id="ctl-h">Controls</h2><p className="skeleton" role="status">Loading…</p></section>)}
 
       <section className="card" aria-labelledby="lv-h">
         <h2 id="lv-h">The levels</h2>
