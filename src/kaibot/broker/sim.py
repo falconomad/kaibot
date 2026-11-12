@@ -210,6 +210,10 @@ class SimBroker(BrokerBase):
     def positions(self) -> dict[str, dict]:
         return dict(self.pos)
 
+    def asset(self, symbol: str) -> dict | None:
+        """S68: the simulator has no listing data, so every custom ticker is unknown and refused (fail closed)."""
+        return None
+
     def activities(self, after: datetime | None = None) -> list[dict]:
         if after is None:
             return list(self.fills)

@@ -109,6 +109,11 @@ class Broker(Protocol):
     def activities(self, after: datetime | None = None) -> list[dict]:
         """Fills booked on the account, oldest first, optionally only those after a time."""
 
+    # ---- reference data ----
+    def asset(self, symbol: str) -> dict | None:
+        """Read-only asset record (S68: custom tickers): {symbol, class, exchange, status, tradable, name}, or None
+        when the venue does not know the symbol. Unknown means refused."""
+
     # ---- time ----
     def clock(self) -> dict:
         """{timestamp, is_open, next_open, next_close}."""

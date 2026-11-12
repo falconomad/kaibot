@@ -541,7 +541,7 @@ class Engine:
                 return {}
             uni, themes = self._universe_and_themes()
             lv = self.level()
-            return tighten(self.policies[lv], self.strategies.get(lv, ["dip_reversal"]), c.get("body") or {},
+            return tighten(self.policies[lv], self.level_strategies(), c.get("body") or {},
                            version=int(c["version"]), universe=uni, themes=themes).custom_universe()
         except Exception:  # noqa: BLE001
             return {}
