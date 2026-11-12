@@ -15,7 +15,7 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
 2. **Add it to the secrets file.** Open `~/Projects/kaibot-secrets/.env` in a text editor and add one line:
    `HEALTHCHECKS_PING_URL=https://hc-ping.com/…` (paste yours). Nothing else in that file changes.
 3. **Mac settings for an unattended Mac mini.**
-   - System Settings > Users & Groups > Automatically log in as: `appucyriac` (launch agents only run while you are
+   - System Settings > Users & Groups > Automatically log in as: your own user (launch agents only run while you are
      logged in).
    - System Settings > Energy: "Start up automatically after a power failure" on; "Prevent automatic sleeping when
      the display is off" on.
