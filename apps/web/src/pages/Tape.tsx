@@ -5,6 +5,7 @@ import { useRunCtx } from "../components/Shell";
 import { api, type TapeItem } from "../lib/api";
 import { RoomBySignal } from "../components/Room";
 import { CAUSE_TEXT, fmtR, roomOutcome } from "../lib/derive";
+import { explainSignal } from "../lib/explain";
 import { EXIT_LABEL, dateEt, money, px, signedMoney, timeEt, tone } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 import { StockCell } from "../components/StockBadge";
@@ -37,8 +38,8 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
   const out = room ? roomOutcome(room.status, room.verdict) : null;
   const roomBlocked = !!room && !taken && (room.status === "done" ? room.verdict === "veto"
     : ["timeout", "invalid", "error"].includes(room.status));
-  const why = it.veto ?? (roomBlocked && out ? `room: ${out.label}${room!.cause ? ` (${CAUSE_TEXT[room!.cause] ?? room!.cause})` : ""}`
-    : it.mode === "live" && !it.approved ? `gate: ${it.binding ?? "not approved"}` : null);
+  const roomWhy = roomBlocked && out ? `${out.label}${room!.cause ? `: ${CAUSE_TEXT[room!.cause] ?? room!.cause}` : ""}` : null;
+  const ex = explainSignal(it, { taken: !!taken, roomWhy });
   // Shadow strategies carry their own counterfactual; room-blocked setups show the rules-only arm's.
   const cf = it.counterfactual ?? (!taken ? room?.counterfactual ?? null : null);
   return (
@@ -46,7 +47,7 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
       <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
         <span className="muted"> · {STRAT[it.strategy] ?? it.strategy}</span></td>
-      <td>{it.reasons.join(" · ")}{why && <span className="muted"> — {why}</span>}
+      <td title={ex.detail}><div>{ex.outcome}</div><div className="muted" style={{ fontSize: 13 }}>{ex.saw}</div>
         {it.entry !== null && <span className="muted num"> · ref {px(it.entry)}, stop {px(it.stop)}{it.target ? `, target ${px(it.target)}` : ""}</span>}
         {room && out && (
           <div className="room-line">
