@@ -859,7 +859,7 @@ def runs(tmp_path_factory, mkt):
     (data / "inputs").mkdir()
     days = pd.date_range("2021-12-01", "2024-03-01", freq="D")
     (data / "inputs" / "fred_vixcls.json").write_text(json.dumps(
-        [{"date": str(d.date()), "value": "." if d.dayofweek > 4 else str(16 + d.day % 17)} for d in days]))
+        [{"date": str(d.date()), "value": "." if d.weekday() > 4 else str(16 + d.day % 17)} for d in days]))
     (data / "trials.jsonl").write_text(json.dumps({"trial_id": "old", "n_trials": 30}) + "\n")
     news_dir = data / "news" / f"symbol={stocks[0]}"
     news_dir.mkdir(parents=True)
