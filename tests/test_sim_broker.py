@@ -359,6 +359,28 @@ def test_a_buy_needs_the_cash_and_the_account_follows_the_book():
     assert SimBroker(BarHistory({}), clock, cash=None).account() == {"status": "ACTIVE"}
 
 
+@pytest.mark.parametrize("kind", ["market", "limit"])
+def test_cash_at_fill_still_checks_a_non_auction_buy_at_submission(kind):
+    """Review of #164 (B1): `cash_at="fill"` moves only the auction (cls/opg) check to the print. A market or
+    limit buy over the cash is refused at submission, as with "submit", so the cash book never goes negative."""
+    b, clock = venue(cash=10_000.0, cash_at="fill")
+    lim = {"limit_price": 101.0} if kind == "limit" else {}
+    with pytest.raises(BrokerError, match="insufficient buying power") as e:
+        b.submit(OrderRequest("A", "buy", 1000, kind, "day", **lim))
+    assert e.value.status == 403 and b.orders == {}
+    b.submit(OrderRequest("A", "buy", 90, kind, "day", **lim))
+    run(b, clock, 30, 31)
+    assert float(b.account()["cash"]) >= 0
+
+
+def test_cash_at_fill_cuts_a_closing_auction_buy_to_the_cash_at_the_print():
+    b, clock = venue(cash=10_000.0, cash_at="fill", start=et(DAY, "15:00", 7))
+    o = b.submit(OrderRequest("A", "buy", 1000, "market", "cls"))  # accepted: checked at the print, not now
+    run(b, clock, 330, 389)
+    assert o["status"] == "canceled" and float(o["filled_qty"]) == 100.0
+    assert float(b.account()["cash"]) >= 0
+
+
 # ================================================================ scripting
 def test_script_reject_then_normal():
     b, clock = venue()
