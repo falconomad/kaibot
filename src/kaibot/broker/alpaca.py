@@ -173,8 +173,14 @@ class AlpacaPaper(BrokerBase):
                     return existing
             raise
 
-    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None) -> dict:
+    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
+                qty: float | None = None) -> dict:
+        """PATCH /v2/orders/{id}: Alpaca replaces the order and answers with the NEW order (new id, `replaces` the
+        old one, which turns `replaced`). `qty` is sent only when given (the order manager resizes a protective
+        stop with it), so the engine's present calls send the same bytes as before."""
         body = {}
+        if qty is not None:
+            body["qty"] = str(int(qty)) if float(qty).is_integer() else str(qty)
         if limit_price is not None:
             body["limit_price"] = f"{limit_price:.2f}"
         if stop_price is not None:
