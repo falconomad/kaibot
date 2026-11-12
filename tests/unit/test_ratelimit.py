@@ -214,3 +214,15 @@ def test_http_gives_up_after_attempts():
     with pytest.raises(http.HttpError) as e:
         http.get("https://e/x", source="x", budget=b, opener=_opener([_e(502)] * 5, []))
     assert e.value.status == 0 and clock.sleeps == [1, 2, 4, 8, 16]
+
+
+# --- S74d (#154): a slot that comes too late is not booked ---
+
+def test_reserve_with_latest_books_nothing_when_the_slot_is_too_late():
+    clock = FakeClock(0.0)
+    b = Budget("t", BudgetSpec(((2, 10.0),)), clock)
+    assert b.reserve() == 0.0 and b.reserve() == 0.0
+    assert b.reserve(latest=5.0) is None  # the next slot is at 10.0
+    assert b.reserve(latest=5.0) is None
+    assert b.reserve() == 10.0  # not 20.0: the refused reservations left no grant behind
+    assert b.reserve(latest=10.0) == 10.0  # a slot at exactly `latest` is booked

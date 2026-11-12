@@ -261,3 +261,14 @@ def test_every_order_path_call_ends_within_the_deadline(name):
     with pytest.raises(AlpacaError):
         ORDER_PATH[name](p)
     assert calls and clock.t - t0 <= ORDER_DEADLINE_S
+
+
+def test_a_deadline_abort_on_the_budget_wait_does_not_hold_back_other_callers():
+    # S74d (#154): the call that gives up because its slot comes too late must not keep that slot booked
+    h, clock, calls = _capped(_blackhole, spec=BudgetSpec(((1, 60.0),)))
+    assert h.budget.reserve() == clock.t  # another caller took this minute's slot
+    t0 = clock.t
+    with pytest.raises(AlpacaError):
+        h.call("GET", "https://paper-api.alpaca.markets/v2/positions")
+    assert calls == [] and clock.t == t0  # it gave up without waiting
+    assert h.budget.reserve() == t0 + 60.0  # the next caller gets the very next slot, not one a minute later
