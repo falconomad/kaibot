@@ -15,6 +15,9 @@ kaibot.replay.multiday_rules.
 Writes data/reports/walkforward_<level>_md_<rule>_<ts>.{json,md}, the trades and daily CSVs of the tuned and
 the fixed account, and two trial rows in data/trials.jsonl (tuned carries n_trials = grid x folds).
 --env is only read when the FRED VIX cache (data/inputs/fred_vixcls.json) is missing.
+No committed pre-registration (docs/prereg/<rule>.md), no run (`kaibot.evaluation.prereg.require`, decision 15
+Gate A; the four first-look rules are registered retroactively). The report and both trial rows carry the
+pre-registration's sha256 and the sha256 of config/gate_v2.yaml.
 """
 
 from __future__ import annotations
@@ -39,6 +42,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from run_replay import load_env, vix_prev_close  # noqa: E402
 from walk_forward import logged_trials, peak_rss_mb  # noqa: E402
 
+from kaibot.evaluation import prereg  # noqa: E402
+from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
 from kaibot.replay import earnings  # noqa: E402
@@ -286,6 +291,13 @@ def main() -> None:
     ap.add_argument("--refresh-daily", action="store_true", help="rebuild the daily-bar cache")
     ap.add_argument("--refresh-vix", action="store_true")
     a = ap.parse_args()
+    try:
+        prereg_sha = prereg.require(a.rule, ROOT)
+    except prereg.PreregError as e:
+        sys.exit(f"no run: {e}")
+    gate_sha = GateV2.load(ROOT).sha
+    print(f"pre-registration docs/prereg/{a.rule}.md sha256 {prereg_sha[:12]}; config/gate_v2.yaml sha256 "
+          f"{gate_sha[:12]}", flush=True)
     t0 = time.time()
     data, exp = Path(a.data), EXPERIMENTS[a.rule]
     cfg = yaml.safe_load(Path(a.universe).read_text())
@@ -337,7 +349,7 @@ def main() -> None:
                               cwd=ROOT).stdout.strip()
     rep = {
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"), "code_sha": code_sha, "set": "multiday",
-        "status": STATUS,
+        "status": STATUS, "prereg_sha256": prereg_sha, "gate_v2_sha256": gate_sha,
         "experiment": a.rule, "experiment_what": exp.what, "fixed_setting": exp.fixed, "level": a.level,
         "universe": Path(a.universe).name, "start": a.start, "end": a.end,
         "grid_axes": {k: list(v) for k, v in exp.axes.items()}, "default_params": dict(exp.default.params),
@@ -399,7 +411,8 @@ def main() -> None:
                 "ts": rep["run_at"], "trial_id": tid, "strategy": a.rule, "variant": "multiday",
                 "label": f"multiday walkforward {which} {a.rule}", "level": a.level, "universe": rep["universe"],
                 "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": rep["input_sha256"],
-                "code_sha": code_sha, "n_trials": n_tr, "experiment": a.rule,
+                "code_sha": code_sha, "n_trials": n_tr, "experiment": a.rule, "prereg_sha256": prereg_sha,
+                "gate_v2_sha256": gate_sha,
                 "params": (f"walk-forward grid ({len(wf.grid)}) x {len(wf.folds)} folds" if which == "tuned"
                            else f"pre-registered {exp.default.label}"),
                 "window": summary["oos_window"],

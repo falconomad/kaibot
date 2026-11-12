@@ -164,8 +164,9 @@ pass Gate B.
 
 ## 7. Momentum core (issue #127, decision 15 rules 1 and 2)
 One command on the Mac, from the repo root. Research only: it reads `data/`, never the engine or the broker.
-Every number is **PROVISIONAL**: today's stock list (survivorship), cost model v1 and a price-only SPY. Nothing
-here can pass Gate B until S71, S83 and S84 have landed and the test is rerun.
+Every number is **PROVISIONAL**: today's stock list (survivorship), cost model v1 and minute bars without
+dividends (SPY is total return when the daily store of section 8 holds SPY, price only otherwise). Nothing here can
+pass Gate B; section 8 is the rerun on the point-in-time universe.
 
 ```
 ./scripts/run_experiments.sh core
@@ -186,31 +187,109 @@ here can pass Gate B until S71, S83 and S84 have landed and the test is rerun.
   to state the break-even multiple) x exposure cap (30 / 60 / 100%) x earnings (hold through; "exit before" is an
   APPROXIMATE variant on the estimated earnings window of section 6 and is skipped, with a message in the log
   and in the table's notes, when that estimate is not reliable). Then the five pre-declared neighbours of each
-  rule and the matched random entries.
-- **Time (measured on synthetic bars of the real size, 2,730 sessions x 300 symbols, on a busy shared 2-CPU
-  cloud machine; not measured on the real data):** `trend_momentum` took 4.5 minutes of wall time (1.1 minutes of
-  CPU) with the exit-before-earnings variant and 200 control runs per cap; the two band versions trade less.
-  Allow about 15 minutes for the three versions with the daily-bar cache of section 6 in place (it is reused; 5
-  to 10 minutes more when it has to be built); an idle machine is faster. About 70% of it is the random control:
-  200 seeded runs for each of the three exposure caps of each version.
-  `KAIBOT_CORE_CONTROL_RUNS=500 ./scripts/run_experiments.sh core` runs the 500 that Gate B mark 3 asks for
-  (about 35 minutes; a different number of runs is a new report, not a resume). No `.env` is needed.
-- **Resumable:** a version with a finished report for the same dates, universe and number of control runs is
-  skipped. Logs are in `logs/experiment_core_<version>.log`.
+  rule and the exposure-matched random control (section 8; since #143, 500 runs per cap by default).
+- **Time:** see section 8 (the same runner; about 10 minutes for the three versions with the daily-bar cache of
+  section 6 in place, 5 to 10 minutes more when it has to be built). `KAIBOT_CORE_CONTROL_RUNS=200` runs fewer
+  control runs (then mark 3 is not judged; a different number of runs is a new report, not a resume). No `.env`
+  is needed.
+- **Resumable:** a version with a finished report for the same dates, universe, number of control runs and
+  control kind is skipped; reports made before #143 (entries-matched control) are run again. Logs are in
+  `logs/experiment_core_<version>.log`.
 - **Output:** ONE table printed and written to `data/reports/experiments_core_summary.md`. Per configuration:
   total return, CAGR, annualised daily Sharpe (mark-to-market) with the 50% haircut beside it, maximum drawdown
   (mark-to-market), each calendar year's return, positive years, average and maximum exposure, average number
   of names, turnover a year, cost a year in bp of equity, trades, average holding days, the share of the profit
   that came from the five best stocks, the break-even cost multiple, and the percentile of the rule's net Sharpe
-  and CAGR among the matched random entries. Benchmark rows over the same sessions: SPY buy-and-hold (price
-  only), SPY scaled to each version's average exposure, the equal-weight universe, and the median matched random
-  account. Under the table each Gate B mark of decision 15 is printed for the base version of each rule as
+  and CAGR among the exposure-matched random portfolios. Benchmark rows over the same sessions: SPY buy-and-hold
+  (total return when the store has it, and price only), SPY scaled to each version's average exposure, the
+  equal-weight universe, and the median random portfolio. Under the table each Gate B mark of decision 15 is printed for the base version of each rule as
   pass, fail or "cannot be judged yet (provisional data)".
 - **Files:** `data/reports/core_balanced_<version>_<ts>.json` and one trades and one daily CSV per run in the
   folder of the same name. Every run is a row in `data/trials.jsonl` with its configuration; a configuration
   counts once (`n_trials` 1 for the base fill at 1x costs, 0 for its cost and fill stress reports).
 - **Read it honestly:** signals and holdings use split-adjusted prices without dividends, and so do the
   benchmarks; the close is the last regular-hours minute, not the auction; at a 100% cap a purchase can be cut
-  to the cash left on the fill day; the random control mirrors dates, entry counts, sizing and holding periods
-  but its average exposure can differ from the rule's (it is printed beside it).
+  to the cash left on the fill day.
 - **Breakdown of any run:** `.venv/bin/python scripts/analyze_trades.py data/reports/core_balanced_<...>/trades_<...>.csv`.
+
+## 8. The honest rerun: point-in-time universe, daily store, gate v2 (issue #143)
+
+The momentum core of section 7 on the S&P 500 as it was on each day (#123), with every price from the raw daily
+store (#124) and Gate B of decision 15 judged where its inputs exist. Research only. The exact sequence on the Mac,
+from the repo root (`git pull` first):
+
+```
+.venv/bin/python scripts/fetch_sp500_history.py
+./scripts/fetch_daily.sh
+.venv/bin/python scripts/fetch_sp500_history.py --holes
+./scripts/run_experiments.sh core_pit
+```
+
+| Step | What it does | Time |
+|---|---|---|
+| `.venv/bin/python scripts/fetch_sp500_history.py` | offline: writes `data/universe/former_members.csv` (442 lines: the companies that left the index, the current members outside today's 288, three renamed tickers) from the committed change log | about 2 seconds |
+| `./scripts/fetch_daily.sh` | downloads raw daily bars and corporate actions from 2016 for SPY, the sector ETFs, today's 288 and the 442 lines (free Alpaca data, keys from `~/Projects/kaibot-secrets/.env`, never printed), then the offline checks; resumable with Ctrl-C | about 17 minutes, about 45 while the engine runs (Data's estimate from about 1,550 requests at 120 a minute, 40 a minute beside the engine; not measured) plus 1-2 minutes of checks |
+| `.venv/bin/python scripts/fetch_sp500_history.py --holes` | offline: `data/universe/holes.csv`, every membership spell the store has no bars for (send it to the Data team) | about 1 minute (Data's estimate) |
+| `./scripts/run_experiments.sh core_pit` | the three versions on `--universe pit`, then one table and the comparison with today's list, written to `data/reports/experiments_core_pit_summary.md`; no `.env` | about 10 minutes on a busy shared 2-CPU cloud machine, measured on a synthetic store of the real size (2,730 sessions x 730 companies, 500 control runs per cap): `trend_momentum` 2.9 minutes, `mom_12_1_band` 2.3 minutes (`mom_12_1_band_nofilter` trades about as much), so about 8 minutes for the three; peak memory about 1.5 GB. Not measured on the real data; allow 15-20 minutes, more while the engine runs |
+
+Optional, for the other columns of the comparison (each about as long as the step above):
+
+```
+./scripts/run_experiments.sh core     # today's list on the minute bars, rerun with the new control and SPY total return
+for v in trend_momentum mom_12_1_band mom_12_1_band_nofilter; do   # today's list on the daily store
+  .venv/bin/python scripts/momentum_core.py --version $v --universe today --bars store --end 2026-11-06
+done
+```
+
+The comparison table takes the newest report of each side that exists; a side that was never run shows "not run".
+The third column (today's list on the daily store) separates the data change from the universe change.
+
+- **What `pit` means.** On day T a rule can buy only companies that were index members on T (the committed change
+  log, `kaibot.ingest.sp500_pit.Membership.mask`) and pass the price and dollar-volume filter on T (price >= $5,
+  20-day dollar volume >= $50M, both on raw prices). A company that leaves the index drops out of the ranked
+  universe, so the rule's own exit (pre-registrations, choice 6 / 4) sells it on the next decision day. A held
+  company whose bars stop more than 7 sessions before the end of the data is closed at its last close times
+  (1 + its terminal return): -100% for SIVB, SBNY and FRC, 0% for takeovers with known terms
+  (`src/kaibot/ingest/sp500/outcomes.csv`), -30% for everything else (docs/ops/pit_universe.md, hole policy). A
+  company the store has no bars for cannot be bought; the report lists how many (`data.companies_without_bars`).
+  Keys whose split the store's check could not reconcile (`split_basis_days > 0`) are never bought.
+- **Prices.** Signals (scores, averages, the 15% move, ATR, SPY's 200-day filter) read split-adjusted closes
+  without dividends, as both pre-registrations freeze; orders, costs, share counts, the price and dollar filters
+  and the marks read raw prices; splits multiply held shares, cash dividends are credited on their ex-date and
+  booked as their own `dividends` line beside each trade's `pnl`. Differences from the minute bars, documented and
+  the same for every company: the close is the official close (normally the closing auction), not the last
+  regular-hours minute (a few basis points); the store has no minute data, so the first / last minute volumes in
+  the impact term are 2% of the day's volume, and the 15:55 price is not available (the base fill is at the
+  close, so the core does not use it).
+- **Benchmarks.** SPY total return from the store (dividends reinvested) is mark 2's benchmark; price-only SPY is
+  shown beside it. The equal-weight benchmark holds the index members of each month (on `today`: today's list),
+  with dividends, splits and terminal returns as above.
+- **Mark 3: the exposure-matched control** (decision 15 section 10). Each random portfolio copies the rule's
+  positions: the session each was bought and sold, its share of equity at entry and at every resize. Only the
+  names are random, drawn from the stocks that pass the price and volume filter on the decision's data (and are
+  members, on `pit`); the rule's own trend and rank filters are not applied. 500 seeded runs per exposure cap;
+  the rule's own names are replayed through the same simulator as a check, and the lower of the two percentiles
+  counts. "Matched" means every slot found a free name and the money committed per session stays within 2 points
+  of the rule's in every run; otherwise mark 3 reads "cannot be judged". The marked exposure still differs (the
+  names' prices differ), which is what is tested. The entries-matched control of #127 is kept as a diagnostic
+  (`--entries-control-runs N`, off by default) and is never judged.
+- **The marks.** Mark 2 against SPY total return, mark 3 on the exposure-matched control with 500 runs, mark 4
+  (marks 1 and 2 at 2x costs against SPY total return) and mark 5 (on `pit`: the base row still passes marks 1
+  and 2) are judged for real. Every result is still provisional: the research harness of #113 (not the engine
+  with `SimBroker`) and cost model v1. A rule can fail Gate B here; it cannot pass it.
+- **Gate A in the runners.** `scripts/momentum_core.py` and `scripts/walk_forward_multiday.py` call
+  `kaibot.evaluation.prereg.require(rule)` first and stop with its message while the pre-registration is
+  missing, unfinished or has uncommitted edits; every report and trial row carries its sha256 and the sha256 of
+  `config/gate_v2.yaml`.
+- **Files.** `data/reports/core_balanced_<version>_pit_<ts>.json` (today's list on the store:
+  `..._store_<ts>.json`) and its folder: trades and daily CSVs per run (the daily CSV has `cost`, `traded` and
+  `dividends` per session), `spy_daily.csv` (`ret` = SPY total return, `ret_price_only` beside it) and one
+  `control_<label>.json` per cap, ready for `scripts/gate_v2_report.py --daily ... --spy ... --random ...`.
+- **`--costs v2`:** not offered. Cost model v2 is PR #145 (S71), not merged when this was built; once it is, a
+  `--costs v2` flag for these runners is a small follow-up, and until then every run is on cost model v1.
+- **What can still bias the pit result:** former members the store has no bars for (they cannot be bought, so
+  the universe is short of exactly the names that later failed or were bought; `holes.csv` counts them); the
+  harsh -30% default terminal return for an unknown delisting; change dates checked only at five IVV quarter
+  ends; the official close against the pre-registered minute close; cost model v1; earnings dates still
+  estimated (S85), and on `pit` the exit-before-earnings variant usually fails the reliability bar because former
+  members have no news history, so it is skipped.

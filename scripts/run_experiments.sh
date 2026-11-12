@@ -13,9 +13,15 @@
 #       2017-05, then ONE table with SPY, the equal-weight universe and matched random entries, written to
 #       data/reports/experiments_core_summary.md. Pre-registered in docs/prereg/. Reuses the daily-bar cache of
 #       the multiday set (builds it if missing: 5 to 10 minutes more). Measured on synthetic bars of the real size
-#       (busy 2-CPU cloud machine: trend_momentum 4.5 min), not on the real data: about 15 minutes with the
-#       cache and the default 200 random runs per exposure cap, about 35 with KAIBOT_CORE_CONTROL_RUNS=500
-#       (what Gate B mark 3 asks for; a different number of runs is a new report, not a resume). Needs no .env.
+#       (busy 2-CPU cloud machine: trend_momentum 4.5 min), not on the real data. Since #143 the random control
+#       is the exposure-matched one of decision 15 section 10, 500 runs per exposure cap by default (what Gate B
+#       mark 3 asks for; KAIBOT_CORE_CONTROL_RUNS changes it, and a different number of runs is a new report, not
+#       a resume); SPY total return is read from the daily store (data/daily) when it holds SPY. Needs no .env.
+#   ./scripts/run_experiments.sh core_pit    issue #143: the same three versions on the point-in-time S&P 500
+#       (#123) with every symbol read from the daily store (#124: raw prices, dividends, SPY total return), then
+#       ONE table plus the comparison "today's list against the point-in-time universe" of the base rows, written
+#       to data/reports/experiments_core_pit_summary.md. Needs data/daily from ./scripts/fetch_daily.sh after
+#       scripts/fetch_sp500_history.py (docs/m0/reproduce.md has the sequence and the times). Needs no .env.
 # Resumable: an experiment whose report already exists for the same dates and universe is skipped, so after
 # Ctrl-C just run it again. Research only: reads the history under data/, never touches the engine or the broker.
 # Each run takes about as long as the baseline walk-forward (about 12 minutes), so allow about an hour in all.
@@ -36,8 +42,31 @@ export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -m certifi)}"  # macOS python.org
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 mkdir -p logs data/reports
 
+if [ "${1:-}" = "core_pit" ]; then  # reads only data/daily, data/news and the committed membership log
+  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-500}"
+  [ -f data/daily/bars/symbol=SPY.parquet ] \
+    || { echo "No daily store at data/daily: run ./scripts/fetch_daily.sh first (docs/m0/reproduce.md)"; exit 1; }
+  [ -f data/universe/former_members.csv ] \
+    || echo "WARNING: no data/universe/former_members.csv: former index members are probably missing from the store"
+  for v in trend_momentum mom_12_1_band mom_12_1_band_nofilter; do
+    if "$PY" scripts/momentum_core.py --has "$v" --level "$LEVEL" --start "$START" --end "$END" \
+        --universe pit --universe-file "$UNIVERSE" --control-runs "$RUNS"; then
+      echo "== $v (point-in-time): report exists, skipped"
+      continue
+    fi
+    echo "== $v (point-in-time): running (log: logs/experiment_core_pit_$v.log)"
+    awake "$PY" scripts/momentum_core.py --universe pit --universe-file "$UNIVERSE" --start "$START" --end "$END" \
+      --level "$LEVEL" --version "$v" --control-runs "$RUNS" > "logs/experiment_core_pit_$v.log" 2>&1 \
+      || { echo "$v failed: see logs/experiment_core_pit_$v.log, then run this again (finished ones are skipped)"
+           exit 1; }
+    tail -n 1 "logs/experiment_core_pit_$v.log"
+  done
+  echo
+  "$PY" scripts/momentum_core.py --summary --set core_pit --level "$LEVEL"
+  exit 0
+fi
 if [ "${1:-}" = "core" ]; then  # reads only data/bars_1m, data/news and the daily-bar cache: no .env needed
-  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-200}"
+  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-500}"
   for v in trend_momentum mom_12_1_band mom_12_1_band_nofilter; do
     if "$PY" scripts/momentum_core.py --has "$v" --level "$LEVEL" --start "$START" --end "$END" \
         --universe "$UNIVERSE" --control-runs "$RUNS"; then
@@ -75,7 +104,7 @@ if [ "${1:-}" = "multiday" ]; then
   "$PY" scripts/experiments_summary.py --set multiday --level "$LEVEL"
   exit 0
 elif [ -n "${1:-}" ]; then
-  echo "usage: $0 [multiday|core]   (no argument: the variant A experiments of issue #109)"; exit 2
+  echo "usage: $0 [multiday|core|core_pit]   (no argument: the variant A experiments of issue #109)"; exit 2
 fi
 
 for exp in control mornings wide_stop high_vix mornings_wide_stop; do
