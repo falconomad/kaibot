@@ -26,9 +26,7 @@ def test_book_limits_load_confirmed_and_inside_the_ceilings():
         assert lim.max_name_pct == pol[name].max_position_pct  # the per-name cap comes from the level
         assert lim.atr_risk_pct == 0.1
         assert (lim.max_names, lim.max_sector_pct, lim.min_cash_pct, lim.max_gap_loss_pct) == (30, 40, 1, 15)
-        assert live[name].max_overnight_pct == 0
-        assert {k: v for k, v in asdict(live[name]).items() if k != "max_overnight_pct"} == {
-            k: v for k, v in asdict(lim).items() if k != "max_overnight_pct"}
+        assert asdict(live[name]) == asdict(lim)  # allow_overnight true (Product, 13 Nov 2026): live = research
     # decision 15: tests run at Balanced with a 100% exposure cap
     assert research["balanced"].max_gross_pct == 100 and research["balanced"].max_overnight_pct == 100
 

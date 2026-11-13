@@ -300,9 +300,9 @@ def test_a_crash_in_the_middle_of_a_send_sends_every_order_once(data, tmp_path, 
 
 def test_overnight_off_buys_nothing_but_still_decides(data, tmp_path):
     """While all_levels.allow_overnight is false the live book's overnight cap is 0: decisions are journalled,
-    nothing is bought."""
+    nothing is bought (the repository allows overnight since 13 Nov 2026; a book with the cap at 0 is built here)."""
     s = mom.VERSIONS["trend_momentum"]
-    lim = ld.live_limits(s, POL, rule_book_limits(s.name, "balanced"))
+    lim = ld.live_limits(s, POL, replace(rule_book_limits(s.name, "balanced"), max_overnight_pct=0.0))
     assert lim.max_overnight_pct == 0
     h = Harness(data, s, ld.live_builder(s, lim), tmp_path)
     h.run()

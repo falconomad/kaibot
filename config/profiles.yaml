@@ -81,7 +81,7 @@ shadow_strategies: [orb_stocks_in_play, news_continuation]   # logged "would hav
 all_levels:
   allow_short: false
   allow_leverage: false
-  allow_overnight: false
+  allow_overnight: true          # Product, 13 Nov 2026 (decision 15 section 11): effective only with KAIBOT_MULTIDAY=on
   entry_window_et: ["09:35", "15:45"]
   flatten_at_et: "15:55"
   max_quote_age_s: 5
