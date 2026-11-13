@@ -179,9 +179,11 @@ class SimBroker(BrokerBase):
             raise ValueError("replaced_leg is nested or detached")
         self.replace_new_id, self.replaced_leg = replace_new_id, replaced_leg
         # Alpaca's wash-trade rule: a new order is refused while an opposite-side market or stop order is open in
-        # the symbol (#206). On by default, as at the venue.
-        self.wash_check = True
-        self.shorting_enabled = False  # the paper account's setting (Kaibot runs with shorting off, decision 15 §11)
+        # the symbol (#206). Off by default so every replay and research run is unchanged; the live daily path's
+        # tests switch it on.
+        self.wash_check = False
+        # the paper account's shorting setting as Alpaca reports it (`account()`); None: not reported
+        self.shorting_enabled: bool | None = None
         self.down = False  # a network cut: every call raises BrokerError(0) until it is False again
         self.calls: list[str] = []  # every write the venue received (submit / cancel / replace), for drills
         self._dup: set[str] = set()
@@ -263,12 +265,15 @@ class SimBroker(BrokerBase):
     def account(self) -> dict:
         self._net()
         if self.cash is None:
-            return {"status": "ACTIVE", "shorting_enabled": self.shorting_enabled}
+            return {"status": "ACTIVE", **self._shorting()}
         now = _utc(self.clk())
         value = sum(float(p["qty"]) * (self.bars.last_close(s, now) or float(p["avg_entry_price"]))
                     for s, p in self.pos.items())
         return {"status": "ACTIVE", "cash": str(self.cash), "equity": str(self.cash + value),
-                "buying_power": str(max(self.cash, 0.0)), "shorting_enabled": self.shorting_enabled}
+                "buying_power": str(max(self.cash, 0.0)), **self._shorting()}
+
+    def _shorting(self) -> dict:
+        return {} if self.shorting_enabled is None else {"shorting_enabled": self.shorting_enabled}
 
     def positions(self) -> dict[str, dict]:
         self._net()

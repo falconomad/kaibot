@@ -69,6 +69,8 @@ class DailyAccount(Account):
             lim = replace(lim, run_drawdown_end_pct=book_end)
         self.rule = ld.Rule(s, ld.live_builder(s, lim))
         super().__init__(tmp_path, gap_b=gap_b)
+        self.broker.wash_check = True  # Alpaca's wash-trade rule (QA-Ops review of #207)
+        self.broker.shorting_enabled = False  # as Alpaca reports it once shorting is off (paper_start step 3)
 
     def load(self, k: date, now):
         if str(k) != DAY1 or not self.has_view:

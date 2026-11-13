@@ -106,6 +106,7 @@ class Harness:
         costs = AuctionImpactCosts(sigma=lambda sym, day: data.sigma_at(data.index_of(day), data.col(sym)), mult=1.0)
         self.broker = SimBroker(data.bar_history(), self.clock, costs=costs, cash=EQ0, calendar=data.calendar(),
                                 cash_at="fill")
+        self.broker.wash_check, self.broker.shorting_enabled = True, False  # as Alpaca, shorting off
         self.path = tmp_path / "journal.sqlite"
         self.journal = Journal(self.path, now=self.clock)
         self.journal.append("run", {"run_id": RID, "amount": EQ0})
