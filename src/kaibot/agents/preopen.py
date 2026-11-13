@@ -14,11 +14,13 @@ What it may do, and nothing else:
   could let another name into the freed room (maximum names, pro-rata caps). Clamping the finished plan cannot:
   every reviewed target lies between the current position and the rules' target, so it only tightens.
 
-Fail closed, as in the intraday room: a review that takes longer than `total_s`, errors, answers for another
-session, misses a candidate, names an unknown or duplicate candidate, or fails the contract vetoes every increase of
-that session. So does a review that is switched on with no reviewer wired (a configuration error, not "off").
+Fail closed, as in the intraday room: a review that takes longer than `total_s` (cut off there, not checked after
+the call returns), errors, answers for another session, misses a candidate, names an unknown or duplicate candidate,
+or fails the contract vetoes every increase of that session. So does a review that is switched on with no reviewer
+wired (a configuration error, not "off").
 Budget: at the daily soft cap (`rules_only`) or with an unknown budget state the review is skipped and the rules'
 plan goes through unchanged (status "skipped"); at the monthly hard cap (`no_entries`) no increase goes through.
+Before wiring, the real reviewer must call through the LLM budget gateway and take the state from it (#186).
 Off (the default) leaves the plan unchanged and calls nothing. Switching it on is the stakeholder's decision.
 """
 
@@ -28,6 +30,8 @@ import math
 import os
 import time
 from collections.abc import Callable, Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -206,10 +210,18 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
         out.status, out.error = "invalid", f"{len(cands)} candidates, more than {MAX_CANDIDATES}"
     else:
         t0 = clock()
+        answer = None
+        # A real deadline: the call runs in a worker and is abandoned at total_s, so a hung reviewer cannot hold
+        # up the 09:00 ET queue. A late answer is never read. Not a context manager: it would wait for the worker.
+        ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="preopen-review")
         try:
-            answer = reviewer(session, cands)
-        except Exception as ex:  # a crash in the review is a no-increase, never a crash of the engine
-            answer, out.status, out.error = None, "error", str(ex)[:200]
+            answer = ex.submit(reviewer, session, list(cands)).result(timeout=total_s)
+        except FutureTimeout:
+            out.status, out.error = "timeout", f"no answer within {int(total_s * 1000)} ms: cut off"
+        except Exception as e:  # a crash in the review is a no-increase, never a crash of the engine
+            out.status, out.error = "error", str(e)[:200]
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
         out.latency_ms = int((clock() - t0) * 1000)
         if out.status == "done" and out.latency_ms > total_s * 1000:
             out.status, out.error = "timeout", f"review took {out.latency_ms} ms (limit {int(total_s * 1000)} ms)"
