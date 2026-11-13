@@ -505,3 +505,38 @@ def test_every_heartbeat_carries_the_experiment_label_with_the_flag_on(tmp_path,
     assert a.eng._daily_status({"state": "idle"})["experiments"]
     monkeypatch.setenv("KAIBOT_MULTIDAY", "off")
     assert "experiments" not in a.eng._daily_status({"state": "market_closed"})
+
+
+def _crash_bad(eng, real, bad):
+    eng._md_price = lambda sym: real(sym) * 0.5 if bad["on"] else real(sym)
+
+
+def test_a_restart_between_the_two_checks_does_not_drop_a_real_breach(tmp_path, monkeypatch):
+    """QA-Ops second key on #213: the first breach is journalled (`md_book_breach`), so a restart between the two
+    checks keeps it; an engine restarting every minute during a crash still ends the book at the next check, never
+    later. A breach that a later check dropped (`md_book_breach_clear`) is not brought back by a restart."""
+    a = DailyAccount(tmp_path, monkeypatch, book_end=5.0)
+    _book_b(a)
+    real = type(a.eng)._md_price.__get__(a.eng)
+    bad = {"on": False}
+    a.ticks(a.open1, 30, 40)
+    bad["on"] = True  # a one-off print, then a restart, then normal prices: dropped, not revived
+    _crash_bad(a.eng, real, bad)
+    a.ticks(a.open1, 40, 41)
+    bad["on"] = False
+    a.ticks(a.open1, 41, 42)
+    assert [b for *_, b in a.eng.journal.entries(kinds=("md_book_breach_clear",))]
+    eng = a.restart()
+    bad["on"] = True
+    _crash_bad(eng, type(eng)._md_price.__get__(eng), bad)
+    a.ticks(a.open1, 42, 43)
+    assert not eng.daily.account.book_ended()  # the dropped breach was not revived: this is a first check
+    for k in range(43, 47):  # a crash loop: one check per process
+        eng = a.restart()
+        _crash_bad(eng, type(eng)._md_price.__get__(eng), bad)
+        a.ticks(a.open1, k, k + 1)
+        if eng.daily.account.book_ended():
+            break
+    assert k == 43, "the breach must be confirmed at the first check after the restart"
+    assert eng.daily.retirement(MD) is not None
+    assert len([b for *_, b in eng.journal.entries(kinds=("md_book_breach",))]) == 2

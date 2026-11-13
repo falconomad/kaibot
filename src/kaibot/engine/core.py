@@ -372,6 +372,7 @@ class Engine:
         self.daily = daily(self) if daily is not None else None
         self._closed_cache: tuple | None = None
         self._breach: tuple[int, datetime] | None = None  # #211: (run, first check) of an unconfirmed book breach
+        self._breach_rid: int | None = None  # the run whose journalled breach `_breach` was read for
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -636,12 +637,19 @@ class Engine:
         if peak is None or equity > peak + 0.005:
             peak = max(peak or float(b.amount), equity)
             self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self.now().isoformat()})
+        if self._breach_rid != rid:  # QA-Ops second key on #213: an unconfirmed breach survives a restart
+            self._breach, self._breach_rid = self._journalled_breach(rid), rid
         if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
+            if self._breach is not None:
+                self.journal.append("md_book_breach_clear", {"run_id": rid, "peak": round(peak, 2),
+                                                             "equity": round(equity, 2), "ts": self.now().isoformat()})
             self._breach = None
             return
         # #211 (QA-Ops review of #207): a retirement is durable, so one bad print must never cause it. The breach
         # must hold on two checks at least BREACH_CONFIRM_S apart (two engine ticks, i.e. two minute bars) before
-        # the book ends; a check in between that is not a breach starts over. A restart starts over too.
+        # the book ends; a check in between that is not a breach starts over (`md_book_breach_clear`). The first
+        # breach is journalled and read back after a restart, so an engine that restarts between the checks (a
+        # crash loop in a falling market) still ends the book at its next check: a restart never delays the end.
         now = self.now()
         if self._breach is None or self._breach[0] != rid:
             self._breach = (rid, now)
@@ -654,6 +662,20 @@ class Engine:
             return
         self._breach = None
         self._book_end(rid, peak, equity, end, [r.name for r in rules])
+
+    def _journalled_breach(self, rid: int) -> tuple[int, datetime] | None:
+        """The run's unconfirmed book breach from the journal (`md_book_breach` not followed by a
+        `md_book_breach_clear`), or None: the confirmation state of `_book_end_check` across a restart."""
+        last = None
+        for _, _, kind, b in self.journal.entries(kinds=("md_book_breach", "md_book_breach_clear")):
+            if b.get("run_id") == rid:
+                last = (kind, b)
+        if last is None or last[0] != "md_book_breach":
+            return None
+        try:
+            return rid, datetime.fromisoformat(str(last[1]["ts"]))
+        except (KeyError, ValueError):
+            return None
 
     def _book_end(self, rid: int, peak: float, equity: float, end: float, rules: list[str]) -> None:
         """The multi-day book reached its run end. Exactly this, in this order:

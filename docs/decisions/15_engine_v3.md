@@ -271,7 +271,9 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
      the last price). Its peak is journalled (`md_book_peak`), so a restart measures from the same peak.
    - **Confirmed breach (#211):** the end counts only when the breach holds on two checks at least a minute apart
      (two engine ticks, two minute bars); a breach seen once is journalled (`md_book_breach`) and dropped if the next
-     check is not a breach, so one bad print can never retire the rule. A restart starts the confirmation over.
+     check is not a breach (`md_book_breach_clear`), so one bad print can never retire the rule. The first
+     breach is read back from the journal after a restart, so a restart (or a crash loop) never delays the end
+     (QA-Ops second key on #213).
    - At the end (`risk/gate.book_run_ended`; `engine/core.Engine._book_end`), exactly this happens, once: the end is
      journalled (`md_book_end`); a `book_drawdown` halt row and a `multi_day_book_ended` event are written; the daily
      path's working orders are cancelled; every multi-day sleeve is sold **at market** (retried each tick until none
