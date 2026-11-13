@@ -283,6 +283,20 @@ class Day:
         return self.n_min - 15  # 15:45
 
 
+def gate_peak(peak: float | None, eq: float, book_pnl: float) -> float | None:
+    """#206 (QA-Ops second key on #207): the run peak the gate's `run_drawdown_pct` check gets. `_risk_halts`
+    measures the intraday run end on the run's equity without the multi-day book's P&L (`intraday_equity`) against
+    the intraday peak; the gate gets the run's whole equity (its sizing needs it), so the peak is scaled such that
+    the gate's drawdown is exactly the intraday one: a book in profit cannot hide an intraday drawdown and a book in
+    loss (it has its own end) does not block intraday entries. Without multi-day P&L: the peak, unchanged."""
+    if not book_pnl or peak is None:
+        return peak
+    eq_i = intraday_equity(eq, book_pnl)
+    if not eq_i > 0:
+        return peak
+    return eq * peak / eq_i
+
+
 class Engine:
     def __init__(
         self,
@@ -1591,7 +1605,7 @@ class Engine:
             data_ok=(self.market.last_bar_minute(s) or -99) >= int(feats.get("m", 0)) - 2,
             in_entry_window=True,
             entries_today=d.entries,
-            run_peak_equity=self.peak,
+            run_peak_equity=gate_peak(self.peak, eq, self._book_pnl()),  # #206: the intraday run end, as _risk_halts
             # the account's figure already nets its open positions; subtract what this loop has added since
             buying_power=eq - exposure if bp is None else min(eq - exposure, bp - self._bp_added),
         )

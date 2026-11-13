@@ -98,3 +98,24 @@ def test_property_no_book_setting_changes_an_intraday_verdict(eq, pnl, peak, end
     b = run_drawdown_reached(peak, intraday_equity(eq, pnl), pol.run_drawdown_end_pct)
     assert a == b and lim.run_drawdown_end_pct == end
     assert intraday_equity(eq, 0.0) == eq  # no multi-day P&L: the run's own equity, as before
+
+
+@hyp.settings(deadline=None)  # the first call imports engine/core
+@hyp.given(peak_i=st.floats(1_000, 1e6), dd=st.floats(0, 0.5), pnl=st.floats(-0.4, 2.0))
+def test_the_gate_sees_the_intraday_drawdown_whatever_the_book_did(peak_i, dd, pnl):
+    """QA-Ops second key on #207: the gate's run_drawdown_pct check (Snapshot.equity = the whole run, needed for
+    sizing) gets the peak scaled by engine/core.gate_peak, so its drawdown is the intraday one `_risk_halts` ends the
+    run on: a book in profit never hides it, a book in loss (its own end) never blocks an intraday entry."""
+    from kaibot.engine.core import gate_peak
+
+    eq_i = peak_i * (1 - dd)
+    book_pnl = pnl * peak_i
+    eq = eq_i + book_pnl  # the run's equity = the intraday equity plus the book's P&L
+    peak = gate_peak(peak_i, eq, book_pnl)
+    assert drawdown_pct(peak, eq) == pytest.approx(drawdown_pct(peak_i, eq_i), abs=1e-6)
+
+
+def test_without_multi_day_pnl_the_gate_peak_is_the_peak_bit_for_bit():
+    from kaibot.engine.core import gate_peak
+
+    assert gate_peak(10_123.45, 9_876.5, 0.0) == 10_123.45 and gate_peak(None, 9_876.5, 0.0) is None

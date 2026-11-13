@@ -391,3 +391,24 @@ def test_only_an_explicit_dated_reenable_brings_the_rule_back_once(tmp_path, mon
     monkeypatch.delenv("KAIBOT_REENABLE")
     fresh.startup()
     assert fresh.daily.retirement(MD) is None
+
+
+def test_the_send_window_reads_the_calendar_once_per_session_not_per_tick():
+    """QA-Ops second key on #207: `in_window` runs at every tick; the session's close is read once (a failed read is
+    tried again)."""
+    from datetime import date, time
+
+    calls = []
+
+    def close(d):
+        calls.append(d)
+        if len(calls) == 1:
+            raise RuntimeError("calendar unreachable")
+        return time(13, 0)
+
+    lv = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
+                      prev_session=lambda d: d, session_close=close)
+    d = date(2026, 11, 27)
+    assert lv.send_until(d) == time(15, 45)  # unreadable: the normal window (Alpaca refuses later orders anyway)
+    assert [lv.send_until(d) for _ in range(5)] == [time(12, 45)] * 5
+    assert calls == [d, d]

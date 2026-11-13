@@ -199,6 +199,8 @@ Start at least 30 minutes before the open.
   The engine reads it once at start-up and records it (`multi_day_reenabled` event). Without the date, or with
   another date, it refuses (`multi_day_reenable_refused` event) and the rule stays retired. Remove the line again
   afterwards. Left in place it does nothing, because it names that one retirement only.
+  The run whose book hit its end keeps its book closed: the rule trades again from the next run on (dashboard,
+  new run), not in that run.
 - **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's closing-auction
   orders that have not filled, then sells everything, the multi-day positions included. Do it before 15:50 New York
   time if you can: after 15:50 the exchange may no longer let a closing-auction order be cancelled, so one sent that

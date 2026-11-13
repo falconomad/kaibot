@@ -212,3 +212,26 @@ def test_heartbeat_never_raises_when_supabase_is_down():
     st = JournalStore(Journal(), remote)
     st.heartbeat("engine", {"state": "trading"})
     assert st.beats["engine"]["state"] == "trading"
+
+
+def test_bootstrap_copies_every_multi_day_retirement_whichever_run_wrote_it():
+    """QA-Ops second key on #207: a rule retired in an earlier run (its book hit its drawdown end) must stay retired on
+    a new journal (a new machine) with a later run; LiveDaily.retirement reads the halt table of this store."""
+    from datetime import UTC, datetime
+
+    from kaibot.engine import live_daily as ld
+
+    remote = Remote()
+    old = remote.insert("run", {"amount_usd": 5000, "status": "ended", "level": "balanced", "kind": "paper"})
+    remote.insert("halt", {"run_id": old["id"], "kind": "multi_day_retired", "session": "2026-11-20",
+                           "reason": "rule=trend_momentum; trend_momentum retired: book fell 21.3% ..."})
+    remote.insert("halt", {"run_id": old["id"], "kind": "daily_stop", "session": "2026-11-19", "reason": "x"})
+    run = remote.insert("run", {"amount_usd": 5000, "status": "running", "level": "balanced", "kind": "paper"})
+    remote.insert("halt", {"run_id": run["id"], "kind": "daily_stop", "session": "2026-11-23", "reason": "y"})
+    st = JournalStore(Journal(), remote, live=True)
+    st.bootstrap()
+    assert sorted(h["kind"] for h in st.select("halt", {})) == ["daily_stop", "multi_day_retired"]  # old run's stop: no
+    lv = ld.LiveDaily(None, st.journal, lambda: datetime(2026, 11, 24, 15, tzinfo=UTC), [], None, None,
+                      next_session=lambda d: d, prev_session=lambda d: d, store=st)
+    assert lv.retirement("trend_momentum")["session"] == "2026-11-20"
+    assert lv.retirement("mom_12_1_band") is None

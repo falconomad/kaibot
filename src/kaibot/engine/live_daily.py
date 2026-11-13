@@ -382,6 +382,7 @@ class LiveDaily:
         self.next_session, self.prev_session = next_session, prev_session
         self.known_order_ids = known_order_ids
         self.session_close = session_close  # the session's close (ET wall time), for early-close days
+        self._closes: dict[date, time | None] = {}  # the session's close, read once (send_until)
         self.store = store  # the Supabase replica: a second, durable record of a retirement (halt rows)
         self.reenable = reenable  # KAIBOT_REENABLE as read from the environment at start-up (used once)
         self._store_cache: dict[str, dict | None] = {}
@@ -694,10 +695,15 @@ class LiveDaily:
     def send_until(self, day: date) -> time:
         """15:45 ET, or on an early-close day the close minus 15 minutes (QA-Ops review of #207; Alpaca refuses
         `cls` orders from 15:50 on normal days, so 15:45 is never passed)."""
-        try:
-            close = self.session_close(day)
-        except Exception:
-            close = None
+        if day in self._closes:  # one calendar read per session (QA-Ops second key: not one per tick)
+            close = self._closes[day]
+        else:
+            try:
+                close = self.session_close(day)
+            except Exception:
+                close = None  # unreadable: 15:45, read again at the next call
+            else:
+                self._closes = {day: close}
         if close is None:
             return SEND_UNTIL
         early = (datetime.combine(day, close) - timedelta(minutes=15)).time()
