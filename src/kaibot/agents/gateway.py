@@ -109,30 +109,42 @@ class Gateway:
             return {"state": "rules_only", "day": None, "month": None, "alert": False}
 
     def call(self, purpose: str, model: str, system: str, user: str, tool: dict, max_tokens: int,
-             timeout_s: float, cache_system: bool = True) -> LLMResult | None:
+             timeout_s: float, cache_system: bool = True, daily_soft_usd: float | None = None,
+             report: dict | None = None) -> LLMResult | None:
+        """`daily_soft_usd` is an optional tighter daily cap for this purpose (e.g. limits.preopen.daily_usd). It is
+        checked against the whole day's spend, so it can only lower the configured cap, never raise it.
+        `report`, if given, gets "reason" set when the answer is None: no_client | no_price | over_tier |
+        reserve_failed | refused | error (the caller's own dict, so parallel calls never share it)."""
+        why = report if report is not None else {}
         if self.client is None:
+            why["reason"] = "no_client"
             return None
         price = self.cfg.prices.get(model)
         if price is None:
             log.error("no price for %s: refusing the call", model)
+            why["reason"] = "no_price"
             return None
         est_in = estimate_tokens(system, user, json.dumps(tool))
         if price.max_prompt_tokens and est_in > price.max_prompt_tokens:
             log.warning("%s prompt ~%d tokens is over the cheap tier: refused", purpose, est_in)
+            why["reason"] = "over_tier"
             return None
         # worst case: every input token billed as a cache write (the dearest input rate), all output used
         worst = max(cost_of(price, 0, max_tokens, cache_write=est_in), cost_of(price, est_in, max_tokens))
         worst = round(worst * 1.1 + 1e-5, 5)
+        cap = self.cfg.daily_soft_usd if daily_soft_usd is None else min(self.cfg.daily_soft_usd, float(daily_soft_usd))
         try:
             call_id = self.store.rpc("llm_reserve", {"p_model": model, "p_purpose": purpose, "p_reserved": worst,
-                                                     "p_daily_soft": self.cfg.daily_soft_usd,
+                                                     "p_daily_soft": cap,
                                                      "p_monthly_hard": self.cfg.monthly_hard_usd,
                                                      "p_ttl_s": self.cfg.reservation_ttl_s})
         except Exception:
             log.exception("reservation failed: no call")
+            why["reason"] = "reserve_failed"
             return None
         if not call_id:
             log.info("budget refused %s ($%.4f): rules-only", purpose, worst)
+            why["reason"] = "refused"
             return None
         t0 = self.clock()
         cache = {"cache_control": {"type": "ephemeral"}} if cache_system else {}
@@ -157,6 +169,7 @@ class Gateway:
             cost = cost_of(price, usage[0], usage[1], usage[2], usage[3])
             self._settle(call_id, cost, usage, f"{type(e).__name__}: {str(e)[:200]}")
             log.warning("%s call failed: %s", purpose, e)
+            why["reason"] = "error"
             return None
 
     def _settle(self, call_id, cost, usage, error) -> None:
