@@ -542,6 +542,15 @@ def _at(d: date, t: time) -> datetime:
     return datetime.combine(d, t, NY).astimezone(UTC)
 
 
+def protect_sleeves(stops: ProtectiveStops, strategy: str, pos: Mapping[str, float], prices: Mapping, now: datetime,
+                    session: str, only: set[str] | None = None) -> list[str]:
+    """One strategy's protective stops (`ensure` for its sleeves `pos`, shares per symbol), scoped to that
+    strategy (issue #199): when two strategies share one order manager, this call never cancels the other
+    strategy's stops as "gone" (its sleeves are not in `pos`). `only`: these symbols alone (a split)."""
+    sleeves = {(strategy, s): q for s, q in pos.items() if only is None or s in only}
+    return stops.ensure(sleeves, prices, now, session, only=only, strategies={strategy})
+
+
 def _venue_actions(broker: SimBroker, symbol: str, *, split: float = 1.0, delist: bool = False) -> None:
     """The venue's corporate actions on its positions (stand-in; Alpaca applies these itself)."""
     p = broker.pos.get(symbol)
@@ -646,7 +655,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                     run.stops[(name, s)] = round(run.stops[(name, s)] / r, 2)
                 if stops is not None:  # re-protected at once, before the open: no session without a stop
                     stops.after_split(s)
-                    stops.ensure({(name, s): led.pos.get(s, 0.0)}, run.stops, clock(), str(d), only={s})
+                    protect_sleeves(stops, name, {s: led.pos.get(s, 0.0)}, run.stops, clock(), str(d), only={s})
                 if frac > 1e-9:
                     broker.pos[s]["qty"] = int(math.floor(float(broker.pos[s]["qty"]) + 1e-9))
                     broker.cash += frac * px
@@ -733,7 +742,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         if stops is not None:  # every position keeps a protective GTC stop at the venue, in whole shares
             run.stops = {k: v for k, v in run.stops.items() if k[1] in led.pos}
             stops.suspended.clear()
-            stops.ensure({(name, s): q for s, q in led.pos.items()}, run.stops, clock(), str(d))
+            protect_sleeves(stops, name, led.pos, run.stops, clock(), str(d))
         run.cash_gap = max(run.cash_gap, abs(broker.cash - led.cash))  # the venue's cash book against the ledger
         if on_session:
             on_session(i)

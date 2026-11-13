@@ -242,8 +242,8 @@ def test_the_daily_runner_keeps_a_protective_stop_on_every_position_and_reconcil
     seen = []
     real = ProtectiveStops.ensure
 
-    def ensure(self, sleeves, prices, now, session, only=None):
-        out = real(self, sleeves, prices, now, session, only=only)
+    def ensure(self, sleeves, prices, now, session, only=None, strategies=None):
+        out = real(self, sleeves, prices, now, session, only=only, strategies=strategies)
         if only is not None:
             return out  # a split's re-protection before the open (checked below)
         stops = {x.symbol: x for x in self.om.working(purposes=("stop",))}
@@ -357,9 +357,9 @@ def test_a_split_session_is_never_without_a_stop_in_the_daily_runner():
     calls = []
     real = ProtectiveStops.ensure
 
-    def ensure(self, sleeves, prices, now, session, only=None):
+    def ensure(self, sleeves, prices, now, session, only=None, strategies=None):
         before = {x.symbol for x in self.om.working(purposes=("stop",))} - set(only or ())
-        out = real(self, sleeves, prices, now, session, only=only)
+        out = real(self, sleeves, prices, now, session, only=only, strategies=strategies)
         stops = {x.symbol for x in self.om.working(purposes=("stop",))}
         calls.append((now.astimezone(NY).strftime("%H:%M"), session, {s for _, s in sleeves} | before, stops))
         return out
