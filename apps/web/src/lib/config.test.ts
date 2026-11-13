@@ -277,7 +277,8 @@ describe("the Strategy page has no live-trading control", () => {
     expect(strategySrc).not.toMatch(/go[- ]?live\s*(button|switch)|live trading (on|switch)|live (keys|base url)/i);
     expect(strategySrc).not.toMatch(/dangerouslySetInnerHTML/);
     const rpcs = [...strategySrc.matchAll(/api\.(\w+)\(/g)].map((m) => m[1]);
-    for (const r of rpcs) expect(["getConfig", "saveConfig", "applyConfig", "resetConfig"]).toContain(r);
+    // checkTicker: the pre-apply re-check of custom tickers (S69); it only reads a ticker's check.
+    for (const r of rpcs) expect(["getConfig", "saveConfig", "applyConfig", "resetConfig", "checkTicker"]).toContain(r);
   });
   it("the config body has no field outside the contract", () => {
     expect(Object.keys(levelDefaults(B())).sort()).toEqual(["advanced", "boldness", "focus", "preset", "risk", "schema", "strategies", "timing"]);
