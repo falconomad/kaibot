@@ -92,6 +92,9 @@ class SimAccount:
     def splits(self, day):
         return {}
 
+    def book_ended(self):
+        return False
+
 
 class Harness:
     """The engine's calls to the daily path, session by session, on SimBroker. `restart(where)` kills the process
@@ -210,6 +213,10 @@ def test_the_live_path_reproduces_the_research_runner_order_by_order_and_fill_by
     assert {s: q for s, q in led.qty_by_symbol().items() if q} == {s: float(p["qty"]) for s, p in
                                                                     h.broker.positions().items()}
     assert led.cash == pytest.approx(h.broker.cash, abs=0.01)
+    # #206: the book's own P&L (what its run end is measured on) is the whole account's P&L here (one rule)
+    venue = led.cash + sum(x.qty * x.mark for x in led.sleeves.values())
+    assert led.strategy_pnl({s.name}) == pytest.approx(venue - EQ0, abs=0.01)
+    assert led.strategy_pnl({"dip_reversal"}) == 0
     # every decision and every send step is in the journal once
     dec = [b for *_, b in h.journal.entries(kinds=("md_decision",))]
     assert len(dec) == I1 - I0 + 2 and len({(b["strategy"], b["session"]) for b in dec}) == len(dec)

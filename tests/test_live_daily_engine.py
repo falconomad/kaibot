@@ -10,7 +10,7 @@ the engine has no daily path and refuses one.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 import numpy as np
@@ -33,6 +33,9 @@ POL = load_profiles()["balanced"]
 class WantsB(mom.TrendMomentum):
     """trend_momentum's name, holding policy and sizing settings; its decision: hold B."""
 
+    def decision_day(self, prev, fill) -> bool:
+        return True
+
     def on_event(self, ctx):
         if "B" in ctx.held:
             return None
@@ -54,19 +57,22 @@ def daily_view(px_b: float) -> DailyData:
 
 
 class DailyAccount(Account):
-    def __init__(self, tmp_path, monkeypatch):
+    def __init__(self, tmp_path, monkeypatch, gap_b=1.0, book_end=None, view=True):
         monkeypatch.setenv("KAIBOT_MULTIDAY", "on")
+        self.has_view = view
         f = frames()["B"]
         self.px_b = float(f[f["ts"] < f["ts"].iloc[0] + timedelta(hours=6, minutes=30)]["c"].iloc[-1])
         self.view = daily_view(self.px_b)
         s = WantsB()
-        self.rule = ld.Rule(s, ld.live_builder(s, ld.live_limits(s, POL, rule_book_limits(MD, "balanced",
-                                                                                           research=True))))
-        super().__init__(tmp_path)
+        lim = ld.live_limits(s, POL, rule_book_limits(MD, "balanced", research=True))
+        if book_end is not None:
+            lim = replace(lim, run_drawdown_end_pct=book_end)
+        self.rule = ld.Rule(s, ld.live_builder(s, lim))
+        super().__init__(tmp_path, gap_b=gap_b)
 
     def load(self, k: date, now):
-        if str(k) != DAY1:
-            raise ld.DataNotReady(f"no view for {k} in this test")
+        if str(k) != DAY1 or not self.has_view:
+            raise ld.DataNotReady(f"the daily store has no SPY bar for {k} (run ./scripts/fetch_daily.sh)")
         return self.view
 
     def engine(self, journal=None) -> Engine:
@@ -137,3 +143,60 @@ def test_without_the_flag_there_is_no_daily_path(monkeypatch, tmp_path):
         Engine(None, None, None, {}, set(), journal=Journal(), daily=lambda e: object())
     monkeypatch.setenv("KAIBOT_MULTIDAY", "on")
     assert callable(entry.daily_path())  # trend_momentum is enabled in config/profiles.yaml (#205)
+
+
+# ---------------------------------------------------------------- the book's own run end (stakeholder, 13 Nov 2026)
+
+
+def test_the_book_end_closes_the_multi_day_book_and_leaves_the_intraday_run_alone(tmp_path, monkeypatch):
+    """B (held by the multi-day book since DAY1) opens DAY2 30% lower. The run's equity falls far below the intraday
+    run end (Balanced 8%), but that end is measured without the book's P&L, so the run goes on. The book's own end
+    (5% here) is reached: journalled, a halt, the book sold at market, no new multi-day trade."""
+    a = DailyAccount(tmp_path, monkeypatch, gap_b=0.7, book_end=5.0)
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))  # the book holds 40 B from DAY1 (no stop: the prereg has none)
+    a.broker.pos["B"] = {"qty": 40, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": 40, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    peak = a.eng._book_peak(a.rid)
+    assert peak is not None
+    a.ticks(a.open2, 0, 4)
+    ends = [b for *_, b in a.eng.journal.entries(kinds=("md_book_end",))]
+    assert len(ends) == 1 and ends[0]["drawdown_pct"] >= 5 and ends[0]["end_pct"] == 5.0
+    assert any(h["kind"] == "book_drawdown" for h in a.store.tables["halt"])
+    assert not any(h["kind"] == "run_drawdown" for h in a.store.tables["halt"])  # the intraday end did not trip
+    assert a.eng.run is not None and a.eng.run["status"] == "running"
+    assert "B" not in a.broker.pos  # the book is sold
+    assert a.eng.daily.account.book_ended() and a.eng.kill is None  # no drift: the sale is booked
+    b = a.eng.ledger.book(a.rid)
+    assert (MD, "B") not in b.sleeves and b.realized_by[MD] < 0
+    assert a.eng._status(4)["multi_day"]["book"] == "ended"
+    a.ticks(a.open2, 4, 390)
+    a.after_close(a.open2)
+    assert a.cls_orders() == []  # the decision of DAY1 is not sent: the book is closed for this run
+    assert len([b for *_, b in a.eng.journal.entries(kinds=("md_book_end",))]) == 1  # once
+    eng = a.restart()
+    assert eng.daily.account.book_ended() and eng._book_peak(a.rid) == peak  # both survive a restart
+
+
+def test_without_the_daily_path_the_run_end_is_measured_as_before(tmp_path):
+    """Flag off: the same gap ends the whole run at the intraday end, multi-day sleeve included (S80)."""
+    a = Account(tmp_path, gap_b=0.7)
+    a.day1()
+    a.ticks(a.open2, 0, 4)
+    assert any(h["kind"] == "run_drawdown" for h in a.store.tables["halt"])
+    assert a.eng.daily is None and not list(a.eng.journal.entries(kinds=("md_book_end", "md_book_peak")))
+
+
+def test_the_heartbeat_says_plainly_when_the_daily_store_was_not_refreshed(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch, view=False)
+    a.ticks(a.open1, 0, 390)
+    st = a.after_close(a.open1) or a.eng.tick()
+    assert "daily store" in st["multi_day"]["rules"][MD]["waiting"]
+    a.ticks(a.open2, 0, 2)
+    st = a.eng._status(1)
+    assert st["multi_day"]["note"].startswith(f"{MD}: no decision today: daily store not refreshed")
+    kinds = [e["type"] for e in a.store.tables["event"]]
+    assert "multi_day_no_decision" in kinds and a.cls_orders() == []

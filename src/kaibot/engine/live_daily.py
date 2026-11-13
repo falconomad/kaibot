@@ -102,6 +102,8 @@ class Account(Protocol):
 
     def splits(self, day: date) -> dict[str, float]: ...  # splits the ledger booked for this session: symbol -> ratio
 
+    def book_ended(self) -> bool: ...  # the multi-day book reached its own run end this run (no more trading)
+
 
 # ---------------------------------------------------------------- the live book's limits
 
@@ -349,6 +351,7 @@ class LiveDaily:
         self._data: dict[date, DailyData] = {}  # the day's view, read once per decision session
         self._waiting: dict[str, str] = {}  # rule -> why the last decision could not be taken (event once)
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
+        self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
 
     # ---------------------------------------------------------------- state
@@ -431,8 +434,10 @@ class LiveDaily:
         if om is None or not (om.live or force):
             return
         now = self.now()
-        unconfirmed = any(r.state in UNCONFIRMED for r in om.live.values())  # looked up at every call
-        if not (force or unconfirmed) and now.astimezone(NY).time() < AUCTION and self._synced is not None \
+        # looked up at every call: an unconfirmed order, or any order that can fill before the closing auction (a
+        # protective or fail-safe stop): its fill must be in the ledger before the next drift check
+        urgent = any(r.state in UNCONFIRMED or r.tif != "cls" for r in om.live.values())
+        if not (force or urgent) and now.astimezone(NY).time() < AUCTION and self._synced is not None \
                 and now - self._synced < POLL_EVERY:
             return
         self._synced = now
@@ -506,13 +511,22 @@ class LiveDaily:
         """After the close of session `closed`: each rule that has not decided for it decides once the daily view of
         that evening is available, and the target list is journalled (`md_decision`). Returns the rules decided now."""
         rid = self.account.run_id()
-        if rid is None:
+        if rid is None or self.account.book_ended():
             return []
         done = []
         for r in self.rules:
             if self.decision(r.name, closed) is not None:
                 continue
             now = self.now()
+            fill = self.next_session(closed)
+            day = getattr(r.strategy, "decision_day", None)
+            if day is not None and not day(closed, fill):  # not its decision day: no target list, no data needed
+                self.journal.append("md_decision", {"run_id": rid, "strategy": r.name, "session": str(closed),
+                                                    "fill_session": str(fill), "decided_at": now.isoformat(),
+                                                    "target": None, "note": "not a decision day"})
+                self._waiting.pop(r.name, None)
+                done.append(r.name)
+                continue
             try:
                 data = self._view(closed, now)
             except DataNotReady as e:
@@ -521,7 +535,6 @@ class LiveDaily:
                     self.event("multi_day_waiting", {"strategy": r.name, "session": str(closed), "why": str(e)[:200]})
                 continue
             self._waiting.pop(r.name, None)
-            fill = self.next_session(closed)
             held = {s: q for s, (q, _) in self.account.held(r.name).items()}
             tl = decide_after_close(r.strategy, data, data.index_of(closed), fill, held)
             body = {"run_id": rid, "strategy": r.name, "session": str(closed), "fill_session": str(fill),
@@ -548,7 +561,7 @@ class LiveDaily:
         through the target loop. Returns the rules whose send step completed now."""
         om = self._manager()
         rid = self.account.run_id()
-        if om is None or rid is None or not self.in_window(self.now()):
+        if om is None or rid is None or not self.in_window(self.now()) or self.account.book_ended():
             return []
         done = []
         for r in self.rules:
@@ -608,10 +621,9 @@ class LiveDaily:
         held = self.account.held(r.name)
         pending = self._pending(r.name, session, held)
         tl = target_from_json(dec["target"]) if dec is not None else None
+        if dec is None:
+            self._no_decision(r.name, session, prev)
         if dec is None and not pending:
-            if held:
-                self.event("multi_day_no_decision", {"strategy": r.name, "session": str(session),
-                                                     "why": f"no decision journalled after the close of {prev}"})
             return {"run_id": rid, "strategy": r.name, "session": str(session), "decided": None, "targets": [],
                     "note": "no decision"}
         if tl is None:
@@ -644,6 +656,60 @@ class LiveDaily:
                                                        "not_bought": [t.symbol for t in cut][:30]})
             targets = [t for t in targets if t not in cut]
         return self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash)
+
+    def _no_decision(self, rule: str, session: date, prev: date) -> None:
+        """No decision for this session: say why, plainly (heartbeat `multi_day.note`, event)."""
+        why = self._waiting.get(rule)
+        avail = getattr(self.load, "available", None)
+        if why is None and avail is not None:
+            try:
+                why = avail(prev, self.now())
+            except Exception as e:  # the note must never stop the send step
+                why = f"{type(e).__name__}"
+        first = not any(b.get("strategy") == rule for b in self._entries("md_decision"))
+        note = ("no decision today: daily store not refreshed" if why else
+                "no decision yet: the first one is taken after a close" if first else
+                "no decision today: none was taken after the last close (engine off then?)")
+        self._missed[rule] = (str(session), note + (f" ({why})" if why else ""))
+        self.event("multi_day_no_decision", {"strategy": rule, "session": str(session), "after_close_of": str(prev),
+                                             "note": self._missed[rule][1][:240]})
+
+    def close_book(self) -> list[str]:
+        """The book's run end (engine/core.Engine._book_end): cancel every working order of this path (its
+        closing-auction buys and sales; the engine then sells the sleeves at market). Returns the cancelled ids."""
+        om = self.om
+        out = []
+        for x in (om.working() if om is not None else []):
+            if x.purpose != "stop" and x.order_id is not None:
+                om.cancel(x.coid)
+                out.append(x.coid)
+        return out
+
+    def status(self, today: date | None = None) -> dict:
+        """The heartbeat's `multi_day` block: the book, each rule's last decision, and a plain note when today has no
+        decision (for example "no decision today: daily store not refreshed")."""
+        ended = self.account.book_ended()
+        rules: dict[str, dict] = {}
+        notes = []
+        for r in self.rules:
+            last = None
+            for b in self._entries("md_decision"):
+                if b.get("strategy") == r.name:
+                    last = b.get("session")
+            row: dict = {"last_decision": last}
+            miss = self._missed.get(r.name)
+            if miss is not None and (today is None or miss[0] == str(today)):
+                row["note"] = miss[1]
+                notes.append(f"{r.name}: {miss[1]}")
+            if r.name in self._waiting:  # the next decision cannot be taken yet
+                row["waiting"] = self._waiting[r.name][:200]
+            rules[r.name] = row
+        out: dict = {"book": "ended" if ended else "open", "rules": rules}
+        if ended:
+            notes.insert(0, "multi-day book closed: its run-drawdown end was reached (no new multi-day trades)")
+        if notes:
+            out["note"] = "; ".join(notes)[:300]
+        return out
 
     @staticmethod
     def _planned(r: Rule, session: date, rid: int, prev: date, targets: list[Target], plan, *, eq=None,
@@ -706,6 +772,11 @@ class EngineAccount:
 
     def allows(self, symbol: str, side: str, purpose: str = "target", qty: float | None = None) -> str | None:
         return self.e.recon.allows(symbol, side, purpose, qty)
+
+    def book_ended(self) -> bool:
+        rid = self.run_id()
+        return rid is not None and any(b.get("run_id") == rid for _, _, _, b in
+                                       self.e.journal.entries(kinds=("md_book_end",)))
 
     def splits(self, day: date) -> dict[str, float]:
         out: dict[str, float] = {}

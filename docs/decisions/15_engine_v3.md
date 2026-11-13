@@ -247,8 +247,8 @@ history justifies. The figures are rounded to whole points. Two more stops, as i
 the `SimBroker` replay outside 10 bp (rolling 20 sessions) for 10 sessions in a row (the engine does not trade what
 we tested), or the ledger and the broker differ and the difference is not resolved the same day.
 
-The trigger is in `config/profiles.yaml` (`retire_drawdown_pct`) so the dashboard can show it. **The engine does not
-enforce it**: Product checks it in the daily status and stops the experiment when it is hit.
+The trigger is in `config/profiles.yaml` (`retire_drawdown_pct`) so the dashboard can show it. Since the stakeholder's
+decision below (13 Nov 2026, 12:39 CET) **the engine enforces it** as the multi-day book's own run end.
 
 **Interaction with the level's run-drawdown end (unchanged, a hard ceiling).** Each level's `run_drawdown_end_pct`
 (Careful 4%, Balanced 8%, Hunter 12%; `HARD_CEILINGS` caps it at 12%) still ends the *whole run* and sells everything,
@@ -257,6 +257,33 @@ every level the run ends first. At Careful, 4% is well below the test's 8.57% dr
 run is likely to end in a normal drawdown. That rule is not loosened here. If the stakeholder wants the experiment to
 run through the drawdowns the test saw, the choice is his: run it at Balanced or Hunter, or start a new run when one
 ends. The run-drawdown end is never raised above `HARD_CEILINGS`.
+
+### Stakeholder decision 13 Nov 2026, 12:39 CET: "option A, as tested" (issue #206, PR #207)
+
+The stakeholder's words: **"option A, as tested"**. What that decides:
+
+1. **The multi-day book has its own run-drawdown end**, separate from the intraday one: Careful **13%**, Balanced
+   **21%**, Hunter **27%** (1.5 x the ten-year test's maximum drawdown at each cap, the retirement trigger above).
+   This needs a new book-level hard ceiling, which **the stakeholder approved explicitly: `BOOK_HARD_CEILINGS.
+   run_drawdown_end_pct = 27`** (`risk/gate.py`). `RiskPolicy`, `HARD_CEILINGS` and the intraday run-drawdown ends
+   (4 / 8 / 12%, ceiling 12%) are **unchanged**.
+   - The book's equity is the run's pot plus the book's P&L since the run began (realised, dividends, open sleeves at
+     the last price). Its peak is journalled (`md_book_peak`), so a restart measures from the same peak.
+   - At the end (`risk/gate.book_run_ended`; `engine/core.Engine._book_end`), exactly this happens, once: the end is
+     journalled (`md_book_end`); a `book_drawdown` halt row and a `multi_day_book_ended` event are written; the daily
+     path's working orders are cancelled; every multi-day sleeve is sold **at market** (retried each tick until none
+     is left); from then on the daily path decides and sends nothing **for the rest of the run**. The intraday rules
+     and the run go on. A new run starts a new book; to retire the rule for good, `KAIBOT_MULTIDAY` is switched off.
+   - With the live daily path on, the intraday run end is measured on the run's equity **without** the multi-day
+     book's P&L (`risk/gate.intraday_equity`), with the same formula as before (`run_drawdown_reached`). Without the
+     daily path (flag off) the book's P&L is 0 and the check is exactly what it was. When the intraday end trips it
+     still ends the whole run and sells everything, the multi-day book included (unchanged). The daily stop (the
+     day's change in the whole run's equity, overnight gaps included) is unchanged and still blocks entries.
+2. **Book limits exactly as pre-registered**, now **confirmed** (no longer provisional; `config/profiles.yaml`
+   `multi_day.provisional: false`): k = 0.1%, the level's `max_position_pct` per name (10 / 15 / 20%), at most
+   **30 names**, a **40% sector cap**, the 3% cash reserve of the portfolio builder (Amendment 3) on the 1% hard
+   floor, and the gap-scenario limit at the hard ceiling, **15%**. The live book is therefore
+   `engine/daily.momentum_limits` at the rule's exposure cap, the sizing the ten-year test ran with.
 
 ### What the code does and does not do yet (13 Nov 2026, PR for #133)
 

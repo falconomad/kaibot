@@ -33,7 +33,7 @@ import logging
 import subprocess
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
@@ -64,7 +64,17 @@ from kaibot.engine.roomflow import RoomFlow
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
 from kaibot.replay.sim import half_spread, sell_px
-from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
+from kaibot.risk.gate import (
+    Proposal,
+    RiskPolicy,
+    Side,
+    Snapshot,
+    book_run_ended,
+    drawdown_pct,
+    evaluate,
+    intraday_equity,
+    run_drawdown_reached,
+)
 from kaibot.strategies import registry
 from kaibot.strategies.base import CloseOut, Context, Event, Holding, MoveStop, Strategy, due, new_scan, note_scan
 
@@ -522,6 +532,16 @@ class Engine:
             self.store.event("multi_day_error", {"step": step, "error": f"{type(e).__name__}: {e}"[:200]},
                              self._rid())
 
+    def _daily_status(self, st: dict) -> dict:
+        """#206: the heartbeat's `multi_day` block (`LiveDaily.status`), e.g. "no decision today: daily store not
+        refreshed". Absent without the daily path."""
+        if self.daily is not None:
+            try:
+                st["multi_day"] = self.daily.status(self.now().astimezone(_et()).date())
+            except Exception:
+                log.exception("daily path status unavailable")
+        return st
+
     def _daily_after_close(self, now: datetime) -> None:
         """After a session's close: the rules decide for the next session (once the daily store holds the close)."""
         if self.run is None or self.run.get("status") not in ("running", "paused"):
@@ -532,6 +552,92 @@ class Engine:
         closed = self._closed_cache[1]
         if closed is not None:
             self.daily.after_close(closed)
+
+    def _book_pnl(self, live: bool = True) -> float:
+        """#206: the multi-day book's P&L since the run began (realised, dividends, open sleeves at the last price,
+        or at the last close mark with `live=False`). 0 without the daily path: nothing changes then."""
+        if self.daily is None:
+            return 0.0
+        rid = self._rid() or (self.day.run_id if self.day else None)
+        b = self.ledger.book(rid) if rid is not None else None
+        if b is None:
+            return 0.0
+        from kaibot.engine.failsafe import multi_day_names
+
+        names = set(multi_day_names())
+        prices = {}
+        if live:
+            for k in b.sleeves:
+                if k[0] in names:
+                    px = self._md_price(k[1])
+                    if px:
+                        prices[k] = px
+        return b.strategy_pnl(names, prices)
+
+    def _book_peak(self, rid: int) -> float | None:
+        peak = None
+        for _, _, _, e in self.journal.entries(kinds=("md_book_peak",)):
+            if e.get("run_id") == rid:
+                peak = float(e["peak"])
+        return peak
+
+    def _book_end_check(self, book_pnl: float) -> None:
+        """#206 (stakeholder decision 13 Nov 2026, decision 15 section 11): the multi-day book's own run end.
+        Book equity = the run's pot + the book's P&L since the run began; its peak is journalled (`md_book_peak`),
+        so a restart measures from the same peak. At `BookLimits.run_drawdown_end_pct` below the peak (the level's
+        book end tightened by the rule's retirement trigger: Careful 13%, Balanced 21%, Hunter 27%) `_book_end`
+        runs once. While the book is closed and still holds shares, the sale is retried at every tick."""
+        if self.daily is None or self.run is None:
+            return
+        rid = self._rid()
+        b = self.ledger.book(rid)
+        if b is None:
+            return
+        ended = self.daily.account.book_ended()
+        if ended:
+            if self._md_sleeves():  # closed: whatever is still held is sold (a sale under way is not repeated)
+                self._flatten_md("book_drawdown", {}, self.monotonic())
+            return
+        rules = self.daily.rules
+        if not rules:
+            return
+        end = min(r.builder.limits.run_drawdown_end_pct for r in rules)
+        equity = float(b.amount) + book_pnl
+        peak = self._book_peak(rid)
+        if peak is None or equity > peak + 0.005:
+            peak = max(peak or float(b.amount), equity)
+            self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self.now().isoformat()})
+        if book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
+            self._book_end(rid, peak, equity, end, [r.name for r in rules])
+
+    def _book_end(self, rid: int, peak: float, equity: float, end: float, rules: list[str]) -> None:
+        """The multi-day book reached its run end. Exactly this, in this order:
+        1. `md_book_end` in the journal (from now on the daily path decides and sends nothing in this run);
+        2. a `book_drawdown` halt row and a `multi_day_book_ended` event;
+        3. every working order of the daily path is cancelled (closing-auction buys and sales);
+        4. every multi-day sleeve is sold at market now (`_flatten_md`, the run-drawdown flatten's sale), retried at
+           each tick until none is left.
+        The intraday rules, their run end (4/8/12%) and the run itself go on; nothing intraday is sold or blocked.
+        A new run starts a new book (the stakeholder's call; to retire the rule for good switch KAIBOT_MULTIDAY off)."""
+        dd = drawdown_pct(peak, equity)
+        body = {"run_id": rid, "rules": rules, "peak": round(peak, 2), "equity": round(equity, 2),
+                "drawdown_pct": round(dd, 3), "end_pct": end, "ts": self.now().isoformat()}
+        self.journal.append("md_book_end", body)
+        reason = (f"multi-day book drawdown {dd:.1f}% reached its end of {end:g}% (peak {peak:,.2f}, now "
+                  f"{equity:,.2f}): no new multi-day trades in this run, the book is sold at market")
+        log.error("%s", reason)
+        self.store.insert("halt", {"run_id": rid, "kind": "book_drawdown", "reason": reason,
+                                   "session": str(self.day.day) if self.day else None}, returning=False)
+        self.store.event("multi_day_book_ended", {**body, "action": reason}, rid)
+        try:
+            self.daily.sync(force=True)  # a stop that fired at the open is booked first: never sold twice
+            self.daily.close_book()
+        except Exception:
+            log.exception("book end: cancelling the daily path's orders failed (the sale goes on)")
+        failed: dict = {}
+        self._flatten_md("book_drawdown", failed, self.monotonic())
+        if failed:
+            log.warning("book end: not sold yet %s (retried at the next tick)", list(failed))
 
     # ================= multi-day sleeves (S80, #120) =================
     def _md_sleeves(self) -> dict:
@@ -1027,7 +1133,8 @@ class Engine:
                 self._finalize_missed(now)  # S77 (audit D8): a restart after the close still closes the day
             self._daily_step("after_close", lambda: self._daily_after_close(now))  # #206: decide for the next session
             self._maybe_prepare(clk, now)
-            return {"state": "market_closed", "next_open": clk.get("next_open"), "account_clean": self.account_clean}
+            return self._daily_status({"state": "market_closed", "next_open": clk.get("next_open"),
+                                       "account_clean": self.account_clean})
         if self.run is None and not self.pos and not self._md_exits:  # S80: a multi-day sale still to book
             return {"state": "idle", "note": "no paper run: start one from the dashboard",
                     "account_clean": self.account_clean}
@@ -1112,7 +1219,8 @@ class Engine:
             self.store.update("run", {"id": self.run["id"]}, {"level": segs[0]["level"]})
             self.run["level"] = segs[0]["level"]
         start_eq = self._start_equity()  # S77: yesterday's mark-to-market close (audit B1 item 5)
-        self.peak = max(float(self.run.get("peak_equity") or start_eq), start_eq)
+        base = intraday_equity(start_eq, self._book_pnl(live=False))  # #206: without the multi-day book's P&L
+        self.peak = max(float(self.run.get("peak_equity") or base), base)
         self.day = Day(self.run["id"], today, open_utc, n_min, start_eq)
         self._load_rules(self.day)
         self._restore_session(self.day)
@@ -1294,8 +1402,14 @@ class Engine:
                  "session": str(d.day)},
                 returning=False,
             )
-        self.peak = max(self.peak or eq, eq)
-        if self.peak and eq <= self.peak * (1 - pol.run_drawdown_end_pct / 100):
+        # #206: with the live daily path the multi-day book has its own run end (`_book_end_check`), and the run's
+        # intraday end (unchanged: RiskPolicy.run_drawdown_end_pct, the same formula) is measured without the book's
+        # P&L. Without the daily path the book's P&L is 0 and this is exactly the check it always was.
+        book_pnl = self._book_pnl()
+        self._book_end_check(book_pnl)
+        eq_i = intraday_equity(eq, book_pnl)
+        self.peak = max(self.peak or eq_i, eq_i)
+        if self.peak and run_drawdown_reached(self.peak, eq_i, pol.run_drawdown_end_pct):
             self.flatten_all("run_drawdown")
             self.store.insert(
                 "halt",
@@ -2103,6 +2217,7 @@ class Engine:
         }
         if self.experiments:
             st["experiments"] = self.experiments  # #133: the dashboard's experiment label (heartbeat detail)
+        self._daily_status(st)
         if self.run is None and d is not None and d.run_id:
             st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
         return st

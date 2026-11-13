@@ -84,6 +84,22 @@ class Book:
     day_dividends: float = 0.0
     booked: set = field(default_factory=set)  # refs of corporate actions already booked
     broker_cash0: float | None = None
+    # #206: realised P&L and dividends since the run began, per strategy (the multi-day book's own P&L)
+    realized_by: dict[str, float] = field(default_factory=dict)
+    dividends_by: dict[str, float] = field(default_factory=dict)
+
+    def strategy_pnl(self, strategies, prices: Mapping[tuple[str, str], float] | None = None) -> float:
+        """P&L since the run began of these strategies' sleeves: realised, dividends, and the open sleeves at
+        `prices` (missing: the last mark, else the cost). The multi-day book's equity is the pot plus this."""
+        names = set(strategies)
+        out = sum(v for k, v in self.realized_by.items() if k in names)
+        out += sum(v for k, v in self.dividends_by.items() if k in names)
+        for k, sl in self.sleeves.items():
+            if k[0] in names:
+                px = (prices or {}).get(k)
+                px = px if px is not None else (sl.mark if sl.mark is not None else sl.avg_cost)
+                out += sl.qty * px - sl.cost
+        return out
 
     def qty_by_symbol(self) -> dict[str, float]:
         out: dict[str, float] = {}
@@ -166,6 +182,7 @@ class Ledger:
         b.cash += qty * px - fees
         b.realized_venue += qty * px - fees - basis
         b.day_realized += qty * px - fees - basis
+        b.realized_by[e["strategy"]] = b.realized_by.get(e["strategy"], 0.0) + qty * px - fees - basis
         if s is None:
             return
         s.cost -= basis
@@ -184,6 +201,7 @@ class Ledger:
             cash = s.qty * float(e["per_share"]) if e.get("per_share") is not None \
                 else float(e["amount"]) * s.qty / total_qty
             s.dividends += cash
+            b.dividends_by[s.strategy] = b.dividends_by.get(s.strategy, 0.0) + cash
             b.cash += cash
             b.dividends_total += cash
             b.day_dividends += cash
@@ -203,6 +221,7 @@ class Ledger:
                 cost_out = s.cost * frac / exact
                 s.cost -= cost_out
                 b.realized_venue += frac * float(e["price"]) - cost_out
+                b.realized_by[s.strategy] = b.realized_by.get(s.strategy, 0.0) + frac * float(e["price"]) - cost_out
                 b.day_realized += frac * float(e["price"]) - cost_out
                 s.qty = float(whole)
             else:
