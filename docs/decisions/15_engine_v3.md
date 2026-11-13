@@ -187,3 +187,84 @@ Raised by QA-Ops while building #126 (PR #140). The conservative reading is chos
 | "Same universe" for the random control | Names are drawn from the stocks that pass the price and volume filter on that date. The rule's own selection filters (trend, rank) are not applied to them. The rule's exposure path, which includes its market filter, is copied |
 | Bootstrap settings | Stationary bootstrap, mean block length 20 sessions, 2,000 resamples, fixed seed |
 | Cost and fill re-runs of the same configuration | Not new trials (`n_trials = 0`). Every new configuration counts 1 |
+
+## 11. Stakeholder decision 13 Nov 2026: paper experiment of a rule that failed Gate B
+
+Issues #133 (S93, first rule on paper) and #132 (S92, settings for multi-day holding, closed).
+
+### The result
+
+The ten-year point-in-time test (`core_pit`, run on 13 Nov 2026 at code `7c0123e`; engine with `SimBroker`,
+point-in-time universe, cost model v2) **failed Gate B** for both momentum rules, `trend_momentum` (rule 1) and
+`mom_12_1_band` (rule 2), on marks 2, 3, 4 and 5 of section 7.
+
+| `trend_momentum`, point-in-time | CAGR | Max drawdown | Sharpe |
+|---|---|---|---|
+| Base (100% exposure cap) | 8.24% | 18.27% | 0.59 |
+| 60% exposure cap | | 14.18% | |
+| 30% exposure cap | | 8.57% | |
+
+### The decision
+
+The stakeholder decided on 13 Nov 2026 to trade `trend_momentum` **on paper anyway, as a clearly labelled
+experiment** ("failed the ten-year test"):
+
+- **Paper only. Real money is barred for this rule**: Gate D can never be opened for it, whatever the paper run
+  shows. Only a rule that passes Gate B can ever reach Gate D.
+- **Gate B is unchanged.** No mark is loosened, re-read or re-run to let this rule pass. The verdict stays `fail`.
+- **This paper run is not Gate C.** Gate C is the incubation of a rule that has passed Gate B. This run measures how
+  the live engine, the broker and the ledger behave with a multi-day book (tracking, fills, stops, fail-safes) and
+  what this rule does live. Its result can never count as Gate C of this rule or any other.
+- **Level exposure caps** (the stakeholder's level limits of section 6, for this rule): Careful (`conservative`)
+  **30%**, Balanced (`balanced`) **60%**, Hunter (`aggressive`) **100%** of equity, gross and overnight. They are
+  tighten-only settings inside `BOOK_HARD_CEILINGS` (`config/profiles.yaml` `multi_day.rules.trend_momentum`).
+- `mom_12_1_band` (and its no-filter version) stays **off**. `trend_momentum` is the only multi-day rule switched
+  on when `KAIBOT_MULTIDAY=on`.
+- `KAIBOT_MULTIDAY` stays **off** by default and `all_levels.allow_overnight` stays **false** in the repository. The
+  stakeholder flips them himself on his Mac (`docs/ops/paper_start.md`).
+- The engine journal (`session_start.experiments`) and the heartbeat (`detail.experiments`) carry the label
+  (`evidence: failed_gate_b`, `experiment: true`, `real_money: false`) so the dashboard shows it on every screen
+  that shows the rule (`strategies/registry.EVIDENCE`).
+
+### Retirement trigger (Product proposes; the stakeholder confirms with the start)
+
+Stop the experiment, sell the rule's positions and switch `KAIBOT_MULTIDAY` off when **the rule's run drawdown
+(peak to trough of its mark-to-market equity since the start) exceeds 1.5 x the ten-year test's maximum drawdown at
+that level's cap**:
+
+| Level | Cap | Ten-year max drawdown | Retire at |
+|---|---|---|---|
+| Careful | 30% | 8.57% | **13%** |
+| Balanced | 60% | 14.18% | **21%** |
+| Hunter | 100% | 18.27% | **27%** |
+
+Why 1.5 x: the ten-year test includes the 2018 sell-off, the 2020 crash and the 2022 bear market, and the rule's
+worst drawdown in all of it is the number above. A drawdown half as large again on paper means the live rule is not
+the rule we tested (or the market is outside anything the test saw), and an experiment that has already failed Gate B
+gets no benefit of the doubt. A tighter trigger (1.0 x to 1.25 x) would very likely stop it inside its normal range,
+in which case we learn nothing about live behaviour. A looser one would let a known-failed rule lose more than its own
+history justifies. The figures are rounded to whole points. Two more stops, as in Gate C: the live daily returns track
+the `SimBroker` replay outside 10 bp (rolling 20 sessions) for 10 sessions in a row (the engine does not trade what
+we tested), or the ledger and the broker differ and the difference is not resolved the same day.
+
+The trigger is in `config/profiles.yaml` (`retire_drawdown_pct`) so the dashboard can show it. **The engine does not
+enforce it**: Product checks it in the daily status and stops the experiment when it is hit.
+
+**Interaction with the level's run-drawdown end (unchanged, a hard ceiling).** Each level's `run_drawdown_end_pct`
+(Careful 4%, Balanced 8%, Hunter 12%; `HARD_CEILINGS` caps it at 12%) still ends the *whole run* and sells everything,
+multi-day sleeves included (section 6). It is measured on the whole run, and it is lower than the triggers above, so at
+every level the run ends first. At Careful, 4% is well below the test's 8.57% drawdown at the 30% cap, so a Careful
+run is likely to end in a normal drawdown. That rule is not loosened here. If the stakeholder wants the experiment to
+run through the drawdowns the test saw, the choice is his: run it at Balanced or Hunter, or start a new run when one
+ends. The run-drawdown end is never raised above `HARD_CEILINGS`.
+
+### What the code does and does not do yet (13 Nov 2026, PR for #133)
+
+Done: the caps, the label, `trend_momentum` as the only rule on behind the flag, and the defaults off. **Not on `main`
+yet: a live daily path.** The live engine (`engine/core.py`) asks strategies only at minute bars (`Event.BAR_CLOSE`).
+The multi-day rules decide `AFTER_CLOSE`, and their targets are executed only by the research runner
+(`engine/daily.run_daily` with `SimBroker`). So with the flag on, the engine loads and labels the rule but places no
+`trend_momentum` orders. Wiring the daily path to the live engine (decide after the close, the portfolio builder at
+the rule's cap via `risk/profiles.rule_exposure_pct`, closing-auction orders through the order manager,
+protective stops) is a separate two-key story (Backend-quant and QA-Ops). The experiment starts trading only once it
+is merged.

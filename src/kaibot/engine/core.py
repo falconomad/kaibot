@@ -310,6 +310,7 @@ class Engine:
         self.run: dict | None = None
         self.day: Day | None = None
         self.pos = Positions()
+        self.experiments: list[dict] = []  # #133: set at each session start (_experiments)
         # S77: the local journal (the store's own when it journals, else an in-memory one) and the ledger folded
         # from it: positions per (strategy, symbol), cash, the mark-to-market close of every session.
         self.journal = journal or getattr(store, "journal", None) or Journal()
@@ -1045,11 +1046,13 @@ class Engine:
             self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
         self.check_account()
         self._startup_reconcile("session_start")  # S78: run again, never reset
-        self.store.event(
-            "session_start",
-            {"day": str(today), "start_equity": start_eq, "level": self.level(), "minutes": n_min},
-            self._rid(),
-        )
+        # #133 (decision 15 section 11): a multi-day rule with a Gate B verdict (an experiment that failed it) is
+        # named in the journal and the heartbeat so the dashboard labels it. Absent for intraday-only sessions.
+        self.experiments = self._experiments()
+        start = {"day": str(today), "start_equity": start_eq, "level": self.level(), "minutes": n_min}
+        if self.experiments:
+            start["experiments"] = self.experiments
+        self.store.event("session_start", start, self._rid())
 
     def _start_equity(self) -> float:
         se = self.ledger.start_equity(self.run["id"])
@@ -1234,6 +1237,21 @@ class Engine:
     def level_strategies(self) -> list[str]:
         """The live strategies the run's level lists (config/profiles.yaml); the owner's config can only remove."""
         return list(self.strategies.get(self.level(), registry.DEFAULT_LIVE))
+
+    def _experiments(self) -> list[dict]:
+        """The label rows of the session's multi-day rules that carry a Gate B verdict (risk/profiles.experiments).
+        Never raises: a label that cannot be built is logged and left out (it never stops trading or a stop)."""
+        r = self.day.rules if self.day else None
+        names = r.strategies if r is not None else self.level_strategies()
+        if not registry.multi_day_names(names):
+            return []
+        try:
+            from kaibot.risk.profiles import experiments
+
+            return experiments(names, self.level())
+        except Exception:
+            log.exception("experiment label unavailable")
+            return []
 
     def live_strategies(self) -> tuple[Strategy, ...]:
         """The registered live strategies this session runs, in registry order."""
@@ -1978,6 +1996,8 @@ class Engine:
             "code_sha": self.code,
             "scan": dict(d.scan) if d else None,
         }
+        if self.experiments:
+            st["experiments"] = self.experiments  # #133: the dashboard's experiment label (heartbeat detail)
         if self.run is None and d is not None and d.run_id:
             st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
         return st

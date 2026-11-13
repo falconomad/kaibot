@@ -56,6 +56,19 @@ multi_day:
     aggressive:
       <<: *md_default
       max_name_pct: 20
+  # Multi-day rules on the live (paper) path. Only with KAIBOT_MULTIDAY=on (default off), and only a rule with
+  # `enabled: true` that passed Gate B or is a stakeholder experiment (strategies/registry.EVIDENCE). Stakeholder,
+  # 13 Nov 2026 (decision 15 section 11): trend_momentum FAILED Gate B and runs as a paper EXPERIMENT only, never
+  # real money; mom_12_1_band stays off. max_exposure_pct: the rule's gross and overnight cap per level, tighten-only
+  # on top of `levels` above and BOOK_HARD_CEILINGS. retire_drawdown_pct: the experiment's retirement trigger
+  # (1.5 x the ten-year test's max drawdown at that cap; section 11), checked in the daily status.
+  rules:
+    trend_momentum:
+      enabled: true
+      max_exposure_pct: {conservative: 30, balanced: 60, aggressive: 100}
+      retire_drawdown_pct: {conservative: 13, balanced: 21, aggressive: 27}
+    mom_12_1_band:
+      enabled: false
 shadow_strategies: [orb_stocks_in_play, news_continuation]   # logged "would have" trades, never sent
 all_levels:
   allow_short: false

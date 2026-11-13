@@ -17,6 +17,7 @@ module, add one line below, list its files under `fingerprint.strategies` in con
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 
 from kaibot.strategies.base import Holding, Mode, Strategy
 from kaibot.strategies.dip import DipReversal
@@ -46,6 +47,46 @@ RETIRED: frozenset[str] = frozenset({SpyLateMomentum.name})
 MULTI_DAY: tuple = tuple(_MOMENTUM.values())
 RESEARCH_ONLY: dict = {s.name: s for s in MULTI_DAY}
 assert not set(RESEARCH_ONLY) & set(BY_NAME), "a multi-day rule must not share a name with a registered one"
+
+
+@dataclass(frozen=True)
+class Evidence:
+    """What the evidence gate said about a multi-day rule (decision 15 sections 7 and 11). The engine journal
+    (`session_start`) and the heartbeat (`detail.experiments`) carry it so the dashboard can label the rule.
+
+    `status`: `failed_gate_b` | `passed_gate_b`. `experiment`: the stakeholder lets the rule trade on paper although
+    it failed Gate B (section 11); such a run is NOT Gate C of a passed rule. `real_money` is False for every rule
+    here: no rule below may ever trade real money (Gate D is the stakeholder's, and only for a rule that passed)."""
+
+    status: str
+    experiment: bool
+    label: str
+    decided: str  # ISO date of the decision
+    decision: str  # where it is written
+    real_money: bool = False
+
+
+FAILED_GATE_B, PASSED_GATE_B = "failed_gate_b", "passed_gate_b"
+_CORE_PIT = "docs/decisions/15_engine_v3.md section 11 (core_pit, 13 Nov 2026, code 7c0123e)"
+EVIDENCE: dict[str, Evidence] = {
+    "trend_momentum": Evidence(FAILED_GATE_B, True, "Experiment: failed the ten-year test", "2026-11-13",
+                               _CORE_PIT),
+    "mom_12_1_band": Evidence(FAILED_GATE_B, False, "Failed the ten-year test", "2026-11-13", _CORE_PIT),
+}
+assert set(EVIDENCE) <= set(RESEARCH_ONLY), "evidence is recorded for multi-day rules only"
+assert not any(e.real_money for e in EVIDENCE.values()), "no rule that failed Gate B may trade real money"
+
+
+def evidence(name: str) -> Evidence | None:
+    """The recorded Gate B verdict of a multi-day rule (a neighbour `rule~x` has its rule's); None: not judged."""
+    return EVIDENCE.get(str(name).split("~", 1)[0])
+
+
+def may_run_on_paper(name: str) -> bool:
+    """A multi-day rule may be switched on for paper only if it passed Gate B, or the stakeholder made it an
+    experiment (decision 15 section 11). Not judged, or failed without the experiment decision: no."""
+    e = evidence(name)
+    return e is not None and (e.status == PASSED_GATE_B or e.experiment)
 
 
 class RefusedStrategy(ValueError):
