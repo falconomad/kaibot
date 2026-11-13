@@ -4,8 +4,9 @@ When the engine is silent, the watchdog (engine/watchdog.py) and the database de
 sell the whole account. Both follow one plan, built here from what the broker says (positions, open orders) and
 what the book says (which sleeve holds which shares, at which stop):
 
-1. cancel every open, unfilled ENTRY order of Kaibot (a buy whose client order id starts with `kb`: the intraday
-   `kb-<run>-<signal>-<n>` and the order manager's `kb<run>-<strategy>-<symbol>-...`);
+1. cancel every open ENTRY order of Kaibot not yet completely filled (a partly filled one has its rest cancelled):
+   a buy whose client order id starts with `kb`, the intraday `kb-<run>-<signal>-<n>` and the order manager's
+   `kb<run>-<strategy>-<symbol>-...`;
 2. verify that every multi-day sleeve has its protective stop resting at the broker, and re-create a missing one
    (a GTC stop sell, whole shares, at the sleeve's last known stop; if none is known or it is not below the last
    price, `EMERGENCY_STOP_PCT` below the last price), never for more shares than the position has free;
@@ -121,10 +122,12 @@ class Plan:
 
 
 def is_entry(o: dict) -> bool:
-    """An open, unfilled Kaibot buy: an entry (intraday) or a target purchase (multi-day)."""
+    """An open Kaibot buy not yet completely filled: an entry (intraday) or a target purchase (multi-day). A partly
+    filled one counts (as before S80): cancelling its rest only takes risk off, and the shares already filled keep
+    their bracket legs (intraday) or get their protective stop (multi-day). `filled_at` is set only by the fill
+    that completes an order (Alpaca, SimBroker)."""
     return (o.get("side") == "buy" and str(o.get("client_order_id") or "").startswith("kb")
-            and o.get("status") in OPEN_STATES and not o.get("filled_at")
-            and not float(o.get("filled_qty") or 0))
+            and o.get("status") in OPEN_STATES and not o.get("filled_at"))
 
 
 def _left(o: dict) -> float:

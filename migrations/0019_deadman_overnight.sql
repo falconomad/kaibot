@@ -9,7 +9,8 @@
 -- heartbeat was stale: every position sold, every protective stop cancelled. From this migration on, whenever the
 -- market is open and the heartbeat is older than 3 minutes, the dead-man follows the same plan as the on-laptop
 -- watchdog (src/kaibot/engine/failsafe.py; tests/test_failsafe_drills.py runs both on the same accounts):
---   1. cancel every open, unfilled Kaibot ENTRY order (a buy whose client_order_id starts with "kb");
+--   1. cancel every open Kaibot ENTRY order not yet completely filled (a buy whose client_order_id starts with "kb";
+--      a partly filled one has the rest cancelled; the filled shares keep their bracket legs);
 --   2. verify that every multi-day sleeve (the active run's last kaibot.ledger_position rows of a multi-day
 --      strategy) has its protective GTC stop at the broker; re-create a missing one in whole shares, at the
 --      sleeve's stop_px, else 10% below the last price (risk/gate.py GAP_SCENARIO_PCT), never for more shares than
@@ -26,7 +27,8 @@
 -- 21:59 UTC on weekdays; the function decides. A pass first READS the account (GET /v2/positions and GET
 -- /v2/orders?status=open&nested=true; the request ids go into kaibot.deadman_pass), and the next run ACTS on the
 -- answers (net._http_response). Reads are every 5 minutes while the engine is silent, every minute in the flatten
--- window. A pass whose answers have not come within 3 minutes is dropped ('expired').
+-- window. Only a read made in the last 3 minutes is ever acted on: an older pass, or one whose answers have not come
+-- within 3 minutes, is dropped ('expired'), and so is every open read when the engine beats again.
 --
 -- Strategies: kaibot.strategy_holding names the rules that hold across sessions (the strategy registry of 0016
 -- has the intraday ones only). tests/test_failsafe_drills.py keeps it equal to strategies/registry.MULTI_DAY. A
@@ -152,7 +154,7 @@ begin
     if o->>'side' = 'buy' and coalesce(o->>'client_order_id', '') like 'kb%'
        and o->>'status' in ('new', 'accepted', 'pending_new', 'partially_filled', 'held', 'accepted_for_bidding',
                             'pending_replace')
-       and o->>'filled_at' is null and coalesce((o->>'filled_qty')::numeric, 0) = 0 then
+       and o->>'filled_at' is null then  -- a partly filled entry too: its rest is cancelled, what filled keeps its legs
       perform net.http_delete(url := base || '/v2/orders/' || (o->>'id'), headers := hdr,
                               timeout_milliseconds := 10000);
       res := jsonb_set(res, '{canceled}', (res->'canceled') || to_jsonb(o->>'symbol'));
@@ -323,6 +325,9 @@ begin
   win := coalesce(p_flatten, ny >= close_ts - interval '4 minutes' and ny < close_ts);
   select h.ts into hb from kaibot.heartbeat h where h.process = 'engine';
   if hb is not null and hb > t - interval '3 minutes' then
+    -- a read made while the engine was briefly stale is never acted on later (review of #180)
+    update kaibot.deadman_pass set state = 'expired', result = '{"error": "the engine beat again"}'::jsonb
+      where state = 'reading';
     return 'engine alive';
   end if;
   select decrypted_secret into key_id from vault.decrypted_secrets where name = 'kaibot_alpaca_paper_key_id';
@@ -338,6 +343,10 @@ begin
   hdr := jsonb_build_object('APCA-API-KEY-ID', key_id, 'APCA-API-SECRET-KEY', secret);
 
   -- act on the newest pass whose answers are in
+  -- only a read of the last 3 minutes is acted on; anything older expires (an old view of the account could put a
+  -- stop on a position that is flat by now, or sell shares that are gone)
+  update kaibot.deadman_pass set state = 'expired', result = '{"error": "read more than 3 minutes ago"}'::jsonb
+    where state = 'reading' and (ts < t - interval '3 minutes' or ts > t);
   select * into p from kaibot.deadman_pass dp where dp.state = 'reading' order by dp.id desc limit 1;
   if p.id is not null then
     if exists (select 1 from net._http_response r where r.id = p.req_positions)
@@ -354,9 +363,6 @@ begin
                               jsonb_array_length(res->'canceled'), jsonb_array_length(res->'stops'),
                               jsonb_array_length(res->'closed'), jsonb_array_length(res->'sold')),
                        'pass expired: the broker did not answer');
-    elsif p.ts < t - interval '3 minutes' then
-      update kaibot.deadman_pass set state = 'expired', result = '{"error": "no answer within 3 minutes"}'::jsonb
-        where id = p.id;
     else
       return 'waiting for the broker''s answers';
     end if;

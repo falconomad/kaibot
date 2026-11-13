@@ -3,9 +3,9 @@ the account closed when the engine stops beating. See docs/decisions/08_tech_des
 docs/ops/failsafe.md.
 
 While the market is open, every 15 s:
-- engine heartbeat older than 90 s -> cancel every open, unfilled Kaibot ENTRY order (a buy whose client_order_id
-  starts with "kb": intraday "kb-<run>-..." and the order manager's "kb<run>-<strategy>-..."), record a halt and an
-  event (the alarm). Protective stops and sales are left alone: they take risk off.
+- engine heartbeat older than 90 s -> cancel every open Kaibot ENTRY order not yet completely filled (a buy whose
+  client_order_id starts with "kb": intraday "kb-<run>-..." and the order manager's "kb<run>-<strategy>-..."),
+  record a halt and an event (the alarm). Protective stops and sales are left alone: they take risk off.
 - the same, at most once a minute while stale: verify that every multi-day sleeve has its protective GTC stop at the
   broker and re-create a missing one (whole shares, at the sleeve's last stop, else 10% below the last price;
   engine/failsafe.py). The book (which sleeve holds what) comes from the engine's local journal, read-only, else

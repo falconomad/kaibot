@@ -31,7 +31,7 @@ def test_an_entry_is_an_open_unfilled_kaibot_buy():
     assert failsafe.is_entry({**o, "client_order_id": "kb3-trend_momentum-B-20260804-target-1"})
     assert not failsafe.is_entry({**o, "side": "sell"})
     assert not failsafe.is_entry({**o, "client_order_id": "manual"})
-    assert not failsafe.is_entry({**o, "filled_qty": "3"})
+    assert failsafe.is_entry({**o, "filled_qty": "3", "status": "partially_filled"})  # the rest is cancelled
     assert not failsafe.is_entry({**o, "status": "filled"})
 
 

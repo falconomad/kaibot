@@ -624,3 +624,36 @@ def test_positions_and_orders_json_shapes():
     a_pos = positions_json(type("B", (), {"positions": lambda self: {"A": {"qty": 3, "avg_entry_price": 9.5}}})())
     assert a_pos == [{"symbol": "A", "qty": "3", "current_price": "9.5"}]
     assert orders_json(type("B", (), {"open_orders": lambda self: [], "orders": {}})()) == []
+
+
+def test_the_dead_man_never_acts_on_an_old_account_read(db):
+    """Backend-quant review of #180: a pass read at 11:00 while the engine was briefly stale must not be acted on
+    when the engine goes silent again at 15:56. Only a read from the last 3 minutes is acted on; older ones expire."""
+    import json
+
+    ny = lambda h, m, s=0: pd.Timestamp(f"{DAY2} {h:02d}:{m:02d}:{s:02d}", tz=ET).to_pydatetime()  # noqa: E731
+    db.sql("delete from kaibot.ledger_position; delete from kaibot.deadman_pass; delete from net.calls; "
+           "delete from net._http_response; delete from kaibot.heartbeat")
+    assert db.check(ny(11, 0)) == "reading the account"  # the engine is briefly stale
+    ids = db.sql("select req_positions, req_orders from kaibot.deadman_pass order by id desc limit 1")[0].split("|")
+    for i, body in zip(ids, ([{"symbol": "A", "qty": "10", "current_price": "100"}], [BRACKET_A]), strict=True):
+        db.sql(f"insert into net._http_response (id, status_code, content) values ({i}, 200, '{json.dumps(body)}')")
+    db.beat(ny(11, 0, 30))  # it beats again
+    assert db.check(ny(11, 1)) == "engine alive"
+    assert db.one("select count(*) from kaibot.deadman_pass where state = 'reading'") == "0"  # expired on alive
+    # even a pass left 'reading' (the alive path skipped) is too old to act on hours later
+    db.sql("update kaibot.deadman_pass set state = 'reading'")
+    db.sql("delete from kaibot.heartbeat")  # the engine goes silent again
+    said = db.check(ny(15, 56))
+    assert not said.startswith("acted") and said.endswith("reading the account")
+    assert db.one("select state from kaibot.deadman_pass order by id limit 1") == "expired"
+    assert db.one("select count(*) from net.calls where method <> 'GET'") == "0"  # nothing sent on the old view
+
+
+def test_a_partly_filled_entry_is_cancelled_too():
+    """The rest of a partly filled entry is cancelled (it only takes risk off); what filled keeps its legs."""
+    o = {"side": "buy", "client_order_id": "kb-1-2-1", "status": "partially_filled", "filled_at": None,
+         "filled_qty": "3", "qty": "10"}
+    assert failsafe.is_entry(o)
+    p = failsafe.plan({}, [{**o, "id": "x", "symbol": "A"}], None, flatten=False)
+    assert [c["symbol"] for c in p.cancel] == ["A"]

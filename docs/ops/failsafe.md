@@ -11,7 +11,7 @@ and stop" sell everything.
 | Engine halts | engine | bad state | no new entries for the session (exits keep being managed); `Engine.entry_block()` says why, for the multi-day target path too |
 | Daily stop | engine | a bad day, overnight gaps included | the day's change in mark-to-market equity (start = yesterday's close mark) at the level's stop: entries blocked for the day, intraday sleeves flattened, multi-day sleeves keep their stops |
 | Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)) |
-| Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel open unfilled Kaibot buys (`kb...`), halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
+| Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel open Kaibot buys (`kb...`) not yet completely filled, halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
 | Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | with 0019: heartbeat > 3 min old while the market is open: the same plan as the watchdog (cancel entries, verify and re-create stops, alarm); from close minus 4 min to the close: sell the intraday shares only. Before 0019 (0006/0017): `DELETE /v2/positions?cancel_orders=true` at close minus 4 min, i.e. the whole account |
 
 Restart and recovery (crash, 10-minute outage, API outage, half-written order, two engines): see
@@ -80,7 +80,8 @@ One plan, two implementations: `src/kaibot/engine/failsafe.py` (the watchdog) an
 `migrations/0019_deadman_overnight.sql` (the dead-man). `tests/test_failsafe_drills.py` runs both on the same
 accounts and checks that they agree.
 
-- **Entries:** every open, unfilled buy whose client id starts with `kb` (intraday `kb-<run>-<signal>-<n>`, order
+- **Entries:** every open buy not yet completely filled (a partly filled one has its rest cancelled; the filled
+  shares keep their legs or get their stop) whose client id starts with `kb` (intraday `kb-<run>-<signal>-<n>`, order
   manager `kb<run>-<strategy>-<symbol>-<yyyymmdd>-<purpose>-<n>`) is cancelled. Sells (stops, sales) are never touched.
 - **Which shares are multi-day**, per symbol: the larger of what the book says and what the multi-day stops at the
   broker cover (their client ids name the strategy), never more than the broker holds. The book is, for the watchdog,
@@ -92,13 +93,16 @@ accounts and checks that they agree.
   if none is known, or it is not below the last price, 10% below the last price (`risk/gate.GAP_SCENARIO_PCT`). Never
   for more shares than are free (other sell orders hold shares); what cannot be covered is an alarm (`unprotected`).
   Client ids: `kbwd-<strategy>-<symbol>-<time>-wdstop` (watchdog), `kbdm-...-dmstop` (dead-man). The engine treats
-  them as orders on a symbol it holds.
+  them as orders on a symbol it holds; the order manager adopting them as the sleeve's own stop is #188, which must
+  land before `KAIBOT_MULTIDAY=on`.
 - **Never a stop on a flat position (#179's lesson):** the fail-safes only ADD a stop where none covers the shares;
   they never cancel and re-arm one. The watchdog reads the position again right before each new stop and sends
-  none if the shares are gone (a stop filled in between). The dead-man acts on an account read up to a minute old,
+  none if the shares are gone (a stop filled in between). The dead-man acts only on an account read made in the last 3 minutes (older reads expire, and every open read
+  expires when the engine beats again; drilled), normally about a minute old,
   so a stop that filled in that minute could be followed by its new stop on a flat position; Alpaca then rejects it
   for want of shares only if shorting is off on the paper account. **Turn shorting off on the paper account**
-  (Alpaca dashboard, account configuration) before applying 0019, and keep #179 (the order manager's re-arm) fixed
+  before applying 0019 (Alpaca dashboard, paper account, Account Configurations, Shorting off; API:
+  `PATCH /v2/account/configurations {"no_shorting": true}`; check `GET /v2/account` shows `shorting_enabled: false`), and keep #179 (the order manager's re-arm) fixed
   before protective stops go live.
 - **Fail closed:** a position that neither the book nor a multi-day stop explains counts as intraday and is sold at
   the close minus 5 minutes. So with Supabase down AND the journal unreadable, a multi-day position keeps its place
@@ -112,7 +116,7 @@ accounts and checks that they agree.
   drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills.
 - **Turning multi-day rules on:** `KAIBOT_MULTIDAY=on` in the engine's environment (the `.env`); default off, and the
   engine refuses to load a multi-day rule without it. It is the explicit switch for the first paper start (#133,
-  after Gate B). It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level
+  after Gate B) and needs #188 first. It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level
   limits, the stakeholder's) still caps overnight exposure at 0 while false, and migration 0019 must be applied first.
 
 ### Drills (`tests/test_failsafe_drills.py`, every one with 40 shares of a multi-day sleeve held from the day before)
