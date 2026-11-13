@@ -835,10 +835,11 @@ def test_nothing_the_engine_runs_knows_about_the_multiday_research():
     functions instead of copies of them."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
         # engine/daily_report.py: the research command's Gate B report on the engine's fills (#161) reads the
-        # harness's data bundle and pass marks; the live engine never imports it (test_engine_momentum)
+        # harness's data bundle and pass marks; the live engine never imports it (test_engine_momentum).
+        # replay/oneshots_daily.py: the research-only one-shot rules of #112 (test_oneshots checks nobody imports it)
         rel = f.relative_to(ROOT / "src" / "kaibot").as_posix()
         if f.name not in ("multiday.py", "multiday_rules.py", "multiday_core.py", "earnings.py") \
-                and rel != "engine/daily_report.py":
+                and rel not in ("engine/daily_report.py", "replay/oneshots_daily.py"):
             text = f.read_text()
             assert "multiday" not in text and "replay.earnings" not in text, f
     from kaibot.broker import shadow_costs

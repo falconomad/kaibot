@@ -727,15 +727,18 @@ class SlotReplay:
 def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, book: MBook, rule: CoreRule,
                              i0: int, i1: int, *, runs: int = 500, seed: int = 127, fill: str = "base",
                              cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-                             progress: Callable[[int], None] | None = None, costs=None) -> dict:
+                             progress: Callable[[int], None] | None = None, costs=None,
+                             fills: Mapping[str, tuple[str, float]] | None = None) -> dict:
     """Gate B mark 3 (decision 15 sections 7 and 10, docs/ops/gate_v2.md hand-off 4): `runs` seeded random
     portfolios that copy the rule's positions slot by slot and draw only the names, from the stocks that pass the
     price and volume filter on the decision's data (`Signals.ok` of the session before the fill: price >= $5,
     20-day dollar volume >= $50M, and index membership on the point-in-time universe) and have a bar to fill on.
     The rule's own names are run through the same replay as a check (`simulated_strategy_sharpe`); the lower of
     the two percentiles counts. Returns `kaibot.evaluation.random_control.ControlResult` as a dict plus the per-run
-    numbers of the report (Sharpe, CAGR, drawdown, return, average exposure) and the CAGR percentile."""
-    where, factor = FILLS[fill]
+    numbers of the report (Sharpe, CAGR, drawdown, return, average exposure) and the CAGR percentile.
+    `fills`: fill name -> (where, cost factor) of the rule's own runs (default `FILLS`; the one-shots of #112 whose
+    base fill is the next open pass their own)."""
+    where, factor = (fills or FILLS)[fill]
     caps = Caps(max_positions=spec.max_names, max_exposure_pct=float(exposure_pct))
     slots = matched_schedule(book, rule, market.raw)
     sig, raw = market.signals, market.raw
