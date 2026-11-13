@@ -26,6 +26,14 @@ from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
 
 EXIT_M = 385  # 15:55 ET bar
 BLACKOUT_FOMC = (240, 300)  # 13:30-14:30 ET around the 14:00 statement
+FOMC_M, BLACKOUT_MIN = 270, 30  # 14:00 ET statement, +-30 min (engine/events.py WINDOW_MIN)
+
+
+def fomc_blackout(window: int | None = None) -> tuple[int, int]:
+    """(first, last) blocked decision minute around the 14:00 FOMC statement. `window` (#66, the owner's quiet
+    window) can only widen the +-30 min, exactly as engine/events.in_blackout does; None = BLACKOUT_FOMC."""
+    w = BLACKOUT_MIN if window is None else max(BLACKOUT_MIN, int(window))
+    return FOMC_M - w, FOMC_M + w
 
 
 @dataclass
@@ -120,12 +128,13 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
                   pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1",
                   target_r: float | None = None, size_atr: float | None = None,
-                  costs: CostModel | None = None) -> Book:
+                  costs: CostModel | None = None, event_window: int | None = None) -> Book:
     """`atr_mult` (stop = atr_mult x 5-minute ATR) and `target_r` (profit target in R; None = the variant's
     pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged.
     `size_atr` (experiments only, None = off) keeps the dollar risk of a stop `size_atr` ATRs away: the quantity
     is what the gate allows at that reference stop, scaled by size_atr / atr_mult, and never more than the gate
-    allows for the real stop. `costs`: None or v1 = the unchanged v1 path; v2 = `kaibot.broker.costs_v2`."""
+    allows for the real stop. `costs`: None or v1 = the unchanged v1 path; v2 = `kaibot.broker.costs_v2`.
+    `event_window` (#66): the owner's Fed quiet window in minutes (30..90, can only widen); None = +-30."""
     v2 = None if costs is None or costs.name == "v1" else costs
     advs: dict[str, np.ndarray] = {}
 
@@ -135,6 +144,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
         return float(advs[sym][r])
 
     fees_of = sell_fees if v2 is None else v2.sell_fees
+    bl_lo, bl_hi = fomc_blackout(event_window)
     tr = target_r if target_r is not None else (2.0 if variant == "A" else 1.5)
     book = Book(equity0)
     row_of = {s: {d: n for n, d in enumerate(sd.dates)} for s, sd in bars.items()}
@@ -192,7 +202,7 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
             g = cand_by_m.get(m)
             if g is None or halted or off[m] or m < pause_until or m + 1 > 375:
                 continue
-            if d in fomc and BLACKOUT_FOMC[0] <= m <= BLACKOUT_FOMC[1]:
+            if d in fomc and bl_lo <= m <= bl_hi:
                 continue
             for _, cnd in g.iterrows():
                 if cnd["news_24h"] or any(p["symbol"] == cnd["symbol"] for p in open_pos):

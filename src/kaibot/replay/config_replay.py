@@ -64,7 +64,8 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
         if start <= d <= end:
             reg[d] = (off | (np.isfinite(vx) and vx > rules.vix_max), vx)
     book = run_portfolio(prep.bars, cands, reg, fomc, rules.policy, equity0=equity0, variant="A",
-                         pause_after_losses=rules.pause_losses, pause_minutes=rules.pause_minutes)
+                         pause_after_losses=rules.pause_losses, pause_minutes=rules.pause_minutes,
+                         event_window=rules.event_window_min)
     trades = pd.DataFrame([t.__dict__ for t in book.trades])
     daily = pd.DataFrame(book.daily)
     n = len(trades)
