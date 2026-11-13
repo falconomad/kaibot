@@ -23,6 +23,7 @@ from kaibot.strategies.base import Holding, Mode, Strategy
 from kaibot.strategies.dip import DipReversal
 from kaibot.strategies.momentum import VERSIONS as _MOMENTUM
 from kaibot.strategies.news_continuation import NewsContinuation
+from kaibot.strategies.noise_band import versions as _noise_band_versions
 from kaibot.strategies.orb import OrbStocksInPlay
 from kaibot.strategies.spy_momentum import SpyLateMomentum
 
@@ -89,6 +90,14 @@ def may_run_on_paper(name: str) -> bool:
     return e is not None and (e.status == PASSED_GATE_B or e.experiment)
 
 
+# Intraday research-only rules (issue #202): `spy_noise_band` and its five pre-declared neighbours, for the Gate B
+# run through the engine with SimBroker (scripts/spy_engine.py). Found by `get` (the engine asks it for a
+# position's own exits), but NOT in STRATEGIES (no SQL registry row, no level, no owner toggle) and never returned
+# by `live`, so no level and no owner config can switch them on: the research run hands the rule to its own engine.
+RESEARCH_INTRADAY: dict = dict(_noise_band_versions())
+assert not set(RESEARCH_INTRADAY) & (set(BY_NAME) | set(RESEARCH_ONLY)), "research names must be unique"
+
+
 class RefusedStrategy(ValueError):
     """A multi-day strategy was asked for on the live path."""
 
@@ -117,7 +126,7 @@ def refuse_multi_day(names_on) -> None:
 
 
 def get(name: str) -> Strategy | None:
-    return BY_NAME.get(name) or RESEARCH_ONLY.get(name)
+    return BY_NAME.get(name) or RESEARCH_ONLY.get(name) or RESEARCH_INTRADAY.get(name)
 
 
 def names(mode: Mode | None = None) -> tuple[str, ...]:

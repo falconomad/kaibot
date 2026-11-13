@@ -31,6 +31,15 @@
 #       random-timing control of decision 15 section 10 (500 seeded runs by default, about a minute per version on
 #       synthetic bars of the real size; KAIBOT_SPY_CONTROL_RUNS changes it, and a report from before #149 or with a
 #       different number of runs is run again), printed under the table.
+#   ./scripts/run_experiments.sh spy_engine  issue #202: the Gate B go/no-go of spy_noise_band (decision 15): the
+#       frozen rule through the ENGINE with SimBroker + SimClock on SPY minute bars, 2017-05-01 to the end, on cost
+#       model v2 and at the prereg's 0.5 / 1 bp, plus the five neighbours (11 engine runs, KAIBOT_SPY_ENGINE_JOBS at a
+#       time, default half the CPUs), the random-timing control (KAIBOT_SPY_CONTROL_RUNS, 500), then ONE page with
+#       decision 15's Gate B marks, the prereg's marks and the harness side by side, written to
+#       data/reports/experiments_spy_engine.md. Runs the harness's spy_noise_band first if its report is missing.
+#       Needs no .env; uses data/daily (SPY total return) and data/inputs/fred_vixcls.json when present.
+#       About 40 minutes of CPU per engine run (measured on synthetic bars of the real size): allow 1 to 1.5
+#       hours on an 8-10 core Mac with the default jobs (an estimate), 7-8 hours on one core.
 #   ./scripts/run_experiments.sh oneshots    issue #112: the six one-shot tests of decision 15 (candidate 5), each ONE
 #       frozen pre-registered run (docs/prereg/): orb_stocks_in_play (keep or delete) and news_continuation on
 #       today's list with minute bars, then pullback_uptrend, ath_breakout (a distribution over random signal
@@ -173,6 +182,29 @@ if [ "${1:-}" = "spy" ]; then  # reads only data/bars_1m/symbol=SPY: no .env nee
   done
   echo
   "$PY" scripts/spy_noise_band.py --summary --level "$LEVEL"
+  exit 0
+fi
+if [ "${1:-}" = "spy_engine" ]; then  # issue #202: reads data/bars_1m/symbol=SPY (+ data/daily, VIX cache): no .env
+  RUNS="${KAIBOT_SPY_CONTROL_RUNS:-500}"
+  JOBS="${KAIBOT_SPY_ENGINE_JOBS:-$("$PY" -c 'import os; print(max(1, (os.cpu_count() or 2) // 2))')}"
+  # the harness numbers for the side-by-side (a few minutes; skipped when its report exists)
+  if ! "$PY" scripts/spy_noise_band.py --has spy_noise_band --level "$LEVEL" --start "$START" --end "$END" \
+      --control-runs "$RUNS"; then
+    echo "== harness spy_noise_band: running (log: logs/experiment_spy_spy_noise_band.log)"
+    awake "$PY" scripts/spy_noise_band.py --start "$START" --end "$END" --level "$LEVEL" --version spy_noise_band \
+      --control-runs "$RUNS" > logs/experiment_spy_spy_noise_band.log 2>&1 \
+      || { echo "harness run failed: see logs/experiment_spy_spy_noise_band.log"; exit 1; }
+  fi
+  if "$PY" scripts/spy_engine.py --has --level "$LEVEL" --start "$START" --end "$END" --control-runs "$RUNS"; then
+    echo "== spy_engine: report exists, skipped"
+  else
+    echo "== spy_engine: 11 engine runs, $JOBS at a time (log: logs/experiment_spy_engine.log)"
+    awake "$PY" scripts/spy_engine.py --start "$START" --end "$END" --level "$LEVEL" --control-runs "$RUNS" \
+      --jobs "$JOBS" > logs/experiment_spy_engine.log 2>&1 \
+      || { echo "spy_engine failed: see logs/experiment_spy_engine.log, then run this again"; exit 1; }
+  fi
+  echo
+  "$PY" scripts/spy_engine.py --summary --level "$LEVEL"
   exit 0
 fi
 [ -f "$ENV_FILE" ] || { echo "No .env found at $ENV_FILE (set KAIBOT_ENV_FILE=/path/to/.env)"; exit 1; }
