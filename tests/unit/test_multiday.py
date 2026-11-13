@@ -929,6 +929,29 @@ def test_run_writes_reports_trades_and_trial_rows(runs, mkt):
     assert "Status: provisional (decision 15)" in md and rep["status"].startswith("provisional")
 
 
+def test_run_writes_a_spy_daily_csv_on_the_sessions_of_the_daily_csvs(runs, mkt):
+    """#185: Gate B/C need SPY per session beside the daily CSVs (`gate_v2_report.py --spy`)."""
+    data, _, _ = runs
+    b, _, _ = mkt
+    close = pd.Series(b.c[:, b.col("SPY")], index=pd.to_datetime(b.dates))
+    for f in (data / "reports").glob("walkforward_balanced_md_*.json"):
+        rep = json.loads(f.read_text())
+        name = rep["files"]["spy_daily"]
+        assert name == f"spy_daily_{f.stem.removeprefix('walkforward_balanced_')}.csv"
+        spy = pd.read_csv(data / "reports" / name)
+        assert list(spy.columns) == ["date", "ret", "ret_kind", "ret_total", "ret_price_only"]
+        for which in ("tuned", "default"):
+            daily = pd.read_csv(data / "reports" / rep["files"][which]["daily"])
+            assert list(spy["date"]) == [str(d)[:10] for d in daily["date"]]  # the same sessions, in order
+        # no daily store in this fixture: price only, and labelled so in the file and the report
+        assert set(spy["ret_kind"]) == {"spy_price_only"} and spy["ret_total"].isna().all()
+        assert rep["spy_daily"]["ret"] == "spy_price_only" and "no SPY in the daily store" in rep["spy_daily"]["note"]
+        want = close.pct_change().reindex(pd.to_datetime(spy["date"])).to_numpy()
+        assert np.allclose(spy["ret"], want) and np.allclose(spy["ret_price_only"], want)
+    usage = (ROOT / "scripts" / "gate_v2_report.py").read_text().split('"""')[1]
+    assert "--spy data/reports/spy_daily_md_trend_highs_<ts>.csv" in usage
+
+
 def test_summary_table_has_both_benchmarks_and_the_survivorship_line(runs, monkeypatch, capsys):
     data, uni, _ = runs
     end = json.loads(next((data / "reports").glob("walkforward_balanced_md_trend_*.json")).read_text())["end"]

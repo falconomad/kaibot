@@ -12,9 +12,11 @@ cannot pass either.
 
 Reading of the marks where the decision leaves room (the strict one each time; listed for Product in
 docs/ops/gate_v2.md):
-- mark 1 "6 of 10 calendar years": a first or last part-year counts as a year; the test must span at least 10
-  calendar years; with more than 10, at least 60% of them (rounded up) must be positive; a year of exactly zero
-  is not positive.
+- mark 1 "6 of 10 calendar years" (decision 15 section 10): a first or last part-year counts as a year only
+  when it has at least 6 months of out-of-sample data (6 calendar months with a session); a shorter one is
+  shown in the report as not counted and still counts in the total return. At least 10 counted years; with more
+  than 10, at least 60% of the counted years (rounded up) must be positive; a year of exactly zero is not
+  positive.
 - mark 2: CAGR and drawdown of the rule and of SPY over the same sessions, drawdown marked to market.
 - mark 3: the control must have filled every slot (`matched`), else the mark is unknown. When the rule's own
   names were also run through the control's simulator, the lower of the two percentiles is used.
@@ -75,6 +77,19 @@ class GateV2:
         return cls(cfg, hashlib.sha256(raw).hexdigest())
 
     @property
+    def bootstrap_kw(self) -> dict:
+        """The one bootstrap block of the config (decision 15 section 10), as `mtm.drawdown_bands` keywords."""
+        b = self.cfg["gate_c"]["bootstrap"]
+        if b.get("method", "stationary") != "stationary":
+            raise ValueError(f"config/gate_v2.yaml: bootstrap method {b['method']!r} is not implemented")
+        return {"runs": int(b["runs"]), "mean_block": float(b["mean_block_sessions"]), "seed": int(b["seed"])}
+
+    def counted(self, year: dict) -> bool:
+        """Whether a calendar-year row (`mtm.calendar_years`) counts in mark 1: a full year, or a part-year with
+        at least `part_year_min_months` months of out-of-sample data."""
+        return bool(not year["partial"] or year["months"] >= int(self.cfg["gate_b"]["mark_1"]["part_year_min_months"]))
+
+    @property
     def stats_kw(self) -> dict:
         s = self.cfg["statistics"]
         return {"periods": int(s["periods_per_year"]), "haircut": float(s["sharpe_haircut"]),
@@ -118,7 +133,8 @@ def _window(gate: GateV2, run: Run) -> tuple[pd.Series, pd.Series, pd.Series | N
 def mark_1(gate: GateV2, net: pd.Series) -> dict:
     """Net return positive overall and in at least 6 of 10 calendar years."""
     m = gate.cfg["gate_b"]["mark_1"]
-    years = mtm.calendar_years(net)
+    every = mtm.calendar_years(net)
+    years = [y for y in every if gate.counted(y)]
     n, pos = len(years), sum(y["return"] > 0.0 for y in years)
     need = max(int(m["min_positive_years"]), math.ceil(m["min_positive_years"] * n / m["of_years"] - 1e-9))
     total = mtm.total_return(net)
@@ -130,8 +146,10 @@ def mark_1(gate: GateV2, net: pd.Series) -> dict:
     if pos < need:
         why.append(f"{pos} positive years, {need} needed")
     return _mark(not why, {"total_return": total, "positive_years": pos, "years": n,
-                           "partial_years": sum(y["partial"] for y in years)},
-                 {"total_return_above": 0.0, "positive_years_min": need, "years_min": int(m["of_years"])},
+                           "partial_years": sum(y["partial"] for y in years),
+                           "years_not_counted": [y["year"] for y in every if not gate.counted(y)]},
+                 {"total_return_above": 0.0, "positive_years_min": need, "years_min": int(m["of_years"]),
+                  "part_year_min_months": int(m["part_year_min_months"])},
                  "; ".join(why))
 
 
@@ -256,7 +274,7 @@ def statistics(gate: GateV2, net: pd.Series, spy: pd.Series, *, costs: pd.Series
     out = {"window": [net.index[0].date().isoformat(), net.index[-1].date().isoformat()],
            "rule": mtm.curve(net, **kw), "spy": mtm.curve(spy, **kw),
            "alpha_beta": asdict(mtm.alpha_beta(net, spy, periods=kw["periods"])),
-           "calendar_years": mtm.calendar_years(net, spy),
+           "calendar_years": [{**y, "counted": gate.counted(y)} for y in mtm.calendar_years(net, spy)],
            "turnover": mtm.turnover(mtm.align(net, traded)[1], kw["periods"]) if traded is not None else None,
            "costs": None, "exposure_matched_spy": None, "deflated_sharpe": None}
     if costs is not None:
@@ -403,36 +421,48 @@ def gate_c_tracking(gate: GateV2, *, rule: str, live: pd.Series, replay: pd.Seri
                       {"days_not_equal": bad, "days_without_record": unknown}, {"every_day": True},
                       "ledger and broker differed" if bad else ("days without a record" if unknown else ""))
 
-    tol = c["tracking"]["tolerance_bp_per_session"]
+    t = c["tracking"]
+    tol, window, rule_ = t["tolerance_bp_per_session"], int(t["rolling_sessions"]), t["breach_rule"]
+    if t["measure"] != "mean_abs_diff" or rule_ not in ("consecutive", "cumulative"):
+        raise ValueError(f"config/gate_v2.yaml: tracking {t['measure']!r} / {rule_!r} is not implemented")
     need = int(c["retirement"]["tracking_breach_sessions"])
+    # decision 15 section 10: the mean absolute difference over a rolling 20 sessions; not defined before the 20th
+    rolling = diff_bp.abs().rolling(window, min_periods=window).mean().dropna()
     numbers = {"sessions_compared": int(both.size),
                "sessions_without_replay": [d.date().isoformat() for d in missing],
                "mean_diff_bp": float(diff_bp.mean()) if both.size else None,
+               "mean_abs_diff_bp": float(diff_bp.abs().mean()) if both.size else None,
                "max_abs_diff_bp": float(diff_bp.abs().max()) if both.size else None,
                "cumulative_diff_bp": float(diff_bp.sum()) if both.size else None,
+               "rolling_mean_abs_diff_bp_max": float(rolling.max()) if rolling.size else None,
+               "rolling_mean_abs_diff_bp_last": float(rolling.iloc[-1]) if rolling.size else None,
+               "first_judged_session": rolling.index[0].date().isoformat() if rolling.size else None,
                "tracking_error_ann_bp": float(diff_bp.std(ddof=1) * math.sqrt(kw["periods"])) if both.size > 1
                else None,
                "correlation": float(np.corrcoef(live.reindex(both), rep.reindex(both))[0, 1])
                if both.size > 2 and live.reindex(both).std() > 0 and rep.reindex(both).std() > 0 else None}
-    limit = {"tolerance_bp_per_session": tol, "breach_sessions": need, "breach_rule": c["tracking"]["breach_rule"]}
+    limit = {"tolerance_bp_per_session": tol, "rolling_sessions": window, "measure": t["measure"],
+             "breach_sessions": need, "breach_rule": rule_}
     breaches = None
     if tol is None:
         tracking = _mark(None, numbers, limit, "the tracking tolerance is not set in config/gate_v2.yaml")
     else:
-        out = diff_bp.abs() > float(tol)
-        breaches = _longest_run(out.to_numpy()) if c["tracking"]["breach_rule"] == "consecutive" else int(out.sum())
+        out = rolling > float(tol)
+        breaches = _longest_run(out.to_numpy()) if rule_ == "consecutive" else int(out.sum())
         numbers.update(sessions_outside_tolerance=int(out.sum()), breach_count=breaches,
                        breach_days=[d.date().isoformat() for d in out.index[out]])
         if breaches >= need:
-            tracking = _mark(False, numbers, limit, f"outside the tolerance on {breaches} sessions")
+            tracking = _mark(False, numbers, limit, f"outside the tolerance on {breaches} sessions"
+                             + (" in a row" if rule_ == "consecutive" else ""))
+        elif not rolling.size:
+            tracking = _mark(None, numbers, limit, f"fewer than {window} sessions compared: the rolling "
+                                                   f"{window}-session mean is not defined yet")
         elif len(missing):
             tracking = _mark(None, numbers, limit, "some live sessions have no replay")
         else:
             tracking = _mark(True, numbers, limit)
 
-    b = c["bootstrap"]
-    bands = mtm.drawdown_bands(test_returns, horizon=max(sessions, 1), runs=int(b["runs"]),
-                               mean_block=float(b["mean_block_sessions"]), seed=int(b["seed"]))
+    bands = mtm.drawdown_bands(test_returns, horizon=max(sessions, 1), **gate.bootstrap_kw)
     live_dd = mtm.max_drawdown(live)
     drawdown = _mark(bool(live_dd <= bands.q95), {"live_max_drawdown": live_dd, "band_95": bands.q95,
                                                    "band_99": bands.q99, "band_median": bands.median},
@@ -450,7 +480,8 @@ def gate_c_tracking(gate: GateV2, *, rule: str, live: pd.Series, replay: pd.Seri
     if live_dd > bands.q99:
         retire.append(f"live drawdown {live_dd:.2%} is outside the 99% band ({bands.q99:.2%})")
     if breaches is not None and breaches >= need:
-        retire.append(f"tracking outside the tolerance of {tol} bp on {breaches} sessions (trigger: {need})")
+        retire.append(f"tracking outside the tolerance of {tol} bp (mean |difference| over {window} sessions) on "
+                      f"{breaches} sessions{' in a row' if rule_ == 'consecutive' else ''} (trigger: {need})")
     marks = {"duration": duration, "reconciliation": recon, "tracking": tracking, "drawdown": drawdown,
              "trigger_written_before_start": trigger}
     others = [m["met"] for k, m in marks.items() if k != "duration"]
@@ -466,7 +497,8 @@ def gate_c_tracking(gate: GateV2, *, rule: str, live: pd.Series, replay: pd.Seri
         "gate": "C", "rule": rule, "generated_at": _iso(as_of or datetime.now(UTC)), "gate_sha": gate.sha,
         "marks": marks, "retire": bool(retire), "retirement_reasons": retire, "status": status,
         "retirement_trigger": {"drawdown_outside_band": c["retirement"]["drawdown_band"],
-                               "tracking_breach_sessions": need, "tolerance_bp_per_session": tol},
+                               "tracking_breach_sessions": need, "tolerance_bp_per_session": tol,
+                               "rolling_sessions": window, "breach_rule": rule_},
         "live": mtm.curve(live, **kw) if sessions >= 3 else None,
         "replay": mtm.curve(rep.reindex(both), **kw) if both.size >= 3 else None,
     })
@@ -616,8 +648,9 @@ def render_gate_b(rep: dict) -> str:
                 f"{_sharpe_cell(v, share)} |" for k, v in st["costs"].items() if k != "breakeven_multiple"]
         be = st["costs"]["breakeven_multiple"]
         out += ["", f"- Break-even cost multiple: {be if isinstance(be, str) else f'{be:.2f}'}x the modelled costs."]
+    months = m["mark_1"]["limit"].get("part_year_min_months", 6)
     out += ["", "| Year | Sessions | Rule | SPY | Difference | Max drawdown |", "|---|---|---|---|---|---|"]
-    out += [f"| {y['year']}{' (part)' if y['partial'] else ''} | {y['sessions']} | {_pct(y['return'])} | "
+    out += [f"| {y['year']}{_year_note(y, months)} | {y['sessions']} | {_pct(y['return'])} | "
             f"{_pct(y.get('benchmark'))} | {_pct(y.get('excess'))} | {_pct(y['max_drawdown'])} |"
             for y in st["calendar_years"]]
     p = rep["prereg"]
@@ -628,6 +661,12 @@ def render_gate_b(rep: dict) -> str:
 
 
 # ---------------------------------------------------------------- helpers
+
+
+def _year_note(y: dict, min_months: int) -> str:
+    if not y["partial"]:
+        return ""
+    return " (part)" if y.get("counted", True) else f" (part, not counted: under {min_months} months)"
 
 
 def _utc(t: datetime) -> datetime:

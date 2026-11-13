@@ -32,7 +32,7 @@ The rule runs in the engine with `SimBroker` from May 2017 onward. All six marks
 
 | Mark | In plain words |
 |---|---|
-| 1 | It made money overall, and in at least 6 of the 10 calendar years. |
+| 1 | It made money overall, and in at least 6 of the 10 calendar years. A part-year counts only with at least 6 months of data; with more than 10 counted years, 60% of them (rounded up) must be positive. |
 | 2 | Either it kept within 2 points a year of SPY while falling at most three quarters as far, or it beat SPY by 1 point a year while falling at most 1.1 times as far. |
 | 3 | Its Sharpe is in the top tenth of at least 500 random portfolios that traded on the same dates, held as many names for as long, with the same money at work, drawn from the same stocks. |
 | 4 | Marks 1 and 2 still hold when every cost is doubled. Triple costs and the break-even cost are shown. |
@@ -51,7 +51,8 @@ stories land. Passing Gate B lets Product start the rule on paper.
 The rule trades on paper for at least 3 months and 60 sessions. `gate_c_tracking` checks, every day:
 
 - the ledger equals the broker;
-- the live daily returns track the `SimBroker` replay of the same days, within the tolerance;
+- the live daily returns track the `SimBroker` replay of the same days: the mean absolute difference over a
+  rolling 20 sessions is at most 10 basis points (not judged before the 20th session);
 - the live drawdown is inside the 95% band of drawdowns the ten-year test could have produced over a stretch of
   the same length (block bootstrap);
 - the retirement trigger was committed before the start.
@@ -60,7 +61,7 @@ Only sessions that ran wholly on the rule's current code count (its fingerprint,
 change to the rule or to the shared core restarts the incubation.
 
 The rule is **retired** when its drawdown leaves the 99% band, or when it tracks outside the tolerance on 10
-sessions. The report says `incubating`, `pass`, `fail`, `incomplete` (something could not be checked) or
+sessions in a row. The report says `incubating`, `pass`, `fail`, `incomplete` (something could not be checked) or
 `retire`.
 
 ### Gate D: real money
@@ -77,10 +78,10 @@ All statistics are on **daily mark-to-market returns** after costs (`kaibot.eval
 | t-stat (Newey-West) | Whether the Sharpe could be luck, allowing for days that move together. The lag is fixed by the length of the sample: floor(4 x (days / 100)^(2/9)), 8 lags for ten years. |
 | Alpha and beta against SPY total return | How much is market exposure (beta) and how much the rule added (alpha, with its own t). A long-only book is mostly beta. |
 | Max drawdown | The deepest fall of the account marked at each close, open losses included. |
-| Calendar-year table | Return per year beside SPY's. Part-years are marked. |
+| Calendar-year table | Return per year beside SPY's. Part-years are marked; one under 6 months is marked "not counted" (it is not a year for mark 1). |
 | 1x, 2x, 3x costs and break-even | The same numbers with costs scaled, and the cost multiple at which the rule makes nothing. |
 | Deflated Sharpe | The chance that the Sharpe is real after allowing for everything that was tried. It uses the number of configurations in the trial registry. |
-| Drawdown bands | The 95% and 99% worst drawdowns from 5,000 resamples of the test in blocks of about 20 sessions. |
+| Drawdown bands | The 95% and 99% worst drawdowns from 2,000 resamples of the test in blocks of about 20 sessions. |
 
 For several rules together, `portfolio_view` shows the combined book and how the rules move together once the
 market is taken out (`residual` correlation). Two long-only rules always look alike before that step.
@@ -155,7 +156,9 @@ to `fingerprint.strategies` when it gets its own file. The engine still logs one
 2. **Daily costs.** Add to each `book.daily` row the dollars of spread, impact and fees charged that session
    (`cost`) and the dollars bought plus sold (`traded`). Until then `gate_v2_report.py` spreads each trade's
    costs over its entry and exit day, which is exact in total and approximate in timing.
-3. **SPY per session** as a CSV (`date`, `ret`) for the test window; total return once S84 lands.
+3. **SPY per session** as a CSV (`date`, `ret`) for the test window. Done (#185): `walk_forward_multiday.py`
+   writes `spy_daily_<tag>.csv` beside the daily CSVs (`ret_kind`: total return when the daily store has SPY,
+   else price only) and `momentum_core.py` writes `<tag>/spy_daily.csv`.
 4. **Random control: switch `multiday_core.matched_random_control` to the exposure-matched control.** Today it
    keeps the entry dates and the number of entries per date, draws each holding period independently from the
    rule's distribution, and sizes each random name with the rule's own ATR formula. So the random books carry a
@@ -189,11 +192,15 @@ to `fingerprint.strategies` when it gets its own file. The engine still logs one
 
 Each was implemented in its strictest reading. None can let a rule pass that should not.
 
-1. **Tracking tolerance.** Decision 15 gives no number. It is `null` in the config, so the tracking mark fails
-   closed. QA-Ops proposes 10 basis points of equity per session. It must be set before the first paper start.
-2. **"10 sessions" outside tolerance:** counted over the whole incubation, not in a row.
-3. **"6 of 10 calendar years":** the part-years 2017 and 2026 count as years; the test must span 10 calendar
-   years; with more than 10, 60% of them (rounded up) must be positive.
+Points 1 to 3 and 7 were settled by decision 15 section 10 (Product, 12 Nov 2026) and are in
+`config/gate_v2.yaml` (#183, #184). Every report made before that change carries the old `gate_sha` and is stale.
+
+1. **Tracking tolerance (settled).** Mean absolute difference between the live daily returns and the replay,
+   over a rolling 20 sessions, at most 10 bp per session. Before the 20th session the mark is not judged.
+2. **"10 sessions" outside tolerance (settled):** 10 sessions in a row.
+3. **"6 of 10 calendar years" (settled):** a part-year counts only with at least 6 months of out-of-sample data
+   (6 calendar months with a session); the threshold is then 60% of the counted years, rounded up. With the
+   window from May 2017, 2017 (8 months) counts.
 4. **Mark 3 for one-instrument rules** (`overnight_spy`, the SPY noise band): there is no other name to draw,
    so the mark stays unknown. They need a random-timing control, which is not specified.
 5. **Mark 5** is read as marks 1 to 4 on the point-in-time run. **Mark 6:** a rule with no neighbour has had
@@ -201,8 +208,8 @@ Each was implemented in its strictest reading. None can let a rule pass that sho
    the control's simulator, the lower of its two percentiles counts.
 6. **Costs in mark 4** are spread, impact and fees. Gap slippage is a price outcome and is not doubled.
    Doubling keeps the positions as they were.
-7. **Bootstrap:** blocks of 20 sessions on average, 5,000 runs, a fixed seed, band for a stretch as long as
-   the live record. None of these is in the decision.
+7. **Bootstrap (settled):** stationary, blocks of 20 sessions on average, 2,000 resamples, a fixed seed (15), band
+   for a stretch as long as the live record. `GateV2.bootstrap_kw` is the one reader of these settings.
 8. **Trial count:** all rules together, a tuned walk-forward counting grid size times folds (the reading
    behind the decision's 8,286). The deflated Sharpe is shown, it is not a pass mark.
 9. **Reports of one configuration.** A row with `n_trials: 0` counts nothing: `momentum_core.py` logs the 2x

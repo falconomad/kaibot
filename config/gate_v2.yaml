@@ -25,6 +25,9 @@ gate_b:
     net_return_positive: true
     min_positive_years: 6
     of_years: 10
+    part_year_min_months: 6        # section 10: a partial calendar year counts only with >= 6 months of out-of-
+                                   # sample data (calendar months with a session); the threshold is then 60% of
+                                   # the counted years, rounded up. A year not counted is still in the total.
   mark_2:                          # EITHER branch, against SPY total return over the same sessions
     defensive:                     #   CAGR >= SPY CAGR - 2 points with max drawdown <= 0.75 x SPY's
       cagr_vs_spy_points_min: -2.0
@@ -61,16 +64,17 @@ gate_c:
   retirement:                      # written before the start: this file is committed before a rule starts
     drawdown_band: 0.99            #   live drawdown outside the 99% band, or
     tracking_breach_sessions: 10   #   tracking outside tolerance for 10 sessions
-  # NOT in decision 15 (Product must settle these before the first paper start; see docs/ops/gate_v2.md):
+  # Decision 15 section 10 (Product, 12 Nov 2026) settled how tracking and the bands are measured:
   tracking:
-    tolerance_bp_per_session: null # |live - replay| daily return, in basis points of equity. null = not set:
-                                   # the tracking mark then fails closed and the tracking trigger cannot fire.
-    breach_rule: cumulative        # the 10 sessions are counted over the whole incubation, not in a row
-  bootstrap:                       # how the bands are drawn (kaibot.evaluation.mtm.drawdown_bands)
+    measure: mean_abs_diff         # mean |live - replay| daily return, in basis points of equity ...
+    rolling_sessions: 20           # ... over a rolling 20 sessions (before the 20th session: not judged yet)
+    tolerance_bp_per_session: 10.0 # ... at most 10 bp per session
+    breach_rule: consecutive       # "outside tolerance for 10 sessions" = 10 sessions in a row
+  bootstrap:                       # how the bands are drawn (kaibot.evaluation.mtm.drawdown_bands); the one block
     method: stationary             # Politis & Romano (1994): blocks of random length, mean below
     mean_block_sessions: 20
-    runs: 5000
-    seed: 15
+    runs: 2000
+    seed: 15                       # fixed
     horizon: live_sessions         # the band is for a stretch as long as the live record so far
 
 # ---------------------------------------------------------------- Gate D: real money

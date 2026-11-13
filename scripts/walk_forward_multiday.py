@@ -49,6 +49,7 @@ from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
 from kaibot.replay import earnings  # noqa: E402
+from kaibot.replay import multiday_core as mc  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
 from kaibot.replay.features import regime  # noqa: E402
 from kaibot.replay.multiday import (  # noqa: E402
@@ -218,6 +219,41 @@ def markdown(rep: dict) -> str:
             f"`{rep['events_sha256_default']}`, code `{rep['code_sha']}`.", "", "Caveats:"]
     out += [f"- {c}" for c in rep["caveats"]]
     return "\n".join(out) + "\n"
+
+
+def spy_total_return_from_store(data: Path, spy: str, dates: np.ndarray) -> tuple[np.ndarray | None, dict | str]:
+    """SPY's total return per session of `dates` from the daily store (NaN where the store has no bar), built by
+    `multiday_core.spy_total_return` (Alpaca's adjusted factor, or a table with every dividend, or the table
+    completed conservatively), or None with the reason."""
+    from kaibot.ingest.daily_store import DailyStore
+
+    root = data / "daily"
+    if not (root / "bars" / f"symbol={spy}.parquet").is_file():
+        return None, f"no {spy} in the daily store ({root}): run ./scripts/fetch_daily.sh"
+    try:
+        panel = DailyStore(root).panel([spy], minute_share=None)
+    except (OSError, ValueError) as e:
+        return None, f"daily store unreadable for {spy}: {e}"
+    r, info = mc.spy_total_return(panel, spy)
+    s = pd.Series(r, index=panel.dates.astype("datetime64[D]"))
+    return s.reindex(dates.astype("datetime64[D]")).to_numpy(dtype=float), info
+
+
+def spy_daily(data: Path, bars: DailyBars, spy: str, i0: int, i1: int) -> tuple[pd.DataFrame, dict]:
+    """SPY per session of the test window (#185), the `--spy` input of scripts/gate_v2_report.py: `ret` is SPY's
+    total return when the daily store has SPY on every session, else the price-only return of the bars, and
+    `ret_kind` says which (`spy_total_return` / `spy_price_only`)."""
+    dates = bars.dates[i0:i1 + 1]
+    price = spy_buy_and_hold(bars, spy, i0, i1)
+    total, note = spy_total_return_from_store(data, spy, dates)
+    if total is not None and not np.isfinite(total).all():
+        note = f"the daily store lacks {spy} on {int((~np.isfinite(total)).sum())} sessions of the window"
+        total = None
+    kind = "spy_price_only" if total is None else "spy_total_return"
+    frame = pd.DataFrame({"date": pd.to_datetime(dates).strftime("%Y-%m-%d"),
+                          "ret": price if total is None else total, "ret_kind": kind,
+                          "ret_total": np.nan if total is None else total, "ret_price_only": price})
+    return frame, {"ret": kind, "note": note}
 
 
 def earnings_filter(data: Path, bars: DailyBars, stocks: list[str], mode: str) -> tuple[dict, np.ndarray | None,
@@ -402,6 +438,11 @@ def main() -> None:
     tag = f"md_{a.rule}{'' if a.costs == 'v1' else '_costs' + a.costs}_{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
     rep["files"] = {w: {"trades": f"trades_{a.level}_{tag}_{w}.csv", "daily": f"daily_{a.level}_{tag}_{w}.csv"}
                     for w in ("tuned", "default")}
+    spy_frame, spy_info = spy_daily(data, bars, spy, wf.i_test0, wf.i1)
+    rep["files"]["spy_daily"] = f"spy_daily_{tag}.csv"  # gate_v2_report.py --spy
+    rep["spy_daily"] = {"file": rep["files"]["spy_daily"], **spy_info}
+    spy_frame.to_csv(out / rep["files"]["spy_daily"], index=False)
+    print(f"SPY per session: {rep['files']['spy_daily']} ({spy_info['ret']})", flush=True)
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
     with trials_f.open("a") as fh:
