@@ -143,3 +143,39 @@ What is tested must be exactly what trades. The live path sizes through the shar
 1. **Sector cap of 40% of equity.** No sector may exceed 40% of equity, the hard ceiling in `BOOK_HARD_CEILINGS`. A buy that would exceed it is cut to fit, best-ranked first, exactly as the builder does. Stocks without a sector count as their own sector.
 2. **A missing bar on the fill day.** When an order finds no bar on its fill day, it waits to the next session without re-checking the other caps. This is the engine's behaviour, and the harness now matches it.
 The level-specific limits (for example the provisional Balanced values) are not part of the rule's test. The test runs at the rule's own limits within the hard ceilings, and the stakeholder confirms level limits separately (#132). No point-in-time or engine result on real data existed when this was written.
+
+## Amendment 5 (13 Nov 2026, backend-quant, issue #203, before any run that reads the SEC earnings dates)
+
+Written after #209 (the code that reads the SEC dates) was reviewed and before any run with
+`data/earnings/announcements.parquet`; no result of the variant on SEC dates, on real or synthetic history, had been
+seen. The only SEC-related number known when this was written is S85's "91% of SEC reports detected within one
+session", which measures the headline detector against SEC, not the bar below. It names the source of the "exit
+before earnings" variant of section 5 on the point-in-time universe and changes nothing else.
+
+1. **Source.** On `--universe pit`, when `data/earnings/announcements.parquet` exists (S85, #125: SEC 8-K Item 2.02
+   filings with their EDGAR acceptance time, `kaibot.ingest.earnings_pit`), the variant is built from those dates
+   (`exit_before_earnings: sec_pit`, reported as "exit before (SEC point-in-time dates)", label `exit_sec`) instead
+   of the headline estimate. A filing is a quarterly report when it comes 30 days or more after the company's
+   previous report filing; 8-K/A amendments are not used.
+2. **Point in time.** Each report counts from the first session that opens after its acceptance time
+   (`earnings_pit.report_events`). A decision at the close of session t uses only reports counted at or before t,
+   so a filing accepted during a session counts from the next one. Companies are mapped to store columns through
+   the membership log.
+3. **Window unchanged.** The window of `kaibot.replay.earnings.calendar` is the same as on the headline path: flat
+   from 10 calendar days before the date expected from earlier reports, until the report or 10 days after that
+   date, and no new position in the 7 days before the window. Only the dates that anchor it change.
+4. **Reliability bar unchanged.** The SEC dates are judged by the same function and the same pre-declared bar as
+   the headline estimate (`replay/earnings.coverage` against `replay/earnings.RELIABLE`). At least 80% of the
+   stocks with bars must report at a plausible 3 to 5 times a year, and the account must be flat the night before
+   at least 85% of the reports after each stock's first. A stock with no SEC rows counts against the first share
+   and gets no blackout. Below the bar, or without the file, the APPROXIMATE headline variant of section 5 runs
+   exactly as before (or is skipped when it fails its own check). `--earnings on` cannot force SEC dates below
+   the bar. The `--universe today` reports never read the SEC file. The report states which source was used and
+   its coverage, and both coverages when the SEC dates fall back.
+5. **Base version and verdict unchanged.** For each of the two versions the base version is still base fill, 1x costs, 100% exposure cap, hold through earnings. The Gate B marks and the verdict never read earnings dates.
+   Every hold-through row is identical with or without the SEC file.
+6. **Trials.** At the base fill and 1x costs, the SEC variant is one configuration per exposure cap (`n_trials` 1).
+   Its cost and fill stress runs are reports of it (`n_trials` 0). The first core_pit run with the SEC file
+   repeats the hold-through and neighbour runs of the earlier report exactly. A row with the same label and the
+   same events digest as a row of the earlier finished report of the same window was counted there, so it logs
+   `n_trials` 0. The SEC variant does not replace the headline variant's earlier rows; both stay in the registry.
