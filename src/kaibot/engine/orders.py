@@ -298,6 +298,26 @@ class OrderManager:
         self._adopt(r, o)
         return r
 
+    def adopt_order(self, o: dict, *, strategy: str, purpose: str, session: str,
+                    meta: dict | None = None) -> OrderRecord:
+        """Take over an order another process placed at the venue (issue #188: the watchdog's or the dead-man's
+        protective stop), under the venue's own client id: journalled as an intent (nothing is sent) and then the
+        venue's state, so from here on it is this manager's order like any other (polled, replaced, cancelled,
+        its fills booked) and a restart folds it from the journal. The same client id twice is the same order."""
+        coid = str(o["client_order_id"])
+        have = self.orders.get(coid)
+        if have is not None:
+            return have
+        self._append("om_intent", {
+            "coid": coid, "strategy": strategy, "symbol": o["symbol"], "side": o["side"], "qty": float(o["qty"]),
+            "type": o.get("type") or "stop", "tif": o.get("time_in_force") or "gtc",
+            "limit": _num(o.get("limit_price")), "stop": _num(o.get("stop_price")), "purpose": purpose,
+            "session": session, "meta": {**(meta or {}), "adopted": True},
+            "created": o.get("created_at") or self.now().isoformat()})
+        r = self.orders[coid]
+        self._adopt(r, o)
+        return r
+
     def cancel(self, coid: str) -> OrderRecord:
         r = self.orders[coid]
         if not r.open or r.state is St.PENDING_CANCEL:

@@ -20,6 +20,26 @@ off. Sent through the order manager like every other order.
   reliably: DNR/DNC), `after_split` lets `ensure` re-create them at the new share count and the scaled price.
 
 A fraction of a share (never held in v3.0: whole shares only) is not covered.
+
+Fail-safe stops (issue #188). While the engine is silent the watchdog (`kbwd-<strategy>-<symbol>-<time>-wdstop`)
+and the database dead-man (`kbdm-...-dmstop`, migration 0019) re-create a missing stop straight at the venue. That
+stop holds the shares, so the manager's own stop would be refused and a sale could not free them. `adopt` takes
+every resting fail-safe stop of a known sleeve into the order manager as that sleeve's own protective stop
+(`OrderManager.adopt_order`: an `om_intent` under the venue's client id plus its `om_state`, and a `stop_adopted`
+entry; a restart folds it and never adopts it twice). It runs at start-up (`startup`: after the manager's
+recovery, before the fills are booked), at every `ensure` (each session's reconciliation of the stops) and before
+every `release`. From then on the usual rules apply: never cancelled and re-armed on adoption (#179), re-priced
+and resized through `replace`, freed by `release`. A fail-safe stop that FILLED while the engine was down is
+adopted from its fill (`OrderManager.foreign`), so the next sync books the sale to the sleeve instead of leaving a
+foreign fill. The strategy in the client id is matched to a sleeve by the client id's own spelling
+(`failsafe.clean(name)[:40]`), so a neighbour name (`trend_momentum~reg60`, written `trend_momentumreg60`) maps back
+to its sleeve; neighbours are research names and never live (`strategies.registry.live` loads only registered
+rules). A fail-safe stop of no known sleeve is left resting and journalled once (`stop_adopt_skipped`). When the
+open orders cannot be read, no new stop is created in that call (a fail-safe stop may hold the shares).
+
+One stop per sleeve: when the engine's stop and a fail-safe stop both rest for one sleeve, the larger is kept and
+the other cancelled, then the kept one is resized. A resize up is capped at the venue's position less the working
+stops of the symbol's other sleeves (#187; #192 for two sleeves in one symbol).
 """
 
 from __future__ import annotations
@@ -29,6 +49,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from kaibot.broker.protocol import BrokerError, OrderRequest
+from kaibot.engine.failsafe import FAILSAFE_COID, clean
 from kaibot.engine.orders import TERMINAL, UNCONFIRMED, OrderManager, St
 
 REARM_DAYS = 10  # re-arm a GTC stop this many days before its expiry
@@ -44,6 +65,59 @@ class ProtectiveStops:
         self.confirm_polls, self.wait = confirm_polls, wait
         self.suspended: set[str] = set()  # symbols with a split under way: no stop is re-created yet
         self._mine: dict[Key, list[str]] | None = None  # stop coids per sleeve (for `_unbooked`)
+        self._skipped: set[str] = set()  # fail-safe stops of no known sleeve, journalled once
+
+    def startup(self, sleeves, session: str) -> list[str] | None:
+        """Start-up (issue #188): the manager recovers its orders from the venue, the fail-safe stops of the
+        sleeves are adopted, then the fills are booked (a fail-safe stop that filled is then the sleeve's sale)."""
+        self.om.recover()
+        done = self.adopt(sleeves, session)
+        self.om.sync()
+        return done
+
+    def adopt(self, sleeves, session: str | None = None, only: set[str] | None = None) -> list[str] | None:
+        """Adopt every fail-safe stop (resting, or filled while the engine was down) of a sleeve in `sleeves`
+        (keys, or a mapping keyed by them). Returns what it adopted; None when the open orders cannot be read."""
+        keys = list(sleeves)
+        try:
+            orders = list(self.om.broker.open_orders())
+        except BrokerError as e:
+            self.om.errors.append(("", f"open orders: {e.status}"))
+            return None
+        for a in list(self.om.foreign.values()):  # fills of orders the manager does not know
+            oid = str(a.get("order_id") or "")
+            if oid and oid not in self.om.by_id and a.get("side") == "sell":
+                try:
+                    orders.append(self.om.broker.order(oid))
+                except BrokerError:
+                    continue
+        done = []
+        for o in orders:
+            coid = str(o.get("client_order_id") or "")
+            m = FAILSAFE_COID.match(coid)
+            if m is None or o.get("side") != "sell" or o.get("type") not in ("stop", "stop_limit"):
+                continue
+            sym = str(o.get("symbol") or "")
+            if (only is not None and sym not in only) or coid in self.om.orders:
+                continue
+            match = [k for k in keys if k[1] == sym and clean(k[0])[:40] == m.group(2)]
+            if len(match) != 1:
+                if coid not in self._skipped:
+                    self._skipped.add(coid)
+                    self.om.journal.append("stop_adopt_skipped", {
+                        "coid": coid, "symbol": sym, "order_id": o.get("id"),
+                        "why": "no sleeve of that strategy" if not match else "more than one sleeve matches"})
+                continue
+            key = match[0]
+            by = "watchdog" if m.group(1) == "wd" else "deadman"
+            r = self.om.adopt_order(o, strategy=key[0], purpose="stop",
+                                    session=session or str(o.get("created_at") or "")[:10], meta={"by": by})
+            self._track(key, r.coid)
+            self.om.journal.append("stop_adopted", {"coid": r.coid, "by": by, "strategy": key[0], "symbol": sym,
+                                                    "order_id": r.order_id, "qty": r.qty, "stop": r.stop,
+                                                    "state": r.state.value})
+            done.append(f"adopt {r.coid}")
+        return done
 
     def stops_of(self, key: Key):
         return self.om.working(symbol=key[1], strategy=key[0], purposes=("stop",))
@@ -53,6 +127,9 @@ class ProtectiveStops:
         """`sleeves`: shares per (strategy, symbol); `prices`: the stop price of each. `only`: look at these
         symbols alone (every other stop is left as it is). Returns what it did."""
         done: list[str] = []
+        adopted = self.adopt(sleeves, session, only)  # issue #188: fail-safe stops become the sleeves' own first
+        if adopted is not None:
+            done += adopted
         for key in sorted(set(sleeves) | {(r.strategy, r.symbol) for r in self.om.working(purposes=("stop",))}):
             strategy, symbol = key
             if only is not None and symbol not in only:
@@ -61,7 +138,8 @@ class ProtectiveStops:
                 continue
             whole = int(math.floor(float(sleeves.get(key, 0.0)) + 1e-9))
             px = prices.get(key)
-            recs = self.stops_of(key)
+            # one stop per sleeve: keep the largest (the engine's own and a fail-safe one may both rest)
+            recs = sorted(self.stops_of(key), key=lambda r: (r.state is St.PENDING_CANCEL, -(r.qty - r.cum)))
             if whole < 1 or px is None or not px > 0:
                 for r in recs:
                     self.om.cancel(r.coid)
@@ -86,6 +164,9 @@ class ProtectiveStops:
                 placed = self._rearm(r, key, whole, px, session)
                 if placed:
                     done.append(f"stop {placed}")
+                continue
+            if r is None and adopted is None:
+                done.append(f"wait {strategy} {symbol}: open orders unreadable (a fail-safe stop may hold the shares)")
                 continue
             if r is None and self._unbooked(key):
                 done.append(f"wait {strategy} {symbol}: a stop fill is not booked yet")
@@ -118,7 +199,10 @@ class ProtectiveStops:
             pos = self.om.broker.positions().get(key[1]) or {}
         except BrokerError:
             return None
-        to = min(whole, int(math.floor(float(pos.get("qty") or 0) + 1e-9)))
+        held = int(math.floor(float(pos.get("qty") or 0) + 1e-9))
+        others = sum(int(math.ceil(x.qty - x.cum - 1e-9)) for x in self.om.working(symbol=key[1], purposes=("stop",))
+                     if x.coid != r.coid)  # #192: the symbol's other stops hold shares too
+        to = min(whole, held - others)
         return to if to > have else None
 
     def _track(self, key: Key, coid: str) -> None:
@@ -166,6 +250,8 @@ class ProtectiveStops:
     def release(self, key: Key, keep: float) -> bool:
         """Before selling down to `keep` shares: True once no stop holds the shares to be sold."""
         whole = int(math.floor(float(keep) + 1e-9))
+        if self.adopt({key}) is None:  # issue #188: a fail-safe stop may hold the shares; unknown: no sale yet
+            return False
         ok = True
         for r in self.stops_of(key):
             if r.state in (St.PENDING_CANCEL, St.PENDING_REPLACE) or r.state in UNCONFIRMED:
