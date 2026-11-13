@@ -23,6 +23,10 @@
 #       to data/reports/experiments_core_pit_summary.md. Needs data/daily from ./scripts/fetch_daily.sh after
 #       scripts/fetch_sp500_history.py (docs/m0/reproduce.md section 9 has the sequence and the times). No .env.
 #       KAIBOT_CORE_COSTS=v2 runs core and core_pit on cost model v2 (#111) instead of v1.
+#       Since #203 the exit-before-earnings variant of core_pit uses the SEC point-in-time dates of
+#       data/earnings/announcements.parquet (./scripts/fetch_earnings_dates.sh) when they meet the pre-declared
+#       reliability bar (else the headline estimate as before); a core_pit report from before the file existed
+#       is run again once it does.
 #   ./scripts/run_experiments.sh spy         issue #128: the SPY noise-band rule (long only, 1x) and its overnight
 #       carry, each ONE continuous account from 2017-05 on SPY minute bars, with cost scenarios, neighbours, the
 #       15:30 check and the live last-30-minutes trade beside it, then ONE table written to

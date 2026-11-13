@@ -35,6 +35,17 @@ in docs/prereg/: fill model (base: next close; stress: next open at doubled spre
 3x, and 0x to state the break-even multiple) x exposure cap (30 / 60 / 100%) x earnings (hold through; exit before =
 approximate, skipped when the estimate is unreliable), then the five neighbours and the matched random control.
 
+Exit before earnings on the point-in-time universe (issue #203): when data/earnings/announcements.parquet exists
+(S85, #125: SEC 8-K Item 2.02 acceptance times, `kaibot.ingest.earnings_pit`), `--universe pit` feeds its report
+sessions (`earnings_pit.report_events`) to the harness's own window (`replay/earnings.calendar`: flat from 10 days
+before the date expected from earlier reports, no entry 7 days before that; row t uses only filings accepted before
+session t opened) in place of the headline detections, and judges them with the SAME pre-declared reliability bar
+(`replay/earnings.RELIABLE`: at least 80% of the stocks report at a plausible 3-5 a year, and the account is flat
+the night before at least 85% of the reports, both measured by `replay/earnings.coverage`). Met: the variant
+`exit_sec` runs on those dates. Not met, or no file: the headline path of #113 as before (`exit_approx` when its
+own estimate meets the bar, otherwise no variant). The base version (hold through earnings) and the Gate B verdict
+never read the earnings dates.
+
 Writes data/reports/core_<level>_<version>[_pit|_store]_<ts>.json, one trades and one daily CSV per run (the
 daily CSV carries each session's `cost`, `traded` and `dividends`), `spy_daily.csv` (SPY per session: total return
 when the store has it, and price only) and one control JSON per exposure cap (`--random` input of
@@ -72,6 +83,7 @@ from walk_forward import peak_rss_mb  # noqa: E402
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
+from kaibot.replay import earnings  # noqa: E402
 from kaibot.replay import multiday_core as mc  # noqa: E402
 from kaibot.replay.multiday import MTrade, bars_fingerprint  # noqa: E402
 from kaibot.replay.multiday_rules import book_digest  # noqa: E402
@@ -123,6 +135,73 @@ def universe_mode(a: argparse.Namespace) -> tuple[str, str, str]:
     if mode == "point_in_time" and bars != "store":
         sys.exit("--universe pit reads the daily store: former members have no minute bars (--bars store)")
     return yaml_file, mode, bars
+
+
+SEC_FILE = Path("earnings") / "announcements.parquet"  # under --data (S85, #125)
+
+
+def earnings_input(a: argparse.Namespace, data: Path, mode: str) -> str:
+    """Which earnings dates a run's exit-before variant is built from: "sec_pit" (the SEC file exists and the
+    universe is point-in-time; the bar may still send it back to the headline path) or "headlines"."""
+    if a.earnings == "off":
+        return "off"
+    return "sec_pit" if mode == "point_in_time" and (data / SEC_FILE).is_file() else "headlines"
+
+
+def sec_blackout(data: Path, bars, stocks: list[str], universe_file: Path):
+    """(SEC table, {stock: report session indexes}, hold, entry): the SEC report sessions of S85 mapped to the
+    store's columns (`earnings_pit.report_events`, companies through the membership log) in the harness's own
+    window (`replay/earnings.calendar`). Point in time: row t uses only filings accepted before session t opened."""
+    from kaibot.ingest.earnings_pit import report_events
+    from kaibot.ingest.sp500_pit import Membership
+
+    table = pd.read_parquet(data / SEC_FILE)
+    ms = Membership.load(universe=Path(universe_file))
+    found = report_events(table, bars.dates, list(bars.symbols), ms)
+    events = {s: np.asarray(found.get(s, ()), dtype=int) for s in stocks}
+    hold, entry = earnings.calendar(bars.dates, bars.symbols, events)
+    return table, events, hold, entry
+
+
+def sec_earnings_filter(data: Path, bars, stocks: list[str], universe_file: Path,
+                        ) -> tuple[dict, np.ndarray | None, np.ndarray | None]:
+    """The exit-before-earnings blackout from the SEC point-in-time dates (issue #203), judged by the unchanged bar
+    of replay/earnings.py. -> (what the report says, hold, entry); hold and entry are None below the bar."""
+    table, events, hold, entry = sec_blackout(data, bars, stocks, universe_file)
+    cov = earnings.coverage(bars.dates, bars.symbols, events, hold, np.isfinite(bars.c), stocks)
+    numbers = (f"{cov['stocks_with_reports']} of {cov['stocks']} stocks have SEC reports, "
+               f"{cov['stocks_plausible_share']:.0%} at a plausible 3-5 a year (median "
+               f"{cov['median_reports_per_year']}); flat the night before {cov['flat_before_report_share']:.0%} of "
+               f"{cov['reports_tested']} reports; {cov['blackout_share_of_sessions']:.0%} of stock-sessions "
+               "blacked out")
+    bar = (f"the bar is {earnings.RELIABLE['min_symbols_share']:.0%} of stocks and "
+           f"{earnings.RELIABLE['min_recall']:.0%} of reports")
+    info = {"source": "sec_pit", "file": str(SEC_FILE), "report_rows": int(table["report"].astype(bool).sum()),
+            "coverage": cov}
+    if cov["reliable"]:
+        note = ("window around the date expected from earlier SEC 8-K Item 2.02 filings, point in time (each session "
+                "uses only filings accepted before it opened): " + numbers + f"; {bar}, met")
+        return {**info, "mode": "on", "note": note}, hold, entry
+    note = f"SEC point-in-time dates BELOW the reliability bar ({numbers}; {bar})"
+    return {**info, "mode": "off (not reliable)", "note": note}, None, None
+
+
+def earnings_variant(a: argparse.Namespace, data: Path, bars, stocks: list[str], mode: str, universe_file: Path,
+                     ) -> tuple[dict, np.ndarray | None, np.ndarray | None, str | None]:
+    """(report entry, hold, entry, variant name or None): the SEC dates when they exist and meet the bar
+    (point-in-time universe only), otherwise the headline path of #113 unchanged."""
+    src = earnings_input(a, data, mode)
+    sec = None
+    if src == "sec_pit":
+        sec, hold, entry = sec_earnings_filter(data, bars, stocks, universe_file)
+        if hold is not None:
+            return {**sec, "input": src}, hold, entry, "exit_sec"
+    earn, hold, entry = wfm.earnings_filter(data, bars, stocks, a.earnings)
+    earn = {**earn, "source": "headlines", "input": src}
+    if sec is not None:
+        earn["sec_pit"] = sec
+        earn["note"] = f"{sec['note']}, so the headline estimate is tried instead: {earn['note']}"
+    return earn, hold, entry, None if hold is None else "exit_approx"
 
 
 def report_tag(level: str, version: str, mode: str, bars: str) -> str:
@@ -229,7 +308,7 @@ def summary_name(costs: str = "v1", which: str = "core") -> str:
 
 
 def find_report(reports: Path, level: str, version: str, costs: str = "v1", mode: str = "today",
-                bars: str | None = None, **same) -> tuple[Path, dict] | None:
+                bars: str | None = None, earnings_input: str | None = None, **same) -> tuple[Path, dict] | None:
     """Newest finished report of `version` on universe `mode` (and `bars`: None takes minute bars for today and
     the store for pit; and, when given, with the same start, end, universe file, control runs, control kind)."""
     bars = bars or ("store" if mode == "point_in_time" else "minute")
@@ -244,6 +323,8 @@ def find_report(reports: Path, level: str, version: str, costs: str = "v1", mode
             continue
         if rep.get("costs", "v1") != costs:  # reports from before #111 are v1
             continue
+        if earnings_input is not None and rep.get("earnings_input", "headlines") != earnings_input:
+            continue  # #203: a report from before the SEC dates existed is run again once they do
         if any(want is not None and rep.get(k) != want for k, want in same.items()):
             continue
         return f, rep
@@ -280,12 +361,12 @@ def run_version(a: argparse.Namespace) -> None:
         warn.append(f"only {i0} sessions of history before the first test session ({NEED_HISTORY} are needed for "
                     "every signal): the first months trade less")
     stock_names = [bars.symbols[j] for j in m.stocks]
-    earn, hold_blk, entry_blk = wfm.earnings_filter(data, bars, stock_names, a.earnings)
-    earn_modes = ["hold"] + (["exit_approx"] if hold_blk is not None else [])
-    if hold_blk is None:
+    earn, hold_blk, entry_blk, variant = earnings_variant(a, data, bars, stock_names, mode, Path(uni_file))
+    earn_modes = ["hold"] + ([variant] if variant else [])
+    if variant is None:
         print(f"exit-before-earnings variant SKIPPED: {earn['note']}", flush=True)
     else:
-        print(f"exit-before-earnings variant runs (APPROXIMATE): {earn['note']}", flush=True)
+        print(f"exit-before-earnings variant runs ({VARIANT_NOTE[variant]}): {earn['note']}", flush=True)
 
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
@@ -300,7 +381,7 @@ def run_version(a: argparse.Namespace) -> None:
 
     def one(sp: mc.CoreSpec, kind: str, fill: str, cost: float, exposure_pct: float, earnings: str) -> dict:
         exposure, earn_mode = exposure_pct, earnings
-        blk = (hold_blk, entry_blk) if earn_mode == "exit_approx" else (None, None)
+        blk = (hold_blk, entry_blk) if earn_mode != "hold" else (None, None)
         book, rule = m.run(pol, sp, i0, i1, fill=fill, cost=cost, exposure_pct=exposure, equity0=a.equity,
                            hold_blk=blk[0], entry_blk=blk[1], costs=costs)
         label = run_label(sp.name, fill, cost, exposure, earn_mode)
@@ -411,14 +492,14 @@ def run_version(a: argparse.Namespace) -> None:
         "level": a.level, "universe": Path(uni_file).name, "universe_mode": mode, "bars": bars_src,
         "data": data_info, "start": a.start, "end": a.end, "equity": a.equity,
         "control_runs": a.control_runs, "control_seed": a.control_seed, "control_kind": CONTROL_KIND,
-        "entries_control_runs": a.entries_control_runs, "earnings": earn,
-        "earnings_variant": "run (approximate)" if hold_blk is not None else "skipped",
+        "entries_control_runs": a.entries_control_runs, "earnings": earn, "earnings_input": earn["input"],
+        "earnings_variant": f"run ({VARIANT_NOTE[variant]})" if variant else "skipped",
         "oos_window": [str(bars.dates[i0]), str(bars.dates[i1])], "oos_sessions": int(i1 - i0 + 1),
         "input_sha256": input_sha, "symbols": len(symbols), "base_label": base_label, "rows": rows,
         "benchmarks": bench, "control": control, "control_entries_matched_diagnostic": diagnostic, "gate_b": gate,
         "warnings": warn, "runtime_s": round(time.time() - t0, 1), "peak_rss_mb": round(peak_rss_mb(), 0),
         "files": {"spy_daily": f"{tag}/spy_daily.csv"},
-        "caveats": caveats(mode, bars_src, spy_tr is not None, a.costs),
+        "caveats": caveats(mode, bars_src, spy_tr is not None, a.costs, variant),
     }
     with (data / "trials.jsonl").open("a") as fh:
         for t in trials:
@@ -429,7 +510,8 @@ def run_version(a: argparse.Namespace) -> None:
     print(f"runtime {rep['runtime_s']}s, peak RSS {rep['peak_rss_mb']} MB")
 
 
-def caveats(mode: str, bars_src: str, total_return: bool, costs: str = "v1") -> list[str]:
+def caveats(mode: str, bars_src: str, total_return: bool, costs: str = "v1", variant: str | None = "exit_approx",
+            ) -> list[str]:
     out = []
     if mode == "point_in_time":
         out += ["point-in-time S&P 500 (#123): a company that left the index drops out of the ranked universe and is "
@@ -455,6 +537,9 @@ def caveats(mode: str, bars_src: str, total_return: bool, costs: str = "v1") -> 
             f"cost model {costs} (#111: bucket half-spreads from the report, not yet fitted to quotes or paper fills)"
             + ("" if bars_src == "store" else "; prices are split-adjusted, so its half-cent floor still overstates "
                "early costs of heavily split names (audit E4)"),
+            "the exit-before-earnings variant uses a window around the date expected from earlier SEC 8-K Item 2.02 "
+            "filings (point in time, #203), not an earnings calendar; companies without SEC rows have no blackout"
+            if variant == "exit_sec" else
             "the exit-before-earnings variant uses an estimated earnings window, not known dates (S85)",
             "Amendment 3: purchases are sized against cash minus a 3% of equity reserve and a buy still above the "
             "cash at the fill is cut to whole shares (no leverage ever); split fractions are paid in cash. Reports "
@@ -471,7 +556,9 @@ HEAD = ("Rule / version", "Fill", "Costs", "Cap %", "Earnings", "Total return %"
 TAIL = ("Positive years", "Avg exposure %", "Max exposure %", "Avg names", "Turnover %/yr", "Cost bp/yr", "Trades",
         "Avg holding days", "Top-5 stocks' share of profit %", "Break-even cost x", "Sharpe pctile vs random",
         "CAGR pctile vs random")
-EARN = {"hold": "hold through", "exit_approx": "exit before (APPROXIMATE)"}
+EARN = {"hold": "hold through", "exit_approx": "exit before (APPROXIMATE)",
+        "exit_sec": "exit before (SEC point-in-time dates)"}
+VARIANT_NOTE = {"exit_approx": "APPROXIMATE", "exit_sec": "SEC point-in-time dates"}
 
 
 def _cells(name: str, s: dict, years: list[str], **extra) -> dict:
@@ -726,7 +813,8 @@ def main() -> None:
     data = Path(a.data)
     if a.has:
         uni_file, mode, bars = universe_mode(a)
-        hit = find_report(data / "reports", a.level, a.has, a.costs, mode, bars, start=a.start, end=a.end,
+        hit = find_report(data / "reports", a.level, a.has, a.costs, mode, bars, earnings_input(a, data, mode),
+                          start=a.start, end=a.end,
                           universe=Path(uni_file).name, control_runs=a.control_runs, control_kind=CONTROL_KIND)
         sys.exit(0 if hit else 1)
     if a.summary:
