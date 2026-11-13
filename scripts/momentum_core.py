@@ -378,6 +378,11 @@ def run_version(a: argparse.Namespace) -> None:
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
     rows, trials, books = [], [], {}
+    # #203 reruns core_pit once the SEC file exists: a row whose configuration and events are identical to a row of
+    # an earlier finished report of the same window was already counted there, so it is a report of it (n_trials 0)
+    prior = find_report(out, a.level, a.version, a.costs, mode, bars_src, start=a.start, end=a.end,
+                        universe=Path(uni_file).name)
+    counted = {(r.get("label"), r.get("events_sha256")) for r in (prior[1].get("rows") or [])} if prior else set()
 
     def one(sp: mc.CoreSpec, kind: str, fill: str, cost: float, exposure_pct: float, earnings: str) -> dict:
         exposure, earn_mode = exposure_pct, earnings
@@ -412,7 +417,7 @@ def run_version(a: argparse.Namespace) -> None:
             "gate_v2_sha256": gate_sha,
             # one configuration = one frozen rule at one exposure cap and earnings version; the same configuration
             # under higher costs or the stress fill is a report of it, not another configuration
-            "n_trials": int(fill == "base" and cost == 1.0),
+            "n_trials": int(fill == "base" and cost == 1.0 and (label, row["events_sha256"]) not in counted),
             "params": {**sp.params(), "fill": fill, "cost_multiple": cost, "exposure_cap_pct": exposure,
                        "earnings": earn_mode, "kind": kind},
             "window": [str(bars.dates[i0]), str(bars.dates[i1])],

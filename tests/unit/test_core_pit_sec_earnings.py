@@ -195,3 +195,27 @@ def test_today_universe_ignores_the_sec_file(runs, tmp_path):
     assert core_script.earnings_input(a, c["root"], "point_in_time") == "sec_pit"
     assert core_script.earnings_input(core_script.argparse.Namespace(earnings="off"), c["root"],
                                       "point_in_time") == "off"
+
+
+def test_the_rerun_once_the_sec_file_exists_counts_only_the_new_variant(runs, tmp_path):
+    """The #203 rerun repeats every hold-through run exactly (same label, same events): those were counted by the
+    earlier report, so only the new SEC variant adds configurations to the trial registry."""
+    import shutil
+
+    out, mp = runs
+    c = out[None]
+    root = tmp_path / "rerun"
+    shutil.copytree(c["root"], root)
+    before = len((root / "trials.jsonl").read_text().splitlines())
+    (root / "earnings").mkdir(exist_ok=True)
+    announcements(c["panel"].dates, c["stocks"]).to_parquet(root / "earnings" / "announcements.parquet")
+    mp.setattr(sp500_pit.Membership, "load", classmethod(lambda cls, *a, ms=c["ms"], **k: ms))
+    run(mp, root, c["uni"], c["panel"], "--version", VERSION)
+    new = [json.loads(x) for x in (root / "trials.jsonl").read_text().splitlines()[before:]]
+    assert new and {r["params"]["earnings"] for r in new} == {"hold", "exit_sec"}
+    assert sum(r["n_trials"] for r in new if r["params"]["earnings"] == "hold") == 0
+    sec = [r for r in new if r["params"]["earnings"] == "exit_sec"]
+    assert sum(r["n_trials"] for r in sec) == sum(1 for r in sec if r["params"]["fill"] == "base"
+                                                  and r["params"]["cost_multiple"] == 1.0) > 0
+    first = [json.loads(x) for x in (c["root"] / "trials.jsonl").read_text().splitlines()]
+    assert sum(r["n_trials"] for r in first) > 0  # the first report counted its configurations
