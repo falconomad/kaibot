@@ -200,3 +200,129 @@ def test_the_heartbeat_says_plainly_when_the_daily_store_was_not_refreshed(tmp_p
     assert st["multi_day"]["note"].startswith(f"{MD}: no decision today: daily store not refreshed")
     kinds = [e["type"] for e in a.store.tables["event"]]
     assert "multi_day_no_decision" in kinds and a.cls_orders() == []
+
+
+# ---------------------------------------------------------------- QA-Ops review of #207: venue conflicts
+
+
+@dataclass(frozen=True)
+class SellsB(mom.TrendMomentum):
+    def decision_day(self, prev, fill) -> bool:
+        return True
+
+    def on_event(self, ctx):
+        return TargetList(self.name, ctx.fill_session, {}, features={"keep": [], "buy": [], "sell": {"B": "exit"}},
+                          resize=False)
+
+
+def _book_b(a, qty=40):
+    """The multi-day book holds `qty` B from DAY1 (booked as the daily path books a fill; no stop: the prereg has
+    none)."""
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))
+    a.broker.pos["B"] = {"qty": qty, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": qty, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    return px
+
+
+def test_a_watchdog_stop_placed_while_the_engine_hung_is_adopted_and_cancelled_before_the_sale(tmp_path,
+                                                                                             monkeypatch):
+    """The engine hung (no restart) and the watchdog put an emergency stop on B. The rule's sale must not be refused
+    session after session: the stop is adopted, cancelled (the rule has no stop), and then the sale goes out once."""
+    from kaibot.broker.protocol import OrderRequest
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.rule = type(a.rule)(SellsB(), a.rule.builder)
+    a.eng.daily._rules = lambda r=[a.rule]: r
+    px = _book_b(a)
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    wd = a.broker.submit(OrderRequest("B", "sell", 40, "stop", "gtc", "kbwd-trend_momentum-B-20260803210000-wdstop",
+                                      stop_price=round(px * 0.9, 2)))
+    a.ticks(a.open2, 0, 3)
+    assert a.broker.orders[wd["id"]]["status"] == "canceled"
+    assert any(b["coid"] == wd["client_order_id"] for *_, b in a.eng.journal.entries(kinds=("stop_adopted",)))
+    (sale,) = [o for o in a.cls_orders() if o["side"] == "sell"]
+    assert float(sale["qty"]) == 40
+    a.ticks(a.open2, 3, 390)
+    a.after_close(a.open2)
+    assert "B" not in a.broker.pos and (MD, "B") not in a.eng.ledger.book(a.rid).sleeves
+    assert len([o for o in a.cls_orders() if o["side"] == "sell"]) == 1 and a.eng.kill is None
+
+
+def test_the_intraday_rule_leaves_a_multi_day_stock_alone(tmp_path, monkeypatch):
+    """Alpaca refuses an order against an open opposite-side market or stop order in the symbol (taught to SimBroker),
+    and one position holds both books' shares: an intraday entry in B while the book holds it is vetoed, so the
+    15:55 flatten can never be refused; A trades as before."""
+    from test_engine import fake_candidate
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    _book_b(a)
+    fake_candidate(a.eng, "B", at=(54,))
+    a.ticks(a.open1, 30, 70)
+    sig = [s for s in a.store.tables.get("signal", []) if s.get("symbol") == "B" and s.get("mode") == "live"]
+    assert sig and all(s.get("rules_veto") == "multi_day_symbol" for s in sig)
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o.get("order_class") == "bracket"]
+
+
+def test_simbroker_refuses_a_wash_trade_as_alpaca_does(tmp_path, monkeypatch):
+    import pytest as _pt
+
+    from kaibot.broker.protocol import BrokerError, OrderRequest
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    _book_b(a)
+    a.broker.submit(OrderRequest("B", "sell", 10, "stop", "gtc", "x1", stop_price=1.0))
+    with _pt.raises(BrokerError, match="wash trade"):
+        a.broker.submit(OrderRequest("B", "buy", 5, "market", "cls", "x2"))
+    a.broker.submit(OrderRequest("B", "sell", 5, "market", "cls", "x3"))  # the same side is fine
+
+
+def test_a_daily_order_waits_while_an_opposite_order_is_open():
+    """The daily path's own check, before it sends: an open opposite-side market or stop order (or armed leg) in the
+    symbol that is not its own working order refuses the target with a reason; the target loop retries it."""
+    orders = [{"id": "s1", "symbol": "B", "side": "sell", "type": "stop", "status": "new", "legs": []},
+              {"id": "e1", "symbol": "C", "side": "buy", "type": "market", "status": "filled",
+               "legs": [{"id": "e1s", "symbol": "C", "side": "sell", "type": "stop", "status": "new"},
+                        {"id": "e1t", "symbol": "C", "side": "sell", "type": "limit", "status": "new"}]},
+              {"id": "mine", "symbol": "D", "side": "sell", "type": "market", "status": "new", "legs": []},
+              {"id": "lim", "symbol": "E", "side": "sell", "type": "limit", "status": "new", "legs": []}]
+    opp = ld.opposite_orders(orders, {"mine"})
+    assert opp == {"B": {"sell"}, "C": {"sell"}}
+
+    class Acct:
+        def entry_block(self):
+            return None
+
+        def allows(self, *a):
+            return None
+
+    g = ld._Gate(Acct())
+    g.opposite = opp
+    assert "wash trade" in g.allows("B", "buy") and g.allows("B", "sell") is None
+    assert "wash trade" in g.allows("C", "buy") and g.allows("D", "buy") is None and g.allows("E", "buy") is None
+
+
+def test_multi_day_buys_wait_while_shorting_is_on(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.broker.shorting_enabled = True
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, 5)
+    assert a.cls_orders() == []
+    assert "multi_day_shorting_on" in [e["type"] for e in a.store.tables["event"]]
+    a.broker.shorting_enabled = False
+    a.eng.daily._shorting_day = None  # (read again at the next session; here: at once)
+    a.ticks(a.open2, 5, 7)
+    assert [o["side"] for o in a.cls_orders()] == ["buy"]
+
+
+def test_on_an_early_close_the_send_window_ends_15_minutes_before_the_close():
+    from datetime import date, time
+
+    lv = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
+                      prev_session=lambda d: d, session_close=lambda d: time(13, 0) if d.day == 27 else time(16, 0))
+    assert lv.send_until(date(2026, 11, 27)) == time(12, 45)  # the day after Thanksgiving
+    assert lv.send_until(date(2026, 11, 25)) == time(15, 45)  # a normal day: 15:45 (cls refused from 15:50)
+    assert ld.calendar_close({"close": "13:00"}) == time(13, 0) and ld.calendar_close(None) is None

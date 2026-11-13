@@ -532,6 +532,13 @@ class Engine:
             self.store.event("multi_day_error", {"step": step, "error": f"{type(e).__name__}: {e}"[:200]},
                              self._rid())
 
+    def _md_symbols(self) -> set[str]:
+        """#206: symbols the multi-day book holds or has a working order of the daily path in (empty without the
+        daily path: the intraday path is unchanged)."""
+        if self.daily is None:
+            return set()
+        return {sym for _, sym in self._md_sleeves()} | self.daily.working_symbols()
+
     def _daily_status(self, st: dict) -> dict:
         """#206: the heartbeat's `multi_day` block (`LiveDaily.status`), e.g. "no decision today: daily store not
         refreshed". Absent without the daily path."""
@@ -1548,6 +1555,12 @@ class Engine:
         decision = self.now()
         if not (s in self.market.base or s == self.market.spy or s in d.custom_ok):
             veto = "not an accepted ticker today"  # S68: a refused or unchecked custom ticker can never be entered
+        if veto is None and s in self._md_symbols():
+            # #206 (QA-Ops): Alpaca refuses an order while an opposite-side market or stop order is open in the
+            # symbol, and one position per symbol holds both books' shares. An intraday entry in a stock the
+            # multi-day book holds or has a closing-auction order in could leave its 15:55 flatten (or the cls order)
+            # refused, so the intraday rule leaves that stock alone (the multi-day book goes first: it sends at 09:31)
+            veto = "multi_day_symbol"
         if fresh_reads:  # single decisions read quotes and buying power themselves
             self._quotes = self.broker_quotes([s])
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0

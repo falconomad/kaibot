@@ -309,13 +309,36 @@ class Rule:
         return self.strategy.name
 
 
+ACTIVE = frozenset({"new", "accepted", "pending_new", "partially_filled", "accepted_for_bidding", "pending_replace"})
+
+
+def opposite_orders(open_orders: Sequence[dict], mine: set[str]) -> dict[str, set[str]]:
+    """symbol -> the sides of open market or stop orders (and armed legs) that are not this path's: Alpaca refuses
+    a new order of the other side in that symbol ("potential wash trade detected"; QA-Ops review of #207)."""
+    out: dict[str, set[str]] = {}
+    for o in open_orders:
+        for x in [o, *(o.get("legs") or [])]:
+            if str(x.get("id")) in mine or x.get("status") not in ACTIVE or x.get("type") not in ("market", "stop"):
+                continue
+            out.setdefault(str(x.get("symbol") or o.get("symbol")), set()).add(str(x.get("side") or o.get("side")))
+    return out
+
+
 class _Gate:
-    """The target loop's `reconciler`: the account's reconciliation, plus no buy while entries are blocked."""
+    """The target loop's `reconciler`: the account's reconciliation, no buy while entries are blocked, and no order
+    against an open opposite-side market or stop order in the symbol (Alpaca would refuse it)."""
 
     def __init__(self, account: Account) -> None:
         self.account = account
+        self.opposite: dict[str, set[str]] = {}
+        self.shorting: bool | None = False  # set by LiveDaily from the account before each send
 
     def allows(self, symbol: str, side: str, purpose: str = "target", qty: float | None = None) -> str | None:
+        other = {"buy": "sell", "sell": "buy"}[side]
+        if other in self.opposite.get(symbol, ()):
+            return f"an open {other} market or stop order in {symbol} (Alpaca refuses a wash trade): waiting"
+        if side == "buy" and self.shorting is not False:
+            return "shorting is on at the paper account (or unread): run ./scripts/alpaca_no_shorting.sh"
         if side == "buy":
             why = self.account.entry_block()
             if why:
@@ -333,7 +356,8 @@ class LiveDaily:
                  load: Callable[[date, datetime], DailyData], account: Account, *,
                  next_session: Callable[[date], date], prev_session: Callable[[date], date],
                  event: Callable[[str, dict], None] = lambda kind, body: None,
-                 known_order_ids: Callable[[], set[str]] = set) -> None:
+                 known_order_ids: Callable[[], set[str]] = set,
+                 session_close: Callable[[date], time | None] = lambda d: None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps)."""
         self._rules = rules if callable(rules) else (lambda r=list(rules): r)
@@ -343,6 +367,9 @@ class LiveDaily:
         self.load, self.account, self.event = load, account, event
         self.next_session, self.prev_session = next_session, prev_session
         self.known_order_ids = known_order_ids
+        self.session_close = session_close  # the session's close (ET wall time), for early-close days
+        self.shorting: bool | None = None  # the paper account's shorting_enabled, read at start-up and each session
+        self._shorting_day: date | None = None
         self.policy = ExecutionPolicy("close")
         self.gate = _Gate(account)
         self.om: OrderManager | None = None
@@ -423,6 +450,7 @@ class LiveDaily:
             return
         sleeves = {(r.name, s): q for r in self.rules for s, (q, _) in self.account.held(r.name).items()}
         self.stops.startup(sleeves, str(self.now().astimezone(NY).date()))
+        self._read_shorting()
         self._prune()
         self._cancel_due()  # a halt or a full flatten journalled before the restart still holds today
 
@@ -552,9 +580,34 @@ class LiveDaily:
             self._data = {k: self.load(k, now)}  # one evening's view at a time
         return self._data[k]
 
+    def send_until(self, day: date) -> time:
+        """15:45 ET, or on an early-close day the close minus 15 minutes (QA-Ops review of #207; Alpaca refuses
+        `cls` orders from 15:50 on normal days, so 15:45 is never passed)."""
+        try:
+            close = self.session_close(day)
+        except Exception:
+            close = None
+        if close is None:
+            return SEND_UNTIL
+        early = (datetime.combine(day, close) - timedelta(minutes=15)).time()
+        return min(SEND_UNTIL, early)
+
     def in_window(self, now: datetime) -> bool:
-        t = now.astimezone(NY).time()
-        return SEND_FROM <= t < SEND_UNTIL
+        et = now.astimezone(NY)
+        return SEND_FROM <= et.time() < self.send_until(et.date())
+
+    def _read_shorting(self, day: date | None = None) -> None:
+        """QA-Ops review of #207: multi-day buys need shorting OFF at the paper account (a late stop must never open a
+        short). Read at start-up and once per session; unreadable counts as on (fail closed)."""
+        try:
+            v = (self.broker.account() or {}).get("shorting_enabled")
+            on = True if v is None else (v is True or str(v).lower() == "true")
+        except Exception:
+            on = True
+        if on and self.shorting is not True:
+            self.event("multi_day_shorting_on", {"action": "multi-day buys refused until shorting is off at the "
+                                                           "paper account: ./scripts/alpaca_no_shorting.sh"})
+        self.shorting, self._shorting_day = on, day
 
     def send(self, session: date) -> list[str]:
         """Session `session`, inside the send window: each rule's targets, journalled before any order, sent once
@@ -567,6 +620,11 @@ class LiveDaily:
         for r in self.rules:
             if self._send_entry(r.name, session, "md_sent") is not None:
                 continue
+            if self._shorting_day != session:
+                self._read_shorting(session)
+            self.gate.shorting = self.shorting
+            if not self._drop_failsafe_stops(r.name, session):
+                continue  # a fail-safe stop still holds shares (or blocks a buy): the next tick goes on
             planned = self._send_entry(r.name, session)
             if planned is None:
                 planned = self._plan(r, session, rid)
@@ -583,6 +641,13 @@ class LiveDaily:
                        and not str(x.reason or "").startswith("lost")}  # the venue said no: not sent again today
             targets = [t for t in targets if t.symbol not in refused]  # (an order that never reached it is)
             held_now = {(r.name, s): q for s, (q, _) in self.account.held(r.name).items()}
+            try:
+                mine = {i for x in om.live.values() if x.purpose != "stop" for i in x.ids}  # a stop counts
+                self.gate.opposite = opposite_orders(self.broker.open_orders(), mine)
+            except Exception:  # unreadable: send nothing this tick (fail closed), try again at the next
+                self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
+                                                 "why": "open orders unreadable"})
+                continue
             res = reconcile_targets(om, self.policy, targets, held_now, now=self.now(), session=str(session),
                                     run=rid, reconciler=self.gate, stops=self.stops, sells_first=False)
             sent = [{"coid": x.coid, "symbol": x.symbol, "side": x.side, "qty": x.qty, "state": str(x.state),
@@ -603,6 +668,35 @@ class LiveDaily:
                                                 "sent": [x["coid"] for x in sent], "skipped": skipped})
                 done.append(r.name)
         return done
+
+    def _drop_failsafe_stops(self, rule: str, session: date) -> bool:
+        """QA-Ops review of #207: a stop the watchdog or the dead-man placed while the engine was silent (hung, not
+        restarted) is adopted into the order manager and, because the rule's pre-registration has no stop
+        (`PREREG_STOP_ATR`), cancelled, before anything is sent: it would hold the shares of a sale and make
+        Alpaca refuse a buy of the same stock (wash trade). True once no such stop is open (or none existed)."""
+        sleeves = {(rule, s): q for s, (q, _) in self.account.held(rule).items()}
+        if not sleeves:
+            return True
+        if self.stops.adopt(sleeves, str(session)) is None:
+            return False  # open orders unreadable: nothing is sent this tick
+        left = []
+        for key in sleeves:
+            for x in self.stops.stops_of(key):
+                if x.state in UNCONFIRMED:
+                    left.append(x.coid)
+                    continue
+                if x.state is not St.PENDING_CANCEL and x.order_id is not None:
+                    self.om.cancel(x.coid)
+                if x.open:
+                    left.append(x.coid)
+        if left:
+            said = repr(left)
+            if self._said.get(f"{rule}:stops") != said:
+                self._said[f"{rule}:stops"] = said
+                self.event("multi_day_stops_cancelled", {"strategy": rule, "session": str(session), "coids": left,
+                                                         "why": "the rule has no stop: a fail-safe stop is cancelled "
+                                                                "before the rule's orders go out"})
+        return not left
 
     def _pending(self, rule: str, session: date, held: Mapping[str, object]) -> dict[str, str]:
         """Sales sent on an earlier session that did not fill (no closing print): sent again, with their reason."""
@@ -833,7 +927,17 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
     return LiveDaily(engine.broker, engine.journal, engine.now, rules if rules is not None else current, load,
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
-                     known_order_ids=known_ids)
+                     known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))))
+
+
+def calendar_close(cal: dict | None) -> time | None:
+    """The close of a session from the broker's calendar row (Alpaca: "16:00" or "13:00")."""
+    v = str((cal or {}).get("close") or "")
+    try:
+        hh, mm = v.replace(":", "")[:2], v.replace(":", "")[2:4]
+        return time(int(hh), int(mm))
+    except ValueError:
+        return None
 
 
 def rules_for(names: Sequence[str], pol: RiskPolicy, level: str) -> list[Rule]:
