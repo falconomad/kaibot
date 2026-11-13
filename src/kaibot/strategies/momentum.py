@@ -14,9 +14,9 @@ What a strategy does here, and what it does not:
 - asked once per session after the close (`Event.AFTER_CLOSE`), it reads the daily bars up to that close through
   `ctx.view` (point-in-time: row `ctx.view.k` is the last row it can see) and, on its decision day, returns a
   `TargetList`: the names to keep, the ranked names it would buy (best first), and why each held name is sold;
-- it never sizes and never sends an order. Share counts come from the shared ATR sizing rule
-  (`engine/daily.atr_risk_sizing`, the stand-in the portfolio builder #119 replaces), orders from the daily
-  runner, fills from `SimBroker`.
+- it never sizes and never sends an order. Share counts come from the portfolio builder (`risk/portfolio.py`,
+  its ranked fill configured per rule by `engine/daily.momentum_builder`, #168), orders from the daily runner,
+  fills from `SimBroker`.
 
 Signals are on split-adjusted closes without dividends (pre-registrations, choice 1; Amendment 2: the daily store's
 official close for `--universe pit`). A missing close carries the last one for at most 5 sessions.
@@ -192,8 +192,9 @@ class _Momentum:
                 if sym in ctx.held or sell_if(j) is not None:
                     continue  # already held (a holding being sold is not bought back the same day), or not buyable
                 buy.append(sym)
-        weights = {s: 1.0 for s in [*keep, *buy]}
+        weights = {s: 1.0 for s in [*keep, *buy]}  # held names first, then the buys best first
         return TargetList(self.name, ctx.fill_session, weights, sizing="atr_risk",
+                          resize=self.resize_week(ctx.fill_session),
                           reasons=tuple(f"sell {s}: {r}" for s, r in sell.items()),
                           features={"keep": keep, "buy": buy, "sell": sell, "ranked": n,
                                     "max_names": self.max_names, "atr_risk": self.atr_risk,

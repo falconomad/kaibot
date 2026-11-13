@@ -149,8 +149,10 @@ spy_total_return_from_store = wfm.spy_total_return_from_store  # one copy, share
 
 
 def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list[str], spy: str, mode: str,
-                bars_src: str, t0: float) -> tuple[mc.Market, str, list[str], dict]:
-    """The `Market` of one run, its input fingerprint, the symbols it read and what the report says about them."""
+                bars_src: str, t0: float, sectors: dict[str, str] | None = None
+                ) -> tuple[mc.Market, str, list[str], dict]:
+    """The `Market` of one run, its input fingerprint, the symbols it read and what the report says about them.
+    `sectors`: Amendment 4's sector of each stock (`mc.universe_sectors`, the engine command's source too)."""
     if bars_src == "minute":
         symbols = [*stocks, *etfs, spy]  # the same list as the multiday set, so its daily-bar cache is reused
 
@@ -166,7 +168,7 @@ def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list
         print(f"daily bars: {len(bars.dates)} sessions x {len(bars.symbols)} symbols "
               f"({'built and cached' if built else 'from the cache'}), {time.time() - t0:.0f}s", flush=True)
         spy_tr, note = spy_total_return_from_store(data, spy, bars.dates)
-        m = mc.Market.from_bars(bars, bars.cols(stocks), bars.col(spy), spy_tr)
+        m = mc.Market.from_bars(bars, bars.cols(stocks), bars.col(spy), spy_tr, sectors=sectors)
         info = {"bars": "minute history (data/bars_1m): split-adjusted as of the download, no dividends",
                 "spy_total_return": note}
         if spy_tr is not None:
@@ -202,7 +204,7 @@ def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list
     rep = store.adjustment_report()
     bad = rep[rep.get("split_basis_days", pd.Series(dtype=float)).fillna(0) > 0]["key"].astype(str).tolist() \
         if len(rep) else []
-    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad)
+    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors)
     print(f"panel: {len(m.raw.dates)} sessions x {len(m.raw.symbols)} symbols, {time.time() - t0:.0f}s", flush=True)
     print(f"SPY total return: {m.notes['spy_total_return']['source']}", flush=True)
     info = {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs and "
@@ -264,7 +266,8 @@ def run_version(a: argparse.Namespace) -> None:
     spy = cfg["market"]
     pol = load_profiles()[a.level]
     costs = None if a.costs == "v1" else get_model(a.costs)
-    m, input_sha, symbols, data_info = load_market(a, data, stocks, list(cfg["sectors"]), spy, mode, bars_src, t0)
+    m, input_sha, symbols, data_info = load_market(a, data, stocks, list(cfg["sectors"]), spy, mode, bars_src, t0,
+                                                   mc.universe_sectors(cfg))
     bars = m.raw
     folds = make_folds(first_train_month(a.start, WARMUP_DAYS), np.datetime64(a.end, "D"))
     if not folds:
