@@ -106,6 +106,7 @@ CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": alread
 # S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
 RECHECK_MINUTES = 15  # S78: a blocking reconciliation difference is checked again this often
+BREACH_CONFIRM_S = 60.0  # #211: a book breach must hold on two checks at least this far apart
 
 
 class FlattenIncomplete(RuntimeError):
@@ -292,7 +293,7 @@ def gate_peak(peak: float | None, eq: float, book_pnl: float) -> float | None:
     if not book_pnl or peak is None:
         return peak
     eq_i = intraday_equity(eq, book_pnl)
-    if not eq_i > 0:
+    if not (eq_i > 0 and eq > 0):  # (#211: a non-positive run equity keeps the peak as it is)
         return peak
     return eq * peak / eq_i
 
@@ -370,6 +371,8 @@ class Engine:
             raise registry.RefusedStrategy(f"the live daily path needs {registry.MULTIDAY_FLAG}=on")
         self.daily = daily(self) if daily is not None else None
         self._closed_cache: tuple | None = None
+        self._breach: tuple[int, datetime] | None = None  # #211: (run, first check) of an unconfirmed book breach
+        self._breach_rid: int | None = None  # the run whose journalled breach `_breach` was read for
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -555,7 +558,13 @@ class Engine:
 
     def _daily_status(self, st: dict) -> dict:
         """#206: the heartbeat's `multi_day` block (`LiveDaily.status`), e.g. "no decision today: daily store not
-        refreshed". Absent without the daily path."""
+        refreshed". Absent without the daily path. #211: with KAIBOT_MULTIDAY=on every heartbeat (closed, idle,
+        preparing, after the close) also carries `experiments`, so the dashboard's label and limits never vanish."""
+        if registry.multi_day_enabled() and "experiments" not in st:
+            if not self.experiments:  # e.g. a start with the market closed: no session start yet
+                self.experiments = self._experiments()
+            if self.experiments:
+                st["experiments"] = self.experiments
         if self.daily is not None:
             try:
                 st["multi_day"] = self.daily.status(self.now().astimezone(_et()).date())
@@ -628,8 +637,47 @@ class Engine:
         if peak is None or equity > peak + 0.005:
             peak = max(peak or float(b.amount), equity)
             self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self.now().isoformat()})
-        if book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
-            self._book_end(rid, peak, equity, end, [r.name for r in rules])
+        if self._breach_rid != rid:  # QA-Ops second key on #213: an unconfirmed breach survives a restart
+            self._breach, self._breach_rid = self._journalled_breach(rid), rid
+        if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
+            if self._breach is not None:
+                self.journal.append("md_book_breach_clear", {"run_id": rid, "peak": round(peak, 2),
+                                                             "equity": round(equity, 2), "ts": self.now().isoformat()})
+            self._breach = None
+            return
+        # #211 (QA-Ops review of #207): a retirement is durable, so one bad print must never cause it. The breach
+        # must hold on two checks at least BREACH_CONFIRM_S apart (two engine ticks, i.e. two minute bars) before
+        # the book ends; a check in between that is not a breach starts over (`md_book_breach_clear`). The first
+        # breach is journalled and read back after a restart, so an engine that restarts between the checks (a
+        # crash loop in a falling market) still ends the book at its next check: a restart never delays the end.
+        now = self.now()
+        if self._breach is not None and self._breach[1].astimezone(_et()).date() != now.astimezone(_et()).date():
+            self._breach = None  # both checks fall in one session: an old breach (before a night) confirms nothing
+        if self._breach is None or self._breach[0] != rid:
+            self._breach = (rid, now)
+            self.journal.append("md_book_breach", {"run_id": rid, "peak": round(peak, 2), "equity": round(equity, 2),
+                                                   "drawdown_pct": round(drawdown_pct(peak, equity), 3),
+                                                   "end_pct": end, "ts": now.isoformat(),
+                                                   "action": "confirmed or dropped at the next check"})
+            return
+        if (now - self._breach[1]).total_seconds() < BREACH_CONFIRM_S:
+            return
+        self._breach = None
+        self._book_end(rid, peak, equity, end, [r.name for r in rules])
+
+    def _journalled_breach(self, rid: int) -> tuple[int, datetime] | None:
+        """The run's unconfirmed book breach from the journal (`md_book_breach` not followed by a
+        `md_book_breach_clear`), or None: the confirmation state of `_book_end_check` across a restart."""
+        last = None
+        for _, _, kind, b in self.journal.entries(kinds=("md_book_breach", "md_book_breach_clear")):
+            if b.get("run_id") == rid:
+                last = (kind, b)
+        if last is None or last[0] != "md_book_breach":
+            return None
+        try:
+            return rid, datetime.fromisoformat(str(last[1]["ts"]))
+        except (KeyError, ValueError):
+            return None
 
     def _book_end(self, rid: int, peak: float, equity: float, end: float, rules: list[str]) -> None:
         """The multi-day book reached its run end. Exactly this, in this order:
@@ -1161,13 +1209,13 @@ class Engine:
             return self._daily_status({"state": "market_closed", "next_open": clk.get("next_open"),
                                        "account_clean": self.account_clean})
         if self.run is None and not self.pos and not self._md_exits:  # S80: a multi-day sale still to book
-            return {"state": "idle", "note": "no paper run: start one from the dashboard",
-                    "account_clean": self.account_clean}
+            return self._daily_status({"state": "idle", "note": "no paper run: start one from the dashboard",
+                                       "account_clean": self.account_clean})
         if self.run is not None and (self.day is None or self.day.day != now.astimezone(_et()).date()):
             self._start_day(now)
         d = self.day
         if d is None:
-            return {"state": "idle", "account_clean": self.account_clean}
+            return self._daily_status({"state": "idle", "account_clean": self.account_clean})
         self.market.update(now)
         m = self.market.last_complete_minute(now)
         if m < 0 or m == d.done_m:
@@ -1219,9 +1267,9 @@ class Engine:
             self.market.prepare_day(
                 nxt.date(),
                 open_utc,
-                progress=lambda n, tot: self.on_progress(
+                progress=lambda n, tot: self.on_progress(self._daily_status(
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
-                ),
+                )),
             )
 
     def _start_day(self, now: datetime) -> None:
@@ -1255,13 +1303,14 @@ class Engine:
         if self.market.set_custom(custom):  # S68: the custom list changed since the history was loaded
             self.market.day = None
         if self.market.day != today:
-            self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
+            self.on_progress(self._daily_status({"state": "preparing",
+                                                 "note": "loading price history (a few minutes the first time)"}))
             self.market.prepare_day(
                 today,
                 open_utc,
-                progress=lambda n, tot: self.on_progress(
+                progress=lambda n, tot: self.on_progress(self._daily_status(
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
-                ),
+                )),
             )
         self._vet_custom(self.day)
         for p in self.pos.values():  # intraday positions opened on an earlier session are closed at the first tick

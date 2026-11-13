@@ -269,6 +269,11 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
    (4 / 8 / 12%, ceiling 12%) are **unchanged**.
    - The book's equity is the run's pot plus the book's P&L since the run began (realised, dividends, open sleeves at
      the last price). Its peak is journalled (`md_book_peak`), so a restart measures from the same peak.
+   - **Confirmed breach (#211):** the end counts only when the breach holds on two checks at least a minute apart
+     (two engine ticks, two minute bars); a breach seen once is journalled (`md_book_breach`) and dropped if the next
+     check is not a breach (`md_book_breach_clear`), so one bad print can never retire the rule. The first
+     breach is read back from the journal after a restart, so a restart (or a crash loop) never delays the end
+     (QA-Ops second key on #213).
    - At the end (`risk/gate.book_run_ended`; `engine/core.Engine._book_end`), exactly this happens, once: the end is
      journalled (`md_book_end`); a `book_drawdown` halt row and a `multi_day_book_ended` event are written; the daily
      path's working orders are cancelled; every multi-day sleeve is sold **at market** (retried each tick until none
@@ -278,15 +283,25 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
      entry `md_retired` and a `multi_day_retired` halt row in Supabase (the engine reads both at start-up; either one
      keeps it retired, so neither a restart, a new journal nor a new run brings it back). The heartbeat says so
      (`detail.multi_day.note`: "trend_momentum retired: book fell 21.3% from its peak on <date>"). The only way back
-     is an explicit stakeholder action: `KAIBOT_REENABLE=<rule>:<retirement date>` in the engine's `.env`, read once
-     at start-up and journalled (`md_reenabled`, a `multi_day_reenabled` halt row and event). A value without the
-     date, or with another date, is refused (`multi_day_reenable_refused` event), so a value left in the `.env` can
-     never re-enable a later retirement.
+     is an explicit stakeholder action: `KAIBOT_REENABLE=<rule>:<retirement id>` in the engine's `.env`, read once
+     at start-up and journalled (`md_reenabled`, a `multi_day_reenabled` halt row and event). Each retirement has its
+     own id (its date plus a random part, e.g. `2026-11-20.a1b2c3`, shown on the heartbeat as `multi_day.rules.<rule>.
+     reenable`), so the value is **single-use** (#211): any other value is refused (`multi_day_reenable_refused`
+     event), and a value left in the `.env` never re-enables a later retirement, not even one on the same date.
    - With the live daily path on, the intraday run end is measured on the run's equity **without** the multi-day
      book's P&L (`risk/gate.intraday_equity`), with the same formula as before (`run_drawdown_reached`). Without the
      daily path (flag off) the book's P&L is 0 and the check is exactly what it was. When the intraday end trips it
-     still ends the whole run and sells everything, the multi-day book included (unchanged). The daily stop (the
-     day's change in the whole run's equity, overnight gaps included) is unchanged and still blocks entries.
+     still ends the whole run and sells everything, the multi-day book included (unchanged).
+   - **The daily stop counts the book's daily move** (#211; S80, unchanged and tighter, never looser): the daily stop
+     and the gate's `daily_loss_pct` measure the day's change in the **whole** run's equity, the multi-day book's
+     move of the day and its overnight gap included. A bad day for the book therefore halts new **intraday** entries
+     (and multi-day buys) for the rest of that session; it sells nothing of the book, which keeps its own end.
+   - **Wash trades (#207, #211):** Alpaca refuses an order while an opposite-side order it could trade against is
+     open in the symbol: a market or stop order always, a limit order against a new market or stop order (and a
+     limit at a crossing price). The intraday rule therefore never enters a stock the multi-day book holds or has an
+     order in (`multi_day_symbol`), and the daily path holds back a `cls` order while an opposite market, stop or
+     limit order (an intraday bracket's target leg included) is open in its symbol. `SimBroker` models the rule
+     (`wash_check`, opt-in, so replays are unchanged).
 2. **Book limits exactly as pre-registered**, now **confirmed** (no longer provisional; `config/profiles.yaml`
    `multi_day.provisional: false`): k = 0.1%, the level's `max_position_pct` per name (10 / 15 / 20%), at most
    **30 names**, a **40% sector cap**, the 3% cash reserve of the portfolio builder (Amendment 3) on the 1% hard

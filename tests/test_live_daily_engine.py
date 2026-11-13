@@ -291,7 +291,7 @@ def test_a_daily_order_waits_while_an_opposite_order_is_open():
               {"id": "mine", "symbol": "D", "side": "sell", "type": "market", "status": "new", "legs": []},
               {"id": "lim", "symbol": "E", "side": "sell", "type": "limit", "status": "new", "legs": []}]
     opp = ld.opposite_orders(orders, {"mine"})
-    assert opp == {"B": {"sell"}, "C": {"sell"}}
+    assert opp == {"B": {"sell"}, "C": {"sell"}, "E": {"sell"}}  # #211: an opposite limit blocks a market order
 
     class Acct:
         def entry_block(self):
@@ -303,7 +303,8 @@ def test_a_daily_order_waits_while_an_opposite_order_is_open():
     g = ld._Gate(Acct())
     g.opposite = opp
     assert "wash trade" in g.allows("B", "buy") and g.allows("B", "sell") is None
-    assert "wash trade" in g.allows("C", "buy") and g.allows("D", "buy") is None and g.allows("E", "buy") is None
+    assert "wash trade" in g.allows("C", "buy") and g.allows("D", "buy") is None
+    assert "wash trade" in g.allows("E", "buy")
 
 
 def test_multi_day_buys_wait_while_shorting_is_on(tmp_path, monkeypatch):
@@ -377,12 +378,18 @@ def test_only_an_explicit_dated_reenable_brings_the_rule_back_once(tmp_path, mon
     eng = a.restart()
     assert eng.daily.retirement(MD) is not None
     refused = [e["payload"] for e in a.store.tables["event"] if e["type"] == "multi_day_reenable_refused"]
-    assert len(refused) == 2 and f"{MD}:{DAY2}" in refused[-1]["why"]
-    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{DAY2}")
+    ident = eng.daily.retirement(MD)["retirement_id"]
+    assert ident.startswith(f"{DAY2}.") and len(refused) == 2 and f"{MD}:{ident}" in refused[-1]["why"]
+    assert eng.daily.status()["rules"][MD]["reenable"] == f"KAIBOT_REENABLE={MD}:{ident}"
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{DAY2}")  # the date alone no longer names the retirement (#211)
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is not None
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{ident}")
     eng = a.restart()
     assert eng.daily.retirement(MD) is None and [r.name for r in eng.daily.active()] == [MD]
     (re,) = [b for *_, b in eng.journal.entries(kinds=("md_reenabled",))]
     assert re["rule"] == MD and re["retired_session"] == DAY2 and re["by"] == "KAIBOT_REENABLE"
+    assert re["retirement_id"] == ident
     assert [x for x in a.store.tables["halt"] if x["kind"] == "multi_day_reenabled"]
     assert "multi_day_reenabled" in [e["type"] for e in a.store.tables["event"]]
     eng = a.restart()  # the flag still in the .env: nothing more is written
@@ -412,3 +419,141 @@ def test_the_send_window_reads_the_calendar_once_per_session_not_per_tick():
     assert lv.send_until(d) == time(15, 45)  # unreadable: the normal window (Alpaca refuses later orders anyway)
     assert [lv.send_until(d) for _ in range(5)] == [time(12, 45)] * 5
     assert calls == [d, d]
+
+
+# ---------------------------------------------------------------- #211: follow-ups of the QA-Ops review of #207
+
+
+def test_a_stale_reenable_line_never_reenables_a_same_date_retirement(tmp_path, monkeypatch):
+    """#211 (QA-Ops 3): re-enabled, then retired again on the SAME date (a new run that day): the old line in the .env
+    names the first retirement's id only and is refused; the rule stays retired."""
+    monkeypatch.delenv("KAIBOT_REENABLE", raising=False)
+    a = _ended_book(tmp_path, monkeypatch)
+    first = a.eng.daily.retirement(MD)["retirement_id"]
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{first}")
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is None
+    eng.daily.retire(MD, run_id=a.rid, session=DAY2, drawdown_pct=22.0, end_pct=21.0, peak=10_000.0, equity=7_800.0)
+    second = eng.daily.retirement(MD)["retirement_id"]
+    assert second != first and second.startswith(f"{DAY2}.")
+    eng = a.restart()  # the stale line is still set
+    assert eng.daily.retirement(MD)["retirement_id"] == second
+    assert len([b for *_, b in eng.journal.entries(kinds=("md_reenabled",))]) == 1
+    why = [e["payload"]["why"] for e in a.store.tables["event"] if e["type"] == "multi_day_reenable_refused"][-1]
+    assert second in why
+
+
+def test_one_bad_print_never_retires_the_rule(tmp_path, monkeypatch):
+    """#211 (QA-Ops 1): a breach seen on one check only (a bad print) is journalled and dropped; the book ends only
+    when the breach holds on two checks at least a minute apart."""
+    a = DailyAccount(tmp_path, monkeypatch, book_end=5.0)
+    _book_b(a)
+    real = a.eng._md_price
+    bad = {"on": False}
+    a.eng._md_price = lambda sym: real(sym) * 0.5 if bad["on"] else real(sym)  # a bad print of B
+    a.ticks(a.open1, 30, 40)
+    bad["on"] = True
+    a.ticks(a.open1, 40, 41)  # one tick with a bad price
+    bad["on"] = False
+    a.ticks(a.open1, 41, 45)
+    assert [b for *_, b in a.eng.journal.entries(kinds=("md_book_breach",))]
+    assert not a.eng.daily.account.book_ended() and a.eng.daily.retirement(MD) is None
+    bad["on"] = True
+    a.ticks(a.open1, 45, 46)
+    assert not a.eng.daily.account.book_ended()  # first check of a new breach
+    a.ticks(a.open1, 46, 47)  # the next minute: confirmed
+    assert a.eng.daily.account.book_ended() and a.eng.daily.retirement(MD) is not None
+
+
+def test_simbroker_models_opposite_limit_orders_as_alpaca_does(tmp_path, monkeypatch):
+    """#211 (QA-Ops 2): an open opposite limit order refuses a new market or stop order, and a new limit order whose
+    price reaches it; a limit that does not reach it is accepted."""
+    import pytest as _pt
+
+    from kaibot.broker.protocol import BrokerError, OrderRequest
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    _book_b(a)
+    a.broker.submit(OrderRequest("B", "sell", 10, "limit", "day", "l1", limit_price=200.0))
+    for req in (OrderRequest("B", "buy", 1, "market", "cls", "m1"),
+                OrderRequest("B", "buy", 1, "stop", "day", "s1", stop_price=300.0),
+                OrderRequest("B", "buy", 1, "limit", "day", "l2", limit_price=200.0)):
+        with _pt.raises(BrokerError, match="wash trade"):
+            a.broker.submit(req)
+    a.broker.submit(OrderRequest("B", "buy", 1, "limit", "day", "l3", limit_price=150.0))  # below the sell: fine
+
+
+def test_every_heartbeat_carries_the_experiment_label_with_the_flag_on(tmp_path, monkeypatch):
+    """#211 (Product): `detail.experiments` was only in the in-session heartbeat; the dashboard's label and limits
+    vanished after the close. With KAIBOT_MULTIDAY=on every heartbeat carries it: closed, idle, preparing, after the
+    close; with the flag off none does."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.eng.strategies = {lv: ["dip_reversal", MD] for lv in ("conservative", "balanced", "aggressive")}
+    a.eng.ex_dividends = lambda day, symbols: []  # a rule that holds across sessions needs an ex-date source
+    a.eng.experiments = []  # as after a start with the market closed
+    beats = []
+    a.eng.on_progress = beats.append
+    a.clock.t = a.open1 - timedelta(minutes=20)  # before the open: closed, preparing the history
+    st = a.eng.tick()
+    assert st["state"] == "market_closed" and st["experiments"][0]["strategy"] == MD
+    assert st["experiments"][0]["label"].startswith("Experiment")
+    assert all(b.get("experiments") for b in beats if b.get("state") == "preparing")
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    st = a.eng.tick()  # after the close, with the decision step
+    assert st["state"] == "market_closed" and st["experiments"][0]["strategy"] == MD
+    assert a.eng._daily_status({"state": "idle"})["experiments"]
+    monkeypatch.setenv("KAIBOT_MULTIDAY", "off")
+    assert "experiments" not in a.eng._daily_status({"state": "market_closed"})
+
+
+def _crash_bad(eng, real, bad):
+    eng._md_price = lambda sym: real(sym) * 0.5 if bad["on"] else real(sym)
+
+
+def test_a_restart_between_the_two_checks_does_not_drop_a_real_breach(tmp_path, monkeypatch):
+    """QA-Ops second key on #213: the first breach is journalled (`md_book_breach`), so a restart between the two
+    checks keeps it; an engine restarting every minute during a crash still ends the book at the next check, never
+    later. A breach that a later check dropped (`md_book_breach_clear`) is not brought back by a restart."""
+    a = DailyAccount(tmp_path, monkeypatch, book_end=5.0)
+    _book_b(a)
+    real = type(a.eng)._md_price.__get__(a.eng)
+    bad = {"on": False}
+    a.ticks(a.open1, 30, 40)
+    bad["on"] = True  # a one-off print, then a restart, then normal prices: dropped, not revived
+    _crash_bad(a.eng, real, bad)
+    a.ticks(a.open1, 40, 41)
+    bad["on"] = False
+    a.ticks(a.open1, 41, 42)
+    assert [b for *_, b in a.eng.journal.entries(kinds=("md_book_breach_clear",))]
+    eng = a.restart()
+    bad["on"] = True
+    _crash_bad(eng, type(eng)._md_price.__get__(eng), bad)
+    a.ticks(a.open1, 42, 43)
+    assert not eng.daily.account.book_ended()  # the dropped breach was not revived: this is a first check
+    for k in range(43, 47):  # a crash loop: one check per process
+        eng = a.restart()
+        _crash_bad(eng, type(eng)._md_price.__get__(eng), bad)
+        a.ticks(a.open1, k, k + 1)
+        if eng.daily.account.book_ended():
+            break
+    assert k == 43, "the breach must be confirmed at the first check after the restart"
+    assert eng.daily.retirement(MD) is not None
+    assert len([b for *_, b in eng.journal.entries(kinds=("md_book_breach",))]) == 2
+
+
+def test_a_breach_from_an_earlier_session_confirms_nothing(tmp_path, monkeypatch):
+    """Backend-quant review of 6c93c89: both checks of a confirmation fall in one session. A breach journalled on
+    DAY1 (never cleared: the engine stopped) does not confirm DAY2's first breach; DAY2 needs its own two checks."""
+    a = DailyAccount(tmp_path, monkeypatch, gap_b=0.7, book_end=5.0)
+    _book_b(a)
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    a.eng.journal.append("md_book_breach", {"run_id": a.rid, "peak": 10_000.0, "equity": 9_000.0,
+                                            "drawdown_pct": 10.0, "end_pct": 5.0,
+                                            "ts": (a.open1 + timedelta(hours=6)).isoformat()})
+    eng = a.restart()
+    a.ticks(a.open2, 0, 1)
+    assert not eng.daily.account.book_ended()  # DAY2's first check
+    a.ticks(a.open2, 1, 2)
+    assert eng.daily.account.book_ended()  # confirmed a minute later

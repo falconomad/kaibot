@@ -189,16 +189,20 @@ Start at least 30 minutes before the open.
   (see the top). The heartbeat says, for example, `trend_momentum retired: book fell 21.3% from its peak on
   2026-11-20`. A restart or a new run does not bring it back. To end the experiment, also remove
   `KAIBOT_MULTIDAY=on` as below.
-- **Re-enabling a retired rule** (only if you decide to, after talking to Product): add one line to the `.env`,
-  with the date the heartbeat names, and restart the engine:
+- **Re-enabling a retired rule** (only if you decide to, after talking to Product): copy the exact line the engine
+  shows for it (heartbeat `multi_day.rules.trend_momentum.reenable`, and in the `multi_day_retired` event), add it
+  to the `.env`, and restart the engine. It looks like this, with the retirement's own id after the colon:
 
   ```
-  KAIBOT_REENABLE=trend_momentum:2026-11-20
+  KAIBOT_REENABLE=trend_momentum:2026-11-20.a1b2c3
   ```
 
-  The engine reads it once at start-up and records it (`multi_day_reenabled` event). Without the date, or with
-  another date, it refuses (`multi_day_reenable_refused` event) and the rule stays retired. Remove the line again
-  afterwards. Left in place it does nothing, because it names that one retirement only.
+  The engine reads it once at start-up and records it (`multi_day_reenabled` event). Any other value, the date
+  alone included, is refused (`multi_day_reenable_refused` event) and the rule stays retired. Remove the line again
+  afterwards. Left in place it does nothing, because it names that one retirement only. A later retirement, even
+  on the same day, gets a new id.
+- **One bad price does not retire the rule:** the book's drawdown must be past its end on two checks at least a
+  minute apart.
   The run whose book hit its end keeps its book closed: the rule trades again from the next run on (dashboard,
   new run), not in that run.
 - **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's closing-auction

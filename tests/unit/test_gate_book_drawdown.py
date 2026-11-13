@@ -119,3 +119,10 @@ def test_without_multi_day_pnl_the_gate_peak_is_the_peak_bit_for_bit():
     from kaibot.engine.core import gate_peak
 
     assert gate_peak(10_123.45, 9_876.5, 0.0) == 10_123.45 and gate_peak(None, 9_876.5, 0.0) is None
+
+
+def test_a_non_positive_run_equity_keeps_the_gate_peak():
+    """#211: no scaled peak at or below zero (cannot happen with long-only books capped at 100%; never divides)."""
+    from kaibot.engine.core import gate_peak
+
+    assert gate_peak(10_000.0, -5.0, -200.0) == 10_000.0 and gate_peak(10_000.0, 0.0, -100.0) == 10_000.0

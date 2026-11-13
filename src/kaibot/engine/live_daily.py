@@ -49,6 +49,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -297,6 +298,11 @@ def retired_note(b: dict) -> str:
     return f"{b.get('rule')} retired: {fell} on {b.get('session')}"
 
 
+def reenable_value(b: dict) -> str:
+    """The one value that re-enables this retirement (#211: single-use, by its id)."""
+    return f"{REENABLE_FLAG}={b.get('rule')}:{b.get('retirement_id') or b.get('session')}"
+
+
 def store_state(root: Path, market: str = "SPY") -> dict:
     """`--check`: where the daily store is and the last session it holds."""
     from kaibot.ingest.daily_store import DailyStore
@@ -325,13 +331,17 @@ class Rule:
 ACTIVE = frozenset({"new", "accepted", "pending_new", "partially_filled", "accepted_for_bidding", "pending_replace"})
 
 
+BLOCKING = frozenset({"market", "stop", "limit", "stop_limit"})  # order types a new market order cannot pass
+
+
 def opposite_orders(open_orders: Sequence[dict], mine: set[str]) -> dict[str, set[str]]:
-    """symbol -> the sides of open market or stop orders (and armed legs) that are not this path's: Alpaca refuses
-    a new order of the other side in that symbol ("potential wash trade detected"; QA-Ops review of #207)."""
+    """symbol -> the sides of open market, stop or limit orders (and armed legs) that are not this path's: Alpaca
+    refuses a new order of the other side in that symbol ("potential wash trade detected"; QA-Ops review of #207).
+    Every order this path sends is a market (`cls`) order, which an opposite limit order blocks too (#211)."""
     out: dict[str, set[str]] = {}
     for o in open_orders:
         for x in [o, *(o.get("legs") or [])]:
-            if str(x.get("id")) in mine or x.get("status") not in ACTIVE or x.get("type") not in ("market", "stop"):
+            if str(x.get("id")) in mine or x.get("status") not in ACTIVE or x.get("type") not in BLOCKING:
                 continue
             out.setdefault(str(x.get("symbol") or o.get("symbol")), set()).add(str(x.get("side") or o.get("side")))
     return out
@@ -493,39 +503,47 @@ class LiveDaily:
         if st is not None and st.get("kind") == "multi_day_retired":
             if last is not None and int(last[1].get("store_id") or -1) > int(st.get("id") or 0):
                 return None  # re-enabled after that row (journalled with the id of its own re-enabling row)
+            reason = str(st.get("reason") or "")
+            rid = next((x.strip()[3:] for x in reason.split(";") if x.strip().startswith("id=")), None)
             return {"rule": rule, "session": st.get("session"), "drawdown_pct": None, "source": "store",
-                    "reason": st.get("reason")}
+                    "reason": reason, "retirement_id": rid or st.get("session")}
         return None
 
     def retire(self, rule: str, *, run_id, session: str | None, drawdown_pct: float, end_pct: float, peak: float,
                equity: float) -> dict:
         """Record the retirement durably: the journal (`md_retired`) and a `multi_day_retired` halt row."""
-        body = {"rule": rule, "run_id": run_id, "session": session, "drawdown_pct": round(drawdown_pct, 3),
-                "end_pct": end_pct, "peak": round(peak, 2), "equity": round(equity, 2), "ts": self.now().isoformat()}
+        # #211: each retirement has its own id (the session and a random part), the only key a re-enable accepts, so
+        # a re-enable is single-use: a later retirement, even on the same date, needs its own
+        ident = f"{session}.{secrets.token_hex(3)}"
+        body = {"rule": rule, "run_id": run_id, "session": session, "retirement_id": ident,
+                "drawdown_pct": round(drawdown_pct, 3), "end_pct": end_pct, "peak": round(peak, 2),
+                "equity": round(equity, 2), "ts": self.now().isoformat()}
         self.journal.append("md_retired", body)
         if self.store is not None:
             try:
                 self.store.insert("halt", {"run_id": run_id, "kind": "multi_day_retired", "session": session,
-                                           "reason": f"rule={rule}; {retired_note(body)}"}, returning=False)
+                                           "reason": f"rule={rule}; id={ident}; {retired_note(body)}"},
+                                  returning=False)
                 self._store_state(rule, fresh=True)
             except Exception:
                 log.exception("retirement halt row not written (the journal holds it)")
-        self.event("multi_day_retired", {**body, "note": retired_note(body),
-                                         "reenable": f"{REENABLE_FLAG}={rule}:{session}"})
+        self.event("multi_day_retired", {**body, "note": retired_note(body), "reenable": reenable_value(body)})
         return body
 
     def _apply_reenable(self) -> None:
-        """KAIBOT_REENABLE=<rule>:<retirement date>, read once at start-up: re-enables exactly that retirement
-        (journalled `md_reenabled`, a `multi_day_reenabled` halt row, an event). Anything else is refused with an
-        event and changes nothing, so a value left in the .env can never re-enable a later retirement."""
+        """KAIBOT_REENABLE=<rule>:<retirement id>, read once at start-up: re-enables exactly that retirement
+        (journalled `md_reenabled`, a `multi_day_reenabled` halt row, an event). The id is the retirement's own
+        (`retirement_id`, shown on the heartbeat): anything else is refused with an event and changes nothing, so a
+        value left in the .env can never re-enable a later retirement, not even one on the same date (#211)."""
         raw, self.reenable = (self.reenable or "").strip(), None
         if not raw:
             return
-        rule, _, day = raw.partition(":")
+        rule, _, token = raw.partition(":")
         cur = self.retirement(rule)
-        if cur is None or not day or str(cur.get("session")) != day:
+        ident = None if cur is None else str(cur.get("retirement_id") or cur.get("session"))
+        if cur is None or not token or token != ident:
             why = ("not retired" if cur is None else
-                   f"the date must be the retirement's: {REENABLE_FLAG}={rule}:{cur.get('session')}")
+                   f"the value must name this retirement: {reenable_value(cur)}")
             log.warning("%s=%s ignored: %s", REENABLE_FLAG, raw, why)
             self.event("multi_day_reenable_refused", {"value": raw[:80], "why": why})
             return
@@ -540,7 +558,8 @@ class LiveDaily:
                 store_id = st.get("id") if st is not None else None
             except Exception:
                 log.exception("re-enabling halt row not written")
-        body = {"rule": rule, "retired_session": day, "by": REENABLE_FLAG, "value": raw[:80], "store_id": store_id,
+        body = {"rule": rule, "retired_session": cur.get("session"), "retirement_id": ident, "by": REENABLE_FLAG,
+                "value": raw[:80], "store_id": store_id,
                 "ts": self.now().isoformat()}
         self.journal.append("md_reenabled", body)
         log.warning("%s re-enabled by %s=%s", rule, REENABLE_FLAG, raw)
@@ -905,7 +924,7 @@ class LiveDaily:
         for r in self.rules:
             ret = self.retirement(r.name)
             if ret is not None:
-                rules[r.name] = {"retired": True, "note": retired_note(ret)}
+                rules[r.name] = {"retired": True, "note": retired_note(ret), "reenable": reenable_value(ret)}
                 notes.append(retired_note(ret))
                 continue
             last = None
