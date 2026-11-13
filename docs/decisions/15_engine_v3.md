@@ -273,7 +273,15 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
      journalled (`md_book_end`); a `book_drawdown` halt row and a `multi_day_book_ended` event are written; the daily
      path's working orders are cancelled; every multi-day sleeve is sold **at market** (retried each tick until none
      is left); from then on the daily path decides and sends nothing **for the rest of the run**. The intraday rules
-     and the run go on. A new run starts a new book; to retire the rule for good, `KAIBOT_MULTIDAY` is switched off.
+     and the run go on.
+   - **Retired across runs** (Product call on #207, 13 Nov 2026): the rule is then **retired**, durably: a journal
+     entry `md_retired` and a `multi_day_retired` halt row in Supabase (the engine reads both at start-up; either one
+     keeps it retired, so neither a restart, a new journal nor a new run brings it back). The heartbeat says so
+     (`detail.multi_day.note`: "trend_momentum retired: book fell 21.3% from its peak on <date>"). The only way back
+     is an explicit stakeholder action: `KAIBOT_REENABLE=<rule>:<retirement date>` in the engine's `.env`, read once
+     at start-up and journalled (`md_reenabled`, a `multi_day_reenabled` halt row and event). A value without the
+     date, or with another date, is refused (`multi_day_reenable_refused` event), so a value left in the `.env` can
+     never re-enable a later retirement.
    - With the live daily path on, the intraday run end is measured on the run's equity **without** the multi-day
      book's P&L (`risk/gate.intraday_equity`), with the same formula as before (`run_drawdown_reached`). Without the
      daily path (flag off) the book's P&L is 0 and the check is exactly what it was. When the intraday end trips it

@@ -328,3 +328,66 @@ def test_on_an_early_close_the_send_window_ends_15_minutes_before_the_close():
     assert lv.send_until(date(2026, 11, 27)) == time(12, 45)  # the day after Thanksgiving
     assert lv.send_until(date(2026, 11, 25)) == time(15, 45)  # a normal day: 15:45 (cls refused from 15:50)
     assert ld.calendar_close({"close": "13:00"}) == time(13, 0) and ld.calendar_close(None) is None
+
+
+# ---------------------------------------------------------------- Product call on #207: retired across runs
+
+
+def _ended_book(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch, gap_b=0.7, book_end=5.0)
+    _book_b(a)
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, 4)
+    assert a.eng.daily.account.book_ended()
+    return a
+
+
+def test_a_rule_whose_book_ended_stays_retired_across_restarts_new_journals_and_runs(tmp_path, monkeypatch):
+    monkeypatch.delenv("KAIBOT_REENABLE", raising=False)
+    a = _ended_book(tmp_path, monkeypatch)
+    (r,) = [b for *_, b in a.eng.journal.entries(kinds=("md_retired",))]
+    assert r["rule"] == MD and r["session"] == DAY2 and r["drawdown_pct"] >= 5
+    (h,) = [x for x in a.store.tables["halt"] if x["kind"] == "multi_day_retired"]
+    assert f"rule={MD};" in h["reason"]
+    note = a.eng._status(4)["multi_day"]["note"]
+    assert note.startswith(f"{MD} retired: book fell ") and note.endswith(f"% from its peak on {DAY2}")
+    assert a.eng.daily.active() == []
+    eng = a.restart()  # a restart
+    assert eng.daily.retirement(MD) is not None and eng.daily.active() == []
+    fresh = a.engine(journal=Journal(tmp_path / "another.sqlite"))  # a new journal: the store's row keeps it
+    fresh.startup()
+    assert fresh.daily.retirement(MD)["source"] == "store" and fresh.daily.active() == []
+    fresh.journal.close()
+    # a new run: the rule is still retired (a new run does not restart it)
+    a.store.insert("command", {"kind": "new_run", "payload": {"amount_usd": 10_000, "level": "balanced"},
+                               "idempotency_key": "k-new", "applied_at": None})
+    a.ticks(a.open2, 4, 20, catch=True)
+    a.eng.apply_commands()
+    assert a.eng.daily.active() == [] and a.eng.daily.after_close(date.fromisoformat(DAY2)) == []
+
+
+def test_only_an_explicit_dated_reenable_brings_the_rule_back_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("KAIBOT_REENABLE", raising=False)
+    a = _ended_book(tmp_path, monkeypatch)
+    monkeypatch.setenv("KAIBOT_REENABLE", MD)  # no date: refused
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is not None
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:2026-01-01")  # the wrong date: refused
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is not None
+    refused = [e["payload"] for e in a.store.tables["event"] if e["type"] == "multi_day_reenable_refused"]
+    assert len(refused) == 2 and f"{MD}:{DAY2}" in refused[-1]["why"]
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{DAY2}")
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is None and [r.name for r in eng.daily.active()] == [MD]
+    (re,) = [b for *_, b in eng.journal.entries(kinds=("md_reenabled",))]
+    assert re["rule"] == MD and re["retired_session"] == DAY2 and re["by"] == "KAIBOT_REENABLE"
+    assert [x for x in a.store.tables["halt"] if x["kind"] == "multi_day_reenabled"]
+    assert "multi_day_reenabled" in [e["type"] for e in a.store.tables["event"]]
+    eng = a.restart()  # the flag still in the .env: nothing more is written
+    assert len([b for *_, b in eng.journal.entries(kinds=("md_reenabled",))]) == 1
+    fresh = a.engine(journal=Journal(tmp_path / "another.sqlite"))  # the store also says re-enabled
+    monkeypatch.delenv("KAIBOT_REENABLE")
+    fresh.startup()
+    assert fresh.daily.retirement(MD) is None

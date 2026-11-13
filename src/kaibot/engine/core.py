@@ -625,7 +625,8 @@ class Engine:
         4. every multi-day sleeve is sold at market now (`_flatten_md`, the run-drawdown flatten's sale), retried at
            each tick until none is left.
         The intraday rules, their run end (4/8/12%) and the run itself go on; nothing intraday is sold or blocked.
-        A new run starts a new book (the stakeholder's call; to retire the rule for good switch KAIBOT_MULTIDAY off)."""
+        5. each rule of the book is RETIRED (`LiveDaily.retire`: journal `md_retired` and a `multi_day_retired` halt
+           row): it trades in no later run either, until the stakeholder re-enables it (KAIBOT_REENABLE)."""
         dd = drawdown_pct(peak, equity)
         body = {"run_id": rid, "rules": rules, "peak": round(peak, 2), "equity": round(equity, 2),
                 "drawdown_pct": round(dd, 3), "end_pct": end, "ts": self.now().isoformat()}
@@ -636,6 +637,9 @@ class Engine:
         self.store.insert("halt", {"run_id": rid, "kind": "book_drawdown", "reason": reason,
                                    "session": str(self.day.day) if self.day else None}, returning=False)
         self.store.event("multi_day_book_ended", {**body, "action": reason}, rid)
+        for name in rules:  # Product call on #207: retired across runs and restarts until re-enabled explicitly
+            self.daily.retire(name, run_id=rid, session=str(self.day.day) if self.day else None, drawdown_pct=dd,
+                              end_pct=end, peak=peak, equity=equity)
         try:
             self.daily.sync(force=True)  # a stop that fired at the open is booked first: never sold twice
             self.daily.close_book()

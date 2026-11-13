@@ -10,7 +10,8 @@ result does not change the Gate B verdict, and it does not count as Gate C.
 **The engine stops the experiment itself** when the rule's own book is 13% (Careful), 21% (Balanced) or 27% (Hunter)
 below its peak. You decided this on 13 Nov 2026 ("option A, as tested"). When that happens the engine writes a
 `book_drawdown` halt and a `multi_day_book_ended` event, cancels the rule's open orders, sells every `trend_momentum`
-position at market, and trades nothing more for this rule in this run. The intraday rule and the run carry on. The
+position at market, and **retires the rule**: it trades in no later run either, until you re-enable it yourself
+(step 9). The intraday rule and the run carry on. The
 level's intraday run-drawdown end (4% / 8% / 12%) is unchanged. Once the rule trades, it is measured without the
 rule's own result, and when it is reached it still ends the whole run and sells everything.
 
@@ -184,8 +185,20 @@ Start at least 30 minutes before the open.
 
 ## 9. Stopping the experiment
 
-- **When the book's drawdown end is hit** the engine has already sold the rule's positions (see the top). To retire
-  the rule for good, remove `KAIBOT_MULTIDAY=on` as below. A new run would start a new book.
+- **When the book's drawdown end is hit** the engine has already sold the rule's positions and **retired** the rule
+  (see the top). The heartbeat says, for example, `trend_momentum retired: book fell 21.3% from its peak on
+  2026-11-20`. A restart or a new run does not bring it back. To end the experiment, also remove
+  `KAIBOT_MULTIDAY=on` as below.
+- **Re-enabling a retired rule** (only if you decide to, after talking to Product): add one line to the `.env`,
+  with the date the heartbeat names, and restart the engine:
+
+  ```
+  KAIBOT_REENABLE=trend_momentum:2026-11-20
+  ```
+
+  The engine reads it once at start-up and records it (`multi_day_reenabled` event). Without the date, or with
+  another date, it refuses (`multi_day_reenable_refused` event) and the rule stays retired. Remove the line again
+  afterwards. Left in place it does nothing, because it names that one retirement only.
 - **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's closing-auction
   orders that have not filled, then sells everything, the multi-day positions included. Do it before 15:50 New York
   time if you can: after 15:50 the exchange may no longer let a closing-auction order be cancelled, so one sent that

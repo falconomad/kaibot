@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -72,6 +73,10 @@ log = logging.getLogger("kaibot.engine.daily")
 
 SEND_FROM, SEND_UNTIL = time(9, 31), time(15, 45)  # Alpaca refuses `cls` orders 15:50-19:00: five minutes' margin
 DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel")
+# Product call on #207 (13 Nov 2026): a rule whose book reached its run end stays RETIRED across runs and restarts,
+# until the stakeholder re-enables it explicitly: KAIBOT_REENABLE=<rule>:<retirement date>, read once at start-up.
+RETIRE_KINDS = ("md_retired", "md_reenabled")
+REENABLE_FLAG = "KAIBOT_REENABLE"
 FOREIGN_MAX_AGE = timedelta(days=3)  # see LiveDaily._prune
 AUCTION, POLL_EVERY = time(15, 59), timedelta(minutes=15)  # see LiveDaily.sync
 # The protective stop each rule's pre-registration declares, in ATR(20) below the entry (None: the rule has none).
@@ -284,6 +289,14 @@ class StoreLoader:
         return None
 
 
+def retired_note(b: dict) -> str:
+    """The heartbeat's line for a retired rule, e.g. "trend_momentum retired: book fell 21.3% from its peak on
+    2026-11-20"."""
+    dd = b.get("drawdown_pct")
+    fell = f"book fell {float(dd):.1f}% from its peak" if dd is not None else "book reached its drawdown end"
+    return f"{b.get('rule')} retired: {fell} on {b.get('session')}"
+
+
 def store_state(root: Path, market: str = "SPY") -> dict:
     """`--check`: where the daily store is and the last session it holds."""
     from kaibot.ingest.daily_store import DailyStore
@@ -357,7 +370,8 @@ class LiveDaily:
                  next_session: Callable[[date], date], prev_session: Callable[[date], date],
                  event: Callable[[str, dict], None] = lambda kind, body: None,
                  known_order_ids: Callable[[], set[str]] = set,
-                 session_close: Callable[[date], time | None] = lambda d: None) -> None:
+                 session_close: Callable[[date], time | None] = lambda d: None,
+                 store=None, reenable: str | None = None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps)."""
         self._rules = rules if callable(rules) else (lambda r=list(rules): r)
@@ -368,6 +382,9 @@ class LiveDaily:
         self.next_session, self.prev_session = next_session, prev_session
         self.known_order_ids = known_order_ids
         self.session_close = session_close  # the session's close (ET wall time), for early-close days
+        self.store = store  # the Supabase replica: a second, durable record of a retirement (halt rows)
+        self.reenable = reenable  # KAIBOT_REENABLE as read from the environment at start-up (used once)
+        self._store_cache: dict[str, dict | None] = {}
         self.shorting: bool | None = None  # the paper account's shorting_enabled, read at start-up and each session
         self._shorting_day: date | None = None
         self.policy = ExecutionPolicy("close")
@@ -442,9 +459,103 @@ class LiveDaily:
         return {r.symbol for r in om.working() if r.purpose != "stop"} if om is not None else set()
 
     # ---------------------------------------------------------------- steps
+    # ---------------------------------------------------------------- retirement (Product call on #207)
+    def _store_state(self, rule: str, fresh: bool = False) -> dict | None:
+        """The latest retirement or re-enabling of `rule` in the store's halt rows (kinds multi_day_retired /
+        multi_day_reenabled, highest id last), or None. A second record: the journal is the engine's state, but a
+        new journal (a new machine, a lost file) must not bring a retired rule back. Read at start-up (and after
+        this engine writes one), never per tick."""
+        if self.store is None:
+            return None
+        if not fresh and rule in self._store_cache:
+            return self._store_cache[rule]
+        try:
+            rows = [r for k in ("multi_day_retired", "multi_day_reenabled")
+                    for r in self.store.select("halt", {"kind": f"eq.{k}"}) or []]
+        except Exception:
+            log.exception("halt rows unreadable (retirement check); the journal decides")
+            return None
+        rows = [r for r in rows if f"rule={rule};" in str(r.get("reason") or "")]
+        self._store_cache[rule] = max(rows, key=lambda r: int(r.get("id") or 0)) if rows else None
+        return self._store_cache[rule]
+
+    def retirement(self, rule: str) -> dict | None:
+        """The rule's retirement in force, or None. Retired when the journal's latest record says so, or the store's
+        does (fail closed: either record keeps it retired)."""
+        last = None
+        for _, _, kind, b in self.journal.entries(kinds=RETIRE_KINDS):
+            if b.get("rule") == rule:
+                last = (kind, b)
+        if last is not None and last[0] == "md_retired":
+            return last[1]
+        st = self._store_state(rule)
+        if st is not None and st.get("kind") == "multi_day_retired":
+            if last is not None and int(last[1].get("store_id") or -1) > int(st.get("id") or 0):
+                return None  # re-enabled after that row (journalled with the id of its own re-enabling row)
+            return {"rule": rule, "session": st.get("session"), "drawdown_pct": None, "source": "store",
+                    "reason": st.get("reason")}
+        return None
+
+    def retire(self, rule: str, *, run_id, session: str | None, drawdown_pct: float, end_pct: float, peak: float,
+               equity: float) -> dict:
+        """Record the retirement durably: the journal (`md_retired`) and a `multi_day_retired` halt row."""
+        body = {"rule": rule, "run_id": run_id, "session": session, "drawdown_pct": round(drawdown_pct, 3),
+                "end_pct": end_pct, "peak": round(peak, 2), "equity": round(equity, 2), "ts": self.now().isoformat()}
+        self.journal.append("md_retired", body)
+        if self.store is not None:
+            try:
+                self.store.insert("halt", {"run_id": run_id, "kind": "multi_day_retired", "session": session,
+                                           "reason": f"rule={rule}; {retired_note(body)}"}, returning=False)
+                self._store_state(rule, fresh=True)
+            except Exception:
+                log.exception("retirement halt row not written (the journal holds it)")
+        self.event("multi_day_retired", {**body, "note": retired_note(body),
+                                         "reenable": f"{REENABLE_FLAG}={rule}:{session}"})
+        return body
+
+    def _apply_reenable(self) -> None:
+        """KAIBOT_REENABLE=<rule>:<retirement date>, read once at start-up: re-enables exactly that retirement
+        (journalled `md_reenabled`, a `multi_day_reenabled` halt row, an event). Anything else is refused with an
+        event and changes nothing, so a value left in the .env can never re-enable a later retirement."""
+        raw, self.reenable = (self.reenable or "").strip(), None
+        if not raw:
+            return
+        rule, _, day = raw.partition(":")
+        cur = self.retirement(rule)
+        if cur is None or not day or str(cur.get("session")) != day:
+            why = ("not retired" if cur is None else
+                   f"the date must be the retirement's: {REENABLE_FLAG}={rule}:{cur.get('session')}")
+            log.warning("%s=%s ignored: %s", REENABLE_FLAG, raw, why)
+            self.event("multi_day_reenable_refused", {"value": raw[:80], "why": why})
+            return
+        store_id = None
+        if self.store is not None:
+            try:
+                self.store.insert("halt", {"run_id": self.account.run_id(), "kind": "multi_day_reenabled",
+                                           "session": str(self.now().astimezone(NY).date()),
+                                           "reason": f"rule={rule}; re-enabled by the stakeholder ({REENABLE_FLAG})"},
+                                  returning=False)
+                st = self._store_state(rule, fresh=True)
+                store_id = st.get("id") if st is not None else None
+            except Exception:
+                log.exception("re-enabling halt row not written")
+        body = {"rule": rule, "retired_session": day, "by": REENABLE_FLAG, "value": raw[:80], "store_id": store_id,
+                "ts": self.now().isoformat()}
+        self.journal.append("md_reenabled", body)
+        log.warning("%s re-enabled by %s=%s", rule, REENABLE_FLAG, raw)
+        self.event("multi_day_reenabled", body)
+
+    def active(self) -> list[Rule]:
+        """The enabled rules that are not retired."""
+        return [r for r in self.rules if self.retirement(r.name) is None]
+
     def startup(self) -> None:
         """Before any decision: the manager recovers its orders from the venue (unconfirmed ones by client id), the
-        fail-safe stops of the sleeves are adopted, the fills since the last start are booked."""
+        fail-safe stops of the sleeves are adopted, the fills since the last start are booked. Retirements are read
+        from the store and KAIBOT_REENABLE is applied (once), with or without a run."""
+        for r in self.rules:
+            self._store_state(r.name, fresh=True)
+        self._apply_reenable()
         om = self._manager()
         if om is None:
             return
@@ -542,7 +653,7 @@ class LiveDaily:
         if rid is None or self.account.book_ended():
             return []
         done = []
-        for r in self.rules:
+        for r in self.active():
             if self.decision(r.name, closed) is not None:
                 continue
             now = self.now()
@@ -617,7 +728,7 @@ class LiveDaily:
         if om is None or rid is None or not self.in_window(self.now()) or self.account.book_ended():
             return []
         done = []
-        for r in self.rules:
+        for r in self.active():
             if self._send_entry(r.name, session, "md_sent") is not None:
                 continue
             if self._shorting_day != session:
@@ -786,6 +897,11 @@ class LiveDaily:
         rules: dict[str, dict] = {}
         notes = []
         for r in self.rules:
+            ret = self.retirement(r.name)
+            if ret is not None:
+                rules[r.name] = {"retired": True, "note": retired_note(ret)}
+                notes.append(retired_note(ret))
+                continue
             last = None
             for b in self._entries("md_decision"):
                 if b.get("strategy") == r.name:
@@ -799,7 +915,9 @@ class LiveDaily:
                 row["waiting"] = self._waiting[r.name][:200]
             rules[r.name] = row
         out: dict = {"book": "ended" if ended else "open", "rules": rules}
-        if ended:
+        if any(v.get("retired") for v in rules.values()):
+            out["retired"] = sorted(k for k, v in rules.items() if v.get("retired"))
+        if ended and not any(v.get("retired") for v in rules.values()):
             notes.insert(0, "multi-day book closed: its run-drawdown end was reached (no new multi-day trades)")
         if notes:
             out["note"] = "; ".join(notes)[:300]
@@ -927,7 +1045,8 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
     return LiveDaily(engine.broker, engine.journal, engine.now, rules if rules is not None else current, load,
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
-                     known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))))
+                     known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
+                     store=engine.store, reenable=os.environ.get(REENABLE_FLAG))
 
 
 def calendar_close(cal: dict | None) -> time | None:
