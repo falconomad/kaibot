@@ -378,3 +378,36 @@ def test_the_store_loader_reads_the_research_loader_up_to_k_once_its_bars_are_av
     assert tl is not None and tl == decide_after_close(s, full, k, data.day(k + 1), {})
     nxt = data.day(len(data.dates) - 1) + timedelta(days=1)
     assert "no SPY bar" in loader.available(nxt, datetime.now(UTC))
+
+
+def test_the_store_loader_waits_for_a_refresh_that_stopped_part_way(tmp_path, data):
+    """QA-Ops review of #207: SPY has session k but most stocks do not (fetch_daily stopped part-way). The view
+    would carry their last close forward, so it is not ready: no decision on yesterday's prices."""
+    import json
+    import shutil
+
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    from kaibot.ingest.daily_bars import COMPLETE_AT
+
+    shutil.copytree(dr.FIXTURE, tmp_path / "daily")
+    meta = json.loads((dr.FIXTURE / "fixture.json").read_text())
+    k = I0 + 7
+    day = data.day(k)
+    cut = meta["stocks"][: max(1, len(meta["stocks"]) // 2)]
+    for sym in meta["symbols"]:
+        f = tmp_path / "daily" / "bars" / f"symbol={sym}.parquet"
+        t = pq.read_table(f)
+        if sym in cut:  # this stock's refresh never ran: its last bar is k - 1
+            t = t.filter(pc.less(t.column("date"), pa.scalar(day, t.schema.field("date").type)))
+        ts = [datetime.combine(d, COMPLETE_AT, NY).astimezone(UTC) for d in t.column("date").to_pylist()]
+        pq.write_table(t.append_column("available_ts", pa.array(ts, pa.timestamp("s", tz="UTC"))), f)
+    uni = tmp_path / "universe.yaml"
+    uni.write_text(json.dumps({"sectors": {"XLK": meta["stocks"]}, "market": "SPY"}))
+    loader = ld.StoreLoader(tmp_path, uni, mode="today")
+    late = datetime.combine(day, time(20, 16), NY).astimezone(UTC)
+    assert loader.available(day, late) is None  # SPY alone says "ready"
+    with pytest.raises(ld.DataNotReady, match="has not finished"):
+        loader(day, late)

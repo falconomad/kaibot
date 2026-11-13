@@ -60,7 +60,7 @@ import pandas as pd
 from kaibot.broker.protocol import Broker
 from kaibot.engine.daily import CASH_RESERVE, DailyData, decide_after_close, momentum_limits, plan_session
 from kaibot.engine.execution import NY, ExecutionPolicy
-from kaibot.engine.orders import UNCONFIRMED, Fill, OrderManager, OrderRecord, St
+from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
 from kaibot.engine.targets import Target, reconcile_targets
 from kaibot.risk.gate import BOOK_FLOORS, BOOK_HARD_CEILINGS, BookLimits, RiskPolicy, validate_book
@@ -71,7 +71,7 @@ from kaibot.strategies.momentum import RESIZE_BUFFER
 log = logging.getLogger("kaibot.engine.daily")
 
 SEND_FROM, SEND_UNTIL = time(9, 31), time(15, 45)  # Alpaca refuses `cls` orders 15:50-19:00: five minutes' margin
-DAILY_KINDS = ("md_decision", "md_send", "md_sent")
+DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel")
 FOREIGN_MAX_AGE = timedelta(days=3)  # see LiveDaily._prune
 AUCTION, POLL_EVERY = time(15, 59), timedelta(minutes=15)  # see LiveDaily.sync
 # The protective stop each rule's pre-registration declares, in ATR(20) below the entry (None: the rule has none).
@@ -251,8 +251,35 @@ class StoreLoader:
         data = DailyData.from_market(m)
         if data.dates[-1].astype(object) != k:
             raise DataNotReady(f"the daily view ends {data.dates[-1]}, not {k}")
+        why = self.incomplete(data)
+        if why:
+            raise DataNotReady(why)
         data.terminal = {}
         return data
+
+    MIN_COVERAGE = 0.97  # of the stocks that had a bar the session before: a normal day misses a few halted names
+
+    @classmethod
+    def incomplete(cls, data: DailyData) -> str | None:
+        """QA-Ops review of #207: SPY's bar of k says only that the refresh got as far as SPY. A refresh that stopped
+        part-way (HTTP error, budget) leaves most stocks without k, and the view would carry their last close
+        forward: a decision on yesterday's prices. So the view is ready only when at least MIN_COVERAGE of the stocks
+        that had an (unfilled) close at k - 1 also have one at k; otherwise DataNotReady (no decision)."""
+        c = data.sig_unfilled_c if data.sig_unfilled_c is not None else data.raw_c
+        if c is None or len(data.dates) < 2 or not len(data.stocks):
+            return None
+        cols = np.asarray(data.stocks, dtype=int)
+        before = np.isfinite(c[-2, cols])
+        if data.member is not None:
+            before &= np.asarray(data.member[-2, cols], dtype=bool)
+        n = int(before.sum())
+        if n == 0:
+            return None
+        have = int((before & np.isfinite(c[-1, cols])).sum())
+        if have < cls.MIN_COVERAGE * n:
+            return (f"the daily store holds {data.dates[-1]} for only {have} of {n} stocks: the refresh has not "
+                    "finished (run ./scripts/fetch_daily.sh again)")
+        return None
 
 
 def store_state(root: Path, market: str = "SPY") -> dict:
@@ -394,6 +421,7 @@ class LiveDaily:
         sleeves = {(r.name, s): q for r in self.rules for s, (q, _) in self.account.held(r.name).items()}
         self.stops.startup(sleeves, str(self.now().astimezone(NY).date()))
         self._prune()
+        self._cancel_due()  # a halt or a full flatten journalled before the restart still holds today
 
     def sync(self, force: bool = False) -> None:
         """Book the venue's fills of this path's orders (each once, by activity id) and poll its open orders. Only
@@ -410,6 +438,50 @@ class LiveDaily:
         self._synced = now
         om.sync()
         self._prune()
+        self._cancel_due()  # an order that was unconfirmed when the halt came is cancelled once it is confirmed
+
+    # ---------------------------------------------------------------- halts and full flattens (QA-Ops, #207 review)
+    def cancel_working(self, sides: Sequence[str], reason: str) -> list[str]:
+        """The engine halts entries (`daily_stop`: sides ("buy",)) or flattens everything (run drawdown, new run,
+        "Flatten and stop": ("buy", "sell")): this path's working closing-auction orders are cancelled, so a resting
+        `cls` buy does not open a position after the halt, and a resting `cls` sale does not sell the shares the
+        flatten sells at market again (that would be a short) or hold them so the flatten cannot sell them. The
+        instruction is journalled (`md_cancel`, per run and New York day), so it survives a restart, and an order
+        still unconfirmed now is cancelled at the next sync. Protective stops are not touched."""
+        om = self._manager()
+        if om is None:
+            return []
+        self.journal.append("md_cancel", {"run_id": om.run_id, "day": str(self.now().astimezone(NY).date()),
+                                          "sides": sorted(set(sides)), "reason": reason})
+        return self._cancel_due()
+
+    def _cancel_sides(self) -> set[str]:
+        om, day = self.om, str(self.now().astimezone(NY).date())
+        out: set[str] = set()
+        for b in self._entries("md_cancel"):
+            if om is not None and b.get("run_id") == om.run_id and b.get("day") == day:
+                out |= set(b.get("sides") or ())
+        if self.account.run_id() is None:  # the run has ended: nothing new may be bought for it
+            out.add("buy")
+        return out
+
+    def _cancel_due(self) -> list[str]:
+        om = self.om
+        if om is None or not om.live:
+            return []
+        sides = self._cancel_sides()
+        out = []
+        for r in om.working():
+            if r.purpose == "stop" or r.side not in sides or r.state is St.PENDING_CANCEL:
+                continue
+            try:
+                om.cancel(r.coid)
+            except OrderBlocked:  # the venue has not confirmed it yet: the next sync cancels it
+                continue
+            out.append(r.coid)
+        if out:
+            self.event("multi_day_canceled", {"coids": out, "sides": sorted(sides)})
+        return out
 
     def _prune(self) -> None:
         """The account's FILL activities include the intraday engine's own fills, which this manager does not know

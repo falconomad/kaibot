@@ -1850,6 +1850,11 @@ class Engine:
         10 s later, `_exit` skips the positions that already have an exit order, and the positions this flatten
         could not close are tried after the others, so a few stuck ones cannot use up every budget."""
         t0 = self.monotonic()
+        if self.daily is not None and reason != "time":  # #206 (QA-Ops review): the daily path's resting `cls`
+            # orders go first: buys on a halt (daily stop), buys and sales on a full flatten (else a resting sale
+            # fills after the flatten's own sale: a short). The close-minus-5 flatten leaves them alone.
+            sides = ("buy",) if reason in INTRADAY_ONLY else ("buy", "sell")
+            self._daily_step("cancel", lambda: self.daily.cancel_working(sides, reason))
         failed: dict[str, Exception | str] = {}
         todo = sorted(self.pos.values(), key=lambda p: p.symbol in self._flatten_slow)  # stable: book order kept
         if reason in INTRADAY_ONLY:  # S78/S80: the close-minus-5 flatten and the daily stop: intraday sleeves only

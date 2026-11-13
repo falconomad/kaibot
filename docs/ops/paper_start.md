@@ -10,10 +10,9 @@ result does not change the Gate B verdict, and it does not count as Gate C.
 **Stop the experiment** if the rule's drawdown passes 13% (Careful), 21% (Balanced) or 27% (Hunter). Product
 checks this in the daily status. The level's own run-drawdown end (4% / 8% / 12%) still ends the whole run first.
 
-> **Read this first.** The live daily path (issue #206) is what places `trend_momentum` orders. Until its pull request
-> is merged the engine only loads and labels the rule and places **no** `trend_momentum` orders. Product tells you
-> when it is in. Steps 1-7 below are safe to do before that. They change nothing until that code is in. Once it is
-> in, the rule trades only with `KAIBOT_MULTIDAY=on` **and** `allow_overnight: true` **and** a fresh daily store
+> **Read this first.** The live daily path (issue #206) is what places `trend_momentum` orders. If your copy of the
+> code does not have it yet (Product tells you), the engine only loads and labels the rule and places **no**
+> `trend_momentum` orders, and steps 1-7 change nothing. With it, the rule trades only with `KAIBOT_MULTIDAY=on` **and** `allow_overnight: true` **and** a fresh daily store
 > (step 6). Without the fresh store it decides nothing and sends nothing, and the engine says so (`multi_day_waiting`).
 
 Do every step **outside 09:30-16:00 New York time** (15:30-22:00 Berlin), with the engine stopped (the daily
@@ -92,7 +91,15 @@ close, and only once the day's bars are in it. Alpaca's daily bar counts as comp
    a `multi_day_waiting` event that names the missing day. Nothing is bought on stale data.
 
 The engine reads the store from `~/Projects/kaibot/data/daily` by default. Set `KAIBOT_DAILY_DATA=/path/to/folder`
-in the `.env` only if your store lives somewhere else (the folder that **holds** `daily/`).
+in the `.env` only if your store lives somewhere else (the folder that **holds** `daily/`). When the engine runs in
+Docker, `./scripts/run_engine.sh` hands it that folder read-only, so nothing else is needed.
+
+The engine also checks that the refresh **finished**: if most stocks are still missing the day's bar (for example
+the script stopped half-way), it waits and decides nothing, as if you had missed the evening.
+
+**Missing the decision evening skips a week.** The rule decides only once a week (see below). If the store is not
+refreshed before the open of that session, there is no decision that week: nothing new is bought, and a held name the
+rule would have sold is kept until the next week's decision.
 
 **What happens each day** (New York time):
 
@@ -103,7 +110,9 @@ in the `.env` only if your store lives somewhere else (the folder that **holds**
   (the portfolio builder: whole shares, 3% cash reserve, at most 40% in one sector, within your level's caps) and sends
   **closing-auction (`cls`) orders** to Alpaca paper (`multi_day_orders` event). Alpaca does not accept them from
   15:50, so the engine stops at 15:45. They fill at the 16:00 close. Each fill is booked once (`multi_day_fill`).
-- Sales always go out. Buys wait while entries are blocked (paused, daily stop, the book not matching Alpaca).
+- Sales always go out. Buys wait while entries are blocked (paused, daily stop, the book not matching Alpaca), but
+  only until 15:45. A buy still blocked then is dropped for that day, and the next weekly decision decides again.
+- If the daily stop fires, the engine cancels the rule's buy orders that have not filled yet. Its sales stay.
 - The 15:55 flatten of the intraday rule never sells `trend_momentum` positions.
 
 ## 7. Check, then start
@@ -140,15 +149,19 @@ Start at least 30 minutes before the open.
   closing auction (orders sent before 15:50 ET). Its positions show on the Live page under `trend_momentum`.
 - **No stop while the engine runs.** The rule as registered has no stop ("No fixed stop" in
   `docs/prereg/trend_momentum.md`), so the engine places none and the position rows say the stop is `missing`. That is
-  expected. If the engine goes quiet, the watchdog and the dead-man put an emergency stop 10% below the last price on
-  each multi-day position (and cancel any of its buy orders not yet filled).
+  expected. If the engine goes quiet, the watchdog (on the Mac) and, once 0019 is applied, the off-box dead-man put an
+  emergency stop 10% below the last price on each multi-day position (and cancel any of its buy orders not yet
+  filled). Before 0019 the dead-man sells everything at 15:56 instead (step 3).
 
 ## 9. Stopping the experiment
 
-- **Stop it for good** (retirement trigger hit, or you decide): dashboard, **Flatten and stop**. This sells everything,
-  the multi-day positions included. Then remove `KAIBOT_MULTIDAY=on` from the `.env` (or set it to `off`) and restart
+- **Stop it for good** (retirement trigger hit, or you decide): dashboard, **Flatten and stop**. This first cancels the
+  rule's closing-auction orders that have not filled, then sells everything, the multi-day positions included. Do it
+  before 15:50 New York time if you can: after 15:50 the exchange may no longer let a closing-auction order be
+  cancelled, so one sent that day could still fill at 16:00. Check the Live page the next morning. Then remove `KAIBOT_MULTIDAY=on` from the `.env` (or set it to `off`) and restart
   the engine. With the flag off the engine refuses to load the rule.
-- **Pause new buys only:** dashboard, **Pause entries**. Held positions are kept; the rule's sales still go out.
+- **Pause new buys only:** dashboard, **Pause entries**. Held positions are kept; the rule's sales still go out. A buy
+  order already sent that day is not cancelled by a pause and still fills at the close.
 - **Engine off for a while:** `./scripts/service.sh hold` (or Ctrl-C). With 0019 applied, the watchdog and the
   dead-man keep the multi-day positions (with an emergency stop each), and they sell only the intraday ones at the
   close. When the engine starts again it picks up where it left off: a decision already taken is not taken again, and
