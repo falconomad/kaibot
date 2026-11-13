@@ -30,16 +30,21 @@ cd ~/Projects/kaibot
 It does steps 1 to 7 below in order and stops with a plain message at the first thing that is not right. It is safe
 to run again: every step checks first and changes only what is not yet as it should be.
 
-1. Gets the latest code (`git pull --ff-only`).
+1. Gets the latest code (`git pull --ff-only`). If the engine is pinned to a release (`data/RELEASE`,
+   `./scripts/release.sh --show`), it does not pull: the pinned release must contain the go-live
+   (`allow_overnight: true`), or it stops and asks you to run `./scripts/release.sh main` first.
 2. Turns shorting off on the Alpaca paper account (`./scripts/alpaca_no_shorting.sh`). If Alpaca does not confirm
    (for example the keys are rejected), it stops here and changes nothing.
 3. Sets `KAIBOT_MULTIDAY=on` in `~/Projects/kaibot-secrets/.env`. It adds or replaces that one line, keeps a copy
    `.env.bak.<date-time>` next to it, and never prints the file.
 4. Stops an engine already running on this Mac, because two engines must never run at once. If one you started
-   by hand does not stop, it asks you to press Ctrl-C in that terminal window and run it again.
-5. Runs `./scripts/run_engine.sh --check`, which must end with `ALL GOOD`.
-6. Installs the always-on service (`./scripts/install_service.sh`). The engine then starts at every login and boot
-   and is restarted after a crash, and the daily bars are refreshed every night and at every login.
+   by hand does not stop, it asks you to press Ctrl-C in that terminal window and run it again. The service is
+   unloaded until step 6, so it cannot start a second engine meanwhile; if the command stops after this step, the
+   engine stays stopped until you run it again.
+5. Runs `./scripts/run_engine.sh --check` as the service will run it, which must end with `ALL GOOD` and show
+   `KAIBOT_MULTIDAY` on, overnight allowed and the rule loaded. Otherwise nothing is installed.
+6. Installs the always-on service (`./scripts/install_service.sh`). The engine then starts at every login (and at
+   boot, if this user logs in automatically: System Settings, Users & Groups) and is restarted after a crash, and the daily bars are refreshed every night and at every login.
 7. Prints a short summary: shorting off, multi-day on, overnight allowed, your level and the rule's cap, the stop
    line, the next decision evening (a Tuesday after the close) and the first possible buys (that Wednesday's
    closing auction), and how to stop: `./scripts/service.sh hold`.

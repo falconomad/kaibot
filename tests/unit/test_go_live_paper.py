@@ -55,11 +55,18 @@ def repo(tmp_path):
          'if [ -f "$f" ]; then while read -r k p; do kill -0 "$p" 2>/dev/null && live="$live$k $p\n"; done < "$f"; fi\n'
          '[ "$1" = --list ] && printf "$live"\n[ -z "$live" ]')
     report = json.dumps(CHECK, indent=1)
-    _exe(r / "scripts" / "run_engine.sh", f'{rec}\necho \'{report}\'\necho "${{FAKE_CHECK:-ALL GOOD}}"')
+    (tmp_path / "report.json").write_text(report + "\n")
+    _exe(r / "scripts" / "run_engine.sh",
+         f'{rec}\necho "env MULTIDAY=${{KAIBOT_MULTIDAY:-unset}} RELEASE=${{KAIBOT_RELEASE:-unset}}" >> {calls}\n'
+         f'cat "${{FAKE_REPORT:-{tmp_path}/report.json}}"\necho "${{FAKE_CHECK:-ALL GOOD}}"\n'
+         'exit "${FAKE_CHECK_CODE:-0}"')
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    _exe(bin_ / "git", rec)
-    _exe(bin_ / "launchctl", f'{rec}\n[ -n "$FAKE_SERVICE_RUNNING" ] && echo "state = running"; exit 0')
+    _exe(bin_ / "git", f'{rec}\n[ "$1" = symbolic-ref ] && exit "${{FAKE_DETACHED:-0}}"\n'
+         '[ "$1" = show ] && { cat "$FAKE_TAG_PROFILES" 2>/dev/null || exit 128; }\nexit 0')
+    _exe(bin_ / "launchctl", f'{rec}\n'
+         '[ "$1" = print ] && [ -z "$FAKE_SERVICE_LOADED$FAKE_SERVICE_RUNNING" ] && exit 113\n'
+         '[ -n "$FAKE_SERVICE_RUNNING" ] && echo "state = running"; exit 0')
     _exe(bin_ / "python3", f'exec "{sys.executable}" "$@"')  # (a symlink would lose a virtualenv)
     env_file = tmp_path / "secret.env"
     env_file.write_text(f"ALPACA_API_KEY=PK123\nALPACA_SECRET={SECRET}\nKAIBOT_MULTIDAY=off\nFRED_API_KEY=x\n")
@@ -82,7 +89,7 @@ def test_the_happy_path_in_order_with_a_plain_summary_and_no_secret_printed(repo
     r, env, env_file, calls, tmp = repo
     x = run(r, env)
     assert x.returncode == 0, x.stdout + x.stderr
-    order = [c.split()[0] for c in calls_of(calls) if not c.startswith("launchctl")]
+    order = [c.split()[0] for c in calls_of(calls) if not c.startswith(("launchctl", "env ", "git symbolic-ref"))]
     assert order == ["git", "alpaca_no_shorting.sh", "run_engine.sh", "install_service.sh"]
     assert "git pull --ff-only -q" in calls_of(calls)
     lines = env_file.read_text().splitlines()
@@ -214,3 +221,106 @@ def test_the_helper_needs_only_the_standard_library():
     mods = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     mods |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     assert not {m.split(".")[0] for m in mods} & {"kaibot", "numpy", "pandas"}
+
+
+# ---------------------------------------------------------------- QA-Ops second key on #218
+
+
+def test_the_check_must_exit_cleanly_and_say_all_good_on_its_own_line(repo):
+    r, env, _, calls, _ = repo
+    for extra in ({"FAKE_CHECK_CODE": "1"}, {"FAKE_CHECK": "NOT ALL GOOD"}):
+        x = run(r, env, **extra)
+        assert x.returncode == 1 and "did not end with ALL GOOD" in x.stdout, extra
+        assert not any(c.startswith("install_service") for c in calls_of(calls))
+
+
+@pytest.mark.parametrize("change,why", [
+    ({"KAIBOT_MULTIDAY": "off"}, "KAIBOT_MULTIDAY is not on"),
+    ({"allow_overnight": False}, "allow_overnight is not true"),
+    ({"rules_loaded": []}, "no multi-day rule"),
+])
+def test_all_good_is_not_enough_the_experiment_must_be_on(repo, change, why):
+    r, env, _, calls, tmp = repo
+    bad = tmp / "bad.json"
+    bad.write_text(json.dumps({"multi_day": {**CHECK["multi_day"], **change}}) + "\n")
+    x = run(r, env, FAKE_REPORT=str(bad))
+    assert x.returncode == 1 and why in x.stdout and "Nothing was installed" in x.stdout
+    assert not any(c.startswith("install_service") for c in calls_of(calls))
+
+
+def test_the_check_runs_as_the_service_will_without_this_shells_switches(repo):
+    r, env, _, calls, _ = repo
+    x = run(r, env, KAIBOT_MULTIDAY="off", KAIBOT_RELEASE="v2026.01.01")
+    assert x.returncode == 0, x.stdout + x.stderr
+    assert "env MULTIDAY=unset RELEASE=unset" in calls_of(calls)
+
+
+def test_a_release_pin_without_the_go_live_stops_before_anything_changes(repo):
+    r, env, env_file, calls, tmp = repo
+    (r / "data").mkdir()
+    (r / "data" / "RELEASE").write_text("v2026.11.10\n")
+    old = tmp / "old_profiles.yaml"
+    old.write_text("all_levels:\n  allow_overnight: false\n")
+    x = run(r, env, FAKE_TAG_PROFILES=str(old))
+    assert x.returncode == 1 and "pinned to release v2026.11.10" in x.stdout and "release.sh main" in x.stdout
+    assert "KAIBOT_MULTIDAY=off" in env_file.read_text()
+    assert not any(c.startswith(("git pull", "alpaca", "run_engine", "install_service")) for c in calls_of(calls))
+    new = tmp / "new_profiles.yaml"
+    new.write_text("all_levels:\n  allow_overnight: true          # comment\n")
+    x = run(r, env, FAKE_TAG_PROFILES=str(new))  # a pin that contains the go-live: no pull, the rest goes on
+    assert x.returncode == 0, x.stdout + x.stderr
+    assert not any(c.startswith("git pull") for c in calls_of(calls)) and "install_service.sh " in calls_of(calls)
+
+
+def test_a_detached_checkout_without_a_pin_stops_with_a_plain_message(repo):
+    r, env, env_file, calls, _ = repo
+    x = run(r, env, FAKE_DETACHED="1")
+    assert x.returncode == 1 and "not on a branch" in x.stdout and "KAIBOT_MULTIDAY=off" in env_file.read_text()
+
+
+def test_a_service_standing_by_is_unloaded_so_it_cannot_start_a_second_engine(repo):
+    """The service is loaded but not running (it stands by while a hand-started engine runs): it would start by
+    itself a minute after that engine stops. It is unloaded first and only step 6 loads it again."""
+    r, env, _, calls, _ = repo
+    x = run(r, env, FAKE_SERVICE_LOADED="1")
+    assert x.returncode == 0, x.stdout + x.stderr
+    c = calls_of(calls)
+    boot = [i for i, v in enumerate(c) if v.startswith("launchctl bootout") and "com.kaibot.engine" in v]
+    assert boot and boot[0] < c.index("install_service.sh ") and "service.sh stop" not in c
+    x = run(r, env, FAKE_SERVICE_LOADED="1", FAKE_CHECK_CODE="1")  # stopped after that: it says so
+    assert x.returncode == 1 and "stopped until this command completes" in x.stdout
+
+
+def test_a_hold_is_said_in_the_summary(repo):
+    r, env, _, _, _ = repo
+    (r / "data").mkdir()
+    (r / "data" / "HOLD").write_text("x")
+    x = run(r, env)
+    assert x.returncode == 0 and "ON HOLD" in x.stdout and "service.sh unhold" in x.stdout
+
+
+def test_set_flag_keeps_every_other_byte_and_never_exposes_the_file(tmp_path):
+    m = load()
+    f = tmp_path / ".env"
+    body = b"A=1\r\nWEIRD=x\x0by\nKAIBOT_MULTIDAY=off\r\nB=\"q\"  # c\r\n"
+    f.write_bytes(body)
+    f.chmod(0o600)
+    m.set_flag(f, "KAIBOT_MULTIDAY", "on", datetime(2026, 11, 14, 9))
+    assert f.read_bytes() == body.replace(b"KAIBOT_MULTIDAY=off", b"KAIBOT_MULTIDAY=on")
+    (bak,) = tmp_path.glob(".env.bak.*")
+    assert bak.read_bytes() == body and stat.S_IMODE(bak.stat().st_mode) == 0o600
+    assert stat.S_IMODE(f.stat().st_mode) == 0o600 and not list(tmp_path.glob("*.tmp"))
+    g = tmp_path / "crlf.env"
+    g.write_bytes(b"A=1\r\n")
+    m.set_flag(g, "KAIBOT_MULTIDAY", "on")
+    assert g.read_bytes() == b"A=1\r\nKAIBOT_MULTIDAY=on\r\n"
+
+
+def test_set_flag_edits_the_target_of_a_symlinked_env(tmp_path):
+    m = load()
+    real = tmp_path / "real.env"
+    real.write_text("A=1\n")
+    link = tmp_path / "link.env"
+    link.symlink_to(real)
+    m.set_flag(link, "KAIBOT_MULTIDAY", "on")
+    assert link.is_symlink() and real.read_text() == "A=1\nKAIBOT_MULTIDAY=on\n"

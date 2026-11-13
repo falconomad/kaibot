@@ -3,15 +3,16 @@
 plus the repository's own momentum calendar; never prints a value of the .env.
 
     go_live_paper.py set-flag <env file> KAIBOT_MULTIDAY on    add or replace one line, timestamped backup first
+    go_live_paper.py gate <check output file>                  exit 1 unless the check shows the experiment switched on
     go_live_paper.py summary <check output file>               the plain summary after ./scripts/run_engine.sh --check
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
-import shutil
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -23,34 +24,70 @@ LEVEL_NAMES = {"conservative": "Careful", "balanced": "Balanced", "aggressive": 
 
 
 def set_flag(path: Path, key: str, value: str, now: datetime | None = None) -> str:
-    """Set `key=value` in the .env: replace every existing `key=` line (the last one wins in every loader, so the
-    file ends with exactly one), else append it. Nothing to change: the file is left alone ("unchanged"). Otherwise a
-    copy `<file>.bak.<YYYYmmdd-HHMMSS>` (same permissions) is written first ("changed <backup name>"). No line of the
-    file is ever printed."""
-    path = Path(path)
-    if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) or "\n" in value:
+    """Set `key=value` in the .env: replace every existing `key=` line (the file ends with exactly one, so no loader
+    can read another value), else append it. Every other line is kept byte for byte (line endings included).
+    Nothing to change: the file is left alone ("unchanged"). Otherwise a copy `<file>.bak.<YYYYmmdd-HHMMSS>` (same
+    permissions) is written first ("changed <backup name>"). No line of the file is ever printed, and no copy of it
+    is ever readable by others, not even for a moment (QA-Ops second key on #218)."""
+    path = Path(path).resolve()  # a symlinked .env: its target is edited, the link stays
+    if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", key) or "\n" in value or "\r" in value:
         raise SystemExit(f"bad setting {key!r}")
-    text = path.read_text()
-    lines = text.splitlines()
-    want = f"{key}={value}"
-    pat = re.compile(rf"^\s*(export\s+)?{re.escape(key)}\s*=")
+    data = path.read_bytes()
+    lines = data.split(b"\n")
+    want = f"{key}={value}".encode()
+    pat = re.compile(rb"^\s*(export\s+)?" + re.escape(key.encode()) + rb"\s*=")
     hits = [i for i, x in enumerate(lines) if pat.match(x)]
     if len(hits) == 1 and lines[hits[0]].strip() == want:
         return "unchanged"
+    mode = path.stat().st_mode & 0o777
     stamp = (now or datetime.now()).strftime("%Y%m%d-%H%M%S")
     backup = path.with_name(f"{path.name}.bak.{stamp}")
-    shutil.copy2(path, backup)
-    os.chmod(backup, path.stat().st_mode & 0o777)
-    out = [x for i, x in enumerate(lines) if i not in hits[:-1]] if hits else list(lines)
+    _write_private(backup, data, mode)
     if hits:
-        out[hits[-1] - (len(hits) - 1)] = want
+        eol = b"\r" if lines[hits[-1]].endswith(b"\r") else b""
+        lines[hits[-1]] = want + eol
+        out = [x for i, x in enumerate(lines) if i not in hits[:-1]]
     else:
-        out.append(want)
+        out = list(lines)
+        if out and out[-1] == b"":  # the file ended with a newline: the new line goes before the end
+            crlf = len(out) > 1 and out[-2].endswith(b"\r")
+            out.insert(len(out) - 1, want + (b"\r" if crlf else b""))
+        else:
+            out.append(want)
+            out.append(b"")
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text("\n".join(out) + "\n")
-    os.chmod(tmp, path.stat().st_mode & 0o777)
+    _write_private(tmp, b"\n".join(out), mode)
     os.replace(tmp, path)
     return f"changed (backup {backup.name})"
+
+
+def _write_private(p: Path, data: bytes, mode: int) -> None:
+    """Write `data` to `p`, created owner-only (0600) and then given `mode`: never readable by others in between."""
+    with contextlib.suppress(FileNotFoundError):
+        p.unlink()  # a leftover .tmp of an interrupted run
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.chmod(p, mode)
+
+
+def gate(text: str) -> list[str]:
+    """What the --check report must show before the service is installed: the multi-day switch on, overnight
+    allowed and at least one multi-day rule loaded. Returns the problems (empty when all is right)."""
+    md = check_report(text).get("multi_day")
+    if not isinstance(md, dict):
+        return ["the check has no multi_day report (FAILED or missing)"]
+    out = []
+    if md.get("KAIBOT_MULTIDAY") != "on":
+        out.append("KAIBOT_MULTIDAY is not on for the engine (is it set to something else in the .env?)")
+    if md.get("allow_overnight") is not True:
+        out.append("allow_overnight is not true in the code the engine runs (an old release pinned?)")
+    if not md.get("rules_loaded"):
+        out.append("no multi-day rule is loaded")
+    return out
 
 
 def check_report(text: str) -> dict:
@@ -136,6 +173,11 @@ def main(argv: list[str]) -> int:
     if len(argv) >= 4 and argv[0] == "set-flag":
         print(set_flag(Path(argv[1]), argv[2], argv[3]))
         return 0
+    if len(argv) >= 2 and argv[0] == "gate":
+        problems = gate(Path(argv[1]).read_text())
+        for x in problems:
+            print(f"NOT READY: {x}")
+        return 1 if problems else 0
     if len(argv) >= 2 and argv[0] == "summary":
         now = os.environ.get("GO_LIVE_NOW_ISO")
         print("\n".join(summary(Path(argv[1]).read_text(), datetime.fromisoformat(now) if now else None)))
