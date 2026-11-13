@@ -25,6 +25,17 @@ journals the differences of the last check as ACCEPTED OFFSETS (`reconcile_resol
 restart (folded from the journal), subtracts them; the same difference stays accepted, a CHANGED one (beyond the
 tolerance around the accepted value) is a new difference and blocks again.
 
+Edge cases (issue #179):
+- a difference that has HEALED is never accepted: a clean check that follows a journalled difference is journalled
+  too, so the owner's command sees that the last check is clean and refuses; the engine's command reads the venue
+  again first and accepts only the differences still there at the value the owner was shown (a healed or a changed
+  one is refused: the owner looks again). Otherwise a later recurrence of the same amount would pass unseen;
+- accepted offsets EXPIRE at the next session start, where they are re-evaluated: the session-start check (and
+  the start-up check) keeps an offset only while its difference is still there at the accepted value; one that
+  healed or changed expires (`reconcile_expired`, journalled) and no longer covers anything. A persistent,
+  unchanged difference stays accepted from session to session without a daily re-acceptance; a failed read
+  expires nothing (the read fails closed by itself).
+
 The owner's command: `python -m kaibot.engine.reconcile --accept "reason"` (accepts the last check's differences
 in the engine's journal; `--status` shows them). Dashboard hook (design only, not built: the `command` table's
 check constraint and `kb_command` need a migration): `kb_command('accept_reconcile', {"reason": ...})`, applied by
@@ -44,6 +55,7 @@ CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
 QTY_EPS = 1e-6
 NEVER_BLOCKED = ("stop", "cancel", "exit", "flatten")
 ACCEPT_COMMAND = "accept_reconcile"
+SESSION_CHECKS = ("startup", "session_start")  # checks at which accepted offsets are re-evaluated (and expire)
 Key = tuple[str, str | None]
 
 
@@ -142,10 +154,25 @@ def accepted_offsets(journal) -> dict[Key, float]:
     out: dict[Key, float] = {}
     if journal is None:
         return out
-    for _, _, _, b in journal.entries(kinds=("reconcile_resolved",)):
+    for _, _, kind, b in journal.entries(kinds=("reconcile_resolved", "reconcile_expired")):
         for d in b.get("offsets") or []:
-            out[(d["kind"], d.get("symbol"))] = float(d["offset"])
+            if kind == "reconcile_expired":
+                out.pop((d["kind"], d.get("symbol")), None)
+            else:
+                out[(d["kind"], d.get("symbol"))] = float(d["offset"])
     return out
+
+
+def _same(a: Difference, b: Difference) -> bool:
+    """The same difference at the same value (cash: within the tolerance; quantity: exactly)."""
+    if a.key != b.key or a.offset is None or b.offset is None:
+        return False
+    band = float(b.detail.get("tolerance") or a.detail.get("tolerance") or 0.0) if a.kind == "cash" else QTY_EPS
+    return abs(a.offset - b.offset) <= band
+
+
+def _diff(d: dict) -> Difference:
+    return Difference(d["kind"], d.get("symbol"), {k: v for k, v in d.items() if k not in ("kind", "symbol")})
 
 
 def resolve_last(journal, reason: str, by: str = "owner") -> list[dict]:
@@ -153,12 +180,16 @@ def resolve_last(journal, reason: str, by: str = "owner") -> list[dict]:
     if not str(reason or "").strip():
         raise ValueError("a resolution needs a reason")
     last = journal.entries(kinds=("reconcile",))
-    diffs = last[-1][3].get("diffs") or [] if last else []
-    offsets = []
-    for d in diffs:
-        diff = Difference(d["kind"], d.get("symbol"), {k: v for k, v in d.items() if k not in ("kind", "symbol")})
-        if diff.offset is not None:
-            offsets.append({"kind": diff.kind, "symbol": diff.symbol, "offset": diff.offset})
+    if not last:
+        raise ValueError("nothing to accept: no reconciliation check in the journal")
+    diffs = last[-1][3].get("diffs") or []
+    if not diffs:
+        raise ValueError("nothing to accept: the last check found no difference (it has healed)")
+    offsets = [{"kind": x.kind, "symbol": x.symbol, "offset": x.offset} for x in map(_diff, diffs)
+               if x.offset is not None]
+    if not offsets:
+        raise ValueError("nothing to accept: these differences cannot be accepted (" +
+                         ", ".join(sorted({d["kind"] for d in diffs})) + "); they heal only when the books agree")
     journal.append("reconcile_resolved", {"reason": str(reason).strip(), "by": by, "offsets": offsets,
                                           "diffs": diffs})
     return offsets
@@ -175,17 +206,38 @@ class Reconciler:
         self.last = Reconciliation()
         self.checked = False
         self._mem: dict[Key, float] = {}  # accepted offsets when there is no journal
+        self._was_dirty: bool | None = None
 
     @property
     def accepted(self) -> dict[Key, float]:
         return accepted_offsets(self.journal) if self.journal is not None else dict(self._mem)
 
     def check(self, when: str = "periodic") -> Reconciliation:
-        self.last = compare(**self.read(), accepted=self.accepted)
+        """`when` in SESSION_CHECKS: accepted offsets not matched by a difference of this check expire."""
+        acc = self.accepted
+        self.last = compare(**self.read(), accepted=acc)
         self.checked = True
-        if self.journal is not None and (self.last.diffs or when == "startup"):
+        if when in SESSION_CHECKS:
+            keep = {d.key for d in self.last.accepted}
+            gone = [{"kind": k[0], "symbol": k[1], "offset": v} for k, v in sorted(acc.items(), key=str)
+                    if k not in keep]
+            if gone:
+                if self.journal is not None:
+                    self.journal.append("reconcile_expired", {"when": when, "offsets": gone,
+                                                              "why": "healed or changed at the session start"})
+                for g in gone:
+                    self._mem.pop((g["kind"], g["symbol"]), None)
+        if self.journal is not None and (self.last.diffs or when == "startup" or self._dirty()):
             self.journal.append("reconcile", {"when": when, **self.last.summary()})
+            self._was_dirty = bool(self.last.diffs)
         return self.last
+
+    def _dirty(self) -> bool:
+        """The last journalled check had differences (a clean check after it is journalled: it healed)."""
+        if self._was_dirty is None:
+            last = self.journal.entries(kinds=("reconcile",))
+            self._was_dirty = bool(last and last[-1][3].get("diffs"))
+        return self._was_dirty
 
     def allows(self, symbol: str, side: str, purpose: str = "target", qty: float | None = None) -> str | None:
         """None when an order may go out; else why not."""
@@ -202,14 +254,30 @@ class Reconciler:
         """The owner looked at the differences and accepts them as they are (journalled with the reason)."""
         if not str(reason or "").strip():
             raise ValueError("a resolution needs a reason")
+        shown = [d for d in self.last.diffs if d.offset is not None]
+        if not shown:
+            return
+        # issue #179: read the venue again; accept only what is still there at the value shown
+        fresh = compare(**self.read(), accepted=self.accepted)
+        take = [d for d in fresh.diffs if any(_same(s, d) for s in shown)]
+        if not take:
+            self.last, self.checked = fresh, True
+            if self.journal is not None:
+                self.journal.append("reconcile", {"when": "resolve", **fresh.summary()})
+                self._was_dirty = bool(fresh.diffs)
+            healed = not any(d.key in {s.key for s in shown} for d in fresh.diffs)
+            raise ValueError("nothing to accept: the difference " + ("has healed" if healed else
+                             "has changed since it was shown: check again and accept the new value"))
         if self.journal is not None:
-            if not self.last.diffs:
-                return
-            self.journal.append("reconcile", {"when": "resolve", **self.last.summary()})
-            resolve_last(self.journal, reason, by)
+            self.journal.append("reconcile", {"when": "resolve", **fresh.summary()})
+            self._was_dirty = bool(fresh.diffs)
+            self.journal.append("reconcile_resolved", {
+                "reason": str(reason).strip(), "by": by, "diffs": [x for x in fresh.summary()["diffs"]
+                                                                   if _diff(x).key in {d.key for d in take}],
+                "offsets": [{"kind": d.kind, "symbol": d.symbol, "offset": d.offset} for d in take]})
         else:
-            self._mem.update({d.key: d.offset for d in self.last.diffs if d.offset is not None})
-        self.last = Reconciliation(accepted=self.last.diffs)
+            self._mem.update({d.key: d.offset for d in take})
+        self.last = compare(**self.read(), accepted=self.accepted)
 
 
 # ---------------------------------------------------------------- the owner's command

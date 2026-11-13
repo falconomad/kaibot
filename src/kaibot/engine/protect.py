@@ -9,7 +9,11 @@ off. Sent through the order manager like every other order.
   placed BEFORE the old one is cancelled (the old stop holds the shares: Alpaca refuses a second sell for them), so
   the re-arm cancels, polls the cancel to its confirmation (`confirm_polls`, `wait`) and sends the new stop in the
   same call: the gap is the cancel's round trip, seconds, and starts 10 days before the expiry, so a re-arm that
-  cannot finish is tried again at every later call long before the stop would lapse;
+  cannot finish is tried again at every later call long before the stop would lapse. Issue #179: the old stop
+  may trigger before the cancel arrives, so the new one goes out only after its final state and the venue's
+  position are read again (FILLED: none; a partial fill: the shares still held), journalled as `stop_rearm`;
+  and no stop is created, or resized up, for a sleeve while one of its stop fills is not yet booked (the sleeve
+  is stale); a resize up is capped at the venue's position, read again;
 - `release(key, keep)` frees shares for a sale: the stop shrinks to what is kept, or is cancelled. A sale is sent
   only once the venue confirmed it (a working stop holds the shares: Alpaca refuses the sale otherwise);
 - splits: `before_split` cancels the symbol's stops before the ex-date (bracket legs and stops are not adjusted
@@ -24,7 +28,7 @@ import math
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
-from kaibot.broker.protocol import OrderRequest
+from kaibot.broker.protocol import BrokerError, OrderRequest
 from kaibot.engine.orders import TERMINAL, UNCONFIRMED, OrderManager, St
 
 REARM_DAYS = 10  # re-arm a GTC stop this many days before its expiry
@@ -39,6 +43,7 @@ class ProtectiveStops:
         self.om, self.run = om, run
         self.confirm_polls, self.wait = confirm_polls, wait
         self.suspended: set[str] = set()  # symbols with a split under way: no stop is re-created yet
+        self._mine: dict[Key, list[str]] | None = None  # stop coids per sleeve (for `_unbooked`)
 
     def stops_of(self, key: Key):
         return self.om.working(symbol=key[1], strategy=key[0], purposes=("stop",))
@@ -78,16 +83,85 @@ class ProtectiveStops:
                     self.om._poll(r)
                 if r.state not in TERMINAL:
                     continue  # not confirmed yet: the next call sends the new stop (10 days of headroom)
-                r = None
+                placed = self._rearm(r, key, whole, px, session)
+                if placed:
+                    done.append(f"stop {placed}")
+                continue
+            if r is None and self._unbooked(key):
+                done.append(f"wait {strategy} {symbol}: a stop fill is not booked yet")
+                continue
             if r is None:
                 coid = self.om.next_coid(self.run, strategy, symbol, session, "stop")
                 self.om.submit(OrderRequest(symbol, "sell", whole, "stop", "gtc", coid, stop_price=round(px, 2)),
                                strategy=strategy, purpose="stop", session=session, override_block=True)
+                self._track(key, coid)
                 done.append(f"stop {coid}")
-            elif int(r.qty) != whole or abs(float(r.stop or 0) - round(px, 2)) > 0.004:
-                self.om.replace(r.coid, stop=round(px, 2), qty=whole if int(r.qty) != whole else None)
-                done.append(f"replace {r.coid}")
+            else:
+                qty = self._resize_to(r, key, whole)
+                if qty is not None or abs(float(r.stop or 0) - round(px, 2)) > 0.004:
+                    self.om.replace(r.coid, stop=round(px, 2), qty=qty)
+                    done.append(f"replace {r.coid}")
         return done
+
+    def _resize_to(self, r, key: Key, whole: int) -> int | None:
+        """The new quantity of a working stop, or None to keep it (QA-Ops review of #187). Down to the sleeve:
+        always. Up: never while a stop fill of the sleeve is unbooked (the sleeve is stale), and never above the
+        venue's position, read again (a failed read: no upsize, tried again at the next call)."""
+        have = int(r.qty)
+        if whole == have:
+            return None
+        if whole < have:
+            return whole
+        if self._unbooked(key):
+            return None
+        try:
+            pos = self.om.broker.positions().get(key[1]) or {}
+        except BrokerError:
+            return None
+        to = min(whole, int(math.floor(float(pos.get("qty") or 0) + 1e-9)))
+        return to if to > have else None
+
+    def _track(self, key: Key, coid: str) -> None:
+        if self._mine is not None:
+            self._mine.setdefault(key, []).append(coid)
+
+    def _unbooked(self, key: Key) -> bool:
+        """A stop of this sleeve has venue fills not yet booked to the ledger: the caller's sleeve is stale."""
+        if self._mine is None:  # once (a restart: the manager folded its orders from the journal)
+            self._mine = {}
+            for r in self.om.orders.values():
+                if r.purpose == "stop":
+                    self._mine.setdefault((r.strategy, r.symbol), []).append(r.coid)
+        mine = self._mine.get(key, [])
+        mine += [r.coid for r in self.stops_of(key) if r.coid not in mine]
+        return any((r := self.om.get(c)) is not None and r.cum > r.booked + 1e-9 for c in mine)
+
+    def _rearm(self, old, key: Key, whole: int, px: float, session: str) -> str | None:
+        """Issue #179: the re-arm's cancel is confirmed. The old stop may have triggered first (filled, in full or
+        in part): read its final state and the venue's position again before the new stop goes out, so no stop
+        sell rests on shares that are gone (on a margin account: a short-sale stop). FILLED (or REJECTED): no new
+        stop; the fill booking and the next `ensure` decide. CANCELED/EXPIRED: a stop for the sleeve's shares less
+        what the old one sold, capped at the venue's position. A failed position read places nothing (the next
+        call creates the stop from the sleeve once nothing is left unbooked). Journalled as `stop_rearm`."""
+        rec = {"coid": old.coid, "strategy": key[0], "symbol": key[1], "old_state": old.state.value,
+               "old_filled": old.cum, "sleeve": whole, "broker_qty": None, "qty": 0, "placed": None}
+        qty = 0
+        if old.state in (St.CANCELED, St.EXPIRED):
+            try:
+                pos = self.om.broker.positions().get(key[1]) or {}
+                rec["broker_qty"] = held = int(math.floor(float(pos.get("qty") or 0) + 1e-9))
+                qty = max(0, min(whole - int(math.ceil(old.cum - 1e-9)), held))
+            except BrokerError as e:
+                rec["error"] = f"positions: {e.status}"
+        rec["qty"] = qty
+        if qty >= 1:
+            coid = self.om.next_coid(self.run, key[0], key[1], session, "stop")
+            self.om.submit(OrderRequest(key[1], "sell", qty, "stop", "gtc", coid, stop_price=round(px, 2)),
+                           strategy=key[0], purpose="stop", session=session, override_block=True)
+            rec["placed"] = coid
+            self._track(key, coid)
+        self.om.journal.append("stop_rearm", rec)
+        return rec["placed"]
 
     def release(self, key: Key, keep: float) -> bool:
         """Before selling down to `keep` shares: True once no stop holds the shares to be sold."""

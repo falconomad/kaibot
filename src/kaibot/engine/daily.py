@@ -624,7 +624,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         pending = {s: r for s, r in pending.items() if s in held}
         forced = {data.symbols[j] for j in exits_on.get(i, ()) if data.symbols[j] in held}
         targets: list[Target] = []
-        if recon.check("startup" if i == i0 else "periodic").diffs:  # the ledger and the venue disagree:
+        if recon.check("startup" if i == i0 else "session_start").diffs:  # the ledger and the venue disagree:
             run.refused.append((i, recon.last.summary()["diffs"]))  # the target loop refuses buys, sales go out
         if tl is not None:
             plan = atr_risk_sizing(tl, held, pending, data, i, eq, pol, exposure_pct, led.cash)
