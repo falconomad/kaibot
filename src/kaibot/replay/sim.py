@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import date
 
 import numpy as np
 import pandas as pd
 
 from kaibot.broker.costs_v2 import CostModel, FillCtx
 from kaibot.broker.shadow_costs import buy_px, cost_parts, half_spread, sell_fees, sell_px  # noqa: F401
+from kaibot.engine.events import in_blackout
 from kaibot.replay.data import SymbolDays
 from kaibot.risk.gate import Proposal, RiskPolicy, Side, Snapshot, evaluate
 
@@ -34,6 +36,17 @@ def fomc_blackout(window: int | None = None) -> tuple[int, int]:
     window) can only widen the +-30 min, exactly as engine/events.in_blackout does; None = BLACKOUT_FOMC."""
     w = BLACKOUT_MIN if window is None else max(BLACKOUT_MIN, int(window))
     return FOMC_M - w, FOMC_M + w
+
+
+def entry_blocked(events: dict | None, fomc: set, d, m: int, window: int | None = None) -> bool:
+    """Is a new entry at decision minute m on day d inside a macro blackout? `events` ({day: [(event, minute)]} from
+    `engine.events.load_calendar`) -> exactly the live engine's `in_blackout` over every event type (FOMC 14:00,
+    CPI 08:30, unscheduled FOMC 10:00), widened by `window`. None = the FOMC-only path over the `fomc` dates."""
+    if events is None:
+        lo, hi = fomc_blackout(window)
+        return d in fomc and lo <= m <= hi
+    day = d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+    return in_blackout(events, day, m, window) is not None
 
 
 @dataclass
@@ -128,13 +141,16 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
                   equity0: float = 100_000.0, min_reward_r: float = 0.75, atr_mult: float = 1.5,
                   pause_after_losses: int = 3, pause_minutes: int = 60, variant: str = "v1",
                   target_r: float | None = None, size_atr: float | None = None,
-                  costs: CostModel | None = None, event_window: int | None = None) -> Book:
+                  costs: CostModel | None = None, event_window: int | None = None,
+                  events: dict | None = None) -> Book:
     """`atr_mult` (stop = atr_mult x 5-minute ATR) and `target_r` (profit target in R; None = the variant's
     pre-registered value, 1.5 for v1 and 2.0 for A) are the walk-forward's tunable exits; defaults are unchanged.
     `size_atr` (experiments only, None = off) keeps the dollar risk of a stop `size_atr` ATRs away: the quantity
     is what the gate allows at that reference stop, scaled by size_atr / atr_mult, and never more than the gate
     allows for the real stop. `costs`: None or v1 = the unchanged v1 path; v2 = `kaibot.broker.costs_v2`.
-    `event_window` (#66): the owner's Fed quiet window in minutes (30..90, can only widen); None = +-30."""
+    `event_window` (#66): the owner's Fed/CPI quiet window in minutes (30..90, can only widen); None = +-30.
+    `events` (#66): the macro calendar as the live engine loads it; when given it replaces the FOMC-only blackout
+    over `fomc` with `engine.events.in_blackout` (see `entry_blocked`). None = today's FOMC-only path."""
     v2 = None if costs is None or costs.name == "v1" else costs
     advs: dict[str, np.ndarray] = {}
 
@@ -202,7 +218,10 @@ def run_portfolio(bars: dict[str, SymbolDays], cands: pd.DataFrame, regime: dict
             g = cand_by_m.get(m)
             if g is None or halted or off[m] or m < pause_until or m + 1 > 375:
                 continue
-            if d in fomc and bl_lo <= m <= bl_hi:
+            if events is None:
+                if d in fomc and bl_lo <= m <= bl_hi:
+                    continue
+            elif entry_blocked(events, fomc, d, m, event_window):
                 continue
             for _, cnd in g.iterrows():
                 if cnd["news_24h"] or any(p["symbol"] == cnd["symbol"] for p in open_pos):

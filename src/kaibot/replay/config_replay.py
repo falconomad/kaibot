@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from kaibot.engine.events import from_fomc_dates, load_calendar
 from kaibot.engine.userconfig import Rules
 from kaibot.evaluation.metrics import max_drawdown, sharpe, t_stat
 from kaibot.replay.data import load_news_times, load_symbol
@@ -23,6 +24,7 @@ from kaibot.replay.pipeline import prepare
 from kaibot.replay.sim import run_portfolio
 
 DESIGN = ("2025-02-01", "2026-06-30")
+CALENDAR = Path(__file__).resolve().parents[3] / "config" / "macro_calendar.yaml"  # what engine/__main__ loads
 
 
 class NoData(RuntimeError):
@@ -42,7 +44,14 @@ def load_vix(data_dir: Path) -> pd.Series:
 
 
 def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: float = 100_000.0,
-                  window: tuple[str, str] = DESIGN) -> dict:
+                  window: tuple[str, str] = DESIGN, events: dict | None = None) -> dict:
+    """`events` None = the live engine's macro calendar (every event type, so the owner's quiet window also blocks
+    CPI mornings once it reaches 09:35, as `engine.events.in_blackout` does live), plus any `fomc` date it lacks."""
+    if events is None:
+        events = {d: list(v) for d, v in load_calendar(CALENDAR)[0].items()}
+        for d, evs in from_fomc_dates(fomc).items():
+            if not any(e == "fomc_statement_1400" for e, _ in events.get(d, ())):
+                events.setdefault(d, []).extend(evs)
     sector_of = {s: e for e, syms in cfg["sectors"].items() for s in syms}
     if not have_data(data_dir, [cfg["market"], *cfg["sectors"], *sector_of]):
         raise NoData("minute-bar history or the VIX cache is missing (run ./scripts/fetch_history.sh, M0 #3)")
@@ -65,7 +74,7 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
             reg[d] = (off | (np.isfinite(vx) and vx > rules.vix_max), vx)
     book = run_portfolio(prep.bars, cands, reg, fomc, rules.policy, equity0=equity0, variant="A",
                          pause_after_losses=rules.pause_losses, pause_minutes=rules.pause_minutes,
-                         event_window=rules.event_window_min)
+                         event_window=rules.event_window_min, events=events)
     trades = pd.DataFrame([t.__dict__ for t in book.trades])
     daily = pd.DataFrame(book.daily)
     n = len(trades)
