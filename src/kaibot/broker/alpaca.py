@@ -174,10 +174,12 @@ class AlpacaPaper(BrokerBase):
             raise
 
     def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
-                qty: float | None = None) -> dict:
+                qty: float | None = None, client_order_id: str | None = None) -> dict:
         """PATCH /v2/orders/{id}: Alpaca replaces the order and answers with the NEW order (new id, `replaces` the
         old one, which turns `replaced`). `qty` is sent only when given (the order manager resizes a protective
-        stop with it), so the engine's present calls send the same bytes as before."""
+        stop with it), so the engine's present calls send the same bytes as before. `client_order_id` (issue
+        #197): the new order's client id, sent only when given (Alpaca: "Automatically generated if not sent");
+        the order manager always sends one, so the fail-safes still recognise a replaced stop."""
         body = {}
         if qty is not None:
             body["qty"] = str(int(qty)) if float(qty).is_integer() else str(qty)
@@ -185,6 +187,8 @@ class AlpacaPaper(BrokerBase):
             body["limit_price"] = f"{limit_price:.2f}"
         if stop_price is not None:
             body["stop_price"] = f"{stop_price:.2f}"
+        if client_order_id:
+            body["client_order_id"] = client_order_id
         return self._t("PATCH", f"/v2/orders/{order_id}", body=body)
 
     def cancel(self, order_id: str) -> None:

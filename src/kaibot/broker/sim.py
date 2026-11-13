@@ -425,8 +425,11 @@ class SimBroker(BrokerBase):
         return None if s is None else s[1]
 
     def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
-                qty: float | None = None) -> dict:
+                qty: float | None = None, client_order_id: str | None = None) -> dict:
         """Change a working order's or leg's price (and an order's quantity). By default in place, keeping the id.
+        `client_order_id` (issue #197): the order works under it from now on (in place too); one the account
+        already used is refused (422), as Alpaca does. Without it a new order gets `sim-<id>`, as Alpaca
+        generates one.
         With `replace_new_id` as Alpaca's PATCH does: the old order turns `replaced` (`replaced_by` names the new
         one) and a new order with a new id and a new client order id works on (`replaces` names the old one); a
         replaced bracket leg is then listed under its parent (`replaced_leg="nested"`) or as an order of its own
@@ -448,16 +451,20 @@ class SimBroker(BrokerBase):
                 raise BrokerError(422, f"qty {qty:g} cannot replace {order_id}")
             if o["side"] == "sell" and qty - float(o["qty"]) > self._free_shares(o["symbol"]) + 1e-9:
                 raise BrokerError(403, "insufficient qty available for order")
+        if client_order_id and self.order_by_client_id(client_order_id) is not None:
+            raise BrokerError(422, "client_order_id must be unique")
         if not self.replace_new_id:
             _reprice(o, stop_price, limit_price, qty)
+            if client_order_id:
+                o["client_order_id"] = client_order_id
             return o
         now = _utc(self.clk())
         nid = f"o{next(self.ids)}"
         if parent is None:
             if float(o.get("filled_qty") or 0):
                 raise BrokerError(422, "sim: replacing a partly filled order is not modelled")
-            new = {**o, "id": nid, "client_order_id": f"sim-{nid}", "replaces": o["id"], "status": "new",
-                   "created_at": now.isoformat(), "submitted_at": now.isoformat(),
+            new = {**o, "id": nid, "client_order_id": client_order_id or f"sim-{nid}", "replaces": o["id"],
+                   "status": "new", "created_at": now.isoformat(), "submitted_at": now.isoformat(),
                    "expires_at": _iso(self._expiry(o["time_in_force"], now)),
                    "legs": [dict(x) for x in o.get("legs") or []]}
             _reprice(new, stop_price, limit_price, qty)
@@ -469,14 +476,16 @@ class SimBroker(BrokerBase):
         if o["status"] != "new":
             raise BrokerError(422, "sim: replacing a leg that is not armed is not modelled")
         new = {**o, "id": nid, "replaces": o["id"], "status": "new"}
+        if client_order_id:
+            new["client_order_id"] = client_order_id
         _reprice(new, stop_price, limit_price, None)
         o.update(status="replaced", replaced_by=nid)
         if self.replaced_leg == "nested":
             parent["legs"] = [new if x is o else x for x in parent["legs"]]
             self._gone[o["id"]] = o
         else:  # an order of its own: Alpaca's answer to issue #11 may be this
-            new.update(client_order_id=f"sim-{nid}", time_in_force="gtc", order_class="simple", legs=[],
-                       filled_qty=0, filled_avg_price=None, filled_at=None, parent_id=parent["id"],
+            new.update(client_order_id=client_order_id or f"sim-{nid}", time_in_force="gtc", order_class="simple",
+                       legs=[], filled_qty=0, filled_avg_price=None, filled_at=None, parent_id=parent["id"],
                        created_at=now.isoformat(), submitted_at=now.isoformat(),
                        expires_at=_iso(self._expiry("gtc", now)))
             self.orders[nid] = new

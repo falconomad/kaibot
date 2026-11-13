@@ -93,8 +93,13 @@ accounts and checks that they agree.
   if none is known, or it is not below the last price, 10% below the last price (`risk/gate.GAP_SCENARIO_PCT`). Never
   for more shares than are free (other sell orders hold shares); what cannot be covered is an alarm (`unprotected`).
   Client ids: `kbwd-<strategy>-<symbol>-<time>-wdstop` (watchdog), `kbdm-...-dmstop` (dead-man). The engine treats
-  them as orders on a symbol it holds; the order manager adopting them as the sleeve's own stop is #188, which must
-  land before `KAIBOT_MULTIDAY=on`.
+  them as orders on a symbol it holds. The engine adopts a resting `kbwd-`/`kbdm-` stop of a known sleeve as that
+  sleeve's own protective stop at start-up, at each session's stop reconciliation and before every sale (#188,
+  `ProtectiveStops.adopt`; journal `stop_adopted`, unknown sleeve `stop_adopt_skipped`). It never adds a second stop
+  and never cancels and re-arms the stop; it re-prices and resizes it through replace. A fail-safe stop that filled
+  while the engine was down is booked to its sleeve. Before `KAIBOT_MULTIDAY=on`: #197, a replaced stop must keep a
+  client id the fail-safes recognise (Alpaca gives a replaced order a new one). #197 sends one on every replace: the
+  next attempt of the engine's own `kb<run>-...-stop-<n>`, or `<root>.r<n>` for an adopted `kbwd-`/`kbdm-` stop.
 - **Never a stop on a flat position (#179's lesson):** the fail-safes only ADD a stop where none covers the shares;
   they never cancel and re-arm one. The watchdog reads the position again right before each new stop and sends
   none if the shares are gone (a stop filled in between). The dead-man acts only on an account read made in the last 3 minutes (older reads expire, and every open read
@@ -116,7 +121,7 @@ accounts and checks that they agree.
   drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills.
 - **Turning multi-day rules on:** `KAIBOT_MULTIDAY=on` in the engine's environment (the `.env`); default off, and the
   engine refuses to load a multi-day rule without it. It is the explicit switch for the first paper start (#133,
-  after Gate B) and needs #188 first. It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level
+  after Gate B) and needs #188 (done) and #197 first. It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level
   limits, the stakeholder's) still caps overnight exposure at 0 while false, and migration 0019 must be applied first.
 
 ### Drills (`tests/test_failsafe_drills.py`, every one with 40 shares of a multi-day sleeve held from the day before)

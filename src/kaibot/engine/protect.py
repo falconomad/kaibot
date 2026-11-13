@@ -36,6 +36,9 @@ foreign fill. The strategy in the client id is matched to a sleeve by the client
 to its sleeve; neighbours are research names and never live (`strategies.registry.live` loads only registered
 rules). A fail-safe stop of no known sleeve is left resting and journalled once (`stop_adopt_skipped`). When the
 open orders cannot be read, no new stop is created in that call (a fail-safe stop may hold the shares).
+A stop the manager replaced works under a new client id of its own family (issue #197,
+`OrderManager.replacement_coid`), so `adopt` knows it by `OrderManager.owner` (or its order id) and never takes it
+for a new fail-safe stop; a partly filled stop is resized on what still rests (the venue's qty includes the fill).
 
 One stop per sleeve: when the engine's stop and a fail-safe stop both rest for one sleeve, the larger is kept and
 the other cancelled, then the kept one is resized. A resize up is capped at the venue's position less the working
@@ -98,7 +101,8 @@ class ProtectiveStops:
             if m is None or o.get("side") != "sell" or o.get("type") not in ("stop", "stop_limit"):
                 continue
             sym = str(o.get("symbol") or "")
-            if (only is not None and sym not in only) or coid in self.om.orders:
+            if (only is not None and sym not in only) or self.om.owner(coid) is not None \
+                    or str(o.get("id") or "") in self.om.by_id:  # a stop the manager replaced is its own (#197)
                 continue
             match = [k for k in keys if k[1] == sym and clean(k[0])[:40] == m.group(2)]
             if len(match) != 1:
@@ -187,12 +191,15 @@ class ProtectiveStops:
     def _resize_to(self, r, key: Key, whole: int) -> int | None:
         """The new quantity of a working stop, or None to keep it (QA-Ops review of #187). Down to the sleeve:
         always. Up: never while a stop fill of the sleeve is unbooked (the sleeve is stale), and never above the
-        venue's position, read again (a failed read: no upsize, tried again at the next call)."""
-        have = int(r.qty)
+        venue's position, read again (a failed read: no upsize, tried again at the next call). Counted on what
+        still rests (#197: a partly filled stop at restart): the venue's qty is the order's total, filled part
+        included, so the quantity sent is the shares to keep covered plus what it already sold."""
+        done = int(math.ceil(float(r.cum) - 1e-9))
+        have = int(r.qty) - done
         if whole == have:
             return None
         if whole < have:
-            return whole
+            return whole + done
         if self._unbooked(key):
             return None
         try:
@@ -203,7 +210,7 @@ class ProtectiveStops:
         others = sum(int(math.ceil(x.qty - x.cum - 1e-9)) for x in self.om.working(symbol=key[1], purposes=("stop",))
                      if x.coid != r.coid)  # #192: the symbol's other stops hold shares too
         to = min(whole, held - others)
-        return to if to > have else None
+        return to + done if to > have else None
 
     def _track(self, key: Key, coid: str) -> None:
         if self._mine is not None:
@@ -259,9 +266,10 @@ class ProtectiveStops:
             elif whole < 1:
                 self.om.cancel(r.coid)
                 ok = ok and not r.open
-            elif int(r.qty) > whole:
-                self.om.replace(r.coid, qty=whole)
-                ok = ok and int(r.qty) <= whole and r.state is not St.PENDING_REPLACE
+            elif int(r.qty) - int(math.ceil(float(r.cum) - 1e-9)) > whole:  # what still rests (#197)
+                done = int(math.ceil(float(r.cum) - 1e-9))
+                self.om.replace(r.coid, qty=whole + done)
+                ok = ok and int(r.qty) - done <= whole and r.state is not St.PENDING_REPLACE
         return ok
 
     def before_split(self, symbol: str) -> None:
