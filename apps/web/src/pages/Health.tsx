@@ -8,6 +8,7 @@ import { poll } from "../lib/poll";
 import { budgetText } from "../lib/roomview";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
+import { ExperimentCard, HaltTag, RuleExperiment } from "../components/Experiment";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -42,7 +43,13 @@ const EV: Record<string, string> = {
   halt: "Halt", halt_cleared: "Halt cleared at the new session", account_not_clean: "Paper account not clean",
   calendar_stale: "Event calendar out of date", run_paused: "Run paused", moc_refused: "Market-on-close refused",
   watchdog_flatten: "Watchdog flattened", watchdog_recovered: "Engine heartbeat back", shadow_error: "Shadow strategy error",
+  // #207: the live daily path (multi-day rules)
+  multi_day_book_ended: "Experiment ended: the multi-day book reached its stop line", multi_day_retired: "Experiment ended: rule retired",
+  multi_day_reenabled: "Multi-day rule switched back on by you", multi_day_reenable_refused: "Switching a rule back on was refused",
+  multi_day_no_decision: "Multi-day rule: no decision today", multi_day_waiting: "Multi-day rule waiting for the daily prices",
+  multi_day_error: "Multi-day step failed (no orders sent)", multi_day_overnight_off: "Overnight holding is off: buys skipped",
 };
+
 
 const STATE_TAG = { ok: ["allow", "ok"], rules_only: ["downgrade", "rules-only"], no_entries: ["veto", "no entries"] } as const;
 const usd = (v: number) => `$${v.toFixed(v < 10 ? 3 : 2)}`;
@@ -109,7 +116,7 @@ function VersionCard({ h }: { h: HealthData }) {
         {fp && !fp.unknown && fp.all && (<><span>Strategy fingerprint</span><span /><span className="v num">{fp.all}</span></>)}
         {fp?.core && (<><span>Shared core</span><span /><span className="v num" title="code: core">{fp.core}</span></>)}
         {fp?.rules.map((p) => (
-          <span key={p.key} style={{ display: "contents" }}><span title={`code: ${p.key}`}>{ruleLabel(p.key)}</span><span /><span className="v num">{p.hash}</span></span>
+          <span key={p.key} style={{ display: "contents" }}><span title={`code: ${p.key}`}>{ruleLabel(p.key)}<RuleExperiment code={p.key} beats={h.heartbeat} /></span><span /><span className="v num">{p.hash}</span></span>
         ))}
       </div>
       {fp?.unknown && <p className="loss" style={{ fontSize: 13 }}>The engine couldn't compute its fingerprint at start, so no trade from this start counts toward a verdict.</p>}
@@ -142,6 +149,8 @@ export function Health() {
         {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 12 }}>Waiting for the engine: {h.pending_commands.map((c) => commandText(c.kind)).join(", ")}</p>}
       </section>
 
+      <ExperimentCard beats={h.heartbeat} />
+
       <VersionCard h={h} />
 
       <ScanCard beat={h.heartbeat.find((b) => b.process === "engine")} />
@@ -162,7 +171,7 @@ export function Health() {
           <h2 id="halt-h">Recent halts</h2>
           {h.halts.length ? (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{h.halts.slice(0, 12).map((x, i) => (
-              <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <span title={`code: ${x.kind}`}>{haltText(x)}</span>
+              <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <span title={`code: ${x.kind}`}>{haltText(x)}</span><HaltTag x={x} all={h.halts} />
                 {haltResolved(x, beatTs, recovered) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}
                 {x.reason && <div className="muted" style={{ fontSize: 12 }}>{x.reason}</div>}</li>))}</ul>
           ) : <Empty>No halts recorded.</Empty>}

@@ -10,6 +10,7 @@ import { BAR } from "../lib/model";
 import { R, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
 import { exitText, ruleLabel, ruleName, vetoText } from "../lib/explain";
 import { Empty, ErrorState, RuleName, TestPhaseBanner } from "../components/States";
+import { HaltTag } from "../components/Experiment";
 import { STALE, poll } from "../lib/poll";
 import type { Heartbeat } from "../lib/api";
 import { Skeleton } from "../components/Skeleton";
@@ -98,7 +99,7 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
       {(r.halts?.length ?? 0) > 0 && (<>
         <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Halts</h3>
         <ul style={{ margin: 0, paddingLeft: 18 }}>{r.halts!.map((h, i) => (
-          <li key={i}><span className="num">{timeEt(h.ts)}</span> <span title={`code: ${h.kind}`}>{haltText(h)}</span>
+          <li key={i}><span className="num">{timeEt(h.ts)}</span> <span title={`code: ${h.kind}`}>{haltText(h)}</span><HaltTag x={h} all={r.halts!} />
             {haltResolved(h, beat?.ts) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}</li>))}</ul>
       </>)}
     </section>
