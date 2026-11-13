@@ -182,3 +182,24 @@ configuration counts 1, cost and fill re-runs of the same configuration count 0.
 model v1, base fill, 1x costs is one trial (`n_trials` 1), each of the five neighbours at the same setting is one
 more (the plateau check is part of the search and is counted, never hidden); every other row (cost model v2, 0x, 2x,
 3x, the stress fill, the T-bill variant) and the random-timing control count 0.
+
+## Amendment 1 (13 Nov 2026, backend-quant, issue #201, before any run on real data)
+
+Written before the rule or its control had been run on real data, and before any percentile of the control had been
+seen on any data. It changes how mark 3's random round trips are placed and nothing else: the construction, the
+neighbours, the fill and cost models, the trials and marks 1 to 6 stand as committed.
+
+Why: while the control was being written, a unit test on synthetic data showed that placing the round trips one
+after another, each at a uniformly drawn free session, often leaves no room for the last ones when the rule is in
+the market most of the time (a few long holdings filling 70 to 90% of the window): such a run is not matched, and
+mark 3 would stay unknown for a reason that has nothing to do with the rule.
+
+The placement, instead: each random account takes the rule's holding durations in a **random order** and separates
+them by **random gaps**. A holding of d sessions occupies its d sessions and its sale session (a holding that reaches
+the end of the window is held to the end and its "sale session" is past the end), so a sale and a buy never share a
+close and two holdings never merge. The free sessions left over are split into one more gap than there are holdings
+by a uniform random composition (every split equally likely), so the first holding can start on the first session
+and the last can run to the end. Every holding is placed exactly once whenever the rule's own holdings fit, which
+they always do, so the control is matched; the number of round trips, the durations and the time in the market are
+the rule's exactly. Everything else of mark 3 is as committed: at least 500 runs, run k seeded by (201, k), the same
+account routine and costs, ties counting against the rule, the 90th percentile of `config/gate_v2.yaml`.
