@@ -493,7 +493,7 @@ def run_version(a: argparse.Namespace) -> None:
         "data": data_info, "start": a.start, "end": a.end, "equity": a.equity,
         "control_runs": a.control_runs, "control_seed": a.control_seed, "control_kind": CONTROL_KIND,
         "entries_control_runs": a.entries_control_runs, "earnings": earn, "earnings_input": earn["input"],
-        "earnings_variant": f"run ({VARIANT_NOTE[variant]})" if variant else "skipped",
+        "earnings_variant": VARIANT_REPORTED[variant] if variant else "skipped",
         "oos_window": [str(bars.dates[i0]), str(bars.dates[i1])], "oos_sessions": int(i1 - i0 + 1),
         "input_sha256": input_sha, "symbols": len(symbols), "base_label": base_label, "rows": rows,
         "benchmarks": bench, "control": control, "control_entries_matched_diagnostic": diagnostic, "gate_b": gate,
@@ -559,6 +559,7 @@ TAIL = ("Positive years", "Avg exposure %", "Max exposure %", "Avg names", "Turn
 EARN = {"hold": "hold through", "exit_approx": "exit before (APPROXIMATE)",
         "exit_sec": "exit before (SEC point-in-time dates)"}
 VARIANT_NOTE = {"exit_approx": "APPROXIMATE", "exit_sec": "SEC point-in-time dates"}
+VARIANT_REPORTED = {"exit_approx": "run (approximate)", "exit_sec": "run (SEC point-in-time dates)"}
 
 
 def _cells(name: str, s: dict, years: list[str], **extra) -> dict:
