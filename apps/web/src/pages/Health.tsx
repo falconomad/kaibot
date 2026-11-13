@@ -2,13 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Heartbeat } from "../lib/api";
 import { ageS, ageText, haltResolved, haltText, scanSummary, sessionTime } from "../lib/derive";
 import { engineVersion } from "../lib/engine";
-import { commandText, ruleLabel } from "../lib/explain";
-import { Empty, ErrorState } from "../components/States";
+import { commandText } from "../lib/explain";
+import { Empty, ErrorState, RuleName } from "../components/States";
 import { poll } from "../lib/poll";
 import { budgetText } from "../lib/roomview";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
-import { ExperimentCard, HaltTag, RuleExperiment } from "../components/Experiment";
+import { ExperimentCard, HaltTag, experimentsOf } from "../components/Experiment";
+import { findExperiment } from "../lib/experiment";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -116,7 +117,7 @@ function VersionCard({ h }: { h: HealthData }) {
         {fp && !fp.unknown && fp.all && (<><span>Strategy fingerprint</span><span /><span className="v num">{fp.all}</span></>)}
         {fp?.core && (<><span>Shared core</span><span /><span className="v num" title="code: core">{fp.core}</span></>)}
         {fp?.rules.map((p) => (
-          <span key={p.key} style={{ display: "contents" }}><span title={`code: ${p.key}`}>{ruleLabel(p.key)}<RuleExperiment code={p.key} beats={h.heartbeat} /></span><span /><span className="v num">{p.hash}</span></span>
+          <span key={p.key} style={{ display: "contents" }}><RuleName code={p.key} exp={findExperiment(p.key, experimentsOf(h.heartbeat))} /><span /><span className="v num">{p.hash}</span></span>
         ))}
       </div>
       {fp?.unknown && <p className="loss" style={{ fontSize: 13 }}>The engine couldn't compute its fingerprint at start, so no trade from this start counts toward a verdict.</p>}

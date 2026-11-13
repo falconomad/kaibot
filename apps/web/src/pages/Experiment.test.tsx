@@ -1,6 +1,7 @@
 // #210: the trend_momentum paper experiment on every screen that shows the rule, and nothing new without the fields.
 import { describe, expect, it, vi } from "vitest";
 import type { Health as HealthResp, Heartbeat, LlmBudget, TapeItem, Trade, TradeDetail } from "../lib/api";
+import { Gate } from "./Gate";
 import { Health } from "./Health";
 import { Live } from "./Live";
 import { Tape } from "./Tape";
@@ -103,8 +104,32 @@ describe("Trades, Tape, Trade detail (#210)", () => {
     expect(t).toContain(BADGE);
     expect(t).toContain("up to 60% invested · retires if it falls 21% from its peak");
     expect(t).not.toContain("research only");
+    // Without the heartbeat's label row the rule keeps its recorded verdict (the badge), only without the limits.
     const t0 = text(render(<TradeDetailPage />, { ...at, ctx: ctx(old) }));
-    expect(t0).not.toContain("Experiment");
-    expect(t0).toContain("Engine v3 candidate, research only");
+    expect(t0.split(BADGE).length - 1).toBe(1);
+    expect(t0).not.toContain("invested");
+    expect(t0).not.toContain("research only");
+  });
+});
+
+describe("Gate page verdicts (#210 follow-up)", () => {
+  const none = { key: ["gate", 1], data: { latest: null, history: [], random_days: 0 } };
+  it("each Engine v3 rule with its honest verdict, never 'research only'", () => {
+    const html = render(<Gate />, { ctx: ctx(withExp), seeds: [none] });
+    const t = text(html);
+    expect(t).toContain("Engine v3 rules: the ten-year test");
+    expect(t).toContain(`Trend momentum ${BADGE} up to 60% invested · retires if it falls 21% from its peak`);
+    expect(t).toContain("12-month momentum failed the ten-year test");
+    expect(t).toContain("SPY trend filter failed the ten-year test");
+    expect(t).toContain("SPY noise band ten-year test: waiting for the engine run");
+    expect(t).toContain("SPY noise band, held overnight waiting: tested after the noise band");
+    expect(t).not.toContain("research only");
+    expect(html).toContain('class="tag gate-fail"');
+    expect(glitches(html)).toEqual([]);
+  });
+  it("the experiment badge stays without the heartbeat, without limits", () => {
+    const t = text(render(<Gate />, { ctx: ctx(old), seeds: [none] }));
+    expect(t).toContain(`Trend momentum ${BADGE}`);
+    expect(t).not.toContain("invested");
   });
 });

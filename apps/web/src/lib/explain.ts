@@ -12,20 +12,34 @@ export const TEST_PHASE = {
 } as const;
 
 /** "retired": decision 15 retired the rule, it keeps trading on paper only as a systems (plumbing) test.
- *  "shadow": measured, never traded. "candidate": an Engine v3 rule in research (ten-year test), not on paper yet. */
-export type RuleStatus = "retired" | "shadow" | "candidate";
+ *  "shadow": measured, never traded. "candidate": an Engine v3 rule in research (ten-year test), not on paper yet.
+ *  #210 follow-up, the Engine v3 rules' honest verdicts (decision 15 sections 7 and 11):
+ *  "experiment": failed the ten-year test (Gate B), trades on paper only as the stakeholder's labelled experiment;
+ *  "failed": failed the ten-year test, off; "pending": the ten-year test waits for its run through the engine with
+ *  the simulated broker (#202/#208); "waiting": tested only once another rule has its verdict. */
+export type RuleStatus = "retired" | "shadow" | "candidate" | "experiment" | "failed" | "pending" | "waiting";
 export const RETIRED_TEXT = "retired, systems test only";
+/** The experiment badge's words when the engine heartbeat has no label row (market closed, older engine). */
+export const EXPERIMENT_LABEL = "Experiment: failed the ten-year test";
 export const RULES: Record<string, { name: string; status: RuleStatus; what: string }> = {
   dip_reversal: { name: "Dip rule", status: "retired", what: "buys a sharp stock-specific fall with no company news, after a 5-minute higher low" },
   spy_late_momentum: { name: "SPY late-day rule", status: "retired", what: "buys SPY in the last 30 minutes when the day is already strong" },
   orb_stocks_in_play: { name: "Opening-breakout rule", status: "shadow", what: "a break above the first 5-minute high on heavy volume" },
   news_continuation: { name: "News rule", status: "shadow", what: "follows a stock that moves on fresh news" },
-  trend_momentum: { name: "Trend momentum", status: "candidate", what: "holds the strongest steady uptrends for weeks" },
-  mom_12_1_band: { name: "12-month momentum", status: "candidate", what: "holds last year's winners for months" },
-  spy_noise_band: { name: "SPY noise band", status: "candidate", what: "buys SPY when it leaves its usual intraday range" },
-  spy_noise_band_carry: { name: "SPY noise band, held overnight", status: "candidate", what: "the noise band, holding to the next open" },
+  trend_momentum: { name: "Trend momentum", status: "experiment", what: "holds the strongest steady uptrends for weeks" },
+  mom_12_1_band: { name: "12-month momentum", status: "failed", what: "holds last year's winners for months" },
+  spy_trend_filter: { name: "SPY trend filter", status: "failed", what: "holds SPY while it is above its 10-month average, otherwise cash" },
+  spy_noise_band: { name: "SPY noise band", status: "pending", what: "buys SPY when it leaves its usual intraday range" },
+  spy_noise_band_carry: { name: "SPY noise band, held overnight", status: "waiting", what: "the noise band, holding to the next open" },
 };
-const STATUS_TEXT: Record<RuleStatus, string> = { retired: RETIRED_TEXT, shadow: "test only, never traded", candidate: "Engine v3 candidate, research only" };
+/** The Engine v3 rules, in the order the Gate page lists their ten-year verdicts. */
+export const V3_RULES = ["trend_momentum", "mom_12_1_band", "spy_trend_filter", "spy_noise_band", "spy_noise_band_carry"] as const;
+const STATUS_TEXT: Record<RuleStatus, string> = { retired: RETIRED_TEXT, shadow: "test only, never traded", candidate: "Engine v3 candidate, research only",
+  experiment: "Experiment — failed the ten-year test · paper only", failed: "failed the ten-year test",
+  pending: "ten-year test: waiting for the engine run", waiting: "waiting: tested after the noise band" };
+/** The tag class of each status: failed is the red of a failed gate, pending the info blue, the rest neutral or amber. */
+export const STATUS_TAG: Record<RuleStatus, string> = { retired: "retired", shadow: "", candidate: "", experiment: "info",
+  failed: "gate-fail", pending: "info", waiting: "gate-muted" };
 const words = (code: string) => code.replace(/_/g, " ");
 export const ruleName = (code: string) => RULES[code]?.name ?? words(code);
 export const ruleStatus = (code: string): RuleStatus | null => RULES[code]?.status ?? null;

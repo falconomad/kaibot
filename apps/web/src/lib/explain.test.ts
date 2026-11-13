@@ -34,7 +34,7 @@ describe("explainSignal", () => {
 });
 
 import { CHECK_TEXT, EXIT_TEXT, RETIRED_TEXT, TEST_PHASE, bindingText, causeText, checkText, commandText, exitText, ruleLabel,
-  ruleName, ruleStatus, vetoText } from "./explain";
+  V3_RULES, ruleName, ruleStatus, vetoText } from "./explain";
 
 describe("plain words for engine codes", () => {
   it("names the rules and marks the dip and SPY late-day rules as retired (decision 15)", () => {
@@ -47,6 +47,13 @@ describe("plain words for engine codes", () => {
     expect(ruleLabel("orb_stocks_in_play")).toBe("Opening-breakout rule (test only, never traded)");
     expect(ruleName("brand_new_rule")).toBe("brand new rule");
     expect(ruleStatus("brand_new_rule")).toBeNull();
+  });
+  it("gives the Engine v3 rules their ten-year verdicts (decision 15 sections 7 and 11)", () => {
+    expect(ruleLabel("trend_momentum")).toBe("Trend momentum (Experiment — failed the ten-year test · paper only)");
+    expect(ruleLabel("mom_12_1_band")).toBe("12-month momentum (failed the ten-year test)");
+    expect(ruleLabel("spy_trend_filter")).toBe("SPY trend filter (failed the ten-year test)");
+    expect(ruleLabel("spy_noise_band")).toBe("SPY noise band (ten-year test: waiting for the engine run)");
+    for (const k of V3_RULES) expect(ruleStatus(k), k).not.toBe("candidate");
   });
   it("covers every gate check and size limit in risk/gate.py", () => {
     for (const k of ["kill_switch", "reconciled", "market_open", "entry_window", "event_blackout", "data_ok", "pump_risk", "symbol_halted",
