@@ -5,14 +5,14 @@ pre-registered results do not move. Product's rule: what trades live is what was
   names, 10% resize buffer, 3% cash reserve). Parity with the research harness (`replay/multiday_core.py`) is exact,
   order by order and fill by fill with the equity curve, on the committed fixture (every version and neighbour) and
   on a 730-stock synthetic decade with splits, dividends, holes, delistings and index leavers.
-- The level's other book caps are outer guards and never cut in these runs (asserted). At the level's provisional
-  30% sector cap they would: pinned below, with why `momentum_limits` uses the 40% hard ceiling.
+- Amendment 4 of both pre-registrations: the 40% sector cap (best-ranked first; no sector = its own) is part of
+  the rule in both, and at the fill only the cash is checked in both. The rules run at their own limits within the
+  hard ceilings. The remaining book caps are outer guards and never cut in these runs (asserted).
 - Cash, shares, marks and venue equity come from `engine.ledger.Ledger`, folded from the run's journal."""
 
 from __future__ import annotations
 
 import dataclasses
-import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -93,11 +93,10 @@ def decade_market(seed: int = 168, n_stocks: int = 730, n: int = 2800, sector_be
     for j in rng.choice(n_stocks, 40, replace=False):
         a = int(rng.integers(0, n - 100))
         member[a:a + int(rng.integers(50, 600)), j] = False
+    sectors = {s: f"SEC{sec[k]:02d}" for k, s in enumerate(stocks) if k % 50}  # every 50th: no sector (its own)
     m = mc.Market.from_panel(DailyPanel.make(dates, syms, o, h, lo, c, v, actions=acts), stocks, "SPY",
-                             member=member, terminal_returns=terminal)
-    data = DailyData.from_market(m)
-    data.sector = {s: f"SEC{sec[k]:02d}" for k, s in enumerate(stocks)}
-    return m, data
+                             member=member, terminal_returns=terminal, sectors=sectors)
+    return m, DailyData.from_market(m)
 
 
 @pytest.fixture(scope="module")
@@ -136,29 +135,21 @@ def exact(c: dict) -> None:
     assert run.ledger.overdrafts == [] and run.cash_gap < 1e-6
 
 
-def first_difference(c: dict) -> tuple[float, float]:
-    """(session of the first differing order, session of the first differing fill); inf where none differs."""
-    h, e = c["h_orders"], c["run"].orders
-    o = next((min(a[0], b[0]) for a, b in zip(h, e, strict=False) if a != b), math.inf)
-
-    def key(f):
-        return f[0], f[1], f[2]
-
-    hs, es = sorted(c["h_fills"], key=key), sorted(c["e_fills"], key=key)
-    f = next((min(a[0], b[0]) for a, b in zip(hs, es, strict=False)
-              if key(a) != key(b) or abs(a[3] - b[3]) > 1e-9), math.inf)
-    return o, f
-
-
 # ---------------------------------------------------------------- parity on the decade
 
+DECADE_RUNS = [("trend_momentum", "base", 100.0, None), ("trend_momentum", "base", 60.0, None),
+               ("trend_momentum", "stress", 60.0, None), ("trend_momentum", "base", 100.0, "risk15"),
+               ("mom_12_1_band", "base", 100.0, None), ("mom_12_1_band", "base", 60.0, None),
+               ("mom_12_1_band", "stress", 60.0, None), ("mom_12_1_band_nofilter", "base", 100.0, None)]
 
-@pytest.mark.parametrize("version,fill,cap", [("trend_momentum", "base", 100.0), ("trend_momentum", "base", 60.0),
-                                              ("mom_12_1_band", "base", 60.0), ("mom_12_1_band", "stress", 60.0)])
-def test_the_builder_reproduces_the_harness_on_a_730_stock_decade(decade, version, fill, cap):
+
+@pytest.mark.parametrize("version,fill,cap,neighbour", DECADE_RUNS)
+def test_the_builder_reproduces_the_harness_on_a_730_stock_decade(decade, version, fill, cap, neighbour):
+    """Exact in all eight runs since Amendment 4 (before it, four of these differed: the sector guard twice, an
+    order without a bar at its fill twice)."""
     m, data, i0, i1 = decade
     assert len(data.symbols) == 731 and i1 - i0 + 1 >= 2520  # ten years of sessions after the warm-up
-    c = run_pair(decade, version, fill, cap)
+    c = run_pair(decade, version, fill, cap, neighbour)
     exact(c)
     reasons = Counter(str(f[5]) for f in c["e_fills"])
     assert reasons["end_of_data"] and reasons["rank"]
@@ -178,74 +169,41 @@ def test_the_decade_exercises_splits_cuts_skips_and_waiting_sales(decade):
     assert {(i, s) for i, k, s, _ in run.orders if k == "sell"} - sold  # a sale that found no bar waited for one
 
 
-# The decade's differences from the harness, each pinned to its cause (DIFFERENCES in test_engine_momentum.py).
-# 1. The sector guard. The pre-registrations have no sector cap; the builder keeps the level's as an outer guard at
-#    the loosest the hard ceilings allow (40%). ATR sizing makes low-volatility names large (up to the 15% name cap),
-#    so even 40% is reached on data without any sector factor: one cut in each run below.
-SECTOR_PINS = {("mom_12_1_band", None): (2324, "D033"), ("trend_momentum", "risk15"): (967, "D145")}
-
-
-@pytest.mark.parametrize("version,neighbour", list(SECTOR_PINS))
-def test_pinned_the_40pct_sector_guard_cuts_once_and_is_the_only_difference(decade, version, neighbour):
-    c = run_pair(decade, version, neighbour=neighbour)
-    i, sym = SECTOR_PINS[(version, neighbour)]
-    assert c["run"].guards == [(i, sym, "sector")]
-    o, _ = first_difference(c)
-    assert o == i  # identical orders up to the guarded decision; it is the first that differs
-    assert [x for x in c["run"].orders if x[0] == i and x[2] == sym] != [x for x in c["h_orders"] if x[0] == i
-                                                                         and x[2] == sym]
-    exact(run_pair(decade, version, neighbour=neighbour, guards=False))  # without the guard: exact
-
-
-# 2. An order that finds no bar at the fill. The builder sizes before the fill, as a real order must, and counts a
-#    sale or a reduction of the plan as made; the harness re-checks the names and exposure caps at the fill and so
-#    knows that it did not happen. The #161 stand-in had the same difference, to the cent (13,567.21 and
-#    7,196.94 on these runs); it is an execution difference of the harness, not of the sizing.
-WAITING_PINS = {("trend_momentum", "stress", 60.0): (787, "D475", "resize", "D672"),
-                ("mom_12_1_band_nofilter", "base", 100.0): (1064, "D140", "sell", "D328")}
-
-
-@pytest.mark.parametrize("version,fill,cap", list(WAITING_PINS))
-def test_pinned_an_order_without_a_bar_at_the_fill_is_the_only_difference(decade, version, fill, cap):
-    m, data, i0, i1 = decade
-    c = run_pair(decade, version, fill, cap)
-    i, waits, kind, buy = WAITING_PINS[(version, fill, cap)]
-    assert c["run"].guards == []
-    o, f = first_difference(c)
-    assert f == i and o > i  # the same orders up to and including the session; the fills differ there first
-    assert (i, kind, waits) in {x[:3] for x in c["run"].orders}
-    j = data.col(waits)
-    assert not np.isfinite((data.raw_o if fill == "stress" else data.raw_c)[i, j])  # no bar at the fill
-    h = {x[1]: x[3] for x in c["h_fills"] if x[0] == i and x[2] == "buy"}
-    e = {x[1]: x[3] for x in c["e_fills"] if x[0] == i and x[2] == "buy"}
-    assert h.get(buy, 0.0) < e[buy]  # the harness cut (or refused) the later buy at the fill; the engine did not
-    assert {s: q for s, q in h.items() if s != buy} == {s: q for s, q in e.items() if s != buy}
-
-
-def test_at_the_levels_30pct_sector_cap_the_guard_cuts_more(decade, monkeypatch):
-    """At the level's provisional 30% sector cap trend_momentum's base run is cut several times on this decade, so
-    `momentum_limits` takes the 40% hard ceiling instead (and even that is reached, above). Every cut is recorded;
-    a report with any says the run is not the pre-registered sizing."""
+def test_the_sector_cap_binds_on_the_decade_and_both_apply_it_the_same_way(decade, monkeypatch):
+    """Amendment 4's 40% cap is reached on this decade (ATR sizing makes low-volatility names large): without it
+    the orders differ; with it the engine and the harness agree exactly (above). Both read the same constant."""
     import kaibot.engine.daily as daily
 
+    assert mc.SECTOR_CAP_PCT == BOOK_HARD_CEILINGS.max_sector_pct == 40.0
+    with_cap = run_pair(decade, "mom_12_1_band")
+    monkeypatch.setattr(mc, "SECTOR_CAP_PCT", 100.0)
+    lim = dataclasses.replace(BOOK_HARD_CEILINGS, max_sector_pct=100.0)
+    monkeypatch.setattr(daily, "BOOK_HARD_CEILINGS", lim)
+    monkeypatch.setattr(PortfolioBuilder, "__post_init__", lambda self: None)  # past the ceiling: this test only
     m, data, i0, i1 = decade
-    assert load_book_limits(research=True)["balanced"].max_sector_pct == 30.0
-    b = momentum_builder(mom.VERSIONS["trend_momentum"], POL, 100.0)
-    at30 = dataclasses.replace(b, limits=dataclasses.replace(b.limits, max_sector_pct=30.0))
-    monkeypatch.setattr(daily, "momentum_builder", lambda *a, **k: at30)
-    r30 = run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, i1, exposure_pct=100.0)
-    assert len(r30.guards) >= 3 and {g for _, _, g in r30.guards} == {"sector"}
-    assert run_pair(decade, "trend_momentum")["run"].guards == []  # at 40%: none on this run
-    assert r30.book.equity != pytest.approx(run_pair(decade, "trend_momentum")["run"].book.equity, abs=1.0)
+    without = tem.compare(m, data, "mom_12_1_band", i0, i1)
+    assert without["orders_equal"] and without["fills_equal"]  # the two still agree without the cap
+    assert without["h_orders"] != with_cap["h_orders"]  # and the cap changed the orders
+
+
+def test_waiting_orders_no_longer_change_the_harness_s_other_orders(decade):
+    """Amendment 4, item 2: the sale of D140 found no bar at its fill (session 1064) and waited; the buy of D328
+    after it is no longer refused by a names re-check at the fill (it was before the amendment)."""
+    m, data, i0, i1 = decade
+    c = run_pair(decade, "mom_12_1_band_nofilter")
+    assert not np.isfinite(data.raw_c[1064, data.col("D140")])
+    assert (1064, "sell", "D140") in {x[:3] for x in c["h_orders"]}
+    assert any(f[:3] == (1064, "D328", "buy") for f in c["h_fills"])
 
 
 # ---------------------------------------------------------------- the configuration
 
 
 def test_each_rule_is_configured_with_its_pre_registered_settings():
+    """Amendment 4: the rule's own limits within the hard ceilings, not the provisional level values."""
     lv = load_book_limits(research=True)["balanced"]
     for _, strat in [*mom.VERSIONS.items(), *[(s.name, s) for v in ("trend_momentum", "mom_12_1_band")
-                                                 for s in mom.neighbours(v)]]:
+                                              for s in mom.neighbours(v)]]:
         for cap in (30.0, 60.0, 100.0):
             b = momentum_builder(strat, POL, cap)
             lim = b.limits
@@ -253,10 +211,11 @@ def test_each_rule_is_configured_with_its_pre_registered_settings():
             assert b.k == strat.atr_risk and min(b.k, lim.atr_risk_pct / 100) == b.k
             assert lim.max_names == strat.max_names and lim.max_name_pct == POL.max_position_pct == 15
             assert lim.max_gross_pct == lim.max_overnight_pct == cap
-            assert lim.max_sector_pct == BOOK_HARD_CEILINGS.max_sector_pct == 40.0
-            assert lim.max_gap_loss_pct == BOOK_HARD_CEILINGS.max_gap_loss_pct
-            assert lim.min_cash_pct == lv.min_cash_pct  # the level's floor, below the 3% reserve
+            assert lim.max_sector_pct == mc.SECTOR_CAP_PCT == 40.0
+            assert (lim.max_gap_loss_pct, lim.min_cash_pct) == (BOOK_HARD_CEILINGS.max_gap_loss_pct,
+                                                                BOOK_HARD_CEILINGS.min_cash_pct)
             assert momentum_limits(strat, POL, cap) == lim
+    assert (lv.max_names, lv.max_sector_pct) == (20, 30.0)  # the level's provisional values are not used
 
 
 def test_resize_weeks_reach_the_builder_through_the_target_list(fx_data):
@@ -274,7 +233,6 @@ def test_resize_weeks_reach_the_builder_through_the_target_list(fx_data):
 def fx_data():
     m, info = tem.dr.load_fixture(tem.FIXTURE)
     data = DailyData.from_market(m)
-    data.sector = info["sectors"]
     i0 = int(np.searchsorted(data.dates, np.datetime64(info["window"][0])))
     return m, data, i0, len(data.dates) - 1
 

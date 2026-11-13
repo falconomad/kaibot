@@ -26,6 +26,12 @@ closing auction (cost model v1 with impact, as pre-registered), the ledger stand
 exit-before-earnings variant is not run here (S85). Writes data/reports/engine_<level>_<version>_<universe>_<ts>
 .json (+ one daily CSV per run) and one trial row per run in data/trials.jsonl (a base configuration counts 1,
 its cost and fill reports 0, as scripts/momentum_core.py counts them).
+
+Sectors (Amendment 4's 40% sector cap, the same in the engine and the harness): a stock's sector is the sector it
+is listed under in the universe file (`--universe-file`, config/universe_history.yaml). On `--universe pit` a
+company the file does not list (a former member, keyed SYMBOL@ASOF in the daily store, which holds no sector) is
+its own sector, as the amendment says; the report's `sectors` counts both. The fixture's sectors are in its
+fixture.json.
 """
 
 from __future__ import annotations
@@ -72,11 +78,11 @@ def load_fixture(directory: Path = FIXTURE):
         for a, b in spans:
             member[a:b, panel.col(sym)] = False
     m = mc.Market.from_panel(panel, meta["stocks"], meta["market"], member=member,
-                             terminal_returns=meta.get("terminal_returns", {}))
+                             terminal_returns=meta.get("terminal_returns", {}), sectors=meta.get("sectors", {}))
     for sym, sessions in meta.get("exits", {}).items():
         m.exits[m.raw.col(sym)] = list(sessions)
     where = directory.relative_to(ROOT) if directory.is_relative_to(ROOT) else directory
-    return m, {"bars": f"committed fixture {where}", "window": meta["window"], "sectors": meta.get("sectors", {})}
+    return m, {"bars": f"committed fixture {where}", "window": meta["window"]}
 
 
 def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str):
@@ -115,11 +121,15 @@ def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str)
     rep = store.adjustment_report()
     bad = rep[rep.get("split_basis_days", pd.Series(dtype=float)).fillna(0) > 0]["key"].astype(str).tolist() \
         if len(rep) else []
-    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad)
-    sectors = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}  # others: the unknown bucket
+    # Amendment 4's 40% sector cap: a stock's sector is the one the universe file lists it under; a stock it does
+    # not list (point-in-time: a former member, whose store key is not a universe ticker) is its own sector
+    sectors = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}
+    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors)
+    m.notes["sectors"] = {"from_universe_file": sum(s in sectors for s in names),
+                          "own_sector": sum(s not in sectors for s in names)}
     return m, {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs "
                        "and share counts raw; dividends credited", "stocks": len(names), "excluded_split_basis": bad,
-               "sectors": sectors}
+               "sectors": m.notes["sectors"]}
 
 
 # ---------------------------------------------------------------- one account and its statistics
@@ -133,7 +143,7 @@ def run_stats(run: DailyRun) -> dict:
     eq = {str(r["date"]): r["end"] for r in run.book.daily}
     st.update({"new_entries": len(run.opened), "skipped_under_one_share": run.skipped,
                "orders_rejected": len(run.rejected), "fills": len(run.fills),
-               # cuts by the level's outer guards (sector, gap, cash floor): any > 0 is not the pre-registered sizing
+               # cuts by the outer guards (gap scenario, cash floor): any > 0 is not the pre-registered sizing
                "guard_cuts": len(run.guards), "basis_gaps": len(run.basis_gaps),
                "overdraft_days": len(od),
                "max_overdraft_pct": round(max((-c / eq[d] * 100 for d, c in od if eq.get(d)), default=0.0), 3)})
@@ -165,7 +175,6 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
     t0 = time.time()
     pol = load_profiles()[level]
     data = DailyData.from_market(market)
-    data.sector = dict(info.get("sectors") or {})
     w = info.get("window") or [start or "2017-05-01", end or str(data.dates[-1])]
     i0, i1 = sessions_window(data, w[0], w[1])
     if i0 > i1:
@@ -184,7 +193,7 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
         log(f"  {lab}: CAGR {st['cagr_pct']}%, max drawdown {st['max_drawdown_pct']}%, {st['trades']} trades, "
             f"{row['runtime_s']}s")
         if st["guard_cuts"]:
-            log(f"  {lab}: WARNING {st['guard_cuts']} purchases cut by the level's outer guards: this run is not the "
+            log(f"  {lab}: WARNING {st['guard_cuts']} purchases cut by the outer guards: this run is not the "
                 "pre-registered sizing (#168)")
         return row
 

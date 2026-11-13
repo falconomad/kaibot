@@ -35,9 +35,12 @@ mom_12_1_band.md, choices 8-11 and Amendment 3), so that what trades live is wha
   does not fit in full is cut to the room left and buying stops there;
 - the room is the gross / overnight cap and, with `cash_reserve`, the cash (`build(cash=...)`) plus the plan's
   sales less `cash_reserve` x equity. The per-name cap is part of the size, as the pre-registrations write it.
-- The other book caps (sector, gross with the cash floor, overnight, gap scenario, per-name across sleeves,
-  budgets) are OUTER GUARDS: checked on the finished plan, they only cut what the plan buys, worst-ranked first,
-  and every cut is in `Plan.guarded`. A run that claims the pre-registered sizing asserts `guarded` stays empty.
+- the sector cap is part of the pass (Amendment 4 of both pre-registrations): a buy or a resize increase is cut
+  to its sector's room, best-ranked first, and buying goes on with the next name; a stock without a sector is
+  its own sector (the pro-rata fill keeps one "unknown" bucket).
+- The other book caps (gross with the cash floor, overnight, gap scenario, per-name across sleeves, budgets) are
+  OUTER GUARDS: checked on the finished plan, they only cut what the plan buys, worst-ranked first, and every cut
+  is in `Plan.guarded`. A run that claims the pre-registered sizing asserts `guarded` stays empty.
 - `Instrument.can_open=False`: the research harness refuses an entry without the previous close or a 14-session
   ATR at the fill, after the room was counted; such a name is sized and counted, and gets no order.
 """
@@ -101,6 +104,12 @@ class Plan:
 
 def _sector(inst: Instrument) -> str:
     return inst.sector or UNKNOWN_SECTOR
+
+
+def _own_sector(market: Mapping[str, Instrument], sym: str) -> str:
+    """The ranked fill's sector bucket: a stock without a sector is its own sector (momentum Amendment 4)."""
+    inst = market.get(sym)
+    return (inst.sector if inst is not None else None) or f"own:{sym}"
 
 
 def _ok(x) -> bool:
@@ -372,6 +381,17 @@ class PortfolioBuilder:
             return "cash" if money is not None and math.floor(max(money, 0.0) / p) < math.floor(
                 max(cap - exposure, 0.0) / p) else "gross"
 
+        # the sector cap (Amendment 4 of the momentum pre-registrations): held names at their prices; a stock
+        # without a sector is its own sector
+        sec_cap = lim.max_sector_pct / 100 * eq
+        used: dict[str, float] = {}
+        for k, q in cur.items():
+            if k not in sell:
+                used[_own_sector(market, k[1])] = used.get(_own_sector(market, k[1]), 0.0) + q * px[k[1]]
+
+        def sector_room(sym: str, p: float) -> float:
+            return math.floor(max(sec_cap - used.get(_own_sector(market, sym), 0.0), 0.0) / p)
+
         tgt: dict[Key, int] = {k: 0 for k in sell}
         for k in sell:
             binding[k] = "exit"
@@ -398,13 +418,16 @@ class PortfolioBuilder:
                 if key[0] in filtered:
                     binding[key] = "trend"
                     continue
-                t = q + min(t - q, fits(px[key[1]]))
+                room = fits(px[key[1]])
+                t = q + min(t - q, room, sector_room(key[1], px[key[1]]))
                 if t <= q:
-                    binding[key] = stop_reason(px[key[1]])
+                    binding[key] = stop_reason(px[key[1]]) if room < 1 else "sector"
                     continue
             exposure += (t - q) * px[key[1]]
             if money is not None:
                 money -= (t - q) * px[key[1]]
+            b = _own_sector(market, key[1])
+            used[b] = used.get(b, 0.0) + (t - q) * px[key[1]]
             tgt[key], binding[key] = int(t), "resize"
             resized.append(key)
         sequence += resized
@@ -437,22 +460,29 @@ class PortfolioBuilder:
                     stopped = binding[key] = stop_reason(p)
                     skipped.append(Skip(*key, stopped))
                     continue
-                why = "vol" if room >= n else stop_reason(p)
-                exposure += min(n, room) * p
+                q = min(n, room, sector_room(sym, p))
+                if q < 1:  # its sector is full: the next name may fit
+                    binding[key] = "sector"
+                    skipped.append(Skip(*key, "sector"))
+                    continue
+                why = "vol" if q == n else stop_reason(p) if q == room else "sector"
+                exposure += q * p
                 if money is not None:
-                    money -= min(n, room) * p
+                    money -= q * p
+                b = _own_sector(market, sym)
+                used[b] = used.get(b, 0.0) + q * p
                 if sym not in names_held:
                     names_held.add(sym)
                     names += 1
                 px[sym] = p
                 binding[key] = why
                 if inst.can_open:
-                    tgt[key] = int(min(n, room))
+                    tgt[key] = int(q)
                     sequence.append(key)
                 else:  # sized and counted as the harness does, then refused at the fill
                     binding[key] = "refused"
                     skipped.append(Skip(*key, "refused", "no new position in this name now"))
-                if room < n:
+                if q == room and room < n:
                     stopped = why  # cut to the room left, and buying stops there
         guarded = self._guards(tgt, cur, fixed, sequence, market, px, eq, budgets, active, other_exposure)
         for key, why in guarded.items():
@@ -475,15 +505,10 @@ class PortfolioBuilder:
             inst = market[sym]
             return gap_loss_ps(px[sym], inst.atr20 if _ok(inst.atr20) else None)
 
-        def sector(sym: str) -> str:
-            return _sector(market[sym])
-
         caps = [("gross", lambda k: True, px.__getitem__,
                  eq * min(lim.max_gross_pct, 100 - lim.min_cash_pct) / 100 - max(other_exposure, 0.0)),
                 ("overnight", lambda k: True, px.__getitem__, eq * lim.max_overnight_pct / 100),
                 ("gap", lambda k: True, gap_ps, eq * lim.max_gap_loss_pct / 100)]
-        caps += [("sector", lambda k, b=b: sector(k[1]) == b, px.__getitem__, eq * lim.max_sector_pct / 100)
-                 for b in sorted({sector(s) for (_, s) in {**fixed, **tgt}})]
         caps += [("name_cap", lambda k, s=s: k[1] == s, px.__getitem__, eq * lim.max_name_pct / 100)
                  for s in sorted({s for (_, s) in {**fixed, **tgt}})]
         caps += [("budget", lambda k, n=n: k[0] == n, px.__getitem__, eq * float(p) / 100)

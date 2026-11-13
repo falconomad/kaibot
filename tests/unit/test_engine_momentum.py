@@ -48,20 +48,12 @@ N, FIRST, I0 = 560, "2022-01-03", 280
 
 # Every difference between the engine path and the harness, and where each is pinned.
 DIFFERENCES = {
-    "sale_waiting_cap": "a sale that finds no bar at its fill: the harness still counts it as held at the fill "
-                        "(names and exposure caps) and so cuts or refuses a later buy; the builder sizes before the "
-                        "fill and counts it as sold, as the harness's own plan does (not on the fixture; on the "
-                        "730-stock decade once, pinned in test_builder_parity.WAITING_PINS; the #161 stand-in had "
-                        "it to the cent)",
-    "reduction_waiting_cap": "the same for a resize reduction that finds no bar at its fill (decade, stress fill; "
-                             "pinned in test_builder_parity.WAITING_PINS)",
-    "sector_guard": "the builder keeps the level's sector cap as an outer guard at the 40% hard ceiling; the "
-                    "pre-registrations have none. Not reached on the fixture; reached once in mom_12_1_band and "
-                    "once in trend_momentum~risk15 on the decade (test_builder_parity.SECTOR_PINS). A Product "
-                    "decision (#168): every cut is in DailyRun.guards and the report's guard_cuts",
     "dispute_netting": "a resize on the session a forced split-dispute exit sells the name: the engine sends the one "
-                       "sale, the harness trades the resize and then sells (does not occur on the fixture)",
+                       "sale, the harness trades the resize and then sells (does not occur on the fixture or the "
+                       "decade)",
 }
+# Gone with Amendment 4 (#168): a sale or reduction without a bar at its fill (the harness no longer re-checks the
+# caps at the fill) and the sector cap (now 40% in both, best-ranked first; no sector = its own sector).
 
 
 # ---------------------------------------------------------------- the committed fixture
@@ -106,7 +98,7 @@ def fixture_panel() -> tuple[DailyPanel, list[str], dict]:
             "window": [str(dates[I0]), str(dates[-1])],
             "not_member": {"P20": [[535, 551]], "P27": [[545, N]], "P09": [[0, 300]]},
             "terminal_returns": {"P28": -0.4}, "exits": {"P20": [534]},
-            "sectors": {s: f"X{k % 10}" for k, s in enumerate(stocks)}}  # ten sectors of three (#168: the guard)
+            "sectors": {s: f"X{k % 10}" for k, s in enumerate(stocks)}}  # ten sectors of three (Amendment 4: 40% cap)
     return DailyPanel.make(dates, syms, o, h, lo, c, v, actions=acts), acts, meta
 
 
@@ -148,7 +140,6 @@ def test_the_committed_fixture_is_the_generator_output(tmp_path):
 def fx():
     m, info = dr.load_fixture(FIXTURE)
     data = DailyData.from_market(m)
-    data.sector = info["sectors"]
     i0 = int(np.searchsorted(data.dates, np.datetime64(info["window"][0])))
     return m, data, i0, len(data.dates) - 1
 
@@ -189,7 +180,7 @@ class RecordingEngine(md.Engine):
 def harness(m: mc.Market, version: str, i0: int, i1: int, fill: str = "base", cap: float = 100.0, spec=None):
     where, factor = mc.FILLS[fill]
     spec = spec or mc.VERSIONS[version]
-    rule = mc.CoreRule(m.signals, POL, spec, where, cap)
+    rule = mc.CoreRule(m.signals, POL, spec, where, cap, m.sector, m.raw.symbols)
     eng = RecordingEngine(m.raw, m.ind, POL, rule, lambda i: spec, 100_000.0, cost_mult=factor,
                           actions=m.actions, terminal=m.terminal, exits=m.exits)
     return eng.run(i0, i1), rule, eng.fills
@@ -338,10 +329,8 @@ def core_today():
 
 
 def core_data(m: mc.Market) -> DailyData:
-    """#127's market for the engine, its eighty stocks in ten sectors (the builder's sector guard, #168)."""
-    data = DailyData.from_market(m)
-    data.sector = {m.raw.symbols[j]: f"X{n % 10}" for n, j in enumerate(m.stocks)}
-    return data
+    """#127's market for the engine (no sectors: each stock its own sector, Amendment 4)."""
+    return DailyData.from_market(m)
 
 
 def test_the_cash_reserve_keeps_both_inside_the_cash_and_identical():
@@ -360,7 +349,7 @@ def test_the_cash_reserve_keeps_both_inside_the_cash_and_identical():
 def test_a_buy_above_the_cash_at_the_print_is_cut_the_same_way_in_both(monkeypatch):
     """With no reserve the last buys of a decision outgrow the cash at the auction: the harness cuts them at the
     fill, `SimBroker(cash_at="fill")` cuts the auction order to the whole shares that fit, at the same price.
-    A counterfactual (Amendment 3 removed it): without the reserve the book reaches 100%, above the level's 2% cash
+    A counterfactual (Amendment 3 removed it): without the reserve the book reaches 100%, above the 1% cash
     floor, so the builder's outer guards are switched off here too; the live builder always keeps them."""
     from kaibot.engine import daily
     from kaibot.risk.portfolio import PortfolioBuilder
@@ -459,7 +448,6 @@ def test_the_research_command_runs_the_engine_and_reports_gate_b_on_the_fixture(
     base = rep["rows"][0]
     m, info = dr.load_fixture(FIXTURE)
     data = DailyData.from_market(m)
-    data.sector = info["sectors"]
     i0 = int(np.searchsorted(data.dates, np.datetime64(rep["oos_window"][0])))
     again = run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, len(data.dates) - 1)
     assert base["final_equity"] == pytest.approx(again.book.equity, abs=0.01)  # the report is the engine's fills

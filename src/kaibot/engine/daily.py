@@ -23,9 +23,10 @@ One session `i` (times ET; the one `SimClock` drives the strategy, the venue and
 
 Sizing and booking (#168, replacing the #161 stand-ins):
 - Sizing is the portfolio builder's ranked fill (`PortfolioBuilder(fill="ranked")`), configured per rule with the
-  pre-registered k, per-name cap, exposure cap, names, 10% resize buffer and 3% cash reserve. It reproduces the
-  research harness's sizing (the momentum core of #127) exactly: the parity tests compare orders,
-  fills and equity. The level's other book caps (sector, gap scenario, cash floor) are outer guards: every cut
+  pre-registered k, per-name cap, exposure cap, names, 40% sector cap (Amendment 4), 10% resize buffer and 3% cash
+  reserve, at the rule's own limits. It reproduces the research harness's sizing (the momentum core of #127)
+  exactly: the parity tests compare orders, fills and equity. The other book caps (gap scenario, cash floor,
+  per-name across sleeves) are outer guards: every cut
   they make is in `DailyRun.guards`, and a run with any is not the pre-registered sizing.
 - `RunLedger` writes the run's entries to the journal and `engine.ledger.Ledger` folds them: cash, shares, marks
   and venue equity come from the ledger; the runner keeps only the harness's trade rows and daily rows.
@@ -64,7 +65,6 @@ from kaibot.engine.targets import Target, reconcile_targets
 from kaibot.replay.history import BarHistory
 from kaibot.risk.gate import BOOK_HARD_CEILINGS, BookLimits, RiskPolicy
 from kaibot.risk.portfolio import Instrument, PortfolioBuilder
-from kaibot.risk.profiles import load_book_limits, load_profiles
 from kaibot.strategies.base import Event, TargetList
 from kaibot.strategies.momentum import RESIZE_BUFFER, DailyContext
 
@@ -114,7 +114,7 @@ class DailyData:
     spy_tr: np.ndarray | None = None  # SPY total return per session (None: price only)
     universe: str = "today"
     notes: dict = field(default_factory=dict)
-    sector: dict[str, str] = field(default_factory=dict)  # symbol -> sector (the builder's sector guard)
+    sector: dict[str, str] = field(default_factory=dict)  # symbol -> sector (Amendment 4; none: its own sector)
 
     def __post_init__(self) -> None:
         self._col = {s: j for j, s in enumerate(self.symbols)}
@@ -154,7 +154,8 @@ class DailyData:
                    raw_l=raw.l, v_first=raw.v_first, v_last=raw.v_last, raw_v=raw.v,
                    stocks=np.asarray(m.stocks, dtype=int), spy=int(m.spy), member=m.member, split=split, div=div,
                    terminal=dict(m.terminal), exits={int(j): list(v) for j, v in m.exits.items()}, spy_tr=m.spy_tr,
-                   universe=m.universe, notes=dict(m.notes), sig_unfilled_c=sig.c)
+                   universe=m.universe, notes=dict(m.notes), sig_unfilled_c=sig.c,
+                   sector={raw.symbols[j]: x for j, x in getattr(m, "sector", {}).items()})
 
     # -- reads
 
@@ -237,35 +238,23 @@ class Plan:
     basis_gaps: list[str] = field(default_factory=list)  # held names whose mark is not the sizing close
 
 
-def momentum_limits(strategy, pol: RiskPolicy, exposure_pct: float, level: BookLimits | None = None) -> BookLimits:
-    """The book limits a momentum rule trades under: the level's multi-day limits (`profiles.yaml`, the research
-    values) with the pre-registered settings in their place: k = the rule's `atr_risk`, the per-name cap = the
-    level's `max_position_pct` (Balanced: 15%), the exposure cap as the gross and overnight cap, at most the rule's
-    `max_names`. The pre-registrations have no sector cap and no gap-scenario cap, so those two are set to the
-    loosest the hard ceilings allow (`BOOK_HARD_CEILINGS`: 40% and 15%); with the cash floor (the level's 2%,
-    below Amendment 3's 3% reserve) they are outer guards that must not cut the pre-registered sizing
-    (`Plan.guarded`, `DailyRun.guards`). At the level's provisional 30% sector cap they do: on the 730-stock
-    synthetic decade of tests/unit/test_builder_parity.py the 30% cap cuts trend_momentum's buys, the 40% cap
-    never does (#168). Validated against the hard ceilings by the builder."""
-    lv = level if level is not None else _level_of(pol)
-    return replace(lv, atr_risk_pct=float(strategy.atr_risk) * 100, max_name_pct=float(pol.max_position_pct),
-                   max_gross_pct=float(exposure_pct), max_overnight_pct=float(exposure_pct),
-                   max_names=int(strategy.max_names), max_sector_pct=BOOK_HARD_CEILINGS.max_sector_pct,
-                   max_gap_loss_pct=BOOK_HARD_CEILINGS.max_gap_loss_pct)
+def momentum_limits(strategy, pol: RiskPolicy, exposure_pct: float) -> BookLimits:
+    """The book limits a momentum rule trades under: its own limits within the hard ceilings, not a level's
+    (Amendment 4 of both pre-registrations; the stakeholder confirms level limits separately, #132). The
+    pre-registered settings: k = the rule's `atr_risk`, the per-name cap = the level's `max_position_pct` (Balanced:
+    15%, in the frozen construction), the exposure cap as the gross and overnight cap, at most the rule's
+    `max_names`, the sector cap at 40% (Amendment 4). The cash floor (1%, below the 3% reserve) and the gap-scenario
+    cap (15%) are the hard ceilings: outer guards the pre-registered sizing never reaches (`DailyRun.guards`)."""
+    return replace(BOOK_HARD_CEILINGS, atr_risk_pct=float(strategy.atr_risk) * 100,
+                   max_name_pct=float(pol.max_position_pct), max_gross_pct=float(exposure_pct),
+                   max_overnight_pct=float(exposure_pct), max_names=int(strategy.max_names))
 
 
-def _level_of(pol: RiskPolicy) -> BookLimits:
-    pols, books = load_profiles(), load_book_limits(research=True)
-    name = next((n for n, p in pols.items() if p == pol and n in books), None)
-    return books[name] if name is not None else BookLimits()
-
-
-def momentum_builder(strategy, pol: RiskPolicy, exposure_pct: float, level: BookLimits | None = None
-                     ) -> PortfolioBuilder:
+def momentum_builder(strategy, pol: RiskPolicy, exposure_pct: float) -> PortfolioBuilder:
     """The portfolio builder configured to size one momentum rule exactly as its pre-registration does: ranked fill
     (sells, resizes with reductions first, buys best first until the room runs out), k = the rule's `atr_risk`, a
     resize only outside a 10% buffer on resize weeks (`TargetList.resize`), Amendment 3's 3% cash reserve."""
-    b = PortfolioBuilder(momentum_limits(strategy, pol, exposure_pct, level), k=float(strategy.atr_risk),
+    b = PortfolioBuilder(momentum_limits(strategy, pol, exposure_pct), k=float(strategy.atr_risk),
                          band=RESIZE_BUFFER, fill="ranked", cash_reserve=CASH_RESERVE)
     assert min(b.k, b.limits.atr_risk_pct / 100) == b.k  # the rule's k is used as it is, never clamped
     return b
@@ -568,11 +557,10 @@ def _venue_actions(broker: SimBroker, symbol: str, *, split: float = 1.0, delist
 
 def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, fill: str = "base",
               cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-              on_session: Callable[[int], None] | None = None, protect_atr: float | None = None,
-              level: BookLimits | None = None) -> DailyRun:
+              on_session: Callable[[int], None] | None = None, protect_atr: float | None = None) -> DailyRun:
     """One continuous account of one multi-day strategy over sessions i0..i1, starting flat: the strategy decides
-    after each close, the portfolio builder sizes (`momentum_builder`: the pre-registered sizing; `level`: the
-    level's book limits, default the level of `pol` in profiles.yaml), the target loop (engine/targets.py) sends
+    after each close, the portfolio builder sizes (`momentum_builder`: the pre-registered sizing at the rule's own
+    limits), the target loop (engine/targets.py) sends
     target minus held minus working through the order manager (engine/orders.py) as closing-auction orders,
     `SimBroker` fills them at the next close (`fill="base"`) or open (`"stress"`, the research cost model), the
     manager books the venue's fills from its account activities and the ledger books them (`RunLedger`). Each
@@ -594,7 +582,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     journal = Journal(now=clock)
     led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal)
     om = OrderManager(broker, journal, clock)
-    builder = momentum_builder(strategy, pol, exposure_pct, level)
+    builder = momentum_builder(strategy, pol, exposure_pct)
     run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om)
     policy = ExecutionPolicy("close" if tif == "cls" else "open", research_open=tif == "opg")
     at_close = ExecutionPolicy("close")

@@ -433,19 +433,42 @@ def test_ranked_the_per_name_cap_is_part_of_the_size():
     assert plan.targets == {("mom", "A"): 150} and plan.guarded == {}
 
 
-def test_ranked_outer_guards_cut_the_last_ranked_purchase_and_say_so():
+def test_ranked_sector_cap_cuts_best_ranked_first_and_buying_goes_on():
+    """Amendment 4: a buy is cut to its sector's room; the next name (another sector) is still bought."""
     b = PortfolioBuilder(replace(RLIM, max_sector_pct=7), fill="ranked")  # $7,000 per sector
-    m = {"A": mk(sector="t"), "B": mk(sector="t"), "C": mk(sector="u")}
+    m = {"A": mk(sector="t"), "B": mk(sector="t"), "C": mk(sector="u"), "D": mk(sector="t")}
+    plan = b.build([rk({"A": 1.0, "B": 1.0, "C": 1.0, "D": 1.0})], {}, m, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 20, ("mom", "C"): 50}  # B gives way to A; D: none left
+    assert plan.binding[("mom", "B")] == "sector" and plan.binding[("mom", "D")] == "sector"
+    assert plan.guarded == {} and plan.sequence == [("mom", "A"), ("mom", "B"), ("mom", "C")]
+
+
+def test_ranked_a_stock_without_a_sector_is_its_own_sector():
+    b = PortfolioBuilder(replace(RLIM, max_sector_pct=7), fill="ranked")
+    m = {"A": mk(sector=None), "B": mk(sector=None)}  # pro-rata: one "unknown" bucket; ranked: two sectors
+    assert b.build([rk({"A": 1.0, "B": 1.0})], {}, m, equity=100_000).targets == {("mom", "A"): 50, ("mom", "B"): 50}
+
+
+def test_ranked_sector_cap_counts_held_names_and_cuts_a_resize_increase():
+    b = PortfolioBuilder(replace(RLIM, max_sector_pct=7), fill="ranked")
+    m = {"A": mk(sector="t"), "H": mk(sector="t")}
+    plan = b.build([rk({"H": 1.0, "A": 1.0}, resize=True)], {("mom", "H"): 30}, m, equity=100_000)
+    assert plan.targets == {("mom", "H"): 50, ("mom", "A"): 20}  # H resized first (held), A gets what is left
+
+
+def test_ranked_outer_guards_cut_the_last_ranked_purchase_and_say_so():
+    b = PortfolioBuilder(replace(RLIM, min_cash_pct=88), fill="ranked")  # the cash floor leaves 12% gross
+    m = {"A": mk(sector="a"), "B": mk(sector="b"), "C": mk(sector="c")}
     plan = b.build([rk({"A": 1.0, "B": 1.0, "C": 1.0})], {}, m, equity=100_000)
-    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 20, ("mom", "C"): 50}  # B, ranked after A, gives way
-    assert plan.guarded == {("mom", "B"): "sector"} and plan.binding[("mom", "B")] == "guard:sector"
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 50, ("mom", "C"): 20}  # C, ranked last, gives way
+    assert plan.guarded == {("mom", "C"): "gross"} and plan.binding[("mom", "C")] == "guard:gross"
 
 
 def test_ranked_guards_never_force_a_sale():
-    b = PortfolioBuilder(replace(RLIM, max_sector_pct=5), fill="ranked")  # the held name alone is above it
-    plan = b.build([rk({"A": 1.0, "B": 1.0}, resize=True)], {("mom", "A"): 50}, {"A": mk(), "B": mk()},
-                   equity=100_000)
-    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 0} and plan.guarded == {("mom", "B"): "sector"}
+    b = PortfolioBuilder(replace(RLIM, min_cash_pct=96), fill="ranked")  # the held name alone is above 4% gross
+    plan = b.build([rk({"A": 1.0, "B": 1.0}, resize=True)], {("mom", "A"): 50},
+                   {"A": mk(sector="a"), "B": mk(sector="b")}, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 0} and plan.guarded == {("mom", "B"): "gross"}
 
 
 def test_ranked_options_are_checked():
@@ -464,17 +487,29 @@ def test_pro_rata_fill_keeps_held_names_when_the_list_does_not_resize():
 
 def _reference(sc):
     """The harness's sizing (`replay/multiday_core.CoreRule.plan`), transcribed for one list of weight-1 names:
-    sells, resizes (reductions first), buys best first until the room runs out; Amendment 3's cash reserve."""
+    sells, resizes (reductions first), buys best first until the room runs out; Amendment 3's cash reserve and
+    Amendment 4's sector cap (no sector: its own)."""
     eq, lim, m, k = sc["equity"], sc["lim"], sc["m"], sc["k"]
     held = {s: (q, m[s].px) for (_, s), q in sc["current"].items() if q > 0}
+
+    def bucket(s):
+        return m[s].sector or f"own:{s}"
+
     sell = [s for s in held if s not in sc["keep"]]
     cap = min(lim.max_gross_pct, lim.max_overnight_pct) / 100 * eq
     exposure = sum(q * last for s, (q, last) in held.items() if s not in sell)
     names = len(held) - len(sell)
     money = sc["cash"] + sum(q * last for s, (q, last) in held.items() if s in sell) - 0.03 * eq
+    sec_cap, used = lim.max_sector_pct / 100 * eq, {}  # Amendment 4
+    for s, (q, last) in held.items():
+        if s not in sell:
+            used[bucket(s)] = used.get(bucket(s), 0.0) + q * last
 
     def fits(px):
         return min(math.floor(max(cap - exposure, 0.0) / px), math.floor(max(money, 0.0) / px))
+
+    def sroom(s, px):
+        return math.floor(max(sec_cap - used.get(bucket(s), 0.0), 0.0) / px)
 
     def target(s):
         return float(min(math.floor(eq * k / m[s].atr20), math.floor(eq * lim.max_name_pct / 100 / m[s].px)))
@@ -485,11 +520,12 @@ def _reference(sc):
         want = [w for w in want if w[3] >= 1 and abs(w[1] - w[3]) > 0.10 * w[3]]
         for s, q, last, t in sorted(want, key=lambda w: w[3] - w[1]):
             if t > q:
-                t = q + min(t - q, fits(last))
+                t = q + min(t - q, fits(last), sroom(s, last))
                 if t <= q:
                     continue
             exposure += (t - q) * last
             money -= (t - q) * last
+            used[bucket(s)] = used.get(bucket(s), 0.0) + (t - q) * last
             out[s] = int(t)
     for s in sc["buy"]:
         if names >= lim.max_names:
@@ -500,11 +536,15 @@ def _reference(sc):
         room = fits(m[s].px)
         if room < 1:
             break
-        exposure += min(t, room) * m[s].px
-        money -= min(t, room) * m[s].px
+        q = min(t, room, sroom(s, m[s].px))
+        if q < 1:
+            continue
+        exposure += q * m[s].px
+        money -= q * m[s].px
+        used[bucket(s)] = used.get(bucket(s), 0.0) + q * m[s].px
         names += 1
-        out[s] = int(min(t, room))
-        if room < t:
+        out[s] = int(q)
+        if q == room and room < t:
             break
     return {("mom", s): q for s, q in out.items()}
 
@@ -516,7 +556,7 @@ def ranked_scenario(draw):
     current = {("mom", s): max(draw(st.integers(0, 400)), 1) for s in held}
     keep = [s for s in held if draw(st.booleans())]
     buy = draw(st.permutations([s for s in SYMS if s not in held]))[:draw(st.integers(0, 12))]
-    lim = replace(sc["lim"], max_sector_pct=40, max_gap_loss_pct=15, min_cash_pct=1)
+    lim = replace(sc["lim"], max_gap_loss_pct=15, min_cash_pct=1)  # the sector cap as drawn: part of the pass
     return {**sc, "lim": lim, "current": current, "keep": keep, "buy": buy, "k": min(sc["k"], lim.atr_risk_pct / 100),
             "resize": draw(st.booleans()), "cash": draw(st.floats(0, sc["equity"]))}
 
