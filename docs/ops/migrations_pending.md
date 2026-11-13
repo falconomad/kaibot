@@ -1,17 +1,19 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 12 Nov 2026. Only the stakeholder applies production migrations.
+Owner: backend-quant. Last checked against main on 13 Nov 2026. Only the stakeholder applies production migrations
+(or Product on his word).
 
 ## What production has now
 
 - 0001-0013: applied.
-- 0014 (custom tickers, #96 / PR #103): applied except two functions. In production: tables `kaibot.ticker_check`,
-  `kaibot.ticker_list`; functions `kaibot.config_check` (0014's version, with `focus.custom`), `kaibot.ticker_latest`,
-  `kaibot.config_custom_check`, `kaibot.ticker_view`, `public.kb_save_config`, `public.kb_check_ticker`,
-  `public.kb_ticker_lists`, `public.kb_save_ticker_list`.
-  Missing: the new `public.kb_apply_config` (the one that also runs `config_custom_check`) and
-  `public.kb_delete_ticker_list`, plus the revoke/grant block at the end of the file that names it.
-- 0015, 0016, 0017, 0018, 0019: not applied.
+- 0014-0018: **applied by Product on 13 Nov 2026** (steps 1-5 below: the rest of 0014, then 0015, 0016, 0017, 0018).
+  Every read-only check below passed: `strategy_registry` has 4 rows, the four `kaibot_deadman_*` jobs are scheduled,
+  the ledger tables exist, 6 `jseq` columns, 0 applied Balanced/Hunter configs with dip off.
+- 0019: **not applied.** It waits for the stakeholder to switch Shorting off on the Alpaca paper account (step 6).
+  It must be applied **before the first multi-day position is held overnight** (`docs/ops/paper_start.md`).
+- No 0020: the multi-day experiment of #133 (decision 15 section 11) needs no database change. Its caps and label are
+  in `config/profiles.yaml` and `strategies/registry.py`, and the label reaches the dashboard in the heartbeat's
+  `detail.experiments`. 0019's `kaibot.strategy_holding` already lists `trend_momentum` as `multi_day`.
 
 ## Apply in this order
 

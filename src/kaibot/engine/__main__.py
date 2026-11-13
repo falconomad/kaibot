@@ -102,6 +102,25 @@ def build(settings: Settings) -> Engine:
 EXIT_JOURNAL = 4
 
 
+def multi_day_state(remote=None) -> dict:
+    """`--check` (#133): the multi-day switches as this engine would start with them, read-only. `KAIBOT_MULTIDAY`
+    (environment), `all_levels.allow_overnight` (config/profiles.yaml), the multi-day rules it would load, and the
+    experiment label at the active run's level (decision 15 section 11)."""
+    from kaibot.risk.profiles import enabled_multi_day, experiments, rule_book_limits
+    from kaibot.strategies import registry
+
+    cfg = yaml.safe_load((ROOT / "config" / "profiles.yaml").read_text())
+    on = registry.multi_day_enabled()
+    run = remote.active_run() if remote is not None else None
+    level = (run or {}).get("level") or "balanced"
+    rules = enabled_multi_day() if on else []
+    return {registry.MULTIDAY_FLAG: "on" if on else "off",
+            "allow_overnight": bool(cfg["all_levels"].get("allow_overnight", False)),
+            "rules_loaded": rules, "level": level,
+            "overnight_cap_pct": {r: rule_book_limits(r, level).max_overnight_pct for r in rules},
+            "experiments": experiments(rules, level)}
+
+
 def report_conflicts(eng: Engine, replicator: Replicator) -> None:
     """Rows Supabase refused as duplicates that are not the engine's (B2 of the #117 review): replication went on;
     each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local)."""
@@ -211,6 +230,7 @@ def main() -> None:
             return {"path": eng.journal.path, **rep.status()}
 
         step("journal", journal_state)
+        step("multi_day", lambda: multi_day_state(remote))
         step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
         print(json.dumps(report, indent=1, default=str))
         ok = not any(isinstance(v, str) and v.startswith("FAILED") for v in report.values())
