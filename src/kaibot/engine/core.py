@@ -41,7 +41,10 @@ import numpy as np
 from kaibot.broker.alpaca import CANCEL_WAIT_S
 from kaibot.broker.protocol import Broker, OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
-from kaibot.engine import shadow  # S14 shadow strategies: never trade, never raise
+from kaibot.engine import (
+    shadow,  # S14 shadow strategies: never trade, never raise
+    tickercheck,
+)
 from kaibot.engine.config import ROOT
 from kaibot.engine.dividends import match_payment, open_accruals, receivable
 from kaibot.engine.events import from_fomc_dates, in_blackout
@@ -255,6 +258,7 @@ class Day:
     events: list = field(default_factory=list)
     rules: Rules | None = None  # M5: the owner's config for this session (None before the open)
     refused: str | None = None  # M5: entries refused for this session only (invalid config); next day re-checks
+    custom_ok: frozenset = frozenset()  # S68: custom tickers that passed today's point-in-time check
     scan: dict = field(default_factory=lambda: new_scan())  # dashboard-only counters, never read by decisions
     # S77: what moves today's equity besides realised and unrealised trade P&L: dividends booked today, and for a
     # position held over the last close and closed today, minus its gain to that close (already in start_equity)
@@ -873,21 +877,25 @@ class Engine:
             return f"spread above your limit ({r.max_spread_bp:g} bp)"
         return None
 
+    def _applied_config(self, run_id: int, open_utc: datetime) -> dict | None:
+        """The owner's latest applied config created before this session's open (None = the level's defaults)."""
+        rows = [c for c in self.store.select("config", {"run_id": f"eq.{run_id}", "status": "eq.applied"})
+                if _parse_ts(c["created_at"]) < open_utc]
+        return max(rows, key=lambda c: int(c["version"])) if rows else None
+
     def _load_rules(self, d: Day) -> None:
         """M5 S43: the owner's latest applied config created before this session's open, tightened onto the level.
         Invalid -> entries refused for the session (fail closed); management, stops and the flatten still run."""
         lv_pol, lv_strats = self.policies[self.level()], self.level_strategies()
         d.rules = defaults(lv_pol, lv_strats)
         try:
-            rows = [c for c in self.store.select("config", {"run_id": f"eq.{d.run_id}", "status": "eq.applied"})
-                    if _parse_ts(c["created_at"]) < d.open_utc]
+            c = self._applied_config(d.run_id, d.open_utc)
         except Exception as e:
             self._refuse_session(f"config unreadable: {type(e).__name__}")
             return
-        if not rows:
+        if c is None:
             self.market.min_adv = d.rules.min_adv_usd
             return
-        c = max(rows, key=lambda c: int(c["version"]))
         uni, themes = self._universe_and_themes()
         try:
             d.rules = tighten(lv_pol, lv_strats, c.get("body") or {}, version=int(c["version"]),
@@ -899,6 +907,48 @@ class Engine:
         self.market.min_adv = d.rules.min_adv_usd
         self.store.event("config_applied", {"day": str(d.day), "version": d.rules.version,
                                             "config_sha": d.rules.config_sha}, self._rid())
+
+    def _custom_before_open(self, open_utc: datetime) -> dict[str, str]:
+        """S68: the custom tickers of the config that will apply at `open_utc` (Only mode; none otherwise), so their
+        history is loaded ahead of the open.
+        Anything unreadable or invalid means none (the session open decides again and fails closed)."""
+        try:
+            c = self._applied_config(self.run["id"], open_utc)
+            if c is None:
+                return {}
+            uni, themes = self._universe_and_themes()
+            lv = self.level()
+            return tighten(self.policies[lv], self.level_strategies(), c.get("body") or {},
+                           version=int(c["version"]), universe=uni, themes=themes).custom_universe()
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _vet_custom(self, d: Day) -> None:
+        """S68: every custom ticker must pass the SAME safety filters as any other symbol, point-in-time, on the
+        history this session actually loaded: tradable at the broker, enough history, min price, min $ volume.
+        A ticker that fails (or cannot be checked) is not scanned today; the owner cannot override it. The spread
+        and quote checks stay per entry."""
+        custom = dict(self.market.custom)
+        self.market.accept_custom(())
+        d.custom_ok = frozenset()
+        if not custom:
+            return
+        ok, refused = [], {}
+        for s in sorted(custom):
+            try:
+                good, why = tickercheck.verdict(
+                    s, self.broker.asset(s), tickercheck.stats(self.market.history.get(s), d.day),
+                    min_adv=d.rules.min_adv_usd, min_price=d.rules.min_price_usd)
+            except Exception as e:  # noqa: BLE001 - unknown is refused
+                good, why = False, f"{s} could not be checked today ({type(e).__name__})."
+            if good:
+                ok.append(s)
+            else:
+                refused[s] = why
+        d.custom_ok = frozenset(ok)
+        self.market.accept_custom(ok)
+        self.store.event("custom_tickers", {"day": str(d.day), "version": d.rules.version, "accepted": ok,
+                                            "refused": refused}, self._rid())
 
     def _refuse_session(self, reason: str) -> None:
         """Entries off for this session only; stops, management and the 15:55 flatten keep running."""
@@ -990,6 +1040,7 @@ class Engine:
         if timedelta(0) < nxt - now <= timedelta(minutes=45) and self.market.day != nxt.date():
             cal = self.broker.calendar(str(nxt.date()))
             open_utc, _ = session_minutes(cal, nxt.date())
+            self.market.set_custom(self._custom_before_open(open_utc))  # S68: backfill custom tickers before the open
             self.market.prepare_day(
                 nxt.date(),
                 open_utc,
@@ -1023,6 +1074,10 @@ class Engine:
         self._load_rules(self.day)
         self._restore_session(self.day)
         self._corporate_actions(today)
+        # S68: custom tickers are loaded only in 'Only these' mode (decision 12); All / Prefer = the catalogue alone
+        custom = self.day.rules.custom_universe() if self.day.rules and not self.day.refused else {}
+        if self.market.set_custom(custom):  # S68: the custom list changed since the history was loaded
+            self.market.day = None
         if self.market.day != today:
             self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
             self.market.prepare_day(
@@ -1032,6 +1087,7 @@ class Engine:
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
                 ),
             )
+        self._vet_custom(self.day)
         for p in self.pos.values():  # intraday positions opened on an earlier session are closed at the first tick
             p.carried = (flatten_at_close(_holding(p.strategy)) and bool(p.entry_ts)
                          and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today)
@@ -1316,6 +1372,8 @@ class Engine:
         size_mult: 0.5 when the room downgrades. Returns (signal id, the gate's full-size qty) for the A/B."""
         pol, d = self.policy(), self.day
         decision = self.now()
+        if not (s in self.market.base or s == self.market.spy or s in d.custom_ok):
+            veto = "not an accepted ticker today"  # S68: a refused or unchecked custom ticker can never be entered
         if fresh_reads:  # single decisions read quotes and buying power themselves
             self._quotes = self.broker_quotes([s])
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0

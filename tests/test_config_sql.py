@@ -3,7 +3,9 @@
 1. Always: the level limits, themes and universe seeded in 0011 match config/profiles.yaml and
    config/universe_seed.yaml (no Postgres needed).
 2. When a scratch Postgres is reachable (KAIBOT_TEST_PG="-h /tmp -p 55432 -U postgres -d m5", with 0011 applied):
-   SQL `kaibot.config_check` and Python `userconfig.tighten` agree on random configs. Skipped otherwise (CI)."""
+   SQL `kaibot.config_check` and Python `userconfig.tighten` agree on random configs. Skipped otherwise (CI).
+   With migration 0014 applied too, the same fuzz covers focus.custom, including the rule that a custom list is
+   accepted only in Only mode."""
 
 from __future__ import annotations
 
@@ -97,7 +99,13 @@ def test_sql_and_python_validators_agree(_):
     def gen(level, b):
         cases.append((level, b))
 
+    @settings(max_examples=500, deadline=None, suppress_health_check=list(HealthCheck), database=None)
+    @given(level=st.sampled_from(sorted(t.PROFILES)), b=t.custom_body)
+    def gen_custom(level, b):  # well-formed custom lists in every mode (migration 0014)
+        cases.append((level, b))
+
     gen()
+    gen_custom()
     rows = []
     for lv, b in cases:
         s = json.dumps(b, allow_nan=True)
@@ -121,5 +129,12 @@ def test_sql_and_python_validators_agree(_):
                          capture_output=True, text=True, check=True)
     sql = {int(a): b == "t" for a, b in (line.split(",") for line in out.stdout.split() if "," in line)}
     bad = [(rows[i][0], rows[i][1]) for i in range(len(rows)) if sql[i] != rows[i][2]]
+    print(f"parity cases compared: {len(rows)}")
     assert not bad, bad[:5]
     assert sum(r[2] for r in rows) > 100  # the comparison covered accepted configs, not just rejections
+    # S68 (migration 0014): the fuzz also covered custom lists on both sides of the Only-mode rule
+    foci = [(json.loads(s).get("focus"), ok) for _, s, ok in rows]
+    cust = [(f, ok) for f, ok in foci if isinstance(f, dict) and "custom" in f]
+    assert sum(ok for _, ok in cust) >= 50, "too few accepted custom lists (Only mode) in the comparison"
+    assert all(f.get("mode") == "only" for f, ok in cust if ok), "a custom list was accepted outside Only mode"
+    assert sum(1 for f, _ in cust if f.get("mode", "all") in ("all", "prefer")) >= 50

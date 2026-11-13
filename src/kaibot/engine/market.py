@@ -39,6 +39,12 @@ class LiveMarket:
         self.etf_of = etf_of
         self.spy = spy
         self.all = sorted(set(symbols) | set(etf_of.values()) | {spy})
+        # S68: the owner's custom tickers ({ticker: sector ETF}). Their history is loaded, but a ticker is only
+        # scanned once the engine has accepted it for the session (custom_ok). Empty = exactly the seed universe.
+        self._base_symbols, self._base_etf_of = symbols, etf_of
+        self.base = frozenset(symbols)
+        self.custom: dict[str, str] = {}
+        self.custom_ok: frozenset[str] = frozenset()
         self.cache = cache_dir
         self.vix_loader = vix_loader
         self.history: dict[str, pd.DataFrame] = {}
@@ -52,6 +58,31 @@ class LiveMarket:
         self.day: date | None = None
         self.open_utc: datetime | None = None
         self._last_fetch: datetime | None = None
+
+    # ---------- custom tickers (S68) ----------
+    def set_custom(self, custom: dict[str, str]) -> bool:
+        """Set the custom tickers for the next prepare_day. Returns True when the set changed (history must be
+        reloaded). Seed symbols and reference ETFs are never overridden. Nothing is scanned until accept_custom."""
+        refs = set(self._base_etf_of.values()) | {self.spy}
+        custom = {s: e for s, e in custom.items() if s not in self._base_etf_of and s not in refs and e in refs}
+        if custom == self.custom:
+            return False
+        self.custom, self.custom_ok = custom, frozenset()
+        self._refresh()
+        return True
+
+    def accept_custom(self, ok) -> None:
+        """The custom tickers that passed the engine's point-in-time check for this session."""
+        self.custom_ok = frozenset(ok) & frozenset(self.custom)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if not self.custom:  # no custom list: the very same objects as before S68
+            self.symbols, self.etf_of = self._base_symbols, self._base_etf_of
+        else:
+            self.symbols = [*self._base_symbols, *sorted(self.custom_ok)]
+            self.etf_of = {**self.custom, **self._base_etf_of}
+        self.all = sorted(set(self._base_symbols) | set(self.custom) | set(self.etf_of.values()) | {self.spy})
 
     # ---------- once per session ----------
     def prepare_day(self, day: date, open_utc: datetime, progress=None) -> None:

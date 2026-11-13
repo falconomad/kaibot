@@ -55,10 +55,19 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
     sector_of = {s: e for e, syms in cfg["sectors"].items() for s in syms}
     if not have_data(data_dir, [cfg["market"], *cfg["sectors"], *sector_of]):
         raise NoData("minute-bar history or the VIX cache is missing (run ./scripts/fetch_history.sh, M0 #3)")
+    # S68: custom tickers replay like any other symbol, against the sector ETF stored in the config. The $-volume
+    # filter is point-in-time (candidates()); a ticker without downloaded history blocks the replay, never fakes it.
+    custom = {s: e for s, e in rules.custom_universe().items() if s not in sector_of}  # Only mode; else none
+    missing = [s for s in sorted(custom) if not any((data_dir / "bars_1m" / f"symbol={s}").glob("*.parquet"))]
+    if missing:
+        raise NoData(f"minute-bar history is missing for custom ticker(s) {', '.join(missing)} "
+                     "(fetch them with scripts/fetch_history.py and a universe file that lists them)")
+    sector_of = {**sector_of, **custom}
     start, end = np.datetime64(window[0], "D"), np.datetime64(window[1], "D")
     lo = start - np.timedelta64(120, "D")
     spy = load_symbol(data_dir, cfg["market"], lo, end)
     etfs = {e: load_symbol(data_dir, e, lo, end) for e in cfg["sectors"]}
+    etfs[cfg["market"]] = spy  # a custom ticker with no known industry is measured against the market
     tradable = [s for s in sector_of if rules.tradable(s)]
     stocks = {s: load_symbol(data_dir, s, lo, end) for s in tradable}
     stocks = {s: sd for s, sd in stocks.items() if sd is not None}
@@ -84,6 +93,8 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
     months = (end - start).astype(int) / 30.44
     return {
         "window": list(window), "symbols": len(stocks), "trades": n,
+        "custom_list": ({"name": rules.custom_name, "tickers": [[s, e] for s, e in sorted(custom.items())]}
+                        if custom else None),
         "trades_per_month": round(n / months, 1) if months else None,
         "net_pnl_usd": round(float(trades["pnl"].sum()), 2) if n else 0.0,
         "net_return_pct": round(float(trades["pnl"].sum()) / equity0 * 100, 3) if n else 0.0,
@@ -92,5 +103,7 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
         "policy": asdict(rules.policy), "config_sha": rules.config_sha,
         "caveats": ["Prefer mode replays as All (ranking only matters when slots compete)",
                     "SPY momentum not included", "spread/price filters approximated by the universe filter",
-                    "survivorship: today's large caps applied to the past"],
+                    "survivorship: today's large caps applied to the past",
+                    *(["custom tickers: accepted today, applied to the past (tradability and listing history are "
+                       "not point-in-time); only the $-volume filter is"] if custom else [])],
     }

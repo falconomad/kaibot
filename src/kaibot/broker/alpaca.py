@@ -144,6 +144,15 @@ class AlpacaPaper(BrokerBase):
         rows = self._t("GET", "/v2/calendar", {"start": day, "end": day})
         return rows[0] if rows else None
 
+    def asset(self, symbol: str) -> dict | None:
+        """Read-only asset record (S68): is this ticker listed and tradable at the broker? None when unknown."""
+        try:
+            return self._t("GET", f"/v2/assets/{symbol}")
+        except AlpacaError as e:
+            if e.status == 404:
+                return None
+            raise
+
     def positions(self) -> dict[str, dict]:
         return {p["symbol"]: p for p in self._t("GET", "/v2/positions")}
 

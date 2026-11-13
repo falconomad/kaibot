@@ -270,6 +270,10 @@ class SimBroker(BrokerBase):
         self._net()
         return dict(self.pos)
 
+    def asset(self, symbol: str) -> dict | None:
+        """S68: the simulator has no listing data, so every custom ticker is unknown and refused (fail closed)."""
+        return None
+
     def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
         """Fills, plus the non-trade activities a test puts in `non_trade` (dividends, splits) of the types asked."""
         self._net()

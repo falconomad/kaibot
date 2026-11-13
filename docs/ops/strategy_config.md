@@ -4,6 +4,11 @@ The owner tunes the autonomous engine on the dashboard's **Strategy** page. The 
 **pickier or smaller**, never looser and never different. The contract is in `docs/m5/contract.md` and the
 decision in `docs/decisions/12_configuration_panel.md`.
 
+One bounded exception was approved on 11 Nov 2026: a **custom ticker list** (migration 0014) may add tickers from
+outside the catalogue, **only in *Only these* mode**, each passing the same safety filters point-in-time, at most
+40 in a list, with at least 5 accepted stocks in the focus. In *All* and *Prefer* mode custom tickers are never
+loaded or traded, and a config that carries a list in those modes is refused.
+
 ## Life of a change
 1. **Draft.** While you edit, the page saves a draft (`kb_save_config`). The database validates every save
    (`kaibot.config_check`); a value above the level, below its floor, or of the wrong shape is refused.
@@ -32,6 +37,7 @@ decision in `docs/decisions/12_configuration_panel.md`.
 | Strategies | Only the ones left on run. SPY momentum exists only on levels that include it. |
 | Focus: Only | Candidates outside the focus set are dropped before any signal is logged. |
 | Focus: Prefer | Focus names are tried first when several candidates compete in the same minute. |
+| Custom list (Only mode) | Its tickers are loaded with their sector fund, checked again at every open and scanned like any focus stock. A ticker that fails the check is skipped that day (`custom_tickers` event). Not available in All or Prefer mode. |
 | Entry window | Narrows 09:35–15:45. |
 | Pause | 2–3 losses in a row trigger a pause of 60–240 minutes. |
 | VIX limit | No new dip or SPY entries while the prior VIX close is above it. The crisis gate stays at 35. |
@@ -47,4 +53,8 @@ leverage / overnight, and the strategy entry thresholds.
 - `tests/test_config_sql.py`:
   - checks that the SQL seed data matches the YAML;
   - checks that the SQL and Python validators agree on random configs. This part needs `KAIBOT_TEST_PG` pointing
-    at a scratch Postgres with 0011 applied; on 11 Nov they agreed on all 2,120 cases.
+    at a scratch Postgres with the migrations up to 0014 applied; on 11 Nov they agreed on every case
+    of a run (1,648 after the custom-list cases were added; the count varies a little from run to run). With 0014
+    the fuzz also draws well-formed custom lists in every mode, so the Only-mode rule is compared on both sides.
+- `tests/test_custom_tickers.py` and `tests/test_custom_tickers_sql.py`: a custom list is rejected outside Only
+  mode (Python and SQL, same sentence), and the engine never loads or enters a custom ticker in All or Prefer mode.

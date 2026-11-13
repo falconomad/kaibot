@@ -68,6 +68,15 @@ class FakeBroker(SimBroker):
         super().__init__(data.history, clock, costs=None, cash=None)
         self.data, self.day = data, day
         self.foreign: dict[str, dict] = {}
+        self.assets: dict[str, dict | None] = {}  # S68: overrides for asset(); default = listed and tradable
+
+    def asset(self, symbol):
+        if symbol in self.assets:
+            return self.assets[symbol]
+        if symbol not in self.data.frames:
+            return None
+        return {"symbol": symbol, "class": "us_equity", "exchange": "NASDAQ", "status": "active", "tradable": True,
+                "name": f"{symbol} Inc"}
 
     def _days(self):
         return [self.day]

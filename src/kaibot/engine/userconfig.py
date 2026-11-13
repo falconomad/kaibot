@@ -1,7 +1,8 @@
 """M5 (decision 12, S43/S44): the owner's Strategy config, applied at the session open. Pure and property-tested.
 
 `tighten()` turns the level's policy plus a config body (docs/m5/contract.md) into the `Rules` the engine trades
-under for the day. Each setting can only make Kaibot pickier or smaller:
+under for the day. Each setting can only make Kaibot pickier or smaller (the one bounded exception, approved on
+11 Nov 2026, is a custom ticker list in 'Only these' mode: see decision 12):
 - a value above the level, below its floor, or of the wrong type is REJECTED (ConfigError), never clamped;
 - the result is validated against both the level policy and HARD_CEILINGS.
 
@@ -16,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from dataclasses import dataclass, replace
 
 from kaibot.risk.gate import HARD_CEILINGS, RiskPolicy, validate_policy
@@ -41,6 +43,18 @@ RISK_FIELDS = {
 MIN_ONLY_SYMBOLS = 5
 MAX_EXCLUDED = 10  # S53: config/presets.yaml limits.max_excluded
 MAX_BODY_BYTES = 8192
+# S68 (#96): a custom ticker list, stored BY VALUE in the config (symbol + its sector ETF), so an applied version
+# never changes. The cap keeps the 5-minute scan and the free data limits intact.
+# Decision 12 ("Custom ticker lists", approved 11 Nov 2026): a custom list is the one bounded way a config may trade
+# something outside the catalogue, and only in 'Only these' mode. In All and Prefer mode it is rejected here and by
+# the server, and the engine never loads it (Rules.custom_universe()).
+CUSTOM_NEEDS_ONLY = "A custom list can only be used with 'Only these'. Choose 'Only these' or remove the list."
+MAX_CUSTOM = 40
+MAX_LIST_NAME = 40
+TICKER_RE = re.compile(r"[A-Z]{1,5}(\.[A-Z])?")
+# SPY + the sector ETFs of config/universe_seed.yaml (a test checks they match). References are never traded as
+# custom tickers, and a custom ticker's sector ETF must be one of them.
+REFERENCE_ETFS = frozenset({"SPY", "XLK", "XLC", "XLY", "XLP", "XLV", "XLF", "XLI", "XLE", "XLU", "XLRE", "XLB"})
 
 
 class ConfigError(ValueError):
@@ -55,6 +69,8 @@ class Rules:
     mode: str = "all"  # all | prefer | only
     focus: frozenset[str] = frozenset()
     excluded: frozenset[str] = frozenset()  # never traded, in every mode
+    custom: tuple[tuple[str, str], ...] = ()  # S68: (ticker, sector ETF) outside the catalogue, sorted by ticker
+    custom_name: str = ""
     first_entry_m: int = FIRST_ENTRY_M
     last_entry_m: int = LAST_ENTRY_M
     pause_losses: int = LEVEL_PAUSE_LOSSES
@@ -70,6 +86,13 @@ class Rules:
         if symbol in self.excluded:
             return False
         return self.mode != "only" or symbol in self.focus
+
+    def custom_universe(self) -> dict[str, str]:
+        """{custom ticker: sector ETF} the engine and the replay may load. Empty unless the mode is 'only' and the
+        ticker is in the chosen focus: outside Only mode a custom ticker is never loaded, scanned or traded."""
+        if self.mode != "only":
+            return {}
+        return {s: e for s, e in self.custom if s in self.focus and s not in self.excluded}
 
     def rank(self, symbol: str) -> int:
         """Sort key: focus names first in Prefer mode (0 before 1); everything equal otherwise."""
@@ -131,7 +154,7 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
 
     # ---- focus ----
     fo = _obj(body.get("focus"), "focus")
-    _only_keys(fo, {"themes", "symbols", "exclude", "mode"}, "focus")
+    _only_keys(fo, {"themes", "symbols", "exclude", "mode", "custom"}, "focus")
     mode = fo.get("mode", "all")
     if mode not in ("all", "prefer", "only"):
         raise ConfigError(f"focus.mode {mode!r} is not all, prefer or only")
@@ -151,6 +174,10 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
         if s not in universe:
             raise ConfigError(f"{s!r} is not in the universe")
         excluded.add(s)
+    if "custom" in fo and mode != "only":  # approved 11 Nov 2026: custom tickers trade only in 'Only these' mode
+        raise ConfigError(CUSTOM_NEEDS_ONLY)
+    custom_name, custom = _custom(fo["custom"], universe) if "custom" in fo else ("", ())
+    sel |= {s for s, _ in custom}
     sel -= excluded
     if mode == "only" and len(sel) < MIN_ONLY_SYMBOLS:
         raise ConfigError(f"'Only these' needs at least {MIN_ONLY_SYMBOLS} stocks (has {len(sel)})")
@@ -192,7 +219,7 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
         raise ConfigError("advanced.max_spread_bp must be 1..5")
 
     return Rules(version=int(version), policy=pol, strategies=tuple(on), mode=mode, focus=frozenset(sel),
-                 excluded=frozenset(excluded),
+                 excluded=frozenset(excluded), custom=custom, custom_name=custom_name,
                  first_entry_m=first, last_entry_m=last, pause_losses=pl, pause_minutes=pm, vix_max=vx,
                  event_window_min=ew, min_price_usd=mp, min_adv_usd=ma, max_spread_bp=ms, config_sha=body_sha(body))
 
@@ -210,10 +237,48 @@ def is_tightening(r: Rules, level_policy: RiskPolicy, level_strategies) -> bool:
         r.pause_minutes >= LEVEL_PAUSE_MINUTES, r.vix_max <= LEVEL_VIX_MAX, r.event_window_min >= LEVEL_EVENT_WINDOW,
         r.min_price_usd >= LEVEL_MIN_PRICE, r.min_adv_usd >= LEVEL_MIN_ADV, r.max_spread_bp <= LEVEL_MAX_SPREAD,
         r.mode != "only" or len(r.focus) >= MIN_ONLY_SYMBOLS,
+        len(r.custom) <= MAX_CUSTOM, all(e in REFERENCE_ETFS and s not in REFERENCE_ETFS for s, e in r.custom),
+        not r.custom or r.mode == "only",  # custom tickers exist only in 'Only these' mode
     ])
 
 
 # ---------------- helpers ----------------
+def _custom(v, universe) -> tuple[str, tuple[tuple[str, str], ...]]:
+    """focus.custom = {"name": "...", "tickers": [{"symbol": "PLTR", "etf": "XLK"}, ...]} -> (name, pairs).
+
+    Shape only: whether each ticker is ACCEPTED is checked by the server at save/apply (kaibot.ticker_check) and by
+    the engine point-in-time at every session open (engine/tickercheck.py). A catalogue stock belongs in
+    focus.symbols, so it is rejected here; that keeps one sector ETF per symbol."""
+    if not isinstance(v, dict):
+        raise ConfigError("focus.custom must be an object")
+    _only_keys(v, {"name", "tickers"}, "focus.custom")
+    name = v.get("name", "")
+    if not isinstance(name, str) or len(name) > MAX_LIST_NAME:
+        raise ConfigError(f"the list name must be text of at most {MAX_LIST_NAME} characters")
+    tickers = v.get("tickers")
+    if not isinstance(tickers, list) or not tickers:
+        raise ConfigError("a custom list needs at least one ticker")
+    if len(tickers) > MAX_CUSTOM:
+        raise ConfigError(f"a custom list can hold at most {MAX_CUSTOM} tickers")
+    out: dict[str, str] = {}
+    for t in tickers:
+        if not isinstance(t, dict) or set(t) != {"symbol", "etf"}:
+            raise ConfigError("each custom ticker needs a symbol and its sector fund")
+        sym, etf = t["symbol"], t["etf"]
+        if not isinstance(sym, str) or not TICKER_RE.fullmatch(sym):
+            raise ConfigError("a custom ticker is not a valid US stock symbol")
+        if sym in REFERENCE_ETFS:
+            raise ConfigError(f"{sym} is a reference fund and cannot be traded")
+        if sym in universe:
+            raise ConfigError(f"{sym} is already in the catalogue: pick it as a stock instead")
+        if not isinstance(etf, str) or etf not in REFERENCE_ETFS:
+            raise ConfigError(f"{sym} has an unknown sector fund")
+        if sym in out:
+            raise ConfigError(f"{sym} is listed twice")
+        out[sym] = etf
+    return name, tuple(sorted(out.items()))
+
+
 def _obj(v, where: str) -> dict:
     if v is None:
         return {}

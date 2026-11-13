@@ -113,6 +113,11 @@ class Broker(Protocol):
         """Account activities of these types (Alpaca's codes: FILL, DIV, SSP, ...), oldest first, optionally only
         those after a time. The ledger (S77) reads dividends and splits through it."""
 
+    # ---- reference data ----
+    def asset(self, symbol: str) -> dict | None:
+        """Read-only asset record (S68: custom tickers): {symbol, class, exchange, status, tradable, name}, or None
+        when the venue does not know the symbol. Unknown means refused."""
+
     # ---- time ----
     def clock(self) -> dict:
         """{timestamp, is_open, next_open, next_close}."""
