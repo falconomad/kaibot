@@ -18,13 +18,37 @@ rule's own result, and when it is reached it still ends the whole run and sells 
 **Limits** (confirmed as tested): at most 30 names, at most 40% in one sector, at most your level's position size per
 name (10% / 15% / 20%), a 3% cash reserve, never leverage.
 
-> **Read this first.** The live daily path (issue #206) is what places `trend_momentum` orders. If your copy of the
-> code does not have it yet (Product tells you), the engine only loads and labels the rule and places **no**
-> `trend_momentum` orders, and steps 1-7 change nothing. With it, the rule trades only with `KAIBOT_MULTIDAY=on` **and** `allow_overnight: true` **and** a fresh daily store
-> (step 6). Without the fresh store it decides nothing and sends nothing, and the engine says so (`multi_day_waiting`).
+## The one command
 
-Do every step **outside 09:30-16:00 New York time** (15:30-22:00 Berlin), with the engine stopped (the daily
-refresh of step 6 is the exception: it runs while the engine runs).
+On the Mac, **outside 09:30-16:00 New York time** (15:30-22:00 Berlin), in Terminal:
+
+```
+cd ~/Projects/kaibot
+./scripts/go_live_paper.sh
+```
+
+It does steps 1 to 7 below in order and stops with a plain message at the first thing that is not right. It is safe
+to run again: every step checks first and changes only what is not yet as it should be.
+
+1. Gets the latest code (`git pull --ff-only`).
+2. Turns shorting off on the Alpaca paper account (`./scripts/alpaca_no_shorting.sh`). If Alpaca does not confirm
+   (for example the keys are rejected), it stops here and changes nothing.
+3. Sets `KAIBOT_MULTIDAY=on` in `~/Projects/kaibot-secrets/.env`. It adds or replaces that one line, keeps a copy
+   `.env.bak.<date-time>` next to it, and never prints the file.
+4. Stops an engine already running on this Mac, because two engines must never run at once. If one you started
+   by hand does not stop, it asks you to press Ctrl-C in that terminal window and run it again.
+5. Runs `./scripts/run_engine.sh --check`, which must end with `ALL GOOD`.
+6. Installs the always-on service (`./scripts/install_service.sh`). The engine then starts at every login and boot
+   and is restarted after a crash, and the daily bars are refreshed every night and at every login.
+7. Prints a short summary: shorting off, multi-day on, overnight allowed, your level and the rule's cap, the stop
+   line, the next decision evening (a Tuesday after the close) and the first possible buys (that Wednesday's
+   closing auction), and how to stop: `./scripts/service.sh hold`.
+
+**The Mac switched off at the weekend is fine.** On Monday the engine starts by itself when you log in, and the
+daily-bar refresh also runs at login, so Friday's bars are in long before the rule needs them (it decides on Tuesday
+evenings). A Saturday-morning refresh missed while the Mac was off changes nothing.
+
+The sections below explain each step, for reference or to do it by hand.
 
 ## 1. Stop the engine
 
@@ -45,7 +69,8 @@ If you pinned a release (`docs/ops/always_on.md`), ask Product which tag to pin 
 
 ## 3. Database (Product does this; you only confirm)
 
-`docs/ops/migrations_pending.md`. Steps 1-5 (0014-0018) were applied by Product on 13 Nov 2026. What is left:
+`docs/ops/migrations_pending.md`. 0014-0018 were applied by Product on 13 Nov 2026, and **0019 on 13 Nov 2026 at
+about 18:55 CET** (one dead-man job, `kaibot_deadman`; its checks passed). What is left for you:
 
 1. **You: turn Shorting off on the Alpaca paper account.** In Terminal:
 
@@ -59,11 +84,9 @@ If you pinned a release (`docs/ops/always_on.md`), ask Product which tag to pin 
    `shorting_enabled = false`. If it says `NOT CONFIRMED` or `FAILED`, do it by hand: Alpaca dashboard, switch to
    the **paper** account, Account Configurations, **Shorting: off**, Save. Either way, this stops a late stop order
    from ever opening a short.
-2. **Tell Product "shorting is off".** Product applies step 6, `migrations/0019_deadman_overnight.sql`, and runs its
-   checks: `kaibot_deadman` is the only dead-man job, and `strategy_holding` has 3 multi-day rows.
-
-**0019 and Shorting off must both be done before the first position is held overnight** (step 5). Without 0019 the
-off-box dead-man would sell every position at 15:56 if the engine went quiet, the multi-day ones included.
+2. That is all: 0019 is applied. Shorting off and 0019 together are what make holding over the close safe. Without
+   0019 the off-box dead-man would sell every position at 15:56 if the engine went quiet, the multi-day ones
+   included.
 
 ## 4. Switch multi-day rules on (the engine's environment)
 
@@ -78,15 +101,10 @@ off (`config/profiles.yaml`, `multi_day.rules`).
 
 ## 5. Allow overnight holding (the level limits)
 
-The repository keeps `all_levels.allow_overnight: false`. While it is false the engine may not hold the rule's
-positions over the close (its overnight cap is 0), whatever the exposure cap says.
-
-**Recommended:** tell Product "flip allow_overnight". Product opens a one-line pull request
-(`config/profiles.yaml`: `allow_overnight: true`), you approve it, Product merges it, and you `git pull --ff-only`
-again. Do it this way because a change you make by hand on the Mac stops the engine's start script from pulling new
-code ("could not pull the latest code") and blocks a pinned release.
-
-Only after step 3 is complete (0019 applied, Shorting off).
+Done in the repository: Product set `all_levels.allow_overnight: true` on 13 Nov 2026. It has an effect only with
+`KAIBOT_MULTIDAY=on` (step 4), which stays your one switch. With the flag off the engine is the intraday engine it
+always was. Do not edit `config/profiles.yaml` by hand on the Mac: the start script could then no longer pull new
+code.
 
 ## 6. The daily bars (automatic with the always-on service)
 
@@ -104,7 +122,8 @@ at **20:15 New York time**, and the engine reads nothing before that.
    22:15 (the two clocks change on different dates) and 01:45 or 02:45, so always after the day's bar is complete
    and well before the next open, all year. Its output goes to `logs/fetch_daily.log` in the kaibot folder. A failed
    refresh sends the usual alarm when alarms are set up. The Mac must be on and logged in. A run missed while it
-   slept starts when it wakes.
+   slept starts when it wakes, and the job also runs at every login and boot (a Mac switched off at the weekend
+   catches up on Monday).
 3. **Without the service:** run `./scripts/fetch_daily.sh` yourself after 20:15 New York time, before the next open.
 4. **If the refresh is missed:** the rule decides nothing for that session and sends no `trend_momentum` orders.
    Held positions are kept. The engine's heartbeat says it in plain words

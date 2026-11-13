@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 13 Nov 2026. Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 13 Nov 2026 (0019 applied that evening). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -9,8 +9,9 @@ Owner: backend-quant. Last checked against main on 13 Nov 2026. Only the stakeho
 - 0014-0018: **applied by Product on 13 Nov 2026** (steps 1-5 below: the rest of 0014, then 0015, 0016, 0017, 0018).
   Every read-only check below passed: `strategy_registry` has 4 rows, the four `kaibot_deadman_*` jobs are scheduled,
   the ledger tables exist, 6 `jseq` columns, 0 applied Balanced/Hunter configs with dip off.
-- 0019: **not applied.** It waits for the stakeholder to switch Shorting off on the Alpaca paper account (step 6).
-  It must be applied **before the first multi-day position is held overnight** (`docs/ops/paper_start.md`).
+- 0019: **applied by Product on 13 Nov 2026, about 18:55 CET** (step 6 below; the stakeholder delegated the decision).
+  Its read-only checks passed: one pg_cron job `kaibot_deadman` (the four `kaibot_deadman_*` jobs are gone).
+  Shorting off on the paper account is done by `./scripts/go_live_paper.sh` (`./scripts/alpaca_no_shorting.sh`).
 - No 0020: the multi-day experiment of #133 (decision 15 section 11) needs no database change. Its caps and label are
   in `config/profiles.yaml` and `strategies/registry.py`, and the label reaches the dashboard in the heartbeat's
   `detail.experiments`. 0019's `kaibot.strategy_holding` already lists `trend_momentum` as `multi_day`.

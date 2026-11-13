@@ -221,7 +221,8 @@ experiment** ("failed the ten-year test"):
 - `mom_12_1_band` (and its no-filter version) stays **off**. `trend_momentum` is the only multi-day rule switched
   on when `KAIBOT_MULTIDAY=on`.
 - `KAIBOT_MULTIDAY` stays **off** by default and `all_levels.allow_overnight` stays **false** in the repository. The
-  stakeholder flips them himself on his Mac (`docs/ops/paper_start.md`).
+  stakeholder flips them himself on his Mac (`docs/ops/paper_start.md`). *Superseded for `allow_overnight` on
+  13 Nov 2026 evening (Product, delegated; below): it is true in the repository; `KAIBOT_MULTIDAY` stays his switch.*
 - The engine journal (`session_start.experiments`) and the heartbeat (`detail.experiments`) carry the label
   (`evidence: failed_gate_b`, `experiment: true`, `real_money: false`) so the dashboard shows it on every screen
   that shows the rule (`strategies/registry.EVIDENCE`).
@@ -307,6 +308,21 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
    **30 names**, a **40% sector cap**, the 3% cash reserve of the portfolio builder (Amendment 3) on the 1% hard
    floor, and the gap-scenario limit at the hard ceiling, **15%**. The live book is therefore
    `engine/daily.momentum_limits` at the rule's exposure cap, the sizing the ten-year test ran with.
+
+### Product decisions 13 Nov 2026, evening: go-live on paper for Monday 16 Nov (the stakeholder delegated them)
+
+The stakeholder asked for everything ready for Monday 16 Nov 2026 and delegated the remaining decisions to Product
+("just decide and push"). Product decided:
+
+- **`all_levels.allow_overnight: true`** in `config/profiles.yaml`. It acts only on multi-day books, which exist only
+  with `KAIBOT_MULTIDAY=on`. With the flag off, no multi-day rule, no daily path and nothing that reads
+  `allow_overnight` on the intraday path load, so the engine is unchanged (tested). **`KAIBOT_MULTIDAY` stays the
+  stakeholder's single switch**, set in his `.env` (by `./scripts/go_live_paper.sh`, `docs/ops/paper_start.md`).
+- **Migration 0019 is applied in production** as of 13 Nov 2026, about 18:55 CET: one pg_cron job `kaibot_deadman`,
+  its checks passed (`docs/ops/migrations_pending.md`).
+- **One go-live command**, `./scripts/go_live_paper.sh`: latest code, shorting off at the paper account,
+  `KAIBOT_MULTIDAY=on`, no second engine, `--check`, the always-on service (the daily-bar refresh also at login and
+  boot, so a Mac switched off at the weekend catches up on Monday), and a plain summary.
 
 ### What the code does and does not do yet (13 Nov 2026, PR for #133)
 

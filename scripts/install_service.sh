@@ -9,6 +9,9 @@
 #                    at 07:45 (a catch-up: only the refresh, which skips what it has). Mac time (Europe/Berlin):
 #                    03:15 is 21:15 New York (22:15 in the weeks the two clocks change on different dates), after
 #                    Alpaca's daily bar is complete (20:15 ET), and 07:45 is still hours before the open (#206).
+#                    Also at every login and boot (RunAtLoad): launchd skips calendar runs while the Mac is OFF (not
+#                    asleep), so a Mac off at the weekend catches up Friday's bars when it starts on Monday. Running
+#                    twice a day is harmless: the second run only refreshes, and the refresh skips what it has.
 # Logs: ~/Library/Logs/kaibot/. Remove with ./scripts/uninstall_service.sh. Runbook: docs/ops/always_on.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -102,7 +105,7 @@ daily_plist() {
 	</array>
 	<key>WorkingDirectory</key><string>$(xml "$REPO")</string>
 $(env_block)
-	<key>RunAtLoad</key><false/>
+	<key>RunAtLoad</key><true/>
 	<key>StartCalendarInterval</key>
 	<array>
 $(for d in 2 3 4 5 6; do for hm in "3 15" "7 45"; do set -- $hm; printf '\t\t<dict><key>Weekday</key><integer>%d</integer><key>Hour</key><integer>%d</integer><key>Minute</key><integer>%d</integer></dict>\n' "$d" "$1" "$2"; done; done)
