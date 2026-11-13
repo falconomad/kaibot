@@ -10,12 +10,14 @@ result does not change the Gate B verdict, and it does not count as Gate C.
 **Stop the experiment** if the rule's drawdown passes 13% (Careful), 21% (Balanced) or 27% (Hunter). Product
 checks this in the daily status. The level's own run-drawdown end (4% / 8% / 12%) still ends the whole run first.
 
-> **Read this first: it does not trade yet.** On `main` today the live engine loads and labels the rule, but it has
-> no live daily path, so it places **no `trend_momentum` orders**. Only the research runner can do that. The
-> experiment starts trading once the follow-up story that wires the daily path into the live engine is merged.
-> Product tells you when. Steps 1-6 below are safe to do now. They change nothing until that code is in.
+> **Read this first.** The live daily path (issue #206) is what places `trend_momentum` orders. Until its pull request
+> is merged the engine only loads and labels the rule and places **no** `trend_momentum` orders. Product tells you
+> when it is in. Steps 1-7 below are safe to do before that. They change nothing until that code is in. Once it is
+> in, the rule trades only with `KAIBOT_MULTIDAY=on` **and** `allow_overnight: true` **and** a fresh daily store
+> (step 6). Without the fresh store it decides nothing and sends nothing, and the engine says so (`multi_day_waiting`).
 
-Do every step **outside 09:30-16:00 New York time** (15:30-22:00 Berlin), with the engine stopped.
+Do every step **outside 09:30-16:00 New York time** (15:30-22:00 Berlin), with the engine stopped (the daily
+refresh of step 6 is the exception: it runs while the engine runs).
 
 ## 1. Stop the engine
 
@@ -69,7 +71,42 @@ code ("could not pull the latest code") and blocks a pinned release.
 
 Only after step 3 is complete (0019 applied, Shorting off).
 
-## 6. Check, then start
+## 6. Refresh the daily bars every weekday evening
+
+The rule decides on **daily bars**, the same daily store the ten-year test used (`data/daily`, written by
+`./scripts/fetch_daily.sh`; free Alpaca data). The engine never downloads it itself. It reads the store after each
+close, and only once the day's bars are in it. Alpaca's daily bar counts as complete at **20:15 New York time**
+(02:15 Berlin), because after-hours trading adds to the day's volume. So:
+
+1. **First time (once):** run `./scripts/fetch_daily.sh` with `data/universe/former_members.csv` in place, as for
+   the ten-year test (`docs/ops/daily_bars.md`). The rule's universe is the S&P 500 as of each day, so the store needs
+   the former members too.
+2. **Every weekday after 20:15 New York time, before the next open:** run `./scripts/fetch_daily.sh` again. It is
+   resumable and skips what it already has. Running it in the early morning in Berlin (for example 07:00) also works:
+   the engine decides as soon as the bars are there, as long as that is before the next open (09:30 New York,
+   15:30 Berlin).
+   To automate it, Product or QA-Ops can add it to the always-on service. Ask them, and do not edit the start script
+   by hand.
+3. **If you miss an evening:** the engine decides nothing for that session and sends no `trend_momentum` orders.
+   Held positions are kept (and sold at the next session that has a decision, if the rule says so). The engine writes
+   a `multi_day_waiting` event that names the missing day. Nothing is bought on stale data.
+
+The engine reads the store from `~/Projects/kaibot/data/daily` by default. Set `KAIBOT_DAILY_DATA=/path/to/folder`
+in the `.env` only if your store lives somewhere else (the folder that **holds** `daily/`).
+
+**What happens each day** (New York time):
+
+- After the close, once the bars are in the store: the rule decides for the next session. The decision is written to
+  the engine's journal (`multi_day_decision` event). `trend_momentum` decides once a week (the first session from
+  Wednesday on) and re-sizes every second week.
+- Next session, from 09:31 until 15:45: the engine sizes the decision against the run's equity at the last close
+  (the portfolio builder: whole shares, 3% cash reserve, at most 40% in one sector, within your level's caps) and sends
+  **closing-auction (`cls`) orders** to Alpaca paper (`multi_day_orders` event). Alpaca does not accept them from
+  15:50, so the engine stops at 15:45. They fill at the 16:00 close. Each fill is booked once (`multi_day_fill`).
+- Sales always go out. Buys wait while entries are blocked (paused, daily stop, the book not matching Alpaca).
+- The 15:55 flatten of the intraday rule never sells `trend_momentum` positions.
+
+## 7. Check, then start
 
 ```
 cd ~/Projects/kaibot
@@ -84,6 +121,7 @@ It must end with `ALL GOOD`, and the `multi_day` line must show:
 - `"overnight_cap_pct"`: 30, 60 or 100 for your level (0 while `allow_overnight` is false)
 - `"experiments"`: one entry with `"label": "Experiment: failed the ten-year test"`, `"evidence": "failed_gate_b"`,
   `"real_money": false`, and your level's `max_exposure_pct` and `retire_drawdown_pct`
+- `"daily_store"`: its `path`, and a `last_session` that is the last trading day (step 6)
 
 Pick the level when you start the run on the dashboard (Careful, Balanced or Hunter), as usual. Then start the engine:
 
@@ -92,25 +130,29 @@ Pick the level when you start the run on the dashboard (Careful, Balanced or Hun
 
 Start at least 30 minutes before the open.
 
-## 7. See that it is running
+## 8. See that it is running
 
 - **Dashboard, Health:** Engine is green, and its code version is the one you pulled.
 - **The experiment label:** the engine writes it in every heartbeat (`detail.experiments`) and in each day's
   `session_start` event. The dashboard does not show the label yet. Frontend adds it (it reads
-  `heartbeat.detail.experiments[].label` and `.evidence`). Until then, step 6's `--check` is the way to see it.
+  `heartbeat.detail.experiments[].label` and `.evidence`). Until then, step 7's `--check` is the way to see it.
 - **Positions:** once the live daily path is merged, the rule decides after the close and buys or sells in the
-  closing auction (orders sent before 15:50 ET). Its positions show on the Live page under `trend_momentum`, each with
-  a stop resting at Alpaca.
+  closing auction (orders sent before 15:50 ET). Its positions show on the Live page under `trend_momentum`.
+- **No stop while the engine runs.** The rule as registered has no stop ("No fixed stop" in
+  `docs/prereg/trend_momentum.md`), so the engine places none and the position rows say the stop is `missing`. That is
+  expected. If the engine goes quiet, the watchdog and the dead-man put an emergency stop 10% below the last price on
+  each multi-day position (and cancel any of its buy orders not yet filled).
 
-## 8. Stopping the experiment
+## 9. Stopping the experiment
 
 - **Stop it for good** (retirement trigger hit, or you decide): dashboard, **Flatten and stop**. This sells everything,
   the multi-day positions included. Then remove `KAIBOT_MULTIDAY=on` from the `.env` (or set it to `off`) and restart
   the engine. With the flag off the engine refuses to load the rule.
-- **Pause new buys only:** dashboard, **Pause entries**. Held positions keep their stops.
-- **Engine off for a while:** `./scripts/service.sh hold` (or Ctrl-C). Positions keep their stops at Alpaca. With
-  0019 applied, the watchdog and the dead-man keep the multi-day positions and their stops, and they sell only the
-  intraday ones at the close.
+- **Pause new buys only:** dashboard, **Pause entries**. Held positions are kept; the rule's sales still go out.
+- **Engine off for a while:** `./scripts/service.sh hold` (or Ctrl-C). With 0019 applied, the watchdog and the
+  dead-man keep the multi-day positions (with an emergency stop each), and they sell only the intraday ones at the
+  close. When the engine starts again it picks up where it left off: a decision already taken is not taken again, and
+  an order already sent is not sent twice.
 
 Real money is never switched on from this rule. If a rule passes Gate B one day, real money is a separate decision
 (Gate D), and it stays yours.

@@ -1,8 +1,10 @@
 """The daily runner path (issue #161, story S94; decision 15 sections 3 and 5): multi-day `Strategy` plug-ins on
 daily bars, their targets executed at the next session's closing auction through `SimBroker`.
 
-Research and engine-simulation only. The live engine (`engine/core.py`) refuses multi-day strategies; nothing
-here is imported by it.
+The research runner (`run_daily`) and, with KAIBOT_MULTIDAY=on, the live engine's daily path (engine/live_daily.py,
+issue #206) share the decision core here: `DailyData` / `DailyView` (point-in-time daily bars), `decide_after_close`
+(the strategy's target list), `plan_session` (the portfolio builder's whole-share targets). The live engine imports
+this module only with the flag on.
 
 One session `i` (times ET; the one `SimClock` drives the strategy, the venue and this runner):
 
@@ -298,6 +300,37 @@ def builder_sizing(builder: PortfolioBuilder, tl: TargetList, held: Mapping[str,
     return Plan(sell, resize, buy, skipped, {s: why for (_, s), why in p.guarded.items()}, gaps)
 
 
+# ---------------------------------------------------------------- the decision core shared with the live path
+
+
+def decide_after_close(strategy, data: DailyData, k: int, fill_session: date,
+                       held: Mapping[str, float]) -> TargetList | None:
+    """After the close of session k: the strategy reads the daily bars up to that close (`data.view(k)`, nothing
+    after row k) and its own book (`held`: symbol -> shares) and returns its target list for `fill_session`, or
+    None on a day it does not decide. The research runner and the live daily path (engine/live_daily.py) both call
+    exactly this (decision 15: one decision core)."""
+    ctx = DailyContext(Event.AFTER_CLOSE, data.day(k), fill_session, data.view(k), dict(held))
+    return strategy.on_event(ctx)
+
+
+def plan_session(builder: PortfolioBuilder, tl: TargetList | None, name: str,
+                 held: Mapping[str, tuple[float, float]], pending: Mapping[str, str], data: DailyData, i: int,
+                 eq: float, cash: float,
+                 forced: set[str] | frozenset = frozenset()) -> tuple[Plan | None, list[Target]]:
+    """Session i's targets for the target loop (engine/targets.py), in the order the venue should get them: the
+    builder's plan of the target list decided after the close of i - 1 (sales, then resizes, then buys best first),
+    or without a new list the sales still pending (a sale whose stock had no bar is tried again every session).
+    `forced`: names sold at this close anyway (a disputed split next); their resize is not sent. Shared by the
+    research runner and the live daily path."""
+    if tl is None:
+        return None, [Target(name, s, 0, "sell", {"why": r}) for s, r in pending.items()]
+    plan = builder_sizing(builder, tl, held, pending, data, i, eq, cash)
+    targets = [Target(name, s, 0, "sell", {"why": r}) for s, r in plan.sell.items()]
+    targets += [Target(name, s, int(t), "resize", {"why": t}) for s, t in plan.resize if s not in forced]
+    targets += [Target(name, s, int(t), "buy", {"why": t}) for s, t in plan.buy]
+    return plan, targets
+
+
 # ---------------------------------------------------------------- the ledger (#117) and the trade rows
 
 
@@ -566,7 +599,8 @@ def _venue_actions(broker: SimBroker, symbol: str, *, split: float = 1.0, delist
 
 def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, fill: str = "base",
               cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-              on_session: Callable[[int], None] | None = None, protect_atr: float | None = None) -> DailyRun:
+              on_session: Callable[[int], None] | None = None, protect_atr: float | None = None,
+              builder: PortfolioBuilder | None = None) -> DailyRun:
     """One continuous account of one multi-day strategy over sessions i0..i1, starting flat: the strategy decides
     after each close, the portfolio builder sizes (`momentum_builder`: the pre-registered sizing at the rule's own
     limits), the target loop (engine/targets.py) sends
@@ -578,7 +612,9 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     `protect_atr`: a protective GTC stop that far below the entry (in ATR(20)) rests at the venue for every
     position (decision 15; off by default: the pre-registrations have no stop, so the Gate B runs keep none).
     What is still held after i1 is valued at its last mark less the cost model's sale (the harness's
-    `end_of_data`), so every dollar of the equity curve is in a trade row."""
+    `end_of_data`), so every dollar of the equity curve is in a trade row.
+    `builder`: the portfolio builder to size with (default `momentum_builder`: the pre-registered sizing); the live
+    path's parity test passes the live book's builder (`engine/live_daily.live_builder`)."""
     if i0 < 1 or i1 >= len(data.dates) or i0 > i1:
         raise ValueError("sessions i0..i1 must lie inside the data, with i0 >= 1")
     where, factor = FILLS[fill]
@@ -591,7 +627,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     journal = Journal(now=clock)
     led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal)
     om = OrderManager(broker, journal, clock)
-    builder = momentum_builder(strategy, pol, exposure_pct)
+    builder = builder or momentum_builder(strategy, pol, exposure_pct)
     run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om)
     policy = ExecutionPolicy("close" if tif == "cls" else "open", research_open=tif == "opg")
     at_close = ExecutionPolicy("close")
@@ -609,9 +645,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     def decide(k: int) -> None:
         """After the close of session k: the strategy's target list for session k + 1."""
         clock.set(_at(data.day(k), AFTER_CLOSE))
-        ctx = DailyContext(Event.AFTER_CLOSE, data.day(k), data.day(k + 1), data.view(k),
-                           {s: q for s, (q, _) in led.held().items()})
-        tl = strategy.on_event(ctx)
+        tl = decide_after_close(strategy, data, k, data.day(k + 1), {s: q for s, (q, _) in led.held().items()})
         if tl is not None:
             run.targets[k + 1] = tl
 
@@ -674,20 +708,15 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         targets: list[Target] = []
         if recon.check("startup" if i == i0 else "session_start").diffs:  # the ledger and the venue disagree:
             run.refused.append((i, recon.last.summary()["diffs"]))  # the target loop refuses buys, sales go out
-        if tl is not None:
-            plan = builder_sizing(builder, tl, held, pending, data, i, eq, led.cash)
+        plan, planned = plan_session(builder, tl, name, held, pending, data, i, eq, led.cash, forced)
+        targets += planned
+        if plan is not None:
             run.skipped += plan.skipped
             run.guards += [(i, s, why) for s, why in plan.guarded.items()]
             run.basis_gaps += [(i, s) for s in plan.basis_gaps]
             run.orders += [(i, "sell", s, r) for s, r in plan.sell.items()]
             run.orders += [(i, "resize", s, t) for s, t in plan.resize] + [(i, "buy", s, t) for s, t in plan.buy]
-            targets += [Target(name, s, 0, "sell", {"why": r}) for s, r in plan.sell.items()]
-            # a resize of a name sold at this close anyway (a split the data disagree about is next) is not sent
-            targets += [Target(name, s, int(t), "resize", {"why": t}) for s, t in plan.resize if s not in forced]
-            targets += [Target(name, s, int(t), "buy", {"why": t}) for s, t in plan.buy]
             pending = {}
-        else:  # a sale whose stock had no bar: try again every session
-            targets += [Target(name, s, 0, "sell", {"why": r}) for s, r in pending.items()]
         send(i, targets, policy)
         sold = {t.symbol for t in targets if t.shares == 0}
         send(i, [Target(name, s, 0, "split_dispute", {"why": "split_dispute"}) for s in forced if s not in sold],
@@ -781,4 +810,5 @@ def daily_returns(book: Book) -> np.ndarray:
 
 
 __all__: Sequence[str] = ("DailyData", "DailyView", "Plan", "momentum_limits", "momentum_builder", "builder_sizing",
-                          "RunLedger", "Book", "Trade", "DailyRun", "run_daily", "sessions_window", "daily_returns")
+                          "decide_after_close", "plan_session", "RunLedger", "Book", "Trade", "DailyRun", "run_daily",
+                          "sessions_window", "daily_returns")

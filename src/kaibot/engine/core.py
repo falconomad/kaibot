@@ -292,6 +292,7 @@ class Engine:
         journal: Journal | None = None,
         corporate_actions=None,
         ex_dividends=None,
+        daily=None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
@@ -338,6 +339,13 @@ class Engine:
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
+        # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
+        # core), built by `daily(self)`. None (the default, and always with KAIBOT_MULTIDAY off): the engine is the
+        # intraday engine it was, line for line.
+        if daily is not None and not registry.multi_day_enabled():
+            raise registry.RefusedStrategy(f"the live daily path needs {registry.MULTIDAY_FLAG}=on")
+        self.daily = daily(self) if daily is not None else None
+        self._closed_cache: tuple | None = None
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -348,6 +356,7 @@ class Engine:
             self._adopt_orphans()
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
             log.exception("order adoption failed")
+        self._daily_step("startup", lambda: self.daily.startup())  # #206: its orders recovered, its fills booked
         self.check_account()
         self._startup_reconcile("startup")
         self.store.event(
@@ -366,6 +375,8 @@ class Engine:
         ours for an approved signal has already been adopted by `_adopt_orphans` at startup.)"""
         broker_pos = self.broker.positions()
         known = set(self.pos) | {sym for _, sym in self._md_sleeves()}  # S80: the ledger's multi-day sleeves too
+        if self.daily is not None:  # #206: a closing-auction order of the daily path is the engine's own
+            known |= self.daily.working_symbols()
         foreign = sorted(set(broker_pos) - known)
         orders = sorted({o["symbol"] for o in self.broker.open_orders() if o["symbol"] not in known})
         self.account_clean = not foreign and not orders
@@ -455,6 +466,8 @@ class Engine:
         # compared once that has settled (as a single position was before)
         unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
         unsettled |= {k[1] for x in self._md_exits.values() for k, _ in x["keys"]}
+        if self.daily is not None:  # #206: a symbol with a daily-path order is compared once it has settled
+            unsettled |= self.daily.working_symbols()
         mine: dict[str, float] = {}
         for s, p in self.pos.items():
             if s not in unsettled:
@@ -494,6 +507,31 @@ class Engine:
             self._md_realized(body)
         self.journal.append(kind, body)
         self.ledger.apply(kind, body)
+
+    # ================= the live daily path (#206) =================
+    def _daily_step(self, step: str, call) -> None:
+        """One step of the daily path (engine/live_daily.py), only when it is wired. A failure is logged and an
+        event, never a stop of the intraday engine: the daily path then sends nothing (fail closed), and what it has
+        journalled is picked up at the next call."""
+        if self.daily is None:
+            return
+        try:
+            call()
+        except Exception as e:
+            log.exception("daily path: %s failed", step)
+            self.store.event("multi_day_error", {"step": step, "error": f"{type(e).__name__}: {e}"[:200]},
+                             self._rid())
+
+    def _daily_after_close(self, now: datetime) -> None:
+        """After a session's close: the rules decide for the next session (once the daily store holds the close)."""
+        if self.run is None or self.run.get("status") not in ("running", "paused"):
+            return
+        key = (now.astimezone(_et()).date(), now.astimezone(_et()).hour)
+        if self._closed_cache is None or self._closed_cache[0] != key:
+            self._closed_cache = (key, self._last_closed_session(now))
+        closed = self._closed_cache[1]
+        if closed is not None:
+            self.daily.after_close(closed)
 
     # ================= multi-day sleeves (S80, #120) =================
     def _md_sleeves(self) -> dict:
@@ -981,11 +1019,13 @@ class Engine:
         now = self.now()
         clk = self.broker.clock()
         if not clk["is_open"]:
+            self._daily_step("sync", lambda: self.daily.sync())  # #206: the closing auction's fills, before the close
             if self.day and not self.day.finalized:
                 self._sync_orders()
                 self._finalize_day()
             elif self.day is None:
                 self._finalize_missed(now)  # S77 (audit D8): a restart after the close still closes the day
+            self._daily_step("after_close", lambda: self._daily_after_close(now))  # #206: decide for the next session
             self._maybe_prepare(clk, now)
             return {"state": "market_closed", "next_open": clk.get("next_open"), "account_clean": self.account_clean}
         if self.run is None and not self.pos and not self._md_exits:  # S80: a multi-day sale still to book
@@ -1007,6 +1047,7 @@ class Engine:
         # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
+        self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
         self._recheck_reconcile(m)
         self._check_drift()
         if any(p.carried for p in self.pos.values()):
@@ -1015,6 +1056,7 @@ class Engine:
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
         self._manage_stops(m)
+        self._daily_step("send", lambda: self.daily.send(d.day))  # #206: closing-auction orders, 09:31-15:45 ET
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
