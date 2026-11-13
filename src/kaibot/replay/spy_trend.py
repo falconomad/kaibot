@@ -1,9 +1,9 @@
 """The SPY trend filter (issue #201, pre-registered in docs/prereg/spy_trend_filter.md before this file existed).
 
 Hold SPY when its month-end close is above its 10-month simple moving average (Faber 2007), otherwise cash; decide
-at the close of the check session T, fill at the close of T+1. Research only: a small SPY-only routine in the style
-of `kaibot.replay.spy_noise_band` on the daily store (`kaibot.ingest.daily_store`, raw bars with dividends). Fills
-are priced by the cost models of `kaibot.broker.costs_v2` ("v1" or "v2"). Nothing in the engine imports this
+at the close of the check session T, fill at the close of T+1. Research only: a small SPY-only routine (the
+pattern of the noise-band study, issue #128) on the daily store (`kaibot.ingest.daily_store`, raw bars with dividends).
+Fills are priced by the cost models of `kaibot.broker.costs_v2` ("v1" or "v2"). Nothing in the engine imports this
 module, and nothing here trades. Every result is PROVISIONAL: the go/no-go run is the engine with `SimBroker`.
 
 Pieces, all pure functions of arrays so the tests run them on synthetic bars:
