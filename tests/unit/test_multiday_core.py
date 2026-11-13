@@ -813,7 +813,7 @@ def test_run_experiments_script_has_the_core_command_and_it_is_documented():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
     for needle in ('"${1:-}" = "core"', "trend_momentum mom_12_1_band mom_12_1_band_nofilter", "momentum_core.py",
                    "--summary", "--has", "KAIBOT_CORE_CONTROL_RUNS", "experiments_core_summary.md",
-                   "usage: $0 [multiday|core|core_pit|spy]"):
+                   "usage: $0 [multiday|core|core_pit|spy"):
         assert needle in sh
     assert sh.index('"${1:-}" = "core"') < sh.index("No .env found")  # the core set needs no .env
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "run_experiments.sh")]).returncode == 0
@@ -827,9 +827,10 @@ def test_the_core_is_research_only():
     """Nothing the engine runs imports the momentum core, and the core charges costs through the harness's engine
     (no cost arithmetic of its own, no second simulator)."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
-        # engine/daily_report.py (by its path): the research command only (#161)
+        # engine/daily_report.py (by its path): the research command only (#161); replay/oneshots_daily.py: the
+        # research-only one-shot rules of #112 (tests/unit/test_oneshots.py checks nothing imports them)
         rel = f.relative_to(ROOT / "src" / "kaibot").as_posix()
-        if f.name != "multiday_core.py" and rel != "engine/daily_report.py":
+        if f.name != "multiday_core.py" and rel not in ("engine/daily_report.py", "replay/oneshots_daily.py"):
             assert "multiday_core" not in f.read_text(), f
     text = (ROOT / "src" / "kaibot" / "replay" / "multiday_core.py").read_text()
     for banned in ("buy_px", "sell_px", "sell_fees", "shadow_fill_price", "kaibot.engine", "kaibot.broker",
