@@ -377,6 +377,50 @@ def test_drill_engine_killed_at_1550_dead_man(tmp_path):
         db.stop()
 
 
+def _re_price_b(a) -> dict:
+    """Issue #197: the engine re-priced B's stop before it died (Alpaca: a replace gives the order a new client id
+    unless one is sent; the order manager sends the next attempt of its own)."""
+    om = OrderManager(a.broker, a.eng.journal, a.clock, run_id=a.rid)
+    om.replace(a.stop_coid, stop=round(a.b_px * 0.91, 2))
+    (s,) = a.stop_b()
+    assert s["client_order_id"] == a.stop_coid[:-1] + "2" and failsafe.parse_coid(s["client_order_id"])[0] == MD
+    return s
+
+
+def test_drill_a_re_priced_stop_keeps_the_sleeve_with_the_watchdog_and_the_book_unknown(tmp_path):
+    a = _killed_at_1550(tmp_path)
+    s = _re_price_b(a)
+    down = DownStore(a.store)  # Supabase down and no journal: the stop's client id is all the watchdog has
+    wd = Watchdog(a.broker, down, now=a.clock, book=book_reader(tmp_path / "nowhere.sqlite", down))
+    a.clock.t = a.open2 + timedelta(minutes=382)
+    out = wd.step()
+    assert out["stops"] == [] and not any("B" in x for x in wd._alarms if "without a protective stop" in x)
+    a.clock.t = a.open2 + timedelta(minutes=385, seconds=10)
+    out = wd.step()
+    assert out["closed"] == ["A"] and out["kept"] == {"B": QTY}
+    assert a.broker.pos["B"]["qty"] == QTY and [o["id"] for o in a.stop_b()] == [s["id"]] and not a.sells("B")
+
+
+def test_drill_a_re_priced_stop_keeps_the_sleeve_with_the_dead_man_and_no_ledger_rows(tmp_path):
+    a = _killed_at_1550(tmp_path)
+    s = _re_price_b(a)
+    db = DeadmanDb(tmp_path)
+    try:
+        db.beat(a.clock())
+        db.run(a.rid)  # the run, but no ledger rows: the book is unknown to the dead-man
+        for k in range(381, 390):
+            a.clock.t = a.open2 + timedelta(minutes=k, seconds=2)
+            db.check(a.clock())
+            db.pump(a.broker)
+            a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+        r = db.last_result()
+        assert r["multi_day"] == {"B": QTY} and r["stops"] == []
+        assert "A" not in a.broker.pos and a.broker.pos["B"]["qty"] == QTY
+        assert [o["id"] for o in a.stop_b()] == [s["id"]] and not a.sells("B")
+    finally:
+        db.stop()
+
+
 # ======================================================================= drill 2: the network cut overnight
 
 
@@ -498,6 +542,16 @@ CASES = {
         {}, [_o("b1", "A", "buy", "market", 5, f"kb-{R}-56-1"), _o("b2", "C", "buy", "market", 5,
                                                                    f"kb{R}-{MD}-C-20260804-target-1"),
              _o("b3", "D", "buy", "limit", 5, "manual-1")], [], False),
+    # issue #197: a stop the engine re-priced keeps a client id of its family (the next attempt, or `.r<n>`)
+    "a re-priced engine stop, no book": (
+        {"B": ("40", "100")}, [_o("s2", "B", "sell", "stop", 40, f"kb{R}-{MD}-B-20260803-stop-2", stop_price="91.00")],
+        [], True),
+    "a re-priced fail-safe stop next to intraday shares, no book": (
+        {"B": ("50", "100")}, [_o("s3", "B", "sell", "stop", 40, f"kbwd-{MD}-B-20260804093107-wdstop.r2",
+                                  stop_price="91.00")], [], True),
+    "a re-priced dead-man stop with its sleeve": (
+        {"B": ("40", "100")}, [_o("s4", "B", "sell", "stop", 40, f"kbdm-{MD}-B-20260804093107-dmstop.r3",
+                                  stop_price="91.00")], [(MD, "B", 40, 91.0)], False),
     "an intraday neighbour name is not multi-day": (
         {"B": ("40", "100")}, [_o("s9", "B", "sell", "stop", 40, f"kb{R}-dip_reversal-B-20260803-stop-1")], [], True),
 }
@@ -563,6 +617,10 @@ def test_the_plan_cases_say_what_decision_15_says():
     assert got["no book: the multi-day stop explains it"]["close"] == []
     assert got["entries of both kinds, and a foreign buy"]["cancel"] == ["A", "C"]
     assert got["an intraday neighbour name is not multi-day"]["close"] == ["B"]
+    for c in ("a re-priced engine stop, no book", "a re-priced fail-safe stop next to intraday shares, no book",
+              "a re-priced dead-man stop with its sleeve"):  # #197: still multi-day, never sold, no stop added
+        assert got[c]["multi_day"] == {"B": 40} and got[c]["close"] == [] and got[c]["stops"] == [], c
+    assert got["a re-priced fail-safe stop next to intraday shares, no book"]["sell"] == [("B", 10)]
 
 
 # ======================================================================= the dead-man's schedule and guards

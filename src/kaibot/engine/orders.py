@@ -6,7 +6,7 @@ pure fold over the local journal (engine/journal.py), so a restart rebuilds it e
 
     om_intent  {coid, strategy, symbol, side, qty, type, tif, limit, stop, purpose, session, meta}  BEFORE the call
     om_terms   {coid, qty?, stop?, limit?}                       the new terms of a replace the venue accepted
-    om_state   {coid, state, order_id?, venue?, cum?, avg?, reason?, ids?}                          every transition
+    om_state   {coid, state, order_id?, venue?, cum?, avg?, reason?, ids?, client_id?}              every transition
     om_fill    {coid, activity, strategy, symbol, side, qty, px, fees, ts}  a fill read from the account activities
                (or the ledger's own `fill` entry with the same fields plus run_id, when the manager books the ledger)
 
@@ -30,7 +30,12 @@ notes_engine_architecture.md section 4):
 - a 403 or 422 rejects that one order (D4); nothing else is stopped;
 - cancel and replace are transitions (`pending_cancel`, `pending_replace`) confirmed by the venue's next answer;
   a replace may answer with a new order id (Alpaca): the record follows it and keeps every id it ever had, so a
-  fill on a replaced bracket leg is found whether or not Alpaca lists that leg under its parent (D11, issue #11).
+  fill on a replaced bracket leg is found whether or not Alpaca lists that leg under its parent (D11, issue #11);
+- every replace sends a client id (issue #197: Alpaca generates a new one otherwise, and the watchdog and the
+  dead-man recognise a multi-day stop by its client id alone). It is deterministic and of the order's own family
+  (`replacement_coid`): the next attempt number of the manager's `kb<run>-...-<n>`, or `<root>.r<generation>` of an
+  adopted `kbwd-`/`kbdm-` stop. It is journalled (`om_state` pending_replace, `client_id`) BEFORE the call, and
+  the record keeps every client id it had (`client_ids`, `owner`), so a replaced order is the same record.
 
 Nothing here reads the wall clock: `now` is injected (the engine's clock, or `SimClock`).
 """
@@ -124,6 +129,7 @@ class OrderRecord:
     misses: int = 0  # lookups by client id that found nothing
     last_miss: str | None = None
     expires_at: str | None = None
+    client_ids: list[str] = field(default_factory=list)  # the client ids replaces gave it, oldest first (#197)
 
     @property
     def open(self) -> bool:
@@ -170,6 +176,7 @@ class OrderManager:
         self.live: dict[str, OrderRecord] = {}  # the open ones (index: ten-year research runs make many orders)
         self.bases: dict[str, int] = {}  # client id without its attempt number -> orders made for it
         self.by_id: dict[str, str] = {}  # venue id -> coid
+        self.aliases: dict[str, str] = {}  # a client id a replace gave the order -> its record's coid (#197)
         self.seen: set[str] = set()  # activity ids booked
         self.foreign: dict[str, dict] = {}  # activity id -> a fill on an order this manager does not know
         self.last_fill: datetime | None = None
@@ -213,6 +220,12 @@ class OrderManager:
                     self.by_id[i] = r.coid
             if b.get("order_id"):
                 r.order_id = b["order_id"]
+            cid = b.get("client_id")
+            if cid and cid != r.coid and cid not in r.client_ids:
+                r.client_ids.append(cid)
+                self.aliases[cid] = r.coid
+                base = _base(cid)  # counted with the intents: a later attempt never reuses it
+                self.bases[base] = self.bases.get(base, 0) + 1
         elif kind in ("om_fill", "fill") and b.get("activity"):
             self.seen.add(b["activity"])
             r = self.orders.get(b.get("coid") or "")
@@ -235,6 +248,22 @@ class OrderManager:
     # ---------------------------------------------------------------- reads
     def get(self, coid: str) -> OrderRecord | None:
         return self.orders.get(coid)
+
+    def owner(self, client_id: str) -> OrderRecord | None:
+        """The record of an order working under this client id: its own, or one a replace gave it (#197)."""
+        return self.orders.get(client_id) or self.orders.get(self.aliases.get(client_id, ""))
+
+    def replacement_coid(self, r: OrderRecord) -> str:
+        """The client id the next replace of `r` sends (issue #197). Deterministic (a fold of the journal) and
+        of the order's own family, so the fail-safes still recognise it (engine/failsafe.COID, FAILSAFE_COID,
+        migration 0019): the manager's `kb<run>-<strategy>-<symbol>-<day>-<purpose>-<n>` takes the decision's
+        next attempt number; anything else (an adopted `kbwd-`/`kbdm-` stop) becomes `<root>.r<generation>`."""
+        if _OWN.match(r.coid):
+            base = _base(r.coid)
+            return f"{base}-{self.attempts(base) + 1}"
+        g = len(r.client_ids) + 2  # the root is generation 1
+        tail = f".r{g}"
+        return f"{r.coid[:COID_MAX - len(tail)]}{tail}"
 
     def working(self, symbol: str | None = None, strategy: str | None = None,
                 purposes: Iterable[str] | None = None) -> list[OrderRecord]:
@@ -339,9 +368,10 @@ class OrderManager:
         r = self.orders[coid]
         if not r.open or r.order_id is None or r.state in (St.PENDING_CANCEL, St.PENDING_REPLACE):
             raise OrderBlocked(f"{coid} is {r.state}: it cannot be replaced now")
-        self._state(r, St.PENDING_REPLACE)
+        cid = self.replacement_coid(r)
+        self._state(r, St.PENDING_REPLACE, client_id=cid)  # journalled before the call (#197)
         try:
-            o = self.broker.replace(r.order_id, stop_price=stop, limit_price=limit, qty=qty)
+            o = self.broker.replace(r.order_id, stop_price=stop, limit_price=limit, qty=qty, client_order_id=cid)
         except BrokerError as e:
             self.errors.append((coid, f"replace: {e.status}: {_reason(e)}"))
             self._poll(r)
@@ -376,8 +406,10 @@ class OrderManager:
         if state is St.ACCEPTED and float(o.get("filled_qty") or 0) > 0:
             state = St.PARTIAL
         terms = {"qty": _num(o.get("qty")), "limit": _num(o.get("limit_price")), "stop": _num(o.get("stop_price"))}
+        cid = o.get("client_order_id")  # the id it works under (a venue that chose its own: recorded too)
+        cid = str(cid) if cid and cid != r.coid and cid not in r.client_ids else None
         self._state(r, state, order_id=o.get("id"), venue=o.get("status"), cum=float(o.get("filled_qty") or 0),
-                    ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0, **terms)
+                    ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0, client_id=cid, **terms)
 
     def _poll(self, r: OrderRecord) -> None:
         try:
@@ -488,6 +520,9 @@ def _num(v) -> float | None:
         return None if v is None else float(v)
     except (TypeError, ValueError):
         return None
+
+
+_OWN = re.compile(r"^kb\d+-[A-Za-z0-9_.]+-[A-Za-z0-9_.]+-\d{8}-[A-Za-z0-9_.]+-\d+$")  # client_order_id's form
 
 
 def _base(coid: str) -> str:

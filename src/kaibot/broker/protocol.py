@@ -88,9 +88,10 @@ class Broker(Protocol):
         """Cancel an open order or leg. An order that is already gone is not an error."""
 
     def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
-                qty: float | None = None) -> dict:
+                qty: float | None = None, client_order_id: str | None = None) -> dict:
         """Change the price (or the quantity) of a working order; returns the order that now works (its id may be
-        new: Alpaca replaces the order, the old one turns `replaced`)."""
+        new: Alpaca replaces the order, the old one turns `replaced`). `client_order_id`: the client id the order
+        works under from now on (Alpaca generates a new one if none is sent; issue #197)."""
 
     def order(self, order_id: str) -> dict:
         """One order with its legs nested."""
