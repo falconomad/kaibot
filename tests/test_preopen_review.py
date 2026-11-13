@@ -1,7 +1,9 @@
 """Issue #131 (M7·S91), contracts-first slice: the pre-open review of a daily rule's candidate list.
 Offline: no network, no key, no LLM call. The review may only veto or halve an increase."""
 
+import math
 import socket
+import time
 from datetime import date
 
 import pytest
@@ -169,6 +171,19 @@ def test_slow_review_times_out_and_vetoes_every_increase():
     assert reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
 
 
+def test_hung_review_is_cut_off_at_the_deadline():
+    def hung(d, cs):
+        time.sleep(2.0)
+        return answer(cs)
+
+    t0 = time.monotonic()
+    reviewed, out, _ = review(D, [tl({"A": 0.5, "B": 0.5})], {(S, "A"): 40, (S, "B"): 21}, {(S, "B"): 1}, hung,
+                              env=ON_ENV, budget_state="ok", total_s=0.2)
+    assert time.monotonic() - t0 < 1.0  # returned at the deadline, not when the reviewer finished
+    assert out.status == "timeout" and out.verdicts == {}
+    assert reviewed == {(S, "A"): 0, (S, "B"): 1}
+
+
 def test_unvalidated_model_instance_is_rejected():
     cs = candidates(D, [tl({"A": 1.0})], {(S, "A"): 5}, {})
     bad = PreopenVerdicts.model_construct(session=D.isoformat(), verdicts=[
@@ -232,6 +247,20 @@ def test_fractional_holding_fail_closed_keeps_the_holding():
     reviewed, out, _ = review(D, [tl({"A": 1.0})], {k: 9}, {k: 3.5}, lambda d, cs: None, env=ON_ENV,
                               budget_state="ok")
     assert out.status == "invalid" and reviewed == {k: 3.5}
+
+
+@settings(max_examples=300, deadline=None)
+@given(held=st.one_of(st.integers(0, 50), st.floats(0, 50, allow_nan=False)), extra=st.integers(0, 50),
+       verdict=st.sampled_from(["allow", "downgrade", "veto"]), status=st.sampled_from(preopen.STATUSES))
+def test_property_no_sale_over_held_target_verdict(held, extra, verdict, status):
+    k = (S, "A")
+    tgt = int(math.floor(held)) + extra  # target at, below or just above a fractional holding (3.5 -> 4)
+    got = apply({k: tgt}, {k: held}, preopen.ReviewOutcome(status, D, verdicts={f"{S}:A": verdict}))[k]
+    assert violations({k: tgt}, {k: held}, {k: got}) == []
+    if tgt > held:
+        assert held <= got <= tgt and (got == held or isinstance(got, int))  # no sale, no fractional order
+    else:
+        assert got == tgt
 
 
 def test_violations_catches_a_loosening():
