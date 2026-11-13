@@ -2,7 +2,7 @@
 
 `SimBroker` prices a fill through an object shaped like `broker.sim.ShadowCosts` (`market`, `auction`, `fees`,
 optionally `auction_fill`). Its default is cost model v1 (`broker.sim.COSTS_V1`), which every other run keeps.
-This module adds the two the Gate B run of `spy_noise_band` needs (decision 15: go/no-go on cost model v2),
+This module adds the two the SPY noise-band Gate B run needs (decision 15: go/no-go on cost model v2),
 without touching the venue's rules or the live code (live code never imports cost model v2: test_costs_v2.py):
 
 - `V2SimCosts`: `kaibot.broker.costs_v2.CostV2` behind the venue's interface. A market order pays the continuous
@@ -10,7 +10,7 @@ without touching the venue's rules or the live code (live code never imports cos
   print pays the close venue's half-spread and half the impact; an opening print twice the midday half-spread
   (`opg` orders, not used by the noise band). Fees: v2's 2026 SEC and TAF on every sale. `mult` scales spread and
   impact (2x / 3x cost runs), never the fees, as scripts/momentum_core.py scales them.
-- `FixedBpCosts`: the pre-registration's all-in scenarios (0.5 / 1 / 2 bp a side, docs/prereg/spy_noise_band.md
+- `FixedBpCosts`: the pre-registration's all-in scenarios (0.5 / 1 / 2 bp a side, the noise-band pre-registration,
   section 4): every buy pays and every sale gives up `bp`, no separate fee (the percentage includes it).
 
 Each fill's mid and cost are recorded in `log` (side, mid, price, qty, fee, venue), so a report can split gross from

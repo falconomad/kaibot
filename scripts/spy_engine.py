@@ -91,7 +91,7 @@ SUMMARY = "experiments_spy_engine.md"
 CALENDAR = ROOT / "config" / "macro_calendar.yaml"
 STATUS = ("engine + SimBroker + SimClock (decision 15): the frozen rule as an engine strategy, every order through the "
           "risk gate and SimBroker, cost model v2 for the go/no-go")
-# (version, scenario): the go/no-go grid; the version is a key of registry.RESEARCH_INTRADAY
+# (version, scenario): the go/no-go grid; the version is a key of registry.research_intraday()
 BASE_RUNS = (("spy_noise_band", "v2"), ("spy_noise_band", "0.5"), ("spy_noise_band", "1"))
 NEIGHBOUR_RUNS = tuple((sp.name, "v2") for sp in nb.NEIGHBOURS) + tuple(
     (f"spy_noise_band~{k}", "0.5") for k in nb.LOOKBACK_NEIGHBOURS)
@@ -173,7 +173,7 @@ def engine_run(frame: pd.DataFrame, cal: dict, days: list[str], version: str, sc
                progress=None) -> dict:
     """One continuous account of `version` under `scenario` through the engine. -> trips, daily rows, engine
     rows (trades, halts, errors)."""
-    strat = registry.RESEARCH_INTRADAY[version]
+    strat = registry.research_intraday()[version]
     costs = costs_for(scenario, adv)
     profiles = load_profiles()
     start = pd.Timestamp(f"{days[0]} 09:00", tz=ET).tz_convert(UTC).to_pydatetime() - timedelta(minutes=30)
@@ -361,7 +361,7 @@ def timing_control(sd: SymbolDays, version: str, trips: list[dict], i0: int, i1:
     (the harness's control routine, the same durations, the rule's check times), at `cost_bp` a side."""
     if runs < 1 or not trips:
         return None
-    spec = registry.RESEARCH_INTRADAY[version].spec
+    spec = registry.research_intraday()[version].spec
     c = nb.random_timing_control(sd, spec, as_harness_trips(trips, sd), i0, i1, round(cost_bp, 4), runs=runs,
                                  seed=seed)
     sh = np.array(c["per_run"]["sharpe"])
@@ -549,7 +549,7 @@ def write(rep: dict, data: Path) -> Path:
                      "cost_model": "v2" if scenario.startswith("v2") else f"{scenario} bp",
                      "prereg_sha256": rep["prereg"]["sha256"], "gate_v2_sha256": rep["gate_v2_sha256"],
                      "n_trials": 0,  # a report of a configuration the harness already counted (section 10)
-                     "params": {**registry.RESEARCH_INTRADAY[version].spec.params(), "cost": scenario},
+                     "params": {**registry.research_intraday()[version].spec.params(), "cost": scenario},
                      "window": rep["window"],
                      "metrics": {k: st[k] for k in ("trades", "net_bp_per_trip", "t_net", "return_pct", "cagr_pct",
                                                     "sharpe", "max_drawdown_pct")}})

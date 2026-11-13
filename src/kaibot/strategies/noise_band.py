@@ -3,7 +3,7 @@
 RESEARCH ONLY. The rule of the pre-registration, unchanged, as a `Strategy` plug-in, so the go/no-go run of Gate B
 comes from the engine with `SimBroker` (decision 15 sections 3 and 7): every decision, order, fill, halt and size
 goes through `Engine.tick`, the risk gate and the order path exactly as on paper. It is registered in
-`registry.RESEARCH_INTRADAY` only: in no level of config/profiles.yaml, no owner toggle, not in the SQL registry,
+`registry.research_intraday()` only: in no level of config/profiles.yaml, no owner toggle, not in the SQL registry,
 and `registry.live` never returns it, so the live engine cannot trade it. The research run (scripts/spy_engine.py)
 hands it to one `Engine` built on `SimBroker` + `SimClock`.
 

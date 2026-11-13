@@ -81,7 +81,7 @@ def test_without_the_engines_halts_the_engine_makes_exactly_the_harness_round_tr
     assert run["errors"] == []
     trips = se.trips_of(run, sd)
     i0, i1 = int(np.searchsorted(sd.dates, np.datetime64(days[0]))), len(sd.dates) - 1
-    spec = registry.RESEARCH_INTRADAY[version].spec
+    spec = registry.research_intraday()[version].spec
     want = nb.signals(sd, spec, i0, i1)
     assert len(trips) == len(want) >= 10
     cm = nb.close_minute(sd)
@@ -168,12 +168,12 @@ def test_the_v2_run_pays_more_than_half_a_bp(bars):
 
 
 def test_the_research_rule_never_reaches_the_live_path():
-    names = list(registry.RESEARCH_INTRADAY)
+    names = list(registry.research_intraday())
     assert names[0] == "spy_noise_band" and len(names) == 6
     assert registry.live(names) == () and registry.live([*names, "dip_reversal"]) == (registry.BY_NAME[
         "dip_reversal"],)
     assert not set(names) & registry.owner_toggles() and not set(names) & set(registry.names())
-    assert all(registry.get(n) is registry.RESEARCH_INTRADAY[n] for n in names)
+    assert all(registry.get(n) is registry.research_intraday()[n] for n in names)
     assert registry.multi_day_names(names) == []  # intraday: never refused as multi-day, never loaded either
     with pytest.raises(ValueError, match="multi-day"):
         NoiseBand(nb.VERSIONS["spy_noise_band_carry"])
