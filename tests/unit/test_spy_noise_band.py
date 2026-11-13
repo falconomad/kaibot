@@ -281,11 +281,25 @@ def test_script_end_to_end_resumable_with_one_table(tmp_path):
     assert subprocess.run([py, script, "--has", "spy_noise_band", *common, "--control-runs", "600"]).returncode == 1
 
 
+# Issue #202: the Gate B run puts the rule through the engine (strategies/noise_band.py, registered lazily in
+# strategies/registry.py for research only); those two modules may name it, nothing else in src may.
+MAY_NAME_IT = {("replay", "spy_noise_band.py"), ("strategies", "noise_band.py"), ("strategies", "registry.py")}
+
+
 def test_research_only_and_costs_come_from_the_replay():
-    """Nothing the engine runs imports this routine, and it prices fills with sim.py's cost functions."""
+    """Nothing the live engine runs imports this routine, and it prices fills with sim.py's cost functions."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
-        if f.name != "spy_noise_band.py":
+        if (f.parent.name, f.name) not in MAY_NAME_IT:
             assert "spy_noise_band" not in f.read_text(), f
+    code = ("import sys, kaibot.engine.__main__, kaibot.engine.core, kaibot.engine.watchdog; "
+            "from kaibot.strategies import registry; registry.live(['dip_reversal']); registry.get('dip_reversal'); "
+            "bad = [m for m in sys.modules if m in ('kaibot.replay.spy_noise_band', 'kaibot.strategies.noise_band')]; "
+            "print(bad); sys.exit(1 if bad else 0)")
+    import subprocess
+
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT,
+                       env={**__import__("os").environ, "PYTHONPATH": str(ROOT / "src")})
+    assert r.returncode == 0, r.stdout + r.stderr  # the live engine never loads the research rule
     from kaibot.broker import shadow_costs
     from kaibot.replay import sim
 

@@ -89,6 +89,30 @@ def may_run_on_paper(name: str) -> bool:
     return e is not None and (e.status == PASSED_GATE_B or e.experiment)
 
 
+# Intraday research-only rules (issue #202): `spy_noise_band` and its five pre-declared neighbours, for the Gate B
+# run through the engine with SimBroker (scripts/spy_engine.py). Found by `get` (the engine asks it for a
+# position's own exits), but NOT in STRATEGIES (no SQL registry row, no level, no owner toggle) and never returned
+# by `live`, so no level and no owner config can switch them on: the research run hands the rule to its own engine.
+# Loaded lazily, on the first `get` of one of these names: the live engine never imports the research rule.
+RESEARCH_INTRADAY_NAMES: frozenset[str] = frozenset(
+    {"spy_noise_band", *(f"spy_noise_band~{k}" for k in ("lb10", "lb20", "lb30", "check15", "exit1555"))})
+assert not RESEARCH_INTRADAY_NAMES & (set(BY_NAME) | set(RESEARCH_ONLY)), "research names must be unique"
+_research_intraday: dict | None = None
+
+
+def research_intraday() -> dict:
+    """{name: strategy} of the intraday research-only rules (imported on first use)."""
+    global _research_intraday
+    if _research_intraday is None:
+        from kaibot.strategies.noise_band import versions
+
+        got = dict(versions())
+        if set(got) != RESEARCH_INTRADAY_NAMES:
+            raise RuntimeError(f"research rules {sorted(got)} differ from RESEARCH_INTRADAY_NAMES")
+        _research_intraday = got
+    return _research_intraday
+
+
 class RefusedStrategy(ValueError):
     """A multi-day strategy was asked for on the live path."""
 
@@ -117,7 +141,8 @@ def refuse_multi_day(names_on) -> None:
 
 
 def get(name: str) -> Strategy | None:
-    return BY_NAME.get(name) or RESEARCH_ONLY.get(name)
+    hit = BY_NAME.get(name) or RESEARCH_ONLY.get(name)
+    return hit if hit is not None or name not in RESEARCH_INTRADAY_NAMES else research_intraday()[name]
 
 
 def names(mode: Mode | None = None) -> tuple[str, ...]:
