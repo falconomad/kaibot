@@ -55,6 +55,14 @@ CASH_RESERVE = 0.03  # Amendment 3: every decision's buys are sized against cash
 SECTOR_CAP_PCT = BOOK_HARD_CEILINGS.max_sector_pct  # Amendment 4: no sector above 40% of equity
 
 
+def universe_sectors(cfg: Mapping) -> dict[str, str]:
+    """Amendment 4's sector source, the one for every command (the engine's research command and
+    `scripts/momentum_core.py`): a stock's sector is the one the universe file lists it under (`sectors: {ETF:
+    [symbols]}`). A stock the file does not list (point-in-time: a former member, keyed SYMBOL@ASOF in the daily
+    store, which holds no sector) is its own sector (`own_sector`)."""
+    return {str(s): str(etf) for etf, syms in (cfg.get("sectors") or {}).items() for s in syms}
+
+
 def own_sector(sector: str | None, symbol: str) -> str:
     """Amendment 4: a stock without a sector is its own sector (the same rule as the portfolio builder's)."""
     return sector or f"own:{symbol}"
@@ -505,11 +513,13 @@ class Market:
     sector: dict[int, str] = dataclasses.field(default_factory=dict)  # column -> sector (Amendment 4)
 
     @classmethod
-    def from_bars(cls, bars: DailyBars, stocks: np.ndarray, spy: int, spy_tr: np.ndarray | None = None) -> Market:
+    def from_bars(cls, bars: DailyBars, stocks: np.ndarray, spy: int, spy_tr: np.ndarray | None = None,
+                  sectors: Mapping[str, str] | None = None) -> Market:
         """Today's harness: one set of split-adjusted bars without dividends for everything (#113, #127)."""
         ind = indicators(bars)
+        sector = {bars.col(s): str(x) for s, x in (sectors or {}).items() if s in bars._col and x}
         return cls(bars, bars, ind, Signals(bars, ind, stocks, spy), np.asarray(stocks, dtype=int), spy,
-                   spy_tr=spy_tr)
+                   spy_tr=spy_tr, sector=sector)
 
     @classmethod
     def from_panel(cls, panel, stocks: Sequence[str], spy: str, *, member: np.ndarray | None = None,

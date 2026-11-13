@@ -718,7 +718,10 @@ def test_core_run_writes_reports_files_and_one_trial_row_per_run(core_runs, core
         f"trend_momentum|base|1x|cap{e}|hold" for e in (30, 60, 100)}
     lo, mid, hi = (next(r for r in grid if r["fill"] == "base" and r["cost"] == 1.0 and r["exposure_pct"] == e)
                    for e in (30.0, 60.0, 100.0))
-    assert lo["avg_exposure_pct"] < mid["avg_exposure_pct"] < hi["avg_exposure_pct"] and lo["max_exposure_pct"] < 40
+    # changed by Amendment 4 (#168): this universe file has two sectors and the script now passes them, so the 40%
+    # sector cap binds before the 60% and 100% exposure caps do (it was lo < mid < hi)
+    assert lo["avg_exposure_pct"] < mid["avg_exposure_pct"] <= hi["avg_exposure_pct"] and lo["max_exposure_pct"] < 40
+    assert hi["max_exposure_pct"] <= 80.0 + 1.0  # two sectors at 40% each (at the decision prices)
     x1, x3 = (next(r for r in grid if r["fill"] == "base" and r["cost"] == c and r["exposure_pct"] == 60.0)
               for c in (1.0, 3.0))
     assert 2.5 * x1["cost_bp_per_year"] < x3["cost_bp_per_year"] < 3.5 * x1["cost_bp_per_year"]

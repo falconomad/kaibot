@@ -123,7 +123,7 @@ def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str)
         if len(rep) else []
     # Amendment 4's 40% sector cap: a stock's sector is the one the universe file lists it under; a stock it does
     # not list (point-in-time: a former member, whose store key is not a universe ticker) is its own sector
-    sectors = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}
+    sectors = mc.universe_sectors(cfg)
     m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors)
     m.notes["sectors"] = {"from_universe_file": sum(s in sectors for s in names),
                           "own_sector": sum(s not in sectors for s in names)}
