@@ -39,6 +39,13 @@
 #       data/reports/experiments_oneshots_summary.md. A rule whose data is missing is skipped with a message and
 #       tried again next time. KAIBOT_ONESHOT_CONTROL_RUNS (500) and KAIBOT_ONESHOT_SEEDS (200) change the control
 #       and the subsets (a different number is a new report). Times: docs/m0/reproduce.md section 10. No .env.
+#   ./scripts/run_experiments.sh spy_trend   issue #201: the SPY trend filter (hold SPY above its 10-month average,
+#       else cash; month-end check, filled at the next close), its five neighbours, cost models v1 and v2, the
+#       random-timing control of Gate B mark 3 (500 runs per cost model; KAIBOT_SPY_TREND_CONTROL_RUNS changes it,
+#       and a different number is a new report) and Gate B per cost model, ONE continuous account each from
+#       2017-05, then ONE table written to data/reports/experiments_spy_trend_summary.md. Pre-registered in
+#       docs/prereg/spy_trend_filter.md. Reads only SPY (and BIL, if present, for the T-bill row) from the daily
+#       store data/daily: no .env. A few minutes.
 # Resumable: an experiment whose report already exists for the same dates and universe is skipped, so after
 # Ctrl-C just run it again. Research only: reads the history under data/, never touches the engine or the broker.
 # Each run takes about as long as the baseline walk-forward (about 12 minutes), so allow about an hour in all.
@@ -132,6 +139,23 @@ if [ "${1:-}" = "core" ]; then  # reads only data/bars_1m, data/news and the dai
   "$PY" scripts/momentum_core.py --summary --level "$LEVEL" --costs "$COSTS"
   exit 0
 fi
+if [ "${1:-}" = "spy_trend" ]; then  # reads only data/daily (SPY, and BIL when present): no .env needed
+  RUNS="${KAIBOT_SPY_TREND_CONTROL_RUNS:-500}"
+  [ -f data/daily/bars/symbol=SPY.parquet ] \
+    || { echo "No SPY in the daily store at data/daily: run ./scripts/fetch_daily.sh first (docs/m0/reproduce.md)"; exit 1; }
+  if "$PY" scripts/spy_trend.py --has --start "$START" --end "$END" --control-runs "$RUNS"; then
+    echo "== spy_trend_filter: report exists, skipped"
+  else
+    echo "== spy_trend_filter: running (log: logs/experiment_spy_trend.log)"
+    awake "$PY" scripts/spy_trend.py --start "$START" --end "$END" --control-runs "$RUNS" \
+      > logs/experiment_spy_trend.log 2>&1 \
+      || { echo "spy_trend failed: see logs/experiment_spy_trend.log, then run this again"; exit 1; }
+    tail -n 1 logs/experiment_spy_trend.log
+  fi
+  echo
+  "$PY" scripts/spy_trend.py --summary
+  exit 0
+fi
 if [ "${1:-}" = "spy" ]; then  # reads only data/bars_1m/symbol=SPY: no .env needed
   RUNS="${KAIBOT_SPY_CONTROL_RUNS:-500}"
   for v in spy_noise_band spy_noise_band_carry; do
@@ -171,7 +195,7 @@ if [ "${1:-}" = "multiday" ]; then
   "$PY" scripts/experiments_summary.py --set multiday --level "$LEVEL"
   exit 0
 elif [ -n "${1:-}" ]; then
-  echo "usage: $0 [multiday|core|core_pit|spy|oneshots]   (no argument: the variant A experiments of issue #109)"; exit 2
+  echo "usage: $0 [multiday|core|core_pit|spy|spy_trend|oneshots]   (no argument: the variant A experiments of issue #109)"; exit 2
 fi
 
 for exp in control mornings wide_stop high_vix mornings_wide_stop; do

@@ -405,3 +405,21 @@ Six low-prior rules, each ONE frozen run of the construction pre-registered in `
   minutes (reading the monthly files dominates), so about 5-15 minutes per intraday rule for 288 stocks on the
   first run and seconds from the cache. Estimate about 1 to 1.5 hours for the whole set on the stakeholder's Mac;
   the real runtimes are printed at the end of each log and recorded in each report (`runtime_s`).
+
+## 11. SPY trend filter (issue #201, stakeholder 13 Nov 2026)
+
+Pre-registered in `docs/prereg/spy_trend_filter.md` (with Amendment 1) before any code ran it. Needs only SPY in the
+daily store (section 9: `./scripts/fetch_daily.sh`); no `.env`:
+
+```bash
+./scripts/run_experiments.sh spy_trend
+```
+
+One run: the base rule (SPY above its 10-month average at month-end, else cash; filled at the next close) and its five
+neighbours, cost models v1 and v2 (0x to 3x), the stress fill, 500 random-timing accounts per cost model for Gate B
+mark 3, and Gate B per cost model. The table goes to `data/reports/experiments_spy_trend_summary.md`; the full gate v2
+reports to `data/reports/spy_trend_<ts>/gate_b_<model>.md`. About half a minute on synthetic bars of the real size
+(not measured on the real data). Six trial rows count one configuration each (the base and the five neighbours at v1,
+base fill, 1x). A T-bill row (cash earning BIL's total return, never judged) appears only if `data/daily` holds BIL
+(`python scripts/fetch_daily.py --symbols BIL`, which needs the `.env`). Every result is PROVISIONAL: the research
+harness can fail Gate B, never pass it.
