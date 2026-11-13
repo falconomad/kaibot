@@ -61,9 +61,11 @@ def decide(data: dict) -> dict:
     def tri(it):
         return it.get("triage") if isinstance(it.get("triage"), dict) else {}
 
-    # the room's DATA block does not carry the pack's ticker/sector scope, so "about the ticker" here means
-    # "not triaged as a sector or macro story"
-    ticker = [it for it in fresh if tri(it).get("cause") not in ("sector", "macro")]
+    # "about the ticker": not triaged as a sector or macro story and, when the DATA block says where the story
+    # came from, not a triaged story from the sector feed (a peer's news is not this company's news). An item
+    # with no scope, or one nobody triaged, is still treated as ticker news: the strict reading.
+    ticker = [it for it in fresh if tri(it).get("cause") not in ("sector", "macro")
+              and not (it.get("scope") == "sector" and tri(it))]
     out = {"support": [], "flags": [], "confidence": "high"}
 
     def veto(cause, why, flags):

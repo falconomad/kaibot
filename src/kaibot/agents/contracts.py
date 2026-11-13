@@ -65,6 +65,41 @@ def admissible(v: JudgeVerdict, strategy: str) -> bool:
     return not (strategy == "dip_reversal" and v.cause in (DropCause.COMPANY_NEWS, DropCause.UNKNOWN))
 
 
+class ReviewFlag(StrEnum):
+    """Why the pre-open review (issue #131) would hold back a daily rule's buy. Labels only: the rule's own
+    signal is not second-guessed, the review looks for events the rule cannot see."""
+
+    COMPANY_NEWS = "company_news"  # 8-K, guidance, downgrade, litigation, offering since the rule's close
+    EARNINGS_SOON = "earnings_soon"  # earnings inside the first holding days
+    CORPORATE_ACTION = "corporate_action"  # pending split, merger, spin-off, tender, delisting notice
+    DATA_ISSUE = "data_issue"  # the candidate's evidence looks stale, missing or inconsistent
+    NONE = "none"  # nothing found
+    UNKNOWN = "unknown"
+
+
+class CandidateVerdict(BaseModel):
+    """One verdict per candidate of the pre-open review. allow = keep the rules' order, downgrade = half of the
+    rules' increase, veto = no increase. No price, size, stop or exit fields (room.FORBIDDEN_FIELDS is checked)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    verdict: Literal["allow", "downgrade", "veto"]
+    flag: ReviewFlag
+    confidence: Confidence
+    reason: str = Field(max_length=200)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=8)
+
+
+class PreopenVerdicts(BaseModel):
+    """The pre-open review's whole answer for one session: exactly one verdict per candidate it was shown."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session: str = Field(description="the session the orders are for, ISO date")
+    verdicts: list[CandidateVerdict] = Field(default_factory=list, max_length=50)
+
+
 class TriageScore(BaseModel):
     """Haiku's one score per deduplicated news cluster (story S33). No price, size, stop or exit fields:
     triage only labels evidence for the rules-only veto and the room."""

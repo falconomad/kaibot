@@ -311,7 +311,9 @@ def _num(v, where: str, integer: bool = False) -> float:
 
 def _hhmm(v, where: str) -> int:
     """'HH:MM' ET -> session minute of the decision (09:35 -> 5)."""
-    if not isinstance(v, str) or len(v) != 5 or v[2] != ":" or not (v[:2] + v[3:]).isdigit():
+    # ASCII digits only, like the SQL check (`^[0-2][0-9]:[0-5][0-9]$`): str.isdigit() also accepts e.g. Arabic-Indic
+    # or superscript digits, which the SQL validator refuses.
+    if not isinstance(v, str) or len(v) != 5 or v[2] != ":" or not all(c in "0123456789" for c in v[:2] + v[3:]):
         raise ConfigError(f"{where} must be HH:MM")
     h, m = int(v[:2]), int(v[3:])
     if h > 23 or m > 59:

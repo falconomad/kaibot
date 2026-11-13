@@ -122,11 +122,11 @@ class AlpacaPaper(BrokerBase):
     def account(self) -> dict:
         return self._t("GET", "/v2/account")
 
-    def activities(self, after: datetime | None = None) -> list[dict]:
-        """Fills booked on the account, oldest first (GET /v2/account/activities, 100 a page). Not used by the
-        engine yet: the order manager (S78) reconciles from it."""
+    def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
+        """Account activities, oldest first (GET /v2/account/activities, 100 a page). Fills: the order manager
+        (S78) reconciles from them. Dividends and splits (DIV*, SSP): the ledger books them (S77)."""
         out: list[dict] = []
-        params = {"activity_types": "FILL", "direction": "asc", "page_size": ACTIVITY_PAGE}
+        params = {"activity_types": ",".join(types), "direction": "asc", "page_size": ACTIVITY_PAGE}
         if after is not None:
             params["after"] = after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         for _ in range(ACTIVITY_MAX_PAGES):
@@ -182,12 +182,22 @@ class AlpacaPaper(BrokerBase):
                     return existing
             raise
 
-    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None) -> dict:
+    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
+                qty: float | None = None, client_order_id: str | None = None) -> dict:
+        """PATCH /v2/orders/{id}: Alpaca replaces the order and answers with the NEW order (new id, `replaces` the
+        old one, which turns `replaced`). `qty` is sent only when given (the order manager resizes a protective
+        stop with it), so the engine's present calls send the same bytes as before. `client_order_id` (issue
+        #197): the new order's client id, sent only when given (Alpaca: "Automatically generated if not sent");
+        the order manager always sends one, so the fail-safes still recognise a replaced stop."""
         body = {}
+        if qty is not None:
+            body["qty"] = str(int(qty)) if float(qty).is_integer() else str(qty)
         if limit_price is not None:
             body["limit_price"] = f"{limit_price:.2f}"
         if stop_price is not None:
             body["stop_price"] = f"{stop_price:.2f}"
+        if client_order_id:
+            body["client_order_id"] = client_order_id
         return self._t("PATCH", f"/v2/orders/{order_id}", body=body)
 
     def cancel(self, order_id: str) -> None:

@@ -31,6 +31,14 @@
 #       random-timing control of decision 15 section 10 (500 seeded runs by default, about a minute per version on
 #       synthetic bars of the real size; KAIBOT_SPY_CONTROL_RUNS changes it, and a report from before #149 or with a
 #       different number of runs is run again), printed under the table.
+#   ./scripts/run_experiments.sh oneshots    issue #112: the six one-shot tests of decision 15 (candidate 5), each ONE
+#       frozen pre-registered run (docs/prereg/): orb_stocks_in_play (keep or delete) and news_continuation on
+#       today's list with minute bars, then pullback_uptrend, ath_breakout (a distribution over random signal
+#       subsets at 5, 10 and 20 positions), post_earnings_week (needs data/earnings) and weekly_fall_rebound on
+#       the point-in-time S&P 500 and the daily store; ONE table with pass / fail per rule written to
+#       data/reports/experiments_oneshots_summary.md. A rule whose data is missing is skipped with a message and
+#       tried again next time. KAIBOT_ONESHOT_CONTROL_RUNS (500) and KAIBOT_ONESHOT_SEEDS (200) change the control
+#       and the subsets (a different number is a new report). Times: docs/m0/reproduce.md section 10. No .env.
 # Resumable: an experiment whose report already exists for the same dates and universe is skipped, so after
 # Ctrl-C just run it again. Research only: reads the history under data/, never touches the engine or the broker.
 # Each run takes about as long as the baseline walk-forward (about 12 minutes), so allow about an hour in all.
@@ -51,6 +59,35 @@ export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -m certifi)}"  # macOS python.org
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 mkdir -p logs data/reports
 
+if [ "${1:-}" = "oneshots" ]; then  # reads data/bars_1m, data/news, data/daily, data/earnings: no .env needed
+  RUNS="${KAIBOT_ONESHOT_CONTROL_RUNS:-500}"
+  SEEDS="${KAIBOT_ONESHOT_SEEDS:-200}"
+  for r in orb_stocks_in_play news_continuation pullback_uptrend ath_breakout post_earnings_week \
+      weekly_fall_rebound; do
+    if "$PY" scripts/oneshots.py --has "$r" --start "$START" --end "$END" --universe-file "$UNIVERSE" \
+        --control-runs "$RUNS" --seeds "$SEEDS"; then
+      echo "== $r: report exists, skipped"
+      continue
+    fi
+    echo "== $r: running (log: logs/experiment_oneshot_$r.log)"
+    set +e
+    awake "$PY" scripts/oneshots.py --rule "$r" --start "$START" --end "$END" --universe-file "$UNIVERSE" \
+      --level "$LEVEL" --control-runs "$RUNS" --seeds "$SEEDS" > "logs/experiment_oneshot_$r.log" 2>&1
+    rc=$?
+    set -e
+    if [ "$rc" = 3 ]; then
+      tail -n 1 "logs/experiment_oneshot_$r.log"  # data missing: the message says which; tried again next time
+      continue
+    elif [ "$rc" != 0 ]; then
+      echo "$r failed: see logs/experiment_oneshot_$r.log, then run this again (finished ones are skipped)"
+      exit 1
+    fi
+    tail -n 1 "logs/experiment_oneshot_$r.log"
+  done
+  echo
+  "$PY" scripts/oneshots.py --summary
+  exit 0
+fi
 if [ "${1:-}" = "core_pit" ]; then  # reads only data/daily, data/news and the committed membership log
   RUNS="${KAIBOT_CORE_CONTROL_RUNS:-500}"
   COSTS="${KAIBOT_CORE_COSTS:-v1}"
@@ -134,7 +171,7 @@ if [ "${1:-}" = "multiday" ]; then
   "$PY" scripts/experiments_summary.py --set multiday --level "$LEVEL"
   exit 0
 elif [ -n "${1:-}" ]; then
-  echo "usage: $0 [multiday|core|core_pit|spy]   (no argument: the variant A experiments of issue #109)"; exit 2
+  echo "usage: $0 [multiday|core|core_pit|spy|oneshots]   (no argument: the variant A experiments of issue #109)"; exit 2
 fi
 
 for exp in control mornings wide_stop high_vix mornings_wide_stop; do

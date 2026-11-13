@@ -19,6 +19,13 @@ on the other side", "## 2. Frozen construction", neighbours as a table, sources 
 "12 November 2026"). A heading may cover several sections. A file without a `Status` line counts as
 pre-registered.
 
+Amendments (issue #161). A pre-registration may be amended only by APPENDING dated sections headed
+"## Amendment <n> (...)", each committed. `load` reads the file's git history: `versions` holds the hash of every
+committed version, oldest first, and whether today's file is that version plus amendments only;
+`first_committed_at` is the first commit. `accepts(sha)` is true for today's hash and for every earlier version
+that today's file only amends, so trial rows logged before an amendment stay attributable to the rule (gate v2
+reports them as `amended_since_logged_runs`); any other edit of the text makes a logged hash unknown.
+
 A pre-registration written AFTER the first run is marked `Status: retroactive`. `require` accepts it (the run
 is logged with its hash) and `Prereg.retroactive` is true: gate v2 never lets such a rule pass Gate B.
 """
@@ -58,6 +65,7 @@ _TITLE_RULE = re.compile(r"^#\s+Pre-registration:\s*`?(?P<rule>[a-z][a-z0-9_]*)`
 _TABLE_ROW = re.compile(r"^\s*\|(?P<cells>.+)\|\s*$", re.M)
 _PLACEHOLDER = re.compile(r"<<.*?>>|<<|>>", re.S)
 _FIELD = re.compile(r"^\s*[-*]\s*\*\*(?P<key>[^:*]+):\*\*\s*(?P<value>.*?)\s*$", re.M)
+_AMENDMENT = re.compile(r"^##\s+Amendment\s+\d+\b.*$", re.M)
 _ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(?P<item>.+?)\s*$", re.M)
 
 
@@ -75,15 +83,26 @@ class Prereg:
     neighbours: tuple[str, ...]
     sections: dict[str, str]
     committed_at: datetime | None  # last commit that touched the file; None when git was not asked
+    first_committed_at: datetime | None = None  # first commit of the file (the pre-registration itself)
+    versions: tuple[tuple[str, datetime, bool], ...] = ()  # (sha256, committed_at, amended_only), oldest first
+    amendments: tuple[str, ...] = ()  # the "## Amendment n" headings of today's file
 
     @property
     def retroactive(self) -> bool:
         return self.status == "retroactive"
 
+    def accepts(self, sha: str) -> bool:
+        """`sha` is today's file, or an earlier committed version that today's file only amends."""
+        return sha == self.sha256 or any(v == sha and amended for v, _, amended in self.versions)
+
     def summary(self) -> dict:
         return {"rule": self.rule, "sha256": self.sha256, "status": self.status, "date": self.date.isoformat(),
                 "neighbours": list(self.neighbours),
-                "committed_at": self.committed_at.isoformat() if self.committed_at else None}
+                "committed_at": self.committed_at.isoformat() if self.committed_at else None,
+                "first_committed_at": self.first_committed_at.isoformat() if self.first_committed_at else None,
+                "amendments": list(self.amendments),
+                "versions": [{"sha256": v, "committed_at": t.isoformat(), "amended_only": a}
+                             for v, t, a in self.versions]}
 
 
 def path_for(rule: str, root: Path | str | None = None) -> Path:
@@ -150,6 +169,34 @@ def _check_committed(path: Path, root: Path) -> datetime:
     return datetime.fromisoformat(when)
 
 
+def amended_only(old: str, new: str) -> bool:
+    """`new` is `old` with dated "## Amendment n" sections appended and nothing else changed."""
+    if old == new:
+        return True
+    if not new.startswith(old.rstrip()):
+        return False
+    tail = new[len(old.rstrip()):]
+    if not tail.startswith("\n"):
+        return False  # an amendment starts on a line of its own, never glued onto the last line
+    rest = tail.strip()
+    heads = [ln for ln in rest.splitlines() if ln.startswith("#")]
+    return bool(rest) and rest.startswith("## Amendment") and all(_AMENDMENT.match(h) for h in heads)
+
+
+def _versions(path: Path, root: Path, text: str) -> tuple[tuple[str, datetime, bool], ...]:
+    """Every committed version of the file, oldest first: (sha256, commit time, today's file only amends it)."""
+    rel = path.relative_to(root).as_posix()
+    log = _git(root, "log", "--format=%H %cI", "--", rel).stdout.split("\n")
+    out = []
+    for line in reversed([x for x in log if x.strip()]):
+        commit, when = line.split(" ", 1)
+        raw = subprocess.run(["git", "-C", str(root), "show", f"{commit}:{rel}"], capture_output=True,
+                             timeout=20).stdout
+        out.append((hashlib.sha256(raw).hexdigest(), datetime.fromisoformat(when.strip()),
+                    amended_only(raw.decode("utf-8", errors="replace"), text)))
+    return tuple(out)
+
+
 def _date(value: str) -> date | None:
     try:
         return date.fromisoformat(value[:10])
@@ -207,7 +254,10 @@ def load(rule: str, root: Path | str | None = None, *, committed: bool = True) -
         raise PreregError(f"{rel} names {len(neighbours)} neighbours; at most {MAX_NEIGHBOURS} are allowed for "
                           "the plateau check (decision 15, Gate A).")
     committed_at = _check_committed(path, root) if committed else None
-    return Prereg(rule, path, hashlib.sha256(raw).hexdigest(), status, when, neighbours, sections, committed_at)
+    versions = _versions(path, root, text) if committed else ()
+    return Prereg(rule, path, hashlib.sha256(raw).hexdigest(), status, when, neighbours, sections, committed_at,
+                  versions[0][1] if versions else None, versions,
+                  tuple(m.group(0).strip() for m in _AMENDMENT.finditer(text)))
 
 
 def require(rule: str, root: Path | str | None = None, *, committed: bool = True) -> str:

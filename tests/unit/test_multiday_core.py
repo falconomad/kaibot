@@ -718,7 +718,10 @@ def test_core_run_writes_reports_files_and_one_trial_row_per_run(core_runs, core
         f"trend_momentum|base|1x|cap{e}|hold" for e in (30, 60, 100)}
     lo, mid, hi = (next(r for r in grid if r["fill"] == "base" and r["cost"] == 1.0 and r["exposure_pct"] == e)
                    for e in (30.0, 60.0, 100.0))
-    assert lo["avg_exposure_pct"] < mid["avg_exposure_pct"] < hi["avg_exposure_pct"] and lo["max_exposure_pct"] < 40
+    # changed by Amendment 4 (#168): this universe file has two sectors and the script now passes them, so the 40%
+    # sector cap binds before the 60% and 100% exposure caps do (it was lo < mid < hi)
+    assert lo["avg_exposure_pct"] < mid["avg_exposure_pct"] == hi["avg_exposure_pct"] and lo["max_exposure_pct"] < 40
+    assert mid["max_exposure_pct"] == hi["max_exposure_pct"]  # the sector cap, not the exposure cap, binds
     x1, x3 = (next(r for r in grid if r["fill"] == "base" and r["cost"] == c and r["exposure_pct"] == 60.0)
               for c in (1.0, 3.0))
     assert 2.5 * x1["cost_bp_per_year"] < x3["cost_bp_per_year"] < 3.5 * x1["cost_bp_per_year"]
@@ -813,7 +816,7 @@ def test_run_experiments_script_has_the_core_command_and_it_is_documented():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
     for needle in ('"${1:-}" = "core"', "trend_momentum mom_12_1_band mom_12_1_band_nofilter", "momentum_core.py",
                    "--summary", "--has", "KAIBOT_CORE_CONTROL_RUNS", "experiments_core_summary.md",
-                   "usage: $0 [multiday|core|core_pit|spy]"):
+                   "usage: $0 [multiday|core|core_pit|spy"):
         assert needle in sh
     assert sh.index('"${1:-}" = "core"') < sh.index("No .env found")  # the core set needs no .env
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "run_experiments.sh")]).returncode == 0
@@ -827,7 +830,10 @@ def test_the_core_is_research_only():
     """Nothing the engine runs imports the momentum core, and the core charges costs through the harness's engine
     (no cost arithmetic of its own, no second simulator)."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
-        if f.name != "multiday_core.py":
+        # engine/daily_report.py (by its path): the research command only (#161); replay/oneshots_daily.py: the
+        # research-only one-shot rules of #112 (tests/unit/test_oneshots.py checks nothing imports them)
+        rel = f.relative_to(ROOT / "src" / "kaibot").as_posix()
+        if f.name != "multiday_core.py" and rel not in ("engine/daily_report.py", "replay/oneshots_daily.py"):
             assert "multiday_core" not in f.read_text(), f
     text = (ROOT / "src" / "kaibot" / "replay" / "multiday_core.py").read_text()
     for banned in ("buy_px", "sell_px", "sell_fees", "shadow_fill_price", "kaibot.engine", "kaibot.broker",

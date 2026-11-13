@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kaibot · Holding settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0A0B0D}
+a{color:#7FB2FF}a:hover{color:#B3D1FF}
+.num{font-variant-numeric:tabular-nums}
+.nav a{color:#A1A8B3;text-decoration:none}.nav a:hover{color:#F4F5F7}
+/* motion: one easing, short durations; everything stops for prefers-reduced-motion */
+:root{--ease:cubic-bezier(.2,.7,.2,1)}
+@keyframes kb-rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes kb-fade{from{opacity:0}to{opacity:1}}
+@keyframes kb-draw{to{stroke-dashoffset:0}}
+@keyframes kb-pulse{0%{box-shadow:0 0 0 0 rgba(61,220,151,.55)}70%{box-shadow:0 0 0 8px rgba(61,220,151,0)}100%{box-shadow:0 0 0 0 rgba(61,220,151,0)}}
+@keyframes kb-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.enter{animation:kb-rise .55s var(--ease) both}
+.d1{animation-delay:.06s}.d2{animation-delay:.12s}.d3{animation-delay:.18s}.d4{animation-delay:.24s}.d5{animation-delay:.3s}
+.draw{stroke-dasharray:1400;stroke-dashoffset:1400;animation:kb-draw 1.3s var(--ease) .25s forwards}
+.fade{animation:kb-fade .6s var(--ease) .9s both}
+.grow{transform-origin:left;animation:kb-grow .8s var(--ease) .3s both}
+.live-dot{border-radius:999px;animation:kb-pulse 2s infinite}
+.morph{transition:d .45s var(--ease),cy .45s var(--ease)}
+.press{transition:transform .15s var(--ease),background-color .2s var(--ease),border-color .2s var(--ease),color .2s var(--ease),opacity .2s}
+.press:hover{filter:brightness(1.12)}.press:active{transform:scale(.97)}
+.lift{transition:transform .2s var(--ease),background-color .2s var(--ease),border-color .2s var(--ease)}
+.lift:hover{transform:translateY(-2px);border-color:#3A404A}
+.row{transition:background-color .2s var(--ease)}.row:hover{background:#1B1E24}
+.swap{animation:kb-rise .35s var(--ease) both}
+.tabbar{display:none}
+@media (max-width: 760px){
+  .topnav{display:none!important}
+  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:5;justify-content:space-around;padding:8px 8px 20px;background:rgba(10,11,13,.92);backdrop-filter:blur(12px);border-top:1px solid #1B1E24}
+  .page{padding:16px 16px 96px!important;gap:16px!important}
+  .bar{padding:12px 16px!important;gap:12px!important}
+  .hero{font-size:44px!important}
+  .h1{font-size:30px!important}
+  .hide-sm{display:none!important}
+  .full-sm{flex:1 1 100%!important;width:100%}
+  .cols{grid-template-columns:minmax(0,1fr)!important}
+  .card{border-radius:20px!important;padding:16px!important}
+}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}.draw{stroke-dashoffset:0}}
+@keyframes kb-riseY{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+@keyframes kb-ring{from{stroke-dasharray:0 239}}
+@keyframes kb-shimmer{from{background-position:-600px 0}to{background-position:600px 0}}
+.rise{transform-box:view-box;animation:kb-riseY 1.1s var(--ease) .15s both}
+.rise-bar{transform-box:view-box;animation:kb-riseY .8s var(--ease) both}
+.rise-up{transform-origin:bottom;animation:kb-riseY .6s var(--ease) both}
+.ring{animation:kb-ring 1.1s var(--ease) .3s both}
+.sk{display:block;background:linear-gradient(90deg,#16181C 0%,#23272E 50%,#16181C 100%);background-size:1200px 100%;animation:kb-shimmer 1.5s linear infinite;border-radius:10px}
+
+.show-sm,.show-sm-flex,.hd-phone{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+select.kbs{appearance:none;-webkit-appearance:none;background:#131519 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23A1A8B3' stroke-width='2'%3E%3Cpath d='M6 9l6 6l6-6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 14px center;padding:0 40px 0 16px}
+.seg{transition:background-color .25s var(--ease),color .25s var(--ease)}
+.chip{transition:background-color .2s var(--ease),border-color .2s var(--ease),color .2s var(--ease),transform .15s var(--ease)}
+.chip:active{transform:scale(.96)}
+.rowlink{transition:background-color .2s var(--ease)}.rowlink:hover{background:#1B1E24}
+.chev{transition:transform .25s var(--ease)}.open-chev{transform:rotate(90deg)}
+.expand{animation:kb-rise .3s var(--ease) both}
+.mwrap{position:fixed;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;padding:24px}
+.mpanel{width:min(440px,100%);max-height:86vh;overflow:auto;border-radius:24px;animation:kb-rise .3s var(--ease) both}
+@keyframes kb-sheet{from{transform:translateY(100%)}to{transform:none}}
+button:disabled{cursor:not-allowed}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 28px}
+.stat{display:flex;flex-direction:column;gap:3px;min-width:0}
+.facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 24px}
+.side{display:flex;flex-direction:column;gap:16px}
+.hrow{display:grid;grid-template-columns:minmax(0,2.1fr) 92px 156px 128px minmax(0,2.5fr) 172px 16px;gap:0 18px;align-items:center}
+.prow{display:grid;grid-template-columns:44px minmax(0,1.15fr) minmax(0,1.6fr) 150px;gap:6px 16px;align-items:center}
+.plrow{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:4px 14px;align-items:start}
+.two{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:20px;align-items:start}
+.gates{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px 24px}
+.gsteps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px 32px;padding-top:6px}
+.orow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,440px);gap:12px 28px;align-items:center}
+.kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.strip{display:flex;flex-direction:column;gap:14px}
+@media (max-width: 1080px){.two{grid-template-columns:minmax(0,1fr)}}
+@media (max-width: 1180px){.hd-desk{display:none!important}.hd-phone{display:block!important}}
+@media (max-width: 760px){
+  .show-sm{display:block!important}.show-sm-flex{display:flex!important}
+  .hd-desk{display:none!important}.hd-phone{display:block!important}
+  .mwrap{align-items:flex-end;padding:0}.mpanel{width:100%;border-radius:24px 24px 0 0;animation:kb-sheet .35s var(--ease) both}
+  .tap{min-height:44px!important}
+  .two{grid-template-columns:minmax(0,1fr)!important}
+  .stats{grid-template-columns:minmax(0,1fr);gap:8px}
+  .stat{flex-direction:row;flex-wrap:wrap;align-items:baseline;gap:0 10px}
+  .stat>dt{flex:1 1 auto}.stat>.sub{flex:1 1 100%;text-align:right}
+  .facts{grid-template-columns:minmax(0,1fr);gap:12px}
+  .side{gap:12px}
+  .hrow{grid-template-columns:minmax(0,1fr) auto 16px;gap:0 10px}
+  .prow{grid-template-columns:40px minmax(0,1fr);gap:4px 12px}
+  .plrow{grid-template-columns:36px minmax(0,1fr);gap:4px 12px}
+  .gates{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+  .gsteps{gap:6px}.gstep{padding:10px 8px!important}
+  .checks{grid-template-columns:minmax(0,1fr)}
+  .orow{grid-template-columns:minmax(0,1fr)}
+  .steps{grid-template-columns:minmax(0,1fr)}
+  .two.reflow{display:flex;flex-direction:column;gap:16px}.two.reflow>div{display:contents!important}
+  .o1{order:1}.o2{order:2}.o3{order:3}.o4{order:4}.o5{order:5}.o6{order:6}
+  .kv{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .chartcard{padding:14px 12px 10px!important}
+  .statusbar{padding:6px 8px 6px 14px!important;gap:0!important}
+  .pad-sm{padding:6px 4px 10px!important}
+  .full-row{grid-column:2}
+  .full-row-r{grid-column:2;align-items:baseline!important;flex-direction:row!important;gap:8px!important}
+}
+
+.dock{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:6;width:min(640px,calc(100% - 24px));animation:kb-dock .4s var(--ease) both}
+@keyframes kb-dock{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
+.tog{transition:background-color .25s var(--ease)}.tog>span{transition:transform .25s var(--ease)}
+.setrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 24px;align-items:center;padding:16px 20px;border-top:1px solid #1B1E24}
+.stepper{display:flex;align-items:center;gap:4px;background:#0A0B0D;border:1px solid #262A31;border-radius:999px;padding:3px}
+.stepper button{width:44px;height:44px;border-radius:999px;border:0;background:#1B1E24;color:#F4F5F7;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.stepper button:disabled{background:transparent;color:#5C6370}
+.seg2{display:flex;gap:2px;background:#0A0B0D;border:1px solid #262A31;border-radius:999px;padding:3px}
+.seg2 button{min-height:44px;padding:0 14px;border-radius:999px;border:0;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+body:has(.mwrap) .tabbar{display:none!important}
+.seg2 button{white-space:nowrap}
+.layers{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:13px;color:#A1A8B3;padding-top:2px}
+.layers .ly{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.layers b{color:#D0D5DD;font-weight:600}
+.layers i{font-style:normal;color:#7FB2FF;font-size:12px}.layers .ly-you b{color:#F4F5F7}.lysep{color:#A1A8B3}
+.stack{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0}
+.stack>li{padding:16px 20px;display:flex;flex-direction:column;gap:4px;border-left:1px solid #1B1E24}.stack>li:first-child{border-left:0}
+.rrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;min-height:56px;padding:10px 0;border-top:1px solid #1B1E24}
+@media (max-width: 760px){
+  .dock{bottom:84px}
+  .setrow{grid-template-columns:minmax(0,1fr);padding:14px 16px}
+  .stepper{justify-self:start}
+  .stack{grid-template-columns:minmax(0,1fr)}.stack>li{border-left:0;border-top:1px solid #1B1E24;padding:14px 16px}.stack>li:first-child{border-top:0}
+  .card.flush{padding:0!important}
+}
+
+button:focus-visible,input:focus-visible,a:focus-visible,select:focus-visible{outline:2px solid #4F95F0;outline-offset:2px}
+</style>
+</helmet>
+<div style="min-height: 2040px; background: #0A0B0D; color: #F4F5F7; font-family: Inter, system-ui, sans-serif">
+  <header class="bar" style="display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 16px 40px; border-bottom: 1px solid #1B1E24">
+    <a href="Overview.dc.html" style="display: flex; align-items: center; gap: 10px; color: #F4F5F7; text-decoration: none; min-height: 44px">
+      <svg width="26" height="26" viewBox="0 0 28 28" aria-hidden="true"><rect x="1" y="1" width="26" height="26" rx="8" fill="#F4F5F7"></rect><path d="M8 18 L12.5 12.5 L15.5 15.5 L20 9.5" stroke="#0A0B0D" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      <span style="font-weight: 700; font-size: 18px; letter-spacing: -0.02em">kaibot</span>
+    </a>
+    <nav class="nav topnav" aria-label="Main" style="display: flex; flex-wrap: wrap; gap: 4px; font-size: 15px; font-weight: 500">
+      <a href="Overview.dc.html" style="padding: 8px 14px">Home</a>
+      <a href="Holdings.dc.html" style="padding: 8px 14px">Holdings</a>
+      <a href="NextClose.dc.html" style="padding: 8px 14px">Next close</a>
+      <a href="Evidence.dc.html" style="padding: 8px 14px">Evidence</a>
+      <a href="Report.dc.html" style="padding: 8px 14px">Report</a>
+      <a href="Engine.dc.html" style="padding: 8px 14px">Engine</a>
+      <a href="Configure.dc.html" aria-current="page" style="color: #F4F5F7; background: #1B1E24; border-radius: 999px; padding: 8px 14px">Strategy</a>
+      <a href="Settings.dc.html" style="padding: 8px 14px">Run &amp; settings</a>
+    </nav>
+    <div style="flex: 1"></div>
+    <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #A1A8B3; background: #131519; border: 1px solid #262A31; border-radius: 999px; padding: 7px 12px">
+      <span class="live-dot" aria-hidden="true" style="width: 8px; height: 8px; background: #3DDC97"></span>
+      <span style="color: #F4F5F7; font-weight: 500">Running</span><span class="hide-sm"> · Mac mini · 6 s ago</span>
+    </span>
+    <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; color: #0A0B0D; background: #F5B64C; border-radius: 999px; padding: 4px 9px">PAPER · BALANCED</span>
+  </header>
+  <main class="page" style="max-width: 1240px; margin: 0 auto; box-sizing: border-box; padding: 28px 40px 120px; display: flex; flex-direction: column; gap: 20px">
+    <sc-if value="{{loading}}" hint-placeholder-val="{{false}}">
+      <div aria-busy="true" aria-label="Loading" style="display: flex; flex-direction: column; gap: 20px">
+        <span class="sk" style="width: 300px; height: 40px; border-radius: 12px"></span>
+        <span class="sk" style="height: 72px; border-radius: 18px"></span>
+        <span class="sk" style="height: 96px; border-radius: 24px"></span>
+        <div class="two"><span class="sk" style="height: 640px; border-radius: 24px"></span><div style="display: flex; flex-direction: column; gap: 20px"><span class="sk" style="height: 420px; border-radius: 24px"></span><span class="sk" style="height: 240px; border-radius: 24px"></span></div></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ready}}" hint-placeholder-val="{{true}}">
+    <div class="enter" style="display: flex; flex-direction: column; gap: 6px">
+      <a href="Configure.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 600; text-decoration: none; align-self: flex-start"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M15 5 L8 12 L15 19" stroke-linecap="round" stroke-linejoin="round"></path></svg> Strategy</a>
+      <div style="display: flex; align-items: center; gap: 12px"><h1 class="h1" style="margin: 0; flex: 1 1 auto; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Holding settings</h1><span style="flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px dashed #3A404A; font-size: 12px; font-weight: 600; color: #A1A8B3; white-space: nowrap">Sample data</span></div>
+      <span style="font-size: 15px; color: #A1A8B3; line-height: 1.5; max-width: 760px">For the rules that keep stocks for days or weeks. Each setting can only make Kaibot more careful than your level, Balanced. Nothing here can raise a limit.</span>
+    </div>
+    <sc-if value="{{applied}}" hint-placeholder-val="{{false}}">
+      <div role="status" class="swap" style="display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-radius: 18px; background: #12301F; border: 1px solid #262A31">
+        <span style="color: #3DDC97; display: flex; padding-top: 1px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3DDC97" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M12 7.5 V12 l3 2"></path></svg></span>
+        <span style="display: flex; flex-direction: column; gap: 4px; min-width: 0"><b style="font-size: 15px; font-weight: 600">Saved · replay running</b><span class="num" style="font-size: 14px; color: #D0D5DD; line-height: 1.5">Kaibot is replaying both rules over ten years with your settings and logs the run. The settings apply from the next decision, after tonight’s close at 22:00.</span></span>
+      </div>
+    </sc-if>
+    <sc-if value="{{notYet}}" hint-placeholder-val="{{false}}">
+      <div role="status" class="swap" style="display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-radius: 18px; background: #1B1E24; border: 1px solid #3A404A">
+        <span style="color: #A1A8B3; display: flex; padding-top: 1px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M12 7.5 V12 l3 2"></path></svg></span>
+        <span style="display: flex; flex-direction: column; gap: 4px; min-width: 0"><b style="font-size: 15px; font-weight: 600">Multi-day holding has not started</b><span class="num" style="font-size: 14px; color: #D0D5DD; line-height: 1.5">You can set your limits now. They apply from the first paper start.</span></span>
+      </div>
+    </sc-if>
+    <sc-if value="{{prov}}" hint-placeholder-val="{{false}}">
+      <div role="status" class="swap" style="display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border-radius: 18px; background: #16263D; border: 1px solid #2D4F7A">
+        <span style="color: #7FB2FF; display: flex; padding-top: 1px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7FB2FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 3 a9 9 0 1 0 0 18 a9 9 0 0 0 0 -18 M12 11 V16 M12 7.8 V8.2"></path></svg></span>
+        <span style="display: flex; flex-direction: column; gap: 4px; min-width: 0"><b style="font-size: 15px; font-weight: 600">The Balanced limits are provisional</b><span class="num" style="font-size: 14px; color: #D0D5DD; line-height: 1.5">They are set from the first ten-year results and confirmed before the first paper start. Your settings stay inside them: if a limit is set lower than yours, yours follows it down.</span></span>
+      </div>
+    </sc-if>
+    <section class="card enter d1" aria-labelledby="sk-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 0; overflow: hidden; display: flex; flex-direction: column">
+      <h2 id="sk-h" style="margin: 0; padding: 18px 20px 4px; font-size: 18px; font-weight: 600">Three layers, each only stricter</h2>
+      <span style="padding: 0 20px 12px; font-size: 14px; color: #A1A8B3; line-height: 1.5">Every limit below shows all three. The strictest one is the one Kaibot uses.</span>
+      <ol class="stack" style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #1B1E24">
+        <li><span style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #A1A8B3"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>1 · Hard ceiling</span><b style="font-size: 15px; font-weight: 600">Built into Kaibot</b><span class="num" style="font-size: 13px; color: #A1A8B3; line-height: 1.5">The same for everyone, for example 100% invested, 30 stocks, 20% in one stock, at least 1% cash. Nothing can raise it.</span></li>
+        <li><span style="font-size: 13px; font-weight: 600; color: #7FB2FF">2 · Your level</span><b style="font-size: 15px; font-weight: 600">Balanced, provisional</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">At or inside the hard ceiling. Set from the first ten-year results and confirmed before the first paper start.</span></li>
+        <li><span style="font-size: 13px; font-weight: 600; color: #F4F5F7">3 · Your settings</span><b style="font-size: 15px; font-weight: 600">Only stricter than the level</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">The + stops at the level. A looser value is refused, never rounded down.</span></li>
+      </ol>
+    </section>
+    <section class="card enter d1" aria-labelledby="md-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 22px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px">
+      <div style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+        <h2 id="md-h" style="margin: 0; font-size: 18px; font-weight: 600">Multi-day holding</h2>
+        <span class="swap" style="font-size: 14px; color: #A1A8B3; line-height: 1.5">{{mdNote}}</span>
+      </div>
+      <span class="num" style="font-size: 15px; font-weight: 600; color: {{mdInk}}">{{mdWord}}</span>
+      <button type="button" role="switch" aria-checked="{{mdS}}" aria-label="Multi-day holding" onClick="{{flipMd}}" disabled="{{mdOff}}" class="press" style="flex: none; width: 60px; height: 44px; border: 0; padding: 0; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center"><span class="tog" style="width: 52px; height: 32px; border-radius: 999px; padding: 4px; box-sizing: border-box; background: {{mdBg}}; display: flex"><span style="width: 24px; height: 24px; border-radius: 999px; background: #F4F5F7; transform: {{mdX}}"></span></span></button>
+    </section>
+    <div class="two">
+      <div style="display: flex; flex-direction: column; gap: 20px; min-width: 0">
+        <section class="card flush enter d2" aria-labelledby="bk-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column">
+          <div style="display: flex; flex-direction: column; gap: 4px; padding: 20px 20px 14px">
+            <h2 id="bk-h" style="margin: 0; font-size: 18px; font-weight: 600">Limits for the whole book</h2>
+            <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">Both rules together, at today’s prices.</span>
+          </div>
+          <sc-for list="{{book}}" as="s" hint-placeholder-count="5">
+            <div class="setrow">
+              <div style="min-width: 0; display: flex; flex-direction: column; gap: 3px">
+                <span style="display: flex; align-items: center; gap: 8px"><b id="sl-{{s.k}}" style="font-size: 15px; font-weight: 600">{{s.label}}</b><sc-if value="{{s.changed}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; color: #7FB2FF">changed</span></sc-if></span>
+                <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{s.help}}</span>
+                <span class="num layers" aria-label="{{s.layersA}}"><span class="ly"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>Hard ceiling <b>{{s.ceilT}}</b></span><span class="lysep" aria-hidden="true">›</span><span class="ly">Balanced <b>{{s.levelT}}</b> <i>provisional</i></span><span class="lysep" aria-hidden="true">›</span><span class="ly ly-you">Yours <b>{{s.valT}}</b> <span style="color: #A1A8B3">{{s.youT}}</span></span></span>
+                <sc-if value="{{s.hasWarn}}" hint-placeholder-val="{{false}}"><span class="num swap" style="display: flex; gap: 6px; font-size: 13px; color: #F5B64C; line-height: 1.5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg><span>{{s.warn}}</span></span></sc-if>
+              </div>
+              <div class="stepper" role="group" aria-labelledby="sl-{{s.k}}">
+                <button type="button" class="press" onClick="{{s.down}}" disabled="{{s.downOff}}" aria-label="Lower: {{s.label}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 12 H19"></path></svg></button>
+                <output class="num" aria-live="polite" style="min-width: 76px; text-align: center; font-size: 17px; font-weight: 700">{{s.valT}}</output>
+                <button type="button" class="press" onClick="{{s.up}}" disabled="{{s.upOff}}" aria-label="Raise: {{s.label}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 5 V19 M5 12 H19"></path></svg></button>
+              </div>
+            </div>
+          </sc-for>
+          <button type="button" class="rowlink" onClick="{{advTap}}" aria-expanded="{{advS}}" style="display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 20px; border: 0; border-top: 1px solid #1B1E24; background: transparent; color: #F4F5F7; font: inherit; text-align: left; cursor: pointer; width: 100%">
+            <span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 15px; font-weight: 600">More limits</span><span style="font-size: 13px; color: #A1A8B3">Risk per stock and the bad-morning test</span></span>
+            <span class="num" style="font-size: 13px; color: #A1A8B3">{{advSum}}</span>
+            <span class="chev {{advChev}}" style="display: flex"><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></span>
+          </button>
+          <sc-if value="{{adv}}" hint-placeholder-val="{{false}}">
+            <div class="expand">
+              <sc-for list="{{advList}}" as="s" hint-placeholder-count="2">
+            <div class="setrow">
+              <div style="min-width: 0; display: flex; flex-direction: column; gap: 3px">
+                <span style="display: flex; align-items: center; gap: 8px"><b id="sl-{{s.k}}" style="font-size: 15px; font-weight: 600">{{s.label}}</b><sc-if value="{{s.changed}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; color: #7FB2FF">changed</span></sc-if></span>
+                <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{s.help}}</span>
+                <span class="num layers" aria-label="{{s.layersA}}"><span class="ly"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>Hard ceiling <b>{{s.ceilT}}</b></span><span class="lysep" aria-hidden="true">›</span><span class="ly">Balanced <b>{{s.levelT}}</b> <i>provisional</i></span><span class="lysep" aria-hidden="true">›</span><span class="ly ly-you">Yours <b>{{s.valT}}</b> <span style="color: #A1A8B3">{{s.youT}}</span></span></span>
+                <sc-if value="{{s.hasWarn}}" hint-placeholder-val="{{false}}"><span class="num swap" style="display: flex; gap: 6px; font-size: 13px; color: #F5B64C; line-height: 1.5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg><span>{{s.warn}}</span></span></sc-if>
+              </div>
+              <div class="stepper" role="group" aria-labelledby="sl-{{s.k}}">
+                <button type="button" class="press" onClick="{{s.down}}" disabled="{{s.downOff}}" aria-label="Lower: {{s.label}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 12 H19"></path></svg></button>
+                <output class="num" aria-live="polite" style="min-width: 76px; text-align: center; font-size: 17px; font-weight: 700">{{s.valT}}</output>
+                <button type="button" class="press" onClick="{{s.up}}" disabled="{{s.upOff}}" aria-label="Raise: {{s.label}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 5 V19 M5 12 H19"></path></svg></button>
+              </div>
+            </div>
+              </sc-for>
+            </div>
+          </sc-if>
+        </section>
+        <section class="card flush enter d3" aria-labelledby="st-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column">
+          <div style="display: flex; flex-direction: column; gap: 4px; padding: 20px 20px 14px">
+            <h2 id="st-h" style="margin: 0; font-size: 18px; font-weight: 600">When to stop</h2>
+            <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5">These also count the move from one close to the next morning.</span>
+          </div>
+          <sc-for list="{{stop}}" as="s" hint-placeholder-count="2">
+            <div class="setrow">
+              <div style="min-width: 0; display: flex; flex-direction: column; gap: 3px">
+                <span style="display: flex; align-items: center; gap: 8px"><b id="sl-{{s.k}}" style="font-size: 15px; font-weight: 600">{{s.label}}</b><sc-if value="{{s.changed}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; font-weight: 600; color: #7FB2FF">changed</span></sc-if></span>
+                <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{s.help}}</span>
+                <span class="num layers" aria-label="{{s.layersA}}"><span class="ly"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>Hard ceiling <b>{{s.ceilT}}</b></span><span class="lysep" aria-hidden="true">›</span><span class="ly">Balanced <b>{{s.levelT}}</b> <i>provisional</i></span><span class="lysep" aria-hidden="true">›</span><span class="ly ly-you">Yours <b>{{s.valT}}</b> <span style="color: #A1A8B3">{{s.youT}}</span></span></span>
+                <sc-if value="{{s.hasWarn}}" hint-placeholder-val="{{false}}"><span class="num swap" style="display: flex; gap: 6px; font-size: 13px; color: #F5B64C; line-height: 1.5"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5B64C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px"><path d="M12 4 L21 20 H3 Z M12 10 V14 M12 17 V17.4"></path></svg><span>{{s.warn}}</span></span></sc-if>
+              </div>
+              <div class="stepper" role="group" aria-labelledby="sl-{{s.k}}">
+                <button type="button" class="press" onClick="{{s.down}}" disabled="{{s.downOff}}" aria-label="Lower: {{s.label}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M5 12 H19"></path></svg></button>
+                <output class="num" aria-live="polite" style="min-width: 76px; text-align: center; font-size: 17px; font-weight: 700">{{s.valT}}</output>
+                <button type="button" class="press" onClick="{{s.up}}" disabled="{{s.upOff}}" aria-label="Raise: {{s.label}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M12 5 V19 M5 12 H19"></path></svg></button>
+              </div>
+            </div>
+          </sc-for>
+
+        </section>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 20px; min-width: 0">
+        <section class="card enter d3" aria-labelledby="ru-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 20px 20px 8px; display: flex; flex-direction: column; gap: 4px">
+          <h2 id="ru-h" style="margin: 0; font-size: 18px; font-weight: 600">Each rule</h2>
+          <span style="font-size: 14px; color: #A1A8B3; line-height: 1.5; padding-bottom: 6px">You can switch a rule off or make it stricter. You cannot switch on a version that was not tested.</span>
+          <sc-for list="{{rules}}" as="r" hint-placeholder-count="2">
+            <div style="display: flex; flex-direction: column; padding: 8px 0 10px; border-top: 1px solid #262A31">
+              <div class="rrow" style="border-top: 0">
+                <span style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px"><b id="rn-{{r.k}}" style="font-size: 16px; font-weight: 600">{{r.name}}</b><span class="num" style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{r.sub}}</span></span>
+                <button type="button" role="switch" aria-checked="{{r.onS}}" aria-label="Use {{r.name}}" onClick="{{r.flip}}" disabled="{{r.onOff}}" class="press" style="flex: none; width: 60px; height: 44px; border: 0; padding: 0; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center"><span class="tog" style="width: 52px; height: 32px; border-radius: 999px; padding: 4px; box-sizing: border-box; background: {{r.onBg}}; display: flex"><span style="width: 24px; height: 24px; border-radius: 999px; background: #F4F5F7; transform: {{r.onX}}"></span></span></button>
+              </div>
+              <div class="rrow">
+                <span style="flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Market check</span><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">No new buys while the S&amp;P 500 is below its 200-day average. {{r.checkWhy}}</span></span>
+                <sc-if value="{{r.checkLocked}}" hint-placeholder-val="{{true}}"><span style="display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; color: #3DDC97"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true" style="flex: none"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11 V8 a4 4 0 0 1 8 0 V11"></path></svg>Always on</span></sc-if>
+                <sc-if value="{{r.checkFree}}" hint-placeholder-val="{{false}}"><button type="button" role="switch" aria-checked="{{r.ckS}}" aria-label="Market check for {{r.name}}" onClick="{{r.flipCheck}}" disabled="{{r.ckOff}}" class="press" style="flex: none; width: 60px; height: 44px; border: 0; padding: 0; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center"><span class="tog" style="width: 52px; height: 32px; border-radius: 999px; padding: 4px; box-sizing: border-box; background: {{r.ckBg}}; display: flex"><span style="width: 24px; height: 24px; border-radius: 999px; background: #F4F5F7; transform: {{r.ckX}}"></span></span></button></sc-if>
+              </div>
+              <div class="rrow">
+                <span style="flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span id="en-{{r.k}}" style="font-size: 14px; font-weight: 500">Around earnings</span><span style="font-size: 13px; color: #A1A8B3; line-height: 1.45">{{r.earnWhy}}</span></span>
+                <div class="seg2" role="radiogroup" aria-labelledby="en-{{r.k}}">
+                  <sc-for list="{{r.earn}}" as="e" hint-placeholder-count="2">
+                    <button type="button" role="radio" class="seg" aria-checked="{{e.on}}" onClick="{{e.pick}}" disabled="{{e.off}}" style="background: {{e.bg}}; color: {{e.ink}}">{{e.name}}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </section>
+        <section class="card enter d4" aria-labelledby="td-h" style="background: #131519; border: 1px solid #262A31; border-radius: 24px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+          <h2 id="td-h" style="margin: 0; font-size: 18px; font-weight: 600">What this means today</h2>
+          <dl style="margin: 0; display: flex; flex-direction: column">
+            <sc-for list="{{today}}" as="t" hint-placeholder-count="4">
+              <div style="display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 10px 0; border-top: 1px solid #1B1E24"><dt style="flex: 1 1 160px; font-size: 14px; color: #A1A8B3">{{t.k}}</dt><dd class="num swap" style="margin: 0; font-size: 14px; font-weight: 600; text-align: right">{{t.v}}</dd></div>
+            </sc-for>
+          </dl>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">Kaibot never sells a stock only because you lowered a limit. Lower limits stop new buys and make new positions smaller. To sell everything now, use Flatten and stop on Home.</span>
+        </section>
+      </div>
+    </div>
+    <p style="margin: 0; font-size: 12px; color: #A1A8B3; text-align: center; line-height: 1.5">Sample data: every price, rank and result here is invented · paper trading only · times in Berlin (New York is 6 hours behind)</p>
+    </sc-if>
+    <sc-if value="{{dirty}}" hint-placeholder-val="{{false}}">
+      <div class="dock" role="region" aria-label="Unsaved changes" style="display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 20px; border-radius: 999px; background: #1B1E24; border: 1px solid #3A404A; box-shadow: 0 12px 40px rgba(0,0,0,.5)">
+        <span class="num" style="flex: 1; font-size: 14px; font-weight: 600">{{dirtyT}}</span>
+        <button type="button" class="press" onClick="{{undo}}" style="height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid #3A404A; background: transparent; color: #F4F5F7; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Undo</button>
+        <button type="button" class="press" onClick="{{openReview}}" style="height: 44px; padding: 0 20px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Review</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{review}}" hint-placeholder-val="{{false}}">
+      <div class="mwrap">
+        <div onClick="{{closeSheet}}" style="position: absolute; inset: 0; background: rgba(0,0,0,.6)" aria-hidden="true"></div>
+        <section class="mpanel" role="dialog" aria-modal="true" aria-labelledby="rv-h" style="position: relative; background: #131519; border: 1px solid #262A31; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: center; gap: 8px"><h2 id="rv-h" style="margin: 0; flex: 1; font-size: 20px; font-weight: 600">Review changes</h2><button type="button" onClick="{{closeSheet}}" aria-label="Close" class="press" style="width: 44px; height: 44px; border-radius: 999px; border: 0; background: #1B1E24; color: #A1A8B3; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M6 6 L18 18 M18 6 L6 18"></path></svg></button></div>
+          <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+            <sc-for list="{{diff}}" as="x" hint-placeholder-count="2">
+              <li style="display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 10px 0; border-top: 1px solid #1B1E24; font-size: 14px"><span style="flex: 1 1 180px; color: #A1A8B3">{{x.k}}</span><span class="num" style="color: #A1A8B3; text-decoration: line-through">{{x.a}}</span><span aria-hidden="true" style="color: #A1A8B3">→</span><b class="num" style="font-weight: 600">{{x.b}}</b></li>
+            </sc-for>
+          </ul>
+          <ol style="margin: 0; padding: 0 0 0 20px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: #A1A8B3; line-height: 1.5">
+            <li>Kaibot first replays both rules over ten years with your settings and logs the run. This takes a few minutes.</li>
+            <li class="num">Then the settings apply from the next decision, after tonight’s close at 22:00. Tonight’s orders are already at the broker; a buy that would break a new limit is cancelled.</li>
+            <li>Every setting stays inside the Balanced limits, so nothing here can make Kaibot hold more.</li>
+          </ol>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px">
+            <button type="button" class="press full-sm" onClick="{{apply}}" style="height: 48px; padding: 0 22px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Save and replay</button>
+            <button type="button" class="press full-sm" onClick="{{closeSheet}}" style="height: 48px; padding: 0 22px; border-radius: 999px; border: 1px solid #3A404A; background: transparent; color: #F4F5F7; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Keep editing</button>
+          </div>
+        </section>
+      </div>
+    </sc-if>
+    <sc-if value="{{offSheet}}" hint-placeholder-val="{{false}}">
+      <div class="mwrap">
+        <div onClick="{{closeSheet}}" style="position: absolute; inset: 0; background: rgba(0,0,0,.6)" aria-hidden="true"></div>
+        <section class="mpanel" role="dialog" aria-modal="true" aria-labelledby="of-h" style="position: relative; background: #131519; border: 1px solid #262A31; padding: 22px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; align-items: center; gap: 8px"><h2 id="of-h" style="margin: 0; flex: 1; font-size: 20px; font-weight: 600">Switch off multi-day holding?</h2><button type="button" onClick="{{closeSheet}}" aria-label="Close" class="press" style="width: 44px; height: 44px; border-radius: 999px; border: 0; background: #1B1E24; color: #A1A8B3; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M6 6 L18 18 M18 6 L6 18"></path></svg></button></div>
+          <span class="num" style="font-size: 14px; color: #A1A8B3; line-height: 1.5">Kaibot holds {{held}} stocks for these rules. Choose what happens to them.</span>
+          <div role="radiogroup" aria-labelledby="of-h" style="display: flex; flex-direction: column; gap: 8px">
+            <sc-for list="{{offModes}}" as="m" hint-placeholder-count="2">
+              <button type="button" role="radio" aria-checked="{{m.on}}" onClick="{{m.pick}}" class="press" style="display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 14px 16px; border-radius: 16px; border: 1px solid {{m.bd}}; background: {{m.bg}}; color: #F4F5F7; font: inherit; cursor: pointer">
+                <span aria-hidden="true" style="flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 999px; border: 2px solid {{m.ring}}; box-sizing: border-box; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 10px; border-radius: 999px; background: {{m.dot}}"></span></span>
+                <span style="display: flex; flex-direction: column; gap: 3px"><b style="font-size: 15px; font-weight: 600">{{m.name}}</b><span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">{{m.sub}}</span></span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px">
+            <button type="button" class="press full-sm" onClick="{{confirmOff}}" style="height: 48px; padding: 0 22px; border-radius: 999px; border: 0; background: #F4F5F7; color: #0A0B0D; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Switch off</button>
+            <button type="button" class="press full-sm" onClick="{{closeSheet}}" style="height: 48px; padding: 0 22px; border-radius: 999px; border: 1px solid #3A404A; background: transparent; color: #F4F5F7; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer">Keep it on</button>
+          </div>
+          <span style="font-size: 13px; color: #A1A8B3; line-height: 1.5">Either way, nothing changes before you review and save.</span>
+        </section>
+      </div>
+    </sc-if>
+  </main>
+  <nav class="tabbar" aria-label="Main">
+    <a href="Overview.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z" stroke-linejoin="round"></path></svg>Home</a>
+    <a href="Holdings.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 7 H20 M8 12 H20 M8 17 H20" stroke-linecap="round"></path><path d="M4 7 H4.01 M4 12 H4.01 M4 17 H4.01" stroke-linecap="round" stroke-width="2.6"></path></svg>Holdings</a>
+    <a href="NextClose.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5 V12 L15 14" stroke-linecap="round" stroke-linejoin="round"></path></svg>Next</a>
+    <a href="Evidence.dc.html" class="press" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3.5 L19 6.5 V11.5 C19 15.8 16 19 12 20.5 C8 19 5 15.8 5 11.5 V6.5 Z" stroke-linejoin="round"></path><path d="M9 12 L11.2 14.2 L15 10" stroke-linecap="round" stroke-linejoin="round"></path></svg>Evidence</a>
+    <button type="button" class="press" onClick="{{openMore}}" aria-expanded="{{moreS}}" aria-haspopup="dialog" style="display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 60px; min-height: 44px; text-decoration: none; font-size: 11px; font-weight: 600; color: #A1A8B3; background: transparent; border: 0; padding: 0; font-family: inherit; cursor: pointer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12 H5.01 M12 12 H12.01 M19 12 H19.01" stroke-linecap="round" stroke-width="3"></path></svg>More</button>
+  </nav>
+  <sc-if value="{{more}}" hint-placeholder-val="{{false}}">
+    <div class="mwrap">
+      <div onClick="{{closeMore}}" style="position: absolute; inset: 0; background: rgba(0,0,0,.6)" aria-hidden="true"></div>
+      <section class="mpanel" role="dialog" aria-modal="true" aria-labelledby="more-h" style="position: relative; background: #131519; border: 1px solid #262A31; padding: 18px 12px 24px; display: flex; flex-direction: column; gap: 2px">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 0 8px 8px"><h2 id="more-h" style="margin: 0; flex: 1; font-size: 18px; font-weight: 600">More</h2><button type="button" onClick="{{closeMore}}" aria-label="Close" class="press" style="width: 44px; height: 44px; border-radius: 999px; border: 0; background: #1B1E24; color: #A1A8B3; cursor: pointer; display: flex; align-items: center; justify-content: center"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none"><path d="M6 6 L18 18 M18 6 L6 18"></path></svg></button></div>
+        <a href="Report.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border-radius: 14px; color: #F4F5F7; text-decoration: none"><span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; font-weight: 600">Report</b><span style="font-size: 13px; color: #A1A8B3">Each day in numbers</span></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+        <a href="Engine.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border-radius: 14px; color: #F4F5F7; text-decoration: none"><span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; font-weight: 600">Engine</b><span style="font-size: 13px; color: #A1A8B3">Health, alarms and the event log</span></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+        <a href="Configure.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border-radius: 14px; color: #F4F5F7; text-decoration: none"><span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; font-weight: 600">Strategy</b><span style="font-size: 13px; color: #A1A8B3">What Kaibot may trade and how boldly</span></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+        <a href="Settings.dc.html" class="rowlink" style="display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 6px 12px; border-radius: 14px; color: #F4F5F7; text-decoration: none"><span style="flex: 1; display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; font-weight: 600">Run &amp; settings</b><span style="font-size: 13px; color: #A1A8B3">Pot, level and account</span></span><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A1A8B3" stroke-width="2" aria-hidden="true" style="flex: none"><path d="M9 6 L15 12 L9 18" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+      </section>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"showLoading":{"editor":"boolean","default":false,"section":"States"},"notStartedYet":{"editor":"boolean","default":false,"section":"States"},"earningsTested":{"editor":"boolean","default":false,"section":"States"},"$preview":{"width":1440,"height":2040}}'>
+class Component extends DCLogic {
+  constructor(p) {
+    super(p); this.D = {"settings":[{"k":"gross","label":"Most of the pot invested","help":"Everything the rules hold together. The rest stays in cash.","unit":"%","dec":0,"level":100,"ceil":100,"step":5,"lo":10,"hi":100,"v":80,"kind":"cap","group":"book"},{"k":"names","label":"Most stocks at once","help":"Both rules together.","unit":"","dec":0,"level":20,"ceil":30,"step":1,"lo":1,"hi":20,"v":20,"kind":"cap","group":"book"},{"k":"name","label":"Most in one stock","help":"Share of the pot, both rules together.","unit":"%","dec":0,"level":15,"ceil":20,"step":1,"lo":1,"hi":15,"v":10,"kind":"cap","group":"book"},{"k":"sector","label":"Most in one sector","help":"Share of the pot in one sector, for example technology.","unit":"%","dec":0,"level":30,"ceil":40,"step":5,"lo":5,"hi":30,"v":30,"kind":"cap","group":"book"},{"k":"cash","label":"Cash always kept aside","help":"Never invested. This one can only go up.","unit":"%","dec":0,"level":2,"ceil":1,"step":1,"lo":2,"hi":50,"v":2,"kind":"floor","group":"book"},{"k":"risk","label":"Risk per stock","help":"A normal day’s move in one stock costs at most this share of the pot. Lower means smaller positions.","unit":"%","dec":2,"level":0.1,"ceil":0.25,"step":0.01,"lo":0.02,"hi":0.1,"v":0.1,"kind":"cap","group":"more"},{"k":"gap","label":"Loss on a bad morning","help":"Kaibot tests a bad morning: every stock opens 10% lower, or three normal days lower if that is more. The pot may lose at most this.","unit":"%","dec":0,"level":12,"ceil":15,"step":1,"lo":2,"hi":12,"v":12,"kind":"cap","group":"more"},{"k":"daily","label":"Stop buying for the day after a loss of","help":"Counts the overnight move. Stocks you hold keep their safety stops.","unit":"%","dec":2,"level":1.5,"ceil":3.0,"step":0.25,"lo":0.25,"hi":1.5,"v":1.5,"kind":"cap","group":"stop"},{"k":"run","label":"End the run after a fall of","help":"Measured from the pot’s highest value. The run ends, as it does today.","unit":"%","dec":1,"level":8.0,"ceil":12.0,"step":0.5,"lo":2.0,"hi":8.0,"v":8.0,"kind":"cap","group":"stop"}],"rules":[{"k":"r1","name":"Steady risers","what":"Buys the stocks that have climbed most steadily over about four months.","held":8,"check":"locked","checkWhy":"Always on for this rule. It was tested this way."},{"k":"r2","name":"12-month winners","what":"Buys the stocks that did best over the past year, leaving out the last month.","held":4,"check":"off","checkWhy":"Runs without it now. Switching it on uses the version that was tested with it."}],"pot":5175.4,"held":12,"invested":52.7,"biggest":6.1,"biggestSym":"CSCO","today":"Thu 11 Mar","now":"20:14"};
+    const vals = {}; this.D.settings.forEach((s) => { vals[s.k] = s.v; });
+    const rules = { r1: { on: true, check: true, earn: 'hold' }, r2: { on: true, check: false, earn: 'hold' } };
+    this.saved = { vals: { ...vals }, rules: JSON.parse(JSON.stringify(rules)), md: true, offMode: 'keep' };
+    this.state = { more: false, ready: false, vals, rules, md: true, offMode: 'keep', pickMode: 'keep', sheet: null, adv: false, applied: false };
+  }
+
+  componentDidMount() { this._t = setTimeout(() => this.setState({ ready: true }), 1000); }
+  componentWillUnmount() { clearTimeout(this._t); }
+  common() {
+    const st = this.state; const loading = !!this.props.showLoading || !st.ready;
+    return { loading, ready: !loading, more: !!st.more, moreS: String(!!st.more), openMore: () => this.setState({ more: true }), closeMore: () => this.setState({ more: false }) };
+  }
+  fmt(s, v) { return (s.unit === '%' ? v.toFixed(s.dec) + '%' : String(v)); }
+  usd(v) { return '$' + Math.round(v).toLocaleString('en-US'); }
+  sw(on, extra) { return { [extra + 'S']: String(on), [extra + 'Bg']: on ? '#3D7BD9' : '#3A404A', [extra + 'X']: on ? 'translateX(20px)' : 'none' }; }
+  set(k, v) { this.setState({ vals: { ...this.state.vals, [k]: v }, applied: false }); }
+  row(s) {
+    const st = this.state, v = st.vals[s.k], D = this.D, eps = 1e-9;
+    const r = (x) => Math.round(x / s.step) * s.step;
+    const atLimit = s.kind === 'cap' ? v >= s.level - eps : v <= s.level + eps;
+    let warn = '';
+    const notYet = !!this.props.notStartedYet;
+    if (s.k === 'names' && !notYet && v < D.held) warn = 'You hold ' + D.held + ' now. Kaibot sells none of them for this; it buys again once fewer than ' + v + ' are held.';
+    if (s.k === 'gross' && !notYet && v < D.invested) warn = D.invested.toFixed(0) + '% is invested now. Kaibot sells nothing for this; it buys again once less than ' + v + '% is invested.';
+    if (s.k === 'name' && !notYet && v < D.biggest) warn = D.biggestSym + ' is ' + D.biggest.toFixed(1) + '% of the pot now. It is kept; Kaibot does not add to it above ' + v + '%.';
+    if (s.k === 'cash' && v > 100 - st.vals.gross) warn = 'With ' + v + '% kept aside, at most ' + (100 - v) + '% can be invested.';
+    const floor = s.kind === 'floor', pre = floor ? 'at least ' : '';
+    const youT = atLimit ? '· at the Balanced limit' : (floor ? '· stricter: more cash' : '· stricter');
+    return { k: s.k, label: s.label, help: s.help, valT: this.fmt(s, v), changed: Math.abs(v - this.saved.vals[s.k]) > eps,
+      ceilT: pre + this.fmt(s, s.ceil), levelT: pre + this.fmt(s, s.level), youT,
+      layersA: 'Hard ceiling ' + pre + this.fmt(s, s.ceil) + ', Balanced limit ' + pre + this.fmt(s, s.level) + ' provisional, yours ' + this.fmt(s, v),
+      hasWarn: !!warn, warn,
+      downOff: v <= s.lo + eps ? true : null, upOff: v >= s.hi - eps ? true : null,
+      down: () => this.set(s.k, Math.max(s.lo, r(v - s.step))), up: () => this.set(s.k, Math.min(s.hi, r(v + s.step))) };
+  }
+  renderVals() {
+    const st = this.state, D = this.D, S = this.saved, P = this.props;
+    const notYet = !!P.notStartedYet, tested = !!P.earningsTested;
+    const rows = D.settings.map((s) => this.row(s));
+    const by = (g) => rows.filter((r, i) => D.settings[i].group === g);
+    const diff = [];
+    if (st.md !== S.md) diff.push({ k: 'Multi-day holding', a: 'On', b: st.offMode === 'sell' ? 'Off, sell at the next close' : 'Off, keep what is held' });
+    D.settings.forEach((s) => { if (Math.abs(st.vals[s.k] - S.vals[s.k]) > 1e-9) diff.push({ k: s.label, a: this.fmt(s, S.vals[s.k]), b: this.fmt(s, st.vals[s.k]) }); });
+    D.rules.forEach((ru) => {
+      const a = S.rules[ru.k], b = st.rules[ru.k];
+      if (a.on !== b.on) diff.push({ k: ru.name, a: a.on ? 'On' : 'Off', b: b.on ? 'On' : 'Off' });
+      if (a.check !== b.check) diff.push({ k: ru.name + ' · market check', a: a.check ? 'On' : 'Off', b: b.check ? 'On' : 'Off' });
+      if (a.earn !== b.earn) diff.push({ k: ru.name + ' · earnings', a: a.earn === 'hold' ? 'Hold through' : 'Sell before', b: b.earn === 'hold' ? 'Hold through' : 'Sell before' });
+    });
+    const setRule = (k, patch) => this.setState({ rules: { ...st.rules, [k]: { ...st.rules[k], ...patch } }, applied: false });
+    const rules = D.rules.map((ru) => {
+      const r = st.rules[ru.k], wasOn = S.rules[ru.k].on, wasCheck = S.rules[ru.k].check;
+      const earn = [['hold', 'Hold through'], ['sell', 'Sell before']].map(([k, n]) => {
+        const can = k === 'hold' ? S.rules[ru.k].earn === 'hold' : tested;      // only stricter, and only a tested version
+        const on = r.earn === k;
+        return { name: n, on: String(on), off: can ? null : true, pick: () => setRule(ru.k, { earn: k }),
+          bg: on ? '#F4F5F7' : 'transparent', ink: on ? '#0A0B0D' : (can ? '#A1A8B3' : '#7E8693') };
+      });
+      return { k: ru.k, name: ru.name,
+        sub: (notYet ? 'Not started · ' : r.on ? ru.held + ' stocks held · ' : 'Off: buys nothing new, keeps its ' + ru.held + ' stocks until it sells them · ') + ru.what,
+        ...this.sw(r.on, 'on'), onOff: !wasOn && !r.on ? true : null, flip: () => { if (r.on || wasOn) setRule(ru.k, { on: !r.on }); },
+        checkLocked: ru.check === 'locked', checkFree: ru.check !== 'locked', checkWhy: ru.checkWhy,
+        ...this.sw(r.check, 'ck'), ckOff: wasCheck && r.check ? true : null, flipCheck: () => { if (!r.check || !wasCheck) setRule(ru.k, { check: !r.check }); },
+        earnWhy: tested ? 'Both choices were tested. Selling before earnings means more trades.' : 'Holds through earnings, as it was tested. “Sell before” is offered once that version has passed its own tests.',
+        earn };
+    });
+    const v = st.vals, pot = D.pot;
+    const cap = Math.min(v.gross, 100 - v.cash);
+    const today = [
+      { k: 'Most invested', v: cap + '% · ' + this.usd(pot * cap / 100) + ' of ' + this.usd(pot) },
+      { k: 'Invested now', v: notYet ? 'Nothing yet' : D.invested.toFixed(0) + '% · ' + D.held + ' stocks' },
+      { k: 'Most in one stock', v: v.name + '% · ' + this.usd(pot * v.name / 100) },
+      { k: 'Buying stops for the day at', v: '−' + this.usd(pot * v.daily / 100) + ' on the day' },
+      { k: 'The run ends at', v: '−' + v.run.toFixed(1) + '% from the pot’s highest value' },
+    ];
+    const mdOn = st.md && !notYet;
+    const advChanged = by('more').some((r) => r.changed);
+    return { ...this.common(), notYet, held: D.held,
+      book: by('book'), advList: by('more'), stop: by('stop'), adv: st.adv, advS: String(st.adv), advChev: st.adv ? 'open-chev' : '',
+      advTap: () => this.setState({ adv: !st.adv }), advSum: advChanged ? 'changed' : 'at the Balanced limits',
+      mdWord: notYet ? 'Not started' : (st.md ? 'On' : 'Off'), mdInk: mdOn ? '#3DDC97' : '#A1A8B3',
+      mdNote: notYet ? 'Off at every level until a rule has passed its tests and the paper start is approved.' :
+        (st.md ? 'Kaibot may keep stocks overnight and for weeks, inside the limits below.' :
+          (st.offMode === 'sell' ? 'Off after you save: Kaibot sells every multi-day holding at the next close.' : 'Off after you save: Kaibot buys nothing new and keeps what it holds until each rule sells it.')),
+      ...this.sw(mdOn, 'md'), mdOff: notYet || (!S.md && !st.md) ? true : null,
+      flipMd: () => { if (notYet) return; if (st.md) this.setState({ sheet: 'off', pickMode: st.offMode }); else this.setState({ md: true, applied: false }); },
+      offSheet: st.sheet === 'off', review: st.sheet === 'review',
+      offModes: [['keep', 'Stop buying, keep what is held', 'Each rule sells its stocks by its own conditions. Safety stops stay at the broker.'],
+                 ['sell', 'Sell everything at the next close', 'Every multi-day holding is sold at tonight’s closing price.']].map(([k, n, s]) => {
+        const on = st.pickMode === k;
+        return { name: n, sub: s, on: String(on), pick: () => this.setState({ pickMode: k }), bd: on ? '#4F95F0' : '#262A31', bg: on ? '#16263D' : 'transparent', ring: on ? '#7FB2FF' : '#5C6370', dot: on ? '#7FB2FF' : 'transparent' };
+      }),
+      confirmOff: () => this.setState({ md: false, offMode: st.pickMode, sheet: null, applied: false }),
+      closeSheet: () => this.setState({ sheet: null }),
+      rules, today, diff,
+      dirty: diff.length > 0 && !st.sheet, dirtyT: diff.length === 1 ? '1 change, not saved' : diff.length + ' changes, not saved',
+      undo: () => this.setState({ vals: { ...S.vals }, rules: JSON.parse(JSON.stringify(S.rules)), md: S.md, offMode: S.offMode }),
+      openReview: () => this.setState({ sheet: 'review' }),
+      apply: () => { this.saved = { vals: { ...st.vals }, rules: JSON.parse(JSON.stringify(st.rules)), md: st.md, offMode: st.offMode }; this.setState({ sheet: null, applied: true }); },
+      applied: st.applied, prov: !st.applied,
+    };
+  }
+}
+</script>
+</body>
+</html>

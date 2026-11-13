@@ -3,6 +3,7 @@
 Targets (from multi-day strategies) + the current book + limits -> whole-share target positions per
 (strategy, symbol). Pure: no clock, no broker, no database."""
 
+import math
 from dataclasses import replace
 from datetime import date
 
@@ -319,3 +320,261 @@ def test_property_skipped_names_are_logged(sc):
     logged = {(x.strategy, x.symbol) for x in plan.skipped}
     # every wanted name ends up held or logged with a reason (or was cut to zero by a cap, also logged)
     assert wanted - got <= logged
+
+
+# ------------------------------------------------------------------ #168: the ranked fill (the pre-registered sizing)
+# Written before the code. The momentum pre-registrations size best-first: a buy that does not fit is cut to the
+# room and buying stops; purchases fit in the cash plus the plan's sales less a 3% reserve (Amendment 3); held names
+# are resized only on resize weeks, outside a 10% buffer, reductions first. The builder's `fill="ranked"` must give
+# exactly that (engine/daily.momentum_builder configures it per rule; tests/unit/test_builder_parity.py compares it
+# with the research harness on the fixture and a 730-stock decade).
+
+RLIM = replace(LIM, max_sector_pct=40, max_gap_loss_pct=15, max_names=30)
+RB = PortfolioBuilder(RLIM, fill="ranked", cash_reserve=0.03)
+
+
+def rk(weights, resize=False, strategy="mom"):
+    return tl(strategy, weights, resize=resize)
+
+
+def test_ranked_buys_best_first_cuts_the_one_that_does_not_fit_and_stops():
+    # each wants 50 shares x $100 = $5,000; the 12% cap leaves room for 2.4 names
+    b = PortfolioBuilder(replace(RLIM, max_gross_pct=12, max_overnight_pct=12), fill="ranked")
+    m = {s: mk(sector=s) for s in ("CCC", "AAA", "BBB", "DDD")}
+    plan = b.build([rk({"CCC": 1.0, "AAA": 1.0, "BBB": 1.0, "DDD": 1.0})], {}, m, equity=100_000)
+    assert plan.targets == {("mom", "AAA"): 50, ("mom", "BBB"): 20, ("mom", "CCC"): 50}
+    assert plan.sequence == [("mom", "CCC"), ("mom", "AAA"), ("mom", "BBB")]  # the list's order, not the symbol's
+    assert plan.binding[("mom", "BBB")] == "gross" and plan.binding[("mom", "DDD")] == "gross"
+    assert ("mom", "DDD") not in plan.orders and {x.symbol for x in plan.skipped} == {"DDD"}
+    assert plan.guarded == {}
+
+
+def test_ranked_a_size_below_one_share_is_skipped_and_buying_goes_on():
+    m = {"BIG": mk(px=5000.0, atr=600.0), "AAA": mk()}  # 100,000 x 0.001 / 600 = 0.17 shares
+    plan = RB.build([rk({"BIG": 1.0, "AAA": 1.0})], {}, m, equity=100_000, cash=100_000)
+    assert plan.targets == {("mom", "AAA"): 50}
+    assert [(x.symbol, x.reason) for x in plan.skipped] == [("BIG", "unaffordable")]
+
+
+def test_ranked_max_names_counts_kept_names_and_stops():
+    b = PortfolioBuilder(replace(RLIM, max_names=2), fill="ranked")
+    m = {s: mk(sector=s) for s in ("H", "A", "B")}
+    plan = b.build([rk({"H": 1.0, "A": 1.0, "B": 1.0})], {("mom", "H"): 50}, m, equity=100_000)
+    assert plan.orders == {("mom", "A"): 50} and plan.binding[("mom", "B")] == "max_names"
+
+
+def test_ranked_cash_reserve_and_sales_fund_the_purchases():
+    m = {s: mk(sector=s) for s in ("OLD", "A", "B")}
+    # cash $2,000 + the sale of OLD (40 x $100) - 3% of $100,000 = $3,000: 30 shares of A, then buying stops
+    plan = RB.build([rk({"A": 1.0, "B": 1.0})], {("mom", "OLD"): 40}, m, equity=100_000, cash=2_000)
+    assert plan.orders == {("mom", "OLD"): -40, ("mom", "A"): 30}
+    assert plan.sequence == [("mom", "OLD"), ("mom", "A")]  # sells first: they fund the print's purchases
+    assert plan.binding[("mom", "A")] == "cash" and plan.binding[("mom", "B")] == "cash"
+    with pytest.raises(ValueError, match="cash"):
+        RB.build([rk({"A": 1.0})], {}, m, equity=100_000)  # the reserve needs the account's cash
+
+
+def test_ranked_holds_kept_names_unless_the_list_resizes():
+    m = {"A": mk(), "B": mk()}  # target 50 each
+    cur = {("mom", "A"): 70, ("mom", "B"): 30}
+    held = RB.build([rk({"A": 1.0, "B": 1.0}, resize=False)], cur, m, equity=100_000, cash=50_000)
+    assert held.orders == {} and held.binding[("mom", "A")] == "hold"
+    plan = RB.build([rk({"A": 1.0, "B": 1.0}, resize=True)], cur, m, equity=100_000, cash=50_000)
+    assert plan.orders == {("mom", "A"): -20, ("mom", "B"): 20}
+    assert plan.sequence == [("mom", "A"), ("mom", "B")]  # reductions first: they make room
+
+
+@pytest.mark.parametrize("current,order", [(44, 6), (45, None), (55, None), (56, -6)])
+def test_ranked_resize_buffer_is_more_than_ten_percent_of_the_target(current, order):
+    # the pre-registration trades when |held - target| > 10% of the target: 45 and 55 stay, 44 and 56 trade
+    plan = RB.build([rk({"A": 1.0}, resize=True)], {("mom", "A"): current}, {"A": mk()}, equity=100_000,
+                    cash=50_000)
+    assert plan.orders.get(("mom", "A")) == order
+
+
+def test_ranked_a_resize_increase_is_cut_to_the_room():
+    b = PortfolioBuilder(replace(RLIM, max_gross_pct=10, max_overnight_pct=10), fill="ranked")
+    plan = b.build([rk({"A": 1.0, "B": 1.0}, resize=True)], {("mom", "A"): 30, ("mom", "B"): 50},
+                   {"A": mk(), "B": mk(sector="x")}, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 50}  # B is at target; A grows by the $2,000 left
+    plan = b.build([rk({"A": 1.0, "B": 1.0}, resize=True)], {("mom", "A"): 30, ("mom", "B"): 60},
+                   {"A": mk(), "B": mk(sector="x")}, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 50}  # B's reduction comes first and makes the room
+
+
+def test_ranked_a_held_name_without_data_is_kept_and_counted():
+    m = {"A": Instrument(px=100.0, atr20=float("nan")), "B": mk(sector="x")}
+    b = PortfolioBuilder(replace(RLIM, max_gross_pct=10, max_overnight_pct=10), fill="ranked")
+    plan = b.build([rk({"A": 1.0, "B": 1.0}, resize=True)], {("mom", "A"): 80}, m, equity=100_000)
+    assert plan.targets == {("mom", "A"): 80, ("mom", "B"): 20}
+
+
+def test_ranked_a_name_that_may_not_open_is_sized_counted_and_not_bought():
+    """The research harness refuses such an entry at the fill after the room was counted (#161, kept by #168)."""
+    b = PortfolioBuilder(replace(RLIM, max_gross_pct=10, max_overnight_pct=10), fill="ranked")
+    m = {"A": Instrument(100.0, 2.0, "a", can_open=False), "B": mk(sector="b")}
+    plan = b.build([rk({"A": 1.0, "B": 1.0})], {}, m, equity=100_000)
+    assert plan.targets == {("mom", "B"): 50} and plan.binding[("mom", "A")] == "refused"
+    assert ("mom", "A") in {(x.strategy, x.symbol) for x in plan.skipped if x.reason == "refused"}
+    # the pro-rata fill just skips it
+    assert PB.build([tl("mom", {"A": 1.0})], {}, m, equity=100_000).targets == {}
+
+
+def test_ranked_uses_the_rules_k_when_the_limits_allow_it():
+    b = PortfolioBuilder(replace(RLIM, atr_risk_pct=0.15), k=0.0015, fill="ranked")
+    assert b.build([rk({"A": 1.0})], {}, {"A": mk()}, equity=100_000).targets == {("mom", "A"): 75}
+    clamped = PortfolioBuilder(RLIM, k=0.0015, fill="ranked")  # the level's 0.1% still caps it
+    assert clamped.build([rk({"A": 1.0})], {}, {"A": mk()}, equity=100_000).targets == {("mom", "A"): 50}
+
+
+def test_ranked_the_per_name_cap_is_part_of_the_size():
+    # ATR 0.5 -> 200 shares ($20,000); the 15% cap is $15,000 = 150 shares
+    plan = RB.build([rk({"A": 1.0})], {}, {"A": mk(atr=0.5)}, equity=100_000, cash=100_000)
+    assert plan.targets == {("mom", "A"): 150} and plan.guarded == {}
+
+
+def test_ranked_sector_cap_cuts_best_ranked_first_and_buying_goes_on():
+    """Amendment 4: a buy is cut to its sector's room; the next name (another sector) is still bought."""
+    b = PortfolioBuilder(replace(RLIM, max_sector_pct=7), fill="ranked")  # $7,000 per sector
+    m = {"A": mk(sector="t"), "B": mk(sector="t"), "C": mk(sector="u"), "D": mk(sector="t")}
+    plan = b.build([rk({"A": 1.0, "B": 1.0, "C": 1.0, "D": 1.0})], {}, m, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 20, ("mom", "C"): 50}  # B gives way to A; D: none left
+    assert plan.binding[("mom", "B")] == "sector" and plan.binding[("mom", "D")] == "sector"
+    assert plan.guarded == {} and plan.sequence == [("mom", "A"), ("mom", "B"), ("mom", "C")]
+
+
+def test_ranked_a_stock_without_a_sector_is_its_own_sector():
+    b = PortfolioBuilder(replace(RLIM, max_sector_pct=7), fill="ranked")
+    m = {"A": mk(sector=None), "B": mk(sector=None)}  # pro-rata: one "unknown" bucket; ranked: two sectors
+    assert b.build([rk({"A": 1.0, "B": 1.0})], {}, m, equity=100_000).targets == {("mom", "A"): 50, ("mom", "B"): 50}
+
+
+def test_ranked_sector_cap_counts_held_names_and_cuts_a_resize_increase():
+    b = PortfolioBuilder(replace(RLIM, max_sector_pct=7), fill="ranked")
+    m = {"A": mk(sector="t"), "H": mk(sector="t")}
+    plan = b.build([rk({"H": 1.0, "A": 1.0}, resize=True)], {("mom", "H"): 30}, m, equity=100_000)
+    assert plan.targets == {("mom", "H"): 50, ("mom", "A"): 20}  # H resized first (held), A gets what is left
+
+
+def test_ranked_outer_guards_cut_the_last_ranked_purchase_and_say_so():
+    b = PortfolioBuilder(replace(RLIM, min_cash_pct=88), fill="ranked")  # the cash floor leaves 12% gross
+    m = {"A": mk(sector="a"), "B": mk(sector="b"), "C": mk(sector="c")}
+    plan = b.build([rk({"A": 1.0, "B": 1.0, "C": 1.0})], {}, m, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 50, ("mom", "C"): 20}  # C, ranked last, gives way
+    assert plan.guarded == {("mom", "C"): "gross"} and plan.binding[("mom", "C")] == "guard:gross"
+
+
+def test_ranked_guards_never_force_a_sale():
+    b = PortfolioBuilder(replace(RLIM, min_cash_pct=96), fill="ranked")  # the held name alone is above 4% gross
+    plan = b.build([rk({"A": 1.0, "B": 1.0}, resize=True)], {("mom", "A"): 50},
+                   {"A": mk(sector="a"), "B": mk(sector="b")}, equity=100_000)
+    assert plan.targets == {("mom", "A"): 50, ("mom", "B"): 0} and plan.guarded == {("mom", "B"): "gross"}
+
+
+def test_ranked_options_are_checked():
+    with pytest.raises(ValueError):
+        PortfolioBuilder(RLIM, fill="greedy")
+    with pytest.raises(ValueError):
+        PortfolioBuilder(RLIM, cash_reserve=0.03)  # the reserve belongs to the ranked fill
+    with pytest.raises(ValueError):
+        PortfolioBuilder(RLIM, fill="ranked", cash_reserve=1.5)
+
+
+def test_pro_rata_fill_keeps_held_names_when_the_list_does_not_resize():
+    plan = PB.build([tl("mom", {"A": 1.0}, resize=False)], {("mom", "A"): 70}, {"A": mk()}, equity=100_000)
+    assert plan.orders == {} and plan.binding[("mom", "A")] == "hold"
+
+
+def _reference(sc):
+    """The harness's sizing (`replay/multiday_core.CoreRule.plan`), transcribed for one list of weight-1 names:
+    sells, resizes (reductions first), buys best first until the room runs out; Amendment 3's cash reserve and
+    Amendment 4's sector cap (no sector: its own)."""
+    eq, lim, m, k = sc["equity"], sc["lim"], sc["m"], sc["k"]
+    held = {s: (q, m[s].px) for (_, s), q in sc["current"].items() if q > 0}
+
+    def bucket(s):
+        return m[s].sector or f"own:{s}"
+
+    sell = [s for s in held if s not in sc["keep"]]
+    cap = min(lim.max_gross_pct, lim.max_overnight_pct) / 100 * eq
+    exposure = sum(q * last for s, (q, last) in held.items() if s not in sell)
+    names = len(held) - len(sell)
+    money = sc["cash"] + sum(q * last for s, (q, last) in held.items() if s in sell) - 0.03 * eq
+    sec_cap, used = lim.max_sector_pct / 100 * eq, {}  # Amendment 4
+    for s, (q, last) in held.items():
+        if s not in sell:
+            used[bucket(s)] = used.get(bucket(s), 0.0) + q * last
+
+    def fits(px):
+        return min(math.floor(max(cap - exposure, 0.0) / px), math.floor(max(money, 0.0) / px))
+
+    def sroom(s, px):
+        return math.floor(max(sec_cap - used.get(bucket(s), 0.0), 0.0) / px)
+
+    def target(s):
+        return float(min(math.floor(eq * k / m[s].atr20), math.floor(eq * lim.max_name_pct / 100 / m[s].px)))
+
+    out = {s: 0 for s in sell} | {s: q for s, (q, _) in held.items() if s not in sell}
+    if sc["resize"]:
+        want = [(s, q, last, target(s)) for s, (q, last) in held.items() if s not in sell]
+        want = [w for w in want if w[3] >= 1 and abs(w[1] - w[3]) > 0.10 * w[3]]
+        for s, q, last, t in sorted(want, key=lambda w: w[3] - w[1]):
+            if t > q:
+                t = q + min(t - q, fits(last), sroom(s, last))
+                if t <= q:
+                    continue
+            exposure += (t - q) * last
+            money -= (t - q) * last
+            used[bucket(s)] = used.get(bucket(s), 0.0) + (t - q) * last
+            out[s] = int(t)
+    for s in sc["buy"]:
+        if names >= lim.max_names:
+            break
+        t = target(s)
+        if t < 1:
+            continue
+        room = fits(m[s].px)
+        if room < 1:
+            break
+        q = min(t, room, sroom(s, m[s].px))
+        if q < 1:
+            continue
+        exposure += q * m[s].px
+        money -= q * m[s].px
+        used[bucket(s)] = used.get(bucket(s), 0.0) + q * m[s].px
+        names += 1
+        out[s] = int(q)
+        if q == room and room < t:
+            break
+    return {("mom", s): q for s, q in out.items()}
+
+
+@st.composite
+def ranked_scenario(draw):
+    sc = draw(scenario())
+    held = sorted({s for (_, s) in sc["current"]})
+    current = {("mom", s): max(draw(st.integers(0, 400)), 1) for s in held}
+    keep = [s for s in held if draw(st.booleans())]
+    buy = draw(st.permutations([s for s in SYMS if s not in held]))[:draw(st.integers(0, 12))]
+    lim = replace(sc["lim"], max_gap_loss_pct=15, min_cash_pct=1)  # the sector cap as drawn: part of the pass
+    return {**sc, "lim": lim, "current": current, "keep": keep, "buy": buy, "k": min(sc["k"], lim.atr_risk_pct / 100),
+            "resize": draw(st.booleans()), "cash": draw(st.floats(0, sc["equity"]))}
+
+
+@hyp.settings(max_examples=400, deadline=None, suppress_health_check=[hyp.HealthCheck.too_slow])
+@hyp.given(sc=ranked_scenario())
+def test_property_the_ranked_fill_is_the_pre_registered_sizing(sc):
+    """Whenever no outer guard cuts, the ranked fill gives the harness's whole shares exactly; whenever one does,
+    it only ever cut a purchase (and said which)."""
+    b = PortfolioBuilder(sc["lim"], k=sc["k"], fill="ranked", cash_reserve=0.03)
+    lst = tl("mom", {s: 1.0 for s in [*sc["keep"], *sc["buy"]]}, resize=sc["resize"])
+    plan = b.build([lst], sc["current"], sc["m"], equity=sc["equity"], cash=sc["cash"])
+    ref = _reference(sc)
+    assert all(isinstance(q, int) and q >= 0 for q in plan.targets.values())
+    if not plan.guarded:
+        assert {k: q for k, q in plan.targets.items() if q or k in sc["current"]} == ref
+    for key in plan.guarded:
+        assert sc["current"].get(key, 0) <= plan.targets[key] < ref[key]
+    assert plan.sequence == [k for k in plan.sequence if plan.orders[k] < 0] + [
+        k for k in plan.sequence if plan.orders[k] > 0 and k in sc["current"]] + [
+        k for k in plan.sequence if k not in sc["current"]]

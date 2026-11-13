@@ -10,6 +10,11 @@ No look-ahead: a decision for session i reads rows <= i - 1 of arrays whose row 
 account as it stood before the session. The whole order list of a decision is fixed before any of it fills.
 Signals use the harness's bars as they are: split-adjusted, no dividends.
 
+Amendment 4 of both pre-registrations (#168): the plan also keeps every sector at or below 40% of equity (a buy
+or resize increase is cut to its sector's room, best-ranked first, and buying goes on; a stock without a sector is
+its own sector), and at the fill only the cash is checked, as in the engine: an order that finds no bar waits (a
+sale) or is dropped (a buy) and the other caps are not re-checked. Changed results are re-pinned in the tests.
+
 Issue #143 (the honest rerun), each part off by default so that today's results are unchanged (a test pins them):
 - `Market`: one bundle of what a run reads. `Market.from_bars` is today's harness (one set of bars for
   everything). `Market.from_panel` reads a raw panel of the daily store (#124): signals on split-adjusted prices
@@ -39,13 +44,28 @@ from kaibot.evaluation import random_control as rc
 from kaibot.evaluation.metrics import max_drawdown, sharpe
 from kaibot.replay.multiday import FIELDS, Caps, DailyBars, Engine, Indicators, MBook, closes, indicators
 from kaibot.replay.multiday_rules import MIN_ADV, MIN_PRICE, SESSIONS_PER_MONTH
-from kaibot.risk.gate import RiskPolicy
+from kaibot.risk.gate import BOOK_HARD_CEILINGS, RiskPolicy
 
 ATR_SESSIONS = 20
 SMA_STOCK, SMA_MARKET = 100, 200
 MOVE_WINDOW, MOVE_MAX = 90, 0.15
 ANNUAL_SESSIONS = 250  # the published annualisation of the regression slope
 RESIZE_BUFFER = 0.10  # no resize trade within 10% of the target
+CASH_RESERVE = 0.03  # Amendment 3: every decision's buys are sized against cash minus 3% of equity
+SECTOR_CAP_PCT = BOOK_HARD_CEILINGS.max_sector_pct  # Amendment 4: no sector above 40% of equity
+
+
+def universe_sectors(cfg: Mapping) -> dict[str, str]:
+    """Amendment 4's sector source, the one for every command (the engine's research command and
+    `scripts/momentum_core.py`): a stock's sector is the one the universe file lists it under (`sectors: {ETF:
+    [symbols]}`). A stock the file does not list (point-in-time: a former member, keyed SYMBOL@ASOF in the daily
+    store, which holds no sector) is its own sector (`own_sector`)."""
+    return {str(s): str(etf) for etf, syms in (cfg.get("sectors") or {}).items() for s in syms}
+
+
+def own_sector(sector: str | None, symbol: str) -> str:
+    """Amendment 4: a stock without a sector is its own sector (the same rule as the portfolio builder's)."""
+    return sector or f"own:{symbol}"
 DECISION_WEEKDAY = 2  # Wednesday (Monday = 0)
 FILLS = {"base": ("close", 1.0), "stress": ("open", 2.0)}  # where an order fills, and the spread / impact factor
 COSTS = (1.0, 2.0, 3.0)
@@ -216,12 +236,17 @@ class CoreRule:
     (sales waiting for a bar, the decision log), so it serves ONE engine run."""
 
     def __init__(self, sig: Signals, pol: RiskPolicy, spec: CoreSpec, fill: str = "close",
-                 exposure_pct: float = 100.0) -> None:
+                 exposure_pct: float = 100.0, sector: Mapping[int, str] | None = None,
+                 symbols: Sequence[str] | None = None) -> None:
+        """`sector`: column -> sector; `symbols`: the column names (a column without a sector is its own sector,
+        Amendment 4)."""
         if fill not in ("close", "open"):
             raise ValueError("fill is close or open")
         self.sig, self.pol, self.spec, self.fill = sig, pol, spec, fill
         self.name = spec.rule
         self.caps = Caps(max_positions=spec.max_names, max_exposure_pct=float(exposure_pct))
+        self.sector = dict(sector or {})
+        self.symbols = list(symbols) if symbols is not None else None
         self.score_m = sig.score(spec)
         self.days = sig.decision_days(spec)
         self.trend_rules = spec.rule == "trend_momentum"  # the 100-day and 15%-move conditions
@@ -249,10 +274,14 @@ class CoreRule:
         js = np.flatnonzero(np.isfinite(sc) & self.sig.ok[k])
         return js[np.argsort(-sc[js], kind="stable")]
 
-    def plan(self, i: int, held: Mapping[int, tuple[float, float]], eq: float) -> dict:
+    def plan(self, i: int, held: Mapping[int, tuple[float, float]], eq: float, cash: float | None = None) -> dict:
         """The orders of decision session i, from `held` (column -> (shares, last mark)) and equity `eq`, both as
         of the close of i - 1: {"sell": {column: reason}, "resize": [(column, shares)], "buy": [(column, shares)]}.
-        Room is counted at the previous close's prices, as if every order of this plan fills."""
+        Room is counted at the previous close's prices, as if every order of this plan fills.
+
+        `cash` (the account's cash before the session's fills): Amendment 3 of both pre-registrations. Purchases
+        (new buys and resize increases) also fit in the cash plus the plan's sales and reductions at those prices,
+        less a reserve of `CASH_RESERVE` x equity. None: no cash limit (unit tests of the ranking only)."""
         sig, spec, k = self.sig, self.spec, i - 1
         order = self.ranking(k)
         n = len(order)
@@ -270,6 +299,21 @@ class CoreRule:
         cap = self.caps.max_exposure_pct / 100 * eq
         exposure = sum(q * last for j, (q, last) in held.items() if j not in sell)
         names = len(held) - len(sell)
+        money = None if cash is None else (cash + sum(q * last for j, (q, last) in held.items() if j in sell)
+                                           - CASH_RESERVE * eq)
+        sec_cap = SECTOR_CAP_PCT / 100 * eq  # Amendment 4: held names at their marks, as the builder counts them
+        used: dict[str, float] = {}
+        for j, (q, last) in held.items():
+            if j not in sell:
+                used[self.bucket(j)] = used.get(self.bucket(j), 0.0) + q * last
+
+        def fits(px: float) -> float:  # whole shares that fit under the cap and (Amendment 3) in the cash
+            n = math.floor(max(cap - exposure, 0.0) / px)
+            return n if money is None else min(n, math.floor(max(money, 0.0) / px))
+
+        def sector_room(j: int, px: float) -> float:  # whole shares that fit under the sector cap (Amendment 4)
+            return math.floor(max(sec_cap - used.get(self.bucket(j), 0.0), 0.0) / px)
+
         resize: list[tuple[int, float]] = []
         if spec.resize and sig.week[i] % 2 == 0:
             want = []
@@ -279,10 +323,13 @@ class CoreRule:
                     want.append((j, q, last, t))
             for j, q, last, t in sorted(want, key=lambda w: w[3] - w[1]):  # reductions first: they make room
                 if t > q:
-                    t = q + min(t - q, math.floor(max(cap - exposure, 0.0) / last))
+                    t = q + min(t - q, fits(last), sector_room(j, last))
                     if t <= q:
                         continue
                 exposure += (t - q) * last
+                if money is not None:
+                    money -= (t - q) * last
+                used[self.bucket(j)] = used.get(self.bucket(j), 0.0) + (t - q) * last
                 resize.append((j, float(t)))
         buy: list[tuple[int, float]] = []
         if not spec.market_filter or sig.market_on[k]:
@@ -299,15 +346,24 @@ class CoreRule:
                     self.skipped += 1  # one share is more than the position size (decision 15: skipped, counted)
                     continue
                 px = sig.px[k, j] / sj
-                room = math.floor(max(cap - exposure, 0.0) / px)
+                room = fits(px)
                 if room < 1:
                     break  # no room left: buying stops here
-                exposure += min(t, room) * px
+                q = min(t, room, sector_room(j, px))
+                if q < 1:
+                    continue  # its sector is full (Amendment 4): the next name may fit
+                exposure += q * px
+                if money is not None:
+                    money -= q * px
+                used[self.bucket(j)] = used.get(self.bucket(j), 0.0) + q * px
                 names += 1
-                buy.append((j, float(min(t, room))))
-                if room < t:
+                buy.append((j, float(q)))
+                if q == room and room < t:
                     break  # cut to the room left under the exposure cap, and buying stops there (choice 10 / 8)
         return {"sell": sell, "resize": resize, "buy": buy}
+
+    def bucket(self, j: int) -> str:
+        return own_sector(self.sector.get(j), self.symbols[j] if self.symbols is not None else f"#{j}")
 
     # -- placing the orders
 
@@ -322,15 +378,18 @@ class CoreRule:
                 if j not in eng.pos or self._sell(i, eng, j, reason):
                     del self.waiting[j]
             return
-        p = self.plan(i, {j: (x.qty, x.last) for j, x in eng.pos.items()}, eq)
+        p = self.plan(i, {j: (x.qty, x.last) for j, x in eng.pos.items()}, eq, eng.cash)
         self.orders += [(i, "sell", j, r) for j, r in p["sell"].items()]
         self.orders += [(i, "resize", j, t) for j, t in p["resize"]] + [(i, "buy", j, t) for j, t in p["buy"]]
         self.waiting = {j: r for j, r in p["sell"].items() if not self._sell(i, eng, j, r)}
+        # Amendment 4: the plan is final; at the fill only the cash is checked (an order without a bar waits or is
+        # dropped, and the other caps are not re-checked with what did not fill, as the engine cannot)
         for j, t in p["resize"]:
-            if eng.adjust(i, j, t, eq, self.caps, at=self.fill) and j in eng.pos:
+            if eng.adjust(i, j, t, eq, self.caps, at=self.fill, recheck=False) and j in eng.pos:
                 self.resized.append((i, j, eng.pos[j].qty * self._ref(i, j) / eq))
         for j, t in p["buy"]:
-            q = eng.enter(i, j, eq, self.spec.name, self.caps, at=self.fill, shares=t, prev_close=True)
+            q = eng.enter(i, j, eq, self.spec.name, self.caps, at=self.fill, shares=t, prev_close=True,
+                          recheck=False)
             if q:
                 self.entries[i] = self.entries.get(i, 0) + 1
                 self.opened.append((i, j, q * self._ref(i, j) / eq))
@@ -345,12 +404,13 @@ def run_rule(bars: DailyBars, ind: Indicators, pol: RiskPolicy, sig: Signals, sp
              hold_blk: np.ndarray | None = None, entry_blk: np.ndarray | None = None,
              costs=None, actions: tuple[np.ndarray, np.ndarray] | None = None,
              terminal: Mapping[int, tuple[int, float]] | None = None,
-             exits: Mapping[int, Sequence[int]] | None = None) -> tuple[MBook, CoreRule]:
+             exits: Mapping[int, Sequence[int]] | None = None,
+             sector: Mapping[int, str] | None = None) -> tuple[MBook, CoreRule]:
     """One continuous account of one frozen configuration over sessions i0..i1, starting flat. `bars` and `ind`
     are the market side (raw prices with the daily store); `costs` (None: cost model v1), `actions` and
     `terminal` see `multiday.Engine`."""
     where, factor = FILLS[fill]
-    rule = CoreRule(sig, pol, spec, where, exposure_pct)
+    rule = CoreRule(sig, pol, spec, where, exposure_pct, sector, bars.symbols)
     eng = Engine(bars, ind, pol, rule, lambda i: spec, equity0, hold_blk, entry_blk, cost_mult=cost * factor,
                  costs=costs, actions=actions, terminal=terminal, exits=exits)
     return eng.run(i0, i1), rule
@@ -450,18 +510,22 @@ class Market:
     spy_tr: np.ndarray | None = None
     member: np.ndarray | None = None
     notes: dict = dataclasses.field(default_factory=dict)
+    sector: dict[int, str] = dataclasses.field(default_factory=dict)  # column -> sector (Amendment 4)
 
     @classmethod
-    def from_bars(cls, bars: DailyBars, stocks: np.ndarray, spy: int, spy_tr: np.ndarray | None = None) -> Market:
+    def from_bars(cls, bars: DailyBars, stocks: np.ndarray, spy: int, spy_tr: np.ndarray | None = None,
+                  sectors: Mapping[str, str] | None = None) -> Market:
         """Today's harness: one set of split-adjusted bars without dividends for everything (#113, #127)."""
         ind = indicators(bars)
+        sector = {bars.col(s): str(x) for s, x in (sectors or {}).items() if s in bars._col and x}
         return cls(bars, bars, ind, Signals(bars, ind, stocks, spy), np.asarray(stocks, dtype=int), spy,
-                   spy_tr=spy_tr)
+                   spy_tr=spy_tr, sector=sector)
 
     @classmethod
     def from_panel(cls, panel, stocks: Sequence[str], spy: str, *, member: np.ndarray | None = None,
                    terminal_returns: Mapping[str, float] | None = None, exclude: Sequence[str] = (),
-                   disputed: Sequence[str] = (), default_terminal: float = -0.30) -> Market:
+                   disputed: Sequence[str] = (), default_terminal: float = -0.30,
+                   sectors: Mapping[str, str] | None = None) -> Market:
         """From a RAW `kaibot.ingest.daily_store.DailyPanel` (any duck-typed equal). The session calendar is
         SPY's. `member` is (panel sessions x panel symbols) bool, `exclude` keys that may never be bought,
         `terminal_returns` key -> return booked when a held company's bars stop more than `TERMINAL_SLACK`
@@ -536,12 +600,13 @@ class Market:
                  "disputed_splits": windows, "spy_total_return": spy_info,
                  "adjustment_sources": dict(sorted(pd.Series(adj.adj_source).value_counts().items()))
                  if adj.adj_source else {}, **{f"panel_{k}": v for k, v in getattr(panel, "notes", {}).items()}}
+        sector = {raw.col(s): str(x) for s, x in (sectors or {}).items() if s in raw._col and x}
         return cls(raw, sig, ind, signals, cols, raw.col(spy), "point_in_time" if member is not None else "today",
-                   "store", (split, div), terminal, exits, spy_tr, mem, notes)
+                   "store", (split, div), terminal, exits, spy_tr, mem, notes, sector)
 
     def run(self, pol: RiskPolicy, spec: CoreSpec, i0: int, i1: int, **kw) -> tuple[MBook, CoreRule]:
         return run_rule(self.raw, self.ind, pol, self.signals, spec, i0, i1, actions=self.actions,
-                        terminal=self.terminal, exits=self.exits, **kw)
+                        terminal=self.terminal, exits=self.exits, sector=self.sector, **kw)
 
     def spy_price_only(self, i0: int, i1: int) -> np.ndarray:
         """SPY close-to-close returns on split-adjusted closes, no dividends."""
@@ -711,15 +776,18 @@ class SlotReplay:
 def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, book: MBook, rule: CoreRule,
                              i0: int, i1: int, *, runs: int = 500, seed: int = 127, fill: str = "base",
                              cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
-                             progress: Callable[[int], None] | None = None, costs=None) -> dict:
+                             progress: Callable[[int], None] | None = None, costs=None,
+                             fills: Mapping[str, tuple[str, float]] | None = None) -> dict:
     """Gate B mark 3 (decision 15 sections 7 and 10, docs/ops/gate_v2.md hand-off 4): `runs` seeded random
     portfolios that copy the rule's positions slot by slot and draw only the names, from the stocks that pass the
     price and volume filter on the decision's data (`Signals.ok` of the session before the fill: price >= $5,
     20-day dollar volume >= $50M, and index membership on the point-in-time universe) and have a bar to fill on.
     The rule's own names are run through the same replay as a check (`simulated_strategy_sharpe`); the lower of
     the two percentiles counts. Returns `kaibot.evaluation.random_control.ControlResult` as a dict plus the per-run
-    numbers of the report (Sharpe, CAGR, drawdown, return, average exposure) and the CAGR percentile."""
-    where, factor = FILLS[fill]
+    numbers of the report (Sharpe, CAGR, drawdown, return, average exposure) and the CAGR percentile.
+    `fills`: fill name -> (where, cost factor) of the rule's own runs (default `FILLS`; the one-shots of #112 whose
+    base fill is the next open pass their own)."""
+    where, factor = (fills or FILLS)[fill]
     caps = Caps(max_positions=spec.max_names, max_exposure_pct=float(exposure_pct))
     slots = matched_schedule(book, rule, market.raw)
     sig, raw = market.signals, market.raw

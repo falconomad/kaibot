@@ -258,14 +258,16 @@ def max_drawdown(returns) -> float:
 
 
 def calendar_years(net: pd.Series, benchmark: pd.Series | None = None) -> list[dict]:
-    """One row per calendar year: sessions, compounded return, the benchmark's, the difference, the year's own
-    maximum drawdown, and `partial` when the year has fewer than 240 sessions (a first or last year)."""
+    """One row per calendar year: sessions, the calendar months with at least one session (`months`), compounded
+    return, the benchmark's, the difference, the year's own maximum drawdown, and `partial` when the year has
+    fewer than 240 sessions (a first or last year)."""
     net = dated(net)
     bench = align(net, benchmark)[1] if benchmark is not None else None
     out = []
     for year, r in net.groupby(net.index.year):
-        row = {"year": int(year), "sessions": int(r.size), "return": total_return(r),
-               "max_drawdown": max_drawdown(r), "partial": bool(r.size < FULL_YEAR_SESSIONS)}
+        row = {"year": int(year), "sessions": int(r.size), "months": int(r.index.month.nunique()),
+               "return": total_return(r), "max_drawdown": max_drawdown(r),
+               "partial": bool(r.size < FULL_YEAR_SESSIONS)}
         if bench is not None:
             row["benchmark"] = total_return(bench[bench.index.year == year])
             row["excess"] = row["return"] - row["benchmark"]

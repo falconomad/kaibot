@@ -1,7 +1,8 @@
 """Gate B report for one multi-day rule from the files a walk-forward writes (issue #126, decision 15 section 7).
 
 python scripts/gate_v2_report.py --rule trend_highs --daily data/reports/daily_balanced_md_trend_highs_<ts>_default.csv
-    --spy spy_daily.csv [--trades data/reports/trades_balanced_md_trend_highs_<ts>_default.csv]
+    --spy data/reports/spy_daily_md_trend_highs_<ts>.csv
+    [--trades data/reports/trades_balanced_md_trend_highs_<ts>_default.csv]
     [--random control.json] [--universe today|point_in_time] [--pit-daily daily.csv [--pit-trades trades.csv]
     [--pit-random control.json]] [--neighbour NAME=daily.csv ...]
     [--engine research_harness|simbroker] [--cost-model v1|v2] [--data-repairs] [--benchmark spy_price_only|
@@ -14,7 +15,9 @@ Inputs
   Optional columns: `cost` ($ of costs charged that session), `traded` ($ bought plus sold), `exposure` (share of
   equity invested at the close).
 - --spy: `date` and `ret` (SPY total return per session), or `date` and `close` (the first row is then only
-  used as the base). It must cover every session of --daily.
+  used as the base). It must cover every session of --daily. walk_forward_multiday.py writes it beside the daily
+  CSVs as `spy_daily_<tag>.csv` (`ret_kind` says total return or price only); momentum_core.py as
+  `<tag>/spy_daily.csv`.
 - --trades: used only when --daily has no `cost` column. Each trade's spread and impact are split half on its
   entry and half on its exit session and its fees are put on the exit session: an APPROXIMATION of when the cost
   was charged (the totals are exact). Gap slippage is a price outcome, not a modelled cost, and is not scaled.

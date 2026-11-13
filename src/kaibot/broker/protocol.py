@@ -8,7 +8,7 @@ Nine primitives carry everything (`submit`, `cancel`, `replace`, `open_orders`, 
 `activities`, `clock`, `calendar`), plus three reads the engine needs (`order`, `order_by_client_id`,
 `close_position`). The engine's present call sites (`submit_bracket`, `replace_stop`, ...) are one-line wrappers
 defined once in `BrokerBase`, so the paper venue and the simulator receive the SAME `OrderRequest` for the same
-engine call. The order manager (S78) will call the primitives directly.
+engine call. The order manager (S78, engine/orders.py) calls the primitives directly.
 """
 
 from __future__ import annotations
@@ -87,8 +87,11 @@ class Broker(Protocol):
     def cancel(self, order_id: str) -> None:
         """Cancel an open order or leg. An order that is already gone is not an error."""
 
-    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None) -> dict:
-        """Change the price of a working order; returns the order that now works (its id may be new)."""
+    def replace(self, order_id: str, *, stop_price: float | None = None, limit_price: float | None = None,
+                qty: float | None = None, client_order_id: str | None = None) -> dict:
+        """Change the price (or the quantity) of a working order; returns the order that now works (its id may be
+        new: Alpaca replaces the order, the old one turns `replaced`). `client_order_id`: the client id the order
+        works under from now on (Alpaca generates a new one if none is sent; issue #197)."""
 
     def order(self, order_id: str) -> dict:
         """One order with its legs nested."""
@@ -106,8 +109,9 @@ class Broker(Protocol):
 
     def account(self) -> dict: ...
 
-    def activities(self, after: datetime | None = None) -> list[dict]:
-        """Fills booked on the account, oldest first, optionally only those after a time."""
+    def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
+        """Account activities of these types (Alpaca's codes: FILL, DIV, SSP, ...), oldest first, optionally only
+        those after a time. The ledger (S77) reads dividends and splits through it."""
 
     # ---- reference data ----
     def asset(self, symbol: str) -> dict | None:

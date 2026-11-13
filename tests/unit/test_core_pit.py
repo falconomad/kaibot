@@ -42,12 +42,15 @@ N, FIRST, I0 = 560, "2022-01-03", 280
 
 # Written down from the code of #127 as merged (main @ af35af9) BEFORE any change of #143: trades, final equity
 # and the events digest of the base and a stress account of each version on the synthetic market of #127.
+# Re-pinned for Amendment 3 of both pre-registrations (#161, 12 Nov 2026): the two 100%-cap accounts whose buys
+# bound on cash changed (a 3% of equity cash reserve; trend_momentum was (109, 125685.6006, "1beb63952bbc1c17"),
+# mom_12_1_band_nofilter (27, 141053.8994, "447b67ce1c3af51a")); the others did not bind and are unchanged.
 PINNED_CORE = {
-    ("trend_momentum", "base", 100.0): (109, 125685.6006, "1beb63952bbc1c17"),
+    ("trend_momentum", "base", 100.0): (110, 125272.0285, "b1823770ddb944f0"),
     ("trend_momentum", "stress", 60.0): (64, 120772.5994, "5ae6cf3d94af54d7"),
     ("mom_12_1_band", "base", 100.0): (22, 136827.0345, "63195d1dcee90cf0"),
     ("mom_12_1_band", "stress", 60.0): (16, 129887.3954, "2429859c52c03a19"),
-    ("mom_12_1_band_nofilter", "base", 100.0): (27, 141053.8994, "447b67ce1c3af51a"),
+    ("mom_12_1_band_nofilter", "base", 100.0): (27, 140793.9177, "91a4a9bfdb2eb9df"),
     ("mom_12_1_band_nofilter", "stress", 60.0): (20, 132386.1183, "9e418d4cd644ee21"),
 }
 
@@ -581,3 +584,36 @@ def test_cost_model_v2_runs_on_the_store_market_and_in_the_control():
     r = c["control_result"]
     assert r["simulated_strategy_sharpe"] == pytest.approx(r["strategy_sharpe"], abs=1e-9)
     assert np.isfinite(m.equal_weight(I0, N - 1, costs=get_model("v2"))).all()
+
+
+def test_core_pit_and_the_engine_command_give_the_same_sectors(pit_runs):
+    """Amendment 4 (#168): `run_experiments.sh core_pit` (scripts/momentum_core.py) and the engine's research
+    command (`engine/daily_report.load_store`) read the same store and universe file and must give every stock the
+    same sector, so the 40% cap is the same in both: the file's sector, a former member its own sector."""
+    import argparse
+    import time
+
+    import yaml
+
+    from kaibot.engine import daily_report as dr
+    from kaibot.engine.daily import DailyData
+
+    data, panel, ms, keys, base, out, mp = pit_runs
+    uni = Path(base[base.index("--universe-file") + 1])
+    end = base[base.index("--end") + 1]
+    cfg = yaml.safe_load(uni.read_text())
+    stocks = [s for syms in cfg["sectors"].values() for s in syms]
+    a = argparse.Namespace(universe_file=str(uni), start=FIRST, end=end)
+    script_m = core_script.load_market(a, data, stocks, list(cfg["sectors"]), "SPY", "point_in_time", "store",
+                                       time.time(), mc.universe_sectors(cfg))[0]
+    engine_m = dr.load_store(data, uni, "pit", FIRST, end)[0]
+
+    def buckets(m):
+        return {m.raw.symbols[j]: mc.own_sector(m.sector.get(j), m.raw.symbols[j]) for j in m.stocks.tolist()}
+
+    got = buckets(script_m)
+    assert got == buckets(engine_m) and len(got) == 30
+    assert {got[k] for k in keys.values()} == {f"own:{k}" for k in keys.values()}  # former members: their own
+    assert {v for k, v in got.items() if k not in keys.values()} == {"XLK", "XLF"}
+    eng = DailyData.from_market(engine_m).sector
+    assert {s: mc.own_sector(eng.get(s), s) for s in got} == got  # the builder sees the same sectors

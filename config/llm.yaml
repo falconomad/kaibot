@@ -21,4 +21,5 @@ limits:
   proposer: {max_tokens: 700, timeout_s: 15}
   critic: {max_tokens: 700, timeout_s: 15}
   judge: {max_tokens: 500, timeout_s: 15}
+  preopen: {max_tokens: 4000, timeout_s: 90, daily_usd: 3.0}  # #186: one call per session; cap = budget.daily_soft_usd
   room_total_s: 45

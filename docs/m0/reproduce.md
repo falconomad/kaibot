@@ -349,3 +349,59 @@ The third column (today's list on the daily store) separates the data change fro
   ends; the official close against the pre-registered minute close; cost model v1; earnings dates still
   estimated (S85), and on `pit` the exit-before-earnings variant usually fails the reliability bar because former
   members have no news history, so it is skipped.
+
+## 10. One-shot ten-year tests (issue #112, story S72, decision 15 candidate 5)
+
+Six low-prior rules, each ONE frozen run of the construction pre-registered in `docs/prereg/<rule>.md`
+(committed before the code; `scripts/oneshots.py` refuses a rule without its committed file):
+
+```bash
+./scripts/run_experiments.sh oneshots   # all six, resumable, then the one table
+.venv/bin/python scripts/oneshots.py --rule pullback_uptrend --end 2026-11-06   # one rule by hand
+.venv/bin/python scripts/oneshots.py --summary   # data/reports/experiments_oneshots_summary.md
+```
+
+- **What runs on what.** `orb_stocks_in_play` (keep or delete) and `news_continuation` read the minute history
+  (`data/bars_1m`, and `data/news` for news) of today's list: former members have no minute bars, so these two
+  carry survivorship bias, stated in their rows. `pullback_uptrend`, `ath_breakout`, `post_earnings_week` and
+  `weekly_fall_rebound` read the point-in-time S&P 500 (#123) on the daily store (#124), with SPY total return,
+  the 3% cash reserve and the exposure-matched random control (Gate B mark 3, 500 runs;
+  `KAIBOT_ONESHOT_CONTROL_RUNS`). `post_earnings_week` needs the SEC announcement table of S85
+  (`data/earnings/announcements.parquet`, `./scripts/fetch_earnings_dates.sh`).
+- **Missing data.** A rule whose data is missing prints `SKIPPED: <what is missing>` (exit code 3), writes
+  `data/reports/oneshots_<rule>_skipped.json` for the summary and is tried again on the next run; the others go on.
+- **Resumable.** A rule with a finished report for the same dates, universe file, control runs (and seeds) is
+  skipped. The intraday rules cache their per-symbol pass in `data/oneshots/<rule>/` (rebuilt when a symbol's
+  minute or news files change), so an interrupted run resumes at the next symbol.
+- **ORB.** Long only, 1x (each trade 1/20 of the day's equity). Relative volume only from what Kaibot has at the
+  decision: the 09:30-09:34 SIP minutes are 15 minutes old at 09:50, so the buy-stops are placed at 09:50, never
+  earlier. Pessimistic stop-entry fill: the worse of the trigger and the next minute's high, plus half a spread
+  and impact. Kept only if the mean net R is at least +0.05 with t >= 3 AND total net R stays positive without
+  the ten best symbols; otherwise the summary says "FAIL: propose deletion" and a follow-up story removes the
+  rule, its shadow wiring (`engine/shadow.py`, `config/profiles.yaml`) and its tests.
+- **News continuation** counts only the complete news months (at least 90% of the stocks with minute bars have a
+  headline that month, the month has at least half the median monthly headline count, and it ends before the last
+  stored headline). The report and the summary list them as date ranges. Marks: the intraday bar of
+  `config/gate.yaml` (900 trades, t > 3, 95th percentile of 1,000 random entries, daily Sharpe above SPY); the
+  deflated Sharpe comes from the trial registry, so this report can fail the rule but never pass it.
+- **All-time-high breakout** is a distribution, never one curve: 200 seeded random subsets of the signals
+  (`KAIBOT_ONESHOT_SEEDS`) at 5, 10 and 20 positions; the table shows the median seed at 10 positions with the
+  5th / 50th / 95th percentile CAGR and the share of seeds that pass mark 1. The Gate B marks are judged on the
+  median-Sharpe seed.
+- **`weekly_fall_rebound`** is the stakeholder's earlier question (a large stock after its worst five sessions:
+  bottom decile and at least 15% down, hold 5 or 20 sessions, next-close fills). Low prior, written down before
+  the run: the reversal literature puts it at about zero after costs.
+- **Files.** `data/reports/oneshots_<rule>_<ts>.json` and its folder (trades and daily CSVs per configuration,
+  `spy_daily.csv`, one `control_<version>.json`), one trial row per configuration in `data/trials.jsonl` with the
+  pre-registration's sha256 and the sha256 of `config/gate_v2.yaml`.
+- **Status.** PROVISIONAL (decision 15): the research harness of #113 and cost model v1. A rule can FAIL here; none
+  can pass here (the go/no-go run is the engine with `SimBroker`).
+- **Runtimes (honest):** NOT measured on the real data (this was built on a cloud machine without it). Measured on
+  synthetic data of the real size on a busy 2-CPU machine: one daily-rule account over 2,700 sessions x 650 stocks
+  takes 0.15-0.4 s, one control run 0.05-0.2 s; so `pullback_uptrend`, `post_earnings_week` and
+  `weekly_fall_rebound` take about 1-3 minutes each after the panel is loaded, and `ath_breakout` (about 2,200
+  seeded accounts plus the control) about 10-20 minutes. Loading the point-in-time panel from the daily store adds
+  the few minutes of section 9 per rule. The intraday pass takes about 1-2 s per symbol and ten years on synthetic
+  minutes (reading the monthly files dominates), so about 5-15 minutes per intraday rule for 288 stocks on the
+  first run and seconds from the cache. Estimate about 1 to 1.5 hours for the whole set on the stakeholder's Mac;
+  the real runtimes are printed at the end of each log and recorded in each report (`runtime_s`).

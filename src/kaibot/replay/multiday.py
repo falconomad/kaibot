@@ -386,6 +386,13 @@ class Engine:
                 p.fill, p.mid, p.last, p.hi_close, p.stop = (x / s for x in (p.fill, p.mid, p.last, p.hi_close,
                                                                               p.stop))
                 p.entry_costs = (p.entry_costs[0] / s, p.entry_costs[1] / s)
+        # Amendment 3 of the momentum pre-registrations: a fraction of a share left by a split is paid out in cash
+        # at the split-adjusted previous close (Alpaca's rule), with no cost; the whole shares stay held
+        for p in [p for p in self.pos.values() if self.split(i, p.j) != 1.0]:
+            frac = p.qty - math.floor(p.qty + 1e-9)
+            if frac > 1e-9:
+                self.sell(i, p.j, p.last, "cash_in_lieu", 1.0, qty=frac, costless=True)
+
     def adv(self, i: int, j: int) -> float:
         """20-session average dollar volume known before session i (NaN when unknown)."""
         a = self.ind.adv[i - 1, j] if i > 0 else math.nan
@@ -482,7 +489,7 @@ class Engine:
     def enter(self, i: int, j: int, eq: float, config: str, caps: Caps, *, at: str = "open", stop_atr: float = 0.0,
               trail_atr: float = 0.0, max_hold: int = 0, max_value_pct: float | None = None,
               exit_next_open: bool = False, carry: Mapping | None = None, shares: float | None = None,
-              prev_close: bool = False) -> float:
+              prev_close: bool = False, recheck: bool = True) -> float:
         """Buy at the open of session i (sized from the close of i - 1) or at its close (sized from the 15:55
         price, or with `prev_close` from the close of i - 1: an order placed the evening before). Returns the
         quantity bought, 0 when a cap, the blackout or missing data stops the entry.
@@ -491,10 +498,10 @@ class Engine:
         <= the level's max position %; everything held <= `caps.max_exposure_pct` of equity; never more than the
         cash. `carry` (qty, fill, mid) hands over a position bought intraday: at most that quantity, at its fill.
         `shares` is the sizing hook: the rule's own number of shares replaces the gap sizing (the position cap,
-        the exposure cap and the cash still apply).
+        the exposure cap and the cash still apply; with `recheck=False` only the cash: the plan is final).
         """
         b, k = self.b, i - 1
-        if k < 0 or j in self.pos or len(self.pos) >= caps.max_positions:
+        if k < 0 or j in self.pos or (recheck and len(self.pos) >= caps.max_positions):
             return 0.0
         s = self.split(i, j)  # a level of the close of i - 1 in the shares of session i (1.0: no split)
         atr = float(self.ind.atr[k, j]) / s
@@ -505,14 +512,16 @@ class Engine:
         row = k if at == "open" or prev_close else i  # the last session whose news the decision can have read
         if self.entry_blk is not None and (self.entry_blk[row, j] or self.hold_blk[row, j]):
             return 0.0
-        if shares is None:
+        if not recheck and shares is not None:  # the plan's shares, final: only the cash below (momentum, #168)
+            value = math.inf
+        elif shares is None:
             value = min(eq * self.pol.risk_per_trade_pct / 100 / (caps.gap_atr * atr) * ref,
                         eq * self.pol.max_position_pct / 100, caps.max_exposure_pct / 100 * eq - self.exposure())
         else:
             value = min(eq * self.pol.max_position_pct / 100, caps.max_exposure_pct / 100 * eq - self.exposure())
         if max_value_pct is not None:
             value = min(value, eq * max_value_pct / 100)
-        qty = float(math.floor(value / ref)) if value > 0 else 0.0
+        qty = (math.inf if value == math.inf else float(math.floor(value / ref))) if value > 0 else 0.0
         if shares is not None:
             qty = min(qty, float(math.floor(shares))) if math.isfinite(shares) else 0.0
         sig = self.sigma(i, j)
@@ -544,7 +553,7 @@ class Engine:
         return qty
 
     def adjust(self, i: int, j: int, target: float, eq: float, caps: Caps, *, at: str = "close",
-               reason: str = "resize") -> float:
+               reason: str = "resize", recheck: bool = True) -> float:
         """Partial buy or sell of a held position so that it holds `target` whole shares, at the open or the
         close of session i (an order sized from the close of i - 1). Returns the signed shares traded: 0 when
         there is no bar, nothing to do, or no room. A purchase obeys the same position cap, exposure cap and cash
@@ -565,6 +574,8 @@ class Engine:
         room = min(eq * self.pol.max_position_pct / 100 - p.qty * ref,
                    caps.max_exposure_pct / 100 * eq - self.exposure())
         add = min(target - p.qty, float(math.floor(room / ref))) if room > 0 else 0.0
+        if not recheck:  # the plan's target, final: only the cash below (momentum, #168)
+            add = target - p.qty
         if add < 1:
             return 0.0
         sig = self.sigma(i, j)

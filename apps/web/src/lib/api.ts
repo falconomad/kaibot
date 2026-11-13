@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { coerce } from "./coerce";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
+import type { TickerCheck, TickerLists } from "./tickers";
 export { coerce };
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
@@ -194,6 +195,17 @@ export const api = {
     const r = coerce(await rpc<Chapter[] | null>("kb_chapters", { p_run: run })) ?? [];
     return r.map((c) => ({ ...c, version: Number(c.version), n_trades: Number(c.n_trades), pnl_usd: Number(c.pnl_usd ?? 0) }));
   },
+  // S68/S69 custom ticker lists (contract "Custom ticker lists"). kb_delete_ticker_list may not exist in the database
+  // yet (migrations_pending step 1): callers read that with tickers.isMissingFunction and say so in plain words.
+  checkTicker: (symbol: string) => rpc<TickerCheck>("kb_check_ticker", { p_symbol: symbol }),
+  tickerLists: async () => {
+    const r = await rpc<TickerLists | null>("kb_ticker_lists");
+    return { max_tickers: Number(r?.max_tickers ?? 40), max_lists: Number(r?.max_lists ?? 20), min_only: Number(r?.min_only ?? 5),
+      lists: Array.isArray(r?.lists) ? r.lists : [] };
+  },
+  saveTickerList: (name: string, symbols: string[]) =>
+    rpc<{ ok: boolean; name: string; symbols: string[] }>("kb_save_ticker_list", { p_name: name, p_symbols: symbols }),
+  deleteTickerList: (name: string) => rpc<{ ok: boolean }>("kb_delete_ticker_list", { p_name: name }),
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

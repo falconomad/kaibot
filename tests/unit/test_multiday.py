@@ -834,7 +834,12 @@ def test_nothing_the_engine_runs_knows_about_the_multiday_research():
     strategies and the intraday replay cannot be affected; and the new code charges costs with the replay's own
     functions instead of copies of them."""
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
-        if f.name not in ("multiday.py", "multiday_rules.py", "multiday_core.py", "earnings.py"):
+        # engine/daily_report.py: the research command's Gate B report on the engine's fills (#161) reads the
+        # harness's data bundle and pass marks; the live engine never imports it (test_engine_momentum).
+        # replay/oneshots_daily.py: the research-only one-shot rules of #112 (test_oneshots checks nobody imports it)
+        rel = f.relative_to(ROOT / "src" / "kaibot").as_posix()
+        if f.name not in ("multiday.py", "multiday_rules.py", "multiday_core.py", "earnings.py") \
+                and rel not in ("engine/daily_report.py", "replay/oneshots_daily.py"):
             text = f.read_text()
             assert "multiday" not in text and "replay.earnings" not in text, f
     from kaibot.broker import shadow_costs
@@ -923,6 +928,29 @@ def test_run_writes_reports_trades_and_trial_rows(runs, mkt):
     md = next((data / "reports").glob("walkforward_balanced_md_overnight_spy_*.md")).read_text()
     assert "Survivorship bias" in md and "| Spread $ |" in md and "Return minus the universe equal-weight" in md
     assert "Status: provisional (decision 15)" in md and rep["status"].startswith("provisional")
+
+
+def test_run_writes_a_spy_daily_csv_on_the_sessions_of_the_daily_csvs(runs, mkt):
+    """#185: Gate B/C need SPY per session beside the daily CSVs (`gate_v2_report.py --spy`)."""
+    data, _, _ = runs
+    b, _, _ = mkt
+    close = pd.Series(b.c[:, b.col("SPY")], index=pd.to_datetime(b.dates))
+    for f in (data / "reports").glob("walkforward_balanced_md_*.json"):
+        rep = json.loads(f.read_text())
+        name = rep["files"]["spy_daily"]
+        assert name == f"spy_daily_{f.stem.removeprefix('walkforward_balanced_')}.csv"
+        spy = pd.read_csv(data / "reports" / name)
+        assert list(spy.columns) == ["date", "ret", "ret_kind", "ret_total", "ret_price_only"]
+        for which in ("tuned", "default"):
+            daily = pd.read_csv(data / "reports" / rep["files"][which]["daily"])
+            assert list(spy["date"]) == [str(d)[:10] for d in daily["date"]]  # the same sessions, in order
+        # no daily store in this fixture: price only, and labelled so in the file and the report
+        assert set(spy["ret_kind"]) == {"spy_price_only"} and spy["ret_total"].isna().all()
+        assert rep["spy_daily"]["ret"] == "spy_price_only" and "no SPY in the daily store" in rep["spy_daily"]["note"]
+        want = close.pct_change().reindex(pd.to_datetime(spy["date"])).to_numpy()
+        assert np.allclose(spy["ret"], want) and np.allclose(spy["ret_price_only"], want)
+    usage = (ROOT / "scripts" / "gate_v2_report.py").read_text().split('"""')[1]
+    assert "--spy data/reports/spy_daily_md_trend_highs_<ts>.csv" in usage
 
 
 def test_summary_table_has_both_benchmarks_and_the_survivorship_line(runs, monkeypatch, capsys):

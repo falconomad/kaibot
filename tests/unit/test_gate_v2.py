@@ -126,9 +126,27 @@ def test_a_config_with_a_mark_missing_is_refused():
         g2.GateV2.from_bytes(yaml.safe_dump(cfg).encode())
 
 
-def test_what_decision_15_does_not_say_is_left_unset():
-    """The tracking tolerance is not in the decision. It stays null until Product sets it, and null fails closed."""
-    assert GATE.cfg["gate_c"]["tracking"]["tolerance_bp_per_session"] is None
+def test_the_clarifications_of_decision_15_section_10_are_in_the_config():
+    """Section 10 (Product, 12 Nov 2026) settled what section 7 left open (#183, #184): change one and this test
+    asks for the other."""
+    text = " ".join((ROOT / "docs" / "decisions" / "15_engine_v3.md").read_text().split())
+    section = text[text.index("## 10. Gate v2 clarifications"):]
+    t, boot, m1 = GATE.cfg["gate_c"]["tracking"], GATE.cfg["gate_c"]["bootstrap"], GATE.cfg["gate_b"]["mark_1"]
+    for phrase, got, want in [
+        ("≤ 10 bp per session, over a rolling 20 sessions", (t["tolerance_bp_per_session"], t["rolling_sessions"]),
+         (10.0, 20)),
+        ("Mean absolute difference between live daily returns and the `SimBroker` replay", t["measure"],
+         "mean_abs_diff"),
+        ("10 sessions in a row", (t["breach_rule"], GATE.cfg["gate_c"]["retirement"]["tracking_breach_sessions"]),
+         ("consecutive", 10)),
+        ("counts only if it has at least 6 months of out-of-sample data", m1["part_year_min_months"], 6),
+        ("Stationary bootstrap, mean block length 20 sessions, 2,000 resamples, fixed seed",
+         (boot["method"], boot["mean_block_sessions"], boot["runs"], isinstance(boot["seed"], int)),
+         ("stationary", 20, 2000, True)),
+    ]:
+        assert phrase in section, f"decision 15 section 10 no longer says: {phrase}"
+        assert got == want, phrase
+    assert "NOT in decision 15" not in (ROOT / "config" / "gate_v2.yaml").read_text()
 
 
 # ---------------------------------------------------------------- Gate B: the verdict
@@ -140,7 +158,8 @@ def test_a_rule_that_meets_every_mark_passes():
     assert rep["verdict"] == "pass" and rep["can_pass"] and not rep["provisional"]
     assert rep["gate_sha"] == GATE.sha and rep["prereg"]["sha256"] == "ab" * 32 and rep["gate"] == "B"
     assert rep["gate_a"] == {"preregistered": True, "not_retroactive": True, "neighbours_at_most": True,
-                             "committed_before_first_run": True, "unchanged_since_logged_runs": None}
+                             "committed_before_first_run": True, "unchanged_since_logged_runs": None,
+                             "amended_since_logged_runs": None}
     json.dumps(rep)  # JSON-ready as it is
 
 
@@ -206,7 +225,8 @@ def test_mark_1_needs_six_positive_years_of_ten_and_a_positive_total():
     loser = {y: (0.02 if i < 7 else -0.20) for i, y in enumerate(YEARS)}  # seven small gains, three big losses
     m = g2.mark_1(GATE, by_year(loser))
     assert m["met"] is False and m["numbers"]["positive_years"] == 7 and "not positive" in m["why"]
-    assert m["numbers"]["partial_years"] == 2  # 2017 from May and 2026 to November count as years
+    assert m["numbers"]["partial_years"] == 2  # 2017 from May (8 months) and 2026 to November (11 months) ...
+    assert m["numbers"]["years"] == 10 and m["numbers"]["years_not_counted"] == []  # ... have 6 months: they count
 
 
 def test_mark_1_needs_ten_calendar_years_and_sixty_percent_beyond_ten():
@@ -219,6 +239,40 @@ def test_mark_1_needs_ten_calendar_years_and_sixty_percent_beyond_ten():
     assert m["met"] is False and m["limit"]["positive_years_min"] == 7  # 60% of eleven, rounded up
     eleven[2023] = 0.08
     assert g2.mark_1(GATE, by_year(eleven, idx11))["met"] is True
+
+
+def test_mark_1_a_part_year_under_six_months_is_not_counted():
+    """Decision 15 section 10 (#184): a partial calendar year counts only with at least 6 months of out-of-sample
+    data; the threshold is then 60% of the counted years, rounded up."""
+    four = pd.bdate_range("2017-01-02", "2027-04-30")  # ten full years and a 4-month stub
+    yearly = {y: (0.08 if i < 6 else -0.01) for i, y in enumerate(range(2017, 2028))}
+    m = g2.mark_1(GATE, by_year({**yearly, 2027: -0.05}, four))
+    assert m["numbers"]["years"] == 10 and m["numbers"]["years_not_counted"] == [2027]
+    assert m["limit"]["positive_years_min"] == 6 and m["met"] is True  # six of the ten counted years
+    assert m["numbers"]["total_return"] > 0  # the stub still counts in the total return
+    m = g2.mark_1(GATE, by_year({**yearly, 2027: 0.08}, four))
+    assert m["numbers"]["positive_years"] == 6  # a positive stub adds no positive year either
+    seven = pd.bdate_range("2017-01-02", "2027-07-30")  # ten full years and a 7-month stub
+    m = g2.mark_1(GATE, by_year({**yearly, 2027: -0.05}, seven))
+    assert m["numbers"]["years"] == 11 and m["numbers"]["years_not_counted"] == []
+    assert m["limit"]["positive_years_min"] == 7 and m["met"] is False  # ceil(0.6 x 11) = 7; six positive
+    assert g2.mark_1(GATE, by_year({**yearly, 2027: 0.05}, seven))["met"] is True
+    nine_and_stub = pd.bdate_range("2017-05-01", "2026-03-31")  # 2017 from May, 2018-2025, three months of 2026
+    m = g2.mark_1(GATE, by_year({y: 0.08 for y in range(2017, 2027)}, nine_and_stub))
+    assert m["met"] is False and m["numbers"]["years"] == 9 and "spans 9 calendar years" in m["why"]
+
+
+def test_the_report_prints_a_year_that_is_not_counted():
+    idx = pd.bdate_range("2017-05-01", "2027-03-31")
+    spy = by_year({**SPY_YEARS, 2027: 0.02}, idx)
+    r = g2.Run(by_year({**STEADY, 2027: 0.01}, idx), spy, costs=pd.Series(0.00002, index=idx), random=CONTROL,
+               universe="point_in_time")
+    rep = judge(r, neighbours={"n1": by_year(STEADY, idx), "n2": by_year(STEADY, idx)})
+    assert rep["marks"]["mark_1"]["numbers"]["years_not_counted"] == [2027]
+    years = {y["year"]: y for y in rep["statistics"]["calendar_years"]}
+    assert years[2027]["counted"] is False and years[2027]["months"] == 3 and years[2017]["counted"] is True
+    md = g2.render_gate_b(rep)
+    assert "| 2027 (part, not counted: under 6 months) |" in md and "| 2017 (part) |" in md
 
 
 def test_mark_2_either_branch():
@@ -355,7 +409,7 @@ def test_a_sharpe_above_one_is_printed_with_a_warning():
 # ---------------------------------------------------------------- Gate C
 
 
-def with_tolerance(bp: float | None = 10.0, rule: str = "cumulative") -> g2.GateV2:
+def with_tolerance(bp: float | None = 10.0, rule: str = "consecutive") -> g2.GateV2:
     def change(cfg):
         cfg["gate_c"]["tracking"].update(tolerance_bp_per_session=bp, breach_rule=rule)
     return with_config(change)
@@ -388,7 +442,9 @@ def test_a_healthy_incubation_passes_gate_c():
     assert rep["marks"]["duration"]["numbers"]["sessions"] == 70 and rep["marks"]["duration"]["numbers"]["months"] >= 3
     assert rep["gate"] == "C" and rep["gate_sha"] == with_tolerance().sha != GATE.sha
     assert rep["retirement_trigger"] == {"drawdown_outside_band": 0.99, "tracking_breach_sessions": 10,
-                                         "tolerance_bp_per_session": 10.0}
+                                         "tolerance_bp_per_session": 10.0, "rolling_sessions": 20,
+                                         "breach_rule": "consecutive"}
+    assert track(GATE, live, replay, test)["status"] == "pass"  # the repository's config judges it the same way
     json.dumps(rep)
 
 
@@ -416,24 +472,73 @@ def test_a_code_change_restarts_the_incubation():
 
 def test_without_a_tolerance_the_tracking_mark_fails_closed():
     live, replay, test = paper()
-    rep = track(GATE, live, replay, test)  # the repository's config: Product has not set the tolerance
+    rep = track(with_tolerance(None), live, replay, test)
     assert rep["marks"]["tracking"]["met"] is None and "not set" in rep["marks"]["tracking"]["why"]
     assert rep["status"] == "incomplete" and not rep["retire"]
 
 
-def test_tracking_outside_tolerance_for_ten_sessions_retires_the_rule():
-    live, replay, test = paper()
-    drift = replay.copy()
-    drift.iloc[[3, 9, 14, 20, 27, 33, 41, 48, 55]] += 0.0030  # nine sessions 30 bp apart
-    nine = track(with_tolerance(), live, drift, test)
-    assert nine["status"] == "pass" and nine["marks"]["tracking"]["numbers"]["breach_count"] == 9
-    drift.iloc[62] -= 0.0030  # the tenth
-    ten = track(with_tolerance(), live, drift, test)
-    assert ten["status"] == "retire" and ten["retire"] and ten["marks"]["tracking"]["met"] is False
-    assert "tracking outside the tolerance" in ten["retirement_reasons"][0]
-    assert len(ten["marks"]["tracking"]["numbers"]["breach_days"]) == 10
-    in_a_row = track(with_tolerance(rule="consecutive"), live, drift, test)  # the other reading: ten in a row
-    assert in_a_row["status"] == "pass" and in_a_row["marks"]["tracking"]["numbers"]["breach_count"] == 1
+def drifting(gaps_bp: list[float], seed: int = 21) -> tuple[pd.Series, pd.Series, np.ndarray]:
+    """A live record whose replay differs by exactly `gaps_bp[i]` basis points on session i."""
+    live, _, test = paper(seed, n=len(gaps_bp))
+    return live, live - np.array(gaps_bp) / 1e4, test
+
+
+def test_tracking_judges_the_rolling_20_session_mean_absolute_difference():
+    """Decision 15 section 10 (#183): mean |live - replay| over a rolling 20 sessions, at most 10 bp."""
+    live, replay, test = drifting([12.0, -12.0] * 35)  # every session 12 bp off, either way: mean |diff| 12 bp
+    rep = track(GATE, live, replay, test)
+    n = rep["marks"]["tracking"]["numbers"]
+    assert n["rolling_mean_abs_diff_bp_max"] == pytest.approx(12.0) and n["mean_diff_bp"] == pytest.approx(0.0)
+    assert n["sessions_outside_tolerance"] == 51 and n["breach_count"] == 51  # sessions 20 to 70, all in a row
+    assert rep["status"] == "retire" and rep["marks"]["tracking"]["met"] is False
+    assert n["first_judged_session"] == live.index[19].date().isoformat()
+    assert rep["marks"]["tracking"]["limit"] == {"tolerance_bp_per_session": 10.0, "rolling_sessions": 20,
+                                                 "measure": "mean_abs_diff", "breach_sessions": 10,
+                                                 "breach_rule": "consecutive"}
+
+
+def test_an_isolated_spike_does_not_breach():
+    gaps = [1.0] * 70
+    gaps[30] = 150.0  # one session 150 bp off: far outside 10 bp on its own day ...
+    live, replay, test = drifting(gaps)
+    rep = track(GATE, live, replay, test)
+    n = rep["marks"]["tracking"]["numbers"]
+    assert n["max_abs_diff_bp"] == pytest.approx(150.0)
+    assert n["rolling_mean_abs_diff_bp_max"] == pytest.approx((150.0 + 19) / 20)  # ... 8.45 bp over 20 sessions
+    assert n["breach_count"] == 0 and rep["status"] == "pass" and rep["marks"]["tracking"]["met"] is True
+
+
+def test_nine_rolling_breaches_in_a_row_do_not_retire_the_rule_and_ten_do():
+    def gaps(drift_sessions: int) -> list[float]:
+        return [15.0] * drift_sessions + [0.0] * (70 - drift_sessions)  # 15 bp off at the start, then exact
+
+    # the window of 20 holds k sessions of 15 bp: mean 0.75 k bp, above 10 bp from k = 14
+    for drift, breaches in ((22, 9), (23, 10)):
+        live, replay, test = drifting(gaps(drift))
+        rep = track(GATE, live, replay, test)
+        n = rep["marks"]["tracking"]["numbers"]
+        assert n["breach_count"] == breaches == n["sessions_outside_tolerance"]
+        assert rep["retire"] is (breaches >= 10) and rep["status"] == ("retire" if breaches >= 10 else "pass")
+    assert "tracking outside the tolerance" in rep["retirement_reasons"][0] and "in a row" in \
+        rep["retirement_reasons"][0]
+    # two stretches of nine, apart: eighteen sessions outside, never ten in a row
+    live, replay, test = drifting([15.0] * 22 + [0.0] * 17 + [15.0] * 16 + [0.0] * 15)
+    rep = track(GATE, live, replay, test)
+    n = rep["marks"]["tracking"]["numbers"]
+    assert n["sessions_outside_tolerance"] == 18 and n["breach_count"] == 9 and not rep["retire"]
+    assert rep["status"] == "pass"
+    cumulative = track(with_tolerance(rule="cumulative"), live, replay, test)  # the old reading would retire it
+    assert cumulative["retire"]
+
+
+def test_before_the_twentieth_session_tracking_is_not_judged():
+    live, replay, test = paper(n=19)
+    rep = track(GATE, live, replay, test)
+    t = rep["marks"]["tracking"]
+    assert t["met"] is None and "20 sessions" in t["why"] and rep["status"] == "incomplete"
+    assert t["numbers"]["rolling_mean_abs_diff_bp_max"] is None and t["numbers"]["first_judged_session"] is None
+    live, replay, test = paper(n=20)
+    assert track(GATE, live, replay, test)["marks"]["tracking"]["met"] is True
 
 
 def test_live_drawdown_against_the_bootstrap_bands_of_the_test():
