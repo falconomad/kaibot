@@ -10,6 +10,9 @@ import { ErrorState, RuleName } from "../components/States";
 import { STALE } from "../lib/poll";
 import { Skeleton } from "../components/Skeleton";
 import { StockBadge, companyName } from "../components/StockBadge";
+import { RuleExperiment, experimentsOf } from "../components/Experiment";
+import { useRunCtx } from "../components/Shell";
+import { type Experiment, findExperiment } from "../lib/experiment";
 
 // Price ladder: entry, stop, target and exit on one vertical price scale.
 function Ladder({ t }: { t: Trade }) {
@@ -48,7 +51,7 @@ function NotRecorded({ what, replay }: { what: string; replay: boolean }) {
     : `No ${what.toLowerCase()} was recorded for this trade.`}</p>;
 }
 
-function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
+function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp?: Experiment | null }) {
   const t = d.trade, replay = d.run.kind === "replay";
   if (id === "why") {
     const LABELS: Record<string, string> = { z: "Drop since the open (σ)", resid_z: "Stock-specific part (σ)",
@@ -58,7 +61,7 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
       .map(([k, v]) => [LABELS[k], typeof v === "number" ? Number(v.toFixed(3)) : v]));
     return (
       <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
-        <span>Rule</span><span className="v"><RuleName code={t.strategy} />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>{RULES[t.strategy].what}</div>}</span>
+        <span>Rule</span><span className="v"><RuleName code={t.strategy} exp={exp} limits />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>{RULES[t.strategy].what}</div>}</span>
         <span>Exit</span><span className="v" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}{t.exit_ts ? ` · ${timeEt(t.exit_ts)} ET` : ""}</span>
         <span>Risk (1R)</span><span className="v">{money(t.risk_usd)}</span>
         <span>Result</span><span className={`v ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
@@ -103,6 +106,7 @@ function Tab({ id, d }: { id: (typeof TABS)[number][0]; d: TradeDetail }) {
 
 export function TradeDetailPage() {
   const { id } = useParams();
+  const beats = useRunCtx()?.overview?.heartbeat;
   const [params] = useSearchParams();
   const initial = TABS.find(([k]) => k === params.get("tab"))?.[0] ?? "why";
   const [tab, setTab] = useState<(typeof TABS)[number][0]>(initial);
@@ -118,7 +122,7 @@ export function TradeDetailPage() {
       <Link to="/">← Home</Link>
       <section className="card">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}</span></span></span>
+          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}<RuleExperiment code={t.strategy} beats={beats} /></span></span></span>
           <span className={`num ${tone(t.pnl_usd)}`} style={{ fontSize: 18 }}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         </div>
         <p className="muted num" style={{ margin: "4px 0 0" }}>
@@ -131,7 +135,7 @@ export function TradeDetailPage() {
           <div className="tabs" role="tablist" aria-label="Trade details" onKeyDown={onTabKeys}>
             {TABS.map(([k, l]) => <button key={k} id={`tab-${k}`} aria-controls="trade-panel" {...tabProps(tab === k)} onClick={() => setTab(k)}>{l}</button>)}
           </div>
-          <div role="tabpanel" id="trade-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} style={{ paddingTop: 12 }}><Tab id={tab} d={d} /></div>
+          <div role="tabpanel" id="trade-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} style={{ paddingTop: 12 }}><Tab id={tab} d={d} exp={findExperiment(t.strategy, experimentsOf(beats))} /></div>
         </section>
       </div>
     </>

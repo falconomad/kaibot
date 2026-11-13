@@ -47,6 +47,26 @@ describe("riskStatus (S28: red on breach)", () => {
     expect(riskStatus(run({ status: "paused" }), ov(), 0, 0).severity).toBe("warn");
     expect(riskStatus(run(), ov({ halts_today: [{ kind: "watchdog", reason: "x", ts: "" }] }), 0, 0).severity).toBe("warn");
   });
+  // #210: the paper experiment's planned end is amber, its re-enabling is not a halt; genuine breaches stay red.
+  const retired = { kind: "multi_day_retired", ts: "2026-11-20T15:00:00Z", session: "2026-11-20",
+    reason: "rule=trend_momentum; trend_momentum retired: book fell 21.3% from its peak on 2026-11-20" };
+  const book = { kind: "book_drawdown", ts: "2026-11-20T15:00:00Z", reason: "multi-day book drawdown 21.3% reached its end of 21% (peak 1, now 1): x" };
+  const back = { kind: "multi_day_reenabled", ts: "2026-11-20T16:00:00Z", reason: "rule=trend_momentum; re-enabled by the stakeholder (KAIBOT_REENABLE)" };
+  it("shows the experiment's retirement as amber, with the reason and date, never red", () => {
+    const s = riskStatus(run(), ov({ halts_today: [book, retired] }), 0, 0);
+    expect(s.severity).toBe("warn");
+    expect(s.items.join(" | ")).toMatch(/Experiment ended: Trend momentum retired: its book fell 21.3% from its peak on Nov 20, 2026/);
+    expect(s.items.join(" | ")).toMatch(/stop line 21%/);
+  });
+  it("a re-enabling is not a halt and undoes the retirement", () => {
+    expect(riskStatus(run(), ov({ halts_today: [back] }), 0, 0)).toEqual({ severity: "ok", items: [] });
+    expect(riskStatus(run(), ov({ halts_today: [retired, back] }), 0, 0)).toEqual({ severity: "ok", items: [] });
+  });
+  it("a genuine breach next to the experiment's end stays red", () => {
+    const s = riskStatus(run(), ov({ halts_today: [retired, { kind: "drift", reason: "x", ts: "2026-11-20T15:01:00Z" }] }), 0, 0);
+    expect(s.severity).toBe("breach");
+    expect(s.items.length).toBe(2);
+  });
   it("drops a watchdog note once the engine is back", () => {
     const now = Date.parse("2026-11-12T18:01:30Z");
     const o = ov({ halts_today: [{ kind: "watchdog", reason: "x", ts: "2026-11-12T17:52:50Z" }],

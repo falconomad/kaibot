@@ -12,6 +12,7 @@ import { StockBadge, StockCell, companyName } from "../components/StockBadge";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState, TestPhaseBanner } from "../components/States";
 import { STALE, poll } from "../lib/poll";
+import { ExperimentCard, RuleExperiment } from "../components/Experiment";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -25,6 +26,7 @@ function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { labe
 
 export function TradeRows({ rows }: { rows: Trade[] }) {
   const nav = useNavigate();
+  const beats = useRunCtx()?.overview?.heartbeat;
   return (
     <table className="list">
       <thead><tr><th>Stock</th><th>Time (ET)</th><th className="hide-sm">Why it closed</th><th className="r hide-sm">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th><th className="hide-sm">Room</th></tr></thead>
@@ -33,7 +35,8 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
           <tr key={t.id} className="click" tabIndex={0} aria-label={`${t.symbol} trade on ${dateEt(t.entry_ts)}: open details`}
             onClick={() => nav(`/trades/${t.id}`)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(`/trades/${t.id}`); } }}>
-            <td title={`code: ${t.strategy}`}><StockCell symbol={t.symbol} sub={`${t.qty} sh · ${ruleName(t.strategy)}`} /></td>
+            <td title={`code: ${t.strategy}`}><StockCell symbol={t.symbol} sub={`${t.qty} sh · ${ruleName(t.strategy)}`} />
+              <RuleExperiment code={t.strategy} beats={beats} /></td>
             <td className="num muted">{dateEt(t.entry_ts)} {timeEt(t.entry_ts)}</td>
             <td className="muted hide-sm" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}</td>
             <td className="r num hide-sm">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
@@ -231,6 +234,8 @@ export function Live() {
           </section>
         )}
       </div>
+
+      {run.kind === "paper" && <ExperimentCard beats={overview.heartbeat} />}
 
       {run.kind === "paper" && (
         <div className="grid">

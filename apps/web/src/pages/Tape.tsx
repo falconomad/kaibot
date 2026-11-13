@@ -13,12 +13,14 @@ import { dateEt, money, px, signedMoney, timeEt, tone } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { StockCell } from "../components/StockBadge";
+import { RuleExperiment } from "../components/Experiment";
+import type { Heartbeat } from "../lib/api";
 
 const PAGE = 100;
 type Filter = "all" | "trades" | "live" | "room" | "shadow";
 
 /** What happened, in one line, with the reason. */
-function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?: () => void }) {
+function Line({ it, open, onToggle, beats }: { it: TapeItem; open?: boolean; onToggle?: () => void; beats?: Heartbeat[] }) {
   if (it.kind === "fill") {
     const cost = Math.abs(it.venue_px - it.shadow_px) * it.qty + it.fees;
     return (
@@ -27,7 +29,8 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
         <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
         <td className="num">{it.qty} @ {px(it.venue_px)} <span className="muted">(shadow {px(it.shadow_px)}, fees {money(it.fees)})</span>
           {it.side === "sell" && it.exit_reason && <span className="muted" title={`code: ${it.exit_reason}`}> · {exitText(it.exit_reason)}</span>}
-          {it.tag && <span className="muted" title={`code: ${it.tag}`}> · {it.tag.replace(/_/g, " ")}</span>}</td>
+          {it.tag && <span className="muted" title={`code: ${it.tag}`}> · {it.tag.replace(/_/g, " ")}</span>}
+          <RuleExperiment code={it.strategy} beats={beats} /></td>
         <td className={`r num ${tone(it.pnl_usd)}`} title={`Costs on this fill vs shadow model: ${money(cost)}`}>
           {it.side === "sell" ? signedMoney(it.pnl_usd) : ""}</td>
       </>
@@ -47,7 +50,8 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
     <>
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
       <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
-        <span className="muted" title={`${ruleLabel(it.strategy)} · code: ${it.strategy}`}> · {ruleName(it.strategy)}</span></td>
+        <span className="muted" title={`${ruleLabel(it.strategy)} · code: ${it.strategy}`}> · {ruleName(it.strategy)}</span>
+        <RuleExperiment code={it.strategy} beats={beats} /></td>
       <td title={ex.detail}><div>{ex.outcome}</div><div className="muted" style={{ fontSize: 13 }}>{ex.saw}</div>
         {it.entry !== null && <span className="muted num"> · ref {px(it.entry)}, stop {px(it.stop)}{it.target ? `, target ${px(it.target)}` : ""}</span>}
         {room && out && (
@@ -68,7 +72,7 @@ function Line({ it, open, onToggle }: { it: TapeItem; open?: boolean; onToggle?:
 }
 
 export function Tape() {
-  const { run } = useRunCtx();
+  const { run, overview } = useRunCtx();
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<Set<number>>(new Set());
   const toggle = (id: number) => setOpen((o) => { const n = new Set(o); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -111,7 +115,7 @@ export function Tape() {
               <Fragment key={`${it.kind}-${it.ts}-${i}`}>
                 <tr style={head ? { borderTop: "2px solid var(--rule)" } : undefined}>
                   <td className="num">{head ? <b>{d} </b> : null}{timeEt(it.ts)}</td>
-                  <Line it={it} open={isOpen} onToggle={sid !== undefined ? () => toggle(sid) : undefined} />
+                  <Line it={it} beats={overview?.heartbeat} open={isOpen} onToggle={sid !== undefined ? () => toggle(sid) : undefined} />
                 </tr>
                 {isOpen && (
                   <tr className="expand"><td colSpan={5}><div className="expand-inner"><RoomBySignal signalId={sid!} /></div></td></tr>

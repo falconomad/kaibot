@@ -4,6 +4,8 @@
 import type { ReactNode } from "react";
 import { TEST_PHASE, RETIRED_TEXT, ruleName, ruleStatus, ruleStatusText } from "../lib/explain";
 import { Skeleton } from "./Skeleton";
+import type { Experiment } from "../lib/experiment";
+import { ExperimentBadge } from "./Experiment";
 
 export const Loading = Skeleton;
 
@@ -40,12 +42,14 @@ export function Code({ text, code }: { text: string; code: string | null | undef
   return code ? <span title={`code: ${code}`}>{text}</span> : <>{text}</>;
 }
 
-/** A rule's plain name, with "retired, systems test only" (or "test only") as a tag when it applies. */
-export function RuleName({ code, tag = true }: { code: string; tag?: boolean }) {
+/** A rule's plain name, with "retired, systems test only" (or "test only") as a tag when it applies. A rule the engine
+ *  runs as a paper experiment (#210) carries the experiment badge instead (with its cap and stop line if `limits`). */
+export function RuleName({ code, tag = true, exp, limits }: { code: string; tag?: boolean; exp?: Experiment | null; limits?: boolean }) {
   const st = ruleStatus(code), txt = ruleStatusText(code);
   return (
     <span title={`code: ${code}`}>{ruleName(code)}
-      {tag && txt && <> <span className={`tag ${st === "retired" ? "retired" : ""}`}>{st === "retired" ? RETIRED_TEXT : txt}</span></>}
+      {tag && exp && <> <ExperimentBadge e={exp} limits={limits} /></>}
+      {tag && !exp && txt && <> <span className={`tag ${st === "retired" ? "retired" : ""}`}>{st === "retired" ? RETIRED_TEXT : txt}</span></>}
     </span>
   );
 }

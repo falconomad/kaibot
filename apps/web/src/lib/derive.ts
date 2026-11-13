@@ -3,6 +3,8 @@
 // go/no-go rows (gateview.ts) and the M5 estimator (estimator.ts) live in their own modules, loaded with their pages.
 import type { AttributionGroup, Evidence, Halt, Level, Overview, Report, Run, Scan } from "./api";
 import { BAR, LEVELS } from "./model";
+import { experimentHaltText, haltTone, retirementUndone } from "./experiment";
+import { ruleName } from "./explain";
 
 export const etToday = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
 
@@ -21,7 +23,8 @@ export function evidenceVerdict(e: Evidence | undefined): { frac: number; text: 
 export const fmtR = (r: number | null | undefined) =>
   r === null || r === undefined || Number.isNaN(r) ? "—" : (r >= 0 ? "+" : "−") + Math.abs(r).toFixed(2) + "R";
 
-/** S28: one status for the risk strip. Red when any limit or safety halt is in force. */
+/** S28: one status for the risk strip. Red when any limit or safety halt is in force; amber when the paper experiment
+ *  ended as planned (#210). */
 export type Severity = "ok" | "warn" | "breach";
 export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, ddPct: number, now = Date.now()):
   { severity: Severity; items: string[] } {
@@ -36,7 +39,14 @@ export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, dd
   if (detail.account_clean === false) { items.push("Paper account has positions or orders Kaibot didn't place"); bump("breach"); }
   // A watchdog halt is over once the engine is back: a fresh heartbeat newer than the halt.
   const fresh = !!beat?.ts && ageS(beat.ts, now) < 120;
-  for (const h of (o?.halts_today ?? []).filter((x) => !(fresh && haltResolved(x, beat?.ts)))) { items.push(haltText(h)); bump(h.kind === "deadman" || h.kind === "watchdog" ? "warn" : "breach"); }
+  // #210: the experiment's planned end (book stop line, retirement) is amber, never a red breach; a re-enabling is
+  // good news and not a halt at all, and it undoes an earlier retirement of the same rule.
+  const halts = o?.halts_today ?? [];
+  for (const h of halts.filter((x) => !(fresh && haltResolved(x, beat?.ts)) && !retirementUndone(x, halts))) {
+    const t = haltTone(h.kind);
+    if (t === "info") continue;
+    items.push(haltText(h)); bump(t === "breach" ? "breach" : "warn");
+  }
   if (lv && dayPct <= -lv.stop) { items.push(`Daily stop reached (−${lv.stop}%)`); bump("breach"); }
   else if (lv && dayPct < 0 && -dayPct >= 0.8 * lv.stop) { items.push("Close to the daily stop"); bump("warn"); }
   if (lv && ddPct >= lv.runDd) { items.push(`Run drawdown cap reached (${lv.runDd}%)`); bump("breach"); }
@@ -58,7 +68,8 @@ export const HALT_TEXT: Record<string, string> = {
   llm_budget: "Monthly LLM budget reached: no new entries",
   broker_rejects: "The broker rejected several orders in a row: entries halted",
 };
-export const haltText = (h: Halt) => HALT_TEXT[h.kind] ?? `${h.kind.replace(/_/g, " ")}: ${h.reason}`;
+export const haltText = (h: Halt) =>
+  HALT_TEXT[h.kind] ?? experimentHaltText(h, ruleName) ?? `${h.kind.replace(/_/g, " ")}: ${h.reason}`;
 
 /** A watchdog halt is resolved once the engine is back: a heartbeat newer than the halt, or a later
  *  `watchdog_recovered` event. The banner also asks for the heartbeat to be fresh (riskStatus); history only asks

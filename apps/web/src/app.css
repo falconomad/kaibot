@@ -435,3 +435,15 @@ dialog.kb-sheet::backdrop { background: rgba(0, 0, 0, .6); }
 main:focus { outline: none; }
 tr.click:focus-visible { outline: 2px solid var(--sea); outline-offset: -2px; }
 .banner a, .state a { text-decoration: underline; text-underline-offset: 2px; }
+
+/* #210: the paper experiment. Calm: the info tone (blue), never the red of a breach; its planned end is amber. */
+.tag.info { color: var(--sea-ink); background: var(--sea-tint); }
+.exp { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; vertical-align: middle; }
+button.exp-tag { height: auto; min-height: 0; border: 0; cursor: help; font-family: inherit; line-height: 1.3; white-space: normal; text-align: left;
+  color: var(--sea-ink); background: var(--sea-tint); }
+button.exp-tag:focus-visible { outline: 2px solid var(--sea); outline-offset: 2px; }
+.exp-limits { font-size: 12px; font-weight: 400; }
+.exp-tip { flex-basis: 100%; font-size: 12px; font-weight: 400; color: var(--slate); line-height: 1.45; }
+.exp-rule + .exp-rule { border-top: 1px solid var(--rule); margin-top: 12px; padding-top: 12px; }
+.exp-ended { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: var(--warn-tint); border: 1px solid #4A3A16; }
+.exp-note { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: var(--surface-2); }
