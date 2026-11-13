@@ -667,7 +667,7 @@ class LiveDaily:
             except Exception as e:  # the note must never stop the send step
                 why = f"{type(e).__name__}"
         first = not any(b.get("strategy") == rule for b in self._entries("md_decision"))
-        note = ("no decision today: daily store not refreshed" if why else
+        note = ("no decision today: daily store not refreshed (see logs/fetch_daily.log)" if why else
                 "no decision yet: the first one is taken after a close" if first else
                 "no decision today: none was taken after the last close (engine off then?)")
         self._missed[rule] = (str(session), note + (f" ({why})" if why else ""))

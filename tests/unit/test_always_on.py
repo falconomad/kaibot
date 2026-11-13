@@ -90,8 +90,47 @@ def test_daily_plist_keys(plists):
     p = plistlib.loads(texts["daily"].encode())
     assert p["Label"] == "com.kaibot.daily"
     assert p["ProgramArguments"][-1] == "daily" and p["RunAtLoad"] is False and "KeepAlive" not in p
-    assert p["StartCalendarInterval"] == [{"Weekday": d, "Hour": 3, "Minute": 15} for d in range(2, 7)]
+    # #206: 03:15 and a 07:45 catch-up (only the daily bar refresh), Tuesday-Saturday, Mac time
+    assert p["StartCalendarInterval"] == [{"Weekday": d, "Hour": h, "Minute": m} for d in range(2, 7)
+                                          for h, m in ((3, 15), (7, 45))]
     assert p["StandardOutPath"] == f"{home}/Library/Logs/kaibot/daily.log"
+
+
+def test_the_daily_bar_refresh_runs_after_alpacas_daily_bar_and_before_the_open_whatever_the_dst():
+    """#206: the Mac runs on Europe/Berlin. For every weekday session of 2026-2028 the refreshes of the next morning
+    (03:15 and 07:45 Berlin) fall after 20:15 New York of the session (Alpaca's complete daily bar,
+    kaibot.ingest.daily_bars.COMPLETE_AT) and before the next session's 09:30 New York open."""
+    from datetime import date, datetime, time, timedelta
+    from zoneinfo import ZoneInfo
+
+    from kaibot.ingest.daily_bars import COMPLETE_AT
+
+    berlin, ny = ZoneInfo("Europe/Berlin"), ZoneInfo("America/New_York")
+    d = date(2026, 1, 1)
+    while d < date(2029, 1, 1):
+        if d.weekday() < 5:
+            nxt = d + timedelta(days=3 if d.weekday() == 4 else 1)
+            ready = datetime.combine(d, COMPLETE_AT, ny)
+            for h, m in ((3, 15), (7, 45)):  # Tuesday-Saturday: the morning after each weekday
+                run = datetime.combine(d + timedelta(days=1), time(h, m), berlin)
+                assert ready < run < datetime.combine(nxt, time(9, 30), ny), (d, h, m)
+        d += timedelta(days=1)
+
+
+def test_the_daily_job_refreshes_the_store_twice_and_backs_up_once(tmp_path):
+    r = tmp_path / "kaibot"
+    (r / "scripts").mkdir(parents=True)
+    shutil.copy(SCRIPTS / "service_run.sh", r / "scripts")
+    for n, body in (("backup_local.sh", f"echo backup >> {tmp_path}/calls"),
+                    ("fetch_daily.sh", f"echo fetch >> {tmp_path}/calls; echo stored SPY")):
+        (r / "scripts" / n).write_text(f"#!/bin/bash\n{body}\n")
+        (r / "scripts" / n).chmod(0o755)
+    env = {"HOME": str(tmp_path), "KAIBOT_LOG_DIR": str(tmp_path / "logs"), "KAIBOT_ENV_FILE": str(tmp_path / "x"),
+           "PATH": os.environ["PATH"]}
+    for _ in range(2):
+        sh(["bash", "scripts/service_run.sh", "daily"], r, env, check=True)
+    assert (tmp_path / "calls").read_text().split() == ["backup", "fetch", "fetch"]
+    assert (r / "logs" / "fetch_daily.log").read_text().count("stored SPY") == 2
 
 
 def test_plists_never_contain_secrets(plists):

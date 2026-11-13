@@ -7,8 +7,15 @@ labelled experiment, to see how the engine handles a book held for weeks. It nev
 result does not change the Gate B verdict, and it does not count as Gate C.
 
 **Exposure caps** (the share of the paper pot the rule may hold): Careful 30%, Balanced 60%, Hunter 100%.
-**Stop the experiment** if the rule's drawdown passes 13% (Careful), 21% (Balanced) or 27% (Hunter). Product
-checks this in the daily status. The level's own run-drawdown end (4% / 8% / 12%) still ends the whole run first.
+**The engine stops the experiment itself** when the rule's own book is 13% (Careful), 21% (Balanced) or 27% (Hunter)
+below its peak. You decided this on 13 Nov 2026 ("option A, as tested"). When that happens the engine writes a
+`book_drawdown` halt and a `multi_day_book_ended` event, cancels the rule's open orders, sells every `trend_momentum`
+position at market, and trades nothing more for this rule in this run. The intraday rule and the run carry on. The
+level's intraday run-drawdown end (4% / 8% / 12%) is unchanged. Once the rule trades, it is measured without the
+rule's own result, and when it is reached it still ends the whole run and sells everything.
+
+**Limits** (confirmed as tested): at most 30 names, at most 40% in one sector, at most your level's position size per
+name (10% / 15% / 20%), a 3% cash reserve, never leverage.
 
 > **Read this first.** The live daily path (issue #206) is what places `trend_momentum` orders. If your copy of the
 > code does not have it yet (Product tells you), the engine only loads and labels the rule and places **no**
@@ -39,8 +46,18 @@ If you pinned a release (`docs/ops/always_on.md`), ask Product which tag to pin 
 
 `docs/ops/migrations_pending.md`. Steps 1-5 (0014-0018) were applied by Product on 13 Nov 2026. What is left:
 
-1. **You: turn Shorting off on the Alpaca paper account.** Alpaca dashboard, switch to the **paper** account,
-   Account Configurations, **Shorting: off**, Save. (This stops a late stop order from ever opening a short.)
+1. **You: turn Shorting off on the Alpaca paper account.** In Terminal:
+
+   ```
+   cd ~/Projects/kaibot
+   ./scripts/alpaca_no_shorting.sh
+   ```
+
+   It reads your paper keys from `~/Projects/kaibot-secrets/.env` and never prints them. It refuses anything but the
+   paper account. It must end with `OK: shorting is off on the paper account`, after `no_shorting = true` and
+   `shorting_enabled = false`. If it says `NOT CONFIRMED` or `FAILED`, do it by hand: Alpaca dashboard, switch to
+   the **paper** account, Account Configurations, **Shorting: off**, Save. Either way, this stops a late stop order
+   from ever opening a short.
 2. **Tell Product "shorting is off".** Product applies step 6, `migrations/0019_deadman_overnight.sql`, and runs its
    checks: `kaibot_deadman` is the only dead-man job, and `strategy_holding` has 3 multi-day rows.
 
@@ -70,25 +87,29 @@ code ("could not pull the latest code") and blocks a pinned release.
 
 Only after step 3 is complete (0019 applied, Shorting off).
 
-## 6. Refresh the daily bars every weekday evening
+## 6. The daily bars (automatic with the always-on service)
 
 The rule decides on **daily bars**, the same daily store the ten-year test used (`data/daily`, written by
-`./scripts/fetch_daily.sh`; free Alpaca data). The engine never downloads it itself. It reads the store after each
-close, and only once the day's bars are in it. Alpaca's daily bar counts as complete at **20:15 New York time**
-(02:15 Berlin), because after-hours trading adds to the day's volume. So:
+`./scripts/fetch_daily.sh`, free Alpaca data). The engine never downloads it itself. Alpaca's daily bar is complete
+at **20:15 New York time**, and the engine reads nothing before that.
 
-1. **First time (once):** run `./scripts/fetch_daily.sh` with `data/universe/former_members.csv` in place, as for
-   the ten-year test (`docs/ops/daily_bars.md`). The rule's universe is the S&P 500 as of each day, so the store needs
-   the former members too.
-2. **Every weekday after 20:15 New York time, before the next open:** run `./scripts/fetch_daily.sh` again. It is
-   resumable and skips what it already has. Running it in the early morning in Berlin (for example 07:00) also works:
-   the engine decides as soon as the bars are there, as long as that is before the next open (09:30 New York,
-   15:30 Berlin).
-   To automate it, Product or QA-Ops can add it to the always-on service. Ask them, and do not edit the start script
-   by hand.
-3. **If you miss an evening:** the engine decides nothing for that session and sends no `trend_momentum` orders.
-   Held positions are kept (and sold at the next session that has a decision, if the rule says so). The engine writes
-   a `multi_day_waiting` event that names the missing day. Nothing is bought on stale data.
+1. **First time (once, by hand):** run `./scripts/fetch_daily.sh` with `data/universe/former_members.csv` in place,
+   as for the ten-year test (`docs/ops/daily_bars.md`). The rule's universe is the S&P 500 as of each day, so the
+   store needs the former members too.
+2. **From then on it is automatic** if the engine runs as the always-on service (`./scripts/install_service.sh`,
+   `docs/ops/always_on.md`). If you installed the service before this change, run `./scripts/install_service.sh`
+   once more so it picks up the new schedule. The nightly job refreshes the store every Tuesday to Saturday at
+   **03:15** Mac time, then again at **07:45** to catch up if the first run failed. In New York that is 21:15 or
+   22:15 (the two clocks change on different dates) and 01:45 or 02:45, so always after the day's bar is complete
+   and well before the next open, all year. Its output goes to `logs/fetch_daily.log` in the kaibot folder. A failed
+   refresh sends the usual alarm when alarms are set up. The Mac must be on and logged in. A run missed while it
+   slept starts when it wakes.
+3. **Without the service:** run `./scripts/fetch_daily.sh` yourself after 20:15 New York time, before the next open.
+4. **If the refresh is missed:** the rule decides nothing for that session and sends no `trend_momentum` orders.
+   Held positions are kept. The engine's heartbeat says it in plain words
+   (`detail.multi_day.note`: **`no decision today: daily store not refreshed`**), and a `multi_day_no_decision` event names the missing day.
+   Nothing is bought on stale data. `trend_momentum` decides only once a week (on the evening before the first
+   session from Wednesday on), so only that evening's refresh is critical.
 
 The engine reads the store from `~/Projects/kaibot/data/daily` by default. Set `KAIBOT_DAILY_DATA=/path/to/folder`
 in the `.env` only if your store lives somewhere else (the folder that **holds** `daily/`). When the engine runs in
@@ -107,7 +128,8 @@ rule would have sold is kept until the next week's decision.
   the engine's journal (`multi_day_decision` event). `trend_momentum` decides once a week (the first session from
   Wednesday on) and re-sizes every second week.
 - Next session, from 09:31 until 15:45: the engine sizes the decision against the run's equity at the last close
-  (the portfolio builder: whole shares, 3% cash reserve, at most 40% in one sector, within your level's caps) and sends
+  (the portfolio builder: whole shares, 3% cash reserve, at most 40% in one sector, at most 30 names, within your
+  level's caps) and sends
   **closing-auction (`cls`) orders** to Alpaca paper (`multi_day_orders` event). Alpaca does not accept them from
   15:50, so the engine stops at 15:45. They fill at the 16:00 close. Each fill is booked once (`multi_day_fill`).
 - Sales always go out. Buys wait while entries are blocked (paused, daily stop, the book not matching Alpaca), but
@@ -155,10 +177,13 @@ Start at least 30 minutes before the open.
 
 ## 9. Stopping the experiment
 
-- **Stop it for good** (retirement trigger hit, or you decide): dashboard, **Flatten and stop**. This first cancels the
-  rule's closing-auction orders that have not filled, then sells everything, the multi-day positions included. Do it
-  before 15:50 New York time if you can: after 15:50 the exchange may no longer let a closing-auction order be
-  cancelled, so one sent that day could still fill at 16:00. Check the Live page the next morning. Then remove `KAIBOT_MULTIDAY=on` from the `.env` (or set it to `off`) and restart
+- **When the book's drawdown end is hit** the engine has already sold the rule's positions (see the top). To retire
+  the rule for good, remove `KAIBOT_MULTIDAY=on` as below. A new run would start a new book.
+- **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's closing-auction
+  orders that have not filled, then sells everything, the multi-day positions included. Do it before 15:50 New York
+  time if you can: after 15:50 the exchange may no longer let a closing-auction order be cancelled, so one sent that
+  day could still fill at 16:00. Check the Live page the next morning. Then remove `KAIBOT_MULTIDAY=on` from the
+  `.env` (or set it to `off`) and restart
   the engine. With the flag off the engine refuses to load the rule.
 - **Pause new buys only:** dashboard, **Pause entries**. Held positions are kept; the rule's sales still go out. A buy
   order already sent that day is not cancelled by a pause and still fills at the close.
