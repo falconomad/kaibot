@@ -18,7 +18,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
 NY = ZoneInfo("America/New_York")
 LEVEL_NAMES = {"conservative": "Careful", "balanced": "Balanced", "aggressive": "Hunter"}
 
@@ -77,12 +76,22 @@ def sessions_from(d: date, n: int = 15) -> list[date]:
     return out
 
 
-def next_decision(now: datetime) -> tuple[date, date]:
-    """(decision evening, fill session): the first fill session after now for which trend_momentum decides
-    (strategies/momentum.is_weekly_decision: the first session of its week on Wednesday or later), and the session
-    whose close it decides after. Weekdays only (a market holiday moves it a session)."""
-    from kaibot.strategies.momentum import is_weekly_decision
+def week_number(d: date) -> int:
+    """strategies/momentum.week_number without numpy (Monday-based weeks since 1970)."""
+    return ((d - date(1970, 1, 1)).days + 3) // 7
 
+
+def is_weekly_decision(prev: date, fill: date) -> bool:
+    """strategies/momentum.is_weekly_decision in the standard library only (this script must run before the
+    engine's Python environment exists; a test keeps the two equal)."""
+    late = fill.weekday() >= 2
+    return late and not (prev.weekday() >= 2 and week_number(prev) == week_number(fill))
+
+
+def next_decision(now: datetime) -> tuple[date, date]:
+    """(decision evening, fill session): the first fill session after now for which trend_momentum decides (the
+    first session of its week on Wednesday or later), and the session whose close it decides after. Weekdays only
+    (a market holiday moves it a session)."""
     et = now.astimezone(NY)
     start = et.date() + timedelta(days=1)
     days = sessions_from(et.date() - timedelta(days=7), 30)

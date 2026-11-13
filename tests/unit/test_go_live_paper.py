@@ -60,7 +60,7 @@ def repo(tmp_path):
     bin_.mkdir()
     _exe(bin_ / "git", rec)
     _exe(bin_ / "launchctl", f'{rec}\n[ -n "$FAKE_SERVICE_RUNNING" ] && echo "state = running"; exit 0')
-    (bin_ / "python3").symlink_to(sys.executable)
+    _exe(bin_ / "python3", f'exec "{sys.executable}" "$@"')  # (a symlink would lose a virtualenv)
     env_file = tmp_path / "secret.env"
     env_file.write_text(f"ALPACA_API_KEY=PK123\nALPACA_SECRET={SECRET}\nKAIBOT_MULTIDAY=off\nFRED_API_KEY=x\n")
     env_file.chmod(0o600)
@@ -190,3 +190,27 @@ def test_set_flag_adds_replaces_and_deduplicates(tmp_path):
 ])
 def test_the_next_decision_is_the_evening_before_the_first_session_from_wednesday_on(now, dec, fill):
     assert load().next_decision(datetime.fromisoformat(now).replace(tzinfo=NY)) == (dec, fill)
+
+
+def test_the_scripts_calendar_is_the_rules_calendar():
+    """The go-live helper runs before the engine's environment exists (standard library only): its copy of the
+    weekly decision rule equals strategies/momentum's on every pair of consecutive weekdays of three years."""
+    from datetime import timedelta
+
+    from kaibot.strategies import momentum as mom
+
+    m = load()
+    days = [date(2026, 1, 1) + timedelta(days=i) for i in range(3 * 366)]
+    days = [d for d in days if d.weekday() < 5]
+    for prev, fill in zip(days, days[1:], strict=False):
+        assert m.is_weekly_decision(prev, fill) == mom.is_weekly_decision(prev, fill), (prev, fill)
+        assert m.week_number(fill) == mom.week_number(fill)
+
+
+def test_the_helper_needs_only_the_standard_library():
+    import ast
+
+    tree = ast.parse((ROOT / "scripts" / "go_live_paper.py").read_text())
+    mods = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    mods |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    assert not {m.split(".")[0] for m in mods} & {"kaibot", "numpy", "pandas"}
