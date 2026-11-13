@@ -540,3 +540,20 @@ def test_a_restart_between_the_two_checks_does_not_drop_a_real_breach(tmp_path, 
     assert k == 43, "the breach must be confirmed at the first check after the restart"
     assert eng.daily.retirement(MD) is not None
     assert len([b for *_, b in eng.journal.entries(kinds=("md_book_breach",))]) == 2
+
+
+def test_a_breach_from_an_earlier_session_confirms_nothing(tmp_path, monkeypatch):
+    """Backend-quant review of 6c93c89: both checks of a confirmation fall in one session. A breach journalled on
+    DAY1 (never cleared: the engine stopped) does not confirm DAY2's first breach; DAY2 needs its own two checks."""
+    a = DailyAccount(tmp_path, monkeypatch, gap_b=0.7, book_end=5.0)
+    _book_b(a)
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    a.eng.journal.append("md_book_breach", {"run_id": a.rid, "peak": 10_000.0, "equity": 9_000.0,
+                                            "drawdown_pct": 10.0, "end_pct": 5.0,
+                                            "ts": (a.open1 + timedelta(hours=6)).isoformat()})
+    eng = a.restart()
+    a.ticks(a.open2, 0, 1)
+    assert not eng.daily.account.book_ended()  # DAY2's first check
+    a.ticks(a.open2, 1, 2)
+    assert eng.daily.account.book_ended()  # confirmed a minute later

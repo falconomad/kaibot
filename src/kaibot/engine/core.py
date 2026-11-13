@@ -651,6 +651,8 @@ class Engine:
         # breach is journalled and read back after a restart, so an engine that restarts between the checks (a
         # crash loop in a falling market) still ends the book at its next check: a restart never delays the end.
         now = self.now()
+        if self._breach is not None and self._breach[1].astimezone(_et()).date() != now.astimezone(_et()).date():
+            self._breach = None  # both checks fall in one session: an old breach (before a night) confirms nothing
         if self._breach is None or self._breach[0] != rid:
             self._breach = (rid, now)
             self.journal.append("md_book_breach", {"run_id": rid, "peak": round(peak, 2), "equity": round(equity, 2),
