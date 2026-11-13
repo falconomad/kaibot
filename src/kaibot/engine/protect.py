@@ -12,7 +12,8 @@ off. Sent through the order manager like every other order.
   cannot finish is tried again at every later call long before the stop would lapse. Issue #179: the old stop
   may trigger before the cancel arrives, so the new one goes out only after its final state and the venue's
   position are read again (FILLED: none; a partial fill: the shares still held), journalled as `stop_rearm`;
-  and no stop is created for a sleeve while one of its stop fills is not yet booked (the sleeve is stale);
+  and no stop is created, or resized up, for a sleeve while one of its stop fills is not yet booked (the sleeve
+  is stale); a resize up is capped at the venue's position, read again;
 - `release(key, keep)` frees shares for a sale: the stop shrinks to what is kept, or is cancelled. A sale is sent
   only once the venue confirmed it (a working stop holds the shares: Alpaca refuses the sale otherwise);
 - splits: `before_split` cancels the symbol's stops before the ex-date (bracket legs and stops are not adjusted
@@ -95,10 +96,30 @@ class ProtectiveStops:
                                strategy=strategy, purpose="stop", session=session, override_block=True)
                 self._track(key, coid)
                 done.append(f"stop {coid}")
-            elif int(r.qty) != whole or abs(float(r.stop or 0) - round(px, 2)) > 0.004:
-                self.om.replace(r.coid, stop=round(px, 2), qty=whole if int(r.qty) != whole else None)
-                done.append(f"replace {r.coid}")
+            else:
+                qty = self._resize_to(r, key, whole)
+                if qty is not None or abs(float(r.stop or 0) - round(px, 2)) > 0.004:
+                    self.om.replace(r.coid, stop=round(px, 2), qty=qty)
+                    done.append(f"replace {r.coid}")
         return done
+
+    def _resize_to(self, r, key: Key, whole: int) -> int | None:
+        """The new quantity of a working stop, or None to keep it (QA-Ops review of #187). Down to the sleeve:
+        always. Up: never while a stop fill of the sleeve is unbooked (the sleeve is stale), and never above the
+        venue's position, read again (a failed read: no upsize, tried again at the next call)."""
+        have = int(r.qty)
+        if whole == have:
+            return None
+        if whole < have:
+            return whole
+        if self._unbooked(key):
+            return None
+        try:
+            pos = self.om.broker.positions().get(key[1]) or {}
+        except BrokerError:
+            return None
+        to = min(whole, int(math.floor(float(pos.get("qty") or 0) + 1e-9)))
+        return to if to > have else None
 
     def _track(self, key: Key, coid: str) -> None:
         if self._mine is not None:

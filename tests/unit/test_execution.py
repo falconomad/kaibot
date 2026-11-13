@@ -500,3 +500,48 @@ def test_179_a_re_arm_whose_position_read_fails_places_nothing_and_tries_again_a
     ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
     (new,) = ps.stops_of(K)
     assert int(new.qty) == 30
+
+
+def test_179_review_after_a_partial_fill_the_next_call_never_resizes_the_stop_above_the_venue_position():
+    """QA-Ops review of #187: sleeve 30, the old stop sells 10 during the cancel, the venue holds 20. A second
+    `ensure` with the stale sleeve (the 10-share fill not booked yet) must not replace the 20-share stop up to 30."""
+    b, clock, om, ps = stopped(confirm_polls=3)
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    b.cancel = _cancel_loses_race(b, filled=10, pos=20)
+    clock.set(clock() + timedelta(days=81))
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    (new,) = ps.stops_of(K)
+    sent = []
+    real = b.replace
+    b.replace = lambda *a, **kw: sent.append((a, kw)) or real(*a, **kw)
+    did = ps.ensure({K: 30.0}, {K: 90.0}, clock(), "2026-12-05")
+    assert not [s for s in sent if s[1].get("qty")], sent
+    assert int(ps.stops_of(K)[0].qty) == 20 and not [d for d in did if d.startswith("replace")], did
+    # a new stop price while the fill is unbooked: the price moves, the quantity does not
+    ps.ensure({K: 30.0}, {K: 88.0}, clock(), "2026-12-05")
+    (s,) = ps.stops_of(K)
+    assert int(s.qty) == 20 and abs(float(s.stop) - 88.0) < 1e-9 and not [x for x in sent if x[1].get("qty")]
+
+
+def test_179_review_a_resize_up_is_capped_at_the_venue_position_and_skipped_when_it_cannot_be_read():
+    from kaibot.broker.protocol import BrokerError
+
+    b, clock, om, ps = stopped()
+    ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
+    b.pos["A"]["qty"] = 35  # the sleeve says 40, the venue holds 35 (a buy partly filled)
+    ps.ensure({K: 40.0}, {K: 90.0}, clock(), DAY)
+    assert int(ps.stops_of(K)[0].qty) == 35
+    real = b.positions
+
+    def down():
+        raise BrokerError(503, "unavailable")
+
+    b.positions = down
+    b.pos["A"]["qty"] = 40
+    ps.ensure({K: 40.0}, {K: 90.0}, clock(), DAY)
+    assert int(ps.stops_of(K)[0].qty) == 35  # no upsize on an unread position
+    ps.ensure({K: 20.0}, {K: 90.0}, clock(), DAY)  # a downsize needs no read
+    assert int(ps.stops_of(K)[0].qty) == 20
+    b.positions = real
+    ps.ensure({K: 40.0}, {K: 90.0}, clock(), DAY)
+    assert int(ps.stops_of(K)[0].qty) == 40
