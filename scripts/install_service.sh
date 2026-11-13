@@ -5,7 +5,10 @@
 #   ./scripts/install_service.sh --dry-run --out DIR    write the plists to DIR only (no launchctl; works on Linux)
 # com.kaibot.engine  starts at login and every weekday at 15:00 (Mac time); the engine itself waits for the
 #                    broker's session. Restarted about a minute after a crash. Keeps the Mac awake (caffeinate).
-# com.kaibot.daily   03:15 Tuesday-Saturday: rotate logs, back up local files, refresh the daily bar store.
+# com.kaibot.daily   03:15 Tuesday-Saturday: rotate logs, back up local files, refresh the daily bar store; again
+#                    at 07:45 (a catch-up: only the refresh, which skips what it has). Mac time (Europe/Berlin):
+#                    03:15 is 21:15 New York (22:15 in the weeks the two clocks change on different dates), after
+#                    Alpaca's daily bar is complete (20:15 ET), and 07:45 is still hours before the open (#206).
 # Logs: ~/Library/Logs/kaibot/. Remove with ./scripts/uninstall_service.sh. Runbook: docs/ops/always_on.md.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -102,7 +105,7 @@ $(env_block)
 	<key>RunAtLoad</key><false/>
 	<key>StartCalendarInterval</key>
 	<array>
-$(for d in 2 3 4 5 6; do printf '\t\t<dict><key>Weekday</key><integer>%d</integer><key>Hour</key><integer>3</integer><key>Minute</key><integer>15</integer></dict>\n' "$d"; done)
+$(for d in 2 3 4 5 6; do for hm in "3 15" "7 45"; do set -- $hm; printf '\t\t<dict><key>Weekday</key><integer>%d</integer><key>Hour</key><integer>%d</integer><key>Minute</key><integer>%d</integer></dict>\n' "$d" "$1" "$2"; done; done)
 	</array>
 	<key>LowPriorityIO</key><true/>
 	<key>Nice</key><integer>5</integer>

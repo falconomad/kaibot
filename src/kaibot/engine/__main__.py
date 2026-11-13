@@ -96,7 +96,31 @@ def build(settings: Settings) -> Engine:
     return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
                   calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
                   pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
-                  ex_dividends=ExDateDividends(data))  # S78: dividends accrued at the ex-date (#118)
+                  ex_dividends=ExDateDividends(data),  # S78: dividends accrued at the ex-date (#118)
+                  daily=daily_path())
+
+
+def daily_path():
+    """#206: the live daily path's factory, only with KAIBOT_MULTIDAY=on and a multi-day rule enabled in
+    config/profiles.yaml (`multi_day.rules`); None otherwise, and then nothing of it is imported. The daily view is
+    read from the daily store under KAIBOT_DAILY_DATA (default <repo>/data, the folder holding daily/, which
+    ./scripts/fetch_daily.sh refreshes; docs/ops/paper_start.md)."""
+    from kaibot.strategies import registry
+
+    if not registry.multi_day_enabled():
+        return None
+    from kaibot.risk.profiles import enabled_multi_day
+
+    if not enabled_multi_day():
+        return None
+    from pathlib import Path
+
+    from kaibot.engine import live_daily
+
+    root = Path(os.environ.get("KAIBOT_DAILY_DATA") or ROOT / "data")
+    load = live_daily.StoreLoader(root, ROOT / "config" / "universe_history.yaml")
+    log.info("multi-day daily path: ON (%s; daily store %s)", ", ".join(enabled_multi_day()), root / "daily")
+    return lambda eng: live_daily.for_engine(eng, load)
 
 
 EXIT_JOURNAL = 4
@@ -118,7 +142,16 @@ def multi_day_state(remote=None) -> dict:
             "allow_overnight": bool(cfg["all_levels"].get("allow_overnight", False)),
             "rules_loaded": rules, "level": level,
             "overnight_cap_pct": {r: rule_book_limits(r, level).max_overnight_pct for r in rules},
-            "experiments": experiments(rules, level)}
+            "experiments": experiments(rules, level), **({"daily_store": daily_store_state()} if rules else {})}
+
+
+def daily_store_state() -> dict:
+    """#206: where the daily path reads its daily view, and the last session the store holds (SPY)."""
+    from pathlib import Path
+
+    from kaibot.engine.live_daily import store_state
+
+    return store_state(Path(os.environ.get("KAIBOT_DAILY_DATA") or ROOT / "data"))
 
 
 def report_conflicts(eng: Engine, replicator: Replicator) -> None:

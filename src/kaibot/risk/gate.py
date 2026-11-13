@@ -54,8 +54,9 @@ HARD_CEILINGS = RiskPolicy(risk_per_trade_pct=1.0, max_position_pct=20, max_open
 
 @dataclass(frozen=True)
 class BookLimits:
-    """Book-level limits for multi-day sleeves (all % of equity unless noted). Level values are PROVISIONAL
-    (decision 15 section 6: confirmed by the stakeholder with the first paper start)."""
+    """Book-level limits for multi-day sleeves (all % of equity unless noted). The level values in
+    config/profiles.yaml were confirmed by the stakeholder on 13 Nov 2026 (decision 15 section 11, "option A, as
+    tested": the pre-registered limits of trend_momentum)."""
 
     atr_risk_pct: float = 0.1  # k: a 1-ATR(20) move costs this % of equity per position (shares = E x k / ATR)
     max_name_pct: float = 10.0  # one symbol, all sleeves together
@@ -65,18 +66,49 @@ class BookLimits:
     max_names: int = 20  # distinct symbols in the multi-day book
     min_cash_pct: float = 2.0  # a FLOOR: cash kept aside (gross may not exceed 100 - this)
     max_gap_loss_pct: float = 12.0  # loss of the overnight book in the gap scenario (gap_loss_ps)
+    # #206: the multi-day book's own run end, % below the book's peak equity (the run's pot plus the book's P&L).
+    # Separate from RiskPolicy.run_drawdown_end_pct (the intraday run end, unchanged); see `book_run_ended`.
+    run_drawdown_end_pct: float = 13.0
 
 
 # Ceilings for book limits; no profile or owner setting may loosen them (min_cash_pct is a floor).
 BOOK_HARD_CEILINGS = BookLimits(atr_risk_pct=0.25, max_name_pct=HARD_CEILINGS.max_position_pct, max_gross_pct=100.0,
                                 max_overnight_pct=100.0, max_sector_pct=40.0, max_names=30, min_cash_pct=1.0,
-                                max_gap_loss_pct=15.0)
+                                max_gap_loss_pct=15.0,
+                                # stakeholder, 13 Nov 2026: 1.5 x the ten-year test's max drawdown at the 100% cap
+                                run_drawdown_end_pct=27.0)
 BOOK_FLOORS = ("min_cash_pct",)
 
 # The gap scenario: every overnight position opens this far below its last price; a resting stop does not help
 # (a stop gapped through fills at the open, decision 15 section 5).
 GAP_SCENARIO_PCT = 10.0
 GAP_SCENARIO_ATR = 3.0
+
+
+def drawdown_pct(peak: float, equity: float) -> float:
+    """% below the peak (0 at or above it, and 0 without a positive peak)."""
+    if not peak > 0 or equity >= peak:
+        return 0.0
+    return min((peak - equity) / peak * 100, 100.0)
+
+
+def run_drawdown_reached(peak: float, equity: float, end_pct: float) -> bool:
+    """A run end: equity at or below `end_pct` % under the peak. The same expression engine/core used before #206
+    for the run's end (RiskPolicy.run_drawdown_end_pct); now also the multi-day book's (`book_run_ended`)."""
+    return equity <= peak * (1 - end_pct / 100)
+
+
+def book_run_ended(peak: float, equity: float, lim: BookLimits) -> bool:
+    """#206: the multi-day book has reached its own run end (`BookLimits.run_drawdown_end_pct`). `peak`, `equity`:
+    the book's equity, the run's pot plus the book's P&L since the run began (realised, dividends, marks). What the
+    engine does then: engine/core.Engine._book_end."""
+    return run_drawdown_reached(peak, equity, lim.run_drawdown_end_pct)
+
+
+def intraday_equity(run_equity: float, book_pnl: float) -> float:
+    """#206: the run's equity without the multi-day book's P&L, which the intraday run end is measured on once a
+    multi-day book trades (the book has its own end). With no multi-day P&L it is the run's equity: unchanged."""
+    return run_equity - book_pnl
 
 
 def gap_loss_ps(px: float, atr: float | None) -> float:

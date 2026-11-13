@@ -216,7 +216,9 @@ def test_each_rule_is_configured_with_its_pre_registered_settings():
             assert (lim.max_gap_loss_pct, lim.min_cash_pct) == (BOOK_HARD_CEILINGS.max_gap_loss_pct,
                                                                 BOOK_HARD_CEILINGS.min_cash_pct)
             assert momentum_limits(strat, POL, cap) == lim
-    assert (lv.max_names, lv.max_sector_pct) == (20, 30.0)  # the level's provisional values are not used
+    # #206: the confirmed level values are the pre-registered ones, so the live book sizes as the test did
+    assert momentum_limits(mom.VERSIONS["trend_momentum"], POL, 100.0) == dataclasses.replace(
+        lv, run_drawdown_end_pct=BOOK_HARD_CEILINGS.run_drawdown_end_pct)
 
 
 def test_resize_weeks_reach_the_builder_through_the_target_list(fx_data):

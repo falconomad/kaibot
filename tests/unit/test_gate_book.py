@@ -91,6 +91,7 @@ def _reviewer_case(atr):
     scenario, entry 100, stop 50."""
     from kaibot.risk.profiles import load_book_limits, load_profiles
     pol, book = load_profiles()["balanced"], load_book_limits(research=True)["balanced"]
+    book = replace(book, max_gap_loss_pct=12.0)  # the review's 12% (#206 confirmed the level at the 15% ceiling)
     return evaluate(Proposal("X", Side.BUY, 100, 50, atr=atr), book_snap(gap_loss=11_900), pol, book), book
 
 
@@ -213,12 +214,13 @@ def test_book_hard_ceilings():
     assert c.max_gross_pct <= 100 and c.max_overnight_pct <= 100  # decision 15 section 6: never above 100%
     assert c.atr_risk_pct == 0.25 and c.max_name_pct == HARD_CEILINGS.max_position_pct
     assert (c.max_sector_pct, c.max_names, c.min_cash_pct, c.max_gap_loss_pct) == (40, 30, 1.0, 15)
+    assert c.run_drawdown_end_pct == 27  # #206: the multi-day book's own end (stakeholder, 13 Nov 2026)
     validate_book(BOOK)
     validate_book(BookLimits())  # the defaults sit inside the ceilings
 
 
 CEILING_FIELDS = ("atr_risk_pct", "max_name_pct", "max_gross_pct", "max_overnight_pct", "max_sector_pct", "max_names",
-                  "max_gap_loss_pct")
+                  "max_gap_loss_pct", "run_drawdown_end_pct")
 
 
 def test_every_book_field_is_covered_by_a_ceiling_or_a_floor():

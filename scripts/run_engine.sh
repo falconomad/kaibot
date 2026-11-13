@@ -47,7 +47,14 @@ if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 
     docker run -d --rm --name kaibot-watchdog -e KAIBOT_ENV_FILE=/secrets/.env -v "$ENV_FILE:/secrets/.env:ro" \
       -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine.watchdog >/dev/null && echo "Watchdog started (container kaibot-watchdog)."
   fi
-  awake docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env \
+  # #206: the live daily path reads the daily store (written on this Mac by ./scripts/fetch_daily.sh). The image has
+  # no data/ folder, so the store is mounted read-only (KAIBOT_DAILY_DATA from the environment or the .env, else
+  # ./data: the folder that holds daily/). Without it the daily path finds no store and decides nothing.
+  DAILY_HOST="${KAIBOT_DAILY_DATA:-$(sed -n 's/^KAIBOT_DAILY_DATA=//p' "$ENV_FILE" | tail -1 | tr -d "\"'")}"
+  DAILY_HOST="${DAILY_HOST:-$PWD/data}"
+  DAILY_MOUNT=()
+  [ -d "$DAILY_HOST/daily" ] && DAILY_MOUNT=(-v "$DAILY_HOST/daily:/kaibot-daily/daily:ro" -e KAIBOT_DAILY_DATA=/kaibot-daily)
+  awake docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env ${DAILY_MOUNT[@]+"${DAILY_MOUNT[@]}"} \
     -v "$ENV_FILE:/secrets/.env:ro" -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
 else
   PY="$(command -v python3.13 || command -v python3.12 || command -v python3 || true)"

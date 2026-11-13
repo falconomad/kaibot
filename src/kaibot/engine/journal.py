@@ -523,6 +523,13 @@ class JournalStore:
                 if ids:
                     for t in ("gate_run", "order"):
                         rows[t] = self.remote.select(t, {"signal_id": f"in.({ids})"})
+            # #206 (QA-Ops second key on #207): a multi-day rule's retirement holds across runs, so a new journal
+            # copies every retirement and re-enabling, whichever run wrote it (live_daily.LiveDaily.retirement reads
+            # them from the halt table); else a new journal with a later run would bring a retired rule back.
+            have = {r.get("id") for r in rows.get("halt", [])}
+            rows["halt"] = rows.get("halt", []) + [
+                r for r in self.remote.select("halt", {"kind": "in.(multi_day_retired,multi_day_reenabled)"})
+                if r.get("id") not in have]
             last = self.remote.select("event", {"select": "hash", "order": "id.desc", "limit": "1"})
             seen = self._seen_now(self.observe(process))  # the journals before this one: known, not newer
         except Exception as e:

@@ -98,7 +98,7 @@ class FakeBroker(SimBroker):
         }
 
     def account(self):
-        a = {"status": "ACTIVE", "equity": "100000"}
+        a = {"status": "ACTIVE", "equity": "100000", **self._shorting()}
         if getattr(self, "buying_power", None) is not None:
             a["buying_power"] = str(self.buying_power)
         return a

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # What the launchd agents run (issue #121). Not for hand use: start by hand with ./scripts/run_engine.sh.
 #   service_run.sh engine   one engine run through run_engine.sh, with the alarm pinger beside it
-#   service_run.sh daily    nightly job: rotate logs, back up local files, refresh the daily bar store
+#   service_run.sh daily    nightly job: rotate logs, back up local files, refresh the daily bar store (a second run
+#                           the same day only refreshes the store)
 # Settings (written into the plist by install_service.sh): KAIBOT_SERVICE_MODE (docker|python), KAIBOT_ENV_FILE,
 # KAIBOT_LOG_DIR. Exit codes for launchd (KeepAlive restarts only after a non-zero exit):
 #   0  clean stop (service.sh stop, logout) or on hold (data/HOLD): launchd leaves it stopped
@@ -102,14 +103,20 @@ run_engine() {
 
 run_daily() {
   command -v caffeinate >/dev/null 2>&1 && caffeinate -i -w $$ &
-  local failed=()
-  say "daily job: rotate logs"
-  for f in "$LOG_DIR"/*.log logs/*.log; do [ -f "$f" ] && rotate "$f" 1; done
-  say "daily job: backup"
-  ./scripts/backup_local.sh || failed+=(backup)
+  local failed=() done_mark="data/live/daily_job.$(date +%F)"
+  mkdir -p logs
+  if [ ! -f "$done_mark" ]; then  # the 07:45 catch-up run does only the refresh
+    say "daily job: rotate logs"
+    for f in "$LOG_DIR"/*.log logs/*.log; do [ -f "$f" ] && rotate "$f" 1; done
+    say "daily job: backup"
+    ./scripts/backup_local.sh || failed+=(backup)
+    rm -f data/live/daily_job.*; : > "$done_mark"
+  fi
   if [ "${KAIBOT_DAILY_FETCH:-1}" = 1 ]; then
-    say "daily job: refresh the daily bar store (scripts/fetch_daily.sh)"
-    ./scripts/fetch_daily.sh </dev/null || failed+=(fetch_daily)
+    # #206: the multi-day rule decides on these bars (docs/ops/paper_start.md); resumable, skips what it has
+    say "daily job: refresh the daily bar store (scripts/fetch_daily.sh; log logs/fetch_daily.log)"
+    { echo "== $(date '+%Y-%m-%d %H:%M:%S %Z')"; ./scripts/fetch_daily.sh </dev/null; } >>logs/fetch_daily.log 2>&1 ||
+      failed+=(fetch_daily)
   fi
   if [ "${#failed[@]}" -eq 0 ]; then say "daily job finished"; hc log "kaibot daily job finished on $(hostname -s)"
   else say "daily job FAILED: ${failed[*]}"; hc fail "kaibot daily job failed: ${failed[*]}"; exit 1; fi
