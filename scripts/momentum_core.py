@@ -145,22 +145,7 @@ def store_fingerprint(store_root: Path, keys, extra: str = "") -> str:
     return h.hexdigest()
 
 
-def spy_total_return_from_store(data: Path, spy: str, dates: np.ndarray) -> tuple[np.ndarray | None, dict | str]:
-    """SPY's total return per session of `dates` from the daily store (NaN where the store has no bar), built by
-    `multiday_core.spy_total_return` (Alpaca's adjusted factor, or a table with every dividend, or the table
-    completed conservatively), or None with the reason."""
-    from kaibot.ingest.daily_store import DailyStore
-
-    root = data / "daily"
-    if not (root / "bars" / f"symbol={spy}.parquet").is_file():
-        return None, f"no {spy} in the daily store ({root}): run ./scripts/fetch_daily.sh"
-    try:
-        panel = DailyStore(root).panel([spy], minute_share=None)
-    except (OSError, ValueError) as e:
-        return None, f"daily store unreadable for {spy}: {e}"
-    r, info = mc.spy_total_return(panel, spy)
-    s = pd.Series(r, index=panel.dates.astype("datetime64[D]"))
-    return s.reindex(dates.astype("datetime64[D]")).to_numpy(dtype=float), info
+spy_total_return_from_store = wfm.spy_total_return_from_store  # one copy, shared with the walk-forward
 
 
 def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list[str], spy: str, mode: str,
