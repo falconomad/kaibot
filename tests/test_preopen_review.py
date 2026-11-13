@@ -211,9 +211,27 @@ def test_property_only_tightens(plan, cur, picks, status):
         if tgt <= c:
             assert reviewed[k] == tgt  # sales and holds untouched
         else:
-            assert reviewed[k] <= tgt
-            if status == "done" and out.verdicts[preopen.candidate_id(k)] == "veto":
-                assert reviewed[k] <= c
+            assert c <= reviewed[k] <= tgt  # never below the holding: the review never sells
+            assert isinstance(reviewed[k], int) or reviewed[k] == c  # whole shares, or the holding unchanged
+            if out.multiplier(preopen.candidate_id(k)) == 0.0:
+                assert reviewed[k] == c  # a veto (or a failure) sends no order at all
+
+
+@pytest.mark.parametrize("verdict, want", [("allow", 4), ("downgrade", 3.5), ("veto", 3.5)])
+def test_fractional_holding_is_never_sold_by_the_review(verdict, want):
+    k = (S, "A")
+    reviewed, out, _ = review(D, [tl({"A": 1.0})], {k: 4}, {k: 3.5}, lambda d, cs: answer(cs, verdict),
+                              env=ON_ENV, budget_state="ok")
+    assert out.status == "done" and reviewed == {k: want}
+    assert violations({k: 4}, {k: 3.5}, reviewed) == []
+    assert out.row({k: 4}, reviewed, {k: 3.5})["arms"][f"{S}:A"]["reviewed"] == want
+
+
+def test_fractional_holding_fail_closed_keeps_the_holding():
+    k = (S, "A")
+    reviewed, out, _ = review(D, [tl({"A": 1.0})], {k: 9}, {k: 3.5}, lambda d, cs: None, env=ON_ENV,
+                              budget_state="ok")
+    assert out.status == "invalid" and reviewed == {k: 3.5}
 
 
 def test_violations_catches_a_loosening():
@@ -222,6 +240,10 @@ def test_violations_catches_a_loosening():
     assert violations(plan, cur, {(S, "A"): 10, (S, "B"): 5})
     assert violations(plan, cur, {(S, "A"): 10})
     assert violations(plan, cur, {(S, "A"): 10, (S, "B"): 0, (S, "C"): 1})
+    frac = {(S, "A"): 3.5}
+    assert violations({(S, "A"): 4}, frac, {(S, "A"): 3})  # below the holding: a sale decided by the review
+    assert violations({(S, "A"): 4}, frac, {(S, "A"): 3.75})  # neither whole shares nor the holding
+    assert violations({(S, "A"): 4}, frac, {(S, "A"): 3.5}) == []
 
 
 # ---------- offline evals on stored candidate lists ----------

@@ -127,7 +127,8 @@ class ReviewOutcome:
             return 0.0
         return MULTIPLIER.get(self.verdicts.get(cid, "veto"), 0.0)
 
-    def row(self, rules_plan: Mapping[Key, int], reviewed: Mapping[Key, int], current: Mapping[Key, float]) -> dict:
+    def row(self, rules_plan: Mapping[Key, int], reviewed: Mapping[Key, int | float],
+            current: Mapping[Key, float]) -> dict:
         """One record per session: both arms of every candidate, so the counterfactual (the rules' plan through
         SimBroker) can be run beside the reviewed plan. Keys are "<strategy>:<symbol>"."""
         keys = sorted(k for k in rules_plan if rules_plan[k] > float(current.get(k, 0) or 0))
@@ -135,7 +136,7 @@ class ReviewOutcome:
                 "verdicts": dict(self.verdicts), "answer": self.answer, "latency_ms": self.latency_ms,
                 "cost_usd": round(self.cost_usd, 5),
                 "arms": {candidate_id(k): {"current": float(current.get(k, 0) or 0), "rules": int(rules_plan[k]),
-                                           "reviewed": int(reviewed[k])} for k in keys}}
+                                           "reviewed": reviewed[k]} for k in keys}}
 
 
 def check_answer(answer, session: date, cands: list[ReviewCandidate]) -> tuple[PreopenVerdicts | None, str | None]:
@@ -162,20 +163,21 @@ def check_answer(answer, session: date, cands: list[ReviewCandidate]) -> tuple[P
     return v, None
 
 
-def apply(plan: Mapping[Key, int], current: Mapping[Key, float], outcome: ReviewOutcome) -> dict[Key, int]:
-    """The reviewed plan. Each growing key becomes current + floor((rules - current) x multiplier) whole shares,
-    so it lies between the current position and the rules' target; every other key is the rules' target.
-    (A fractional current position counts as its whole shares: a veto never rounds it up. The reviewed target can
-    then sit below the fractional holding, e.g. 3 for 3.5 held; whether that trims the fraction is the order
-    layer's whole-share rule, not the review's: open question for Backend-quant before wiring.)"""
-    out = {}
+def apply(plan: Mapping[Key, int], current: Mapping[Key, float], outcome: ReviewOutcome) -> dict[Key, int | float]:
+    """The reviewed plan. Invariant for every growing key: current <= reviewed <= rules' target, so the review can
+    cancel or halve a buy but never sell. A growing key becomes floor(current) + floor((rules - floor(current)) x
+    multiplier) whole shares; when that would land below the holding (a veto, a failure, or a floored downgrade
+    on a fractional holding, e.g. 3.5 held and target 4) the holding is returned unchanged, so no order is sent.
+    Every other key is the rules' target."""
+    out: dict[Key, int | float] = {}
     for key, tgt in plan.items():
         cur = float(current.get(key, 0) or 0)
         tgt = int(tgt)
         if tgt > cur:
             m = outcome.multiplier(candidate_id(key))
-            base = max(0, math.floor(cur))  # a fractional position is never rounded up into an unreviewed buy
-            out[key] = min(tgt, base + math.floor((tgt - base) * m))
+            base = max(0, math.floor(cur))
+            got = min(tgt, base + math.floor((tgt - base) * m))
+            out[key] = got if got >= cur else (int(cur) if cur.is_integer() else cur)
         else:
             out[key] = tgt
     return out
@@ -184,7 +186,7 @@ def apply(plan: Mapping[Key, int], current: Mapping[Key, float], outcome: Review
 def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int], current: Mapping[Key, float],
            reviewer: Reviewer | None, *, env: Mapping[str, str] | None = None, budget_state: str | None = None,
            total_s: float = TOTAL_S,
-           clock=time.monotonic) -> tuple[dict[Key, int], ReviewOutcome, list[ReviewCandidate]]:
+           clock=time.monotonic) -> tuple[dict[Key, int | float], ReviewOutcome, list[ReviewCandidate]]:
     """Run the pre-open review on the builder's plan. Returns (reviewed plan, outcome, candidates)."""
     targets = list(targets)
     if not enabled(env):
@@ -221,7 +223,8 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
     return apply(plan, current, out), out, cands
 
 
-def violations(plan: Mapping[Key, int], current: Mapping[Key, float], reviewed: Mapping[Key, int]) -> list[str]:
+def violations(plan: Mapping[Key, int], current: Mapping[Key, float],
+               reviewed: Mapping[Key, int | float]) -> list[str]:
     """Independent check of the only-tighten rule; must be empty for every review."""
     bad = []
     for key in sorted(set(plan) | set(reviewed)):
@@ -232,10 +235,12 @@ def violations(plan: Mapping[Key, int], current: Mapping[Key, float], reviewed: 
             bad.append(f"{candidate_id(key)}: dropped from the plan")
             continue
         cur, tgt, got = float(current.get(key, 0) or 0), int(plan[key]), reviewed[key]
-        if not isinstance(got, int):
-            bad.append(f"{candidate_id(key)}: not whole shares")
-        elif tgt > cur and not (max(0, math.floor(cur)) <= got <= tgt):
+        if not isinstance(got, int | float) or isinstance(got, bool):
+            bad.append(f"{candidate_id(key)}: not a share count")
+        elif tgt > cur and not (cur <= got <= tgt):
             bad.append(f"{candidate_id(key)}: {got} outside [{cur}, {tgt}]")
+        elif tgt > cur and not (isinstance(got, int) or got == cur):
+            bad.append(f"{candidate_id(key)}: {got} is neither whole shares nor the holding")
         elif tgt <= cur and got != tgt:
             bad.append(f"{candidate_id(key)}: a sale or hold was changed ({tgt} -> {got})")
     return bad
