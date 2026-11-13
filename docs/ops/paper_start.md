@@ -136,6 +136,13 @@ rule would have sold is kept until the next week's decision.
   only until 15:45. A buy still blocked then is dropped for that day, and the next weekly decision decides again.
 - If the daily stop fires, the engine cancels the rule's buy orders that have not filled yet. Its sales stay.
 - The 15:55 flatten of the intraday rule never sells `trend_momentum` positions.
+- The intraday rule leaves alone any stock `trend_momentum` holds or has an order in that day. Alpaca refuses an
+  order while an opposite one is open in the same stock, and both books share one position per stock.
+- On an early-close day (for example the day after Thanksgiving) the orders go out until 15 minutes before the close.
+- No buys while Alpaca says shorting is on for the paper account (step 3). The engine says so
+  (`multi_day_shorting_on` event).
+- An emergency stop that the watchdog placed while the engine was stuck is taken over and cancelled before the
+  rule's next orders go out. The rule has no stop of its own.
 
 ## 7. Check, then start
 
