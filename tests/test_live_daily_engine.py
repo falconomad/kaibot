@@ -481,3 +481,27 @@ def test_simbroker_models_opposite_limit_orders_as_alpaca_does(tmp_path, monkeyp
         with _pt.raises(BrokerError, match="wash trade"):
             a.broker.submit(req)
     a.broker.submit(OrderRequest("B", "buy", 1, "limit", "day", "l3", limit_price=150.0))  # below the sell: fine
+
+
+def test_every_heartbeat_carries_the_experiment_label_with_the_flag_on(tmp_path, monkeypatch):
+    """#211 (Product): `detail.experiments` was only in the in-session heartbeat; the dashboard's label and limits
+    vanished after the close. With KAIBOT_MULTIDAY=on every heartbeat carries it: closed, idle, preparing, after the
+    close; with the flag off none does."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.eng.strategies = {lv: ["dip_reversal", MD] for lv in ("conservative", "balanced", "aggressive")}
+    a.eng.ex_dividends = lambda day, symbols: []  # a rule that holds across sessions needs an ex-date source
+    a.eng.experiments = []  # as after a start with the market closed
+    beats = []
+    a.eng.on_progress = beats.append
+    a.clock.t = a.open1 - timedelta(minutes=20)  # before the open: closed, preparing the history
+    st = a.eng.tick()
+    assert st["state"] == "market_closed" and st["experiments"][0]["strategy"] == MD
+    assert st["experiments"][0]["label"].startswith("Experiment")
+    assert all(b.get("experiments") for b in beats if b.get("state") == "preparing")
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    st = a.eng.tick()  # after the close, with the decision step
+    assert st["state"] == "market_closed" and st["experiments"][0]["strategy"] == MD
+    assert a.eng._daily_status({"state": "idle"})["experiments"]
+    monkeypatch.setenv("KAIBOT_MULTIDAY", "off")
+    assert "experiments" not in a.eng._daily_status({"state": "market_closed"})

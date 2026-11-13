@@ -557,7 +557,13 @@ class Engine:
 
     def _daily_status(self, st: dict) -> dict:
         """#206: the heartbeat's `multi_day` block (`LiveDaily.status`), e.g. "no decision today: daily store not
-        refreshed". Absent without the daily path."""
+        refreshed". Absent without the daily path. #211: with KAIBOT_MULTIDAY=on every heartbeat (closed, idle,
+        preparing, after the close) also carries `experiments`, so the dashboard's label and limits never vanish."""
+        if registry.multi_day_enabled() and "experiments" not in st:
+            if not self.experiments:  # e.g. a start with the market closed: no session start yet
+                self.experiments = self._experiments()
+            if self.experiments:
+                st["experiments"] = self.experiments
         if self.daily is not None:
             try:
                 st["multi_day"] = self.daily.status(self.now().astimezone(_et()).date())
@@ -1179,13 +1185,13 @@ class Engine:
             return self._daily_status({"state": "market_closed", "next_open": clk.get("next_open"),
                                        "account_clean": self.account_clean})
         if self.run is None and not self.pos and not self._md_exits:  # S80: a multi-day sale still to book
-            return {"state": "idle", "note": "no paper run: start one from the dashboard",
-                    "account_clean": self.account_clean}
+            return self._daily_status({"state": "idle", "note": "no paper run: start one from the dashboard",
+                                       "account_clean": self.account_clean})
         if self.run is not None and (self.day is None or self.day.day != now.astimezone(_et()).date()):
             self._start_day(now)
         d = self.day
         if d is None:
-            return {"state": "idle", "account_clean": self.account_clean}
+            return self._daily_status({"state": "idle", "account_clean": self.account_clean})
         self.market.update(now)
         m = self.market.last_complete_minute(now)
         if m < 0 or m == d.done_m:
@@ -1237,9 +1243,9 @@ class Engine:
             self.market.prepare_day(
                 nxt.date(),
                 open_utc,
-                progress=lambda n, tot: self.on_progress(
+                progress=lambda n, tot: self.on_progress(self._daily_status(
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
-                ),
+                )),
             )
 
     def _start_day(self, now: datetime) -> None:
@@ -1273,13 +1279,14 @@ class Engine:
         if self.market.set_custom(custom):  # S68: the custom list changed since the history was loaded
             self.market.day = None
         if self.market.day != today:
-            self.on_progress({"state": "preparing", "note": "loading price history (a few minutes the first time)"})
+            self.on_progress(self._daily_status({"state": "preparing",
+                                                 "note": "loading price history (a few minutes the first time)"}))
             self.market.prepare_day(
                 today,
                 open_utc,
-                progress=lambda n, tot: self.on_progress(
+                progress=lambda n, tot: self.on_progress(self._daily_status(
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
-                ),
+                )),
             )
         self._vet_custom(self.day)
         for p in self.pos.values():  # intraday positions opened on an earlier session are closed at the first tick
