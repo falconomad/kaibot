@@ -13,6 +13,7 @@ pre-registered results do not move. Product's rule: what trades live is what was
 from __future__ import annotations
 
 import dataclasses
+import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -287,3 +288,50 @@ def test_buys_book_no_fees_so_the_ledgers_cost_basis_is_the_harness_entry(fx_dat
     for s, st in run.ledger.stats.items():
         sleeve = run.ledger.lb.sleeves[("trend_momentum", s)]
         assert sleeve.qty == st.qty
+
+
+# ---------------------------------------------------------------- the sector cap mid-ranking (QA-Ops on #182)
+
+
+@pytest.mark.parametrize("version", ["trend_momentum", "mom_12_1_band_nofilter"])
+def test_a_full_sector_skips_to_the_next_name_and_buying_goes_on_in_both(version, monkeypatch):
+    """Amendment 4: when the best-ranked candidate's sector is full, it is skipped and a lower-ranked name of
+    another sector is still bought (buying does not stop). #127's market with its twenty strongest stocks (S60-S79)
+    in one sector, so the 40% cap binds in the middle of the ranking. The harness's own `CoreRule.plan` is
+    observed: a candidate skipped for its sector (with no sector cap it would be bought at that decision) is
+    followed by a bought name of another sector. Engine and harness agree exactly on these runs, so the builder
+    does the same (a "stop buying" in either one breaks this test)."""
+    m, i0, i1 = tem.core_today()
+    syms = m.raw.symbols
+    sec = {int(j): ("HOT" if int(syms[j][1:]) >= 60 else f"X{int(syms[j][1:]) % 7}") for j in m.stocks}
+    m = dataclasses.replace(m, sector=sec)
+    data = DailyData.from_market(m)
+    assert data.sector["S70"] == "HOT" and data.sector["S10"] == "X3"
+    events: list[tuple[int, str, str]] = []
+    plan = mc.CoreRule.plan
+
+    def observed(self, i, held, eq, cash=None):
+        p = plan(self, i, held, eq, cash)
+        bought = [j for j, _ in p["buy"]]
+        if not bought:
+            return p
+        r = self.ranking(i - 1)
+        order = [j for j in r[:math.ceil(self.spec.enter_top * len(r))].tolist() if j not in held]
+        before = [j for j in order[:order.index(bought[-1])] if j not in bought and self.bucket(j) == "HOT"]
+        if before and self.bucket(bought[-1]) != "HOT":
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(mc, "SECTOR_CAP_PCT", 100.0)
+                uncapped = {j for j, _ in plan(self, i, held, eq, cash)["buy"]}
+            for j in before:
+                if j in uncapped:  # skipped for its sector only
+                    events.append((i, syms[j], syms[bought[-1]]))
+        return p
+
+    monkeypatch.setattr(mc.CoreRule, "plan", observed)
+    c = tem.compare(m, data, version, i0, i1)
+    assert events, "no decision where a full sector was skipped and a later name bought"
+    assert c["orders_equal"] and c["fills_equal"] and c["digest_equal"] and c["max_equity_gap"] <= 0.01
+    assert c["run"].guards == [] and c["run"].ledger.overdrafts == []
+    i, skipped, later = events[0]
+    assert (i, "buy", later) in {x[:3] for x in c["run"].orders}  # the engine bought the later name too
+    assert (i, "buy", skipped) not in {x[:3] for x in c["run"].orders}
