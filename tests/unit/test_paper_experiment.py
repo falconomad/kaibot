@@ -45,10 +45,12 @@ def _write(tmp_path, cfg) -> Path:
 # ------------------------------------------------------------------ defaults the stakeholder flips
 
 
-def test_multi_day_flag_and_overnight_stay_off_by_default(monkeypatch):
+def test_the_flag_stays_off_by_default_and_overnight_is_allowed(monkeypatch):
+    """Product, 13 Nov 2026 (decision 15 section 11): allow_overnight is true in the repository; it acts only on
+    multi-day books, which exist only with KAIBOT_MULTIDAY=on, the stakeholder's single switch (default off)."""
     monkeypatch.delenv(registry.MULTIDAY_FLAG, raising=False)
     assert not registry.multi_day_enabled()
-    assert _cfg()["all_levels"]["allow_overnight"] is False
+    assert _cfg()["all_levels"]["allow_overnight"] is True
     # with the flag off the levels run exactly their own (intraday) lists
     assert load_strategies() == {lv: list(body["strategies"]) for lv, body in _cfg()["levels"].items()}
 
@@ -75,19 +77,19 @@ def test_level_caps_are_30_60_100_and_inside_the_hard_ceilings(monkeypatch):
         assert research.max_gross_pct == research.max_overnight_pct == cap
         validate_book(research, BOOK_HARD_CEILINGS)
         validate_book(research, load_book_limits(research=True)[lv])  # tighten-only on top of the level
-        live = rule_book_limits(MD, lv)  # allow_overnight false: nothing over the close, whatever the cap
-        assert live.max_gross_pct == cap and live.max_overnight_pct == 0
+        live = rule_book_limits(MD, lv)  # allow_overnight true: the cap is also the overnight cap
+        assert live.max_gross_pct == live.max_overnight_pct == cap
         validate_book(live, load_book_limits()[lv])
     assert rule_exposure_pct("mom_12_1_band", "balanced") == 0.0  # no cap configured: may hold nothing
 
 
-def test_with_overnight_allowed_the_cap_is_the_overnight_cap(tmp_path):
+def test_with_overnight_off_nothing_is_held_over_the_close(tmp_path):
     cfg = _cfg()
-    cfg["all_levels"]["allow_overnight"] = True
+    cfg["all_levels"]["allow_overnight"] = False
     p = _write(tmp_path, cfg)
     for lv, cap in CAPS.items():
         lim = rule_book_limits(MD, lv, p)
-        assert lim.max_gross_pct == lim.max_overnight_pct == cap
+        assert lim.max_gross_pct == cap and lim.max_overnight_pct == 0
 
 
 @pytest.mark.parametrize("bad,match", [(101, "loosens the hard ceiling"), (0, "must be a number > 0"),
@@ -205,9 +207,29 @@ def test_check_reports_the_multi_day_switches(monkeypatch):
     monkeypatch.delenv(registry.MULTIDAY_FLAG, raising=False)
     off = multi_day_state(Remote())
     assert off[registry.MULTIDAY_FLAG] == "off" and off["rules_loaded"] == [] and off["experiments"] == []
-    assert off["allow_overnight"] is False
+    assert off["allow_overnight"] is True
     monkeypatch.setenv(registry.MULTIDAY_FLAG, "on")
     st = multi_day_state(Remote())
     assert st["rules_loaded"] == [MD] and st["level"] == "conservative"
-    assert st["overnight_cap_pct"] == {MD: 0.0}  # allow_overnight false: nothing held over the close
+    assert st["overnight_cap_pct"] == {MD: 30.0}  # allow_overnight true: Careful's 30% cap
     assert st["experiments"][0]["max_exposure_pct"] == 30.0 and st["experiments"][0]["evidence"] == "failed_gate_b"
+
+
+def test_allow_overnight_reaches_only_multi_day_books():
+    """Flags off => no multi-day anything: allow_overnight is read only by the multi-day book limits
+    (risk/profiles.load_book_limits) and the --check line; nothing on the intraday path reads it, so with
+    KAIBOT_MULTIDAY off (no multi-day rule loaded, no daily path) the engine is the same with it true or false."""
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[2] / "src" / "kaibot"
+    readers = sorted(str(f.relative_to(src)) for f in src.rglob("*.py")
+                     if '"allow_overnight"' in f.read_text())
+    assert readers == ["engine/__main__.py", "risk/profiles.py"]
+
+
+def test_with_the_flag_off_no_multi_day_rule_or_daily_path_loads(monkeypatch):
+    from kaibot.engine import __main__ as entry
+
+    monkeypatch.delenv(registry.MULTIDAY_FLAG, raising=False)
+    assert entry.daily_path() is None
+    assert all(not registry.multi_day_names(v) for v in load_strategies().values())

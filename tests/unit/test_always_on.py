@@ -89,7 +89,8 @@ def test_daily_plist_keys(plists):
     home, _, texts = plists
     p = plistlib.loads(texts["daily"].encode())
     assert p["Label"] == "com.kaibot.daily"
-    assert p["ProgramArguments"][-1] == "daily" and p["RunAtLoad"] is False and "KeepAlive" not in p
+    # go-live: also at login and boot (a Mac switched off at the weekend catches up Friday's bars on Monday)
+    assert p["ProgramArguments"][-1] == "daily" and p["RunAtLoad"] is True and "KeepAlive" not in p
     # #206: 03:15 and a 07:45 catch-up (only the daily bar refresh), Tuesday-Saturday, Mac time
     assert p["StartCalendarInterval"] == [{"Weekday": d, "Hour": h, "Minute": m} for d in range(2, 7)
                                           for h, m in ((3, 15), (7, 45))]
