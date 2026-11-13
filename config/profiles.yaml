@@ -33,35 +33,43 @@ levels:
     max_entries_per_day: 30
     run_drawdown_end_pct: 12
     strategies: [dip_reversal]    # spy_late_momentum retired 12 Nov 2026 (#128); still registered
-# Book limits for MULTI-DAY sleeves (#119, risk/portfolio.py and the gate's book checks). PROVISIONAL DEFAULTS:
-# decision 15 section 6 says Product proposes the level values with the first ten-year results of rule 1 and the
-# stakeholder confirms them with the first paper start. Until then every level carries the same placeholders and
-# tests run at Balanced with a 100% cap. Each value may only tighten BOOK_HARD_CEILINGS in risk/gate.py
-# (min_cash_pct is a floor). While all_levels.allow_overnight is false the live loader sets max_overnight_pct to 0.
+# Book limits for MULTI-DAY sleeves (#119, risk/portfolio.py and the gate's book checks). CONFIRMED by the stakeholder
+# on 13 Nov 2026 ("option A, as tested"; decision 15 section 11): the limits trend_momentum was pre-registered and
+# tested with (docs/prereg/trend_momentum.md, Amendments 3 and 4; engine/daily.momentum_limits): k = 0.1%, the
+# level's max_position_pct per name, at most 30 names, a 40% sector cap, the gap scenario at the hard ceiling (15%)
+# and the 1% cash floor (the builder keeps the pre-registered 3% cash reserve on top). The exposure cap per level is
+# the rule's (`rules` below). run_drawdown_end_pct: the BOOK's own run end, 1.5 x the ten-year test's max drawdown at
+# the level's cap (separate from the intraday run end in `levels`, which is unchanged). Each value may only tighten
+# BOOK_HARD_CEILINGS in risk/gate.py (min_cash_pct is a floor). While all_levels.allow_overnight is false the live
+# loader sets max_overnight_pct to 0.
 multi_day:
-  provisional: true
+  provisional: false
   levels:
     conservative: &md_default
       atr_risk_pct: 0.1        # k: a 1-ATR(20) day costs 0.1% of equity per position
       max_name_pct: 10         # = the level's max_position_pct
       max_gross_pct: 100
       max_overnight_pct: 100
-      max_sector_pct: 30
-      max_names: 20
-      min_cash_pct: 2
-      max_gap_loss_pct: 12     # gap scenario: max(10%, 3 x ATR20) on every overnight position
+      max_sector_pct: 40       # Amendment 4
+      max_names: 30            # the pre-registration
+      min_cash_pct: 1          # the hard floor; the pre-registered 3% reserve is the builder's (Amendment 3)
+      max_gap_loss_pct: 15     # gap scenario: max(10%, 3 x ATR20) on every overnight position; the hard ceiling
+      run_drawdown_end_pct: 13 # the book's own run end (Careful: 1.5 x 8.57%)
     balanced:
       <<: *md_default
       max_name_pct: 15
+      run_drawdown_end_pct: 21 # 1.5 x 14.18%
     aggressive:
       <<: *md_default
       max_name_pct: 20
+      run_drawdown_end_pct: 27 # 1.5 x 18.27%; BOOK_HARD_CEILINGS
   # Multi-day rules on the live (paper) path. Only with KAIBOT_MULTIDAY=on (default off), and only a rule with
   # `enabled: true` that passed Gate B or is a stakeholder experiment (strategies/registry.EVIDENCE). Stakeholder,
   # 13 Nov 2026 (decision 15 section 11): trend_momentum FAILED Gate B and runs as a paper EXPERIMENT only, never
   # real money; mom_12_1_band stays off. max_exposure_pct: the rule's gross and overnight cap per level, tighten-only
   # on top of `levels` above and BOOK_HARD_CEILINGS. retire_drawdown_pct: the experiment's retirement trigger
-  # (1.5 x the ten-year test's max drawdown at that cap; section 11), checked in the daily status.
+  # (1.5 x the ten-year test's max drawdown at that cap; section 11). Since #206 the engine enforces it: it tightens
+  # the book's run_drawdown_end_pct above (the smaller wins), and reaching it closes the multi-day book.
   rules:
     trend_momentum:
       enabled: true

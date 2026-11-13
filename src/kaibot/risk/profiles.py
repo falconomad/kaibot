@@ -116,12 +116,17 @@ def rule_exposure_pct(name: str, level: str, path: Path = DEFAULT_PATH) -> float
 
 def rule_book_limits(name: str, level: str, path: Path = DEFAULT_PATH, *, research: bool = False) -> BookLimits:
     """The level's multi-day book limits tightened by the rule's exposure cap: gross and overnight both at most the
-    cap (never above the level's value: live with allow_overnight false the overnight cap stays 0). Validated
-    against the level (tighten-only) and BOOK_HARD_CEILINGS."""
+    cap (never above the level's value: live with allow_overnight false the overnight cap stays 0), and the book's
+    run end at most the rule's retirement trigger (#206). Validated against the level (tighten-only) and
+    BOOK_HARD_CEILINGS."""
     base = load_book_limits(path, research=research)[level]
     cap = rule_exposure_pct(name, level, path)
-    return tighten_book(base, {"max_gross_pct": min(base.max_gross_pct, cap),
-                               "max_overnight_pct": min(base.max_overnight_pct, cap)})
+    out = {"max_gross_pct": min(base.max_gross_pct, cap), "max_overnight_pct": min(base.max_overnight_pct, cap)}
+    r = load_multi_day_rules(path).get(name)
+    retire = r.retire_drawdown_pct.get(level) if r is not None else None
+    if retire is not None:  # #206: the retirement trigger is the book's run end (engine-enforced; the smaller wins)
+        out["run_drawdown_end_pct"] = min(base.run_drawdown_end_pct, float(retire))
+    return tighten_book(base, out)
 
 
 def experiments(names_on, level: str, path: Path = DEFAULT_PATH) -> list[dict]:
@@ -144,8 +149,8 @@ def experiments(names_on, level: str, path: Path = DEFAULT_PATH) -> list[dict]:
 
 
 def load_book_limits(path: Path = DEFAULT_PATH, *, research: bool = False) -> dict[str, BookLimits]:
-    """Book limits per level for multi-day sleeves (profiles.yaml `multi_day`, PROVISIONAL until the stakeholder
-    confirms them, decision 15 section 6), validated against BOOK_HARD_CEILINGS.
+    """Book limits per level for multi-day sleeves (profiles.yaml `multi_day`; confirmed by the stakeholder on
+    13 Nov 2026, decision 15 section 11), validated against BOOK_HARD_CEILINGS.
 
     Live (`research=False`): while `all_levels.allow_overnight` is false no multi-day sleeve may hold anything over
     the close, so `max_overnight_pct` is 0. `research=True` (the ten-year test with SimBroker) keeps the values."""
@@ -164,4 +169,5 @@ def load_book_limits(path: Path = DEFAULT_PATH, *, research: bool = False) -> di
 
 
 def book_limits_provisional(path: Path = DEFAULT_PATH) -> bool:
+    """False since 13 Nov 2026: the stakeholder confirmed the level values (decision 15 section 11)."""
     return bool(yaml.safe_load(path.read_text())["multi_day"].get("provisional", True))

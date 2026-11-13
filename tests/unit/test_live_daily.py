@@ -14,6 +14,7 @@ fill and its booking, ends with the same orders at the venue, each once, and the
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
 
@@ -193,7 +194,9 @@ def test_the_live_path_reproduces_the_research_runner_order_by_order_and_fill_by
     s = mom.VERSIONS["trend_momentum"]
     lim = momentum_limits(s, POL, 100.0) if limits == "prereg" else live_book_limits(s)
     if limits == "live_book":
-        assert lim.max_gross_pct == 60 and lim.max_names == 20 and lim.max_sector_pct == 30  # #205, Balanced
+        assert lim.max_gross_pct == 60 and lim.max_names == 30 and lim.max_sector_pct == 40  # #205, Balanced
+        # #206: confirmed as pre-registered, so the live book is the tested sizing at the rule's 60% cap
+        assert dataclasses.replace(lim, run_drawdown_end_pct=27.0) == momentum_limits(s, POL, 60.0)
     b = ld.live_builder(s, lim)
     ref = reference(data, s, ld.live_builder(s, lim))
     h = Harness(data, s, b, tmp_path)

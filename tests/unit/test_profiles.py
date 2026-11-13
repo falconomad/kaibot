@@ -10,21 +10,22 @@ def test_profiles_load_and_respect_ceilings():
     assert all(abs(x.max_daily_loss_pct / x.risk_per_trade_pct - 3) < 1e-9 for x in p.values())
 
 
-def test_book_limits_load_provisional_and_inside_the_ceilings():
-    """#119: multi-day book limits per level are PROVISIONAL (decision 15 section 6) and only tighten
-    BOOK_HARD_CEILINGS; live, overnight exposure stays 0 while allow_overnight is false."""
+def test_book_limits_load_confirmed_and_inside_the_ceilings():
+    """#119: multi-day book limits per level only tighten BOOK_HARD_CEILINGS; live, overnight exposure stays 0 while
+    allow_overnight is false. #206: confirmed by the stakeholder on 13 Nov 2026 as the pre-registered limits."""
     from dataclasses import asdict
 
     from kaibot.risk.gate import BOOK_HARD_CEILINGS, validate_book
     from kaibot.risk.profiles import book_limits_provisional, load_book_limits
 
-    assert book_limits_provisional()
+    assert not book_limits_provisional()
     research, live, pol = load_book_limits(research=True), load_book_limits(), load_profiles()
     assert set(research) == set(live) == set(pol)
     for name, lim in research.items():
         validate_book(lim, BOOK_HARD_CEILINGS)
         assert lim.max_name_pct == pol[name].max_position_pct  # the per-name cap comes from the level
         assert lim.atr_risk_pct == 0.1
+        assert (lim.max_names, lim.max_sector_pct, lim.min_cash_pct, lim.max_gap_loss_pct) == (30, 40, 1, 15)
         assert live[name].max_overnight_pct == 0
         assert {k: v for k, v in asdict(live[name]).items() if k != "max_overnight_pct"} == {
             k: v for k, v in asdict(lim).items() if k != "max_overnight_pct"}
