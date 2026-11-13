@@ -22,6 +22,8 @@ from datetime import date
 from pathlib import Path
 
 from kaibot.agents.contracts import CandidateVerdict, Confidence, PreopenVerdicts, ReviewFlag
+from kaibot.agents.evalset.runner import OfflineBudget
+from kaibot.agents.gateway import Gateway, LLMConfig
 from kaibot.agents.preopen import Key, ReviewCandidate, review, violations
 from kaibot.strategies.base import TargetList
 
@@ -89,14 +91,21 @@ def load_lists(path: Path = PREOPEN_SET) -> list[dict]:
     return out
 
 
-def evaluate(lists: list[dict], reviewer=None, budget_state: str = "ok") -> dict:
-    """Run the review over stored lists. `contract_violations` must be 0."""
+def offline_gateway() -> Gateway:
+    """A budget gateway on the in-memory budget (state ok, never refuses) and with no client: no key, no spend."""
+    return Gateway(OfflineBudget(), None, LLMConfig.load())
+
+
+def evaluate(lists: list[dict], reviewer=None, gateway=None) -> dict:
+    """Run the review over stored lists. `contract_violations` must be 0. The budget state comes from `gateway`
+    (default: the offline one, always ok)."""
     reviewer = reviewer or StubReviewer()
+    gateway = gateway or offline_gateway()
     statuses, verdicts, bad, match, n_expected, n_cands = Counter(), Counter(), [], 0, 0, 0
     rows = []
     for case in lists:
         reviewed, out, cands = review(case["session"], case["targets"], case["plan"], case["current"], reviewer,
-                                      env=ON_ENV, budget_state=budget_state)
+                                      env=ON_ENV, gateway=gateway)
         statuses[out.status] += 1
         n_cands += len(cands)
         verdicts.update(out.verdicts.values())

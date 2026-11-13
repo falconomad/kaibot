@@ -7,6 +7,7 @@ import time
 from datetime import date
 
 import pytest
+from fakes import FakeStore
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
@@ -14,12 +15,26 @@ from pydantic import ValidationError
 from kaibot.agents import preopen
 from kaibot.agents.contracts import CandidateVerdict, Confidence, PreopenVerdicts, ReviewFlag
 from kaibot.agents.evalset.preopen import ON_ENV, PREOPEN_SET, StubReviewer, evaluate, load_lists
+from kaibot.agents.gateway import Gateway, LLMConfig
 from kaibot.agents.preopen import MAX_CANDIDATES, apply, candidates, check_answer, enabled, review, violations
 from kaibot.agents.room import FORBIDDEN_FIELDS, _field_names, tool_for
 from kaibot.strategies.base import TargetList
 
 D = date(2026, 11, 13)
 S = "trend_momentum"
+CFG = LLMConfig.load()
+
+
+def budget(day=0.0, month=0.0, down=False):
+    """The LLM budget gateway on FakeStore (no client: these tests use stub reviewers). #186: the review reads the
+    budget state from it, never from the caller."""
+    store = FakeStore()
+    store.llm.update(day=day, month=month)
+    if down:
+        def boom(fn, args):
+            raise ConnectionError("supabase unreachable")
+        store.rpc = boom
+    return Gateway(store, None, CFG)
 
 
 @pytest.fixture(autouse=True)
@@ -94,11 +109,11 @@ def test_only_increases_are_candidates_ranked_by_weight():
 
 # ---------- verdicts and fail-closed paths ----------
 
-def run(rev, plan=None, cur=None, budget="ok", weights=None):
+def run(rev, plan=None, cur=None, gw=None, weights=None):
     plan = plan or {(S, "A"): 40, (S, "B"): 21, (S, "C"): 10}
     cur = cur if cur is not None else {(S, "B"): 1}
     return review(D, [tl(weights or {"A": 0.5, "B": 0.3, "C": 0.2})], plan, cur, rev, env=ON_ENV,
-                  budget_state=budget)
+                  gateway=gw or budget())
 
 
 def test_allow_downgrade_veto():
@@ -132,12 +147,12 @@ def test_reviewer_crash_is_no_increase_not_a_crash():
     assert out.status == "error" and reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
 
 
-def test_budget_soft_cap_or_unknown_skips_and_hard_cap_blocks():
-    rev = StubReviewer()
-    for state in ("rules_only", None):
-        reviewed, out, _ = run(rev, budget=state)
-        assert out.status == "skipped" and reviewed == {(S, "A"): 40, (S, "B"): 21, (S, "C"): 10}
-    reviewed, out, _ = run(rev, budget="no_entries")
+def test_budget_soft_cap_or_unknown_vetoes_and_hard_cap_blocks():
+    rev = StubReviewer()  # #186: an exhausted or unreadable budget vetoes every increase (was: skipped)
+    for gw in (budget(day=CFG.daily_soft_usd), budget(down=True)):
+        reviewed, out, _ = run(rev, gw=gw)
+        assert out.status == "budget" and reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
+    reviewed, out, _ = run(rev, gw=budget(month=CFG.monthly_hard_usd))
     assert out.status == "no_entries" and reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
     assert rev.calls == 0
 
@@ -165,7 +180,7 @@ def test_on_without_a_reviewer_fails_closed():
 def test_slow_review_times_out_and_vetoes_every_increase():
     ticks = iter([0.0, preopen.TOTAL_S + 1.0])
     reviewed, out, _ = review(D, [tl({"A": 0.5, "B": 0.3, "C": 0.2})], {(S, "A"): 40, (S, "B"): 21, (S, "C"): 10},
-                              {(S, "B"): 1}, lambda d, cs: answer(cs), env=ON_ENV, budget_state="ok",
+                              {(S, "B"): 1}, lambda d, cs: answer(cs), env=ON_ENV, gateway=budget(),
                               clock=lambda: next(ticks))
     assert out.status == "timeout" and out.verdicts == {}
     assert reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
@@ -178,7 +193,7 @@ def test_hung_review_is_cut_off_at_the_deadline():
 
     t0 = time.monotonic()
     reviewed, out, _ = review(D, [tl({"A": 0.5, "B": 0.5})], {(S, "A"): 40, (S, "B"): 21}, {(S, "B"): 1}, hung,
-                              env=ON_ENV, budget_state="ok", total_s=0.2)
+                              env=ON_ENV, gateway=budget(), total_s=0.2)
     assert time.monotonic() - t0 < 1.0  # returned at the deadline, not when the reviewer finished
     assert out.status == "timeout" and out.verdicts == {}
     assert reviewed == {(S, "A"): 0, (S, "B"): 1}
@@ -236,7 +251,7 @@ def test_property_only_tightens(plan, cur, picks, status):
 def test_fractional_holding_is_never_sold_by_the_review(verdict, want):
     k = (S, "A")
     reviewed, out, _ = review(D, [tl({"A": 1.0})], {k: 4}, {k: 3.5}, lambda d, cs: answer(cs, verdict),
-                              env=ON_ENV, budget_state="ok")
+                              env=ON_ENV, gateway=budget())
     assert out.status == "done" and reviewed == {k: want}
     assert violations({k: 4}, {k: 3.5}, reviewed) == []
     assert out.row({k: 4}, reviewed, {k: 3.5})["arms"][f"{S}:A"]["reviewed"] == want
@@ -245,7 +260,7 @@ def test_fractional_holding_is_never_sold_by_the_review(verdict, want):
 def test_fractional_holding_fail_closed_keeps_the_holding():
     k = (S, "A")
     reviewed, out, _ = review(D, [tl({"A": 1.0})], {k: 9}, {k: 3.5}, lambda d, cs: None, env=ON_ENV,
-                              budget_state="ok")
+                              gateway=budget())
     assert out.status == "invalid" and reviewed == {k: 3.5}
 
 
@@ -288,9 +303,9 @@ def test_stored_lists_offline_eval():
     assert sells["arms"] == {} and sells["verdicts"] == {}
 
 
-@pytest.mark.parametrize("state", ["rules_only", "no_entries"])
-def test_stored_lists_under_budget_states(state):
-    rep = evaluate(load_lists(PREOPEN_SET), budget_state=state)
+@pytest.mark.parametrize("day, month", [(CFG.daily_soft_usd, 0.0), (CFG.daily_soft_usd, CFG.monthly_hard_usd)])
+def test_stored_lists_under_budget_states(day, month):
+    rep = evaluate(load_lists(PREOPEN_SET), gateway=budget(day, month))
     assert rep["contract_violations"] == []
     assert rep["verdicts"] == {}
 
