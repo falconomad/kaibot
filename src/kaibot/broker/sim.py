@@ -178,6 +178,10 @@ class SimBroker(BrokerBase):
         if replaced_leg not in ("nested", "detached"):
             raise ValueError("replaced_leg is nested or detached")
         self.replace_new_id, self.replaced_leg = replace_new_id, replaced_leg
+        # Alpaca's wash-trade rule: a new order is refused while an opposite-side market or stop order is open in
+        # the symbol (#206). On by default, as at the venue.
+        self.wash_check = True
+        self.shorting_enabled = False  # the paper account's setting (Kaibot runs with shorting off, decision 15 §11)
         self.down = False  # a network cut: every call raises BrokerError(0) until it is False again
         self.calls: list[str] = []  # every write the venue received (submit / cancel / replace), for drills
         self._dup: set[str] = set()
@@ -259,12 +263,12 @@ class SimBroker(BrokerBase):
     def account(self) -> dict:
         self._net()
         if self.cash is None:
-            return {"status": "ACTIVE"}
+            return {"status": "ACTIVE", "shorting_enabled": self.shorting_enabled}
         now = _utc(self.clk())
         value = sum(float(p["qty"]) * (self.bars.last_close(s, now) or float(p["avg_entry_price"]))
                     for s, p in self.pos.items())
         return {"status": "ACTIVE", "cash": str(self.cash), "equity": str(self.cash + value),
-                "buying_power": str(max(self.cash, 0.0))}
+                "buying_power": str(max(self.cash, 0.0)), "shorting_enabled": self.shorting_enabled}
 
     def positions(self) -> dict[str, dict]:
         self._net()
@@ -372,6 +376,11 @@ class SimBroker(BrokerBase):
                 raise BrokerError(422, "bracket orders must be DAY or GTC")
             if r.order_class == "bracket" and not all(legs) or r.order_class == "oto" and sum(legs) != 1:
                 raise BrokerError(422, f"{r.order_class} order with the wrong legs")
+        if self.wash_check:
+            other = self._opposite(r.symbol, r.side)
+            if other is not None:  # Alpaca: "potential wash trade detected. use complex orders" (#206, QA-Ops)
+                raise BrokerError(403, f"potential wash trade detected. use complex orders (opposite {other['type']} "
+                                       f"order {other['id']} in {r.symbol})")
         if r.side == "sell":
             free = self._free_shares(r.symbol)
             if r.qty > free + 1e-9:
@@ -381,6 +390,18 @@ class SimBroker(BrokerBase):
             px = r.limit_price or r.stop_price or self.bars.last_close(r.symbol, now)
             if px is not None and r.qty * px > self.cash + 1e-9:
                 raise BrokerError(403, "insufficient buying power")
+
+    def _opposite(self, symbol: str, side: str) -> dict | None:
+        """An open market or stop order (or armed leg) of the other side in `symbol`: Alpaca refuses the new order
+        then (wash-trade protection)."""
+        for o in self._live_orders():
+            if o["symbol"] != symbol:
+                continue
+            for x in [o, *(o.get("legs") or [])]:
+                live = x["status"] in WORKING if x is o else x["status"] == "new"
+                if live and x.get("side", o["side"]) != side and x.get("type") in ("market", "stop"):
+                    return x
+        return None
 
     def _free_shares(self, symbol: str) -> float:
         """Shares of the position that no working sell order or leg holds."""

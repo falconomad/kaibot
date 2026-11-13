@@ -292,8 +292,12 @@ def _killed_at_1550(tmp_path, gap_b=1.0):
     a.day1()
     fake_candidate(a.eng, "A", at=(54,))
     a.ticks(a.open2, 0, 379)
-    # a multi-day purchase for the closing auction, sent before 15:50 (Alpaca's cut-off for cls orders)
+    # a multi-day purchase for the closing auction, sent before 15:50 (Alpaca's cut-off for cls orders). #206: next to
+    # B's resting sell stop Alpaca would refuse it (wash trade) and the daily path no longer sends it; the drill keeps
+    # a resting entry to show the fail-safes cancel one, so the venue's check is off for this one order
+    a.broker.wash_check = False
     a.broker.submit(OrderRequest("B", "buy", 5, "market", "cls", f"kb{a.rid}-{MD}-B-20260804-target-1"))
+    a.broker.wash_check = True
     a.ticks(a.open2, 379, 380)  # 15:50: the engine dies here
     assert "A" in a.broker.pos and a.broker.pos["B"]["qty"] == QTY
     beat(a.store, a.clock())
