@@ -212,7 +212,7 @@ def test_the_script_writes_gate_b_and_the_prereg_marks(report, capsys):
     page = (root / "reports" / se.SUMMARY).read_text()
     for needle in ("## Decision 15 Gate B on cost model v2", "## The pre-registration's marks",
                    "## Engine against the research harness", "Harness 0.5 bp", "quoted in issue #202",
-                   "| spy_noise_band|v2 |"):
+                   "| spy_noise_band|v2 |", "**Size (read before the marks):**", "partly invested account"):
         assert needle in page, needle
     rows = [json.loads(x) for x in (root / "trials.jsonl").read_text().splitlines()]
     assert len(rows) == 3 and {r["n_trials"] for r in rows} == {0} and {r["status"] for r in rows} == {

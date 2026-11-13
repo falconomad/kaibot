@@ -604,6 +604,12 @@ def page(rep: dict, name: str = "") -> str:
     out += ["", f"Rule CAGR {gv._pct(st['rule']['cagr'])}, max drawdown {gv._pct(st['rule']['max_drawdown'])}, "
             f"Sharpe {st['rule']['sharpe']['sharpe']:.2f}; benchmark {rep['benchmark']['kind']} CAGR "
             f"{gv._pct(st['spy']['cagr'])}, max drawdown {gv._pct(st['spy']['max_drawdown'])}.", ""]
+    out += [f"**Size (read before the marks):** this is the account the risk gate allows, not the prereg's 1x "
+            f"account: {v2['mean_position_pct']}% of equity on average when long (at most "
+            f"{v2['max_position_pct']}%; the level's per-position cap, at most 20% under `HARD_CEILINGS`). "
+            "Marks 2 and 4 (CAGR and drawdown against SPY) judge this partly invested account, so a fail there "
+            "says nothing about the rule at 1x; mark 1 per year and per-trip numbers do not depend on size "
+            "beyond rounding to whole shares.", ""]
     out += ["## The pre-registration's marks", "",
             "As written (0.5 bp a side; mark 2 at 1 bp), from the engine's round trips:", ""]
     out += [f"- Mark {m['mark']} ({m['text']}): **{m['verdict']}**. {m['detail']}." for m in
