@@ -74,6 +74,9 @@ def test_a_restart_after_the_halt_keeps_the_cancel(tmp_path, monkeypatch):
 
 @dataclass(frozen=True)
 class SellsB(mom.TrendMomentum):
+    def decision_day(self, prev, fill) -> bool:  # #206: the daily path asks a rule only on its decision days
+        return True
+
     def on_event(self, ctx):
         return TargetList(self.name, ctx.fill_session, {}, features={"keep": [], "buy": [], "sell": {"B": "exit"}},
                           resize=False)
