@@ -291,7 +291,7 @@ def test_a_daily_order_waits_while_an_opposite_order_is_open():
               {"id": "mine", "symbol": "D", "side": "sell", "type": "market", "status": "new", "legs": []},
               {"id": "lim", "symbol": "E", "side": "sell", "type": "limit", "status": "new", "legs": []}]
     opp = ld.opposite_orders(orders, {"mine"})
-    assert opp == {"B": {"sell"}, "C": {"sell"}}
+    assert opp == {"B": {"sell"}, "C": {"sell"}, "E": {"sell"}}  # #211: an opposite limit blocks a market order
 
     class Acct:
         def entry_block(self):
@@ -303,7 +303,8 @@ def test_a_daily_order_waits_while_an_opposite_order_is_open():
     g = ld._Gate(Acct())
     g.opposite = opp
     assert "wash trade" in g.allows("B", "buy") and g.allows("B", "sell") is None
-    assert "wash trade" in g.allows("C", "buy") and g.allows("D", "buy") is None and g.allows("E", "buy") is None
+    assert "wash trade" in g.allows("C", "buy") and g.allows("D", "buy") is None
+    assert "wash trade" in g.allows("E", "buy")
 
 
 def test_multi_day_buys_wait_while_shorting_is_on(tmp_path, monkeypatch):
@@ -377,12 +378,18 @@ def test_only_an_explicit_dated_reenable_brings_the_rule_back_once(tmp_path, mon
     eng = a.restart()
     assert eng.daily.retirement(MD) is not None
     refused = [e["payload"] for e in a.store.tables["event"] if e["type"] == "multi_day_reenable_refused"]
-    assert len(refused) == 2 and f"{MD}:{DAY2}" in refused[-1]["why"]
-    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{DAY2}")
+    ident = eng.daily.retirement(MD)["retirement_id"]
+    assert ident.startswith(f"{DAY2}.") and len(refused) == 2 and f"{MD}:{ident}" in refused[-1]["why"]
+    assert eng.daily.status()["rules"][MD]["reenable"] == f"KAIBOT_REENABLE={MD}:{ident}"
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{DAY2}")  # the date alone no longer names the retirement (#211)
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is not None
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{ident}")
     eng = a.restart()
     assert eng.daily.retirement(MD) is None and [r.name for r in eng.daily.active()] == [MD]
     (re,) = [b for *_, b in eng.journal.entries(kinds=("md_reenabled",))]
     assert re["rule"] == MD and re["retired_session"] == DAY2 and re["by"] == "KAIBOT_REENABLE"
+    assert re["retirement_id"] == ident
     assert [x for x in a.store.tables["halt"] if x["kind"] == "multi_day_reenabled"]
     assert "multi_day_reenabled" in [e["type"] for e in a.store.tables["event"]]
     eng = a.restart()  # the flag still in the .env: nothing more is written
@@ -412,3 +419,65 @@ def test_the_send_window_reads_the_calendar_once_per_session_not_per_tick():
     assert lv.send_until(d) == time(15, 45)  # unreadable: the normal window (Alpaca refuses later orders anyway)
     assert [lv.send_until(d) for _ in range(5)] == [time(12, 45)] * 5
     assert calls == [d, d]
+
+
+# ---------------------------------------------------------------- #211: follow-ups of the QA-Ops review of #207
+
+
+def test_a_stale_reenable_line_never_reenables_a_same_date_retirement(tmp_path, monkeypatch):
+    """#211 (QA-Ops 3): re-enabled, then retired again on the SAME date (a new run that day): the old line in the .env
+    names the first retirement's id only and is refused; the rule stays retired."""
+    monkeypatch.delenv("KAIBOT_REENABLE", raising=False)
+    a = _ended_book(tmp_path, monkeypatch)
+    first = a.eng.daily.retirement(MD)["retirement_id"]
+    monkeypatch.setenv("KAIBOT_REENABLE", f"{MD}:{first}")
+    eng = a.restart()
+    assert eng.daily.retirement(MD) is None
+    eng.daily.retire(MD, run_id=a.rid, session=DAY2, drawdown_pct=22.0, end_pct=21.0, peak=10_000.0, equity=7_800.0)
+    second = eng.daily.retirement(MD)["retirement_id"]
+    assert second != first and second.startswith(f"{DAY2}.")
+    eng = a.restart()  # the stale line is still set
+    assert eng.daily.retirement(MD)["retirement_id"] == second
+    assert len([b for *_, b in eng.journal.entries(kinds=("md_reenabled",))]) == 1
+    why = [e["payload"]["why"] for e in a.store.tables["event"] if e["type"] == "multi_day_reenable_refused"][-1]
+    assert second in why
+
+
+def test_one_bad_print_never_retires_the_rule(tmp_path, monkeypatch):
+    """#211 (QA-Ops 1): a breach seen on one check only (a bad print) is journalled and dropped; the book ends only
+    when the breach holds on two checks at least a minute apart."""
+    a = DailyAccount(tmp_path, monkeypatch, book_end=5.0)
+    _book_b(a)
+    real = a.eng._md_price
+    bad = {"on": False}
+    a.eng._md_price = lambda sym: real(sym) * 0.5 if bad["on"] else real(sym)  # a bad print of B
+    a.ticks(a.open1, 30, 40)
+    bad["on"] = True
+    a.ticks(a.open1, 40, 41)  # one tick with a bad price
+    bad["on"] = False
+    a.ticks(a.open1, 41, 45)
+    assert [b for *_, b in a.eng.journal.entries(kinds=("md_book_breach",))]
+    assert not a.eng.daily.account.book_ended() and a.eng.daily.retirement(MD) is None
+    bad["on"] = True
+    a.ticks(a.open1, 45, 46)
+    assert not a.eng.daily.account.book_ended()  # first check of a new breach
+    a.ticks(a.open1, 46, 47)  # the next minute: confirmed
+    assert a.eng.daily.account.book_ended() and a.eng.daily.retirement(MD) is not None
+
+
+def test_simbroker_models_opposite_limit_orders_as_alpaca_does(tmp_path, monkeypatch):
+    """#211 (QA-Ops 2): an open opposite limit order refuses a new market or stop order, and a new limit order whose
+    price reaches it; a limit that does not reach it is accepted."""
+    import pytest as _pt
+
+    from kaibot.broker.protocol import BrokerError, OrderRequest
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    _book_b(a)
+    a.broker.submit(OrderRequest("B", "sell", 10, "limit", "day", "l1", limit_price=200.0))
+    for req in (OrderRequest("B", "buy", 1, "market", "cls", "m1"),
+                OrderRequest("B", "buy", 1, "stop", "day", "s1", stop_price=300.0),
+                OrderRequest("B", "buy", 1, "limit", "day", "l2", limit_price=200.0)):
+        with _pt.raises(BrokerError, match="wash trade"):
+            a.broker.submit(req)
+    a.broker.submit(OrderRequest("B", "buy", 1, "limit", "day", "l3", limit_price=150.0))  # below the sell: fine

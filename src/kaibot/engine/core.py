@@ -106,6 +106,7 @@ CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": alread
 # S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
 RECHECK_MINUTES = 15  # S78: a blocking reconciliation difference is checked again this often
+BREACH_CONFIRM_S = 60.0  # #211: a book breach must hold on two checks at least this far apart
 
 
 class FlattenIncomplete(RuntimeError):
@@ -292,7 +293,7 @@ def gate_peak(peak: float | None, eq: float, book_pnl: float) -> float | None:
     if not book_pnl or peak is None:
         return peak
     eq_i = intraday_equity(eq, book_pnl)
-    if not eq_i > 0:
+    if not (eq_i > 0 and eq > 0):  # (#211: a non-positive run equity keeps the peak as it is)
         return peak
     return eq * peak / eq_i
 
@@ -370,6 +371,7 @@ class Engine:
             raise registry.RefusedStrategy(f"the live daily path needs {registry.MULTIDAY_FLAG}=on")
         self.daily = daily(self) if daily is not None else None
         self._closed_cache: tuple | None = None
+        self._breach: tuple[int, datetime] | None = None  # #211: (run, first check) of an unconfirmed book breach
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -628,8 +630,24 @@ class Engine:
         if peak is None or equity > peak + 0.005:
             peak = max(peak or float(b.amount), equity)
             self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self.now().isoformat()})
-        if book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
-            self._book_end(rid, peak, equity, end, [r.name for r in rules])
+        if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
+            self._breach = None
+            return
+        # #211 (QA-Ops review of #207): a retirement is durable, so one bad print must never cause it. The breach
+        # must hold on two checks at least BREACH_CONFIRM_S apart (two engine ticks, i.e. two minute bars) before
+        # the book ends; a check in between that is not a breach starts over. A restart starts over too.
+        now = self.now()
+        if self._breach is None or self._breach[0] != rid:
+            self._breach = (rid, now)
+            self.journal.append("md_book_breach", {"run_id": rid, "peak": round(peak, 2), "equity": round(equity, 2),
+                                                   "drawdown_pct": round(drawdown_pct(peak, equity), 3),
+                                                   "end_pct": end, "ts": now.isoformat(),
+                                                   "action": "confirmed or dropped at the next check"})
+            return
+        if (now - self._breach[1]).total_seconds() < BREACH_CONFIRM_S:
+            return
+        self._breach = None
+        self._book_end(rid, peak, equity, end, [r.name for r in rules])
 
     def _book_end(self, rid: int, peak: float, equity: float, end: float, rules: list[str]) -> None:
         """The multi-day book reached its run end. Exactly this, in this order:
