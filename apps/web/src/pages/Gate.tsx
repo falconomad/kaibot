@@ -6,20 +6,22 @@ import { useRunCtx } from "../components/Shell";
 import { api, type GateStrategy } from "../lib/api";
 import { gateOverallText, gateRows, gateStatusText } from "../lib/gateview";
 import { dateEt, day, money, timeBoth } from "../lib/fmt";
-import { ruleName } from "../lib/explain";
+import { RULES, V3_RULES, ruleName } from "../lib/explain";
+import { experimentsOf } from "../components/Experiment";
+import { findExperiment, type Experiment } from "../lib/experiment";
 import { Empty, ErrorState, RuleName } from "../components/States";
 import { Skeleton } from "../components/Skeleton";
 import { STALE, poll } from "../lib/poll";
 
 const STATE_TEXT = { pass: "pass", fail: "fail", unknown: "unknown", provisional: "on track (provisional)", pending: "not yet" };
 
-function StrategyCard({ name, st }: { name: string; st: GateStrategy }) {
+function StrategyCard({ name, st, exp }: { name: string; st: GateStrategy; exp: Experiment | null }) {
   const s = gateStatusText(st.status);
   const done = Math.min(st.n_trades / Math.max(st.n_trades + st.trades_to_go, 1), 1);
   return (
     <section className="card" aria-labelledby={`g-${name}`}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-        <h2 id={`g-${name}`} style={{ margin: 0 }}><RuleName code={name} /></h2>
+        <h2 id={`g-${name}`} style={{ margin: 0 }}><RuleName code={name} exp={exp} /></h2>
         <span className={`tag gate-${s.tone}`}>{s.label}</span>
       </div>
       <p className="muted" style={{ fontSize: 13 }}>
@@ -48,8 +50,26 @@ function StrategyCard({ name, st }: { name: string; st: GateStrategy }) {
   );
 }
 
+/** #210 follow-up: the Engine v3 rules' ten-year verdicts (decision 15), each with its honest tag. */
+function V3Verdicts({ exps }: { exps: Experiment[] }) {
+  return (
+    <section className="card" aria-labelledby="v3-h">
+      <h2 id="v3-h">Engine v3 rules: the ten-year test</h2>
+      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Each rule is tested on ten years of past prices, after costs, before it may trade on paper.
+        A rule that fails never trades real money.</p>
+      <ul className="v3-list">
+        {V3_RULES.map((k) => (
+          <li key={k}><b><RuleName code={k} exp={findExperiment(k, exps)} limits /></b>
+            <div className="muted" style={{ fontSize: 13 }}>{RULES[k].what}</div></li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function Gate() {
-  const { run } = useRunCtx();
+  const { run, overview } = useRunCtx();
+  const exps = experimentsOf(overview?.heartbeat);
   // The engine writes one report after each close: cache it for minutes, poll gently.
   const q = useQuery({ queryKey: ["gate", run.id], queryFn: () => api.gate(run.id), staleTime: STALE.daily, ...poll(300_000) });
   if (q.isPending) return <Skeleton />;
@@ -75,8 +95,9 @@ export function Gate() {
           </p>
         )}
       </section>
+      <V3Verdicts exps={exps} />
       {latest && (Object.keys(latest.report.strategies ?? {}).length
-        ? Object.entries(latest.report.strategies).map(([k, st]) => <StrategyCard key={k} name={k} st={st} />)
+        ? Object.entries(latest.report.strategies).map(([k, st]) => <StrategyCard key={k} name={k} st={st} exp={findExperiment(k, exps)} />)
         : <section className="card"><Empty>The latest report judged no strategy: none traded on the current code yet.</Empty></section>)}
       {q.data.history.length > 1 && (
         <section className="card" aria-labelledby="gh-h">

@@ -2,7 +2,7 @@
 // Error: role="alert", a plain sentence, the server's message as detail, and a Retry button when the query can retry.
 // Empty: a plain sentence with what to expect next. Loading: the shaped skeleton (role="status").
 import type { ReactNode } from "react";
-import { TEST_PHASE, RETIRED_TEXT, ruleName, ruleStatus, ruleStatusText } from "../lib/explain";
+import { EXPERIMENT_LABEL, STATUS_TAG, TEST_PHASE, RETIRED_TEXT, ruleName, ruleStatus, ruleStatusText } from "../lib/explain";
 import { Skeleton } from "./Skeleton";
 import type { Experiment } from "../lib/experiment";
 import { ExperimentBadge } from "./Experiment";
@@ -46,10 +46,13 @@ export function Code({ text, code }: { text: string; code: string | null | undef
  *  runs as a paper experiment (#210) carries the experiment badge instead (with its cap and stop line if `limits`). */
 export function RuleName({ code, tag = true, exp, limits }: { code: string; tag?: boolean; exp?: Experiment | null; limits?: boolean }) {
   const st = ruleStatus(code), txt = ruleStatusText(code);
+  // An experiment keeps its badge without the heartbeat's label row (market closed, older engine), only without limits.
+  const e = exp ?? (st === "experiment" ? { strategy: code, label: EXPERIMENT_LABEL, evidence: "failed_gate_b", experiment: true,
+    realMoney: false, level: null, capPct: null, retirePct: null } : null);
   return (
     <span title={`code: ${code}`}>{ruleName(code)}
-      {tag && exp && <> <ExperimentBadge e={exp} limits={limits} /></>}
-      {tag && !exp && txt && <> <span className={`tag ${st === "retired" ? "retired" : ""}`}>{st === "retired" ? RETIRED_TEXT : txt}</span></>}
+      {tag && e && <> <ExperimentBadge e={e} limits={limits} /></>}
+      {tag && !e && txt && st && <> <span className={`tag ${STATUS_TAG[st]}`}>{st === "retired" ? RETIRED_TEXT : txt}</span></>}
     </span>
   );
 }

@@ -447,3 +447,5 @@ button.exp-tag:focus-visible { outline: 2px solid var(--sea); outline-offset: 2p
 .exp-rule + .exp-rule { border-top: 1px solid var(--rule); margin-top: 12px; padding-top: 12px; }
 .exp-ended { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: var(--warn-tint); border: 1px solid #4A3A16; }
 .exp-note { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; font-size: 13px; background: var(--surface-2); }
+.v3-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.v3-list b { font-weight: 600; }
