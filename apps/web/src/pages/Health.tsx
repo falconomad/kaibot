@@ -93,7 +93,7 @@ function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
       <ul style={{ fontSize: 13, margin: "0 0 8px", paddingLeft: 18 }}>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
       {near.length > 0 && (
         <div>
-          <table className="list">
+          <table className="list" tabIndex={0} aria-label="Today's scan">
             <thead><tr><th>Near-miss</th><th>Time (ET)</th><th>Dip (σ)</th><th>Why it didn't qualify</th></tr></thead>
             <tbody>{near.map((n, i) => <tr key={`${n.symbol}-${n.m}-${i}`}><td>{n.symbol}</td><td>{sessionTime(n.m)}</td><td>{n.z.toFixed(2)}</td><td>{n.why.replace(/ sigma/g, "σ")}</td></tr>)}</tbody>
           </table>
@@ -143,7 +143,7 @@ export function Health() {
     <>
       <section className="card" aria-labelledby="proc-h">
         <h2 id="proc-h">Processes</h2>
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="Processes">
           <thead><tr><th>Process</th><th>State</th><th>Last heartbeat</th><th>Detail</th></tr></thead>
           <tbody>{procs.length ? procs.map((b) => <Proc key={b.process} h={b} />) : <tr><td colSpan={4} className="muted">No process has reported yet.</td></tr>}</tbody>
         </table>
@@ -181,7 +181,7 @@ export function Health() {
 
       <section className="card" aria-labelledby="ev-h">
         <h2 id="ev-h">Operations log</h2>
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="Operations log">
           <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
           <tbody>{!h.events.length && <tr><td colSpan={3} className="muted">Nothing logged yet.</td></tr>}{h.events.map((e, i) => (
             <tr key={i}>

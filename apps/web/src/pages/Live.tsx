@@ -31,7 +31,7 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
   const nav = useNavigate();
   const beats = useRunCtx()?.overview?.heartbeat;
   return (
-    <table className="list">
+    <table className="list" tabIndex={0} aria-label="Trades">
       <thead><tr><th>Stock</th><th>Time (ET)</th><th className="hide-sm">Why it closed</th><th className="r hide-sm">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th><th className="hide-sm">Room</th></tr></thead>
       <tbody>
         {rows.map((t) => (

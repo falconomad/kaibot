@@ -175,12 +175,19 @@ export function Shell() {
           {" "}<Link to="/health">Engine health</Link>
         </div>
       )}
-      <div className="body">
-        <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
-          <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
-            retryOverview: () => { void overview.refetch(); } } satisfies RunCtx} />
-        </main>
-      </div>
+      {/* v4 PR 1 (audit #9): the halt strip above depends on the overview. Until its first answer the page shows a
+          placeholder block of its own (one screen tall, so the footer stays below the fold); the real page is then
+          inserted once, with the strip, instead of being pushed down by it. */}
+      {overview.isPending ? (
+        <div className="body body-pending" aria-busy="true"><main id="main" tabIndex={-1}><Skeleton variant="dashboard" /></main></div>
+      ) : (
+        <div className="body" key="ready">
+          <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
+            <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
+              retryOverview: () => { void overview.refetch(); } } satisfies RunCtx} />
+          </main>
+        </div>
+      )}
       <TabBar />
       <div className="foot">Paper trading only · simulated money · times ET (CET in brackets) · <Link to="/start">New run</Link> · <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a></div>
     </div>

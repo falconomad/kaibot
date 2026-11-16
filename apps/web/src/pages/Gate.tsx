@@ -28,9 +28,9 @@ function StrategyCard({ name, st, exp }: { name: string; st: GateStrategy; exp: 
         {st.n_trades.toLocaleString("en-US")} trades on the current code · {money(st.pnl_usd)} after costs
         {st.trades_to_go > 0 && <> · {st.trades_to_go.toLocaleString("en-US")} more needed before it can pass</>}
       </p>
-      <div className="bar-track" aria-label={`${Math.round(done * 100)}% of the required trades`}><i style={{ width: `${done * 100}%` }} /></div>
+      <div className="bar-track" role="img" aria-label={`${Math.round(done * 100)}% of the required trades`}><i style={{ width: `${done * 100}%` }} /></div>
       {st.kills.length > 0 && <ul className="loss" style={{ fontSize: 13 }}>{st.kills.map((k) => <li key={k}>Kill: {k}</li>)}</ul>}
-      <table className="list">
+      <table className="list" tabIndex={0} aria-label="Criteria">
         <thead><tr><th>Criterion</th><th>Now</th><th>Bar</th><th>State</th></tr></thead>
         <tbody>
           {gateRows(st).map((r) => (
@@ -102,7 +102,7 @@ export function Gate() {
       {q.data.history.length > 1 && (
         <section className="card" aria-labelledby="gh-h">
           <h2 id="gh-h">Verdict history</h2>
-          <table className="list">
+          <table className="list" tabIndex={0} aria-label="Verdict history">
             <thead><tr><th>Session</th><th>Verdict</th><th>Trades</th></tr></thead>
             <tbody>
               {q.data.history.slice(0, 20).map((h) => (

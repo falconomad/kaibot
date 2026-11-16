@@ -77,7 +77,7 @@ function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp
       <>
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>{d.gate.qty} shares; the size was limited by <span title={d.gate.binding ? `code: ${d.gate.binding}` : undefined}>{bindingText(d.gate.binding)}</span>.</p>
         <p className="muted num" style={{ marginTop: 0, fontSize: 12 }}>policy {d.gate.policy_hash} · code version {d.gate.code_sha}</p>
-        <table className="list"><thead><tr><th>Check</th><th>Result</th><th className="r">Actual</th><th className="r">Limit</th></tr></thead>
+        <table className="list" tabIndex={0} aria-label="Gate checks"><thead><tr><th>Check</th><th>Result</th><th className="r">Actual</th><th className="r">Limit</th></tr></thead>
           <tbody>{rows.map(([k, v]) => (
             <tr key={k}><td title={`code: ${k}`}>{checkText(k)}</td>
               <td className={v.state === "pass" ? "" : v.state === "warn" ? "loss" : "loss"} style={{ color: v.state === "pass" ? "var(--pass)" : v.state === "warn" ? "var(--warn)" : "var(--fail)" }}>
@@ -97,7 +97,7 @@ function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp
   if (!d.fills.length)
     return <p className="muted">{replay ? "Replay fills use the shadow cost model only: next-bar open at the modelled bid/ask plus impact, and SEC/FINRA fees on sells. No broker fills exist for a replay." : "No fills recorded."}</p>;
   return (
-    <table className="list"><thead><tr><th>Time</th><th>Side</th><th className="r">Qty</th><th className="r">Broker</th><th className="r">Shadow</th><th className="r">Fees</th></tr></thead>
+    <table className="list" tabIndex={0} aria-label="Fills and costs"><thead><tr><th>Time</th><th>Side</th><th className="r">Qty</th><th className="r">Broker</th><th className="r">Shadow</th><th className="r">Fees</th></tr></thead>
       <tbody>{d.fills.map((f, i) => <tr key={i}><td className="num">{timeEt(f.ts)}</td><td>{f.side}</td><td className="r num">{f.qty}</td>
         <td className="r num">{px(Number(f.venue_px))}</td><td className="r num">{px(Number(f.shadow_px))}</td><td className="r num">{money(Number(f.fees))}</td></tr>)}</tbody>
     </table>
@@ -119,7 +119,7 @@ export function TradeDetailPage() {
   const d = q.data, t = d.trade;
   return (
     <>
-      <Link to="/">← Home</Link>
+      <Link to="/" className="back">← Home</Link>
       <section className="card">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
           <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}<RuleExperiment code={t.strategy} beats={beats} /></span></span></span>

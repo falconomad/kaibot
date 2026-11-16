@@ -26,7 +26,7 @@ export function StockBadge({ symbol, size = 40 }: { symbol: string; size?: numbe
       </span>
     );
   return (
-    <span className="badge" style={{ ...box, background: tint(symbol), fontSize: Math.round(size * 0.3) }} aria-hidden="true">
+    <span className="badge" style={{ ...box, background: tint(symbol), fontSize: Math.max(12, Math.round(size * 0.3)) }} aria-hidden="true">
       {symbol.slice(0, 4)}
     </span>
   );
