@@ -26,7 +26,7 @@ function Line({ it, open, onToggle, beats }: { it: TapeItem; open?: boolean; onT
     return (
       <>
         <td><span className={`tag ${it.side === "buy" ? "allow" : "downgrade"}`}>{it.side === "buy" ? "bought" : "sold"}</span></td>
-        <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} className="rowlink"><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
+        <td>{it.trade_id ? <Link to={`/positions/${it.trade_id}`} className="rowlink"><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
         <td className="num">{it.qty} @ {px(it.venue_px)} <span className="muted">(shadow {px(it.shadow_px)}, fees {money(it.fees)})</span>
           {it.side === "sell" && it.exit_reason && <span className="muted" title={`code: ${it.exit_reason}`}> · {exitText(it.exit_reason)}</span>}
           {it.tag && <span className="muted" title={`code: ${it.tag}`}> · {it.tag.replace(/_/g, " ")}</span>}
@@ -49,7 +49,7 @@ function Line({ it, open, onToggle, beats }: { it: TapeItem; open?: boolean; onT
   return (
     <>
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
-      <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} className="rowlink"><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
+      <td>{it.trade_id ? <Link to={`/positions/${it.trade_id}`} className="rowlink"><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
         <span className="muted" title={`${ruleLabel(it.strategy)} · code: ${it.strategy}`}> · {ruleName(it.strategy)}</span>
         <RuleExperiment code={it.strategy} beats={beats} /></td>
       <td title={ex.detail}><div>{ex.outcome}</div><div className="muted" style={{ fontSize: 13 }}>{ex.saw}</div>
@@ -90,7 +90,7 @@ export function Tape() {
   return (
     <section className="card" aria-labelledby="tape-h">
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <h2 id="tape-h" style={{ margin: 0 }}>Tape</h2>
+        <h2 id="tape-h" style={{ margin: 0 }}>Activity</h2>
         <span className="muted" style={{ fontSize: 13 }}>Every setup Kaibot saw, what it did, why, and every fill after costs. Newest first.</span>
         <span className="spacer" />
         <div className="tabs" role="tablist" onKeyDown={onTabKeys} aria-label="Show">

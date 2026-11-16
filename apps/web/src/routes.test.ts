@@ -12,7 +12,7 @@ describe("lazy routes (#80)", () => {
   it("imports no other page eagerly: every other page goes through a loader", () => {
     const eagerPages = [...mainSrc.matchAll(/from "\.\/pages\/(\w+)"/g)].map((m) => m[1]).sort();
     expect(eagerPages).toEqual(["Live", "SignIn"]);
-    expect(Object.keys(ROUTE_LOADERS)).toHaveLength(11);
+    expect(Object.keys(ROUTE_LOADERS)).toHaveLength(12);
     for (const path of Object.keys(ROUTE_LOADERS)) expect(mainSrc).toContain(`load["${path}"]()`);
   });
 
@@ -20,7 +20,7 @@ describe("lazy routes (#80)", () => {
     const navTargets = [...shellSrc.matchAll(/\{ to: "([^"]+)"/g)].map((m) => m[1]);
     expect(navTargets.length).toBeGreaterThanOrEqual(8);
     for (const to of navTargets) expect(isLazyRoute(to)).toBe(to !== "/");
-    expect(shellSrc.match(/\{\.\.\.warm\(n\.to\)\}/g)).toHaveLength(2);
+    expect(shellSrc.match(/\{\.\.\.warm\((n\.)?to\)\}/g)).toHaveLength(2); // top nav and tab bar
   });
 
   it("does not treat prototype keys or unknown paths as routes", () => {

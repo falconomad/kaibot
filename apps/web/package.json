@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:mobile": "VITE_SUPABASE_URL=http://localhost:54321 VITE_SUPABASE_PUBLISHABLE_KEY=mock vite build --outDir /tmp/kb-dist-check --emptyOutDir && python3 scripts/mobile_check.py --dist /tmp/kb-dist-check --interact"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

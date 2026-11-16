@@ -17,7 +17,7 @@ describe("Trade detail page states", () => {
   it("empty: an unknown trade says so and links back to all trades", () => {
     const html = render(<TradeDetailPage />, { ...at, seeds: [{ key, data: null }] });
     expect(text(html)).toContain("Trade not found.");
-    expect(html).toContain('href="/trades"');
+    expect(html).toContain('href="/positions"');
     expect(glitches(html)).toEqual([]);
   });
 

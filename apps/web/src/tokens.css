@@ -17,5 +17,6 @@
   --ease: cubic-bezier(.2, .7, .2, 1);
   --radius: 24px;
 }
+
 body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
 .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }

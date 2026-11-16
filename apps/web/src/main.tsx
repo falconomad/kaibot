@@ -2,8 +2,9 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import type { Session } from "@supabase/supabase-js";
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import "./tokens.css";
+import "./v4tokens.css";
 import "./app.css";
 import { api, supa } from "./lib/api";
 import { Shell } from "./components/Shell";
@@ -16,16 +17,17 @@ import { STALE } from "./lib/poll";
 // Lazy routes (see routes.ts). Sign-in, the shell and Home stay in the first load so the first screen is one round trip.
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
 const Health = lazy(() => load["/health"]().then((m) => ({ default: m.Health })));
-const Tape = lazy(() => load["/tape"]().then((m) => ({ default: m.Tape })));
+const Tape = lazy(() => load["/activity"]().then((m) => ({ default: m.Tape })));
 const Holdings = lazy(() => load["/holdings"]().then((m) => ({ default: m.Holdings })));
 const Report = lazy(() => load["/report"]().then((m) => ({ default: m.Report })));
 const Onboarding = lazy(() => load["/start"]().then((m) => ({ default: m.Onboarding })));
-const TradeDetailPage = lazy(() => load["/trades/:id"]().then((m) => ({ default: m.TradeDetailPage })));
+const TradeDetailPage = lazy(() => load["/positions/:id"]().then((m) => ({ default: m.TradeDetailPage })));
 const GoNoGo = lazy(() => load["/gate"]().then((m) => ({ default: m.Gate })));
 const Strategy = lazy(() => load["/strategy"]().then((m) => ({ default: m.Strategy })));
 const StrategyHome = lazy(() => load["/strategy"]().then((m) => ({ default: m.StrategyHome })));
 const FineTune = lazy(() => load["/strategy/fine-tune"]().then((m) => ({ default: m.FineTune })));
-const Trades = lazy(() => load["/trades"]().then((m) => ({ default: m.Trades })));
+const More = lazy(() => load["/more"]().then((m) => ({ default: m.More })));
+const Trades = lazy(() => load["/positions"]().then((m) => ({ default: m.Trades })));
 
 /** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton. */
 const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense>;
@@ -34,6 +36,13 @@ const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense f
 // doesn't fire every query at once.
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: STALE.default,
   refetchIntervalInBackground: false } } });
+
+/** /trades/:id (before v4) -> /positions/:id, keeping the query (?tab=...). */
+function OldTrade() {
+  const { id } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={`/positions/${id}${search}`} replace />;
+}
 
 function Gate() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
@@ -61,9 +70,14 @@ function Gate() {
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<Live />} />
-        <Route path="trades" element={page(<Trades />)} />
-        <Route path="trades/:id" element={page(<TradeDetailPage />, "detail")} />
-        <Route path="tape" element={page(<Tape />)} />
+        <Route path="positions" element={page(<Trades />)} />
+        <Route path="positions/:id" element={page(<TradeDetailPage />, "detail")} />
+        <Route path="activity" element={page(<Tape />)} />
+        <Route path="more" element={page(<More />)} />
+        {/* v4: Trades is now Positions and Tape is Activity; old links keep working */}
+        <Route path="trades" element={<Navigate to="/positions" replace />} />
+        <Route path="trades/:id" element={<OldTrade />} />
+        <Route path="tape" element={<Navigate to="/activity" replace />} />
         <Route path="holdings" element={page(<Holdings />)} />
         <Route path="report" element={page(<Report />)} />
         <Route path="health" element={page(<Health />)} />

@@ -144,7 +144,7 @@ export function RoomBySignal({ signalId }: { signalId: number }) {
   if (!q.data) return <p className="muted">No room session for this setup.</p>;
   return (
     <>
-      {q.data.trade && <p style={{ margin: "0 0 8px" }}><Link to={`/trades/${q.data.trade.id}`}>Open the trade →</Link></p>}
+      {q.data.trade && <p style={{ margin: "0 0 8px" }}><Link to={`/positions/${q.data.trade.id}`}>Open the trade →</Link></p>}
       <RoomTranscript s={q.data.session} trade={q.data.trade} compact />
     </>
   );

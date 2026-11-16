@@ -115,7 +115,7 @@ export function TradeDetailPage() {
     staleTime: (qq) => (qq.state.data?.trade.exit_ts ? STALE.daily : STALE.default) });
   if (q.isPending) return <Skeleton variant="detail" />;
   if (q.isError) return <ErrorState what="This trade" error={q.error} retry={() => q.refetch()} />;
-  if (!q.data) return <section className="card"><p style={{ marginTop: 0 }}>Trade not found. It may belong to a run you can't see.</p><Link to="/trades">All trades</Link></section>;
+  if (!q.data) return <section className="card"><p style={{ marginTop: 0 }}>Trade not found. It may belong to a run you can't see.</p><Link to="/positions">All trades</Link></section>;
   const d = q.data, t = d.trade;
   return (
     <>

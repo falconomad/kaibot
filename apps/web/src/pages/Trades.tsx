@@ -17,7 +17,7 @@ export function Trades() {
   return (
     <section className="card" aria-labelledby="trades-h">
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 10 }}>
-        <h2 id="trades-h" style={{ margin: 0 }}>All trades · {run.label ?? `Run ${run.id}`}</h2>
+        <h2 id="trades-h" style={{ margin: 0 }}>Positions · {run.label ?? `Run ${run.id}`}</h2>
         {q.data && <span className="muted num">{total} total</span>}
         <span className="spacer" />
         <nav aria-label="Pages" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", maxWidth: "100%" }}>
