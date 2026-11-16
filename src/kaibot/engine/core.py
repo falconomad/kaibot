@@ -828,8 +828,8 @@ class Engine:
             except Exception:
                 have = None
         for sym, keys in by_sym.items():
-            if have is not None and have.get(sym, 0.0) <= 0:
-                failed[sym] = f"{sym} is not held at the broker (the ledger holds it): not sold, check the account"
+            if have is not None and have.get(sym, 0.0) <= 0:  # nothing to sell (as close_position answered before)
+                log.warning("flatten (%s): %s is in the ledger but not held at the broker: not sold", reason, sym)
                 continue
             if have is not None and self.pos.on(sym):
                 left = have[sym] - sum(float(p.qty) for p in self.pos.on(sym))
