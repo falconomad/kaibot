@@ -69,7 +69,7 @@ Measured on PR #227 (`ubuntu-latest`, public repo: 4 vCPU, 16 GB):
 | before: one job, serial `pytest -q` | 837 s (job 14 min 10 s) | |
 | one job, `-n 4 --dist loadscope` | 262 s | big modules pin one worker |
 | one job, `-n 4 --dist worksteal` | 194 to 384 s | runner CPU decides: about 250 s on Xeon 6975P / EPYC 9V74, about 380 s on EPYC 7763; peak memory 7 to 8.9 GB of 16 GB |
-| two parts, `-n 4 --dist worksteal` each | see PR #227 | chosen: under 6 min even on the slow CPU |
+| two parts, `-n 4 --dist worksteal` each | 127 to 222 s per part | chosen: push to green `python` 3 min 56 s, 3 min 06 s, 2 min 51 s on three runs in a row (slowest part ran on EPYC 7763); peak memory 4.3 to 7.0 GB per runner |
 
 Tried and dropped: `OMP_NUM_THREADS=1` (no change), 6 workers (no change: a 4 vCPU runner is 2 cores with SMT),
 turning off the warnings plugin (no change; the ~124,000 pandas `Series.values` deprecation warnings come from
