@@ -269,9 +269,9 @@ describe("the browser tab, the home-screen label and the manifest read the same 
   });
   it("index.html links the favicon to the logo's own file, and the icons and manifest the build serves", () => {
     expect(indexHtml).toContain('<link rel="icon" href="/src/brand/logo/favicon.svg" type="image/svg+xml" />');
-    expect(indexHtml).toContain('<link rel="icon" href="/favicon.ico" sizes="32x32" />');
-    expect(indexHtml).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" />');
-    expect(indexHtml).toContain(`<link rel="manifest" href="/${MANIFEST_PATH}" />`);
+    expect(indexHtml).toContain('<link rel="icon" href="/favicon.ico?v=k1" sizes="32x32" />');
+    expect(indexHtml).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=k1" />');
+    expect(indexHtml).toContain(`<link rel="manifest" href="/${MANIFEST_PATH}?v=k1" />`);
     expect(ICONS.map((i) => i.file)).toEqual(expect.arrayContaining(["favicon.ico", "apple-touch-icon.png"]));
   });
   it("the manifest: name and short_name from BRAND, opens in the browser, PNG icons with a maskable one", () => {
