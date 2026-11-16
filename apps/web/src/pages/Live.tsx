@@ -1,18 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Suspense, lazy, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { Meter, engineChip, livePot, useRunCtx } from "../components/Shell";
 import { PotChart } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { R, dateEt, day, money, pct, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
 import { commandText, exitText, ruleName } from "../lib/explain";
-import { evidenceVerdict, levelPlan } from "../lib/derive";
-import { StockBadge, StockCell, companyName } from "../components/StockBadge";
+import { ageS, ageText, evidenceVerdict, levelPlan } from "../lib/derive";
+import { StockCell } from "../components/StockBadge";
 import { Skeleton } from "../components/Skeleton";
-import { Empty, ErrorState, TestPhaseBanner } from "../components/States";
+import { Empty, ErrorState } from "../components/States";
 import { STALE, poll } from "../lib/poll";
-import { ExperimentCard, RuleExperiment } from "../components/Experiment";
+import { RuleExperiment } from "../components/Experiment";
+import { HomeStatus, TopHoldings, holdingRows } from "../components/Home";
 import { type StartState, startState } from "../lib/startstate";
 import { useBook } from "../components/useBook";
 import { mtmCurve } from "../lib/book";
@@ -95,40 +96,6 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
   );
 }
 
-function Positions({ positions }: { positions: Record<string, { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }> }) {
-  const nav = useNavigate();
-  const rows = Object.entries(positions);
-  if (!rows.length) return <p className="muted" style={{ fontSize: 14 }}>No open positions. Kaibot is flat by 15:55 every day.</p>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      {rows.map(([s, p]) => {
-        const pnl = p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null;
-        const span = p.target - p.stop || 1;
-        const at = (v: number | null) => `${Math.max(0, Math.min(100, (((v ?? p.stop) - p.stop) / span) * 100)).toFixed(1)}%`;
-        return (
-          <button key={s} type="button" className="posrow" onClick={() => nav(`/positions/${p.trade_id}`)}
-            style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px", borderRadius: 16, border: 0, background: "transparent",
-              textAlign: "left", height: "auto", fontWeight: 400, width: "100%" }}>
-            <StockBadge symbol={s} size={44} />
-            <span style={{ flex: "1 1 160px", minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
-              <b style={{ fontSize: 15 }}>{s} <span className="muted" style={{ fontWeight: 400 }}>· {companyName(s)}</span></b>
-              <span className="num muted" style={{ fontSize: 13 }}>{p.qty} sh · in at {px(p.fill)}{p.status === "pending" ? " · filling" : ""}</span>
-            </span>
-            <span className="hide-sm" style={{ flex: "1 1 220px", display: "flex", flexDirection: "column", gap: 6 }}
-              aria-label={`Price ${px(p.last)} between stop ${px(p.stop)} and target ${px(p.target)}`}>
-              <span className="ladder-row"><span className="entry" style={{ left: at(p.fill) }} /><span className="now" style={{ left: at(p.last) }} /></span>
-              <span className="num muted" style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}><span>stop {px(p.stop)}</span><span>target {px(p.target)}</span></span>
-            </span>
-            <span style={{ flex: "0 0 110px", textAlign: "right", display: "flex", flexDirection: "column", gap: 2 }}>
-              <span className="num" style={{ fontWeight: 600 }}>{px(p.last)}</span>
-              <span className={`num ${tone(pnl)}`} style={{ fontSize: 13, fontWeight: 600 }}>{pnl === null ? "—" : `${pnl >= 0 ? "▲" : "▼"} ${signedMoney(pnl)}`}</span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 /** A new run between "Start paper run" and its first session: the true state, never "waits for the engine" while the
  *  engine's heartbeat is fresh. */
@@ -153,19 +120,18 @@ export function StartBanner({ state: s }: { state: StartState }) {
   );
 }
 
-// #130: the multi-day book section is its own chunk: an intraday-only run never needs it.
-const BookSection = lazy(() => import("../components/BookSection").then((m) => ({ default: m.BookSection })));
 
-const RANGES = [["1W", 5], ["1M", 21], ["3M", 63], ["ALL", 0]] as const;
+const RANGES = [["1W", 5, "1W"], ["1M", 21, "1M"], ["3M", 63, "3M"], ["ALL", 0, "All"]] as const;
 
 export function Live() {
-  const { run, overview, overviewError, retryOverview, meters } = useRunCtx();
+  const { run, overview, overviewError, retryOverview, meters, risk } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), ...poll(60_000) });
   // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
   const chapters = useQuery({ queryKey: ["chapters", run.id], queryFn: () => api.chapters(run.id), enabled: run.kind === "paper", staleTime: STALE.daily, retry: false });
   // #130: the pot line marked to market (kb_equity_series) once the ledger has closes; before that, realised results.
-  const { series } = useBook(run);
+  const { series, book: bookQ } = useBook(run);
+  const useBookData = bookQ.data;
   const lv = run.level ? LEVELS[run.level] : null;
   const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
   if (overviewError) return <ErrorState what="The run overview" error={overviewError} retry={retryOverview} />;
@@ -184,110 +150,92 @@ export function Live() {
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
   const vsSpy = s.netUsd - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
+  const beatTs = overview.heartbeat.find((h) => h.process === "engine")?.ts;
+
+  const book = useBookData;
+  const rows = holdingRows(live?.positions ?? {}, book);
+  const allTime = pot - run.amount_usd;
+  const chartStart = range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd;
 
   return (
     <>
-      {run.kind === "paper" && <TestPhaseBanner />}
-      {run.kind === "replay" && (
-        <div className="banner">
-          <b>Replay, not live trading.</b> This is Variant A run on past market data from {day(run.started_on!)} to {day(run.ended_on!)}
-          {" "}with the Balanced rules and the shadow cost model. The engine starts paper trading in M1; from then on this screen updates every 5 seconds.
-        </div>
-      )}
-      {run.kind === "paper" && !chip.live && ["scheduled", "running", "paused"].includes(run.status) && (
-        <div className="banner warn">
-          <b>The engine isn't running.</b> Nothing trades until you start it on your Mac: open Terminal in the kaibot folder and run
-          {" "}<code className="num">./scripts/run_engine.sh</code>. Open trades keep their stop-loss at Alpaca meanwhile.
-        </div>
-      )}
+      <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} book={book} />
       <StartBanner state={startState(run, overview)} />
 
-      <section aria-labelledby="pot-h" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <h1 id="pot-h" style={{ margin: 0, fontSize: 15, fontWeight: 500, color: "var(--slate)" }}>{run.kind === "replay" ? "Pot at the end of the replay, after costs" : "Pot, after costs"}</h1>
-          <div className="hero">{money(pot)}</div>
-          <div className="num" style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 16, fontWeight: 500 }}>
-            <span className={tone(pot - run.amount_usd)}>{pot >= run.amount_usd ? "▲" : "▼"} {signedMoney(pot - run.amount_usd)} · {pct(((pot - run.amount_usd) / run.amount_usd) * 100)}</span>
-            {live && <span className={tone(live.dayPnl)}>today {live.dayPnl >= 0 ? "▲" : "▼"} {signedMoney(live.dayPnl)}</span>}
-            <span className="muted">SPY same start {s.spyPct >= 0 ? "▲" : "▼"} {pct(s.spyPct)}</span>
+      <div className="home-band">
+        <section aria-labelledby="pot-h" className="home-hero">
+          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : "Paper pot"}</h1>
+          <div className="hero num">{money(pot)}</div>
+          <div className="num home-change">
+            <span className={tone(allTime)}>{signedMoney(allTime)} all time</span>
+            {live && <span className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} today</span>}
+            <span className="muted desk-only">{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500 by {money(Math.abs(vsSpy))}</span>
           </div>
-        </div>
+        </section>
         {lv && meters && run.kind === "paper" && (
-          <div className="phone-only meters meters-home" aria-label="Limits">
+          <div className="desk-only meters home-meters" aria-label="Limits">
             <Meter label="Day vs stop" value={`${pct(meters.dayPct)} / −${lv.stop.toFixed(2)}%`} frac={meters.dayPct < 0 ? -meters.dayPct / lv.stop : 0} />
             <Meter label="Run drawdown" value={`${meters.dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={meters.dd / lv.runDd} />
           </div>
         )}
-        <div className="range" role="group" aria-label="Chart range">
-          {RANGES.map(([k]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{k}</button>)}
-        </div>
-        <div className="card" style={{ padding: "18px 18px 10px" }}>
-          <PotChart key={range} data={shown} start={range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd}
-            markers={(chapters.data ?? []).filter((c) => c.version > 0 && c.from).map((c) => ({ session: c.from.slice(0, 10), label: `v${c.version}` }))} />
-        </div>
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          {vsSpy >= 0 ? "Ahead of" : "Behind"} SPY by <b className="num" style={{ color: "var(--ink)" }}>{money(Math.abs(vsSpy))}</b> since the start.
-          {" "}Reported P&amp;L is the worse of broker fills and the stricter cost model.
-        </p>
-      </section>
-
-      <div className="grid">
-        <section className="card" aria-labelledby="bar-h">
-          <h2 id="bar-h">Evidence toward the go-live bar</h2>
-          <div className="kv">
-            <Progress label="Trades" now={evidence.data?.n ?? s.trades} bar={BAR.trades} />
-            <Progress label="Months" now={s.months} bar={BAR.months} fmt={(v) => v.toFixed(1)} />
-            <Progress label="t-stat (net)" now={evidence.data?.t ?? s.t} bar={BAR.t} fmt={(v) => v.toFixed(2)} />
-            <span>Max drawdown</span><span /><span className="v">{s.maxDdPct.toFixed(1)}% / {lv?.runDd ?? "—"}%</span>
-            <span>Hit rate</span><span /><span className="v">{(s.hitRate * 100).toFixed(1)}%</span>
-            <span>Profit factor</span><span /><span className="v">{s.profitFactor?.toFixed(2) ?? "—"}</span>
-            <span>Losing trading days</span><span /><span className="v">{(s.losingDayShare * 100).toFixed(0)}%</span>
-          </div>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
-            The bar is fixed in advance: ≥ {BAR.trades} trades over ≥ {BAR.months} months, t &gt; {BAR.t}, above the {BAR.randomPct}th
-            percentile of random entries, and better risk-adjusted than SPY. {s.t < BAR.t ? "Not met." : ""}
-          </p>
-          {evidence.data && <p style={{ fontSize: 13, marginBottom: 0 }}>{evidenceVerdict(evidence.data).text}</p>}
-        </section>
-
-        {lv && (
-          <section className="card" aria-labelledby="rules-h">
-            <h2 id="rules-h">Rules for {lv.name}</h2>
-            <div className="kv">
-              <span>Risk per trade</span><span /><span className="v">{lv.risk}% of pot</span>
-              <span>Daily stop (flatten and halt)</span><span /><span className="v">−{lv.stop}%</span>
-              <span>Largest position</span><span /><span className="v">{lv.pos}%</span>
-              <span>Positions at once</span><span /><span className="v">{lv.maxPositions}</span>
-              <span>New trades per day</span><span /><span className="v">≤ {lv.entries}</span>
-              <span>Run ends at drawdown</span><span /><span className="v">{lv.runDd}% from peak</span>
-              <span>Entries / flat by</span><span /><span className="v">09:35–15:45 / 15:55 ET</span>
-            </div>
-            <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>No shorts, leverage or overnight holds. After 3 losses in a row, entries pause for 60 minutes.</p>
-          </section>
-        )}
       </div>
 
-      {run.kind === "paper" && <Suspense fallback={null}><BookSection run={run} beats={overview.heartbeat} /></Suspense>}
-      {run.kind === "paper" && <ExperimentCard beats={overview.heartbeat} />}
-
-      {run.kind === "paper" && (
-        <div className="grid">
-          <section className="card" aria-labelledby="pos-h">
-            <h2 id="pos-h">Open positions · {Object.keys(live?.positions ?? {}).length} / {lv?.maxPositions ?? "—"}</h2>
-            <Positions positions={live?.positions ?? {}} />
-            <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Every stop and target is held at Alpaca, so it fires even if your Mac is off.</p>
-          </section>
-          <Controls run={run} overview={overview} />
+      <section aria-label="Pot over time" className="home-chart">
+        <PotChart data={shown} start={chartStart} compact
+          markers={(chapters.data ?? []).filter((c) => c.version > 0 && c.from).map((c) => ({ session: c.from.slice(0, 10), label: `v${c.version}` }))} />
+        <div className="range" role="group" aria-label="Chart range">
+          {RANGES.map(([k, , label]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{label}</button>)}
         </div>
+      </section>
+
+      {run.kind === "paper" && <TopHoldings rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} />}
+      {run.kind === "replay" && (
+        <section className="card" aria-labelledby="last-h">
+          <h2 id="last-h">{lastDay ? `Trades on ${day(lastDay.session)}, the last trading day` : "Trades"}</h2>
+          {lastRows.length ? <TradeRows rows={lastRows} /> : <Empty>No trades yet.</Empty>}
+        </section>
       )}
 
-      <section className="card" aria-labelledby="last-h">
-        <h2 id="last-h">{run.kind === "paper" ? "Latest trades" : lastDay ? `Trades on ${day(lastDay.session)}, the last trading day` : "Trades"}</h2>
-        {run.kind === "replay" && <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Open positions: none. Kaibot is flat by 15:55 every day. Select a trade for the full reasoning.</p>}
-        {(run.kind === "paper" ? trades.data.rows.slice(0, 12) : lastRows).length
-          ? <TradeRows rows={run.kind === "paper" ? trades.data.rows.slice(0, 12) : lastRows} />
-          : <Empty>No trades yet. Kaibot checks for setups every 5 minutes from 09:35 to 15:45 ET; many days have none.</Empty>}
-      </section>
+      <details className="home-details">
+        <summary><span>Details</span><span className="muted">vs S&amp;P 500, limits, evidence, rules</span></summary>
+        <div className="home-details-body">
+          <div className="kv">
+            <span>S&amp;P 500 (SPY), same start</span><span /><span className="v num">{s.spyPct >= 0 ? "+" : ""}{pct(s.spyPct)}</span>
+            <span>{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500</span><span /><span className="v num">{money(Math.abs(vsSpy))}</span>
+          </div>
+          {lv && meters && run.kind === "paper" && (
+            <div className="phone-only meters meters-home" aria-label="Limits">
+              <Meter label="Day vs stop" value={`${pct(meters.dayPct)} / −${lv.stop.toFixed(2)}%`} frac={meters.dayPct < 0 ? -meters.dayPct / lv.stop : 0} />
+              <Meter label="Run drawdown" value={`${meters.dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={meters.dd / lv.runDd} />
+            </div>
+          )}
+          <section aria-labelledby="bar-h">
+            <h3 id="bar-h">Evidence toward the go-live bar</h3>
+            <div className="kv">
+              <Progress label="Trades" now={evidence.data?.n ?? s.trades} bar={BAR.trades} />
+              <Progress label="Months" now={s.months} bar={BAR.months} fmt={(v) => v.toFixed(1)} />
+              <Progress label="t-stat (net)" now={evidence.data?.t ?? s.t} bar={BAR.t} fmt={(v) => v.toFixed(2)} />
+              <span>Max drawdown</span><span /><span className="v">{s.maxDdPct.toFixed(1)}% / {lv?.runDd ?? "—"}%</span>
+              <span>Hit rate</span><span /><span className="v">{(s.hitRate * 100).toFixed(1)}%</span>
+            </div>
+            {evidence.data && <p style={{ fontSize: 13, marginBottom: 0 }}>{evidenceVerdict(evidence.data).text}</p>}
+          </section>
+          {lv && (
+            <section aria-labelledby="rules-h">
+              <h3 id="rules-h">Rules for {lv.name}</h3>
+              <div className="kv">
+                <span>Risk per trade</span><span /><span className="v">{lv.risk}% of pot</span>
+                <span>Daily stop (flatten and halt)</span><span /><span className="v">−{lv.stop}%</span>
+                <span>Largest position</span><span /><span className="v">{lv.pos}%</span>
+                <span>Run ends at drawdown</span><span /><span className="v">{lv.runDd}% from peak</span>
+              </div>
+            </section>
+          )}
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Reported P&amp;L is the worse of broker fills and the stricter cost model.
+            {run.kind === "paper" && <> Pause or stop the run in <Link to="/settings">Run &amp; settings</Link>.</>}</p>
+          {beatTs && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Updated {ageText(ageS(beatTs))}</p>}
+        </div>
+      </details>
     </>
   );
 }

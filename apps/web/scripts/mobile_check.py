@@ -65,14 +65,15 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     row = {"page": name, "w": w, "overflow": m["docOverflow"], "offscreen": m["offscreen"][:3],
            "tap<44": len(m["tapSmall"]), "taps": m["tapSmall"], "text<12": m["smallWords"],
            "small_font": m["smallFont"],
-           "tables_wider": sum(t["wider"] for t in m["tables"]), "cls": m["cls"], "header": m["headerH"]}
+           "tables_wider": sum(t["wider"] for t in m["tables"]), "cls": m["cls"], "header": m["headerH"],
+           "words": m["foldWords"], "fold": m["foldText"]}
     if phone and m["docOverflow"]:
         fails.append(f"{name}@{w}: page wider than the screen ({m['docScrollWidth']} px)")
     if phone and m["tapSmall"]:
         fails.append(f"{name}@{w}: {len(m['tapSmall'])} tap targets under 44 px")
     over = "YES" if m["docOverflow"] else "no"
     print(f"{name:13} {w:5}  overflow={over:3}  tap<44={len(m['tapSmall']):3}  text<12={m['smallWords']:4}  "
-          f"tables-wider={row['tables_wider']}  cls={m['cls']:.3f}", flush=True)
+          f"tables-wider={row['tables_wider']}  cls={m['cls']:.3f}  words={m['foldWords']}", flush=True)
     return row
 
 
@@ -111,7 +112,7 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         fails.append(f"not reachable on a phone: {missing}")
     pg.click("nav.tabbar a[href='/']")
     pg.wait_for_timeout(800)
-    btn = pg.locator(".exp-btn").first
+    btn = pg.locator(".status-row.info, .exp-btn").first
     if btn.count():
         btn.click()
         pg.wait_for_selector("[role=dialog]")
@@ -120,12 +121,12 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(400)
         gone = pg.locator("[role=dialog]").count() == 0
-        back = pg.evaluate("document.activeElement && document.activeElement.classList.contains('exp-btn')")
+        back = pg.evaluate("!!document.activeElement && document.activeElement.matches('.status-row, .exp-btn')")
         print("sheet: focus inside", inside, "closed on Escape", gone, "focus returned", back)
         if not (inside and gone and back):
             fails.append(f"sheet: focus inside={inside} closed={gone} focus back={back}")
     else:
-        fails.append("no experiment label on Home to open the sheet")
+        fails.append("no experiment row on Home to open the sheet")
     ctx.close()
     ctx, pg = page(reduced=True)
     running = pg.evaluate("document.getAnimations().filter(a => a.playState === 'running').length")

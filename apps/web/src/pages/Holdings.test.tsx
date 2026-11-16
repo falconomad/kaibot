@@ -4,7 +4,6 @@ import type { Heartbeat } from "../lib/api";
 import { parseBook } from "../lib/book";
 import { Holdings } from "./Holdings";
 import { BookSection } from "../components/BookSection";
-import liveSrc from "./Live.tsx?raw";
 import { RAW_BOOK, RAW_EMPTY_BOOK } from "./testkit-book";
 import { boom, ctxFor, emptyOverview, glitches, hasAlert, hasStatus, paperRun, render, replayRun, text, zeros } from "./testkit";
 
@@ -59,10 +58,6 @@ describe("Holdings page (board 12)", () => {
 });
 
 describe("Home: the book section (board 11)", () => {
-  it("Home loads it as its own chunk, for paper runs", () => {
-    expect(liveSrc).toMatch(/lazy\(\(\) => import\("\.\.\/components\/BookSection"\)/);
-    expect(liveSrc).toContain('run.kind === "paper" && <Suspense fallback={null}><BookSection');
-  });
   it("intraday-only run (no multi-day fields, empty book): nothing new", () => {
     const t = text(render(home(beat({})), { seeds: [book(RAW_EMPTY_BOOK)] }));
     expect(t).not.toContain("Stocks held for weeks");

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Health as HealthResp, Heartbeat, LlmBudget, TapeItem, Trade, TradeDetail } from "../lib/api";
 import { Gate } from "./Gate";
 import { Health } from "./Health";
+import { ExperimentCard } from "../components/Experiment";
 import { Live } from "./Live";
 import { Tape } from "./Tape";
 import { TradeDetailPage } from "./TradeDetail";
@@ -32,26 +33,26 @@ const budget: LlmBudget = { day: "2026-11-13", day_usd: 0, month_usd: 0, state: 
 const health = (hb: Heartbeat[], halts: HealthResp["halts"] = []): HealthResp =>
   ({ now: "2026-11-13T22:00:00Z", heartbeat: hb, halts, events: [], pending_commands: [], deadman: { armed: true, jobs: [], runs: [] } });
 
-describe("Home (#210)", () => {
-  it("shows the badge, the cap, the stop line and the no-decision note", () => {
-    const t = text(render(<Live />, { ctx: ctx(withExp), seeds: [trades(["trades-all", 1])] }));
-    expect(t).toContain("Paper experiment");
-    expect(t).toContain(BADGE);
-    expect(t).toContain("up to 60% invested");
-    expect(t).toContain("retires if it falls 21% from its peak");
-    expect(t).toContain("No decision today: the daily prices weren't refreshed after the last close");
+describe("Home (#210, v4 status rows)", () => {
+  it("the experiment row states the label in full; its sheet holds the badge, cap, stop line and the no-decision note", () => {
+    const html = render(<Live />, { ctx: ctx(withExp), seeds: [trades(["trades-all", 1])] });
+    expect(html).toMatch(/<button type="button" class="status-row info"[^>]*><span class="status-text">Experiment: failed the ten-year test<\/span>/);
+    const sheet = text(render(<ExperimentCard beats={withExp} />));
+    expect(sheet).toContain(BADGE);
+    expect(sheet).toContain("up to 60% invested");
+    expect(sheet).toContain("retires if it falls 21% from its peak");
+    expect(sheet).toContain("No decision today: the daily prices weren't refreshed after the last close");
   });
-  it("a retired experiment reads as ended, in amber, with reason and date", () => {
+  it("a retired experiment reads as ended, in amber, never red", () => {
     const html = render(<Live />, { ctx: ctx(retired), seeds: [trades(["trades-all", 1])] });
-    expect(text(html)).toContain("Experiment ended");
-    expect(text(html)).toContain("Trend momentum retired: its book fell 21.3% from its peak on Nov 20, 2026");
-    expect(html).toContain("exp-ended");
-    expect(html).not.toContain("tag veto");
+    expect(html).toMatch(/class="status-row warn"[^>]*><span class="status-text">Experiment ended: Trend momentum retired/);
+    expect(html).not.toContain("status-row breach");
+    expect(text(render(<ExperimentCard beats={retired} />))).toContain("Trend momentum retired: its book fell 21.3% from its peak on Nov 20, 2026");
   });
-  it("an old engine: nothing new", () => {
+  it("an old engine: no experiment, the test-phase row instead", () => {
     const html = render(<Live />, { ctx: ctx(old), seeds: [trades(["trades-all", 1])] });
     expect(text(html)).not.toContain("Experiment");
-    expect(text(html)).not.toContain("No decision");
+    expect(text(html)).toContain("Test phase: paper only, testing the systems");
     expect(glitches(html)).toEqual([]);
   });
 });
