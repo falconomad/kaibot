@@ -10,8 +10,8 @@ errors (the bar cannot be used as it is)
     duplicate_date   the same session twice in one file
     unsorted         dates not in increasing order
     not_a_session    a bar on a day that is not an NYSE regular session (`kaibot.ingest.nyse_sessions`)
-    early_available  `available_ts` earlier than 15 minutes after that session's close: a reader keyed on
-                     `available_ts <= decision_ts` could see the bar before it was complete (point in time)
+    early_available  `available_ts` missing, or earlier than 15 minutes after that session's close: a reader
+                     keyed on `available_ts <= decision_ts` could see the bar before it was complete (point in time)
 warnings (worth a look, often real)
     missing_sessions NYSE sessions inside the key's first..last span with no bar (one row per run; a halt, or a
                      hole in the download)
@@ -20,6 +20,15 @@ warnings (worth a look, often real)
     jump             close-to-close move beyond JUMP (up or down) with no split, stock dividend or spin-off of
                      that key landing on the bar (a missing corporate action, or a bad print)
     zero_volume      a bar with no shares traded
+    off_stamp        `available_ts` is not the store's own stamp for that session (see below), but not early
+                     enough to be an error: a bar written by another tool, or a stamp rule that has drifted
+
+The point-in-time reference is the stamp the store itself writes: `daily_bars.bars_table` sets `available_ts` to
+`COMPLETE_AT` (20:15 ET) of the session date, because extended hours add to a day's volume until 20:00 ET; the live
+daily path (`engine/live_daily.py`) and the multi-day harness treat a bar as complete from that time. The hard floor
+is the session's close plus 15 minutes (16:15 ET, 13:15 ET on early-close days; SIP is free only when 15 minutes
+old): a stamp before it is an error, a stamp at or after it that differs from 20:15 ET is `off_stamp`. A store
+written by `bars_table` therefore never trips either check.
 
 Outputs under <data>/daily/check: integrity.csv (every finding), integrity_summary.csv (one verdict per key:
 clean, warn or error), integrity.txt (plain words).
@@ -29,7 +38,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Iterable, Sequence
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
 
@@ -37,7 +46,8 @@ import numpy as np
 import pandas as pd
 
 from kaibot.ingest import nyse_sessions
-from kaibot.ingest.daily_bars import SHARE_TYPES
+from kaibot.ingest.alpaca_history import ET
+from kaibot.ingest.daily_bars import COMPLETE_AT, SHARE_TYPES
 from kaibot.ingest.daily_store import DailyStore
 
 JUMP = 0.5  # |close / previous close - 1| above this is a jump
@@ -46,7 +56,7 @@ AVAILABLE_AFTER = timedelta(minutes=15)  # SIP history is free and complete only
 REL_TOL = 1e-9  # float noise allowed in the high / low ordering
 EXPLAINS_JUMP = (*SHARE_TYPES, "spin_off")
 ERRORS = ("bad_price", "ohlc_order", "bad_volume", "duplicate_date", "unsorted", "not_a_session", "early_available")
-WARNINGS = ("missing_sessions", "stale", "jump", "zero_volume")
+WARNINGS = ("missing_sessions", "stale", "jump", "zero_volume", "off_stamp")
 FINDING_COLUMNS = ["key", "date", "severity", "kind", "detail"]
 SUMMARY_COLUMNS = ["key", "verdict", "bars", "first", "last", "errors", "warnings", *ERRORS, *WARNINGS]
 
@@ -56,6 +66,12 @@ def _due(d: date) -> np.datetime64:
     """Earliest allowed `available_ts` of session `d` (naive UTC, seconds): its close plus AVAILABLE_AFTER. Cached,
     since every key of the store asks for the same few thousand sessions."""
     return np.datetime64((nyse_sessions.close_utc(d) + AVAILABLE_AFTER).replace(tzinfo=None), "s")
+
+
+@cache
+def _stamp(d: date) -> np.datetime64:
+    """The `available_ts` the store itself writes for session `d` (naive UTC, seconds): COMPLETE_AT ET that day."""
+    return np.datetime64(datetime.combine(d, COMPLETE_AT, ET).astimezone(UTC).replace(tzinfo=None), "s")
 
 
 def _finding(key: str, day, kind: str, detail: str = "") -> dict:
@@ -132,6 +148,9 @@ def check_bars(key: str, bars: pd.DataFrame, actions: pd.DataFrame | None = None
             if np.isnat(ts[i]) or ts[i] < due:
                 out.append(_finding(key, dates[i], "early_available",
                                     f"available_ts {ts[i]} is before {due} UTC"))
+            elif ts[i] != _stamp(d):
+                out.append(_finding(key, dates[i], "off_stamp",
+                                    f"available_ts {ts[i]} UTC, the store writes {_stamp(d)} UTC"))
 
     # --- flat, unchanged runs
     flat = ok & (o == h) & (h == lo) & (lo == c)

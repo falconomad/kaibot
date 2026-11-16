@@ -87,7 +87,8 @@ def test_available_ts_before_the_close_plus_15_minutes_is_an_error():
     df.loc[6, "available_ts"] = pd.Timestamp(datetime(2026, 10, 9, 20, 5, tzinfo=UTC))  # 16:05 ET: too early
     df.loc[8, "available_ts"] = pd.Timestamp(datetime(2026, 10, 13, 20, 15, tzinfo=UTC))  # 16:15 ET: just in time
     found = di.check_bars("AAA", df)
-    assert [(f["kind"], f["date"]) for f in found] == [("early_available", str(DAYS[6]))]
+    assert [(f["kind"], f["severity"], f["date"]) for f in found] == [
+        ("early_available", "error", str(DAYS[6])), ("off_stamp", "warn", str(DAYS[8]))]
     assert DAYS[6] == date(2026, 10, 9) and DAYS[8] == date(2026, 10, 13)
 
 
@@ -95,8 +96,20 @@ def test_early_close_days_use_the_13_00_close():
     day = date(2026, 11, 27)  # day after Thanksgiving: closes 13:00 ET
     assert nyse_sessions.early_close(day)
     df = frame([day], [50.0])
-    df.loc[0, "available_ts"] = pd.Timestamp(datetime(2026, 11, 27, 18, 20, tzinfo=UTC))  # 13:20 ET
-    assert di.check_bars("AAA", df) == []
+    assert di.check_bars("AAA", df) == []  # the store's own 20:15 ET stamp
+    df.loc[0, "available_ts"] = pd.Timestamp(datetime(2026, 11, 27, 18, 20, tzinfo=UTC))  # 13:20 ET: past the close
+    assert [(f["kind"], f["severity"]) for f in di.check_bars("AAA", df)] == [("off_stamp", "warn")]
+    df.loc[0, "available_ts"] = pd.Timestamp(datetime(2026, 11, 27, 18, 10, tzinfo=UTC))  # 13:10 ET: too early
+    assert [(f["kind"], f["severity"]) for f in di.check_bars("AAA", df)] == [("early_available", "error")]
+
+
+def test_the_reference_stamp_is_the_one_the_store_writes():
+    from kaibot.ingest.daily_bars import COMPLETE_AT
+    assert COMPLETE_AT.hour == 20 and COMPLETE_AT.minute == 15
+    df = frame()
+    assert (df["available_ts"].dt.tz_convert("America/New_York").dt.strftime("%H:%M") == "20:15").all()
+    df.loc[1, "available_ts"] = pd.NaT
+    assert [(f["kind"], f["date"]) for f in di.check_bars("AAA", df)] == [("early_available", str(DAYS[1]))]
 
 
 def test_a_flat_unchanged_run_is_stale_only_from_five_bars():
