@@ -5,7 +5,7 @@ import { engineChip, livePot, useRunCtx } from "../components/Shell";
 import { PotChart } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
-import { R, dateEt, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { R, dateEt, day, money, pct, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
 import { commandText, exitText, ruleName } from "../lib/explain";
 import { evidenceVerdict, levelPlan } from "../lib/derive";
 import { StockBadge, StockCell, companyName } from "../components/StockBadge";
@@ -13,6 +13,7 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState, TestPhaseBanner } from "../components/States";
 import { STALE, poll } from "../lib/poll";
 import { ExperimentCard, RuleExperiment } from "../components/Experiment";
+import { type StartState, startState } from "../lib/startstate";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -127,6 +128,29 @@ function Positions({ positions }: { positions: Record<string, { qty: number; fil
   );
 }
 
+/** A new run between "Start paper run" and its first session: the true state, never "waits for the engine" while the
+ *  engine's heartbeat is fresh. */
+export function StartBanner({ state: s }: { state: StartState }) {
+  if (s.kind === "none") return null;
+  const what = s.kind !== "scheduled" && s.amount !== null
+    ? <><b className="num">{money(s.amount)}</b>{s.level && LEVELS[s.level as Level] ? <> at <b>{LEVELS[s.level as Level].name}</b></> : null}</> : null;
+  if (s.kind === "queued_waiting") return (
+    <div className="banner warn" role="status">A new run{what ? <> of {what}</> : null} is queued. It waits for the engine: its last heartbeat is more than
+      90 seconds old.</div>
+  );
+  if (s.kind === "queued_online") return (
+    <div className="banner" role="status">A new run{what ? <> of {what}</> : null} is queued. The engine is online and picks it up within about 10 seconds.</div>
+  );
+  const when = s.marketOpen ? "the market is open, so it starts within a minute or two"
+    : s.nextOpen ? `starts at the next open, ${dateEt(s.nextOpen)}, ${timeBoth(s.nextOpen)}` : "starts at the next open";
+  return (
+    <div className="banner" role="status">
+      <b>The engine has accepted it.</b> {s.online ? <>Scheduled: {when}.</>
+        : <>Scheduled: it starts at the next open, if the engine is running then (its last heartbeat is more than 90 seconds old).</>}
+    </div>
+  );
+}
+
 const RANGES = [["1W", 5], ["1M", 21], ["3M", 63], ["ALL", 0]] as const;
 
 export function Live() {
@@ -152,7 +176,6 @@ export function Live() {
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
   const vsSpy = s.netUsd - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
-  const newRun = overview.pending_commands.find((p) => p.kind === "new_run");
 
   return (
     <>
@@ -169,12 +192,7 @@ export function Live() {
           {" "}<code className="num">./scripts/run_engine.sh</code>. Open trades keep their stop-loss at Alpaca meanwhile.
         </div>
       )}
-      {newRun && (
-        <div className="banner warn">
-          A new run is queued: <b className="num">{money(Number(newRun.payload.amount_usd))}</b> at <b>{LEVELS[newRun.payload.level as keyof typeof LEVELS]?.name}</b>.
-          It starts when the engine next comes online.
-        </div>
-      )}
+      <StartBanner state={startState(run, overview)} />
 
       <section aria-labelledby="pot-h" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

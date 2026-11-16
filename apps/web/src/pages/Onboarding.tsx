@@ -1,10 +1,13 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Logo } from "../components/Shell";
 import { api, type Level } from "../lib/api";
 import { LEVELS } from "../lib/model";
 import { money } from "../lib/fmt";
+import { experimentsOf } from "../components/Experiment";
+import { experimentView } from "../lib/experiment";
+import { ruleName } from "../lib/explain";
 
 const STEPS = ["Amount", "Level", "Contract", "Start"];
 
@@ -19,6 +22,10 @@ export function Onboarding() {
     mutationFn: () => api.newRun(amount, level),
     onSuccess: () => { qc.invalidateQueries(); nav("/"); },
   });
+  // What the engine runs now: with the multi-day path on (heartbeat `experiments`, #205) the contract says that the
+  // paper experiment holds stocks overnight. No heartbeat, or an older engine: the day-only contract, as before.
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, retry: false, staleTime: 60_000 });
+  const exps = experimentsOf(health.data?.heartbeat).filter((e) => e.experiment);
   const lv = LEVELS[level];
   const clamp = (v: number) => Math.min(100000, Math.max(1000, Math.round(v / 500) * 500));
   const canNext = step !== 3 || agreed;
@@ -51,7 +58,9 @@ export function Onboarding() {
         {step === 2 && (
           <section className="card">
             <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>Choose a level</h1>
-            <p className="muted" style={{ marginTop: 0 }}>Higher levels risk more per trade and allow bigger losing days. None of them use leverage, shorts or overnight holds.</p>
+            <p className="muted" style={{ marginTop: 0 }}>Higher levels risk more per trade and allow bigger losing days. None of them use leverage or shorts{exps.length
+              ? `. The day rule ends each day flat; the ${exps.map((e) => ruleName(e.strategy)).join(" and ")} paper experiment holds stocks for weeks, within the level's cap and stop line.`
+              : " or overnight holds."}</p>
             <div className="levels">
               {(Object.keys(LEVELS) as Level[]).map((k) => {
                 const l = LEVELS[k];
@@ -72,7 +81,17 @@ export function Onboarding() {
         {step === 3 && (
           <section className="card">
             <h1 style={{ margin: "0 0 8px", fontSize: 20 }}>The contract</h1>
-            <p><b>What Kaibot does:</b> trades liquid US stocks with paper money, on its own, ending every day flat. No overnight positions, shorts or leverage.</p>
+            {exps.length ? (
+              <p><b>What Kaibot does:</b> trades liquid US stocks with paper money, on its own. The intraday rule ends each day flat.
+                {exps.map((e) => {
+                  const v = experimentView(e), same = e.level === level;
+                  const limits = same && (v.cap || v.stop) ? ` (at ${lv.name}: ${[v.cap, v.stop].filter(Boolean).join(", ")})` : "";
+                  return <span key={e.strategy}> The {ruleName(e.strategy)} paper experiment, which failed the ten-year test, holds stocks for weeks,
+                    overnight included, within the level's cap and stop line{limits}. It never trades real money.</span>;
+                })} No shorts or leverage, ever.</p>
+            ) : (
+              <p><b>What Kaibot does:</b> trades liquid US stocks with paper money, on its own, ending every day flat. No overnight positions, shorts or leverage.</p>
+            )}
             <p><b>What to expect:</b> success means beating SPY and cash after costs, by a small margin. Expect 4–5 losing days in 10, and some red weeks.
               The replays so far show no reliable edge.</p>
             <p><b>What it won't do:</b> promise profit, or go live on its own. That takes 900+ trades over 3+ months passing a test set in advance, then a conversation.</p>

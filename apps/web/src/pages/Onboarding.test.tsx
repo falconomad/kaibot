@@ -46,3 +46,32 @@ describe("Onboarding (new run) page states", () => {
     expect(html).toMatch(/<button class="primary">Start paper run<\/button>/);
   });
 });
+
+describe("Onboarding contract: what the engine runs now", () => {
+  const at = { path: "/start", route: "/start" };
+  const exp = { strategy: "trend_momentum", evidence: "failed_gate_b", experiment: true, label: "Experiment: failed the ten-year test",
+    real_money: false, level: "balanced", max_exposure_pct: 60, retire_drawdown_pct: 21 };
+  const health = (detail: Record<string, unknown>) => ({ key: ["health"], data: { now: "", halts: [], events: [], pending_commands: [],
+    deadman: { armed: true, jobs: [], runs: [] }, heartbeat: [{ process: "engine", ts: new Date().toISOString(), detail }] } });
+  it("multi-day on: the day rule ends flat, the experiment holds stocks overnight within the cap and stop line", () => {
+    seed.states = [3, 5000, "balanced", true];
+    const t = text(render(<Onboarding />, { ...at, seeds: [health({ state: "market_closed", experiments: [exp] })] }));
+    expect(t).toContain("The intraday rule ends each day flat.");
+    expect(t).toContain("The Trend momentum paper experiment, which failed the ten-year test, holds stocks for weeks, overnight included, within the level's cap and stop line (at Balanced: up to 60% invested, retires if it falls 21% from its peak).");
+    expect(t).toContain("No shorts or leverage, ever.");
+    expect(t).not.toContain("No overnight positions");
+  });
+  it("another level than the engine's row: no numbers, only the rule", () => {
+    seed.states = [3, 5000, "aggressive", true];
+    const t = text(render(<Onboarding />, { ...at, seeds: [health({ experiments: [exp] })] }));
+    expect(t).toContain("within the level's cap and stop line.");
+    expect(t).not.toContain("60%");
+  });
+  it("no experiments (multi-day off, older engine, no heartbeat): the day-only contract", () => {
+    seed.states = [3, 5000, "balanced", true];
+    expect(text(render(<Onboarding />, { ...at, seeds: [health({ state: "idle" })] }))).toContain("ending every day flat. No overnight positions, shorts or leverage.");
+    seed.states = [3, 5000, "balanced", true];
+    expect(text(render(<Onboarding />, at))).toContain("No overnight positions");
+  });
+});
+
