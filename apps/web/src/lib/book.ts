@@ -47,6 +47,8 @@ export function parseBook(raw: unknown, runId = 0): Book {
     const rule = str(o?.rule, 80), symbol = str(o?.symbol, 12), qty = num(o?.qty), avg = num(o?.avg_cost);
     const mark = num(o?.mark) ?? num(o?.last);
     if (!o || !rule || !symbol || qty === null || avg === null || mark === null) return [];
+    // A row with no shares left (sold by the last fill, before the ledger drops it) is not a holding.
+    if (qty <= 0) return [];
     const s = obj(o.stop), sp = num(s?.price), st = STOP_STATES.find((k) => k === s?.state);
     return [{ rule, symbol, qty, avgCost: avg, mark, priced: num(o.last) !== null, opened: str(o.opened_session, 10),
       dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null }];

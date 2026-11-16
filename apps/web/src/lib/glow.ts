@@ -36,3 +36,18 @@ export function setGlow(anchor: Anchor, doc: Document | undefined = typeof docum
 export function useGlow(anchor: Anchor) {
   useEffect(() => { setGlow(anchor); }, [anchor]);
 }
+
+/** The emailed sign-in link opens a fresh page, so sign-in and Home are never on screen in the same page load. The
+ *  link returns to `/?from=signin` (SignIn.tsx): on that load the glow starts at sign-in's place and drifts to Home
+ *  (the long move), and the marker leaves the address bar. Call once, before the first render. */
+export const FROM_SIGNIN = "from=signin";
+export function primeGlowFromUrl(loc: Pick<Location, "search" | "pathname" | "hash"> | undefined = typeof location === "undefined" ? undefined : location,
+  doc: Document | undefined = typeof document === "undefined" ? undefined : document) {
+  if (!loc || !doc || !new URLSearchParams(loc.search).has("from")) return false;
+  if (new URLSearchParams(loc.search).get("from") !== "signin") return false;
+  setGlow("signin", doc);
+  const rest = new URLSearchParams(loc.search); rest.delete("from");
+  const q = rest.toString();
+  history.replaceState(history.state, "", `${loc.pathname}${q ? `?${q}` : ""}${loc.hash}`);
+  return true;
+}
