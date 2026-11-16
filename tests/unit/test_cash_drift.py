@@ -165,9 +165,10 @@ def test_a_multi_day_sleeve_sold_by_a_flatten_books_the_venues_fee():
     eng._book = lambda kind, body: booked.append((kind, body))
     eng._rid = lambda: 7
     eng._sync_md_exits()
-    assert booked == [("fill", {"run_id": 7, "strategy": "trend_momentum", "symbol": "B", "side": "sell",
-                                "qty": 40, "px": 101.5, "fees": 0.33, "coid": "c1", "ts": T,
-                                "reason": "flatten"})]
+    got = [(k, {f: v for f, v in b.items() if f != "order_id"}) for k, b in booked]  # #252 adds the order id
+    assert got == [("fill", {"run_id": 7, "strategy": "trend_momentum", "symbol": "B", "side": "sell",
+                             "qty": 40, "px": 101.5, "fees": 0.33, "coid": "c1", "ts": T,
+                             "reason": "flatten"})]
 
 
 # ---------------------------------------------------------------- QA-Ops second key (#241): every part, once
