@@ -12,6 +12,10 @@ production data, account or key is used.
 --interact (v4 PR 2) also checks, at 390 px: the top bar is at most 60 px; the tab bar has five 48 px items; every page
 is reachable from the tab bar or More; the experiment sheet opens as a dialog with focus inside, closes on Escape and
 returns focus; and with reduced motion on, nothing animates.
+
+The display name (#254): every page at every width fails if it shows the earlier name ("kaibot") in its text, its tab
+title or in what a screen reader says (text inside <code> is a literal path or command and is not counted). --interact
+also checks the tab title, the logo in the header, and that the favicon, the home-screen icon and the manifest load.
 """
 from __future__ import annotations
 
@@ -20,11 +24,13 @@ import datetime as dt
 import json
 import mimetypes
 import pathlib
+import re
 import sys
 
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
+WEB = ROOT / "apps" / "web"
 TOOLS = ROOT / "docs" / "design" / "audit_2026-11-16" / "tools"
 sys.path.insert(0, str(TOOLS))
 import audit  # noqa: E402  (routes, init script, app and mock URLs)
@@ -59,8 +65,27 @@ def serve(mock, dist: pathlib.Path, now: dt.datetime):
     return handler
 
 
+# Where the earlier display name shows: the tab title, the page's text (hidden text included, <code> left out) and the
+# attributes a person reads or hears. Text nodes are joined with a space, so a word never runs into its neighbour's.
+# KAIBOT_SOMETHING in an engine message is an env var, not the name.
+EARLIER_NAME = r"""() => {
+  const literal = (n) => n.parentElement.closest('code, script, style');
+  const skip = (n) => (literal(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT);
+  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: skip });
+  const words = [];
+  while (walk.nextNode()) words.push(walk.currentNode.nodeValue);
+  const said = [...document.querySelectorAll('[aria-label], [alt], [title], [placeholder]')]
+    .flatMap((e) => ['aria-label', 'alt', 'title', 'placeholder'].map((a) => e.getAttribute(a) || ''));
+  const read = [document.title, words.join(' ').replace(/\s+/g, ' '), ...said];
+  return read.flatMap((s) => s.match(/.{0,24}\bkaibot\b.{0,24}/gi) || []);
+}"""
+
+
 def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     m = page.evaluate(metrics)
+    earlier = page.evaluate(EARLIER_NAME)
+    if earlier:
+        fails.append(f"{name}@{w}: the earlier name shows: {earlier[:3]}")
     phone = w <= 430
     row = {"page": name, "w": w, "overflow": m["docOverflow"], "offscreen": m["offscreen"][:3],
            "tap<44": len(m["tapSmall"]), "taps": m["tapSmall"], "text<12": m["smallWords"],
@@ -79,6 +104,35 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
 
 REACH = ["/", "/positions", "/activity", "/health", "/more", "/report", "/gate", "/strategy", "/settings", "/start"]
 
+# The name and the logo as the browser has them (#254): the tab title, the header, the manifest, and every icon the page
+# and the manifest point to (each must load as an image of the size it claims).
+BRAND_JS = r"""async () => {
+  const img = (src) => new Promise((done) => {
+    const i = new Image();
+    i.onload = () => done([i.naturalWidth, i.naturalHeight]);
+    i.onerror = () => done(null);
+    i.src = src;
+  });
+  const href = (sel) => document.querySelector(sel)?.getAttribute('href') || null;
+  const m = await fetch(href('link[rel=manifest]')).then((r) => r.json()).catch(() => null);
+  const icons = {};
+  for (const sel of ['link[rel=icon][type="image/svg+xml"]', 'link[rel=apple-touch-icon]'])
+    icons[href(sel)] = !!(await img(href(sel)));
+  for (const i of (m?.icons || [])) { const s = await img(i.src); icons[i.src] = !!s && `${s[0]}x${s[1]}` === i.sizes; }
+  const symbol = document.querySelector('header.top .brand .logo-symbol');
+  return {
+    title: document.title,
+    label: document.querySelector('header.top .brand')?.getAttribute('aria-label') || null,
+    word: document.querySelector('header.top .brand .logo-word')?.textContent || null,
+    symbol: !!symbol && symbol.complete && symbol.naturalWidth > 0,
+    logos: document.querySelectorAll('.logo').length,
+    homeLabel: document.querySelector('meta[name=apple-mobile-web-app-title]')?.getAttribute('content') || null,
+    manifest: m ? [m.name, m.short_name, m.display] : null,
+    icons,
+    ico: href('link[rel=icon][sizes]'),
+  };
+}"""
+
 
 def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
     def page(reduced: bool = False):
@@ -93,6 +147,22 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         return ctx, pg
 
     ctx, pg = page()
+    # The name is written once, in src/brand/brand.ts; the built app must show that name and no other.
+    source = (WEB / "src" / "brand" / "brand.ts").read_text()
+    name = re.search(r'^export const BRAND = "([^"]+)";$', source, re.M).group(1)
+    brand = pg.evaluate(BRAND_JS)
+    # Playwright never lets a favicon.ico request through, so that one file is read from the build instead.
+    ico = dist / str(brand["ico"]).lstrip("/")
+    brand["icons"][brand["ico"]] = ico.is_file() and ico.read_bytes()[:4] == b"\x00\x00\x01\x00"
+    print("name:", brand)
+    if (brand["title"], brand["label"], brand["word"]) != (f"{name} · paper", f"{name} home", name):
+        fails.append(f"the name: tab title {brand['title']!r}, header link {brand['label']!r}, word {brand['word']!r}")
+    if not brand["symbol"] or brand["logos"] != 1:
+        fails.append(f"the header logo: symbol drawn={brand['symbol']}, logos={brand['logos']}")
+    if brand["manifest"] != [name, name, "browser"] or brand["homeLabel"] != name:
+        fails.append(f"the manifest or home-screen label: {brand['manifest']}, {brand['homeLabel']!r}")
+    if len(brand["icons"]) < 6 or not all(brand["icons"].values()):
+        fails.append(f"an icon is missing or does not load at its size: {brand['icons']}")
     header = pg.evaluate("Math.round(document.querySelector('header.top').getBoundingClientRect().height)")
     tabs = pg.evaluate("[...document.querySelectorAll('nav.tabbar a')].map(a => [a.textContent.trim(), "
                        "Math.round(a.getBoundingClientRect().height)])")

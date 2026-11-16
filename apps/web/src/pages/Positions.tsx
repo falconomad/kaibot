@@ -22,6 +22,7 @@ import { RULES, exitText, ruleName } from "../lib/explain";
 import { type Experiment, experimentView, findExperiment } from "../lib/experiment";
 import { R, dateEt, day, money, px, signedMoney, timeEt } from "../lib/fmt";
 import { sectorOf } from "../components/Book";
+import { NAME } from "../brand/brand";
 
 const PAGE = 50;
 type IntradayPos = { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number };
@@ -173,7 +174,7 @@ function DaySheet({ o, exps }: { o: Extract<Open, { kind: "day" }>; exps: Experi
         {rule && RULES[rule] && <><span>Why</span><span /><span className="v">It {RULES[rule].what}</span></>}
         {p.fill !== null && <><span>If it hits the stop</span><span /><span className="v loss">{signedMoney((p.stop - p.fill) * p.qty)}</span></>}
       </div>
-      <p className="muted" style={{ fontSize: 14 }}>Kaibot manages each trade itself; the stop and target rest at the broker.</p>
+      <p className="muted" style={{ fontSize: 14 }}>{NAME} manages each trade itself; the stop and target rest at the broker.</p>
       <Link to={`/positions/${p.trade_id}`} className="btn sheet-cta">Full trade details</Link>
     </>
   );
@@ -196,7 +197,7 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
         <span>Sector</span><span /><span className="v">{sectorOf(p.symbol) ?? "not known"}</span>
         <span>Safety stop at the broker</span><span /><span className={`v ${p.stop ? "" : "loss"}`}>{p.stop
           ? `${px(p.stop.price)} · ${p.stop.state === "resting" ? "in place" : p.stop.state === "re-arming" ? "being placed again" : "missing"}${v.stopBelowPct !== null ? ` · ${v.stopBelowPct.toFixed(1)}% below` : ""}`
-          : "none: Kaibot places it again"}</span>
+          : `none: ${NAME} places it again`}</span>
         {p.dividends > 0 && <><span>Dividends</span><span /><span className="v">{money(p.dividends)}</span></>}
       </div>
       {RULES[p.rule] && <p className="muted" style={{ fontSize: 14 }}>The rule {RULES[p.rule].what}. Prices are at the last close.</p>}

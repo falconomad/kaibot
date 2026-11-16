@@ -1,0 +1,10 @@
+{
+  "inputs": "ce3978eded84dff175b9c93270504abfe18277dfcc404daa9385ca6b756581ee",
+  "files": {
+    "favicon.ico": "64328f298aaa870e37dc136ccde6d4dcd5d3b0621d123fb8d5618314e33bab22",
+    "apple-touch-icon.png": "e1de833cf50a6070bdd994d6658dcb99d0b2527d433cd40006ca856452e1ad74",
+    "icons/icon-192.png": "aa352ab5239a4d6918aba6b291a4fb62ea1f384766a4f0470dc2e0705577b63d",
+    "icons/icon-512.png": "3262e8d6eac2df1d8124c74f2f22b078fcfb654fd45db3de9d1125730c8ccc94",
+    "icons/icon-maskable-512.png": "4fbd443f00895e349dc10df69fbd79f4dc09c466aee044687dc3961baf564608"
+  }
+}

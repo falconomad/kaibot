@@ -22,6 +22,7 @@ import { estShort, estimateTrades, paceText } from "../lib/estimator";
 import { applyBlockers, dropCustomUnlessOnly, isMissingFunction, listWords, withoutCustom, POLL_MS, type TickerCheck } from "../lib/tickers";
 import { MyListsCard, ThisListCard, useListEditor, type ListInfo } from "./MyLists";
 import { DayBar, EST, LOCKED, NeverTraded, StrategyProvider, useCtx, useStrategy, usd0, type Ctx, type StrategyState } from "./StrategyShared";
+import { NAME } from "../brand/brand";
 
 export const FINE_TUNE = "/strategy/fine-tune";
 
@@ -43,7 +44,7 @@ export function Strategy() {
       <section className="card" role="alert">
         <h2>Strategy settings aren't available</h2>
         <p className="muted" style={{ margin: 0 }}>The server couldn't load your settings: <span className="loss">{String((q.error as Error)?.message ?? "no data")}</span>.
-          Kaibot keeps trading on its level's defaults meanwhile.</p>
+          {NAME} keeps trading on its level's defaults meanwhile.</p>
       </section>
     );
   const pot = livePot(run, overview).pot;
@@ -222,7 +223,7 @@ export function StrategyHome() {
     <div className="kb-head">
       <div style={{ flex: "1 1 360px", display: "flex", flexDirection: "column", gap: 6 }}>
         <h1 className="kb-h1" tabIndex={-1}>Strategy</h1>
-        <span className="muted">Kaibot trades on its own. Pick a starting point, nudge it, done. Settings can only make it pickier or smaller than {levelName}.</span>
+        <span className="muted">{NAME} trades on its own. Pick a starting point, nudge it, done. Settings can only make it pickier or smaller than {levelName}.</span>
       </div>
       <button type="button" className="kb-ghost" onClick={() => toFine()}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 7 H14 M18 7 H20 M4 17 H8 M12 17 H20" strokeLinecap="round" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>

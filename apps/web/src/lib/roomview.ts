@@ -1,6 +1,7 @@
 // M3 agent room helpers (S35 transcripts, S36 A/B, S32 budget). Split from derive.ts so the first load stays small.
 import type { BudgetState, LlmBudget, PackItem, RoomAB, RoomSession, RoomStatus, RoomVerdict } from "./api";
 import { fmtR } from "./derive";
+import { NAME } from "../brand/brand";
 
 // ---------- M3 agent room (S35 transcripts, S36 A/B) ----------
 // Everything the models wrote is untrusted: these helpers only ever return plain strings/numbers, never markup.
@@ -79,7 +80,7 @@ export function roomOutcome(status: RoomStatus, verdict: RoomVerdict | null, err
     case "pending": return { label: "deliberating", text: "The room is still deliberating (it has at most 45 s).", tag: "" };
     case "timeout": return { label: "no answer", text: "No trade: the room did not answer within 45 s.", tag: "veto" };
     case "invalid": return { label: "invalid", text: "No trade: the room's answer failed validation (for example it cited evidence that isn't in the pack).", tag: "veto" };
-    case "error": return { label: "error", text: "No trade: the room call failed, and Kaibot fails closed.", tag: "veto" };
+    case "error": return { label: "error", text: `No trade: the room call failed, and ${NAME} fails closed.`, tag: "veto" };
     case "skipped": {
       const why = /budget|cap|spend/i.test(error ?? "") ? "daily LLM budget reached"
         : /off|disabled/i.test(error ?? "") ? "the agent room is switched off" : "daily LLM budget reached or the room is off";

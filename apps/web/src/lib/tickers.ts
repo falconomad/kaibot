@@ -4,6 +4,7 @@
 // The rule that matters most: only an ACCEPTED ticker ever reaches the config body. Refused, unchecked and
 // still-checking tickers are shown, never written, never applied.
 import type { ConfigBody, CustomTicker } from "./config";
+import { NAME, brandText } from "../brand/brand";
 
 /** Most tickers in one list (the 5-minute scan and the free data limits). The server rejects more. */
 export const MAX_TICKERS = 40;
@@ -64,8 +65,8 @@ export function itemFromCheck(c: TickerCheck): Item {
   const base = { symbol, inCatalogue: !!c.in_catalogue, name: c.name ?? null };
   switch (c.status) {
     case "accepted": return { ...base, state: "accepted", etf: c.etf ?? null };
-    case "refused": return { ...base, state: "refused", reason: c.reason || "Kaibot's safety filters refused this ticker." };
-    case "error": return { ...base, state: "error", reason: c.reason || `We could not check ${symbol} right now. Try again later.` };
+    case "refused": return { ...base, state: "refused", reason: brandText(c.reason) || `${NAME}'s safety filters refused this ticker.` };
+    case "error": return { ...base, state: "error", reason: brandText(c.reason) || `We could not check ${symbol} right now. Try again later.` };
     default: return { ...base, state: "checking" };
   }
 }
@@ -160,7 +161,7 @@ export function applyBlockers(tickers: CustomTicker[], checks: (TickerCheck | nu
   tickers.forEach((t, i) => {
     const c = checks[i];
     if (!c || c.status === "pending") out.push({ symbol: t.symbol, why: "still being checked" });
-    else if (c.status !== "accepted") out.push({ symbol: t.symbol, why: c.reason || "refused by the safety filters" });
+    else if (c.status !== "accepted") out.push({ symbol: t.symbol, why: brandText(c.reason) || "refused by the safety filters" });
     else if ((c.etf ?? null) !== t.etf) out.push({ symbol: t.symbol, why: "its sector fund changed since it was checked" });
   });
   return out;

@@ -16,6 +16,7 @@ import {
   type Item, type SavedList,
 } from "../lib/tickers";
 import { LockIcon } from "./StrategyShared";
+import { NAME } from "../brand/brand";
 
 const NEW = "\u0000new";
 /** Set once kb_delete_ticker_list answered "does not exist" (database update not applied yet); kept for the session. */
@@ -182,7 +183,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
       <div className="kb-ml-head">
         <h3 id="ml-h" className="kb-ml-title">My lists</h3>
         <span className={`num ${t.full ? "kb-warn" : "muted"}`} aria-live="polite" style={{ fontSize: 13, fontWeight: 600 }}>{t.total} of {MAX_TICKERS}</span>
-        <span className="muted kb-ml-sub">Your own tickers. Type any US stock and Kaibot checks it before it can be traded.</span>
+        <span className="muted kb-ml-sub">Your own tickers. Type any US stock and {NAME} checks it before it can be traded.</span>
       </div>
 
       {ed.lists.isPending ? (
@@ -215,7 +216,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
           <button type="button" onClick={ed.commit} disabled={t.full || !ed.draft.trim()}>Add</button>
         </div>
         <span id="ml-help" className={t.full || ed.msg ? "kb-warn" : "muted"} style={{ fontSize: 12 }} role="status">
-          {t.full ? `This list is full: ${MAX_TICKERS} tickers is the most Kaibot can scan in time. Remove one to add another.`
+          {t.full ? `This list is full: ${MAX_TICKERS} tickers is the most ${NAME} can scan in time. Remove one to add another.`
             : ed.msg ?? "Separate with commas or spaces, or paste a whole list. Each ticker is checked as you add it."}
         </span>
       </div>
@@ -232,7 +233,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
         <div className="kb-ml-warn swap" role="alert"><WarnIcon /><span>“Only these” needs at least {MIN_ONLY} accepted tickers. This list has {t.accepted.length}. Add {short} more.</span></div>
       )}
       {outside && (
-        <div className="kb-ml-warn swap" role="status"><WarnIcon /><span>“Prefer these” keeps all 59 catalogue stocks, so {listWords(t.fresh.map((i) => i.symbol))} {t.fresh.length === 1 ? "is" : "are"} left out. Tickers new to Kaibot are traded only with “Only these”.</span></div>
+        <div className="kb-ml-warn swap" role="status"><WarnIcon /><span>“Prefer these” keeps all 59 catalogue stocks, so {listWords(t.fresh.map((i) => i.symbol))} {t.fresh.length === 1 ? "is" : "are"} left out. Tickers new to {NAME} are traded only with “Only these”.</span></div>
       )}
 
       <div className="kb-row">
@@ -314,7 +315,7 @@ export function ThisListCard({ ed, est, nextOpen }: { ed: ListEditor; est: Estim
   const big = !t.accepted.length ? "No tickers yet" : measured ? estShort(est) : "not measured yet";
   const note = !t.accepted.length ? "Add tickers to see what this list would do."
     : measured ? "From the replay of these catalogue stocks."
-    : `${listWords(fresh.length ? fresh : est.unmeasured)} ${(fresh.length || est.unmeasured.length) === 1 ? "is" : "are"} new to Kaibot, so there is no measured trade rate. The figure appears after this list’s first replay.`;
+    : `${listWords(fresh.length ? fresh : est.unmeasured)} ${(fresh.length || est.unmeasured.length) === 1 ? "is" : "are"} new to ${NAME}, so there is no measured trade rate. The figure appears after this list’s first replay.`;
   return (<>
     <section className="card kb-card" aria-labelledby="rs-h">
       <h2 id="rs-h" className="kb-h2">This list</h2>
@@ -326,7 +327,7 @@ export function ThisListCard({ ed, est, nextOpen }: { ed: ListEditor; est: Estim
       <dl className="num kb-ml-dl">
         <dt>Accepted</dt><dd className="swap">{t.accepted.length}</dd>
         <dt>Refused, never traded</dt><dd className="swap">{t.refused.length}</dd>
-        <dt>New to Kaibot</dt><dd className="swap">{t.accepted.length ? fresh.length : "—"}</dd>
+        <dt>New to {NAME}</dt><dd className="swap">{t.accepted.length ? fresh.length : "—"}</dd>
         <dt>Room left</dt><dd className="swap">{MAX_TICKERS - t.total} of {MAX_TICKERS}</dd>
       </dl>
     </section>
@@ -337,7 +338,7 @@ export function ThisListCard({ ed, est, nextOpen }: { ed: ListEditor; est: Estim
         <li>The list is stored as it is now. Later edits to a saved list do not change what is running.</li>
         <li>Your report starts a new chapter and the change is logged as a trial.</li>
         <li>No shorts, no leverage, nothing held overnight. Same as every other focus.</li>
-        <li>Kaibot checks every ticker again at each open; one that no longer passes is not traded that day.</li>
+        <li>{NAME} checks every ticker again at each open; one that no longer passes is not traded that day.</li>
       </ul>
     </section>
   </>);

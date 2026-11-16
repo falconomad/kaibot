@@ -10,6 +10,8 @@ import { STALE, overviewPollMs, poll } from "../lib/poll";
 import { bookChecks } from "../lib/book";
 import { Sheet } from "./Sheet";
 import { preloadRoute } from "../routes";
+import { BRAND, NAME } from "../brand/brand";
+import { Logo } from "./Logo";
 
 /** Warm a lazy route's chunk when the pointer or keyboard focus reaches its nav link. */
 const warm = (to: string) => ({ onPointerEnter: () => { preloadRoute(to); }, onFocus: () => { preloadRoute(to); } });
@@ -28,15 +30,6 @@ export interface RunCtx {
   overviewError?: unknown; retryOverview?: () => void;
 }
 export const useRunCtx = () => useOutletContext<RunCtx>();
-
-export function Logo({ size = 26 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 28 28" aria-hidden="true">
-      <rect x="1" y="1" width="26" height="26" rx="8" fill="#F4F5F7" />
-      <path d="M8 18 L12.5 12.5 L15.5 15.5 L20 9.5" stroke="#0A0B0D" strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
 // v4 (docs/design/mobile_first_v4.md, "Navigation"). Desktop and tablet: the top navigation. Phones: five tabs; the
 // rest is under More (Report, Go / no-go, Strategy, Holdings, Run & settings, New run, the run picker, Sign out).
@@ -141,7 +134,7 @@ function PhoneHaltBar({ items }: { items: string[] }) {
       </button>
       <Sheet open={open} onClose={() => setOpen(false)} title="Limit or safety halt in force">
         <ul className="sheet-list">{items.map((t) => <li key={t}>{t}</li>)}</ul>
-        <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
+        <p className="muted">{NAME} applies its limits by itself. Open trades keep their stop at the broker.</p>
         <p><Link to="/health" onClick={() => setOpen(false)}>Engine health</Link></p>
       </Sheet>
     </div>
@@ -178,7 +171,7 @@ export function Shell() {
   if (runs.isError) return <div className="center"><ErrorState what="Your runs" error={runs.error} retry={() => runs.refetch()} /></div>;
   if (!run) return (
     <div className="center"><div className="card">
-      <b>No runs yet</b><span className="muted">Start a paper run to give Kaibot an amount and a level.</span>
+      <b>No runs yet</b><span className="muted">Start a paper run to give {NAME} an amount and a level.</span>
       <Link to="/start"><button className="primary">Start a run</button></Link>
     </div></div>
   );
@@ -198,14 +191,14 @@ export function Shell() {
   const checks = bookQ.data?.session ? bookChecks(bookQ.data) : null;
   const red = [...risk.red, ...(run.kind === "paper" ? runEndedRed(run) : []),
     ...(checks?.missing.length ? [`${checks.missing.length} stock${checks.missing.length === 1 ? " has" : "s have"} no safety stop (${checks.missing.join(", ")})`] : []),
-    ...(checks?.reconciled && !checks.reconciled.ok ? ["Kaibot's books and the broker disagree"] : [])];
+    ...(checks?.reconciled && !checks.reconciled.ok ? [`${NAME}'s books and the broker disagree`] : [])];
   const dot: EngineDot = risk.severity === "breach" ? "breach" : active && !chip.live ? "offline" : null;
 
   return (
     <div className="shell">
       <a className="skip" href="#main">Skip to content</a>
       <header className="top">
-        <Link to="/" className="brand" aria-label="kaibot home"><Logo /><span>kaibot</span></Link>
+        <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo /></Link>
         <nav className="topnav" aria-label="Main">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>{n.label}</NavLink>)}
         </nav>

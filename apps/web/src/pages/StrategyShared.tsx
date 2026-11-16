@@ -11,6 +11,7 @@ import { type EstimatorData, estimateTrades } from "../lib/estimator";
 import { LEVELS } from "../lib/model";
 import estimatorJson from "../data/estimator.json";
 import themesJson from "../data/themes.json";
+import { NAME } from "../brand/brand";
 
 export const EST = estimatorJson as unknown as EstimatorData;
 export const UNIVERSE = Object.keys(EST.dip_per_month);
@@ -97,7 +98,7 @@ export function ExcludeEditor({ body, edit, universe }: { body: ConfigBody; edit
   const options = universe.filter((s) => !body.focus.exclude.includes(s));
   const add = () => {
     if (!sym) return;
-    if (!universe.includes(sym)) { setMsg(`${sym} isn't one of the ${universe.length} stocks Kaibot trades, so there is nothing to exclude.`); return; }
+    if (!universe.includes(sym)) { setMsg(`${sym} isn't one of the ${universe.length} stocks ${NAME} trades, so there is nothing to exclude.`); return; }
     if (body.focus.exclude.includes(sym)) { setMsg(`${sym} is already never traded.`); return; }
     if (!canExclude(body, sym, universe)) return;
     edit(excludeStock(body, sym, universe));

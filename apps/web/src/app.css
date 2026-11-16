@@ -52,8 +52,11 @@ main[data-nav="push"] > * { animation: kb-push 240ms var(--ease) both; }
 header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
   padding: 14px max(24px, env(safe-area-inset-left)); background: rgba(10, 11, 13, .86); backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--surface-2); }
-.brand { display: flex; align-items: center; min-height: 44px; gap: 10px; color: var(--ink); font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+.brand { display: flex; align-items: center; min-height: 44px; color: var(--ink); }
 .brand:hover { color: var(--ink); }
+/* the logo (components/Logo.tsx): the symbol and the wordmark, the same wherever it shows */
+.logo { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
+.logo-symbol { flex: none; display: block; }
 nav.topnav { display: flex; flex-wrap: wrap; gap: 2px; font-size: 15px; font-weight: 500; }
 nav.topnav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--slate); padding: 0 14px; border-radius: 999px; transition: color .2s var(--ease), background-color .2s var(--ease); }
 nav.topnav a:hover { color: var(--ink); }
@@ -176,7 +179,7 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
 @media (max-width: 760px) {
   /* v4: one-row top bar, 56 px: mark, name, Paper, engine state. The run picker and the meters move to More and Home. */
   header.top { flex-wrap: nowrap; min-height: var(--topbar); padding: 6px 16px; gap: 8px; }
-  header.top .brand { gap: 8px; font-size: 17px; }
+  header.top .brand .logo { gap: 8px; font-size: 17px; }
   header.top .engine-chip { max-width: 44vw; min-width: 0; }
   header.top .engine-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   nav.topnav, .hide-sm { display: none !important; }

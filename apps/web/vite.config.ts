@@ -1,10 +1,30 @@
 import { defineConfig } from "vitest/config";
+import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { MANIFEST_PATH, brandHtml, manifestJson } from "./src/brand/assets";
+
+/** The display name in the two files that are not React (#254): the title and meta tags of index.html (%BRAND%) and the
+ *  web app manifest. Both are written from src/brand/brand.ts, so the name exists in one place. */
+function brand(): Plugin {
+  return {
+    name: "kb-brand",
+    transformIndexHtml: { order: "pre", handler: (html) => brandHtml(html) },
+    configureServer(server) {
+      server.middlewares.use(`/${MANIFEST_PATH}`, (_req, res) => {
+        res.setHeader("Content-Type", "application/manifest+json");
+        res.end(manifestJson());
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: "asset", fileName: MANIFEST_PATH, source: manifestJson() });
+    },
+  };
+}
 
 // Vendor code changes rarely: separate chunks stay cached across deploys of the app code.
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), brand()],
   // Tests read app.css as text (`?raw`) to check the focus and reduced-motion rules; by default vitest blanks CSS.
   test: { css: { include: /(app|v4tokens)\.css/ } },
   build: {

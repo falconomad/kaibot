@@ -16,6 +16,7 @@ import { STALE, poll } from "../lib/poll";
 import type { Heartbeat } from "../lib/api";
 import { Skeleton } from "../components/Skeleton";
 import { StockBadge, StockCell } from "../components/StockBadge";
+import { NAME } from "../brand/brand";
 
 const strat = ruleName;
 
@@ -293,7 +294,7 @@ export function Report() {
       {run.kind === "paper" && <Accordion title="Chapters" hint="settings versions"><ChaptersCard runId={run.id} /></Accordion>}
       <Accordion title="How to read this">
         <p style={{ fontSize: 14, margin: 0 }}>The report is ready after each session closes (16:00 ET, 22:00 CET). Every number is after costs and uses the
-          worse of the broker's fills and Kaibot's shadow cost model. Expect 4–5 losing days in 10; what matters is the evidence counter:
+          worse of the broker's fills and {NAME}'s shadow cost model. Expect 4–5 losing days in 10; what matters is the evidence counter:
           {" "}{BAR.trades}+ trades over {BAR.months}+ months with t &gt; {BAR.t}. Pot start {money(run.amount_usd)}.</p>
       </Accordion>
     </>

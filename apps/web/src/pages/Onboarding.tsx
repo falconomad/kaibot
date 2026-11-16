@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Logo } from "../components/Shell";
+import { Logo } from "../components/Logo";
+import { BRAND, NAME } from "../brand/brand";
 import { api, type Level } from "../lib/api";
 import { LEVELS } from "../lib/model";
 import { money } from "../lib/fmt";
@@ -35,7 +36,7 @@ export function Onboarding() {
   return (
     <div className="shell">
       <header className="top">
-        <Link to="/" className="brand"><Logo /><span>kaibot</span></Link><span className="pill">PAPER</span>
+        <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo /></Link><span className="pill">PAPER</span>
       </header>
       <main style={{ maxWidth: 880, margin: "0 auto", width: "100%" }}>
         <div className="steps" aria-label="Progress">
@@ -44,8 +45,8 @@ export function Onboarding() {
 
         {step === 1 && (
           <section className="card">
-            <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>How much paper money should Kaibot trade?</h1>
-            <p className="muted" style={{ marginTop: 0 }}>Simulated money only. Kaibot keeps its own ledger at exactly this amount and never uses more.</p>
+            <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>How much paper money should {NAME} trade?</h1>
+            <p className="muted" style={{ marginTop: 0 }}>Simulated money only. {NAME} keeps its own ledger at exactly this amount and never uses more.</p>
             <div style={{ display: "flex", alignItems: "center", gap: 12, maxWidth: "100%" }}>
               <button aria-label="Less" onClick={() => setAmount(clamp(amount - 500))}>−</button>
               <input type="text" inputMode="numeric" aria-label="Amount in US dollars" className="hero" style={{ width: 260, minWidth: 0, flex: "0 1 260px", height: 56, fontSize: 32, textAlign: "center" }}
@@ -62,9 +63,9 @@ export function Onboarding() {
             <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>Choose a level</h1>
             <button type="button" className="linkbtn" aria-haspopup="dialog" onClick={() => setLevelInfo(true)} style={{ minHeight: 44, fontSize: 14 }}>What does a level mean?</button>
             <Sheet open={levelInfo} onClose={() => setLevelInfo(false)} title="What a level means">
-              <p>A level sets how much Kaibot may risk: the loss allowed on one trade, the worst day before it stops for the day, the largest
+              <p>A level sets how much {NAME} may risk: the loss allowed on one trade, the worst day before it stops for the day, the largest
                 single position, and the drawdown that ends the run.</p>
-              <p className="muted">Kaibot applies the level by itself. You can change it later; a change starts at the next session.</p>
+              <p className="muted">{NAME} applies the level by itself. You can change it later; a change starts at the next session.</p>
             </Sheet>
             <p className="muted" style={{ marginTop: 0 }}>Higher levels risk more per trade and allow bigger losing days. None of them use leverage or shorts{exps.length
               ? `. The day rule ends each day flat; the ${exps.map((e) => ruleName(e.strategy)).join(" and ")} paper experiment holds stocks for weeks, within the level's cap and stop line.`
@@ -90,7 +91,7 @@ export function Onboarding() {
           <section className="card">
             <h1 style={{ margin: "0 0 8px", fontSize: 20 }}>The contract</h1>
             {exps.length ? (
-              <p><b>What Kaibot does:</b> trades liquid US stocks with paper money, on its own. The intraday rule ends each day flat.
+              <p><b>What {NAME} does:</b> trades liquid US stocks with paper money, on its own. The intraday rule ends each day flat.
                 {exps.map((e) => {
                   const v = experimentView(e), same = e.level === level;
                   const limits = same && (v.cap || v.stop) ? ` (at ${lv.name}: ${[v.cap, v.stop].filter(Boolean).join(", ")})` : "";
@@ -98,7 +99,7 @@ export function Onboarding() {
                     overnight included, within the level's cap and stop line{limits}. It never trades real money.</span>;
                 })} No shorts or leverage, ever.</p>
             ) : (
-              <p><b>What Kaibot does:</b> trades liquid US stocks with paper money, on its own, ending every day flat. No overnight positions, shorts or leverage.</p>
+              <p><b>What {NAME} does:</b> trades liquid US stocks with paper money, on its own, ending every day flat. No overnight positions, shorts or leverage.</p>
             )}
             <p><b>What to expect:</b> success means beating SPY and cash after costs, by a small margin. Expect 4–5 losing days in 10, and some red weeks.
               The replays so far show no reliable edge.</p>

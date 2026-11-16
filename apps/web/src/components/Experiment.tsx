@@ -5,6 +5,7 @@ import { Sheet } from "./Sheet";
 import type { Halt, Heartbeat } from "../lib/api";
 import { ruleName } from "../lib/explain";
 import { type Experiment, experimentView, haltTone, retirementUndone, experimentsFrom, findExperiment, multiDayFrom, noDecisionText, parseRetired, retiredText } from "../lib/experiment";
+import { NAME } from "../brand/brand";
 
 export const engineDetail = (beats: Heartbeat[] | undefined) => beats?.find((b) => b.process === "engine")?.detail ?? null;
 export const experimentsOf = (beats: Heartbeat[] | undefined) => experimentsFrom(engineDetail(beats));
@@ -42,7 +43,7 @@ export function ExperimentSheetBody({ e, md }: { e: Experiment; md?: ReturnType<
       )}
       {st?.retired && <p className="exp-ended" role="status">{retiredText(ruleName(e.strategy), parseRetired(st.note ?? "").fellPct, parseRetired(st.note ?? "").session)}</p>}
       {!st?.retired && st?.note && <p className="exp-note" role="status" title={`engine: ${st.note}`}>{noDecisionText(st.note)}</p>}
-      <p className="muted" style={{ fontSize: 14 }}>There is no trade-by-trade control: Kaibot decides on its own within these limits.</p>
+      <p className="muted" style={{ fontSize: 14 }}>There is no trade-by-trade control: {NAME} decides on its own within these limits.</p>
     </>
   );
 }

@@ -4,6 +4,7 @@
 import type { Level } from "./api";
 import { LEVELS } from "./model";
 import presetsJson from "../data/presets.json";
+import { brandText } from "../brand/brand";
 
 export type FocusMode = "all" | "prefer" | "only";
 export type PresetKey = "default" | "big_tech" | "calm" | "custom";
@@ -245,7 +246,8 @@ export function setCaution(body: ConfigBody, key: Caution, on: boolean, b: Bound
 
 // ---------------------------------------------------------------- presets
 export const PRESETS: { key: SpecPresetKey; name: string; icon: string; blurb: string }[] = (Object.keys(SPEC.presets) as SpecPresetKey[])
-  .map((key) => ({ key, name: SPEC.presets[key].name, icon: SPEC.presets[key].icon, blurb: SPEC.presets[key].blurb }));
+  // The shared file is written outside apps/web and may carry the earlier display name ("Kaibot default"): brandText.
+  .map((key) => ({ key, name: brandText(SPEC.presets[key].name), icon: SPEC.presets[key].icon, blurb: brandText(SPEC.presets[key].blurb) }));
 export function presetBody(key: SpecPresetKey, b: Bounds, themes: Themes, universe: string[]): ConfigBody {
   const p = SPEC.presets[key];
   let x = levelDefaults(b);

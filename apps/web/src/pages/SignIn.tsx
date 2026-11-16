@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { supa } from "../lib/api";
-import { Logo } from "../components/Shell";
+import { Logo } from "../components/Logo";
+import { NAME } from "../brand/brand";
 
 export function SignIn() {
   const [email, setEmail] = useState("");
@@ -17,7 +18,7 @@ export function SignIn() {
   return (
     <div className="center">
       <form className="card" onSubmit={send}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Logo /><b style={{ fontWeight: 500, fontSize: 16 }}>kaibot</b>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Logo />
           <span className="pill">PAPER</span></div>
         {state === "sent" ? (
           <>
@@ -37,5 +38,17 @@ export function SignIn() {
         )}
       </form>
     </div>
+  );
+}
+
+/** Signed in, but this dashboard belongs to another account (or the check failed): nothing of it is shown. */
+export function NotOwner({ failed, retry }: { failed: boolean; retry: () => void }) {
+  return (
+    <div className="center"><div className="card">
+      <h1 style={{ margin: 0, fontSize: 18 }}>{failed ? "Couldn't check who owns this dashboard" : "Not your dashboard"}</h1>
+      <p className="muted">{failed ? "The server didn't answer. Try again in a moment." : `This ${NAME} belongs to another account. Nothing here is visible to you.`}</p>
+      {failed && <button onClick={retry}>Try again</button>}
+      <button onClick={() => supa.auth.signOut()}>Sign out</button>
+    </div></div>
   );
 }
