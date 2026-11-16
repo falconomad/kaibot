@@ -844,24 +844,45 @@ class Engine:
     def _rebuild_md_exits(self) -> None:
         """#252: the multi-day flatten sales journalled as sent and not yet booked or dropped (start-up)."""
         done = {b.get("order_id") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",))}
+        sent = set()
         for _, _, _, b in self.journal.entries(kinds=("md_exit",)):
+            sent.add(b.get("coid"))
             if b.get("order_id") in done:
                 continue
             self._md_exits[b["order_id"]] = {"run_id": b.get("run_id"), "reason": b.get("reason"),
                                              "keys": [((k[0], k[1]), float(q)) for k, q in b.get("keys") or []]}
+        # QA-Ops (#279): a sleeve's own market sale (`kbfl-` client id) whose intent is journalled but whose md_exit
+        # is not (the process died between the broker call and the entry) is found at the venue by its client id
+        # and rebuilt, so it is booked when it fills and the next flatten does not send it again. (A close_position
+        # has no client id: that window stays, and the reconciliation shows it as a share difference.)
+        for _, _, _, b in self.journal.entries(kinds=("intent",)):
+            coid = str(b.get("coid") or "")
+            if b.get("action") != "sell" or not coid.startswith("kbfl-") or coid in sent:
+                continue
+            try:
+                o = self.broker.order_by_client_id(coid)
+            except Exception:
+                log.exception("multi-day flatten sale %s: unreadable at the venue (the reconciliation decides)", coid)
+                continue
+            if o and o.get("id") and o["id"] not in self._md_exits and o["id"] not in done:
+                self._md_exit_sent(o, b.get("run_id"), [((b.get("strategy"), b.get("symbol")), float(b["qty"]))],
+                                   str(b.get("reason") or "flatten"))
+                sent.add(coid)
 
-    def _md_exit_booked(self, oid: str) -> bool:
-        """The ledger already holds this sale's fill (a crash after the booking, before `md_exit_done`)."""
-        return any(b.get("order_id") == oid and b.get("side") == "sell"
-                   for _, _, _, b in self.journal.entries(kinds=("fill",)))
+    def _md_exit_booked(self, oid: str, strategy: str, symbol: str) -> bool:
+        """The ledger already holds this sale's fill for this sleeve (a crash after its booking, before
+        `md_exit_done`; QA-Ops: per sleeve, so a crash between two sleeves of one order books the second)."""
+        return any(b.get("order_id") == oid and b.get("side") == "sell" and b.get("strategy") == strategy
+                   and b.get("symbol") == symbol for _, _, _, b in self.journal.entries(kinds=("fill",)))
 
     def _sync_md_exits(self) -> None:
         for oid, x in list(self._md_exits.items()):
             o = self.broker.order(oid)
             if o["status"] == "filled":
                 px, ts = float(o["filled_avg_price"]), o.get("filled_at")
-                if not self._md_exit_booked(oid):
-                    for (strategy, sym), q in x["keys"]:
+                fresh = [(k, q) for k, q in x["keys"] if not self._md_exit_booked(oid, k[0], k[1])]
+                if fresh:
+                    for (strategy, sym), q in fresh:
                         if x["run_id"] is not None:
                             self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
                                                 "side": "sell", "qty": q, "px": px, "fees": sell_fees(q, px),
