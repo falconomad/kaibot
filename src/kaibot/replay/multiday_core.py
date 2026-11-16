@@ -448,6 +448,9 @@ def spin_off_records(actions) -> list[dict]:
 
 
 SPIN_MIN_STEP = 0.02  # a spin-off keeps at least 2% of the parent: a smaller step is a data error, not adjusted
+# QA-Ops (#275): an unsourced spin-off's key is not rankable from its ex-date while the unadjusted fall is inside the
+# momentum rules' longest look-back (12-1: 252 sessions plus the skipped month)
+SPIN_UNSOURCED_SESSIONS = 252 + 21
 
 
 def spin_off_factors(panel, records: Sequence[Mapping], disputed: Sequence[str] = ()) -> tuple[np.ndarray,
@@ -458,7 +461,10 @@ def spin_off_factors(panel, records: Sequence[Mapping], disputed: Sequence[str] 
     not a fall. V, in this order:
       1. `child_close`: the record's ratio x the new company's close at k, when the store has that key;
       2. `alpaca_factor`: Alpaca's own close factor that day (ref_total), net of the table's split and dividend;
-      3. `ex_day_drop`: the ex-day fall itself (the day's own market move is then counted as spun value).
+    QA-Ops second key (#275, Product): no third source. The ex-day fall itself would count the parent's own move
+    that day as spun value and could lift its momentum, so a spin-off with neither source is not adjusted and its
+    note carries the panel `row` of k: `Market.from_panel` then makes the key unrankable (never bought) from k for
+    SPIN_UNSOURCED_SESSIONS sessions, while the unadjusted fall is inside the rule's look-back.
     Only rows before k move, and V uses rows <= k only: a view cut before the ex-date is one constant per
     symbol away (point in time). The credit row k is V (research books it as cash at the ex-date, as a dividend:
     the spun shares are sold at that close on the live path). Disputed keys are left alone (they are not
@@ -482,7 +488,6 @@ def spin_off_factors(panel, records: Sequence[Mapping], disputed: Sequence[str] 
             continue  # before the window, or not in it yet
         k, prev_row = int(rows[pos]), int(rows[pos - 1])
         p = float(panel.c[k, j] * panel.split[k, j])
-        prev = float(panel.c[prev_row, j])
         step, src = None, None
         child, ratio = r.get("new_symbol"), r.get("ratio")
         if child and ratio and child in panel._col and math.isfinite(panel.c[k, panel.col(child)]):
@@ -493,12 +498,8 @@ def spin_off_factors(panel, records: Sequence[Mapping], disputed: Sequence[str] 
             tab = float(panel.pf_total[prev_row, j] / panel.pf_total[k, j])
             if tab > 0 and SPIN_MIN_STEP < alp / tab < 0.999:
                 step, src = alp / tab, "alpaca_factor"
-        if step is None:
-            r_day = (p + float(panel.div[k, j])) / prev
-            if SPIN_MIN_STEP < r_day < 1.0:
-                step, src = r_day, "ex_day_drop"
         if step is None or not (SPIN_MIN_STEP < step <= 1.0):
-            notes.append({**note, "source": "not adjusted: no usable value"})
+            notes.append({**note, "source": "not adjusted: no sourced value", "row": k})
             continue
         factor[:k, j] *= step
         credit[k, j] += p * (1.0 - step) / step
@@ -655,6 +656,11 @@ class Market:
         cols = raw.cols(stocks)
         allowed = np.ones(raw.c.shape, dtype=bool)
         allowed[:, raw.cols(exclude)] = False
+        kept_rows = np.flatnonzero(keep)
+        for nt in spin_notes:  # QA-Ops (#275): an unsourced spin-off is never ranked on its unadjusted fall
+            if "row" in nt and nt["key"] in raw._col:
+                kk = int(np.searchsorted(kept_rows, int(nt["row"])))
+                allowed[kk:kk + SPIN_UNSOURCED_SESSIONS, raw.col(nt["key"])] = False
         exits: dict[int, list[int]] = {}
         windows: dict[str, object] = {}
         n_s = len(raw.dates)

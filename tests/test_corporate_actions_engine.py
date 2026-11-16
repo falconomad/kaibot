@@ -125,3 +125,18 @@ def test_a_flatten_never_sells_more_than_the_broker_holds(tmp_path, monkeypatch)
     a.eng.flatten_all("test")
     sells = [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"]
     assert sells and all(float(o["qty"]) <= 10 for o in sells)
+
+
+def test_a_spin_off_record_without_a_share_ratio_is_not_adopted(tmp_path, monkeypatch):
+    """QA-Ops second key (#275): adoption needs the broker's count to match the record. A record without
+    `new_rate` / `source_rate` gives nothing to match, so the new shares are not adopted (entries stay blocked)."""
+    rec = {"spin_offs": [{k: v for k, v in SPIN["spin_offs"][0].items() if k not in ("new_rate", "source_rate")}]}
+    a = Held(tmp_path, monkeypatch, Feed(rec))
+    a.hold()
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
+    a.ticks(a.open2, 0, 2)
+    assert (MD, "BN") not in a.eng.ledger.book(a.rid).sleeves
+    assert not list(a.eng.journal.entries(kinds=("spinoff",)))
+    (ev,) = [e for e in a.store.tables["event"] if e["type"] == "corporate_action_not_adopted"]
+    assert "no share ratio" in str(ev)
+    assert not a.eng.account_clean

@@ -1505,7 +1505,10 @@ class Engine:
                 continue
             q = float(p.get("qty") or 0)
             if x.kind == "spin_off" and mine.get(x.symbol, 0) > 0:
-                if x.ratio is not None and abs(q - math.floor(mine[x.symbol] * x.ratio + 1e-9)) > 1:
+                if x.ratio is None:  # QA-Ops (#275): no ratio, no count to match the venue's shares against
+                    why = (f"the record gives no share ratio for {x.new_symbol}: the venue's {q:g} shares cannot "
+                           "be checked")
+                elif abs(q - math.floor(mine[x.symbol] * x.ratio + 1e-9)) > 1:
                     why = f"the venue credited {q:g} shares, the record's ratio gives {mine[x.symbol] * x.ratio:g}"
                 else:
                     basis = p.get("cost_basis")
