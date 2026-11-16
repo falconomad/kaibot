@@ -12,7 +12,7 @@ import { ctxFor, emptyOverview, glitches, paperRun, render, text } from "./testk
 
 vi.mock("../lib/api", () => import("./testkit-api"));
 
-const BADGE = "Experiment — failed the ten-year test · paper only";
+const BADGE = "Experiment · failed the ten-year test · paper only";
 const EXP = { strategy: "trend_momentum", evidence: "failed_gate_b", experiment: true, label: "Experiment: failed the ten-year test",
   real_money: false, decided: "2026-11-13", level: "balanced", max_exposure_pct: 60, retire_drawdown_pct: 21 };
 const NOTE = "no decision today: daily store not refreshed (see logs/fetch_daily.log)";

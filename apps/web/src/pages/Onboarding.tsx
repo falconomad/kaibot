@@ -5,6 +5,7 @@ import { Logo } from "../components/Shell";
 import { api, type Level } from "../lib/api";
 import { LEVELS } from "../lib/model";
 import { money } from "../lib/fmt";
+import { Sheet } from "../components/Sheet";
 import { experimentsOf } from "../components/Experiment";
 import { experimentView } from "../lib/experiment";
 import { ruleName } from "../lib/explain";
@@ -16,6 +17,7 @@ export function Onboarding() {
   const [amount, setAmount] = useState(5000);
   const [level, setLevel] = useState<Level>("balanced");
   const [agreed, setAgreed] = useState(false);
+  const [levelInfo, setLevelInfo] = useState(false);
   const nav = useNavigate();
   const qc = useQueryClient();
   const start = useMutation({
@@ -58,6 +60,12 @@ export function Onboarding() {
         {step === 2 && (
           <section className="card">
             <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>Choose a level</h1>
+            <button type="button" className="linkbtn" aria-haspopup="dialog" onClick={() => setLevelInfo(true)} style={{ minHeight: 44, fontSize: 14 }}>What does a level mean?</button>
+            <Sheet open={levelInfo} onClose={() => setLevelInfo(false)} title="What a level means">
+              <p>A level sets how much Kaibot may risk: the loss allowed on one trade, the worst day before it stops for the day, the largest
+                single position, and the drawdown that ends the run.</p>
+              <p className="muted">Kaibot applies the level by itself. You can change it later; a change starts at the next session.</p>
+            </Sheet>
             <p className="muted" style={{ marginTop: 0 }}>Higher levels risk more per trade and allow bigger losing days. None of them use leverage or shorts{exps.length
               ? `. The day rule ends each day flat; the ${exps.map((e) => ruleName(e.strategy)).join(" and ")} paper experiment holds stocks for weeks, within the level's cap and stop line.`
               : " or overnight holds."}</p>

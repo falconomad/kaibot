@@ -59,8 +59,8 @@ describe("riskStatus (S28: red on breach)", () => {
     expect(s.items.join(" | ")).toMatch(/stop line 21%/);
   });
   it("a re-enabling is not a halt and undoes the retirement", () => {
-    expect(riskStatus(run(), ov({ halts_today: [back] }), 0, 0)).toEqual({ severity: "ok", items: [] });
-    expect(riskStatus(run(), ov({ halts_today: [retired, back] }), 0, 0)).toEqual({ severity: "ok", items: [] });
+    expect(riskStatus(run(), ov({ halts_today: [back] }), 0, 0)).toEqual({ severity: "ok", items: [], red: [] });
+    expect(riskStatus(run(), ov({ halts_today: [retired, back] }), 0, 0)).toEqual({ severity: "ok", items: [], red: [] });
   });
   it("a genuine breach next to the experiment's end stays red", () => {
     const s = riskStatus(run(), ov({ halts_today: [retired, { kind: "drift", reason: "x", ts: "2026-11-20T15:01:00Z" }] }), 0, 0);

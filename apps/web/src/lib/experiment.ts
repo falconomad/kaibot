@@ -71,8 +71,8 @@ const fmtPct = (v: number) => `${Number.isInteger(v) ? v : Number(v.toFixed(1))}
 
 /** What the badge says, its one-line explanation (hover or tap), the cap and the stop line, in plain words. */
 export function experimentView(e: Experiment) {
-  // The engine's label is "Experiment: failed the ten-year test"; shown as "Experiment — failed the ten-year test".
-  const head = e.label.replace(/^\s*experiment\s*:\s*/i, "Experiment — ");
+  // The engine's label is "Experiment: failed the ten-year test"; shown as "Experiment · failed the ten-year test".
+  const head = e.label.replace(/^\s*experiment\s*:\s*/i, "Experiment · ");
   const failed = e.evidence === "failed_gate_b";
   const text = e.realMoney ? head : `${head} · paper only`;
   const tip = (failed ? "This rule did not pass the ten-year test of past prices. " : "")

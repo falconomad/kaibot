@@ -76,7 +76,7 @@ describe("Trade detail: the result first, detail in accordions", () => {
     const html = render(<TradeDetailPage />, at);
     const t = text(html);
     expect(t).toContain("Why it closed stop hit");
-    expect(t).toContain("Rule Trend momentum Experiment — failed the ten-year test · paper only");
+    expect(t).toContain("Rule Trend momentum Experiment · failed the ten-year test · paper only");
     expect(t).toContain("Stop · target $140.00 · $170.00");
     expect(html).toContain('<details class="acc" open="" id="trade-gate">');
     expect(html).toMatch(/<details class="acc" id="trade-room">/);

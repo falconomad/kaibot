@@ -29,7 +29,8 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
     return { x, y, ticks, pot, spy: line("spy"), area, step };
   }, [data, start]);
 
-  if (!data.length) return <p className="muted">No sessions yet.</p>;
+  // Fewer than two points draw no line: say what will appear instead of an empty frame.
+  if (data.length < 2) return <div className="chart-empty"><b>No history yet</b><span className="muted">The line starts at the first close and runs next to the S&amp;P 500 from the same start.</span></div>;
   const last = data[data.length - 1];
   const h = hover !== null ? data[hover] : null;
 

@@ -49,7 +49,7 @@ describe("plain words for engine codes", () => {
     expect(ruleStatus("brand_new_rule")).toBeNull();
   });
   it("gives the Engine v3 rules their ten-year verdicts (decision 15 sections 7 and 11)", () => {
-    expect(ruleLabel("trend_momentum")).toBe("Trend momentum (Experiment — failed the ten-year test · paper only)");
+    expect(ruleLabel("trend_momentum")).toBe("Trend momentum (Experiment · failed the ten-year test · paper only)");
     expect(ruleLabel("mom_12_1_band")).toBe("12-month momentum (failed the ten-year test)");
     expect(ruleLabel("spy_trend_filter")).toBe("SPY trend filter (failed the ten-year test)");
     expect(ruleLabel("spy_noise_band")).toBe("SPY noise band (ten-year test: waiting for the engine run)");

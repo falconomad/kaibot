@@ -6,7 +6,9 @@ import { LEVELS, curve } from "../lib/model";
 import { riskStatus } from "../lib/derive";
 import { Skeleton } from "./Skeleton";
 import { ErrorState } from "./States";
-import { overviewPollMs, poll } from "../lib/poll";
+import { STALE, overviewPollMs, poll } from "../lib/poll";
+import { bookChecks } from "../lib/book";
+import { Sheet } from "./Sheet";
 import { preloadRoute } from "../routes";
 
 /** Warm a lazy route's chunk when the pointer or keyboard focus reaches its nav link. */
@@ -17,7 +19,9 @@ export interface RunCtx {
   /** v4: the header's "Day vs stop" and "Run drawdown" meters, for pages that show them on phones (Home, More). */
   meters?: { dayPct: number; dd: number; replay: boolean };
   /** v4: the risk strip's state; Home shows it as its own status row instead of the strip. */
-  risk?: { severity: "ok" | "warn" | "breach"; items: string[] };
+  risk?: { severity: "ok" | "warn" | "breach"; items: string[]; red?: string[] };
+  /** v4: the red kinds in force (halts, the run ended, the daily stop, watchdog or dead-man, book problems). */
+  red?: string[];
   /** v4: pick another run (the picker lives in More on phones). */
   pickRun?: (id: number) => void;
   /** Set when the overview failed and has no data to show; pages show an error with a retry instead of a skeleton. */
@@ -125,6 +129,25 @@ export function livePot(run: Run, o: Overview | undefined) {
   return { pot, dayPnl: pot - dayStart, dayPct: ((pot - dayStart) / dayStart) * 100, positions: fresh ? l!.positions : {} };
 }
 
+/** Phones (Product, 16 Nov 2026): a red halt or safety problem shows on every page as one slim line under the header
+ *  (36 px to see, 44 px to tap). It opens the list in a sheet. Amber and info states keep the Engine dot and rows. */
+function PhoneHaltBar({ items }: { items: string[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="haltbar-wrap" role="alert">
+      <button type="button" className="haltbar" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <span className="haltbar-in"><i aria-hidden="true" /><span className="haltbar-text">{items[0]}</span>
+          {items.length > 1 && <span className="haltbar-more">+{items.length - 1}</span>}</span>
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Limit or safety halt in force">
+        <ul className="sheet-list">{items.map((t) => <li key={t}>{t}</li>)}</ul>
+        <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
+        <p><Link to="/health" onClick={() => setOpen(false)}>Engine health</Link></p>
+      </Sheet>
+    </div>
+  );
+}
+
 export function Shell() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, ...poll(60_000) });
   const [picked, setPicked] = useState<number | null>(() => Number(localStorage.getItem("kb.run")) || null);
@@ -134,6 +157,10 @@ export function Shell() {
   // 5 s only while the engine is live in a session; slower when the market is closed or the engine is off (lib/poll.ts).
   const overview = useQuery({ queryKey: ["overview", run?.id], queryFn: () => api.overview(run!.id), enabled: !!run,
     refetchInterval: (q) => overviewPollMs(run, q.state.data), refetchIntervalInBackground: false });
+  // v4 (Product, 16 Nov 2026): the multi-day book's safety problems are red kinds too (an unprotected stock, books
+  // that disagree with the broker), so the phone bar can show them on every page.
+  const bookQ = useQuery({ queryKey: ["book", run?.id], queryFn: () => api.book(run!.id), enabled: !!run && run.kind === "paper",
+    staleTime: STALE.daily, ...poll(300_000) });
   // Focus order: after a navigation, move focus to the page so keyboard and screen-reader users start at the content.
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
@@ -164,7 +191,11 @@ export function Shell() {
   const dd = ((peak - nowPot) / peak) * 100;
   const dayPct = live ? live.dayPct : last ? (last.pnl / (nowPot - last.pnl)) * 100 : 0;
   const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
-  const risk = active ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] };
+  const risk = active ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] as string[], red: [] as string[] };
+  const checks = bookQ.data?.session ? bookChecks(bookQ.data) : null;
+  const red = [...risk.red,
+    ...(checks?.missing.length ? [`${checks.missing.length} stock${checks.missing.length === 1 ? " has" : "s have"} no safety stop (${checks.missing.join(", ")})`] : []),
+    ...(checks?.reconciled && !checks.reconciled.ok ? ["Kaibot's books and the broker disagree"] : [])];
   const dot: EngineDot = risk.severity === "breach" ? "breach" : active && !chip.live ? "offline" : null;
 
   return (
@@ -188,6 +219,7 @@ export function Shell() {
           <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
         </Link>
       </header>
+      {red.length > 0 && pathname !== "/" && pathname !== "/health" && <PhoneHaltBar items={red} />}
       {risk.severity !== "ok" && pathname !== "/" && pathname !== "/health" && (
         <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
           <b>{risk.severity === "breach" ? "Limit or safety halt in force:" : "Heads up:"}</b> {risk.items.join(" · ")}
@@ -203,11 +235,11 @@ export function Shell() {
         <div className="body" key="ready">
           <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
             <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
-              retryOverview: () => { void overview.refetch(); }, meters: { dayPct, dd, replay: run.kind === "replay" }, pickRun, risk } satisfies RunCtx} />
+              retryOverview: () => { void overview.refetch(); }, meters: { dayPct, dd, replay: run.kind === "replay" }, pickRun, risk, red } satisfies RunCtx} />
           </main>
         </div>
       )}
-      <TabBar dot={dot} />
+      <TabBar dot={red.length ? "breach" : dot} />
       <div className="foot">Paper trading only · simulated money · times ET (CET in brackets) · <Link to="/start">New run</Link> · <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a></div>
     </div>
   );

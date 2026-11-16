@@ -13,7 +13,7 @@ describe("experimentsFrom / experimentView (#210)", () => {
   it("reads the heartbeat's label rows and says them plainly", () => {
     const [e] = experimentsFrom({ experiments: [EXP_ROW] });
     const v = experimentView(e);
-    expect(v.text).toBe("Experiment — failed the ten-year test · paper only");
+    expect(v.text).toBe("Experiment · failed the ten-year test · paper only");
     expect(v.cap).toBe("up to 60% invested");
     expect(v.stop).toBe("retires if it falls 21% from its peak");
     expect(v.tip).toMatch(/did not pass the ten-year test/);

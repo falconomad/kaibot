@@ -6,7 +6,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { BookChecks } from "../components/Book";
-import { ExperimentBadge, experimentsOf } from "../components/Experiment";
+import { ExperimentSheetBody, experimentsOf } from "../components/Experiment";
 import { StatusRow } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { livePot, useRunCtx } from "../components/Shell";
@@ -18,7 +18,7 @@ import { onTabKeys, tabProps } from "../lib/a11y";
 import { api, type Trade } from "../lib/api";
 import { type Book, type BookPosition, holdingView } from "../lib/book";
 import { RULES, exitText, ruleName } from "../lib/explain";
-import { type Experiment, findExperiment } from "../lib/experiment";
+import { type Experiment, experimentView, findExperiment } from "../lib/experiment";
 import { R, dateEt, day, money, px, signedMoney, timeEt } from "../lib/fmt";
 import { sectorOf } from "../components/Book";
 
@@ -71,8 +71,8 @@ export function Positions() {
       {!showClosed && (
         <>
           {expHeld && (
-            <StatusRow tone="info" title={expHeld.label} text={<>{ruleName(expHeld.strategy)} is an experiment: it failed the ten-year test</>}>
-              <ExperimentInfo e={expHeld} />
+            <StatusRow tone="info" title={ruleName(expHeld.strategy)} text={<>{ruleName(expHeld.strategy)} is an experiment: it failed the ten-year test</>}>
+              <ExperimentSheetBody e={expHeld} />
             </StatusRow>
           )}
           {b?.session && b.positions.length > 0 && <BookChecks b={b} />}
@@ -136,7 +136,8 @@ export function Positions() {
 }
 
 function ExperimentInfo({ e }: { e: Experiment }) {
-  return <><ExperimentBadge e={e} limits /><p className="muted" style={{ marginTop: 12 }}>It trades on paper only, to see how it behaves live; it never trades real money.</p></>;
+  const v = experimentView(e);
+  return <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{v.text}</span>{(v.cap || v.stop) && <span className="muted" style={{ display: "block", fontSize: 13, marginTop: 6 }}>{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}</p>;
 }
 
 function Bar({ stop, now, target }: { stop: number; now: number; target: number }) {

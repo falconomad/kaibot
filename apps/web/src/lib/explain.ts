@@ -35,7 +35,7 @@ export const RULES: Record<string, { name: string; status: RuleStatus; what: str
 /** The Engine v3 rules, in the order the Gate page lists their ten-year verdicts. */
 export const V3_RULES = ["trend_momentum", "mom_12_1_band", "spy_trend_filter", "spy_noise_band", "spy_noise_band_carry"] as const;
 const STATUS_TEXT: Record<RuleStatus, string> = { retired: RETIRED_TEXT, shadow: "test only, never traded", candidate: "Engine v3 candidate, research only",
-  experiment: "Experiment — failed the ten-year test · paper only", failed: "failed the ten-year test",
+  experiment: "Experiment · failed the ten-year test · paper only", failed: "failed the ten-year test",
   pending: "ten-year test: waiting for the engine run", waiting: "waiting: tested after the noise band" };
 /** The tag class of each status: failed is the red of a failed gate, pending the info blue, the rest neutral or amber. */
 export const STATUS_TAG: Record<RuleStatus, string> = { retired: "retired", shadow: "", candidate: "", experiment: "info",

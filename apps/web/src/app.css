@@ -697,3 +697,32 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 @media (min-width: 761px) { .chips-scroll { margin: 0; padding: 0; flex-wrap: wrap; } }
 /* v4 rule: on phones a halt is a red row on Home and Engine and a red dot on the Engine tab; the strip is desktop-only */
 @media (max-width: 760px) { .riskstrip { display: none; } }
+
+/* ---------- v4 PR 6: the phone halt bar (Product, 16 Nov 2026) ---------- */
+.haltbar-wrap { display: none; }
+@media (max-width: 760px) {
+  .haltbar-wrap { display: block; position: sticky; top: var(--topbar); z-index: 9; padding: 0 12px; background: transparent; }
+  .haltbar { display: flex; align-items: center; width: 100%; min-height: var(--tap); height: var(--tap); padding: 4px 0; border: 0; border-radius: 0;
+    background: transparent; color: var(--text); font-weight: 500; text-align: left; }
+  .haltbar:hover:not(:disabled) { filter: none; } .haltbar:active:not(:disabled) { transform: none; }
+  .haltbar-in { display: flex; align-items: center; gap: 8px; width: 100%; height: 36px; padding: 0 12px; border-radius: 12px;
+    background: var(--down-tint); border: 1px solid #5A2A2E; font-size: var(--t-sm); }
+  .haltbar-in > i { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--down); }
+  .haltbar-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .haltbar-more { flex: none; font-size: var(--t-cap); font-weight: 700; color: var(--text-2); }
+}
+
+/* Run & settings */
+.run-pick { display: flex; flex-direction: column; gap: 6px; font-size: var(--t-sm); color: var(--text-2); }
+.level-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.level-card { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); min-width: 0; }
+.level-card.on { border-color: var(--accent); }
+.level-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: var(--t-md); }
+.row.current { background: var(--surface-2); }
+.sheet-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+.sheet-actions button { flex: 1 1 140px; min-height: var(--btn); }
+button.danger-fill { background: var(--down); border-color: var(--down); color: #0A0B0D; }
+a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--text); }
+@media (max-width: 760px) { .kb-strategy { padding-bottom: 120px; } }
+.exp-pill { display: inline-block; white-space: normal; line-height: 1.35; font-size: var(--t-sm); padding: 4px 10px; }
+.chart-empty { display: flex; flex-direction: column; gap: 4px; justify-content: center; min-height: 140px; padding: 20px; border: 1px dashed var(--line-strong); border-radius: var(--r-row); font-size: var(--t-sm); }

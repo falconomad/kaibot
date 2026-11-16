@@ -13,7 +13,8 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { STALE, poll } from "../lib/poll";
 import { RuleExperiment } from "../components/Experiment";
-import { HomeStatus, TopHoldings, holdingRows } from "../components/Home";
+import { Sheet } from "../components/Sheet";
+import { HomeStatus, NewRunRow, TopHoldings, holdingRows } from "../components/Home";
 import { type StartState, startState } from "../lib/startstate";
 import { useBook } from "../components/useBook";
 import { mtmCurve } from "../lib/book";
@@ -73,14 +74,15 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
       {ended ? <p>This run has {run.status}{run.end_reason ? `: ${run.end_reason}` : ""}. Start a new run from the menu.</p> : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <button className="full-sm" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
-          {!confirm ? <button className="danger full-sm" onClick={() => setConfirm(true)}>Flatten and stop</button> : (
-            <span className="banner swap full-sm" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", background: "var(--loss-tint)", borderColor: "#5A2A2E" }}>
-              Sell every position at market now and end this run?
-              <button onClick={() => setConfirm(false)}>Cancel</button>
-              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)", color: "#0A0B0D" }} disabled={cmd.isPending}
-                onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
-            </span>
-          )}
+          <button className="danger full-sm" aria-haspopup="dialog" onClick={() => setConfirm(true)}>Flatten and stop</button>
+          <Sheet open={confirm} onClose={() => setConfirm(false)} title="Flatten and stop?">
+            <p>Sell every position at market now and end this run. This can't be undone; the run's record stays read-only.</p>
+            <div className="sheet-actions">
+              <button type="button" onClick={() => setConfirm(false)} data-autofocus>Cancel</button>
+              <button type="button" className="primary danger-fill" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>
+                {cmd.isPending ? "Sending…" : "Flatten and stop"}</button>
+            </div>
+          </Sheet>
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>Level from next session
             <select value={plan.next?.level ?? plan.current ?? "balanced"} disabled={cmd.isPending}
               onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
@@ -124,7 +126,7 @@ export function StartBanner({ state: s }: { state: StartState }) {
 const RANGES = [["1W", 5, "1W"], ["1M", 21, "1M"], ["3M", 63, "3M"], ["ALL", 0, "All"]] as const;
 
 export function Live() {
-  const { run, overview, overviewError, retryOverview, meters, risk } = useRunCtx();
+  const { run, runs, overview, overviewError, retryOverview, meters, risk, pickRun } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), ...poll(60_000) });
   // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
@@ -161,6 +163,10 @@ export function Live() {
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
   const vsSpy = s.netUsd - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
   const beatTs = overview.heartbeat.find((h) => h.process === "engine")?.ts;
+  // Stakeholder, 16 Nov 2026: while a newer run is scheduled, an ended run's pot must not read as the current one.
+  const ended = run.kind === "paper" && !["scheduled", "running", "paused"].includes(run.status);
+  const newer = ended ? (runs ?? []).filter((r) => r.kind === "paper" && r.id !== run.id && r.created_at >= run.created_at
+    && ["scheduled", "running", "paused"].includes(r.status)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null : null;
 
   const book = useBookData;
   const rows = holdingRows(live?.positions ?? {}, book);
@@ -169,12 +175,14 @@ export function Live() {
 
   return (
     <>
+      {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
       <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} book={book} />
       <StartBanner state={startState(run, overview)} />
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
-          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : "Paper pot"}</h1>
+          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer ? "Last run (ended)"
+            : ended ? "Paper pot · run ended" : "Paper pot"}</h1>
           <div className="hero num">{money(pot)}</div>
           <div className="num home-change">
             <span className={tone(allTime)}>{signedMoney(allTime)} all time</span>

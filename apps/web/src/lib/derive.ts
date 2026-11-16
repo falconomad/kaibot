@@ -27,16 +27,23 @@ export const fmtR = (r: number | null | undefined) =>
  *  ended as planned (#210). */
 export type Severity = "ok" | "warn" | "breach";
 export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, ddPct: number, now = Date.now()):
-  { severity: Severity; items: string[] } {
+  { severity: Severity; items: string[]; red: string[] } {
   const items: string[] = [];
+  /** v4 (Product, 16 Nov 2026): the red kinds a phone shows on every page: a limit or safety halt in force, the run
+   *  ended, the daily stop, the watchdog or dead-man acting. Amber and info states are not in it. */
+  const red: string[] = [];
   let severity: Severity = "ok";
-  const bump = (s: Severity) => { if (s === "breach" || (s === "warn" && severity === "ok")) severity = s; };
+  const add = (text: string, s: Severity, isRed = s === "breach") => {
+    items.push(text);
+    if (isRed) red.push(text);
+    if (s === "breach" || (s === "warn" && severity === "ok")) severity = s;
+  };
   const lv = run.level ? LEVELS[run.level] : null;
   const beat = o?.heartbeat.find((h) => h.process === "engine");
   const detail = (beat?.detail ?? {}) as { halted?: boolean; account_clean?: boolean };
-  if (run.status === "paused") { items.push("Entries paused"); bump("warn"); }
-  if (detail.halted) { items.push("Engine halted entries for today"); bump("breach"); }
-  if (detail.account_clean === false) { items.push("Paper account has positions or orders Kaibot didn't place"); bump("breach"); }
+  if (run.status === "paused") add("Entries paused", "warn");
+  if (detail.halted) add("Engine halted entries for today", "breach");
+  if (detail.account_clean === false) add("Paper account has positions or orders Kaibot didn't place", "breach");
   // A watchdog halt is over once the engine is back: a fresh heartbeat newer than the halt.
   const fresh = !!beat?.ts && ageS(beat.ts, now) < 120;
   // #210: the experiment's planned end (book stop line, retirement) is amber, never a red breach; a re-enabling is
@@ -45,13 +52,13 @@ export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, dd
   for (const h of halts.filter((x) => !(fresh && haltResolved(x, beat?.ts)) && !retirementUndone(x, halts))) {
     const t = haltTone(h.kind);
     if (t === "info") continue;
-    items.push(haltText(h)); bump(t === "breach" ? "breach" : "warn");
+    add(haltText(h), t === "breach" ? "breach" : "warn", t === "breach" || t === "note");
   }
-  if (lv && dayPct <= -lv.stop) { items.push(`Daily stop reached (−${lv.stop}%)`); bump("breach"); }
-  else if (lv && dayPct < 0 && -dayPct >= 0.8 * lv.stop) { items.push("Close to the daily stop"); bump("warn"); }
-  if (lv && ddPct >= lv.runDd) { items.push(`Run drawdown cap reached (${lv.runDd}%)`); bump("breach"); }
-  else if (lv && ddPct >= 0.8 * lv.runDd) { items.push("Close to the run drawdown cap"); bump("warn"); }
-  return { severity, items: [...new Set(items)] };
+  if (lv && dayPct <= -lv.stop) add(`Daily stop reached (−${lv.stop}%)`, "breach");
+  else if (lv && dayPct < 0 && -dayPct >= 0.8 * lv.stop) add("Close to the daily stop", "warn");
+  if (lv && ddPct >= lv.runDd) add(`Run drawdown cap reached (${lv.runDd}%)`, "breach");
+  else if (lv && ddPct >= 0.8 * lv.runDd) add("Close to the run drawdown cap", "warn");
+  return { severity, items: [...new Set(items)], red: [...new Set(red)] };
 }
 
 export const HALT_TEXT: Record<string, string> = {
