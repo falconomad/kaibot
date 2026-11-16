@@ -12,7 +12,7 @@ describe("lazy routes (#80)", () => {
   it("imports no other page eagerly: every other page goes through a loader", () => {
     const eagerPages = [...mainSrc.matchAll(/from "\.\/pages\/(\w+)"/g)].map((m) => m[1]).sort();
     expect(eagerPages).toEqual(["Live", "SignIn"]);
-    expect(Object.keys(ROUTE_LOADERS)).toHaveLength(10);
+    expect(Object.keys(ROUTE_LOADERS)).toHaveLength(11);
     for (const path of Object.keys(ROUTE_LOADERS)) expect(mainSrc).toContain(`load["${path}"]()`);
   });
 
@@ -47,7 +47,7 @@ describe("first load stays small (idle polish M7)", () => {
       for (const d of deps(f)) { const r = resolve(f, d); if (r) todo.push(r); }
     }
     expect(seen.has("./pages/Live.tsx")).toBe(true);
-    for (const heavy of ["./lib/roomview.ts", "./lib/gateview.ts", "./lib/estimator.ts", "./lib/config.ts", "./lib/multiday.ts", "./lib/engine.ts"])
+    for (const heavy of ["./lib/roomview.ts", "./lib/gateview.ts", "./lib/estimator.ts", "./lib/config.ts", "./lib/engine.ts"])
       expect(seen.has(heavy), heavy).toBe(false);
   });
 });

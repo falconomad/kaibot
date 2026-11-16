@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { engineChip, livePot, useRunCtx } from "../components/Shell";
 import { PotChart } from "../components/PotChart";
@@ -14,6 +14,8 @@ import { Empty, ErrorState, TestPhaseBanner } from "../components/States";
 import { STALE, poll } from "../lib/poll";
 import { ExperimentCard, RuleExperiment } from "../components/Experiment";
 import { type StartState, startState } from "../lib/startstate";
+import { useBook } from "../components/useBook";
+import { mtmCurve } from "../lib/book";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -151,6 +153,9 @@ export function StartBanner({ state: s }: { state: StartState }) {
   );
 }
 
+// #130: the multi-day book section is its own chunk: an intraday-only run never needs it.
+const BookSection = lazy(() => import("../components/BookSection").then((m) => ({ default: m.BookSection })));
+
 const RANGES = [["1W", 5], ["1M", 21], ["3M", 63], ["ALL", 0]] as const;
 
 export function Live() {
@@ -159,6 +164,8 @@ export function Live() {
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), ...poll(60_000) });
   // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
   const chapters = useQuery({ queryKey: ["chapters", run.id], queryFn: () => api.chapters(run.id), enabled: run.kind === "paper", staleTime: STALE.daily, retry: false });
+  // #130: the pot line marked to market (kb_equity_series) once the ledger has closes; before that, realised results.
+  const { series } = useBook(run);
   const lv = run.level ? LEVELS[run.level] : null;
   const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
   if (overviewError) return <ErrorState what="The run overview" error={overviewError} retry={retryOverview} />;
@@ -166,7 +173,8 @@ export function Live() {
   if (!overview || trades.isPending) return <Skeleton variant="dashboard" />;
 
   const daily = overview.daily;
-  const c = curve(run.amount_usd, daily);
+  const marked = (series.data ?? []).filter((p) => p.marked);
+  const c = marked.length ? mtmCurve(run.amount_usd, series.data!, daily) : curve(run.amount_usd, daily);
   const keep = RANGES.find((r) => r[0] === range)![1];
   const shown = keep && c.length > keep ? c.slice(-keep - 1) : c;
   const s = stats(run.amount_usd, daily, trades.data.rows);
@@ -253,6 +261,7 @@ export function Live() {
         )}
       </div>
 
+      {run.kind === "paper" && <Suspense fallback={null}><BookSection run={run} beats={overview.heartbeat} /></Suspense>}
       {run.kind === "paper" && <ExperimentCard beats={overview.heartbeat} />}
 
       {run.kind === "paper" && (

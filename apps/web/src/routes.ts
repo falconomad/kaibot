@@ -4,6 +4,7 @@ export const ROUTE_LOADERS = {
   "/trades": () => import("./pages/Trades"),
   "/trades/:id": () => import("./pages/TradeDetail"),
   "/tape": () => import("./pages/Tape"),
+  "/holdings": () => import("./pages/Holdings"),
   "/report": () => import("./pages/Report"),
   "/health": () => import("./pages/Health"),
   "/gate": () => import("./pages/Gate"),
