@@ -1,0 +1,151 @@
+/* kaibo brand system v1: proposed token values (issue #265). NOT loaded by the app. Written by gen/tokens.py.
+   Every colour is derived from the Rising k logo: blue #4F95F0, white #F4F5F7, black #0A0B0D
+   (and the logo's blue for light backgrounds, #2F6FDE). See brand_system_v1.md.
+
+   How to apply: the first block uses the names of apps/web/src/tokens.css with new values, so it replaces that
+   file's :root colours. The v4 names in v4tokens.css (--bg, --text, --accent, --up, --amber ...) are aliases of
+   these and need no change. The second block is NEW names: each is listed in brand_system_v1.md under
+   "What needs more than a value". The light theme is opt-in until those are done. */
+
+:root {
+  /* the two scales (reference; components use the role names below) */
+  --blue-50: #ECF4FF;
+  --blue-100: #D9E9FF;
+  --blue-200: #B4D4FE;
+  --blue-300: #7FB4F9;
+  --blue-400: #4F95F0;
+  --blue-500: #2F6FDE;
+  --blue-600: #1A54B7;
+  --blue-700: #174189;
+  --blue-800: #142C56;
+  --blue-900: #0F1F39;
+  --blue-950: #081327;
+  --grey-0: #FFFFFF;
+  --grey-50: #F4F5F7;
+  --grey-100: #E4E6EA;
+  --grey-200: #CDD1D9;
+  --grey-300: #B2B8C1;
+  --grey-400: #989FAB;
+  --grey-500: #808692;
+  --grey-600: #5D646F;
+  --grey-700: #40454F;
+  --grey-750: #31363D;
+  --grey-800: #262A31;
+  --grey-850: #1B1E23;
+  --grey-900: #131519;
+  --grey-950: #0A0B0D;
+}
+
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  /* 1. existing names, new values */
+  --paper: #0A0B0D;
+  --surface: #131519;
+  --surface-2: #1B1E23;
+  --rule: #262A31;
+  --rule-strong: #40454F;
+  --ink: #F4F5F7;
+  --slate: #B2B8C1;
+  --stale: #989FAB;
+  --sea: #4F95F0;
+  --sea-ink: #7FB4F9;
+  --sea-tint: #0F1F39;
+  --gain: #3ADD98;
+  --gain-tint: #092B1C;
+  --loss: #FF716D;
+  --loss-tint: #371715;
+  --pass: #3ADD98;
+  --warn: #F7B746;
+  --warn-tint: #32240B;
+  --fail: #FF716D;
+  --ai: #C9B7FD;
+  --ai-tint: #231E30;
+  --s-pot: #4F95F0;
+  --s-spy: #808692;
+  --font-ui: "Outfit", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "Outfit", system-ui, sans-serif;      /* figures use the same face with tabular numerals */
+  --font-ai: "Outfit", system-ui, sans-serif;
+  /* 2. new names */
+  --on-sea: #0A0B0D;
+  --sea-line: #174189;
+  --focus: #7FB4F9;
+  --selection: #174189;
+  --live: #4F95F0;
+  --control: #808692;
+  --gain-line: #0A5C3B;
+  --loss-line: #AD4B48;
+  --warn-line: #906E34;
+  --warn-text: #F7B746;
+  --on-warn: #0A0B0D;
+  --paper-edge: #F7B746;
+  --ai-line: #50466C;
+  --exp-bg: #1B1E23;
+  --exp-line: #808692;
+  --exp-hatch: #40454F;
+  --exp-text: #F4F5F7;
+  --s-grid: #262A31;
+  --s-up: #10A66E;
+  --s-down: #BC262F;
+  --scrim: rgba(0, 0, 0, .6);
+  --bar-bg: rgba(10, 11, 13, .86);
+  --elev-sheet: 0 -12px 40px rgba(0, 0, 0, .55);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --paper: #F4F5F7;
+  --surface: #FFFFFF;
+  --surface-2: #E4E6EA;
+  --rule: #CDD1D9;
+  --rule-strong: #989FAB;
+  --ink: #0A0B0D;
+  --slate: #40454F;
+  --stale: #5D646F;
+  --sea: #2F6FDE;
+  --sea-ink: #1A54B7;
+  --sea-tint: #ECF4FF;
+  --gain: #00764C;
+  --gain-tint: #D8F8E5;
+  --loss: #BC262F;
+  --loss-tint: #FFE9E6;
+  --pass: #00764C;
+  --warn: #F7B746;
+  --warn-tint: #FFECCF;
+  --fail: #BC262F;
+  --ai: #6844AA;
+  --ai-tint: #F0EBFF;
+  --s-pot: #2F6FDE;
+  --s-spy: #5D646F;
+  --on-sea: #FFFFFF;
+  --sea-line: #B4D4FE;
+  --focus: #2F6FDE;
+  --selection: #B4D4FE;
+  --live: #2F6FDE;
+  --control: #5D646F;
+  --gain-line: #8ECFAC;
+  --loss-line: #D14E4D;
+  --warn-line: #A87507;
+  --warn-text: #835B05;
+  --on-warn: #0A0B0D;
+  --paper-edge: #A87507;
+  --ai-line: #C0B7DF;
+  --exp-bg: #E4E6EA;
+  --exp-line: #5D646F;
+  --exp-hatch: #B2B8C1;
+  --exp-text: #0A0B0D;
+  --s-grid: #CDD1D9;
+  --s-up: #039F68;
+  --s-down: #A7021D;
+  --scrim: rgba(10, 11, 13, .45);
+  --bar-bg: rgba(244, 245, 247, .88);
+  --elev-sheet: 0 -12px 40px rgba(10, 11, 13, .18);
+}
+
+/* Shape, taken from the logo: one unit is the stem (4 px in the app); ends are round. Unchanged v4 values are not repeated. */
+:root {
+  --stroke: 2px;            /* icon and chart lines: round caps, round joins */
+  --point: 8px;             /* the live point; 10 px at the end of the chart line */
+  --d-draw: 300ms;          /* a line drawing itself, as the logo's arm does */
+  --d-point: 180ms;         /* the point arriving */
+  --ease-pop: cubic-bezier(.3, 1.4, .5, 1);
+}
