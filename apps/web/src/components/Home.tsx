@@ -6,19 +6,22 @@ import { Link, useNavigate } from "react-router-dom";
 import type { Overview, Run } from "../lib/api";
 import { type Book, bookChecks, holdingView } from "../lib/book";
 import { TEST_PHASE, ruleName } from "../lib/explain";
-import { experimentView, experimentsFrom, multiDayFrom, noDecisionText, parseRetired, retiredText } from "../lib/experiment";
-import { money, px, signedMoney } from "../lib/fmt";
-import { ExperimentCard, engineDetail } from "./Experiment";
+import { experimentsFrom, multiDayFrom, noDecisionText, parseRetired, retiredText } from "../lib/experiment";
+import { money, px, signedMoney, timeBoth } from "../lib/fmt";
+import { LEVELS } from "../lib/model";
+import { ExperimentSheetBody, engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
 
 type Tone = "breach" | "warn" | "info" | "neutral";
 
 /** One status row: the fact in a few words; the explanation opens in a sheet. */
-export function StatusRow({ tone, text, title, children }: { tone: Tone; text: ReactNode; title: string; children: ReactNode }) {
+export function StatusRow({ tone, text, title, children, phoneDup = false }: { tone: Tone; text: ReactNode; title: string; children: ReactNode;
+  /** v4 PR 6: the phone halt bar already says this on every page, so on phones the row is not shown a second time. */
+  phoneDup?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div role={tone === "breach" ? "alert" : tone === "warn" ? "status" : undefined}>
+    <div role={tone === "breach" ? "alert" : tone === "warn" ? "status" : undefined} className={phoneDup ? "dup-phone" : undefined}>
       <button type="button" className={`status-row ${tone}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>
         {tone === "breach" && <i className="status-dot" aria-hidden="true" />}
         <span className="status-text">{text}</span>
@@ -29,10 +32,14 @@ export function StatusRow({ tone, text, title, children }: { tone: Tone; text: R
   );
 }
 
+/** True when the phone halt bar shows every item of the risk row (all of them are red kinds). */
+export const allRed = (risk: { items: string[]; red?: string[] }) =>
+  risk.items.length > 0 && risk.items.every((t) => risk.red?.includes(t));
+
 /** The rows above the pot, in order: a halt or breach, the engine off, a broken safety check of the multi-day book,
  *  then the experiment (or the test phase when no experiment runs). Never hidden; only their explanations are. */
 export function HomeStatus({ run, overview, risk, engineLive, book }: {
-  run: Run; overview: Overview; risk: { severity: "ok" | "warn" | "breach"; items: string[] } | undefined;
+  run: Run; overview: Overview; risk: { severity: "ok" | "warn" | "breach"; items: string[]; red?: string[] } | undefined;
   engineLive: boolean; book: Book | undefined;
 }) {
   const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
@@ -46,7 +53,8 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
   if (risk && risk.severity !== "ok") {
     const first = risk.items[0] ?? (risk.severity === "breach" ? "A limit or safety halt is in force" : "Heads up");
     rows.push(
-      <StatusRow key="risk" tone={risk.severity === "breach" ? "breach" : "warn"} title={risk.severity === "breach" ? "Limit or safety halt in force" : "Heads up"}
+      <StatusRow key="risk" tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"} phoneDup={allRed(risk)}
+        title={risk.severity === "breach" || risk.red?.length ? "Limit or safety halt in force" : "Heads up"}
         text={<>{first}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
         <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>
         <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
@@ -63,7 +71,7 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
     );
   if (unprotected.length || offBooks)
     rows.push(
-      <StatusRow key="book" tone="breach" title="The multi-day book needs attention"
+      <StatusRow key="book" tone="breach" title="The multi-day book needs attention" phoneDup
         text={unprotected.length ? `${unprotected.length} stock${unprotected.length === 1 ? " has" : "s have"} no safety stop` : "Kaibot's books and the broker disagree"}>
         {unprotected.length > 0 && <p>No safety stop at the broker for {unprotected.join(", ")}. Kaibot places it again.</p>}
         {offBooks && <p>Kaibot's books and the broker disagree. Buying stops until the two match again.</p>}
@@ -80,16 +88,15 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
   else if (retired) {
     const r = parseRetired(retired.note ?? "");
     rows.push(
-      <StatusRow key="ended" tone="warn" title="Experiment ended" text={`Experiment ended: ${ruleName(retired.rule)} retired`}>
+      <StatusRow key="ended" tone="warn" title={ruleName(retired.rule)} text={`Experiment ended: ${ruleName(retired.rule)} retired`}>
         <p>{retiredText(ruleName(retired.rule), r.fellPct, r.session)}</p>
-        <ExperimentCard beats={overview.heartbeat} />
+        {exps[0] && <ExperimentSheetBody e={exps[0]} />}
       </StatusRow>,
     );
   } else if (exps.length) {
-    const v = experimentView(exps[0]);
     rows.push(
-      <StatusRow key="exp" tone="info" title={v.text} text={exps[0].label}>
-        <ExperimentCard beats={overview.heartbeat} />
+      <StatusRow key="exp" tone="info" title={ruleName(exps[0].strategy)} text={exps[0].label}>
+        <ExperimentSheetBody e={exps[0]} md={md} />
       </StatusRow>,
     );
   } else if (run.kind === "paper")
@@ -113,6 +120,24 @@ export function noDecisionRows(md: ReturnType<typeof multiDayFrom>): ReactNode[]
       <p className="muted" style={{ fontSize: 13 }} title="engine note">{r.note}</p>
     </StatusRow>
   ));
+}
+
+/** Stakeholder, 16 Nov 2026: an ended run is on screen while a newer run is scheduled (or already running). One row
+ *  says so; its sheet can switch to the new run. */
+export function NewRunRow({ next, overview, onShow }: { next: Run; overview: Overview; onShow?: () => void }) {
+  const d = engineDetail(overview.heartbeat) as { next_open?: unknown } | null;
+  const open = typeof d?.next_open === "string" && Number.isFinite(Date.parse(d.next_open)) ? d.next_open : null;
+  const lv = next.level ? LEVELS[next.level].name : null;
+  const when = next.status === "scheduled" ? (open ? `starts at the open, ${timeBoth(open)}` : "starts at the next open") : "running now";
+  return (
+    <div className="status-rows">
+      <StatusRow tone="info" title="New run" text={`New run: ${money(next.amount_usd).replace(".00", "")}${lv ? ` · ${lv}` : ""} · ${when}`}>
+        <p>A new paper run of {money(next.amount_usd)}{lv ? ` at ${lv}` : ""} {next.status === "scheduled" ? `is scheduled: it ${when}` : "is running"}.
+          The figures below belong to the last run, which has ended.</p>
+        {onShow && <button type="button" className="primary sheet-cta" onClick={onShow}>Show the new run</button>}
+      </StatusRow>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------- top holdings

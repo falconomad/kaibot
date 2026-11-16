@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Accordion } from "../components/Accordion";
-import { StatusRow, noDecisionRows } from "../components/Home";
+import { StatusRow, allRed, noDecisionRows } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { engineChip, useRunCtx } from "../components/Shell";
 import { api, type Heartbeat } from "../lib/api";
@@ -14,7 +14,7 @@ import { poll } from "../lib/poll";
 import { budgetText } from "../lib/roomview";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
-import { ExperimentCard, HaltTag, engineDetail, experimentsOf } from "../components/Experiment";
+import { ExperimentSheetBody, HaltTag, engineDetail, experimentsOf } from "../components/Experiment";
 import { findExperiment, multiDayFrom } from "../lib/experiment";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
@@ -167,7 +167,8 @@ export function Health() {
       </div>
       <div className="status-rows">
         {risk && risk.severity !== "ok" && (
-          <StatusRow tone={risk.severity === "breach" ? "breach" : "warn"} title={risk.severity === "breach" ? "Limit or safety halt in force" : "Heads up"}
+          <StatusRow tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"} phoneDup={allRed(risk)}
+            title={risk.severity === "breach" || risk.red?.length ? "Limit or safety halt in force" : "Heads up"}
             text={<>{risk.items[0]}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
             <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>
             <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
@@ -205,7 +206,7 @@ export function Health() {
       <ul className="rows">
         <SheetRow head="Today's scan" line={scan.headline}><ScanCard beat={engine} /></SheetRow>
         {exps.length > 0 && (
-          <SheetRow head={ruleName(exps[0].strategy)} line={exps[0].label}><ExperimentCard beats={h.heartbeat} /></SheetRow>
+          <SheetRow head={ruleName(exps[0].strategy)} line={exps[0].label}><ExperimentSheetBody e={exps[0]} md={md} /></SheetRow>
         )}
         <li><Link to="/gate" className="row"><span className="row-mid"><b>Go / no-go</b><span className="muted">The ten-year test and the bar for real money</span></span>
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6 L15 12 L9 18" /></svg></Link></li>

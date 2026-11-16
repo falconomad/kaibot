@@ -13,7 +13,7 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { STALE, poll } from "../lib/poll";
 import { RuleExperiment } from "../components/Experiment";
-import { HomeStatus, TopHoldings, holdingRows } from "../components/Home";
+import { HomeStatus, NewRunRow, TopHoldings, holdingRows } from "../components/Home";
 import { type StartState, startState } from "../lib/startstate";
 import { useBook } from "../components/useBook";
 import { mtmCurve } from "../lib/book";
@@ -124,7 +124,7 @@ export function StartBanner({ state: s }: { state: StartState }) {
 const RANGES = [["1W", 5, "1W"], ["1M", 21, "1M"], ["3M", 63, "3M"], ["ALL", 0, "All"]] as const;
 
 export function Live() {
-  const { run, overview, overviewError, retryOverview, meters, risk } = useRunCtx();
+  const { run, runs, overview, overviewError, retryOverview, meters, risk, pickRun } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), ...poll(60_000) });
   // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
@@ -161,6 +161,10 @@ export function Live() {
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
   const vsSpy = s.netUsd - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
   const beatTs = overview.heartbeat.find((h) => h.process === "engine")?.ts;
+  // Stakeholder, 16 Nov 2026: while a newer run is scheduled, an ended run's pot must not read as the current one.
+  const ended = run.kind === "paper" && !["scheduled", "running", "paused"].includes(run.status);
+  const newer = ended ? (runs ?? []).filter((r) => r.kind === "paper" && r.id !== run.id && r.created_at >= run.created_at
+    && ["scheduled", "running", "paused"].includes(r.status)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null : null;
 
   const book = useBookData;
   const rows = holdingRows(live?.positions ?? {}, book);
@@ -169,12 +173,14 @@ export function Live() {
 
   return (
     <>
+      {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
       <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} book={book} />
       <StartBanner state={startState(run, overview)} />
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
-          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : "Paper pot"}</h1>
+          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer?.status === "scheduled" ? "Last run (ended)"
+            : ended ? "Paper pot · run ended" : "Paper pot"}</h1>
           <div className="hero num">{money(pot)}</div>
           <div className="num home-change">
             <span className={tone(allTime)}>{signedMoney(allTime)} all time</span>

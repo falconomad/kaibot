@@ -14,7 +14,7 @@ const STATUS: Record<string, string> = {
 };
 
 export function Settings() {
-  const { run, runs, overview, overviewError, retryOverview } = useRunCtx();
+  const { run, runs, overview, overviewError, retryOverview, pickRun } = useRunCtx();
   const plan = levelPlan(run, overview?.segments);
   const live = ["scheduled", "running", "paused"].includes(run.status);
   return (
@@ -22,7 +22,13 @@ export function Settings() {
       <section className="card" aria-labelledby="run-h">
         <h2 id="run-h">This run</h2>
         <div className="kv">
-          <span>Run</span><span /><span className="v">{run.label ?? `Run ${run.id}`}</span>
+          {/* v4: the header no longer has the run picker, so it sits here, in the old "Run" line (stakeholder, 16 Nov 2026:
+              the pre-v4 Run & settings stays as it was). */}
+          <span>Run</span><span /><span className="v">{runs.length > 1 && pickRun
+            ? <select aria-label="Run shown" value={run.id} onChange={(e) => pickRun(Number(e.target.value))} style={{ maxWidth: "100%" }}>
+                {runs.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
+              </select>
+            : run.label ?? `Run ${run.id}`}</span>
           <span>Status</span><span /><span className="v">{STATUS[run.status] ?? run.status}{run.end_reason ? ` · ${run.end_reason}` : ""}</span>
           <span>Pot at start</span><span /><span className="v">{money(run.amount_usd)}</span>
           <span>Started / ended</span><span /><span className="v">{run.started_on ? day(run.started_on) : "—"} / {run.ended_on ? day(run.ended_on) : "—"}</span>
@@ -66,7 +72,7 @@ export function Settings() {
           <Link to="/start"><button className="primary">New run</button></Link>
         </div>
         <p className="muted" style={{ fontSize: 13 }}>Starting a new run closes the current run's positions first and keeps every old run read-only, so its record
-          can't change. Pick a run from the menu at the top to look at it.</p>
+          can't change. Pick a run in the Run menu above to look at it.</p>
         <table className="list" tabIndex={0} aria-label="All runs">
           <thead><tr><th>Run</th><th>Kind</th><th>Status</th><th className="r">Amount</th><th>From</th><th>To</th></tr></thead>
           <tbody>{runs.map((r) => (

@@ -12,9 +12,9 @@ import { RoomBySignal } from "../components/Room";
 import { fmtR, haltText } from "../lib/derive";
 import { roomOutcome } from "../lib/roomview";
 import { causeText, exitText, explainSignal, ruleName } from "../lib/explain";
-import { type Experiment, findExperiment, haltTone } from "../lib/experiment";
+import { type Experiment, experimentView, findExperiment, haltTone } from "../lib/experiment";
 import { dateEt, money, px, signedMoney, timeEt } from "../lib/fmt";
-import { ExperimentBadge, experimentsOf } from "../components/Experiment";
+import { ExperimentSheetBody, experimentsOf } from "../components/Experiment";
 import { StatusRow } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { Skeleton } from "../components/Skeleton";
@@ -94,9 +94,8 @@ export function Tape() {
         </div>
       </section>
       {expShown && (
-        <StatusRow tone="info" title={expShown.label} text={expShown.label}>
-          <ExperimentBadge e={expShown} limits />
-          <p className="muted" style={{ marginTop: 12 }}>Rows marked "Experiment" belong to this rule. It trades on paper only and never real money.</p>
+        <StatusRow tone="info" title={ruleName(expShown.strategy)} text={expShown.label}>
+          <ExperimentSheetBody e={expShown} />
         </StatusRow>
       )}
       {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="The activity" error={q.error} retry={() => q.refetch()} /> : !rows.length ? (
@@ -145,7 +144,7 @@ function HaltSheet({ h }: { h: Halt }) {
 }
 
 function ItemSheet({ it, exp }: { it: TapeItem; exp: Experiment | null }) {
-  const label = exp ? <p style={{ margin: "0 0 12px" }}><ExperimentBadge e={exp} limits /></p> : null;
+  const label = exp ? <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{experimentView(exp).text}</span></p> : null;
   if (it.kind === "fill") {
     const cost = Math.abs(it.venue_px - it.shadow_px) * it.qty + it.fees;
     return (

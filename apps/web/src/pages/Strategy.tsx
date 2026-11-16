@@ -5,11 +5,12 @@
 // Boldness are shortcuts that write the same body fields. Changes apply at the next session open as a new version.
 // Paper trading only: there is no live-trading control here, and server text is always rendered as plain text.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { livePot, useRunCtx } from "../components/Shell";
 import { PillSwitch, RadioGroup } from "../components/ConfigControls";
 import { StockBadge } from "../components/StockBadge";
+import { Accordion } from "../components/Accordion";
 import { Skeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
 import {
@@ -254,8 +255,10 @@ export function StrategyHome() {
       <div className="sk-stack" style={{ gap: 20 }}>
         {source === "lists" && <ThisListCard ed={ed} est={est} nextOpen={openLabel(nextOpenEt())} />}
         <BoldCard body={body} edit={edit} ctx={ctx} usd={usd} />
-        <HoursCard body={body} edit={edit} ctx={ctx} />
-        <SafetyCard body={body} edit={edit} ctx={ctx} toFine={toFine} />
+        <PhoneFold title="Trading hours" hint={`New trades ${body.timing.entry_start}–${body.timing.entry_end} ET`}>
+          <HoursCard body={body} edit={edit} ctx={ctx} /></PhoneFold>
+        <PhoneFold title="Extra caution" hint={(() => { const n = Object.values(cautionOn(body, b)).filter(Boolean).length; return n ? `${n} on` : "Standard"; })()}>
+          <SafetyCard body={body} edit={edit} ctx={ctx} toFine={toFine} /></PhoneFold>
       </div>
     </div>
   </>);
@@ -353,6 +356,23 @@ function BoldCard({ body, edit, ctx, usd }: { body: ConfigBody; edit: (b: Config
   );
 }
 const Stat = ({ k, v }: { k: string; v: string }) => <span className="kb-stat"><span>{k}</span><b className="swap">{v}</b></span>;
+
+const PHONE = "(max-width: 760px)";
+const isPhone = () => typeof window !== "undefined" && !!window.matchMedia?.(PHONE).matches;
+
+/** v4 (mobile_first_v4.md, Strategy: "Behind a tap: trading hours, extra caution"): on phones the card sits in a
+ *  closed accordion row; on tablets and desktop it shows as before. */
+function PhoneFold({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+  const [phone, setPhone] = useState(isPhone);
+  useEffect(() => {
+    const m = typeof window !== "undefined" ? window.matchMedia?.(PHONE) : undefined;
+    if (!m) return;
+    const on = () => setPhone(m.matches);
+    m.addEventListener?.("change", on);
+    return () => m.removeEventListener?.("change", on);
+  }, []);
+  return phone ? <div className="kb-fold"><Accordion title={title} hint={hint}>{children}</Accordion></div> : <>{children}</>;
+}
 
 function HoursCard({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBody) => void; ctx: Ctx }) {
   const { b } = ctx;

@@ -9,7 +9,7 @@ import { type Experiment, experimentView, haltTone, retirementUndone, experiment
 export const engineDetail = (beats: Heartbeat[] | undefined) => beats?.find((b) => b.process === "engine")?.detail ?? null;
 export const experimentsOf = (beats: Heartbeat[] | undefined) => experimentsFrom(engineDetail(beats));
 
-/** The calm badge: "Experiment — failed the ten-year test · paper only". Hover shows the one-line explanation; a tap
+/** The calm badge: "Experiment · failed the ten-year test · paper only". Hover shows the one-line explanation; a tap
  *  (or Enter) opens it in a bottom sheet with the rule's limits (v4). Clicks never reach a clickable row underneath. */
 export function ExperimentBadge({ e, limits = false }: { e: Experiment; limits?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -20,12 +20,30 @@ export function ExperimentBadge({ e, limits = false }: { e: Experiment; limits?:
       <button type="button" className="exp-btn" title={v.tip} aria-haspopup="dialog" aria-expanded={open}
         onClick={() => setOpen(true)}><span className="tag exp-tag">{v.text}</span></button>
       {limits && (v.cap || v.stop) && <span className="muted exp-limits">{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}
-      <Sheet open={open} onClose={() => setOpen(false)} title={v.text}>
-        <p>{v.tip}</p>
-        {(v.cap || v.stop) && <p className="muted">{[v.cap && `It holds ${v.cap}`, v.stop && `it ${v.stop}`].filter(Boolean).join("; ")}.</p>}
-        <p className="muted" style={{ fontSize: 14 }}>There is no trade-by-trade control: Kaibot decides on its own within these limits.</p>
-      </Sheet>
+      <Sheet open={open} onClose={() => setOpen(false)} title={ruleName(e.strategy)}><ExperimentSheetBody e={e} /></Sheet>
     </span>
+  );
+}
+
+/** The one experiment sheet (Home, Engine, Positions, Activity, every badge): the rule's name is the sheet's title,
+ *  then one pill, the explanation, the cap and the stop line. Nothing is said twice (stakeholder, iPhone, 16 Nov). */
+export function ExperimentSheetBody({ e, md }: { e: Experiment; md?: ReturnType<typeof multiDayFrom> }) {
+  const v = experimentView(e);
+  const st = md?.rules.find((r) => r.rule === e.strategy) ?? null;
+  return (
+    <>
+      <span className="tag info exp-pill">{v.text}</span>
+      <p style={{ marginTop: 12 }}>{v.tip}</p>
+      {(v.cap || v.stop) && (
+        <div className="kv">
+          {v.cap && <><span>Most it may hold</span><span /><span className="v">{v.cap}</span></>}
+          {v.stop && <><span>Stop line</span><span /><span className="v">{v.stop}</span></>}
+        </div>
+      )}
+      {st?.retired && <p className="exp-ended" role="status">{retiredText(ruleName(e.strategy), parseRetired(st.note ?? "").fellPct, parseRetired(st.note ?? "").session)}</p>}
+      {!st?.retired && st?.note && <p className="exp-note" role="status" title={`engine: ${st.note}`}>{noDecisionText(st.note)}</p>}
+      <p className="muted" style={{ fontSize: 14 }}>There is no trade-by-trade control: Kaibot decides on its own within these limits.</p>
+    </>
   );
 }
 

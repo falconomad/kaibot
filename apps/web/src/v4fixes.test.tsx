@@ -25,7 +25,7 @@ describe("v4 PR 1 fixes", () => {
     const html = renderToStaticMarkup(<ExperimentBadge e={{ strategy: "trend_momentum", label: "Experiment: failed the ten-year test", evidence: "failed_gate_b",
       experiment: true, realMoney: false, level: null, capPct: null, retirePct: null }} />);
     expect(html).toContain('class="exp-btn"');
-    expect(text(html)).toBe("Experiment — failed the ten-year test · paper only");
+    expect(text(html)).toBe("Experiment · failed the ten-year test · paper only");
     expect(css).toMatch(/button\.exp-btn \{[^}]*min-height: 44px/);
     expect(css).toMatch(/\.exp-btn > \.tag \{[^}]*white-space: normal/);
   });
