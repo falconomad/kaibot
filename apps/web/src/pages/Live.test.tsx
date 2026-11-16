@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { Live } from "./Live";
+import { Live, StartBanner } from "./Live";
+import { renderToStaticMarkup } from "react-dom/server";
 import { boom, ctxFor, glitches, hasAlert, hasStatus, paperRun, render, replayRun, text, zeros } from "./testkit";
 
 vi.mock("../lib/api", () => import("./testkit-api"));
@@ -52,5 +53,31 @@ describe("Live (Home) page states", () => {
     expect(hasAlert(html)).toBe(true);
     expect(text(html)).toContain("Trades couldn't load.");
     expect(text(html)).toContain("timeout");
+  });
+});
+
+describe("Home: the new run's start state (no 'waits for the engine' while it is online)", () => {
+  const t = (el: Parameters<typeof renderToStaticMarkup>[0]) => text(renderToStaticMarkup(el));
+  it("applied with the engine online: accepted and scheduled for the next open, ET (CET)", () => {
+    const s = t(<StartBanner state={{ kind: "scheduled", online: true, nextOpen: "2026-11-17T09:30:00-05:00", marketOpen: false }} />);
+    expect(s).toContain("The engine has accepted it.");
+    expect(s).toContain("Scheduled: starts at the next open, Tue, Nov 17, 09:30 ET (15:30 CET).");
+    expect(s).not.toMatch(/waits for the engine|comes online/);
+  });
+  it("queued with the engine online: picked up shortly", () => {
+    const s = t(<StartBanner state={{ kind: "queued_online", amount: 5000, level: "balanced" }} />);
+    expect(s).toContain("The engine is online and picks it up within about 10 seconds.");
+    expect(s).not.toContain("waits for the engine");
+  });
+  it("queued with a stale heartbeat: waits for the engine", () =>
+    expect(t(<StartBanner state={{ kind: "queued_waiting", amount: 5000, level: "balanced" }} />)).toContain("It waits for the engine"));
+  it("on the page: a scheduled run with a fresh heartbeat", () => {
+    const r = paperRun({ status: "scheduled" });
+    const overview = { run: r, daily: [], pending_commands: [], ledger: null, today: null,
+      heartbeat: [{ process: "engine", ts: new Date().toISOString(), detail: { state: "market_closed", next_open: "2026-11-17T09:30:00-05:00" } }] };
+    const s = text(render(<Live />, { ctx: ctxFor(r, { overview }), seeds: [{ key: ["trades-all", r.id], data: { total: 0, rows: [] } }] }));
+    expect(s).toContain("The engine has accepted it. Scheduled: starts at the next open");
+    expect(s).not.toContain("The engine isn't running.");
+    expect(s).not.toMatch(/waits for the engine|comes online/);
   });
 });
