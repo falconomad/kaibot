@@ -50,18 +50,34 @@ main[data-nav="push"] > * { animation: kb-push 240ms var(--ease) both; }
 
 /* ---------- top bar + nav ---------- */
 header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
-  padding: 14px max(24px, env(safe-area-inset-left)); background: rgba(10, 11, 13, .86); backdrop-filter: blur(14px);
+  min-height: 72px; padding: 13px max(24px, env(safe-area-inset-left)); background: rgba(10, 11, 13, .86); backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--surface-2); }
 .brand { display: flex; align-items: center; min-height: 44px; color: var(--ink); }
 .brand:hover { color: var(--ink); }
-/* the logo (components/Logo.tsx): the symbol and the wordmark, the same wherever it shows */
-.logo { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); font-weight: 700; font-size: 18px; letter-spacing: -0.02em; }
-.logo-symbol { flex: none; display: block; }
+/* the logo (components/Logo.tsx): Design's wordmark, 26 px tall on phones and 28 px above; lifted a little so its
+   x-height, not its tall k and b, sits on the row's centre line (transform: no layout moves) */
+.logo { display: block; flex: none; height: 28px; overflow: visible; }
+.logo-word { transform: translateY(-8%); }
+/* its load motion: position and opacity only, once (Logo.tsx); the strokes slide out inside their own outlines */
+@keyframes kb-logo-draw { from { transform: translate(var(--fx), var(--fy)); } to { transform: none; } }
+@keyframes kb-logo-pop { from { transform: scale(0); } to { transform: none; } }
+@keyframes kb-logo-pulse { from { opacity: .55; transform: none; } to { opacity: 0; transform: scale(2.1); } }
+.logo-draw { animation: kb-logo-draw .2s var(--ease) both; }
+.logo-pop { transform-box: fill-box; transform-origin: center; animation: kb-logo-pop .18s cubic-bezier(.3, 1.4, .5, 1) both; }
+/* forwards, not both: the ring must stay unseen until its turn */
+.logo-pulse { transform-box: fill-box; transform-origin: center; opacity: 0; animation: kb-logo-pulse .3s var(--ease) forwards; }
 nav.topnav { display: flex; flex-wrap: wrap; gap: 2px; font-size: 15px; font-weight: 500; }
 nav.topnav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--slate); padding: 0 14px; border-radius: 999px; transition: color .2s var(--ease), background-color .2s var(--ease); }
 nav.topnav a:hover { color: var(--ink); }
 nav.topnav a.active { color: var(--ink); background: var(--surface-2); }
 .pill { font-size: 12px; font-weight: 700; letter-spacing: 0.08em; color: #0A0B0D; background: var(--warn); border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
+/* in the header (stakeholder, 16 Nov 2026: the header was too small) Paper and the engine chip are 36 px tall; the
+   engine chip keeps a 44 px tap area: the link is 44 px, its drawn shape (::before) 36 px */
+header.top .pill { display: inline-flex; align-items: center; min-height: 36px; padding: 0 13px; font-size: 13px; }
+header.top .engine-chip { position: relative; isolation: isolate; border-color: transparent; background: transparent; }
+header.top .engine-chip::before { content: ""; position: absolute; z-index: -1; inset: 4px 0; border: 1px solid var(--rule); border-radius: 999px;
+  background: var(--surface); transition: border-color .2s var(--ease); }
+header.top a.engine-chip:hover { border-color: transparent; } header.top a.engine-chip:hover::before { border-color: var(--rule-strong); }
 .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border: 1px solid var(--rule); border-radius: 999px;
   background: var(--surface); color: var(--slate); font-size: 13px; transition: border-color .2s var(--ease); }
 a.chip:hover { border-color: var(--rule-strong); color: var(--slate); }
@@ -179,7 +195,7 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
 @media (max-width: 760px) {
   /* v4: one-row top bar, 56 px: mark, name, Paper, engine state. The run picker and the meters move to More and Home. */
   header.top { flex-wrap: nowrap; min-height: var(--topbar); padding: 6px 16px; gap: 8px; }
-  header.top .brand .logo { gap: 8px; font-size: 17px; }
+  .logo { height: 26px; }
   header.top .engine-chip { max-width: 44vw; min-width: 0; }
   header.top .engine-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   nav.topnav, .hide-sm { display: none !important; }
