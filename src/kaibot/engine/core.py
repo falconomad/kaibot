@@ -837,10 +837,12 @@ class Engine:
             o = self.broker.order(oid)
             if o["status"] == "filled":
                 px, ts = float(o["filled_avg_price"]), o.get("filled_at")
+                fees = self._venue_fees(oid, ts) if x["run_id"] is not None else 0.0  # #238: the venue's fee
+                total = sum(q for _, q in x["keys"]) or 1.0
                 for (strategy, sym), q in x["keys"]:
-                    if x["run_id"] is not None:
+                    if x["run_id"] is not None:  # one order for every sleeve of the symbol: its fee by shares
                         self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
-                                            "side": "sell", "qty": q, "px": px, "fees": sell_fees(q, px),
+                                            "side": "sell", "qty": q, "px": px, "fees": fees * q / total,
                                             "coid": o.get("client_order_id"), "ts": ts, "reason": x["reason"]})
                 keys = [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]
                 self.store.event("multi_day_sold", {"order_id": oid, "keys": keys, "px": px,
@@ -1828,14 +1830,37 @@ class Engine:
                 continue
             if p.exit_order_id:  # we sent a market sell (time / daily stop / manual)
                 if o["status"] == "filled":
-                    self._on_exit_fill(p, float(o["filled_avg_price"]), p.exit_reason or "manual", o.get("filled_at"))
+                    self._on_exit_fill(p, float(o["filled_avg_price"]), p.exit_reason or "manual", o.get("filled_at"),
+                                       o.get("id"))
                 continue
             for leg in o.get("legs") or []:
                 if leg["status"] == "filled":
                     is_target = leg.get("type") == "limit"
                     reason = "target" if is_target else ("trail" if p.armed else "stop")
-                    self._on_exit_fill(p, float(leg["filled_avg_price"]), reason, leg.get("filled_at"))
+                    self._on_exit_fill(p, float(leg["filled_avg_price"]), reason, leg.get("filled_at"), leg.get("id"))
                     break
+
+    def _venue_fees(self, order_id: str | None, ts) -> float:
+        """#238: the fees the venue charged on this order's fills: the `fees` of its FILL activities from a minute
+        before the fill on. `SimBroker` reports them there; Alpaca's FILL activities carry none (its regulatory
+        fees are separate FEE activities at the end of the day), so nothing is booked on the fill. Never an
+        estimate: an estimate the venue does not charge piles up in the ledger's cash with every sale until the
+        reconciliation blocks entries. A failed read books 0 and says so (the reconciliation then shows any
+        difference)."""
+        if order_id is None:
+            return 0.0
+        after = None
+        if ts:
+            t = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts))
+            after = t - timedelta(minutes=1)
+        try:
+            rows = self.broker.activities(after, types=("FILL",))
+        except Exception as e:  # a fee unread must not stop booking the fill
+            log.warning("venue fee of order %s unread: %s", order_id, e)
+            self.store.event("venue_fee_unread", {"order_id": order_id, "error": f"{type(e).__name__}: {e}"[:160]},
+                             (self.run or {}).get("id"))
+            return 0.0
+        return float(sum(float(a.get("fees") or 0.0) for a in rows if str(a.get("order_id")) == str(order_id)))
 
     def _on_entry_fill(self, p: Pos, o: dict) -> None:
         p.fill = float(o["filled_avg_price"])
@@ -1887,11 +1912,14 @@ class Engine:
             },
         )
 
-    def _on_exit_fill(self, p: Pos, px: float, reason: str, ts) -> None:
-        fees = sell_fees(p.qty, px)
+    def _on_exit_fill(self, p: Pos, px: float, reason: str, ts, order_id: str | None = None) -> None:
+        # #238: the ledger and the venue P&L book the fee the venue charged on this order; the shadow P&L keeps the
+        # shadow cost model's own estimate (it prices what the trade would cost, not what it cost)
+        fees = self._venue_fees(order_id, ts)
+        fees_shadow = sell_fees(p.qty, px)
         shadow_exit = px if reason == "target" else sell_px(px, p.qty, p.sigma, self.market.bar_volume(p.symbol))
         pnl_v = (px - p.fill) * p.qty - fees
-        pnl_s = (shadow_exit - (p.shadow_entry or p.fill)) * p.qty - fees
+        pnl_s = (shadow_exit - (p.shadow_entry or p.fill)) * p.qty - fees_shadow
         self.store.insert(
             "fill",
             {
