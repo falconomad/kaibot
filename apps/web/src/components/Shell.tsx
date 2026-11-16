@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { api, supa, type Overview, type Run } from "../lib/api";
 import { LEVELS, curve } from "../lib/model";
-import { pct } from "../lib/fmt";
 import { riskStatus } from "../lib/derive";
 import { Skeleton } from "./Skeleton";
 import { ErrorState } from "./States";
@@ -17,6 +16,8 @@ export interface RunCtx {
   run: Run; runs: Run[]; overview: Overview | undefined;
   /** v4: the header's "Day vs stop" and "Run drawdown" meters, for pages that show them on phones (Home, More). */
   meters?: { dayPct: number; dd: number; replay: boolean };
+  /** v4: the risk strip's state; Home shows it as its own status row instead of the strip. */
+  risk?: { severity: "ok" | "warn" | "breach"; items: string[] };
   /** v4: pick another run (the picker lives in More on phones). */
   pickRun?: (id: number) => void;
   /** Set when the overview failed and has no data to show; pages show an error with a retry instead of a skeleton. */
@@ -182,20 +183,13 @@ export function Shell() {
             {list.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
           </select>
         )}
-        <Link to="/health" className="chip engine-chip" aria-label={`Engine: ${chip.text}`}>
+        <Link to="/health" className="chip engine-chip" aria-label={`Engine: ${chip.text}`} title={chip.sub}>
           <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
             style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
           <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
         </Link>
-        {lv && (
-          <div className="meters hide-sm">
-            <Meter label={run.kind === "replay" ? "Last day vs stop" : "Day vs stop"}
-              value={`${pct(dayPct)} / −${lv.stop.toFixed(2)}%`} frac={dayPct < 0 ? -dayPct / lv.stop : 0} />
-            <Meter label="Run drawdown" value={`${dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={dd / lv.runDd} />
-          </div>
-        )}
       </header>
-      {risk.severity !== "ok" && (
+      {risk.severity !== "ok" && pathname !== "/" && (
         <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
           <b>{risk.severity === "breach" ? "Limit or safety halt in force:" : "Heads up:"}</b> {risk.items.join(" · ")}
           {" "}<Link to="/health">Engine health</Link>
@@ -210,7 +204,7 @@ export function Shell() {
         <div className="body" key="ready">
           <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
             <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
-              retryOverview: () => { void overview.refetch(); }, meters: { dayPct, dd, replay: run.kind === "replay" }, pickRun } satisfies RunCtx} />
+              retryOverview: () => { void overview.refetch(); }, meters: { dayPct, dd, replay: run.kind === "replay" }, pickRun, risk } satisfies RunCtx} />
           </main>
         </div>
       )}

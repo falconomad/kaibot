@@ -25,17 +25,17 @@ describe("Live (Home) page states", () => {
   it("empty: a new paper run says no trades and no positions, in words", () => {
     const html = render(<Live />, { ctx: ctxFor(run), seeds: [noTrades] });
     const t = text(html);
-    expect(t).toContain("No trades yet.");
-    expect(t).toContain("No open positions.");
+    expect(t).toContain("Holding nothing");
+    expect(t).toContain("Nothing held right now.");
     expect(t).toContain("$10,000.00");
-    expect(t).toContain("The engine isn't running.");
+    expect(t).toContain("Engine offline: nothing new trades");
     expect(glitches(html)).toEqual([]);
   });
 
   it("empty: a replay with no trading day", () => {
     const r = replayRun();
     const html = render(<Live />, { ctx: ctxFor(r), seeds: [{ key: ["trades-all", r.id], data: { total: 0, rows: [] } }] });
-    expect(text(html)).toContain("Replay, not live trading.");
+    expect(text(html)).toContain("Replay on past data, not live trading");
     expect(text(html)).toContain("No trades yet.");
     expect(glitches(html)).toEqual([]);
   });
@@ -77,7 +77,7 @@ describe("Home: the new run's start state (no 'waits for the engine' while it is
       heartbeat: [{ process: "engine", ts: new Date().toISOString(), detail: { state: "market_closed", next_open: "2026-11-17T09:30:00-05:00" } }] };
     const s = text(render(<Live />, { ctx: ctxFor(r, { overview }), seeds: [{ key: ["trades-all", r.id], data: { total: 0, rows: [] } }] }));
     expect(s).toContain("The engine has accepted it. Scheduled: starts at the next open");
-    expect(s).not.toContain("The engine isn't running.");
+    expect(s).not.toContain("Engine offline");
     expect(s).not.toMatch(/waits for the engine|comes online/);
   });
 });

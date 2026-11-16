@@ -9,7 +9,8 @@ const W = 760, H = 240, M = { t: 12, r: 92, b: 24, l: 64 };
 /** Optional chapter boundaries (M5 S48): a dashed rule at the first session on or after each `session`. */
 export interface ChartMarker { session: string; label: string }
 
-export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: number; markers?: ChartMarker[] }) {
+/** `compact` (v4 Home): no legend or table button; on phones also no axis labels (CSS), the line only. */
+export function PotChart({ data, start, markers = [], compact = false }: { data: Curve[]; start: number; markers?: ChartMarker[]; compact?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const [table, setTable] = useState(false);
   const ref = useRef<SVGSVGElement>(null);
@@ -25,7 +26,7 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
     const line = (k: "pot" | "spy") => data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d[k]).toFixed(1)}`).join("");
     const pot = line("pot");
     const area = data.length ? `${pot}L${x(data.length - 1).toFixed(1)},${H - M.b}L${x(0).toFixed(1)},${H - M.b}Z` : "";
-    return { x, y, ticks, pot, spy: line("spy"), area };
+    return { x, y, ticks, pot, spy: line("spy"), area, step };
   }, [data, start]);
 
   if (!data.length) return <p className="muted">No sessions yet.</p>;
@@ -43,7 +44,7 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
   if (Math.abs(ly1 - ly2) < 14) { const mid = (ly1 + ly2) / 2; const s = ly1 < ly2 ? -1 : 1; ly1 = mid + s * 7; ly2 = mid - s * 7; }
 
   return (
-    <div>
+    <div className={compact ? "potchart compact" : "potchart"}>
       <div className="legend" style={{ marginBottom: 6 }}>
         <span><i className="sw" style={{ borderColor: "var(--s-pot)" }} />Pot, after costs</span>
         <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dashed" }} />SPY, same start</span>
@@ -58,13 +59,13 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
         </div>
       ) : (
         <div className="chart">
-          <svg ref={ref} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Pot ${money(last.pot)} versus SPY ${money(last.spy)} at the end${markers.length ? `; ${markers.length} chapter change${markers.length === 1 ? "" : "s"} marked` : ""}`}
+          <svg ref={ref} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio={compact ? "none" : undefined} role="img" aria-label={`Pot ${money(last.pot)} versus SPY ${money(last.spy)} at the end${markers.length ? `; ${markers.length} chapter change${markers.length === 1 ? "" : "s"} marked` : ""}`}
             onPointerMove={move} onPointerLeave={() => setHover(null)}>
             {g.ticks.map((t) => (
               <g key={t}>
                 <line x1={M.l} x2={W - M.r} y1={g.y(t)} y2={g.y(t)} stroke={t === start ? "var(--rule-strong)" : "var(--rule)"} strokeWidth={t === start ? 1 : 0.5}
                   strokeDasharray={t === start ? undefined : "2 3"} />
-                <text x={M.l - 8} y={g.y(t) + 4} textAnchor="end" fontSize="12" fill="var(--slate)" className="num">{short(t)}</text>
+                <text x={M.l - 8} y={g.y(t) + 4} textAnchor="end" fontSize="12" fill="var(--slate)" className="num axis">{tick(t, g.step)}</text>
               </g>
             ))}
             {markers.map((mk) => {
@@ -77,8 +78,8 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
                 </g>
               );
             })}
-            <text x={M.l} y={H - 6} fontSize="12" fill="var(--slate)">{day(data[0].session)}</text>
-            <text x={W - M.r} y={H - 6} fontSize="12" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
+            <text className="axis" x={M.l} y={H - 6} fontSize="12" fill="var(--slate)">{day(data[0].session)}</text>
+            <text className="axis" x={W - M.r} y={H - 6} fontSize="12" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
             <defs>
               <linearGradient id="kb-potfill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.28" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />
@@ -87,12 +88,12 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
             {/* Lines start flat on the baseline and rise into shape once, when the chart first appears. */}
             <g className="rise" style={{ transformOrigin: `0 ${H - M.b}px` }}>
               <path className="morph" d={g.area} fill="url(#kb-potfill)" />
-              <path className="morph" d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" />
-              <path className="morph" d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              <path className="morph" d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              <path className="morph" d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </g>
             <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="4.5" fill="var(--s-pot)" stroke="var(--surface)" strokeWidth="2" />
-            <text className="fade-late" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {short(last.pot)}</text>
-            <text className="fade-late" x={W - M.r + 10} y={ly2 + 4} fontSize="12" fill="var(--slate)">SPY {short(last.spy)}</text>
+            <text className="fade-late axis" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {whole(last.pot)}</text>
+            <text className="fade-late axis" x={W - M.r + 10} y={ly2 + 4} fontSize="12" fill="var(--slate)">SPY {whole(last.spy)}</text>
             {h && hover !== null && (
               <g>
                 <line x1={g.x(hover)} x2={g.x(hover)} y1={M.t} y2={H - M.b} stroke="var(--stale)" strokeWidth="1" strokeDasharray="3 3" />
@@ -118,4 +119,7 @@ function niceStep(raw: number) {
   const p = 10 ** Math.floor(Math.log10(raw)); const f = raw / p;
   return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p;
 }
-function short(v: number) { return v >= 10000 ? `$${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)}k` : `$${v.toFixed(0)}`; }
+/** Axis labels that never repeat: thousands only when the step is a whole thousand (audit #13). */
+function tick(v: number, step: number) { return step >= 1000 ? `$${(v / 1000).toFixed(0)}k` : whole(v); }
+/** The end labels use the same figure as the hero, to the dollar. */
+function whole(v: number) { return `$${Math.round(v).toLocaleString("en-US")}`; }
