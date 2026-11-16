@@ -462,3 +462,18 @@ def test_the_store_loader_refuses_a_store_that_fails_the_integrity_check(tmp_pat
     assert (day - old).days > ld.StoreLoader.LOOKBACK_DAYS
     view = ld.StoreLoader(tmp_path / "old", uni, mode="today")(day, late)  # outside the look-back: decides
     assert view.dates[-1].astype(object) == day
+
+
+def test_the_store_loader_refuses_a_store_with_a_bars_file_it_cannot_read(tmp_path, data):
+    """QA-Ops review of #234: a truncated bars file of a stock the rule may not even rank is a failed check
+    (StoreFailedCheck, so the engine's fail-closed handling applies), never another exception out of the loader."""
+    uni, _ = _stamped_store(tmp_path)
+    extra = tmp_path / "daily" / "bars" / "symbol=ZZZZ.parquet"  # not in the universe file
+    extra.write_bytes(b"PAR1 not a parquet file")
+    day = data.day(I0 + 7)
+    late = datetime.combine(day, time(20, 16), NY).astimezone(UTC)
+    loader = ld.StoreLoader(tmp_path, uni, mode="today")
+    with pytest.raises(ld.StoreFailedCheck, match="bars unreadable: .*symbol=ZZZZ.parquet"):
+        loader(day, late)
+    extra.unlink()
+    assert loader(day, late).dates[-1].astype(object) == day

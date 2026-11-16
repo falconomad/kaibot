@@ -574,3 +574,62 @@ def test_a_breach_from_an_earlier_session_confirms_nothing(tmp_path, monkeypatch
     assert not eng.daily.account.book_ended()  # DAY2's first check
     a.ticks(a.open2, 1, 2)
     assert eng.daily.account.book_ended()  # confirmed a minute later
+
+
+def test_a_failed_check_keeps_the_positions_and_sells_nothing(tmp_path, monkeypatch):
+    """QA-Ops review of #234. The book holds 40 B and the store fails the integrity check on the evening: no
+    decision, so at the next session nothing is sold and nothing is bought. "No decision" never means "sell"."""
+    why = f"1 bad bar in 1 key: ZZZ {DAY1} ohlc_order"  # a stock the rule neither holds nor ranks
+    a = DailyAccount(tmp_path, monkeypatch, failed_check=why)
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))
+    a.broker.pos["B"] = {"qty": 40, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": 40, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    assert not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 390)
+    assert a.cls_orders() == []
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B"]  # no sale, no buy, at any time in force
+    assert float(a.broker.pos["B"]["qty"]) == 40 and a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == 40
+    sends = [b for *_, b in a.eng.journal.entries(kinds=("md_send",))]
+    assert [(b["session"], b["targets"], b.get("note")) for b in sends] == [(DAY1, [], "no decision"),
+                                                                             (DAY2, [], "no decision")]
+    assert a.eng.kill is None and a.eng.account_clean
+    kinds = [e["type"] for e in a.store.tables["event"]]
+    assert "multi_day_error" not in kinds and kinds.count("multi_day_waiting") == 1  # said once, not every tick
+
+
+def test_a_check_that_fails_after_the_decision_sends_nothing_new(tmp_path, monkeypatch):
+    """QA-Ops review of #234. The decision was taken on a good store; the engine restarts and, at the send step,
+    the store fails the check: the decided buy is not sent (the view cannot be read), and nothing is sold."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    assert len(list(a.eng.journal.entries(kinds=("md_decision",)))) == 1
+    a.failed_check = f"1 bad bar in 1 key: ZZZ {DAY1} bad_price"
+    a.restart()
+    a.ticks(a.open2, 0, 390)
+    assert a.cls_orders() == [] and not [o for o in a.broker.orders.values() if o["symbol"] == "B"]
+    kinds = [e["type"] for e in a.store.tables["event"]]
+    assert "multi_day_error" not in kinds and "multi_day_waiting" in kinds
+
+
+def test_a_failed_check_leaves_the_books_own_protection_working(tmp_path, monkeypatch):
+    """QA-Ops review of #234. While the store fails the check the held book is still protected: B opens 30% lower
+    and the book's run end (5% here) sells it at market, exactly as with a good store."""
+    a = DailyAccount(tmp_path, monkeypatch, gap_b=0.7, book_end=5.0,
+                     failed_check=f"1 bad bar in 1 key: ZZZ {DAY1} ohlc_order")
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))
+    a.broker.pos["B"] = {"qty": 40, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": 40, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    assert float(a.broker.pos["B"]["qty"]) == 40 and not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 4)
+    assert len([b for *_, b in a.eng.journal.entries(kinds=("md_book_end",))]) == 1
+    assert any(h["kind"] == "book_drawdown" for h in a.store.tables["halt"])
+    assert "B" not in a.broker.pos and a.eng.daily.account.book_ended() and a.eng.kill is None

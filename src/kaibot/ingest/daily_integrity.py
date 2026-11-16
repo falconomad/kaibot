@@ -248,8 +248,9 @@ def failure_reason(errors: pd.DataFrame, show: int = 3) -> str | None:
 class StoreGate:
     """The live daily path's integrity gate on the store under `root` (<data>/daily): `gate(start, end)` is None
     when no bar dated start..end fails a hard check, else `failure_reason`. The verdict is kept until a bars file
-    changes (name, size, mtime), so an engine waiting on a bad store does not re-read it every tick. A missing
-    store is None here: the loader reports that itself."""
+    changes (name, size, mtime), so an engine waiting on a bad store does not re-read it every tick. A bars file
+    that cannot be read is a failure too ("bars unreadable: ..."), never an exception. A missing store is None
+    here: the loader reports that itself."""
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
@@ -266,7 +267,11 @@ class StoreGate:
     def __call__(self, start, end) -> str | None:
         fp = (str(start), str(end), self._fingerprint())
         if fp != self._last:
-            self._why = failure_reason(window_errors(DailyStore(self.root), start, end)) if fp[2] else None
+            try:
+                self._why = failure_reason(window_errors(DailyStore(self.root), start, end)) if fp[2] else None
+            except Exception as e:  # a bars file that cannot be read fails the check too (QA-Ops review of #234)
+                what = str(e).replace(str(self.root / "bars") + os.sep, "")
+                self._why = f"bars unreadable: {type(e).__name__}: {what}"[:200]
             self._last = fp
         return self._why
 

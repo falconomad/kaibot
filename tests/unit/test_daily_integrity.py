@@ -260,3 +260,23 @@ def test_fetch_daily_check_exits_3_on_hard_errors(tmp_path, alpaca, capsys):
     assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 3
     out = capsys.readouterr().out
     assert "Bar integrity: 2 keys: 1 clean, 0 warn, 1 error." in out and "bad_price (error)" in out
+
+
+def test_the_store_gate_fails_closed_on_a_bars_file_it_cannot_read(tmp_path, monkeypatch):
+    """QA-Ops review of #234: a truncated or empty bars file is a failed check with a plain reason (the live daily
+    path then takes no decision), not an exception at every tick; the verdict is cached like any other."""
+    root = tmp_path / "daily"
+    _write(root, "AAA", frame())
+    _write(root, "BBB", frame())
+    p = root / "bars" / "symbol=BBB.parquet"
+    p.write_bytes(p.read_bytes()[:200])
+    gate = di.StoreGate(root)
+    calls = []
+    real = di.window_errors
+    monkeypatch.setattr(di, "window_errors", lambda *a, **k: calls.append(1) or real(*a, **k))
+    why = gate(DAYS[0], DAYS[-1])
+    assert why is not None and why.startswith("bars unreadable: ") and "symbol=BBB.parquet" in why
+    assert str(tmp_path) not in why and len(why) <= 200
+    assert gate(DAYS[0], DAYS[-1]) == why and len(calls) == 1
+    _write(root, "BBB", frame())  # repaired: the next call reads again and passes
+    assert gate(DAYS[0], DAYS[-1]) is None and len(calls) == 2
