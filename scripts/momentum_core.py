@@ -283,11 +283,13 @@ def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list
     rep = store.adjustment_report()
     bad = rep[rep.get("split_basis_days", pd.Series(dtype=float)).fillna(0) > 0]["key"].astype(str).tolist() \
         if len(rep) else []
-    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors)
+    # #266 (amendment 6/7 of the momentum pre-registrations): spin-offs as value kept, as the live view reads them
+    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors,
+                             spin_offs=mc.spin_off_records(store.actions()))
     print(f"panel: {len(m.raw.dates)} sessions x {len(m.raw.symbols)} symbols, {time.time() - t0:.0f}s", flush=True)
     print(f"SPY total return: {m.notes['spy_total_return']['source']}", flush=True)
-    info = {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs and "
-                    "share counts raw; dividends credited",
+    info = {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends, spin-offs as value "
+                    "kept; orders, costs and share counts raw; dividends and spin-off value credited",
             "stocks": len(names), "companies_without_bars": len(missing),
             "companies_without_bars_sample": missing[:25], "excluded_split_basis": bad, **m.notes}
     extra = "|".join([a.start, a.end, mode, *symbols])

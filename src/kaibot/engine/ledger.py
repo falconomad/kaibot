@@ -10,6 +10,10 @@ Entries (kind, body), every body carries `run_id`:
     fill      {strategy, symbol, side, qty, px, fees, pnl_venue?, pnl_shadow?}
     dividend  {symbol, ex_date, per_share | amount, ref}        cash to every sleeve holding the symbol
     split     {symbol, ex_date, ratio, price?, ref}             new shares per old share; a fraction is paid in cash
+    spinoff   {symbol, new_symbol, ex_date, qty, cost, ref}     #266: `qty` new shares credited by the venue, `cost`
+              the basis it moved from the parent to them (Alpaca's cost basis), both split over the parent's holders
+              by shares; cash and the parent's shares do not change
+    symbol_change {symbol, new_symbol, ex_date, ref}            #266: the sleeves move to the new symbol
     mark      {session, prices {(strategy, symbol) | "strategy|symbol": px}, pnl_venue, pnl_shadow, ts?}
               the session's close: every open sleeve is marked, the day is closed
 
@@ -31,7 +35,7 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 
-LEDGER_KINDS = ("run", "position", "fill", "dividend", "split", "mark")
+LEDGER_KINDS = ("run", "position", "fill", "dividend", "split", "spinoff", "symbol_change", "mark")
 
 
 @dataclass
@@ -43,6 +47,7 @@ class Sleeve:
     opened: str | None = None  # session of the first buy (or of the import)
     mark: float | None = None  # last close mark; None until the sleeve has been held over a close
     dividends: float = 0.0
+    origin: str | None = None  # #266: "spin_off:<parent>" for shares a spin-off credited (sold at the next close)
 
     @property
     def avg_cost(self) -> float:
@@ -228,6 +233,41 @@ class Ledger:
                 s.qty = exact
             if s.mark is not None:
                 s.mark /= ratio
+
+    def _spinoff(self, b: Book, e: dict) -> None:
+        holders = b.holders(e["symbol"])
+        total = sum(s.qty for s in holders)
+        qty, cost = float(e["qty"]), float(e["cost"])
+        if not holders or total <= 0 or not qty > 0 or self._seen(b, e):
+            return
+        for s in holders:
+            w = s.qty / total
+            moved = min(cost * w, s.cost)
+            f = moved / s.cost if s.cost > 0 else 0.0  # the share of the parent's value the venue's basis moved
+            s.cost -= moved
+            child = self._sleeve(b, s.strategy, str(e["new_symbol"]), e.get("ex_date"))
+            if s.mark is not None:  # value kept: the last close's value is split in the same proportion
+                value = s.mark * s.qty * f
+                child.mark = ((child.mark or 0.0) * child.qty + value) / (child.qty + qty * w)
+                s.mark *= 1.0 - f
+            child.qty += qty * w
+            child.cost += moved
+            child.origin = f"spin_off:{e['symbol']}"
+
+    def _symbol_change(self, b: Book, e: dict) -> None:
+        old, new = str(e["symbol"]), str(e["new_symbol"])
+        if not b.holders(old) or self._seen(b, e):
+            return
+        for (strategy, sym) in [k for k in b.sleeves if k[1] == old]:
+            s = b.sleeves.pop((strategy, sym))
+            s.symbol = new
+            have = b.sleeves.get((strategy, new))
+            if have is None:
+                b.sleeves[(strategy, new)] = s
+            else:
+                have.qty += s.qty
+                have.cost += s.cost
+                have.dividends += s.dividends
 
     def _mark(self, b: Book, e: dict) -> None:
         prices = {_key(k): float(v) for k, v in (e.get("prices") or {}).items() if v is not None}

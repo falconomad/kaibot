@@ -33,6 +33,7 @@ from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
+from kaibot.engine.corp_guard import RecentActions
 from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
 from kaibot.engine.journal import BootstrapError, IdentityError, Journal, JournalStore, Replicator, journal_path
@@ -97,7 +98,10 @@ def build(settings: Settings) -> Engine:
                   calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
                   pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
                   ex_dividends=ExDateDividends(data),  # S78: dividends accrued at the ex-date (#118)
-                  daily=daily_path(data, review=make_preopen(gw, locked)))  # #131: review None unless switched on
+                  daily=daily_path(data, review=make_preopen(gw, locked)),  # #131: review None unless switched on
+                  # #266: spin-offs and symbol changes of held multi-day positions, adopted from Alpaca's record
+                  # (only used with the daily path: KAIBOT_MULTIDAY=on)
+                  recent_actions=RecentActions(data))
 
 
 def daily_path(data=None, review=None):

@@ -279,6 +279,35 @@ class SimBroker(BrokerBase):
         self._net()
         return dict(self.pos)
 
+    # ================= corporate actions a test applies (#266; Alpaca applies them before the open)
+    def spin_off(self, parent: str, new: str, *, ratio: float, basis_share: float, day: str,
+                 price: float | None = None) -> None:
+        """`ratio` new shares per parent share, whole shares credited (the fraction paid in cash at `price`);
+        `basis_share` of the parent's cost basis moves to the new shares. An SSO activity names the new symbol."""
+        p = self.pos.get(parent)
+        if p is None:
+            return
+        qty, avg = float(p["qty"]), float(p["avg_entry_price"])
+        exact = qty * ratio
+        whole = math.floor(exact + 1e-9)
+        moved = qty * avg * basis_share
+        p["avg_entry_price"] = avg * (1.0 - basis_share)
+        p["cost_basis"] = str(qty * avg * (1.0 - basis_share))  # Alpaca's field, as a spin-off sets it
+        if whole >= 1:
+            self.pos[new] = {"qty": _num(whole), "avg_entry_price": moved / whole, "cost_basis": str(moved)}
+        if price is not None and exact - whole > 1e-9 and self.cash is not None:
+            self.cash += (exact - whole) * price
+        self.non_trade.append({"activity_type": "SSO", "id": f"{day}::sso{len(self.non_trade) + 1}", "date": day,
+                               "symbol": new, "qty": str(_num(whole))})
+
+    def symbol_change(self, old: str, new: str, *, day: str) -> None:
+        """Alpaca updates the asset's symbol: the position is renamed (an SC activity names the new symbol)."""
+        if old not in self.pos:
+            return
+        self.pos[new] = self.pos.pop(old)
+        self.non_trade.append({"activity_type": "SC", "id": f"{day}::sc{len(self.non_trade) + 1}", "date": day,
+                               "symbol": new, "qty": self.pos[new]["qty"]})
+
     def asset(self, symbol: str) -> dict | None:
         """S68: the simulator has no listing data, so every custom ticker is unknown and refused (fail closed)."""
         return None

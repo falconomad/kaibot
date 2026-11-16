@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import subprocess
 import time
 import uuid
@@ -318,6 +319,7 @@ class Engine:
         corporate_actions=None,
         ex_dividends=None,
         daily=None,
+        recent_actions=None,
     ):
         self.broker, self.market, self.store = broker, market, store
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
@@ -351,6 +353,9 @@ class Engine:
         # S78 (#118): live, dividends are accrued at the ex-date (engine/dividends.ExDateDividends: (day, symbols)
         # -> ex-dividends) and Alpaca's later payment is matched to the accrual; None: booked when paid
         self.ex_dividends = ex_dividends
+        # #266: (day, symbols) -> recent spin-offs and symbol changes (engine/corp_guard.RecentActions), the sourced
+        # record by which the multi-day path adopts what Alpaca did to a held position; None: nothing adopted
+        self.recent_actions = recent_actions
         # S78: the ledger against the broker (engine/reconcile.py); accepted offsets fold from the journal
         self.recon = Reconciler(lambda: self._recon_inputs(), self.journal)
         self._finalize_checked: date | None = None
@@ -816,7 +821,37 @@ class Engine:
             if k not in pending:
                 by_sym.setdefault(k[1], []).append((k, sl.qty))
         rid = self._rid() or (self.day.run_id if self.day else None)
+        have = None
+        if by_sym:  # #266: never sell more than the venue holds (that would be a short); no read without sleeves
+            try:
+                have = {s: float(p.get("qty") or 0) for s, p in self.broker.positions().items()}
+            except Exception:
+                have = None
         for sym, keys in by_sym.items():
+            if have is not None and have.get(sym, 0.0) <= 0:
+                failed[sym] = f"{sym} is not held at the broker (the ledger holds it): not sold, check the account"
+                continue
+            if have is not None and self.pos.on(sym):
+                left = have[sym] - sum(float(p.qty) for p in self.pos.on(sym))
+                capped = []
+                for k, q in keys:
+                    q = max(0.0, min(float(q), left))
+                    left -= q
+                    if q > 0:
+                        capped.append((k, q))
+                keys = capped
+                if not keys:
+                    failed[sym] = f"{sym}: the broker holds no multi-day shares to sell"
+                    continue
+            elif have is not None:
+                held = sum(q for _, q in keys)
+                if held > have[sym] + 1e-9:  # close_position sells what the venue holds: book only that
+                    left, capped = have[sym], []
+                    for k, q in keys:
+                        q = max(0.0, min(float(q), left))
+                        left -= q
+                        capped.append((k, q))
+                    keys = [(k, q) for k, q in capped if q > 0]
             if self.monotonic() - t0 > FLATTEN_BUDGET_S - CLOSE_MAX_S:
                 failed.setdefault(sym, f"not tried: flatten time budget ({FLATTEN_BUDGET_S:g} s) used")
                 continue
@@ -1432,6 +1467,73 @@ class Engine:
             return
         for a in acts:
             self._book_action(b, a)
+        if self.corporate_actions is None and self.daily is not None and self.recent_actions is not None:
+            self._adopt_actions(b, today)
+
+    def _adopt_actions(self, b, today: date) -> None:
+        """#266: what Alpaca did before the open to a held multi-day position, adopted from the venue's positions and
+        a sourced record (Alpaca's corporate actions of the last days), never guessed:
+        - a spin-off: the new symbol is at the broker, not in the ledger, and the record names a held parent. Its
+          shares (checked against the record's ratio when it has one: whole shares, +-1) are booked to the parent's
+          holders at Alpaca's cost basis, which moves from the parent (`spinoff`); `origin` makes the daily path
+          sell them at the next closing auction;
+        - a symbol change: the old symbol is gone at the broker, the new one holds exactly the ledger's shares.
+        Anything else is left as it is (the account guard and the reconciliation keep entries blocked) and said."""
+        try:
+            bpos = self.broker.positions()
+        except Exception:
+            log.exception("corporate actions: positions unreadable")
+            return
+        mine = b.qty_by_symbol()
+        intraday = {p.symbol for p in self.pos.values()}
+        foreign = {s: p for s, p in bpos.items() if s not in mine and s not in intraday}
+        gone = {s for s, q in mine.items() if q > 0 and s not in bpos}
+        if not foreign and not gone:
+            return
+        try:
+            links = self.recent_actions(today, sorted(mine))
+        except Exception as e:
+            log.exception("corporate actions: Alpaca's record unreadable")
+            self.store.event("corporate_actions_error", {"day": str(today), "error": str(e)[:200],
+                                                         "action": "nothing adopted; entries stay blocked"},
+                             self._rid())
+            return
+        for x in links:
+            p = foreign.get(x.new_symbol)
+            why = None
+            if p is None:
+                continue
+            q = float(p.get("qty") or 0)
+            if x.kind == "spin_off" and mine.get(x.symbol, 0) > 0:
+                if x.ratio is not None and abs(q - math.floor(mine[x.symbol] * x.ratio + 1e-9)) > 1:
+                    why = f"the venue credited {q:g} shares, the record's ratio gives {mine[x.symbol] * x.ratio:g}"
+                else:
+                    basis = p.get("cost_basis")
+                    cost = float(basis) if basis not in (None, "") else q * float(p.get("avg_entry_price") or 0)
+                    self._book("spinoff", {"run_id": b.run_id, "symbol": x.symbol, "new_symbol": x.new_symbol,
+                                           "ex_date": x.on, "qty": q, "cost": round(cost, 6), "ref": x.ref})
+                    self.store.event("spin_off_adopted", {"parent": x.symbol, "symbol": x.new_symbol, "qty": q,
+                                                          "cost_basis": round(cost, 2), "ex_date": x.on,
+                                                          "ref": x.ref, "action": "sold at the next closing auction"},
+                                     self._rid())
+                    foreign.pop(x.new_symbol)
+                    continue
+            elif x.kind == "symbol_change" and x.symbol in gone:
+                if abs(q - mine[x.symbol]) > 1e-9:
+                    why = f"the venue holds {q:g} shares of {x.new_symbol}, the ledger {mine[x.symbol]:g} of {x.symbol}"
+                else:
+                    self._book("symbol_change", {"run_id": b.run_id, "symbol": x.symbol, "new_symbol": x.new_symbol,
+                                                 "ex_date": x.on, "ref": x.ref})
+                    self.store.event("symbol_change_adopted", {"symbol": x.symbol, "new_symbol": x.new_symbol,
+                                                               "qty": q, "ex_date": x.on, "ref": x.ref}, self._rid())
+                    foreign.pop(x.new_symbol)
+                    gone.discard(x.symbol)
+                    continue
+            if why:
+                self.store.event("corporate_action_not_adopted", {"kind": x.kind, "symbol": x.symbol,
+                                                                  "new_symbol": x.new_symbol, "why": why,
+                                                                  "action": "entries stay blocked: check the "
+                                                                            "paper account"}, self._rid())
 
     def _accrue_dividends(self, b, today: date) -> None:
         """S78 (#118): the dividends going ex today, booked to the sleeves holding the stock at this open (they held
