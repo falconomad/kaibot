@@ -263,3 +263,15 @@ def test_the_rpcs_are_owner_only_and_closed_to_anon(pg):
               f"select kaibot.md_decision_at({R}, 'trend_momentum', '{DAYS[2]}')"):
         with pytest.raises(RuntimeError, match="permission denied"):
             pg.sql(q, role="anon")
+
+
+def test_the_unchecked_helper_and_kb_book_are_closed_to_callers(pg):
+    """QA-Ops (#247): `kaibot.md_decision_at` has no owner check of its own, so no caller role may run it directly
+    (only the owner-checked RPCs, as security definer, do); `kb_book` stays closed to anon after its replacement."""
+    q = f"select kaibot.md_decision_at({R}, 'trend_momentum', '{DAYS[2]}')"
+    for role in ("authenticated", "anon"):
+        with pytest.raises(RuntimeError, match="permission denied"):
+            pg.sql(q, role=role)
+    with pytest.raises(RuntimeError, match="permission denied"):
+        pg.sql(f"select public.kb_book({R})", role="anon")
+    assert pg.json(f"select public.kb_book({R})", role="authenticated")["run_id"] == R  # the owner still reads it
