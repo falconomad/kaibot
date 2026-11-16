@@ -886,6 +886,12 @@ class LiveDaily:
 
         held = self.account.held(r.name)
         rec = self._review_record(r.name, session)
+        if rec is None and self._window_left(self.now()) <= REVIEW_WAIT_UNTIL_S:
+            # QA-Ops key on #248: no review yet and too close to the window's end to wait for one (an engine started
+            # in the last minutes, whose next tick may be past the window): no call is started, the review is a
+            # timeout (no buys) and the sales go out on this tick
+            self._review_cut(r.name, session, rid)
+            rec = self._review_record(r.name, session)
         if rec is None:
             if not self.review.pending(r.name, session):
                 dec = self._decision_for(r.name, session)

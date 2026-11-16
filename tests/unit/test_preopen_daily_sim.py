@@ -189,3 +189,86 @@ def test_off_by_default_nothing_is_built():
     assert make_preopen(offline_gateway(), None, env={"KAIBOT_PREOPEN_REVIEW": "on"}) is None
     assert not preopen.enabled({})
     assert isinstance(make_preopen(offline_gateway(), None, env=ON_ENV), PreopenDesk)
+
+
+# ---------------------------------------------------------------- QA-Ops second key (#248): sales never wait
+
+
+class _Hang:
+    """A reviewer that does not answer (a hung model call); `gate.set()` lets the worker end."""
+
+    def __init__(self):
+        import threading
+
+        self.gate, self.calls = threading.Event(), 0
+
+    def __call__(self, session, cands):
+        self.calls += 1
+        self.gate.wait(30)
+
+
+class LateHarness(ReviewHarness):
+    """Sessions before `switch` as the engine runs them with an allowing review. From `switch` on, the engine is
+    (re)started at 15:44 ET, in the last minute before the send window closes, and the review never answers."""
+
+    def __init__(self, *a, switch: int, hang, **kw):
+        self.switch, self.hang = switch, hang
+        super().__init__(*a, **kw)
+
+    def run(self) -> None:
+        d = self.d
+        self.live.after_close(d.day(I0 - 1))
+        for i in range(I0, self.switch + 1):
+            day = d.day(i)
+            self.account.recon.check("session_start")
+            if i < self.switch:
+                self.clock.set(_at(day, time(8, 45)))
+                self.live.preopen()
+                ticks = [time(9, m) for m in (31, 32, 33, 36, 40, 45, 50, 59)]
+            else:
+                self.live.review = PreopenDesk(self.hang, offline_gateway(), env=ON_ENV, needs_key=False,
+                                               clock=lambda: self.clock().timestamp())
+                ticks = [time(15, 44, 7), time(15, 45, 7)]  # one tick a minute: the last one inside the window
+            for t in ticks:
+                self.clock.set(_at(day, t))
+                self.live.sync()
+                self.live.send(day)
+            self.broker.advance(_at(day, time(9, 30)))
+            self.clock.set(_at(day, time(15, 59)))
+            self.broker.advance(_at(day, time(15, 59)))
+            self.clock.set(_at(day, time(16, 30)))
+            self.live.sync()
+            self.live.sync(force=True)
+            self.account.ledger.apply("mark", self.mark(i))
+            self.journal.append("mark", self.mark(i))
+            self.live.after_close(day)
+
+
+def test_a_review_that_cannot_finish_before_the_cutoff_never_holds_back_the_sales(runs, data, tmp_path):
+    """Room ON, the review hung, the engine's only tick left in the send window: no review is started
+    (no model call), it is journalled as a timeout, the session's sales go out exactly as the rules decided on that
+    tick, and no buy does."""
+    ref = runs["ref"]
+    sold = {}
+    for day, sym, side, qty, _ in venue_orders(ref.broker):
+        if side == "sell":
+            sold.setdefault(day, []).append((sym, qty))
+    idx = next(i for i in range(I0 + 5, I1) if str(data.day(i)) in sold
+               and any(o[0] == str(data.day(i)) and o[2] == "buy" for o in venue_orders(ref.broker)))
+    day = str(data.day(idx))
+    hang = _Hang()
+    lim = momentum_limits(S, POL, 100.0)
+    h = LateHarness(data, S, ld.live_builder(S, lim), tmp_path, review=desk(DeterministicReviewer()), switch=idx,
+                    hang=hang)
+    try:
+        h.run()
+    finally:
+        hang.gate.set()
+    got = [(o[1], o[3]) for o in venue_orders(h.broker) if o[0] == day and o[2] == "sell"]
+    assert sorted(got) == sorted(sold[day])  # every sale of the session, as the rules decided
+    assert not [o for o in venue_orders(h.broker) if o[0] == day and o[2] == "buy"]
+    rec = [b for _, b in entries(h, "md_review") if b["session"] == day]
+    assert len(rec) == 1 and rec[0]["status"] == "timeout"
+    send = [b for _, b in entries(h, "md_send") if b["session"] == day]
+    assert send and send[0]["review"]["status"] == "timeout"
+    assert hang.calls == 0  # nothing started that could not be waited for
