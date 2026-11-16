@@ -189,6 +189,34 @@ def test_a_later_bar_cannot_reach_the_arrays_of_minute_m(frame, tmp_path, m):
 # ---------------------------------------------------------------- 3. never in the live engine
 
 
+@pytest.mark.parametrize(("m", "ahead"), [(57, 1), (57, 30), (97, 8), (250, 139)])
+def test_a_check_ahead_of_the_last_read_shows_no_later_bar(frame, tmp_path, m, ahead):
+    """QA-Ops (#237): `symbol_days` asked for a minute later than the last `update`: the minutes after the last bar
+    read carry its close, as in LiveMarket, whatever the stored bars after it are (the only line that hides the
+    stored future closes in that case; no other test pins it)."""
+    day = "2017-04-12"
+    open_utc, _ = _session(frame, day)
+    later = frame.copy()
+    after = later["ts"] >= pd.Timestamp(open_utc + timedelta(minutes=m + 1))
+    for k in ("o", "h", "l", "c", "vw"):
+        later.loc[after, k] *= 1.5
+    later.loc[after, "v"] *= 10
+    got = []
+    for f, sub in ((frame, "a"), (later, "b")):
+        clock, live, fast = _markets(f, tmp_path / sub, open_utc - timedelta(minutes=30))
+        for mk in (live, fast):
+            mk.prepare_day(datetime.fromisoformat(day).date(), open_utc)
+        clock.set(open_utc + timedelta(minutes=m + 1, seconds=7))
+        for mk in (live, fast):
+            mk.update(clock())
+        clock.set(open_utc + timedelta(minutes=m + ahead + 1, seconds=7))  # time moves on, no read
+        _same_days(live.symbol_days("SPY", m + ahead), fast.symbol_days("SPY", m + ahead))
+        got.append(fast.symbol_days("SPY", m + ahead))
+    _same_days(*got)
+    assert (got[0].c[-1, m + 1:m + ahead + 1] == got[0].c[-1, m]).all()
+    assert np.isnan(got[0].c[-1, m + ahead + 1:]).all()
+
+
 def test_the_live_engine_builds_live_market_not_the_simulation_read():
     src = (ROOT / "src" / "kaibot" / "engine" / "__main__.py").read_text()
     assert "LiveMarket(" in src and "SimMarket" not in src and "engine.runner" not in src
