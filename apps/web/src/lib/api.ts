@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { coerce } from "./coerce";
+import { parseBook, parseSeries } from "./book";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
 import type { TickerCheck, TickerLists } from "./tickers";
 export { coerce };
@@ -206,6 +207,9 @@ export const api = {
   saveTickerList: (name: string, symbols: string[]) =>
     rpc<{ ok: boolean; name: string; symbols: string[] }>("kb_save_ticker_list", { p_name: name, p_symbols: symbols }),
   deleteTickerList: (name: string) => rpc<{ ok: boolean }>("kb_delete_ticker_list", { p_name: name }),
+  // #130: the multi-day book (0018, contract docs/ops/ledger.md). Parsed defensively in lib/book.ts.
+  book: async (run: number) => parseBook(await rpc<unknown>("kb_book", { p_run: run, p_session: null }), run),
+  equitySeries: async (run: number) => parseSeries(await rpc<unknown>("kb_equity_series", { p_run: run, p_from: null, p_to: null })),
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

@@ -17,6 +17,7 @@ import { STALE } from "./lib/poll";
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
 const Health = lazy(() => load["/health"]().then((m) => ({ default: m.Health })));
 const Tape = lazy(() => load["/tape"]().then((m) => ({ default: m.Tape })));
+const Holdings = lazy(() => load["/holdings"]().then((m) => ({ default: m.Holdings })));
 const Report = lazy(() => load["/report"]().then((m) => ({ default: m.Report })));
 const Onboarding = lazy(() => load["/start"]().then((m) => ({ default: m.Onboarding })));
 const TradeDetailPage = lazy(() => load["/trades/:id"]().then((m) => ({ default: m.TradeDetailPage })));
@@ -63,6 +64,7 @@ function Gate() {
         <Route path="trades" element={page(<Trades />)} />
         <Route path="trades/:id" element={page(<TradeDetailPage />, "detail")} />
         <Route path="tape" element={page(<Tape />)} />
+        <Route path="holdings" element={page(<Holdings />)} />
         <Route path="report" element={page(<Report />)} />
         <Route path="health" element={page(<Health />)} />
         <Route path="gate" element={page(<GoNoGo />)} />

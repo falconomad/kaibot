@@ -31,6 +31,7 @@ export function Logo({ size = 26 }: { size?: number }) {
 
 const NAV: { to: string; label: string; short: string; icon: string; tab?: boolean }[] = [
   { to: "/", label: "Home", short: "Home", icon: "M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z", tab: true },
+  { to: "/holdings", label: "Holdings", short: "Holdings", icon: "M4 6 H20 V18 H4 Z M4 10 H20" },
   { to: "/trades", label: "Trades", short: "Trades", icon: "M4 7 H20 M4 12 H20 M4 17 H14", tab: true },
   { to: "/tape", label: "Tape", short: "Tape", icon: "M4 6 H20 M4 10 H16 M4 14 H20 M4 18 H12", tab: true },
   { to: "/report", label: "Report", short: "Report", icon: "M5 20 V12 M12 20 V5 M19 20 V9", tab: true },
