@@ -100,8 +100,15 @@ WRONG_NAME = r"""(brand) => {
 }"""
 
 
+GLOW_LAYER = """() => { const st = getComputedStyle(document.body, '::before');
+  return { position: st.position, z: st.zIndex, image: st.backgroundImage.slice(0, 4), transform: st.transform }; }"""
+
+
 def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     m = page.evaluate(metrics)
+    layer = page.evaluate(GLOW_LAYER)
+    if layer["position"] != "fixed" or not layer["image"].startswith("url(") or layer["z"] != "-1":
+        fails.append(f"{name}@{w}: the page glow layer is missing or not fixed: {layer}")
     wrong = page.evaluate(WRONG_NAME, brand_name())
     if wrong:
         fails.append(f"{name}@{w}: the name is shown wrongly (always lowercase {brand_name()!r}): {wrong[:3]}")
@@ -192,9 +199,17 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     # The logo's motion: plays once as the header first shows, is over within a second and a half, and never again:
     # not on a tab change, and not when the header is drawn anew after New run.
     later = pg.evaluate(LOGO_MOTION)
+    home_at = pg.evaluate("getComputedStyle(document.body, '::before').transform")
     pg.click("nav.tabbar a[href='/positions']")
     pg.wait_for_timeout(120)
     on_tab = pg.evaluate(LOGO_MOTION)
+    drift = pg.evaluate("document.getAnimations().filter(a => a.transitionProperty === 'transform' && a.effect?.pseudoElement === '::before')"
+                        ".map(a => Math.round(a.effect.getComputedTiming().duration))")
+    pg.wait_for_timeout(700)
+    tab_at = pg.evaluate("getComputedStyle(document.body, '::before').transform")
+    print("glow drift on a tab change:", drift, "ms | moved:", home_at != tab_at, "| move:", pg.evaluate("document.body.dataset.glowMove"))
+    if drift != [600] or home_at == tab_at:
+        fails.append(f"the glow did not drift once in 600 ms on a tab change: {drift}, moved={home_at != tab_at}")
     pg.evaluate("history.pushState({}, '', '/start'); dispatchEvent(new PopStateEvent('popstate'))")
     pg.wait_for_selector(".steps")
     on_start = pg.evaluate(LOGO_MOTION)
@@ -211,11 +226,25 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     if still:
         fails.append(f"the logo keeps {still} motion parts after it has finished")
     pg.wait_for_timeout(600)
+    # The page glow (stakeholder, 16 Nov 2026): one layer fixed to the viewport, so a scroll moves content over it.
+    # The sanity check: the layer is fixed and behind everything, and after a scroll the same pixel in the bottom-left
+    # corner still shows the glow at the same strength (it did not scroll away or get repainted elsewhere).
+    glow = pg.evaluate("""() => { const st = getComputedStyle(document.body, '::before');
+      return { position: st.position, z: st.zIndex, image: st.backgroundImage.includes('radial-gradient') ? 'radial-gradient' : st.backgroundImage.slice(0, 15), att: getComputedStyle(document.body).backgroundAttachment }; }""")
+    corner = lambda: pg.screenshot(clip={"x": 2, "y": 520, "width": 1, "height": 1})  # noqa: E731
+    before = corner()
+    pg.mouse.wheel(0, 600)
+    pg.wait_for_timeout(300)
+    scrolled = pg.evaluate("scrollY")
+    print("glow layer:", glow, "| scrolled", scrolled, "px, corner pixel unchanged:", corner() == before)
+    if glow["position"] != "fixed" or glow["z"] != "-1" or not glow["image"].startswith("radial-gradient") or glow["att"] == "fixed":
+        fails.append(f"the page glow is not one fixed layer behind the page: {glow}")
+    pg.mouse.wheel(0, -600)
     # The name is written once, in src/brand/brand.ts; the built app must show that name and no other.
     name = brand_name()
     brand = pg.evaluate(BRAND_JS)
     # Playwright never lets a favicon.ico request through, so that one file is read from the build instead.
-    ico = dist / str(brand["ico"]).lstrip("/")
+    ico = dist / str(brand["ico"]).split("?")[0].lstrip("/")
     brand["icons"][brand["ico"]] = ico.is_file() and ico.read_bytes()[:4] == b"\x00\x00\x01\x00"
     print("name:", brand)
     if (brand["title"], brand["label"], brand["word"]) != (f"{name} · paper", f"{name} home", name):

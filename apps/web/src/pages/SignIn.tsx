@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { supa } from "../lib/api";
 import { Logo } from "../components/Logo";
+import { useGlow } from "../lib/glow";
 import { NAME } from "../brand/brand";
 
 export function SignIn() {
+  useGlow("signin");
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [err, setErr] = useState("");
