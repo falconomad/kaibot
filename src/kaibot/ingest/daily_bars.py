@@ -33,7 +33,7 @@ import csv
 import json
 import math
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -616,18 +616,34 @@ def load_fixes(path: str | Path | None = None) -> list[dict]:
     return out
 
 
+FIX_NEAR_DAYS = 7  # QA-Ops (#264): Alpaca may date the same action a session or two apart from the filing
+
+
+def _same_action(r: Mapping, f: Mapping) -> bool:
+    """Alpaca's row `r` is the fix `f` itself: the same key and a share action of the same ratio (within 1%) dated
+    within FIX_NEAR_DAYS. Then the fix stays out, so a split is never applied twice once Alpaca lists it."""
+    if r["key"] != f["key"]:
+        return False
+    try:
+        near = abs((r["ex_date"] - f["ex_date"]).days) <= FIX_NEAR_DAYS
+        ratio = float(r["ratio"])
+    except (TypeError, ValueError):
+        return False
+    return near and ratio > 0 and abs(ratio / float(f["ratio"]) - 1.0) <= 0.01
+
+
 def with_fixes(kept: Sequence[dict], spans: Iterable[Span], fixes: Sequence[dict]) -> list[dict]:
     """`kept` plus each fix whose key is in the store, whose ex-date lies inside that key's bars (as for Alpaca's
     rows: after the first bar, not after the last of an ended series), and that Alpaca does not list itself (same
-    key, type and ex-date, not a repeat)."""
+    key, a share action of the same ratio within FIX_NEAR_DAYS, not a repeat)."""
     span = {s.key: s for s in spans}
-    have = {(r["key"], r["type"], r["ex_date"]) for r in kept if not r.get("dup")}
+    have = [r for r in kept if not r.get("dup") and r["type"] in SHARE_TYPES]
     out = list(kept)
     for f in fixes:
         s = span.get(f["key"])
         if s is None or not f["ex_date"] > s.first or (s.ended and f["ex_date"] > s.last):
             continue
-        if (f["key"], f["type"], f["ex_date"]) in have:
+        if any(_same_action(r, f) for r in have):
             continue
         out.append(dict(f))
     out.sort(key=lambda r: (r["key"], r["ex_date"], r["type"], r["id"], r["cusip"], r["raw"]))

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import subprocess
 from datetime import UTC, date, datetime, timedelta
 
@@ -606,3 +607,21 @@ def test_sync_actions_writes_the_fixes_into_the_table(tmp_path, alpaca, monkeypa
     mine = [r for r in t if r["id"] == "kaibot-fix:9"]
     assert len(mine) == 1 and mine[0]["key"] == "AAA" and mine[0]["ratio"] == 2.0
     assert db.read_meta(db.actions_path(store(tmp_path)))["fixes"] == 1
+
+
+def test_a_fix_stays_out_when_alpaca_lists_the_same_split_a_few_days_apart():
+    """QA-Ops (#264): once Alpaca lists the action itself, dated a session or two from the filing (or as a stock
+    dividend instead of a split), the fix goes quiet, so the split is never applied twice; another action of the
+    key is no reason to drop it."""
+    fix = {**db.normalise_action("forward_split", {"symbol": "BLL", "old_rate": 1, "new_rate": 2,
+                                                   "ex_date": "2017-05-17"})[0],
+           "key": "BALL@2026-11-05", "id": "kaibot-fix:1", "dup": False, "source": "https://example.org/8-k"}
+    span = db.Span("BALL@2026-11-05", "BALL", date(2016, 1, 4), date(2026, 11, 13), ended=False)
+    for ex, kind in ((date(2017, 5, 16), "forward_split"), (date(2017, 5, 19), "stock_dividend")):
+        alpaca = {**fix, "id": "alpaca-1", "raw": "{}", "ex_date": ex, "type": kind}
+        assert [r["id"] for r in db.with_fixes([alpaca], [span], [fix])] == ["alpaca-1"], (ex, kind)
+    other = [{**fix, "id": "alpaca-2", "raw": "{}", "ex_date": date(2017, 5, 16), "ratio": 1.05},  # other ratio
+             {**fix, "id": "alpaca-3", "raw": "{}", "ex_date": date(2018, 5, 17)},  # a year later
+             {**fix, "id": "alpaca-4", "raw": "{}", "type": "cash_dividend", "ratio": math.nan}]
+    assert sorted(r["id"] for r in db.with_fixes(other, [span], [fix])) == [
+        "alpaca-2", "alpaca-3", "alpaca-4", "kaibot-fix:1"]
