@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { BookChecks } from "../components/Book";
 import { ExperimentSheetBody, experimentsOf } from "../components/Experiment";
 import { StatusRow } from "../components/Home";
+import { Tick } from "../components/Tick";
 import { Sheet } from "../components/Sheet";
 import { livePot, useRunCtx } from "../components/Shell";
 import { Skeleton } from "../components/Skeleton";
@@ -90,8 +91,8 @@ export function Positions() {
                         : `${ruleName(o.p.rule)} · ${o.p.qty} shares${holdingView(o.p, b!).days !== null ? ` · ${holdingView(o.p, b!).days} days` : ""}`}</span>
                       {o.kind === "book" && findExperiment(o.p.rule, exps) && <span className="row-tag">Experiment: failed the ten-year test</span>}
                     </span>
-                    <span className="row-end num"><b>{money(o.value)}</b>
-                      {o.gain !== null && <span className={tone(o.gain)}>{signedMoney(o.gain)}</span>}</span>
+                    <span className="row-end num"><b><Tick value={o.value}>{money(o.value)}</Tick></b>
+                      {o.gain !== null && <Tick value={o.gain} className={tone(o.gain)}>{signedMoney(o.gain)}</Tick>}</span>
                   </button>
                 </li>
               ))}

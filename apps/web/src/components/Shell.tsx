@@ -148,6 +148,9 @@ function PhoneHaltBar({ items }: { items: string[] }) {
   );
 }
 
+/** v4 PR 7: a detail page (two path segments: /positions/12, /strategy/fine-tune) is a push; a tab is a fade. */
+export const navKind = (path: string) => (path.split("/").filter(Boolean).length >= 2 ? "push" : "tab");
+
 export function Shell() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, ...poll(60_000) });
   const [picked, setPicked] = useState<number | null>(() => Number(localStorage.getItem("kb.run")) || null);
@@ -233,7 +236,7 @@ export function Shell() {
         <div className="body body-pending" aria-busy="true"><main id="main" tabIndex={-1}><Skeleton variant="dashboard" /></main></div>
       ) : (
         <div className="body" key="ready">
-          <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
+          <main key={run.id} id="main" ref={mainRef} tabIndex={-1} data-nav={navKind(pathname)}>
             <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
               retryOverview: () => { void overview.refetch(); }, meters: { dayPct, dd, replay: run.kind === "replay" }, pickRun, risk, red } satisfies RunCtx} />
           </main>

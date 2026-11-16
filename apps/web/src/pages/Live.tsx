@@ -13,6 +13,7 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { STALE, poll } from "../lib/poll";
 import { RuleExperiment } from "../components/Experiment";
+import { Tick } from "../components/Tick";
 import { HomeStatus, NewRunRow, TopHoldings, holdingRows } from "../components/Home";
 import { type StartState, startState } from "../lib/startstate";
 import { useBook } from "../components/useBook";
@@ -181,10 +182,10 @@ export function Live() {
         <section aria-labelledby="pot-h" className="home-hero">
           <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer?.status === "scheduled" ? "Last run (ended)"
             : ended ? "Paper pot · run ended" : "Paper pot"}</h1>
-          <div className="hero num">{money(pot)}</div>
+          <div className="hero num"><Tick value={pot}>{money(pot)}</Tick></div>
           <div className="num home-change">
-            <span className={tone(allTime)}>{signedMoney(allTime)} all time</span>
-            {live && <span className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} today</span>}
+            <Tick value={allTime} className={tone(allTime)}>{signedMoney(allTime)} all time</Tick>
+            {live && <Tick value={live.dayPnl} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} today</Tick>}
             <span className="muted desk-only">{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500 by {money(Math.abs(vsSpy))}</span>
           </div>
         </section>
