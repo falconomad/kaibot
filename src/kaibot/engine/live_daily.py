@@ -956,7 +956,10 @@ class LiveDaily:
                if today is None or s == str(today)]
         if self._ca_evening is not None:
             held = {s for r in self.rules for s in self.account.held(r.name)}
-            out += [a.note() for _, a in sorted(self.ca.known(self._ca_evening, held).items())]
+            # QA-Ops (#271 follow-up): a note whose date has passed is dropped (the read it came from may be days
+            # old on evenings without a decision); an undated one stays
+            out += [a.note() for _, a in sorted(self.ca.known(self._ca_evening, held).items())
+                    if not a.on or today is None or a.on >= str(today)]
         return out
 
     def _no_decision(self, rule: str, session: date, prev: date) -> None:
