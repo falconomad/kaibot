@@ -32,6 +32,12 @@ written by `bars_table` therefore never trips either check.
 
 Outputs under <data>/daily/check: integrity.csv (every finding), integrity_summary.csv (one verdict per key:
 clean, warn or error), integrity.txt (plain words).
+
+Exit codes of `scripts/fetch_daily.py --check` (and so of the nightly refresh, scripts/fetch_daily.sh): 0 when no
+error lies inside the live window, 3 when one does, 1 when there is no store. The live window is the live daily
+path's look-back (`LIVE_WINDOW_DAYS`, engine/live_daily.StoreLoader.LOOKBACK_DAYS) before the store's last session:
+an error older than that is never read by the engine, so it is listed as an old finding (with a count) and does not
+make the nightly job report FAILED.
 """
 
 from __future__ import annotations
@@ -50,6 +56,7 @@ from kaibot.ingest.alpaca_history import ET
 from kaibot.ingest.daily_bars import COMPLETE_AT, SHARE_TYPES
 from kaibot.ingest.daily_store import DailyStore
 
+LIVE_WINDOW_DAYS = 600  # = engine/live_daily.StoreLoader.LOOKBACK_DAYS (a test pins it)
 JUMP = 0.5  # |close / previous close - 1| above this is a jump
 STALE_RUN = 5  # this many flat, unchanged bars in a row
 AVAILABLE_AFTER = timedelta(minutes=15)  # SIP history is free and complete only once it is 15 minutes old
@@ -235,11 +242,24 @@ def run_integrity(data_dir: str | Path, keys: Sequence[str] | None = None,
             sev = "error" if kind in ERRORS else "warning"
             lines.append(f"  {kind} ({sev}): {by_kind[kind]} in {len(keys_hit)} keys ("
                          + ", ".join(keys_hit[:10]) + (", ..." if len(keys_hit) > 10 else "") + ")")
-    if any(by_kind.get(k) for k in ERRORS):
-        lines.append("  Keys with errors should not be traded in a simulation until the bars are fetched again "
+    errs = findings[findings["severity"] == "error"] if len(findings) else findings
+    last = pd.to_datetime(summary["last"], errors="coerce").max() if len(summary) else pd.NaT
+    cutoff = (last.date() - timedelta(days=LIVE_WINDOW_DAYS)) if pd.notna(last) else None
+    is_old = (pd.to_datetime(errs["date"]).dt.date < cutoff) if cutoff is not None and len(errs) else None
+    old = errs[is_old] if is_old is not None else errs.iloc[:0]
+    recent = errs[~is_old] if is_old is not None else errs
+    if len(old):
+        n, k = len(old), old["key"].nunique()
+        lines.append(f"  Old findings: {n} error{'s' if n > 1 else ''} in {k} key{'s' if k > 1 else ''} before "
+                     f"{cutoff}, outside the live daily path's {LIVE_WINDOW_DAYS}-day window (never read by the "
+                     "engine; not a failure). Details in integrity.csv.")
+    if len(recent):
+        lines.append(f"  {len(recent)} error{'s' if len(recent) > 1 else ''} inside the live window (from {cutoff}). "
+                     "Keys with errors should not be traded in a simulation until the bars are fetched again "
                      "(scripts/fetch_daily.py --refresh --symbols ...); details in integrity.csv.")
     for s in lines:
         log(s)
     out.mkdir(parents=True, exist_ok=True)
     (out / "integrity.txt").write_text("\n".join(lines) + "\n")
-    return {"keys": len(summary), "verdicts": verdicts, "findings": by_kind}
+    return {"keys": len(summary), "verdicts": verdicts, "findings": by_kind, "errors": len(recent),
+            "old_errors": len(old), "window_from": str(cutoff) if cutoff else None}

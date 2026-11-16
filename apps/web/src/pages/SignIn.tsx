@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supa } from "../lib/api";
 import { Logo } from "../components/Logo";
-import { useGlow } from "../lib/glow";
+import { FROM_SIGNIN, useGlow } from "../lib/glow";
 import { NAME } from "../brand/brand";
 
 export function SignIn() {
@@ -13,7 +13,7 @@ export function SignIn() {
   async function send(e: React.FormEvent) {
     e.preventDefault();
     setState("sending");
-    const { error } = await supa.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+    const { error } = await supa.auth.signInWithOtp({ email, options: { emailRedirectTo: `${window.location.origin}/?${FROM_SIGNIN}` } });
     if (error) { setErr(error.message); setState("error"); } else setState("sent");
   }
 

@@ -38,6 +38,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 WEB = ROOT / "apps" / "web"
 TOOLS = ROOT / "docs" / "design" / "audit_2026-11-16" / "tools"
 sys.path.insert(0, str(TOOLS))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import audit  # noqa: E402  (routes, init script, app and mock URLs)
 import mock_data  # noqa: E402
 
@@ -307,6 +308,24 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     else:
         fails.append("no experiment row on Home to open the sheet")
     ctx.close()
+    # Landing from the emailed sign-in link (/?from=signin, then signed in): the glow starts at sign-in's place and
+    # drifts once to Home's, in 900 ms, and the marker leaves the address bar.
+    ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    ctx.add_init_script(session)
+    ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+    pg = ctx.new_page()
+    pg.goto(audit.APP + "/?from=signin", wait_until="load")
+    start_at = pg.evaluate("[document.body.dataset.glow, getComputedStyle(document.body, '::before').transform]")
+    pg.wait_for_selector("nav.tabbar")
+    pg.wait_for_timeout(60)
+    landing = pg.evaluate("document.getAnimations().filter(a => a.transitionProperty === 'transform' && a.effect?.pseudoElement === '::before')"
+                          ".map(a => Math.round(a.effect.getComputedTiming().duration))")
+    pg.wait_for_timeout(1100)
+    end_at = pg.evaluate("[document.body.dataset.glow, getComputedStyle(document.body, '::before').transform, location.search]")
+    print("sign-in landing: start", start_at, "| drift", landing, "ms | end", end_at)
+    if start_at[0] != "signin" or landing != [900] or end_at[0] != "home" or end_at[1] == start_at[1] or "from=" in end_at[2]:
+        fails.append(f"the glow did not drift once from sign-in to Home on landing: start {start_at}, drift {landing}, end {end_at}")
+    ctx.close()
     ctx, pg, early = page(reduced=True)
     running = pg.evaluate("document.getAnimations().filter(a => a.playState === 'running').length")
     paths = pg.evaluate("document.querySelectorAll('header.top .logo path').length")
@@ -328,6 +347,77 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     if wide != [72, 28]:
         fails.append(f"at 1280 px the header is {wide[0]} px and the wordmark {wide[1]} px (want 72 and 28)")
     ctx.close()
+
+
+# Rows whose parts overlap or stick out: the name and the number of a row must sit side by side, inside the row.
+MISALIGN = r"""() => {
+  const out = [];
+  for (const row of document.querySelectorAll('.row, .hold-row, .kv')) {
+    const r = row.getBoundingClientRect();
+    if (!r.width) continue;
+    const kids = [...row.children].filter((k) => k.getBoundingClientRect().width > 0);
+    for (const k of kids) { const b = k.getBoundingClientRect(); if (b.right > r.right + 1 || b.left < r.left - 1) out.push(`${row.className}: ${k.className || k.tagName} sticks out`); }
+    if (row.matches('.row, .hold-row')) for (let i = 1; i < kids.length; i++) {
+      const x = kids[i - 1].getBoundingClientRect(), y = kids[i].getBoundingClientRect();
+      if (y.top < x.bottom - 1 && y.left < x.right - 1) out.push(`${row.className}: ${kids[i - 1].className} and ${kids[i].className} overlap (${(row.textContent || '').trim().slice(0, 30)})`);
+    }
+  }
+  return [...new Set(out)].slice(0, 6);
+}"""
+
+
+def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics: str, fails: list[str]) -> None:
+    """--stress: the first real holdings, crowded (scripts/stress_mock.py): Home's top holdings, Positions, the position
+    sheet and the book card with 28 multi-day positions, at 375, 390 and 430 px. Fails on overflow, a tap target under
+    44 px, a row whose parts overlap or stick out, a position with 0 shares shown as held, or text contrast."""
+    import stress_mock
+    for w, h in PHONES:
+        for name, path in [("home", "/"), ("positions", "/positions")]:
+            ctx = browser.new_context(viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+            ctx.add_init_script(audit.INIT)
+            ctx.add_init_script(session)
+            ctx.route("**/*", serve(stress_mock.StressMock("running"), dist, now))
+            pg = ctx.new_page()
+            pg.goto(audit.APP + path, wait_until="load")
+            pg.wait_for_selector("main > *")
+            pg.wait_for_timeout(1500)
+            check(pg, f"stress-{name}", w, metrics, fails)
+            bad = pg.evaluate(MISALIGN)
+            rows = pg.evaluate("document.querySelectorAll('.hold-row, .rows .row').length")
+            zero = pg.evaluate("[...document.querySelectorAll('.rows .row, .hold-row')].some(r => [...r.querySelectorAll('b')].some(b => b.textContent.trim() === 'ORCL'))")
+            print(f"stress {name} {w}: {rows} rows, misaligned {bad}, 0-share ORCL shown {zero}")
+            if bad:
+                fails.append(f"stress-{name}@{w}: {bad}")
+            if zero:
+                fails.append(f"stress-{name}@{w}: a position with 0 shares left is shown as held")
+            if name == "positions":
+                # 3 orders tonight; one held row (SUPERLONG, still at the broker) is tagged; NFLX is filled, TSLA not held yet
+                plan = pg.evaluate("[document.querySelectorAll('.nc-list li').length, [...document.querySelectorAll('.row-plan')].map(t => t.closest('.row').querySelector('b').textContent + ': ' + t.textContent).join(), "
+                                   "(document.querySelector('.next-close')?.scrollWidth || 0) > (document.querySelector('.next-close')?.clientWidth || 0) + 1]")
+                print(f"stress plan {w}: {plan[0]} orders, tags [{plan[1]}], overflow {plan[2]}")
+                if plan[0] != 3 or plan[1] != "SUPERLONG: Selling tonight" or plan[2]:
+                    fails.append(f"stress-positions@{w}: the next close's plan is missing or overflows: {plan}")
+                pg.locator(".rows .row").first.click()
+                pg.wait_for_selector("[role=dialog]")
+                pg.wait_for_timeout(500)
+                sheet = pg.evaluate("(() => { const d = document.querySelector('[role=dialog] .sheet, [role=dialog]'); const r = d.getBoundingClientRect(); "
+                                    "return { over: d.scrollWidth > d.clientWidth + 1, right: Math.round(r.right), w: innerWidth }; })()")
+                bad = pg.evaluate(MISALIGN)
+                print(f"stress sheet {w}: {sheet}, misaligned {bad}")
+                if sheet["over"] or sheet["right"] > sheet["w"] or bad:
+                    fails.append(f"stress-sheet@{w}: {sheet} {bad}")
+            if name == "positions":
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(400)
+                pg.get_by_role("tab", name="Closed").click()
+                pg.wait_for_timeout(1200)
+                sold = pg.evaluate("document.querySelectorAll('[aria-label=\\'Sold from the multi-day book\\'] .row').length")
+                bad = pg.evaluate(MISALIGN)
+                print(f"stress sold {w}: {sold} sold rows, misaligned {bad}")
+                if sold != 4 or bad:
+                    fails.append(f"stress-sold@{w}: {sold} sold rows, {bad}")
+                check(pg, "stress-sold", w, metrics, fails)
+            ctx.close()
 
 
 def main(a) -> int:
@@ -366,6 +456,8 @@ def main(a) -> int:
                 ctx.close()
         if a.interact:
             interact(browser, dist, now, session, fails)
+        if a.stress:
+            stress(browser, dist, now, session, metrics, fails)
         browser.close()
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rows, indent=1))
@@ -380,4 +472,5 @@ if __name__ == "__main__":
     ap.add_argument("--widths")
     ap.add_argument("--json")
     ap.add_argument("--interact", action="store_true")
+    ap.add_argument("--stress", action="store_true", help="also a crowded multi-day book (scripts/stress_mock.py)")
     sys.exit(main(ap.parse_args()))

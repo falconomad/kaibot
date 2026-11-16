@@ -33,7 +33,7 @@ import csv
 import json
 import math
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -593,6 +593,63 @@ def actions_table(rows: Sequence[dict]) -> pa.Table:
                     schema=ACTIONS_SCHEMA)
 
 
+FIXES = Path(__file__).with_name("corporate_action_fixes.csv")
+
+
+def load_fixes(path: str | Path | None = None) -> list[dict]:
+    """The verified actions Alpaca's table lacks for a key (corporate_action_fixes.csv, '#' lines are comments), as
+    table rows: id `kaibot-fix:<n>`, the source URL kept in `raw`."""
+    p = Path(path) if path is not None else FIXES
+    with p.open(newline="") as fh:
+        lines = [ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
+    out = []
+    for n, r in enumerate(csv.DictReader(lines), 1):
+        kind, ratio = r["type"].strip(), float(r["ratio"])
+        if kind not in SHARE_TYPES or not ratio > 0 or not r["source"].startswith("https://"):
+            raise ValueError(f"{p}: fix {n} is not a share action with a ratio and an https source: {r}")
+        ex = date.fromisoformat(r["ex_date"].strip())
+        out.append({"key": r["key"].strip(), "symbol": r["key"].strip().partition("@")[0], "type": kind,
+                    "ex_date": ex, "ratio": ratio, "cash": math.nan, "special": False, "foreign": False,
+                    "process_date": ex, "record_date": None, "payable_date": None, "cusip": "",
+                    "id": f"kaibot-fix:{n}", "dup": False, "source": r["source"].strip(),
+                    "raw": json.dumps({"source": r["source"].strip(), "note": r.get("note", "")}, sort_keys=True)})
+    return out
+
+
+FIX_NEAR_DAYS = 7  # QA-Ops (#264): Alpaca may date the same action a session or two apart from the filing
+
+
+def _same_action(r: Mapping, f: Mapping) -> bool:
+    """Alpaca's row `r` is the fix `f` itself: the same key and a share action of the same ratio (within 1%) dated
+    within FIX_NEAR_DAYS. Then the fix stays out, so a split is never applied twice once Alpaca lists it."""
+    if r["key"] != f["key"]:
+        return False
+    try:
+        near = abs((r["ex_date"] - f["ex_date"]).days) <= FIX_NEAR_DAYS
+        ratio = float(r["ratio"])
+    except (TypeError, ValueError):
+        return False
+    return near and ratio > 0 and abs(ratio / float(f["ratio"]) - 1.0) <= 0.01
+
+
+def with_fixes(kept: Sequence[dict], spans: Iterable[Span], fixes: Sequence[dict]) -> list[dict]:
+    """`kept` plus each fix whose key is in the store, whose ex-date lies inside that key's bars (as for Alpaca's
+    rows: after the first bar, not after the last of an ended series), and that Alpaca does not list itself (same
+    key, a share action of the same ratio within FIX_NEAR_DAYS, not a repeat)."""
+    span = {s.key: s for s in spans}
+    have = [r for r in kept if not r.get("dup") and r["type"] in SHARE_TYPES]
+    out = list(kept)
+    for f in fixes:
+        s = span.get(f["key"])
+        if s is None or not f["ex_date"] > s.first or (s.ended and f["ex_date"] > s.last):
+            continue
+        if any(_same_action(r, f) for r in have):
+            continue
+        out.append(dict(f))
+    out.sort(key=lambda r: (r["key"], r["ex_date"], r["type"], r["id"], r["cusip"], r["raw"]))
+    return out
+
+
 def sync_actions(api, root: Path, start: date, now: datetime, chunk: int = CA_CHUNK,
                  log: Callable[[str], None] | None = None) -> dict:
     """Fetch the corporate actions of every key in the store and replace the table (small: always all of it)."""
@@ -601,11 +658,13 @@ def sync_actions(api, root: Path, start: date, now: datetime, chunk: int = CA_CH
     today = now.astimezone(ET).date()
     rows, info = fetch_actions(api, [s.symbol for s in spans], start, today, chunk, log)
     kept = attribute_actions(rows, spans)
+    n_alpaca = len(kept)
+    kept = with_fixes(kept, spans, load_fixes())
     by_type: dict[str, int] = {}
     for r in kept:
         by_type[r["type"]] = by_type.get(r["type"], 0) + 1
     ex = [r["ex_date"] for r in kept if r["type"] in ADJUSTING_TYPES]
-    info.update(rows=len(kept), by_type=by_type, duplicates=sum(r["dup"] for r in kept),
+    info.update(rows=len(kept), fixes=len(kept) - n_alpaca, by_type=by_type, duplicates=sum(r["dup"] for r in kept),
                 first_ex_date=min(ex).isoformat() if ex else None, last_ex_date=max(ex).isoformat() if ex else None,
                 fetched_at=now.astimezone(UTC).isoformat(timespec="seconds"), schema=SCHEMA_VERSION)
     write_table(actions_table(kept), actions_path(root), info)

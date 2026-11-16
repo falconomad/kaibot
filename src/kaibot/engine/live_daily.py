@@ -699,10 +699,17 @@ class LiveDaily:
             body = {"run_id": rid, "strategy": r.name, "session": str(closed), "fill_session": str(fill),
                     "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl)}
             self.journal.append("md_decision", body)
+            buy = list(tl.features.get("buy") or []) if tl else []
             self.event("multi_day_decision", {"strategy": r.name, "session": str(closed), "fill_session": str(fill),
                                               "decides": tl is not None,
-                                              "buy": list((tl.features.get("buy") or [])[:10]) if tl else [],
-                                              "sell": dict(tl.features.get("sell") or {}) if tl else {}})
+                                              "buy": buy[:10],
+                                              "sell": dict(tl.features.get("sell") or {}) if tl else {},
+                                              # #229, reporting only: the dashboard's plan, sell readings, sectors
+                                              "decided_at": now.isoformat(), "held": held,
+                                              "buy_candidates": buy[:60],
+                                              "ranked": tl.features.get("ranked") if tl else None,
+                                              "sell_when": dict(tl.features.get("sell_when") or {}) if tl else {},
+                                              "sectors": {s: data.sector.get(s) for s in [*held, *buy[:60]]}})
             done.append(r.name)
         return done
 
@@ -767,6 +774,12 @@ class LiveDaily:
                 if planned is None:
                     continue
                 self.journal.append("md_send", planned)
+                held = {s: q for s, (q, _) in self.account.held(r.name).items()}  # #229: the plan, for the dashboard
+                self.event("multi_day_plan", {"strategy": r.name, "session": str(session),
+                                              "decided": planned.get("decided"), "note": planned.get("note"),
+                                              "skipped": planned.get("skipped"),
+                                              "targets": [[s, float(held.get(s, 0.0)), q, p, w]
+                                                          for s, q, p, w in planned["targets"]]})
             targets = [Target(r.name, s, int(q), p, {"why": w}) for s, q, p, w in planned["targets"]]
             if not targets:
                 self.journal.append("md_sent", {"run_id": rid, "strategy": r.name, "session": str(session),

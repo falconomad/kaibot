@@ -10,7 +10,9 @@
     python scripts/fetch_daily.py --status    what is stored
     python scripts/fetch_daily.py --check     offline checks: minute history against daily bars on a sample, and
                                               the corporate-actions table against Alpaca's adjusted bars, and
-                                              the integrity of every stored series (daily_integrity, #169)
+                                              the integrity of every stored series (daily_integrity, #169).
+                                              Exit 0: no error inside the live 600-day window (older errors are
+                                              listed as old findings); 3: an error inside it; 1: no store
 
 A key that is already complete is skipped, so stopping and starting again costs nothing. Per key: one request for
 the raw bars and one for Alpaca's own adjusted series (used only by the check; --no-reference skips it). The
@@ -119,9 +121,9 @@ def main(argv: list[str] | None = None, api=None, now: datetime | None = None) -
             return 1
         from kaibot.ingest.daily_integrity import run_integrity
         run_check(Path(a.data), [s.strip().upper() for s in a.sample.split(",") if s.strip()] or None)
-        run_integrity(Path(a.data))
+        res = run_integrity(Path(a.data))
         print(f"Details: {root / 'check'}")
-        return 0
+        return 3 if res["errors"] else 0  # an error the live daily path would read (old findings do not count)
     reqs = build_requests(a, now.astimezone(ET).date())
     if a.status:
         print_status(root, reqs)

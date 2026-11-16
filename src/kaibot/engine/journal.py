@@ -90,6 +90,10 @@ create table if not exists cursor (name text primary key, seq integer not null);
 create table if not exists meta (k text primary key, v text not null);
 create table if not exists idmap (name text not null, tbl text not null, engine_id integer not null,
   db_id integer not null, primary key (name, tbl, engine_id));
+-- #244: the kind reads (`entries(kinds=...)`, `count`) use this instead of scanning every entry. Added to an older
+-- file when it is opened: idempotent, and SQLite builds it in one transaction (a crash leaves none half-built).
+-- No row, trigger, identity or cursor changes.
+create index if not exists entry_kind_seq on entry (kind, seq);
 """
 
 

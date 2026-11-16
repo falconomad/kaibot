@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -180,3 +180,64 @@ def test_the_store_check_writes_its_files_and_runs_with_fetch_daily_check(tmp_pa
     assert load_script().main(["--data", str(tmp_path / "data"), "--check"], now=NOW) == 0
     assert "Bar integrity: 3 keys" in capsys.readouterr().out
     assert (out / "integrity.csv").exists()
+
+
+# ---------------------------------------------------------------- the nightly check's exit code (#230, PR A)
+
+
+def _write(root, key: str, df: pd.DataFrame) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from kaibot.ingest.daily_bars import BARS_SCHEMA, bars_path
+
+    p = bars_path(root, key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    t = df.copy()
+    t["date"] = pd.to_datetime(t["date"]).dt.date
+    pq.write_table(pa.Table.from_pandas(t[BARS_SCHEMA.names], schema=BARS_SCHEMA, preserve_index=False), p)
+
+
+LONG = nyse_sessions.sessions(date(2023, 1, 3), date(2026, 11, 11))  # ~970 sessions: longer than the live window
+
+
+def test_the_live_window_is_the_engines_look_back():
+    from kaibot.engine.live_daily import StoreLoader
+
+    assert di.LIVE_WINDOW_DAYS == StoreLoader.LOOKBACK_DAYS
+
+
+def test_errors_older_than_the_live_window_are_old_findings_not_failures(tmp_path):
+    root = tmp_path / "data" / "daily"
+    df = frame(LONG, [100.0 + 0.01 * i for i in range(len(LONG))])
+    df.loc[5, "c"] = 0.0  # bad_price in January 2023: older than 600 days before the last session
+    _write(root, "AAA", df)
+    _write(root, "SPY", frame(LONG, [400.0 + 0.01 * i for i in range(len(LONG))]))
+    said: list[str] = []
+    res = di.run_integrity(tmp_path / "data", log=said.append)
+    assert res["errors"] == 0 and res["old_errors"] == 1
+    cutoff = date(2026, 11, 11) - timedelta(days=di.LIVE_WINDOW_DAYS)
+    assert any(s.startswith(f"  Old findings: 1 error in 1 key before {cutoff}") for s in said)
+    assert not any("should not be traded" in s for s in said)
+
+    df.loc[len(df) - 3, "h"] = df.loc[len(df) - 3, "c"] * 0.5  # ohlc_order inside the window
+    _write(root, "AAA", df)
+    res = di.run_integrity(tmp_path / "data", log=said.append)
+    assert res["errors"] == 1 and res["old_errors"] == 1
+
+
+def test_fetch_daily_check_exit_codes(tmp_path, capsys):
+    root = tmp_path / "data" / "daily"
+    mod = load_script()
+    assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 1  # no store
+    df = frame(LONG, [100.0 + 0.01 * i for i in range(len(LONG))])
+    _write(root, "SPY", frame(LONG, [400.0 + 0.01 * i for i in range(len(LONG))]))
+    df.loc[5, "c"] = 0.0  # old error only: the nightly job is not FAILED
+    _write(root, "AAA", df)
+    assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 0
+    df.loc[len(df) - 3, "c"] = -1.0  # an error the engine would read
+    _write(root, "AAA", df)
+    capsys.readouterr()
+    assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 3
+    out = capsys.readouterr().out
+    assert "bad_price (error)" in out and "Old findings: 1 error" in out

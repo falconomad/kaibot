@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 13 Nov 2026 (0019 applied that evening). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 16 Nov 2026 (0019 applied 13 Nov; 0020 written, not applied). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -12,9 +12,9 @@ Owner: backend-quant. Last checked against main on 13 Nov 2026 (0019 applied tha
 - 0019: **applied by Product on 13 Nov 2026, about 18:55 CET** (step 6 below; the stakeholder delegated the decision).
   Its read-only checks passed: one pg_cron job `kaibot_deadman` (the four `kaibot_deadman_*` jobs are gone).
   Shorting off on the paper account is done by `./scripts/go_live_paper.sh` (`./scripts/alpaca_no_shorting.sh`).
-- No 0020: the multi-day experiment of #133 (decision 15 section 11) needs no database change. Its caps and label are
-  in `config/profiles.yaml` and `strategies/registry.py`, and the label reaches the dashboard in the heartbeat's
-  `detail.experiments`. 0019's `kaibot.strategy_holding` already lists `trend_momentum` as `multi_day`.
+- 0020: **written, not applied** (#229, PR for the multi-day dashboard's data). Read-only RPCs only: step 7 below.
+  The multi-day experiment of #133 itself needs no database change (its caps and label are in `config/profiles.yaml`
+  and `strategies/registry.py`, and reach the dashboard in the heartbeat's `detail.experiments`).
 
 ## Apply in this order
 
@@ -29,6 +29,7 @@ run it again. Do not reorder them.
 | 4 | `migrations/0017_deadman_early_close.sql` (whole file) | Off-box dead-man knows early closes and holidays (12:56 ET on early-close days, never on a holiday) | **Yes**: `cron.unschedule(...)` and `net.http_delete(...)` (the paper flatten call, only when the dead-man fires) |
 | 5 | `migrations/0018_m7_ledger.sql` (whole file; PR #160, once merged) | The ledger's tables (`ledger_day`, `ledger_position`), engine-assigned ids and `jseq` for idempotent replication from the local journal, `kb_report` start equity from the mark-to-market close, and `kb_book` / `kb_equity_series` for the multi-day dashboard | No: only `alter`, `add column if not exists`, `create ... if not exists` and `create or replace` |
 | 6 | `migrations/0019_deadman_overnight.sql` (whole file; PR for #120, once merged). **Before the first multi-day position is held overnight**; it can wait until then | The off-box dead-man no longer flattens the whole account: while the engine is silent it cancels entry orders, verifies (re-creates) every multi-day protective stop and raises the alarm; in the last 4 minutes it sells intraday shares only. One pg_cron job `kaibot_deadman` replaces the four `kaibot_deadman_*` jobs (docs/ops/failsafe.md) | **Yes**: `cron.unschedule(...)`, `net.http_delete(...)` and `net.http_post(...)` (paper orders, only when the dead-man acts). **First** turn shorting off on the paper account: Alpaca dashboard, paper account, Account Configurations, Shorting off (or `PATCH /v2/account/configurations {"no_shorting": true}`); check `GET /v2/account/configurations` gives `"no_shorting": true` and `GET /v2/account` gives `shorting_enabled: false` |
+| 7 | `migrations/0020_m7_multiday_dashboard.sql` (whole file; PR for #229, once merged). Any time, also while the engine runs | The multi-day dashboard's data: `kb_book` positions also carry `sell_when` and `sector`; new `kb_multiday_plan` (the next close's plan and its orders) and `kb_book_closed` (sold holdings). Read-only functions, owner-checked, no table or row changes | No: only `create or replace function`, `revoke` and `grant` |
 | 8 | `migrations/0021_kb_health_multiday_events.sql` (whole file; PR for #266's events). Independent of step 7 (0020, #247): either order. Any time: dashboard read only | `kb_health` also returns the live daily path's events, among them the corporate-action skips the dashboard now labels (`multi_day_ca_skip`, `multi_day_ca_unread`, #271/#273), the #207 multi-day events and #266's adoption events. Same function as 0007 otherwise, owner-only | No: one `create or replace function`, then the revoke/grant of 0007 |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
@@ -61,6 +62,9 @@ select prosrc like '%multi_day_ca_skip%' and prosrc like '%multi_day_ca_unread%'
 -- step 6: one dead-man job, and it knows the multi-day rules
 select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';    -- kaibot_deadman | * 13-21 * * 1-5
 select count(*) from kaibot.strategy_holding where holding = 'multi_day';                          -- 3
+-- step 7: the dashboard RPCs exist, owner-only
+select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
+select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false
 -- QA-Ops follow-up from #156: an applied Balanced/Hunter config with dip off must be re-applied with dip on
 select run_id, version from kaibot.config c join kaibot.run r on r.id = c.run_id
  where c.status = 'applied' and r.level in ('balanced', 'aggressive')
