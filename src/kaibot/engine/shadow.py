@@ -358,9 +358,14 @@ class ShadowRunner:
 
 
 def _utc_ns(ts: pd.Series) -> np.ndarray:
-    v = ts.values  # tz-aware -> naive UTC datetime64
-    if v.dtype.kind != "M":
-        v = pd.to_datetime(ts, utc=True).values
+    """Bar times as int64 ns since the epoch (UTC); a naive time is UTC. #250: without `Series.values` on a tz-aware
+    column (deprecated in pandas 3.1; a DatetimeArray in pandas 4)."""
+    if isinstance(ts.dtype, pd.DatetimeTZDtype):
+        v = ts.dt.tz_convert(None).to_numpy()  # naive UTC datetime64
+    elif ts.dtype.kind == "M":
+        v = ts.to_numpy()
+    else:
+        v = pd.to_datetime(ts, utc=True).dt.tz_convert(None).to_numpy()
     return v.astype("datetime64[ns]").astype(np.int64)
 
 
