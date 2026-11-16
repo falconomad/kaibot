@@ -17,6 +17,7 @@ import { Skeleton } from "../components/Skeleton";
 import { ExperimentSheetBody, HaltTag, engineDetail, experimentsOf } from "../components/Experiment";
 import { findExperiment, multiDayFrom } from "../lib/experiment";
 import { NAME } from "../brand/brand";
+import { caEvent } from "../lib/corpactions";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -282,6 +283,8 @@ function SheetRow({ head, line, children }: { head: string; line: string; childr
 function eventText(e: HealthData["events"][number]): string {
   if (e.type === "halt" && typeof e.payload?.kind === "string") return `Halt: ${haltText({ kind: e.payload.kind, reason: String(e.payload.reason ?? ""), ts: e.ts })}`;
   if (e.type.startsWith("command_")) return `You asked to ${commandText(e.type.slice("command_".length))}`;
+  const ca = caEvent(e); // #266 corporate actions (kb_health lists them once 0021 is applied)
+  if (ca) return ca.head;
   return EV[e.type] ?? e.type.replace(/_/g, " ");
 }
 
