@@ -128,6 +128,7 @@ def _engine(broker) -> Engine:
     eng.store = types.SimpleNamespace(events=[], event=lambda kind, body, rid=None: eng.store.events.append(
         (kind, body)))
     eng.run = {"id": 7}
+    eng.journal = Journal()  # in memory: the flatten's sale bookkeeping (#252) reads and writes it
     return eng
 
 
