@@ -14,8 +14,9 @@ jobs:
       - run: ./scripts/lock_deps.sh --check  # uv.lock and the requirements exports agree (one locked set, #122)
       - run: uv sync --locked
       - run: uv run ruff check .
-      # 4 workers = the 4 vCPUs of a public-repo ubuntu runner; loadscope keeps each module (and its module-scoped
-      # fixtures) on one worker. Same tests, same example counts; ~14 min -> see docs/ops/hygiene.md (#221)
+      # 4 xdist workers = the 4 vCPUs of a public-repo ubuntu runner (16 GB); worksteal rebalances the long tail.
+      # Same tests and example counts, about 14 -> 3.5 min, peak memory in the job summary (docs/ops/hygiene.md, #221).
+      # If the repo turns private (2 vCPU, 7 GB runners) use -n 2.
       - name: pytest
         run: |
           (while sleep 2; do free -m | awk '/^Mem:/{print $3}'; done) > mem.txt & sampler=$!
