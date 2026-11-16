@@ -180,3 +180,83 @@ def test_the_store_check_writes_its_files_and_runs_with_fetch_daily_check(tmp_pa
     assert load_script().main(["--data", str(tmp_path / "data"), "--check"], now=NOW) == 0
     assert "Bar integrity: 3 keys" in capsys.readouterr().out
     assert (out / "integrity.csv").exists()
+
+
+# ---------------------------------------------------------------- the live gate (issue: live daily path refuses)
+
+
+def _write(root, key: str, df: pd.DataFrame) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from kaibot.ingest.daily_bars import BARS_SCHEMA, bars_path
+
+    p = bars_path(root, key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    t = df.copy()
+    t["date"] = pd.to_datetime(t["date"]).dt.date
+    pq.write_table(pa.Table.from_pandas(t[BARS_SCHEMA.names], schema=BARS_SCHEMA, preserve_index=False), p)
+
+
+def test_window_errors_reports_only_hard_errors_inside_the_window(tmp_path):
+    root = tmp_path / "daily"
+    good = frame()
+    bad = frame()
+    bad.loc[3, "h"] = bad.loc[3, "c"] * 0.9  # ohlc_order on DAYS[3]: before the window below
+    bad.loc[20, "c"] = -1.0  # bad_price on DAYS[20]: inside it
+    bad.loc[25, "v"] = 0.0  # zero_volume: a warning, never a gate failure
+    _write(root, "AAA", good)
+    _write(root, "BBB", bad)
+    errs = di.window_errors(DailyStore(root), DAYS[10], DAYS[-1])
+    assert list(errs.columns) == di.FINDING_COLUMNS
+    assert [(r.key, r.date, r.kind) for r in errs.itertuples()] == [("BBB", str(DAYS[20]), "bad_price")]
+    assert di.window_errors(DailyStore(root), DAYS[21], DAYS[-1]).empty
+    assert len(di.window_errors(DailyStore(root), DAYS[0], DAYS[-1])) == 2
+
+
+def test_failure_reason_is_short_and_plain():
+    assert di.failure_reason(pd.DataFrame(columns=di.FINDING_COLUMNS)) is None
+    errs = pd.DataFrame([di._finding("BBB", DAYS[20], "bad_price"), di._finding("AAA", DAYS[5], "ohlc_order"),
+                         di._finding("AAA", DAYS[6], "early_available")], columns=di.FINDING_COLUMNS)
+    why = di.failure_reason(errs)
+    assert why.startswith("3 bad bars in 2 keys: ")
+    assert f"AAA {DAYS[5]} ohlc_order" in why and f"BBB {DAYS[20]} bad_price" in why
+    many = pd.DataFrame([di._finding(f"K{i:02d}", DAYS[1], "bad_price") for i in range(12)],
+                        columns=di.FINDING_COLUMNS)
+    assert di.failure_reason(many).endswith(", ...") and len(di.failure_reason(many)) <= 200
+
+
+def test_the_store_gate_caches_its_verdict_until_a_file_changes(tmp_path, monkeypatch):
+    root = tmp_path / "daily"
+    _write(root, "AAA", frame())
+    gate = di.StoreGate(root)
+    calls = []
+    real = di.window_errors
+    monkeypatch.setattr(di, "window_errors", lambda *a, **k: calls.append(1) or real(*a, **k))
+    assert gate(DAYS[0], DAYS[-1]) is None and gate(DAYS[0], DAYS[-1]) is None
+    assert len(calls) == 1  # the same files, the same window: checked once
+    bad = frame()
+    bad.loc[29, "l"] = bad.loc[29, "o"] * 1.5
+    _write(root, "AAA", bad)
+    import os
+    st = (root / "bars" / "symbol=AAA.parquet").stat()
+    os.utime(root / "bars" / "symbol=AAA.parquet", ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    assert gate(DAYS[0], DAYS[-1]) == f"1 bad bar in 1 key: AAA {DAYS[29]} ohlc_order"
+    assert len(calls) == 2
+    assert di.StoreGate(tmp_path / "nowhere")(DAYS[0], DAYS[-1]) is None  # no store: the loader says so itself
+
+
+def test_fetch_daily_check_exits_3_on_hard_errors(tmp_path, alpaca, capsys):
+    alpaca.add("SPY", bars(DAYS, [600.0 + i for i in range(len(DAYS))]))
+    alpaca.add("AAA", bars(DAYS, [100.0 + i for i in range(len(DAYS))]))
+    assert run(tmp_path, "--symbols", "AAA", start="2026-10-01") == 0
+    mod = load_script()
+    assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 0
+    store = DailyStore(tmp_path / "data" / "daily")
+    bad = store.bars("AAA")
+    bad.loc[4, "c"] = 0.0
+    _write(store.root, "AAA", bad)
+    capsys.readouterr()
+    assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 3
+    out = capsys.readouterr().out
+    assert "Bar integrity: 2 keys: 1 clean, 0 warn, 1 error." in out and "bad_price (error)" in out

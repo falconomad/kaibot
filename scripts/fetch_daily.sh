@@ -7,7 +7,8 @@
 #   ./scripts/fetch_daily.sh            download + check: about 7 minutes and 180 MB of transfer for today's 300
 #                                       symbols (about 17 minutes while the engine runs); 50 MB on disk
 #   ./scripts/fetch_daily.sh --status   show what is stored and exit
-#   ./scripts/fetch_daily.sh --check    only the offline checks (no keys, no network)
+#   ./scripts/fetch_daily.sh --check    only the offline checks (no keys, no network, no .env); exit 3 when a bar
+#                                       fails a hard integrity check (the live daily path then does not decide)
 # Alpaca allows 200 requests/min per account. This uses 120/min, or 40/min while the engine is running.
 # How to read the result and how the research harness uses the store: docs/ops/daily_bars.md
 set -euo pipefail
@@ -49,4 +50,13 @@ trap 'echo; echo "Stopped. Run again to resume."; exit 130' INT TERM
 awake .venv/bin/python scripts/fetch_daily.py --env "$ENV_FILE" --per-min "$PER_MIN" ${ARGS[@]+"${ARGS[@]}"} \
   2>&1 | tee logs/fetch_daily.log
 echo "Checking (offline)…"
-.venv/bin/python scripts/fetch_daily.py --check 2>&1 | tee logs/fetch_daily_check.log
+rc=0
+.venv/bin/python scripts/fetch_daily.py --check 2>&1 | tee logs/fetch_daily_check.log || rc=$?
+# The integrity summary also goes into logs/fetch_daily.log (the nightly job's log, scripts/service_run.sh), unless
+# this script's output already goes there. Exit 3: a bar fails a hard check and the live daily path will not decide.
+SUMMARY=data/daily/check/integrity.txt
+if [ -f "$SUMMARY" ] && [ ! logs/fetch_daily.log -ef /dev/stdout ]; then
+  { echo "== integrity check $(date '+%Y-%m-%d %H:%M:%S %Z') (exit $rc)"; cat "$SUMMARY"; } >>logs/fetch_daily.log
+fi
+[ "$rc" -eq 3 ] && echo "The daily store fails the integrity check: no multi-day decision until it is fixed (see $SUMMARY)."
+exit "$rc"

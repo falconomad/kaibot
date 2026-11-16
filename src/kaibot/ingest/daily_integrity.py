@@ -31,7 +31,12 @@ old): a stamp before it is an error, a stamp at or after it that differs from 20
 written by `bars_table` therefore never trips either check.
 
 Outputs under <data>/daily/check: integrity.csv (every finding), integrity_summary.csv (one verdict per key:
-clean, warn or error), integrity.txt (plain words).
+clean, warn or error), integrity.txt (plain words). `scripts/fetch_daily.py --check` exits 3 when any error is
+found, and the nightly refresh (scripts/fetch_daily.sh) adds the summary to logs/fetch_daily.log.
+
+The live daily path (engine/live_daily.StoreLoader, only with KAIBOT_MULTIDAY=on) asks `StoreGate` before each
+decision: any error on a bar inside the decision's look-back (`window_errors`) means no decision that evening, and
+the heartbeat says "no decision today: daily prices failed the check (<failure_reason>)". Warnings never block.
 """
 
 from __future__ import annotations
@@ -136,21 +141,23 @@ def check_bars(key: str, bars: pd.DataFrame, actions: pd.DataFrame | None = None
                             f"{n} session{'s' if n > 1 else ''} through {cal[b]}" if n > 1 else "1 session"))
 
     # --- point in time: a bar must not be stamped as known before its session was over
-    if "available_ts" in bars:
+    if "available_ts" in bars and len(cal):
         ts = (pd.to_datetime(bars["available_ts"], utc=True).dt.tz_convert(None).to_numpy()
               .astype("datetime64[s]")[order])  # UTC, NaT where missing
-        on_cal = np.isin(dates, cal)
-        for i in range(len(dates)):
-            d = dates[i].astype(object)
-            if not on_cal[i]:
-                continue  # already an error above; no close to compare with
-            due = _due(d)
-            if np.isnat(ts[i]) or ts[i] < due:
+        on_cal = np.isin(dates, cal)  # off-calendar bars are already errors above: no close to compare with
+        cal_o = cal.astype(object)
+        due = np.array([_due(d) for d in cal_o], dtype="datetime64[s]")
+        stamp = np.array([_stamp(d) for d in cal_o], dtype="datetime64[s]")
+        j = np.clip(np.searchsorted(cal, dates), 0, max(len(cal) - 1, 0))
+        early = on_cal & (np.isnat(ts) | (ts < due[j]))
+        off = on_cal & ~early & (ts != stamp[j])
+        for i in np.flatnonzero(early | off):
+            if early[i]:
                 out.append(_finding(key, dates[i], "early_available",
-                                    f"available_ts {ts[i]} is before {due} UTC"))
-            elif ts[i] != _stamp(d):
+                                    f"available_ts {ts[i]} is before {due[j[i]]} UTC"))
+            else:
                 out.append(_finding(key, dates[i], "off_stamp",
-                                    f"available_ts {ts[i]} UTC, the store writes {_stamp(d)} UTC"))
+                                    f"available_ts {ts[i]} UTC, the store writes {stamp[j[i]]} UTC"))
 
     # --- flat, unchanged runs
     flat = ok & (o == h) & (h == lo) & (lo == c)
@@ -217,6 +224,53 @@ def _save(df: pd.DataFrame, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def window_errors(store: DailyStore, start, end, keys: Sequence[str] | None = None) -> pd.DataFrame:
+    """The hard errors (ERRORS) on bars dated start..end, every key of the store unless `keys` (read-only)."""
+    found = []
+    for key in (list(keys) if keys is not None else store.keys()):
+        bars = store.bars(key, start=start, end=end)
+        found += [f for f in check_bars(key, bars) if f["severity"] == "error"]
+    return pd.DataFrame(found, columns=FINDING_COLUMNS)
+
+
+def failure_reason(errors: pd.DataFrame, show: int = 3) -> str | None:
+    """None when there is no error; else one short line, e.g. "2 bad bars in 1 key: AAA 2026-11-13 ohlc_order,
+    AAA 2026-11-12 bad_price" (at most `show` named, newest first, then ", ...")."""
+    if errors is None or not len(errors):
+        return None
+    e = errors.sort_values(["date", "key"], ascending=[False, True])
+    n, k = len(e), e["key"].nunique()
+    named = [f"{r.key} {r.date} {r.kind}" for r in e.head(show).itertuples()]
+    return (f"{n} bad bar{'s' if n > 1 else ''} in {k} key{'s' if k > 1 else ''}: " + ", ".join(named)
+            + (", ..." if n > show else ""))[:200]
+
+
+class StoreGate:
+    """The live daily path's integrity gate on the store under `root` (<data>/daily): `gate(start, end)` is None
+    when no bar dated start..end fails a hard check, else `failure_reason`. The verdict is kept until a bars file
+    changes (name, size, mtime), so an engine waiting on a bad store does not re-read it every tick. A missing
+    store is None here: the loader reports that itself."""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+        self._last: tuple | None = None
+        self._why: str | None = None
+
+    def _fingerprint(self) -> tuple:
+        out = []
+        for p in sorted((self.root / "bars").glob("symbol=*.parquet")):
+            st = p.stat()
+            out.append((p.name, st.st_size, st.st_mtime_ns))
+        return tuple(out)
+
+    def __call__(self, start, end) -> str | None:
+        fp = (str(start), str(end), self._fingerprint())
+        if fp != self._last:
+            self._why = failure_reason(window_errors(DailyStore(self.root), start, end)) if fp[2] else None
+            self._last = fp
+        return self._why
+
+
 def run_integrity(data_dir: str | Path, keys: Sequence[str] | None = None,
                   log: Callable[[str], None] = print) -> dict:
     """Check the store under <data>/daily, write the files under <data>/daily/check and a summary in plain words."""
@@ -242,4 +296,5 @@ def run_integrity(data_dir: str | Path, keys: Sequence[str] | None = None,
         log(s)
     out.mkdir(parents=True, exist_ok=True)
     (out / "integrity.txt").write_text("\n".join(lines) + "\n")
-    return {"keys": len(summary), "verdicts": verdicts, "findings": by_kind}
+    return {"keys": len(summary), "verdicts": verdicts, "findings": by_kind,
+            "errors": int(sum(by_kind.get(k, 0) for k in ERRORS))}

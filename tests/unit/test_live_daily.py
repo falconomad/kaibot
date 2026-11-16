@@ -348,46 +348,66 @@ def test_the_send_window_ends_before_alpacas_cls_cutoff():
     assert time(15, 50) >= ld.SEND_UNTIL and time(9, 30) < ld.SEND_FROM
 
 
-def test_the_store_loader_reads_the_research_loader_up_to_k_once_its_bars_are_available(tmp_path, data):
-    """Point in time: the view of session k is read only once k's bars are stamped available (20:15 ET), it ends at
-    k, and its decision is the research runner's decision of that evening on the same store."""
+def _stamped_store(tmp_path, cut=(), before=None, edit=None):
+    """The fixture store under tmp_path/daily as scripts/fetch_daily.py writes it: NYSE sessions only (the synthetic
+    fixture also has bars on market holidays, which the integrity check refuses) and each bar stamped available at
+    20:15 ET of its session. Stocks in `cut` lose every bar from `before` on; `edit(sym, df)` may change bars.
+    Returns (universe file, the store's own DailyData)."""
     import json
     import shutil
 
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    from kaibot.engine.daily import decide_after_close
+    from kaibot.ingest import nyse_sessions
     from kaibot.ingest.daily_bars import COMPLETE_AT
 
     shutil.copytree(dr.FIXTURE, tmp_path / "daily")
     meta = json.loads((dr.FIXTURE / "fixture.json").read_text())
-    for sym in meta["symbols"]:  # the stamps scripts/fetch_daily.py writes: 20:15 ET of each session
+    for sym in meta["symbols"]:
         f = tmp_path / "daily" / "bars" / f"symbol={sym}.parquet"
         t = pq.read_table(f)
         days = t.column("date").to_pylist()
-        ts = [datetime.combine(d, COMPLETE_AT, NY).astimezone(UTC) for d in days]
+        cal = set(nyse_sessions.sessions(min(days), max(days)))
+        keep = [d in cal and not (sym in cut and d >= before) for d in days]
+        t = t.filter(pa.array(keep))
+        if edit is not None:
+            df = edit(sym, t.to_pandas())
+            t = pa.Table.from_pandas(df, schema=t.schema, preserve_index=False)
+        ts = [datetime.combine(d, COMPLETE_AT, NY).astimezone(UTC) for d in t.column("date").to_pylist()]
         pq.write_table(t.append_column("available_ts", pa.array(ts, pa.timestamp("s", tz="UTC"))), f)
     uni = tmp_path / "universe.yaml"
     uni.write_text(json.dumps({"sectors": {"XLK": meta["stocks"]}, "market": "SPY"}))
+    m, _ = dr.load_store(tmp_path, uni, "today", "2000-01-01", "2100-01-01")
+    return uni, DailyData.from_market(m)
+
+
+def _decision_k(full, s, k=I0 + 7):
+    while not s.decision_day(full.day(k), full.day(k + 1)):
+        k += 1
+    return k
+
+
+def test_the_store_loader_reads_the_research_loader_up_to_k_once_its_bars_are_available(tmp_path):
+    """Point in time: the view of session k is read only once k's bars are stamped available (20:15 ET), it ends at
+    k, and its decision is the research runner's decision of that evening on the same store."""
+    from kaibot.engine.daily import decide_after_close
+
+    uni, full = _stamped_store(tmp_path)
     loader = ld.StoreLoader(tmp_path, uni, mode="today")
     s = mom.VERSIONS["trend_momentum"]
-    k = I0 + 7
-    while not s.decision_day(data.day(k), data.day(k + 1)):
-        k += 1
-    day = data.day(k)
+    k = _decision_k(full, s)
+    day = full.day(k)
     early = datetime.combine(day, time(16, 30), NY).astimezone(UTC)
     assert "not yet" in loader.available(day, early)
     with pytest.raises(ld.DataNotReady):
         loader(day, early)  # at 16:30 the store's bar of k is not available yet: no decision
     late = datetime.combine(day, time(20, 16), NY).astimezone(UTC)
     view = loader(day, late)
-    assert view.dates[-1] == data.dates[k] and view.terminal == {}
-    tl = decide_after_close(s, view, len(view.dates) - 1, data.day(k + 1), {})
-    m, _ = dr.load_store(tmp_path, uni, "today", str(data.dates[0]), str(data.dates[-1]))
-    full = DailyData.from_market(m)
-    assert tl is not None and tl == decide_after_close(s, full, k, data.day(k + 1), {})
-    nxt = data.day(len(data.dates) - 1) + timedelta(days=1)
+    assert view.dates[-1] == full.dates[k] and view.terminal == {}
+    tl = decide_after_close(s, view, len(view.dates) - 1, full.day(k + 1), {})
+    assert tl is not None and tl == decide_after_close(s, full, k, full.day(k + 1), {})
+    nxt = full.day(len(full.dates) - 1) + timedelta(days=1)
     assert "no SPY bar" in loader.available(nxt, datetime.now(UTC))
 
 
@@ -395,30 +415,50 @@ def test_the_store_loader_waits_for_a_refresh_that_stopped_part_way(tmp_path, da
     """QA-Ops review of #207: SPY has session k but most stocks do not (fetch_daily stopped part-way). The view
     would carry their last close forward, so it is not ready: no decision on yesterday's prices."""
     import json
-    import shutil
 
-    import pyarrow as pa
-    import pyarrow.compute as pc
-    import pyarrow.parquet as pq
-
-    from kaibot.ingest.daily_bars import COMPLETE_AT
-
-    shutil.copytree(dr.FIXTURE, tmp_path / "daily")
     meta = json.loads((dr.FIXTURE / "fixture.json").read_text())
-    k = I0 + 7
-    day = data.day(k)
+    day = data.day(I0 + 7)
     cut = meta["stocks"][: max(1, len(meta["stocks"]) // 2)]
-    for sym in meta["symbols"]:
-        f = tmp_path / "daily" / "bars" / f"symbol={sym}.parquet"
-        t = pq.read_table(f)
-        if sym in cut:  # this stock's refresh never ran: its last bar is k - 1
-            t = t.filter(pc.less(t.column("date"), pa.scalar(day, t.schema.field("date").type)))
-        ts = [datetime.combine(d, COMPLETE_AT, NY).astimezone(UTC) for d in t.column("date").to_pylist()]
-        pq.write_table(t.append_column("available_ts", pa.array(ts, pa.timestamp("s", tz="UTC"))), f)
-    uni = tmp_path / "universe.yaml"
-    uni.write_text(json.dumps({"sectors": {"XLK": meta["stocks"]}, "market": "SPY"}))
+    uni, _ = _stamped_store(tmp_path, cut=cut, before=day)  # their refresh never ran: the last bar is k - 1
     loader = ld.StoreLoader(tmp_path, uni, mode="today")
     late = datetime.combine(day, time(20, 16), NY).astimezone(UTC)
     assert loader.available(day, late) is None  # SPY alone says "ready"
     with pytest.raises(ld.DataNotReady, match="has not finished"):
         loader(day, late)
+
+
+def test_the_store_loader_refuses_a_store_that_fails_the_integrity_check(tmp_path, data):
+    """A bar that fails a hard integrity check (kaibot.ingest.daily_integrity) inside the view's look-back: no
+    decision (StoreFailedCheck, a DataNotReady), with the reason in plain words. A bad bar older than the look-back
+    does not block; warnings never do."""
+    import json
+
+    meta = json.loads((dr.FIXTURE / "fixture.json").read_text())
+    sym = meta["stocks"][0]
+    day = data.day(I0 + 7)
+    late = datetime.combine(day, time(20, 16), NY).astimezone(UTC)
+
+    def high_below_close(at):
+        def edit(s, df):
+            if s == sym:
+                i = int((df["date"] == at).to_numpy().nonzero()[0][0])
+                df.loc[i, "h"] = df.loc[i, "c"] * 0.5
+            return df
+        return edit
+
+    prev = data.day(I0 + 6)
+    uni, _ = _stamped_store(tmp_path / "bad", edit=high_below_close(prev))
+    loader = ld.StoreLoader(tmp_path / "bad", uni, mode="today")
+    assert loader.available(day, late) is None  # SPY's bar alone looks fine
+    with pytest.raises(ld.StoreFailedCheck) as e:
+        loader(day, late)
+    assert isinstance(e.value, ld.DataNotReady)
+    assert str(e.value) == f"1 bad bar in 1 key: {sym} {prev} ohlc_order"
+
+    old = data.day(0)
+    uni, full = _stamped_store(tmp_path / "old", edit=high_below_close(old))
+    day = full.day(len(full.dates) - 5)  # an NYSE session late in the fixture
+    late = datetime.combine(day, time(20, 16), NY).astimezone(UTC)
+    assert (day - old).days > ld.StoreLoader.LOOKBACK_DAYS
+    view = ld.StoreLoader(tmp_path / "old", uni, mode="today")(day, late)  # outside the look-back: decides
+    assert view.dates[-1].astype(object) == day

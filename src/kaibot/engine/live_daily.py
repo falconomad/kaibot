@@ -89,6 +89,11 @@ class DataNotReady(RuntimeError):
     """The daily store does not hold the decision's session yet (or not as available at this time)."""
 
 
+class StoreFailedCheck(DataNotReady):
+    """The daily store holds the session, but a bar inside the decision's look-back fails a hard integrity check
+    (kaibot.ingest.daily_integrity): no decision on those prices. The message is the check's plain reason."""
+
+
 class Account(Protocol):
     """What the daily path needs from the engine (or, in the parity test, from a SimBroker account and a ledger)."""
 
@@ -217,13 +222,16 @@ class StoreLoader:
     scripts/fetch_daily.sh on the Mac; free Alpaca history under the shared budget). The same preparation as the
     ten-year test (`engine/daily_report.load_store`, `mode` "pit": the S&P 500 members of each date), read only up to
     k and only once k's bars are available (`available_ts`, 20:15 ET): otherwise DataNotReady (fail closed: no
-    decision, no order). Live, a held company whose bars stop is the venue's business (Alpaca books a delisting),
-    so the research runner's terminal closes are dropped."""
+    decision, no order). Before the view is read, every bar of the look-back must pass the hard integrity checks of
+    kaibot.ingest.daily_integrity (prices, OHLC order, volume, dates, NYSE sessions, `available_ts`); otherwise
+    StoreFailedCheck (fail closed). Live, a held company whose bars stop is the venue's business (Alpaca books a
+    delisting), so the research runner's terminal closes are dropped."""
 
     LOOKBACK_DAYS = 600  # ~410 sessions: the longest signal window (SPY's 200-day average) plus ATR and ADV
 
     def __init__(self, root: Path, universe_file: Path, mode: str = "pit", market: str = "SPY") -> None:
         self.root, self.universe_file, self.mode, self.market = Path(root), Path(universe_file), mode, market
+        self._gate = None  # kaibot.ingest.daily_integrity.StoreGate, made at the first decision
 
     def available(self, k: date, now: datetime) -> str | None:
         """None when session k's bars are in the store and were available at `now`; else why not."""
@@ -251,9 +259,16 @@ class StoreLoader:
             raise DataNotReady(why)
         from kaibot.engine import daily_report as dr
 
+        start = k - timedelta(days=self.LOOKBACK_DAYS)
+        if self._gate is None:
+            from kaibot.ingest.daily_integrity import StoreGate
+
+            self._gate = StoreGate(self.root / "daily")
+        why = self._gate(start, k)
+        if why:
+            raise StoreFailedCheck(why)
         try:
-            m, _ = dr.load_store(self.root, self.universe_file, self.mode, str(k - timedelta(days=self.LOOKBACK_DAYS)),
-                                 str(k))
+            m, _ = dr.load_store(self.root, self.universe_file, self.mode, str(start), str(k))
         except (SystemExit, ValueError, FileNotFoundError) as e:
             raise DataNotReady(f"daily store unreadable: {e}") from None
         data = DailyData.from_market(m)
@@ -405,6 +420,7 @@ class LiveDaily:
         self._rid: int | None = None
         self._data: dict[date, DailyData] = {}  # the day's view, read once per decision session
         self._waiting: dict[str, str] = {}  # rule -> why the last decision could not be taken (event once)
+        self._failed_check: set[str] = set()  # rules whose last wait was a store failing the integrity check
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
@@ -689,11 +705,16 @@ class LiveDaily:
             try:
                 data = self._view(closed, now)
             except DataNotReady as e:
+                if isinstance(e, StoreFailedCheck):
+                    self._failed_check.add(r.name)
+                else:
+                    self._failed_check.discard(r.name)
                 if self._waiting.get(r.name) != str(e):
                     self._waiting[r.name] = str(e)
                     self.event("multi_day_waiting", {"strategy": r.name, "session": str(closed), "why": str(e)[:200]})
                 continue
             self._waiting.pop(r.name, None)
+            self._failed_check.discard(r.name)
             held = {s: q for s, (q, _) in self.account.held(r.name).items()}
             tl = decide_after_close(r.strategy, data, data.index_of(closed), fill, held)
             body = {"run_id": rid, "strategy": r.name, "session": str(closed), "fill_session": str(fill),
@@ -897,7 +918,9 @@ class LiveDaily:
             except Exception as e:  # the note must never stop the send step
                 why = f"{type(e).__name__}"
         first = not any(b.get("strategy") == rule for b in self._entries("md_decision"))
-        note = ("no decision today: daily store not refreshed (see logs/fetch_daily.log)" if why else
+        failed = why is not None and rule in self._failed_check and self._waiting.get(rule) == why
+        note = ("no decision today: daily prices failed the check" if failed else
+                "no decision today: daily store not refreshed (see logs/fetch_daily.log)" if why else
                 "no decision yet: the first one is taken after a close" if first else
                 "no decision today: none was taken after the last close (engine off then?)")
         self._missed[rule] = (str(session), note + (f" ({why})" if why else ""))
@@ -963,7 +986,8 @@ class LiveDaily:
         return [x for x in om.orders.values() if x.session == str(session) and x.purpose != "stop"] if om else []
 
 
-__all__ = ["LiveDaily", "Rule", "StoreLoader", "DataNotReady", "live_limits", "live_builder", "with_session",
+__all__ = ["LiveDaily", "Rule", "StoreLoader", "DataNotReady", "StoreFailedCheck", "live_limits", "live_builder",
+           "with_session",
            "as_of", "target_to_json", "target_from_json", "SEND_FROM", "SEND_UNTIL", "PREREG_STOP_ATR"]
 
 

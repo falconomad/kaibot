@@ -57,9 +57,9 @@ def daily_view(px_b: float) -> DailyData:
 
 
 class DailyAccount(Account):
-    def __init__(self, tmp_path, monkeypatch, gap_b=1.0, book_end=None, view=True):
+    def __init__(self, tmp_path, monkeypatch, gap_b=1.0, book_end=None, view=True, failed_check=None):
         monkeypatch.setenv("KAIBOT_MULTIDAY", "on")
-        self.has_view = view
+        self.has_view, self.failed_check = view, failed_check
         f = frames()["B"]
         self.px_b = float(f[f["ts"] < f["ts"].iloc[0] + timedelta(hours=6, minutes=30)]["c"].iloc[-1])
         self.view = daily_view(self.px_b)
@@ -73,6 +73,8 @@ class DailyAccount(Account):
         self.broker.shorting_enabled = False  # as Alpaca reports it once shorting is off (paper_start step 3)
 
     def load(self, k: date, now):
+        if self.failed_check:  # StoreLoader: the store fails a hard integrity check (kaibot.ingest.daily_integrity)
+            raise ld.StoreFailedCheck(self.failed_check)
         if str(k) != DAY1 or not self.has_view:
             raise ld.DataNotReady(f"the daily store has no SPY bar for {k} (run ./scripts/fetch_daily.sh)")
         return self.view
@@ -202,6 +204,21 @@ def test_the_heartbeat_says_plainly_when_the_daily_store_was_not_refreshed(tmp_p
     assert st["multi_day"]["note"].startswith(f"{MD}: no decision today: daily store not refreshed")
     kinds = [e["type"] for e in a.store.tables["event"]]
     assert "multi_day_no_decision" in kinds and a.cls_orders() == []
+
+
+def test_the_heartbeat_says_plainly_when_the_daily_prices_failed_the_check(tmp_path, monkeypatch):
+    """A daily store that fails a hard integrity check: no decision, no order, and the heartbeat says why."""
+    why = f"1 bad bar in 1 key: B {DAY1} ohlc_order"
+    a = DailyAccount(tmp_path, monkeypatch, failed_check=why)
+    a.ticks(a.open1, 0, 390)
+    st = a.after_close(a.open1) or a.eng.tick()
+    assert st["multi_day"]["rules"][MD]["waiting"] == why
+    assert not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 2)
+    st = a.eng._status(1)
+    assert st["multi_day"]["note"] == f"{MD}: no decision today: daily prices failed the check ({why})"
+    ev = [e for e in a.store.tables["event"] if e["type"] == "multi_day_no_decision"]
+    assert ev and a.cls_orders() == []
 
 
 # ---------------------------------------------------------------- QA-Ops review of #207: venue conflicts
