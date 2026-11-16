@@ -62,12 +62,12 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
 
       <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Trades</h3>
       {trades.length ? (
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="Trades">
           <thead><tr><th>Time (ET)</th><th>Stock</th><th>Strategy</th><th>Why it closed</th><th className="r">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th></tr></thead>
           <tbody>{trades.map((t) => (
             <tr key={t.id}>
               <td className="num">{timeEt(t.entry_ts)}</td>
-              <td><Link to={`/trades/${t.id}`} style={{ color: "inherit" }}><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
+              <td><Link to={`/trades/${t.id}`} className="rowlink"><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
               <td className="muted" title={`code: ${t.strategy}`}>{strat(t.strategy)}</td>
               <td className="muted" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}</td>
               <td className="r num">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
@@ -87,7 +87,7 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
 
       {(r.shadow?.length ?? 0) > 0 && (<>
         <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Shadow strategies (never traded, counterfactual after costs)</h3>
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="Shadow strategies (never traded, counterfactual after costs)">
           <thead><tr><th>Time (ET)</th><th>Strategy</th><th>Stock</th><th className="r">Would have made</th><th className="r">R</th></tr></thead>
           <tbody>{r.shadow!.map((s, i) => (
             <tr key={i}><td className="num">{timeEt(s.ts)}</td><td className="muted" title={`code: ${s.strategy}`}>{strat(s.strategy)}</td><td><StockCell symbol={s.symbol} /></td>
@@ -138,7 +138,7 @@ function EvidenceCard({ runId }: { runId: number }) {
 
 function GroupTable({ rows }: { rows: AttributionGroup[] }) {
   return (
-    <table className="list">
+    <table className="list" tabIndex={0} aria-label="Evidence counter">
       <thead><tr><th>Group</th><th className="r">Trades</th><th className="r">P&amp;L</th><th className="r">Avg R</th><th className="r">Win rate</th><th className="r">t</th><th>Flag</th></tr></thead>
       <tbody>{rows.map((g) => (
         <tr key={g.dim + g.key}>
@@ -186,7 +186,7 @@ function Attribution({ runId }: { runId: number }) {
         <GroupTable rows={a.groups.filter((g) => g.dim === dim)} />
         {weeksList.length > 1 && (<>
           <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>By week</h3>
-          <table className="list">
+          <table className="list" tabIndex={0} aria-label="By week">
             <thead><tr><th>Week of</th>{[...new Set(a.weekly.map((w) => w.strategy))].map((s) => <th key={s} className="r">{strat(s)}</th>)}</tr></thead>
             <tbody>{weeksList.map((wk) => (
               <tr key={wk}><td className="num">{day(wk)}</td>
@@ -263,7 +263,7 @@ function ChaptersCard({ runId }: { runId: number }) {
         The go-live review judges one frozen setup only.</p>
       {q.isPending ? <Skeleton /> : q.isError ? <p className="muted" style={{ fontSize: 13 }}>Chapters aren't available yet: {String((q.error as Error).message)}</p>
         : !q.data.length ? <Empty>No chapters yet. Everything so far ran on the level's defaults.</Empty> : (
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="Chapters">
           <thead><tr><th>Chapter</th><th>Dates</th><th className="r">Trades</th><th className="r">P&amp;L</th><th className="r">Mean R</th><th className="r">t</th><th>Verdict</th></tr></thead>
           <tbody>{q.data.map((c) => {
             const early = c.too_early || c.n_trades < 30;

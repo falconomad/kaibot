@@ -26,7 +26,7 @@ function Line({ it, open, onToggle, beats }: { it: TapeItem; open?: boolean; onT
     return (
       <>
         <td><span className={`tag ${it.side === "buy" ? "allow" : "downgrade"}`}>{it.side === "buy" ? "bought" : "sold"}</span></td>
-        <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
+        <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} className="rowlink"><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}</td>
         <td className="num">{it.qty} @ {px(it.venue_px)} <span className="muted">(shadow {px(it.shadow_px)}, fees {money(it.fees)})</span>
           {it.side === "sell" && it.exit_reason && <span className="muted" title={`code: ${it.exit_reason}`}> · {exitText(it.exit_reason)}</span>}
           {it.tag && <span className="muted" title={`code: ${it.tag}`}> · {it.tag.replace(/_/g, " ")}</span>}
@@ -49,7 +49,7 @@ function Line({ it, open, onToggle, beats }: { it: TapeItem; open?: boolean; onT
   return (
     <>
       <td><span className={`tag ${taken ? "allow" : it.mode === "shadow" ? "" : "veto"}`}>{label}</span></td>
-      <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} style={{ color: "inherit" }}><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
+      <td>{it.trade_id ? <Link to={`/trades/${it.trade_id}`} className="rowlink"><StockCell symbol={it.symbol} /></Link> : <StockCell symbol={it.symbol} />}
         <span className="muted" title={`${ruleLabel(it.strategy)} · code: ${it.strategy}`}> · {ruleName(it.strategy)}</span>
         <RuleExperiment code={it.strategy} beats={beats} /></td>
       <td title={ex.detail}><div>{ex.outcome}</div><div className="muted" style={{ fontSize: 13 }}>{ex.saw}</div>
@@ -103,7 +103,7 @@ export function Tape() {
           : all.length ? "Nothing of this kind in the loaded part of the tape. Choose All, or load older entries."
           : "Nothing yet. Setups are checked every 5 minutes from 09:35 to 15:45 ET."}</Empty>
       ) : (
-        <table className="list" style={{ marginTop: 12 }}>
+        <table className="list" tabIndex={0} aria-label="Tape" style={{ marginTop: 12 }}>
           <thead><tr><th>Time (ET)</th><th>What</th><th>Stock</th><th>Why</th><th className="r">Result</th></tr></thead>
           <tbody>{rows.map((it, i) => {
             const d = dateEt(it.ts);

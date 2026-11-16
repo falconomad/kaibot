@@ -16,11 +16,11 @@ export function Trades() {
   const pages = Math.max(1, Math.ceil(total / PAGE));
   return (
     <section className="card" aria-labelledby="trades-h">
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 10 }}>
         <h2 id="trades-h" style={{ margin: 0 }}>All trades · {run.label ?? `Run ${run.id}`}</h2>
         {q.data && <span className="muted num">{total} total</span>}
         <span className="spacer" />
-        <nav aria-label="Pages" style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <nav aria-label="Pages" style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", maxWidth: "100%" }}>
           <button disabled={page === 0} onClick={() => setPage(page - 1)}>Newer</button>
           <span className="num muted" aria-live="polite">Page {page + 1} of {pages}</span>
           <button disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}>Older</button>

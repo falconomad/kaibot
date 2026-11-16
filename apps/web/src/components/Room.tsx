@@ -131,7 +131,7 @@ export function RoomTranscript({ s, trade, compact }: { s: RoomSession; trade?: 
           ))}</ul>
         </details>
       )}
-      <p className="muted" style={{ fontSize: 11, margin: 0 }}>Model text is shown as written and is not advice. The room can only veto or halve a trade; it never sets price, size, stop or exit.</p>
+      <p className="muted" style={{ fontSize: 12, margin: 0 }}>Model text is shown as written and is not advice. The room can only veto or halve a trade; it never sets price, size, stop or exit.</p>
     </div>
   );
 }

@@ -48,11 +48,11 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
         <span><i className="sw" style={{ borderColor: "var(--s-pot)" }} />Pot, after costs</span>
         <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dashed" }} />SPY, same start</span>
         <span className="spacer" />
-        <button style={{ minHeight: 32, fontSize: 13, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
+        <button style={{ minHeight: 44, fontSize: 13, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
       </div>
       {table ? (
         <div style={{ maxHeight: 260, overflow: "auto" }}>
-          <table className="list"><thead><tr><th>Session</th><th className="r">Pot</th><th className="r">SPY, same start</th></tr></thead>
+          <table className="list" tabIndex={0} aria-label="Pot and SPY by session"><thead><tr><th>Session</th><th className="r">Pot</th><th className="r">SPY, same start</th></tr></thead>
             <tbody>{data.map((d) => <tr key={d.session}><td>{day(d.session)}</td><td className="r num">{money(d.pot)}</td><td className="r num">{money(d.spy)}</td></tr>)}</tbody>
           </table>
         </div>
@@ -64,7 +64,7 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
               <g key={t}>
                 <line x1={M.l} x2={W - M.r} y1={g.y(t)} y2={g.y(t)} stroke={t === start ? "var(--rule-strong)" : "var(--rule)"} strokeWidth={t === start ? 1 : 0.5}
                   strokeDasharray={t === start ? undefined : "2 3"} />
-                <text x={M.l - 8} y={g.y(t) + 4} textAnchor="end" fontSize="11" fill="var(--slate)" className="num">{short(t)}</text>
+                <text x={M.l - 8} y={g.y(t) + 4} textAnchor="end" fontSize="12" fill="var(--slate)" className="num">{short(t)}</text>
               </g>
             ))}
             {markers.map((mk) => {
@@ -73,12 +73,12 @@ export function PotChart({ data, start, markers = [] }: { data: Curve[]; start: 
               return (
                 <g key={mk.session + mk.label} className="fade-late">
                   <line x1={g.x(i)} x2={g.x(i)} y1={M.t} y2={H - M.b} stroke="var(--ai)" strokeWidth="1" strokeDasharray="4 4" />
-                  <text x={g.x(i) + 4} y={M.t + 10} fontSize="10" fill="var(--ai)">{mk.label}</text>
+                  <text x={g.x(i) + 4} y={M.t + 10} fontSize="12" fill="var(--ai)">{mk.label}</text>
                 </g>
               );
             })}
-            <text x={M.l} y={H - 6} fontSize="11" fill="var(--slate)">{day(data[0].session)}</text>
-            <text x={W - M.r} y={H - 6} fontSize="11" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
+            <text x={M.l} y={H - 6} fontSize="12" fill="var(--slate)">{day(data[0].session)}</text>
+            <text x={W - M.r} y={H - 6} fontSize="12" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
             <defs>
               <linearGradient id="kb-potfill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.28" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />

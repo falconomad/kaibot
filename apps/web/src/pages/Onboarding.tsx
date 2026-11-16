@@ -44,9 +44,9 @@ export function Onboarding() {
           <section className="card">
             <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>How much paper money should Kaibot trade?</h1>
             <p className="muted" style={{ marginTop: 0 }}>Simulated money only. Kaibot keeps its own ledger at exactly this amount and never uses more.</p>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, maxWidth: "100%" }}>
               <button aria-label="Less" onClick={() => setAmount(clamp(amount - 500))}>−</button>
-              <input type="text" inputMode="numeric" aria-label="Amount in US dollars" className="hero" style={{ width: 260, height: 56, fontSize: 32, textAlign: "center" }}
+              <input type="text" inputMode="numeric" aria-label="Amount in US dollars" className="hero" style={{ width: 260, minWidth: 0, flex: "0 1 260px", height: 56, fontSize: 32, textAlign: "center" }}
                 value={money(amount).replace(".00", "")} onChange={(e) => { const v = Number(e.target.value.replace(/[^0-9]/g, "")); if (v) setAmount(Math.min(100000, v)); }}
                 onBlur={() => setAmount(clamp(amount))} />
               <button aria-label="More" onClick={() => setAmount(clamp(amount + 500))}>+</button>

@@ -16,8 +16,8 @@ export function ExperimentBadge({ e, limits = false }: { e: Experiment; limits?:
   const stop = (ev: MouseEvent | KeyboardEvent) => ev.stopPropagation();
   return (
     <span className="exp">
-      <button type="button" className="tag exp-tag" title={v.tip} aria-expanded={open}
-        onClick={(ev) => { stop(ev); setOpen(!open); }} onKeyDown={stop}>{v.text}</button>
+      <button type="button" className="exp-btn" title={v.tip} aria-expanded={open}
+        onClick={(ev) => { stop(ev); setOpen(!open); }} onKeyDown={stop}><span className="tag exp-tag">{v.text}</span></button>
       {limits && (v.cap || v.stop) && <span className="muted exp-limits">{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}
       {open && <span className="exp-tip" role="note">{v.tip}</span>}
     </span>

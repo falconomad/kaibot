@@ -60,9 +60,9 @@ export function DayBar({ body, wide }: { body: ConfigBody; wide?: boolean }) {
       <rect className="kb-anim" x={x(s)} y="6" width={Math.max(0, x(e) - x(s))} height="14" rx="7" fill="var(--sea)" />
       <rect className="kb-anim" x={x(fomc - q)} y="3" width={x(fomc + q) - x(fomc - q)} height="20" rx="4" fill="var(--warn)" opacity=".45" />
       <line x1={x(15 * 60 + 55)} y1="0" x2={x(15 * 60 + 55)} y2="26" stroke="var(--loss)" strokeWidth="2" />
-      <text x="0" y="38" fill="var(--stale)" fontSize="10">09:30</text>
-      <text x={W / 2} y="38" fill="var(--stale)" fontSize="10" textAnchor="middle">12:45</text>
-      <text x={W} y="38" fill="var(--stale)" fontSize="10" textAnchor="end">16:00</text>
+      <text x="0" y="38" fill="var(--stale)" fontSize="12">09:30</text>
+      <text x={W / 2} y="38" fill="var(--stale)" fontSize="12" textAnchor="middle">12:45</text>
+      <text x={W} y="38" fill="var(--stale)" fontSize="12" textAnchor="end">16:00</text>
     </svg>
   );
 }

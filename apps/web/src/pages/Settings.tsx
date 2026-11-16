@@ -40,7 +40,7 @@ export function Settings() {
 
       <section className="card" aria-labelledby="lv-h">
         <h2 id="lv-h">The levels</h2>
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="The levels">
           <thead><tr><th>Level</th><th className="r">Risk per trade</th><th className="r">Daily stop</th><th className="r">Largest position</th>
             <th className="r">Positions</th><th className="r">Run ends at</th><th>Strategies</th></tr></thead>
           <tbody>{(Object.keys(LEVELS) as Level[]).map((k) => {
@@ -67,7 +67,7 @@ export function Settings() {
         </div>
         <p className="muted" style={{ fontSize: 13 }}>Starting a new run closes the current run's positions first and keeps every old run read-only, so its record
           can't change. Pick a run from the menu at the top to look at it.</p>
-        <table className="list">
+        <table className="list" tabIndex={0} aria-label="All runs">
           <thead><tr><th>Run</th><th>Kind</th><th>Status</th><th className="r">Amount</th><th>From</th><th>To</th></tr></thead>
           <tbody>{runs.map((r) => (
             <tr key={r.id} style={r.id === run.id ? { background: "var(--paper)" } : undefined}>
