@@ -198,7 +198,26 @@ class _Momentum:
                           reasons=tuple(f"sell {s}: {r}" for s, r in sell.items()),
                           features={"keep": keep, "buy": buy, "sell": sell, "ranked": n,
                                     "max_names": self.max_names, "atr_risk": self.atr_risk,
-                                    "resize": self.resize_week(ctx.fill_session)})
+                                    "resize": self.resize_week(ctx.fill_session),
+                                    "sell_when": self.sell_when(v, order, ctx.held, str(ctx.session))})
+
+    def sell_when(self, v, order: np.ndarray, held, as_of: str) -> dict[str, list[dict]]:
+        """#229, reporting only: each held name's readings of the rule's sell conditions at this decision (the
+        dashboard's "Sells when"). Read from the same arrays the decision used; nothing here decides anything."""
+        n = len(order)
+        cutoff = math.ceil(self.exit_top * n)
+        place = {int(j): k + 1 for k, j in enumerate(order.tolist())}
+        out: dict[str, list[dict]] = {}
+        for sym in held:
+            j = v.col(sym)
+            rank = place.get(j)
+            out[sym] = [{"code": "rank", "reading": rank, "threshold": cutoff, "of": n,
+                         "met": rank is None or rank > cutoff, "as_of": as_of}, *self.readings(v, j, as_of)]
+        return out
+
+    def readings(self, v, j: int, as_of: str) -> list[dict]:
+        """The rule's other sell conditions for column j (none for a rank-only rule)."""
+        return []
 
     def resize_week(self, fill: date) -> bool:
         return False
@@ -251,6 +270,22 @@ class TrendMomentum(_Momentum):
             return "gap" if gap[j] else "trend" if below[j] else None
 
         return score, ok, sell_if
+
+    def readings(self, v, j: int, as_of: str) -> list[dict]:
+        c = v.close(max(SMA_STOCK, MOVE_WINDOW + 1))[:, j]
+        w = c[-SMA_STOCK:]
+        avg = float(w.mean()) if w.shape[0] == SMA_STOCK else math.nan
+        trend = (float(c[-1]) / avg - 1) * 100 if math.isfinite(avg) and avg > 0 else None
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r = np.abs(c[1:] / c[:-1] - 1)[-MOVE_WINDOW:]
+        r = r[np.isfinite(r)]
+        move = float(r.max()) * 100 if len(r) else None
+        below = bool(below_average(c[:, None])[0])
+        gap = bool(big_move(c[-(MOVE_WINDOW + 1):, None])[0])
+        return [{"code": "trend", "reading_pct": None if trend is None else round(trend, 2), "threshold_pct": 0.0,
+                 "window_days": SMA_STOCK, "met": below, "as_of": as_of},
+                {"code": "gap", "reading_pct": None if move is None else round(move, 2),
+                 "threshold_pct": round(MOVE_MAX * 100, 6), "window_days": MOVE_WINDOW, "met": gap, "as_of": as_of}]
 
 
 @dataclass(frozen=True)

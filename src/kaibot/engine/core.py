@@ -373,6 +373,8 @@ class Engine:
         self._closed_cache: tuple | None = None
         self._breach: tuple[int, datetime] | None = None  # #211: (run, first check) of an unconfirmed book breach
         self._breach_rid: int | None = None  # the run whose journalled breach `_breach` was read for
+        self.book_line: dict | None = None  # #229: the multi-day book's peak and stop line (heartbeat)
+        self._book_peak_ts: str | None = None
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -568,6 +570,8 @@ class Engine:
         if self.daily is not None:
             try:
                 st["multi_day"] = self.daily.status(self.now().astimezone(_et()).date())
+                if self.book_line is not None and self.book_line.get("run_id") == self._rid():
+                    st["multi_day"]["book_line"] = dict(self.book_line)  # #229
             except Exception:
                 log.exception("daily path status unavailable")
         return st
@@ -609,6 +613,7 @@ class Engine:
         for _, _, _, e in self.journal.entries(kinds=("md_book_peak",)):
             if e.get("run_id") == rid:
                 peak = float(e["peak"])
+                self._book_peak_ts = e.get("ts")
         return peak
 
     def _book_end_check(self, book_pnl: float) -> None:
@@ -625,6 +630,8 @@ class Engine:
             return
         ended = self.daily.account.book_ended()
         if ended:
+            if self.book_line is not None and self.book_line.get("run_id") == rid:
+                self.book_line = {**self.book_line, "ended": True}
             if self._md_sleeves():  # closed: whatever is still held is sold (a sale under way is not repeated)
                 self._flatten_md("book_drawdown", {}, self.monotonic())
             return
@@ -636,7 +643,12 @@ class Engine:
         peak = self._book_peak(rid)
         if peak is None or equity > peak + 0.005:
             peak = max(peak or float(b.amount), equity)
-            self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self.now().isoformat()})
+            self._book_peak_ts = self.now().isoformat()
+            self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self._book_peak_ts})
+        # #229, reporting only: the book's distance to its stop line, repeated in every heartbeat (`_daily_status`)
+        self.book_line = {"run_id": rid, "equity": round(equity, 2), "peak": round(peak, 2),
+                          "peak_ts": self._book_peak_ts, "drawdown_pct": round(drawdown_pct(peak, equity), 2),
+                          "end_pct": end, "ended": False}
         if self._breach_rid != rid:  # QA-Ops second key on #213: an unconfirmed breach survives a restart
             self._breach, self._breach_rid = self._journalled_breach(rid), rid
         if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
