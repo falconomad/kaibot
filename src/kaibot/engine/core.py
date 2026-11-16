@@ -1220,6 +1220,8 @@ class Engine:
             elif self.day is None:
                 self._finalize_missed(now)  # S77 (audit D8): a restart after the close still closes the day
             self._daily_step("after_close", lambda: self._daily_after_close(now))  # #206: decide for the next session
+            if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+                self._daily_step("preopen", lambda: self.daily.preopen())  # the pre-open review, from 08:30 ET
             self._maybe_prepare(clk, now)
             return self._daily_status({"state": "market_closed", "next_open": clk.get("next_open"),
                                        "account_clean": self.account_clean})
@@ -1251,6 +1253,8 @@ class Engine:
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
         self._manage_stops(m)
+        if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+            self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
         self._daily_step("send", lambda: self.daily.send(d.day))  # #206: closing-auction orders, 09:31-15:45 ET
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all

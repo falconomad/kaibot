@@ -29,6 +29,11 @@ The steps, per session (times ET):
                              buys need `entry_block() is None` and a clean reconciliation
     every tick               `sync`: the order manager books the venue's fills (the closing auction's at 16:00)
 
+Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
+every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the
+review (agents/preopen_daily.PreopenDesk, a worker thread); its outcome is journalled (`md_review`) before the send;
+`send` applies it to the plan (veto drops a buy, downgrade halves the increase, nothing else) before `md_send`.
+
 Restart safety: a restart between the decision and the send finds `md_decision` and sends from it (the rule is not
 asked again); a restart in the middle of a send finds `md_send` without `md_sent` and runs the target loop again
 on the SAME journalled targets (the open orders cover them, so nothing is sent twice; client ids are deterministic
@@ -73,7 +78,8 @@ from kaibot.strategies.momentum import RESIZE_BUFFER
 log = logging.getLogger("kaibot.engine.daily")
 
 SEND_FROM, SEND_UNTIL = time(9, 31), time(15, 45)  # Alpaca refuses `cls` orders 15:50-19:00: five minutes' margin
-DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel")
+DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel", "md_review")
+PREOPEN_FROM = time(8, 30)  # #131: the pre-open review starts here, before the 09:31 send window
 # Product call on #207 (13 Nov 2026): a rule whose book reached its run end stays RETIRED across runs and restarts,
 # until the stakeholder re-enables it explicitly: KAIBOT_REENABLE=<rule>:<retirement date>, read once at start-up.
 RETIRE_KINDS = ("md_retired", "md_reenabled")
@@ -381,7 +387,7 @@ class LiveDaily:
                  event: Callable[[str, dict], None] = lambda kind, body: None,
                  known_order_ids: Callable[[], set[str]] = set,
                  session_close: Callable[[date], time | None] = lambda d: None,
-                 store=None, reenable: str | None = None, ca=None) -> None:
+                 store=None, reenable: str | None = None, ca=None, review=None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps). `ca`: the live-safety exclusion of
         announced corporate actions (engine/corp_guard.CorporateActionGuard; #266, Amendment 6); None: none."""
@@ -412,6 +418,9 @@ class LiveDaily:
         self.ca = ca
         self._ca_unread: dict[str, tuple[str, str]] = {}  # rule -> (session, why the read failed): no buys then
         self._ca_evening: date | None = None  # the decision evening whose held names the heartbeat notes cover
+        self._preopen_day: date | None = None
+        self._preopen_ok = False
+        self.review = review  # #131: agents/preopen_daily.PreopenDesk, or None (off: nothing below changes)
 
     # ---------------------------------------------------------------- state
     @property
@@ -775,10 +784,20 @@ class LiveDaily:
                 continue  # a fail-safe stop still holds shares (or blocks a buy): the next tick goes on
             planned = self._send_entry(r.name, session)
             if planned is None:
+                if self.review is not None and self._review_record(r.name, session) is None \
+                        and self.review.pending(r.name, session):
+                    continue  # #131: the pre-open review is still running (it has its own hard deadline)
                 planned = self._plan(r, session, rid)
                 if planned is None:
                     continue
+                if self.review is not None:
+                    planned = self._reviewed(r, session, rid, planned)
+                    if planned is None:
+                        continue
                 self.journal.append("md_send", planned)
+                rv = planned.get("review") or {}
+                if rv.get("vetoed") or rv.get("downgraded"):
+                    self.event("multi_day_review_applied", {"strategy": r.name, "session": str(session), **rv})
                 held = {s: q for s, (q, _) in self.account.held(r.name).items()}  # #229: the plan, for the dashboard
                 self.event("multi_day_plan", {"strategy": r.name, "session": str(session),
                                               "decided": planned.get("decided"), "note": planned.get("note"),
@@ -822,6 +841,70 @@ class LiveDaily:
                                                 "sent": [x["coid"] for x in sent], "skipped": skipped})
                 done.append(r.name)
         return done
+
+    # ---------------------------------------------------------------- the pre-open review (#131, off by default)
+    def _review_record(self, rule: str, session: date) -> dict | None:
+        """The journalled `md_review` of (rule, session), collecting a finished one first (journal, then event)."""
+        rec = self._send_entry(rule, session, "md_review")
+        if rec is not None or self.review is None:
+            return rec
+        rec = self.review.collect(rule, session)
+        if rec is not None:
+            from kaibot.agents.preopen_daily import EVENT, event_body
+
+            self.journal.append("md_review", rec)
+            self.event(EVENT, event_body(rec))
+        return rec
+
+    def _reviewed(self, r: Rule, session: date, rid: int, planned: dict) -> dict | None:
+        """The plan with the review's verdicts applied, or None while the review runs (it is started here when the
+        pre-open step did not, e.g. an engine started after 09:31)."""
+        from kaibot.agents.preopen_daily import reviewed_plan
+
+        held = self.account.held(r.name)
+        rec = self._review_record(r.name, session)
+        if rec is None:
+            if not self.review.pending(r.name, session):
+                dec = self._decision_for(r.name, session)
+                tl = target_from_json(dec["target"]) if dec is not None else None
+                self.review.submit(r.name, session, planned, tl, held, self.now(), rid)
+            rec = self._review_record(r.name, session)  # an inline review (replays) is done now
+            if rec is None:
+                return None
+        return reviewed_plan(r.name, planned, held, rec)[0]
+
+    def preopen(self) -> list[str]:
+        """#131: from 08:30 ET until the send window opens, start the review of each rule's plan for today's
+        session and journal finished reviews. Nothing at all when the review is off. Returns the rules started."""
+        if self.review is None or not self.review.enabled:
+            return []
+        now = self.now()
+        et = now.astimezone(NY)
+        if not (PREOPEN_FROM <= et.time() < SEND_FROM):
+            return []
+        rid = self.account.run_id()
+        if rid is None or self.account.book_ended() or self._manager() is None:
+            return []
+        session = et.date()
+        if self._preopen_day != session:  # one calendar read per day: is today a session?
+            try:
+                self._preopen_day, self._preopen_ok = session, self.next_session(self.prev_session(session)) == session
+            except Exception:
+                return []  # unreadable: the send step starts the review instead
+        if not self._preopen_ok:
+            return []
+        started = []
+        for r in self.active():
+            if self._send_entry(r.name, session) is not None or self._review_record(r.name, session) is not None:
+                continue
+            if self.review.pending(r.name, session):
+                continue
+            planned = self._plan(r, session, rid)
+            if planned is None:
+                continue
+            self._reviewed(r, session, rid, planned)  # started (an inline review is journalled at once)
+            started.append(r.name)
+        return started
 
     def _drop_failsafe_stops(self, rule: str, session: date) -> bool:
         """QA-Ops review of #207: a stop the watchdog or the dead-man placed while the engine was silent (hung, not
@@ -1010,8 +1093,16 @@ class LiveDaily:
                 notes.append(f"{r.name}: {miss[1]}")
             if r.name in self._waiting:  # the next decision cannot be taken yet
                 row["waiting"] = self._waiting[r.name][:200]
+            if self.review is not None:  # #131: absent while the review is off (the heartbeat is unchanged)
+                from kaibot.agents.preopen_daily import status_block
+
+                rv = status_block(self._send_entry(r.name, today, "md_review") if today else None, today)
+                row["review"] = rv or {"status": "pending" if today and self.review.pending(r.name, today)
+                                       else "not_yet", "note": "pre-open review: not run yet today"}
             rules[r.name] = row
         out: dict = {"book": "ended" if ended else "open", "rules": rules}
+        if self.review is not None:
+            out["preopen_review"] = "on" if self.review.enabled else "off"
         if any(v.get("retired") for v in rules.values()):
             out["retired"] = sorted(k for k, v in rules.items() if v.get("retired"))
         ca_notes = self._ca_notes(today)
@@ -1121,7 +1212,8 @@ def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Call
 
 
 def for_engine(engine, load: Callable[[date, datetime], DailyData],
-               rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None) -> LiveDaily:
+               rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None,
+               review=None) -> LiveDaily:
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
@@ -1147,7 +1239,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
-                     store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca)
+                     store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review)
 
 
 def calendar_close(cal: dict | None) -> time | None:

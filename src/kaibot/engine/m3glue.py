@@ -5,14 +5,19 @@
 - `make_rules_extra(desk)`: the extra rules-only veto the engine checks before the room: `pump_risk` on point-in-time
   daily bars plus the news the desk knows. Pure rules: no LLM call happens here.
 
+- `make_preopen(gateway, desk)`: the pre-open review of the daily path (#131), or None when it is off (the default:
+  KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on are both needed). Its evidence is the desk's news of the last 72 hours.
+
 Both are thread-safe (the room runs in worker threads) and never raise: on failure the pack falls back to the
 default and the veto fails closed for the long ("pump risk check failed")."""
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -58,13 +63,13 @@ class LockedDesk:
     def __init__(self, desk):
         self.desk, self.lock = desk, threading.Lock()
 
-    def poll(self, symbols: list[str]) -> None:
+    def poll(self, symbols: list[str], lookback: timedelta | None = None) -> None:
         with self.lock:
-            self.desk.poll(symbols)
+            self.desk.poll(symbols) if lookback is None else self.desk.poll(symbols, lookback)
 
-    def pack(self, symbol: str, etf: str | None, as_of: datetime) -> dict:
+    def pack(self, symbol: str, etf: str | None, as_of: datetime, hours: float = 24) -> dict:
         with self.lock:
-            return self.desk.evidence_pack(symbol, etf, as_of)
+            return self.desk.evidence_pack(symbol, etf, as_of, hours)
 
 
 def _locked(desk) -> LockedDesk | None:
@@ -109,3 +114,45 @@ def make_rules_extra(desk):
         return rules_veto_extra(symbol, as_of, bars=bars, news=news)
 
     return rules_extra
+
+
+PREOPEN_NEWS_HOURS = 72  # company news since the rule's last look (72 h covers a weekend)
+
+
+def make_preopen_evidence(desk):
+    """(symbols, as_of) -> symbol -> ticker news items of the last 72 hours. A symbol whose read failed is left out
+    (no evidence shown, never invented); the reviewer then sees no news for it."""
+    d = _locked(desk)
+
+    def evidence(symbols: list[str], as_of: datetime) -> dict[str, list[dict]]:
+        out: dict[str, list[dict]] = {}
+        if d is None:
+            return out
+        try:
+            d.poll(list(symbols), timedelta(hours=PREOPEN_NEWS_HOURS))
+        except Exception:
+            log.exception("news poll for the pre-open review failed: stored news only")
+        for s in symbols:
+            try:
+                pack = d.pack(s, None, as_of, PREOPEN_NEWS_HOURS)
+            except Exception:
+                log.exception("news pack for the pre-open review failed for %s", s)
+                continue
+            if pack.get("complete", True):
+                out[s] = [i for i in pack.get("items") or [] if i.get("scope") == "ticker"]
+        return out
+
+    return evidence
+
+
+def make_preopen(gateway, desk, env: Mapping[str, str] | None = None):
+    """The daily path's pre-open review (agents/preopen_daily.PreopenDesk), or None when it is off. On with no
+    ANTHROPIC_API_KEY (the gateway has no client) it is built but skips every session: the rules decide alone."""
+    from kaibot.agents import preopen
+
+    env = os.environ if env is None else env
+    if not preopen.enabled(env):
+        return None
+    from kaibot.agents.preopen_daily import PreopenDesk
+
+    return PreopenDesk(preopen.GatewayReviewer(gateway), gateway, env=env, evidence_fn=make_preopen_evidence(desk))
