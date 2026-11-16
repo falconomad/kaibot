@@ -53,20 +53,29 @@ live rule in `profiles.yaml`), `broker/base.py` (`tests/unit/test_broker_protoco
 
 ## CI speed (#221)
 
-The `python` job runs `pytest -q -n 4 --dist worksteal --durations=30` (pytest-xdist, dev group): four workers, one
-per vCPU of a public-repo `ubuntu-latest` runner (4 vCPU, 16 GB). No test was skipped, removed or weakened; the
-collected count (2,049: 2,035 passed, 14 skipped) and every Hypothesis `max_examples` are unchanged. Job and check
-names are unchanged (`ci / python`).
+The suite runs in two disjoint parts on two runners, each with 4 pytest-xdist workers (dev group):
+`KAIBOT_TEST_SHARD=1/2` and `2/2` (hook in `tests/conftest.py`, helpers in `tests/ci_shard.py`). Every test lands in
+exactly one part (CRC32 of its node id), so the two jobs together run exactly what one plain `pytest -q` runs;
+`tests/unit/test_ci_shard.py` checks that. No test was skipped, removed or weakened; the collected count did not fall
+and every Hypothesis `max_examples` is unchanged.
 
-| Run (PR #227) | `python` job | pytest | Peak memory on the runner |
-|---|---|---|---|
-| before: serial `pytest -q` | 14 min 10 s | 837 s | not measured |
-| `-n 4 --dist loadscope` | 4 min 35 s | 262 s | not measured |
-| `-n 4 --dist worksteal` | 3 min 26 s | 194 s | 8.6 of 16 GB |
+Jobs: `python-tests (1/2)` and `python-tests (2/2)` run lock check, ruff and their part; `python` waits for both and
+fails unless both passed (it runs even when they fail, so it is never "skipped"). `python` stays the check to require.
 
-`worksteal` beats `loadscope` because a few modules (`test_spy_engine`, `test_builder_parity`) hold most of the
-time; it may run a module-scoped fixture once per worker, which costs less than the idle workers did. The job
-summary prints the peak memory of every run. On a 2 vCPU / 7 GB runner (private repo) use `-n 2`.
+Measured on PR #227 (`ubuntu-latest`, public repo: 4 vCPU, 16 GB):
 
-Run the same thing locally: `uv sync` then `uv run pytest -q -n 4 --dist worksteal` (or `-n auto`). Plain
-`pytest -q` still works and stays serial. The slowest tests are listed at the end of every CI log (`--durations=30`).
+| Setup | pytest | Notes |
+|---|---|---|
+| before: one job, serial `pytest -q` | 837 s (job 14 min 10 s) | |
+| one job, `-n 4 --dist loadscope` | 262 s | big modules pin one worker |
+| one job, `-n 4 --dist worksteal` | 194 to 384 s | runner CPU decides: about 250 s on Xeon 6975P / EPYC 9V74, about 380 s on EPYC 7763; peak memory 7 to 8.9 GB of 16 GB |
+| two parts, `-n 4 --dist worksteal` each | see PR #227 | chosen: under 6 min even on the slow CPU |
+
+Tried and dropped: `OMP_NUM_THREADS=1` (no change), 6 workers (no change: a 4 vCPU runner is 2 cores with SMT),
+turning off the warnings plugin (no change; the ~124,000 pandas `Series.values` deprecation warnings come from
+`src/` and are left to their owners). Caching does not help: install and lint take under 10 s, pytest is the rest.
+
+Run the same thing locally: `uv sync`, then `uv run pytest -q -n auto --dist worksteal`, or one part with
+`KAIBOT_TEST_SHARD=1/2 uv run pytest -q -n auto`. Plain `pytest -q` still works and runs everything serially.
+Every CI log ends with the 30 slowest tests (`--durations=30`) and the job summary shows peak memory and CPU model.
+If the repo turns private (2 vCPU, 7 GB runners), use `-n 2`.

@@ -4,8 +4,12 @@ on:
     branches: [main]
   pull_request:
 jobs:
-  python:
+  python-tests:  # the suite in two disjoint parts on two runners (#221); `python` below is the check to require
+    name: python-tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: {shard: ["1/2", "2/2"]}
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}  # full history: the pre-registration amendment check reads it (#161)
@@ -14,15 +18,22 @@ jobs:
       - run: ./scripts/lock_deps.sh --check  # uv.lock and the requirements exports agree (one locked set, #122)
       - run: uv sync --locked
       - run: uv run ruff check .
-      # 4 xdist workers = the 4 vCPUs of a public-repo ubuntu runner (16 GB); worksteal rebalances the long tail.
-      # Same tests and example counts, about 14 -> 3.5 min, peak memory in the job summary (docs/ops/hygiene.md, #221).
-      # If the repo turns private (2 vCPU, 7 GB runners) use -n 2.
+      # KAIBOT_TEST_SHARD (tests/conftest.py) puts every test in exactly one part; 4 xdist workers per runner
+      # (4 vCPU, 16 GB). Same tests and Hypothesis example counts as plain `pytest -q`. See docs/ops/hygiene.md.
       - name: pytest
+        env: {KAIBOT_TEST_SHARD: "${{ matrix.shard }}"}
         run: |
           (while sleep 2; do free -m | awk '/^Mem:/{print $3}'; done) > mem.txt & sampler=$!
           rc=0; uv run pytest -q -n 4 --dist worksteal --durations=30 || rc=$?; kill $sampler
-          echo "pytest peak memory used on the runner: $(sort -n mem.txt | tail -1) MB of $(free -m | awk '/^Mem:/{print $2}') MB" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "part $KAIBOT_TEST_SHARD on $(lscpu | sed -n 's/^Model name: *//p'): peak memory used \
+          $(sort -n mem.txt | tail -1) of $(free -m | awk '/^Mem:/{print $2}') MB" | tee -a "$GITHUB_STEP_SUMMARY"
           exit $rc
+  python:  # the required check, same name as before #221: green only when every part of the suite passed
+    needs: python-tests
+    if: always()  # a skipped check would count as passed; this job must fail instead
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.python-tests.result }}" = success
   hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
     runs-on: ubuntu-latest
     steps:
