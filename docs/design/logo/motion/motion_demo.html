@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kaibo logo: motion sketches (concepts 1 and 5)</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;background:#0A0B0D;color:#F4F5F7;font:16px/1.5 Inter,system-ui,sans-serif;display:grid;place-items:center;min-height:100vh}
+  main{width:min(720px,100%);padding:32px 20px}
+  h1{font-size:22px;margin:0 0 4px} p{color:#A1A8B3;margin:0 0 20px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  figure{margin:0;padding:20px;border:1px solid #262A31;border-radius:24px;background:#131519;text-align:center}
+  figcaption{color:#A1A8B3;font-size:14px;margin-top:8px}
+  svg{width:160px;height:160px}
+  button{margin-top:20px;min-height:44px;padding:0 20px;border-radius:999px;border:1px solid #3A404A;background:#1B1E24;color:#F4F5F7;font:600 15px Inter,system-ui,sans-serif}
+  /* every stroke has pathLength 1, so "drawing" is one number going from 1 to 0 */
+  .draw{stroke-dasharray:1;stroke-dashoffset:1;animation:draw var(--d,.24s) cubic-bezier(.2,.7,.2,1) var(--t,0s) forwards}
+  @keyframes draw{to{stroke-dashoffset:0}}
+  .pop{transform-box:fill-box;transform-origin:center;transform:scale(0);animation:pop .18s cubic-bezier(.3,1.4,.5,1) .56s forwards}
+  @keyframes pop{to{transform:scale(1)}}
+  .pulse{transform-box:fill-box;transform-origin:center;opacity:0;animation:pulse .7s cubic-bezier(.2,.7,.2,1) .74s 1}
+  @keyframes pulse{0%{opacity:.55;transform:scale(1)}100%{opacity:0;transform:scale(2.1)}}
+  .swell{transform-box:fill-box;transform-origin:center;transform:scaleY(.04);animation:swell .5s cubic-bezier(.3,1.25,.5,1) .28s forwards}
+  @keyframes swell{to{transform:scaleY(1)}}
+  /* Reduced motion: nothing moves; the finished mark is simply there. */
+  @media (prefers-reduced-motion:reduce){
+    .draw{animation:none;stroke-dashoffset:0}.pop{animation:none;transform:none}.pulse{animation:none;opacity:0}.swell{animation:none;transform:none}
+  }
+</style></head>
+<body><main>
+<h1>kaibo logo: motion sketches</h1>
+<p>How concepts 1 and 5 could arrive on load. Under one second, once, then still. With "reduce motion" on, nothing moves.</p>
+<div class="row" id="stage">
+<figure><svg viewBox="0 0 120 120" role="img" aria-label="Concept 1, Rising k">
+  <line class="draw" pathLength="1" style="--t:.26s;--d:.3s" x1="48.57" y1="78.80" x2="74.07" y2="51.50" stroke="#4F95F0" stroke-width="15" stroke-linecap="round"/>
+  <circle class="pulse" cx="89.43" cy="35.06" r="9" fill="none" stroke="#4F95F0" stroke-width="2.5"/>
+  <circle class="pop" cx="89.43" cy="35.06" r="9" fill="#4F95F0"/>
+  <line class="draw" pathLength="1" style="--t:.12s;--d:.24s" x1="48.57" y1="78.80" x2="77.07" y2="96.50" stroke="#F4F5F7" stroke-width="15" stroke-linecap="round"/>
+  <line class="draw" pathLength="1" style="--t:0s;--d:.2s" x1="29.07" y1="96.50" x2="29.07" y2="23.50" stroke="#F4F5F7" stroke-width="15" stroke-linecap="round"/>
+</svg><figcaption>1 · Rising k: stem, leg, the line, then its point with one pulse</figcaption></figure>
+<figure><svg viewBox="0 0 120 120" role="img" aria-label="Concept 5, Sea level">
+  <path class="swell" d="M18.00 44.00 L19.17 43.04 L20.33 42.09 L21.50 41.15 L22.67 40.24 L23.83 39.35 L25.00 38.50 L26.17 37.69 L27.33 36.93 L28.50 36.22 L29.67 35.57 L30.83 34.99 L32.00 34.47 L33.17 34.03 L34.33 33.66 L35.50 33.37 L36.67 33.17 L37.83 33.04 L39.00 33.00 L40.17 33.04 L41.33 33.17 L42.50 33.37 L43.67 33.66 L44.83 34.03 L46.00 34.47 L47.17 34.99 L48.33 35.57 L49.50 36.22 L50.67 36.93 L51.83 37.69 L53.00 38.50 L54.17 39.35 L55.33 40.24 L56.50 41.15 L57.67 42.09 L58.83 43.04 L60.00 44.00 L61.17 44.96 L62.33 45.91 L63.50 46.85 L64.67 47.76 L65.83 48.65 L67.00 49.50 L68.17 50.31 L69.33 51.07 L70.50 51.78 L71.67 52.43 L72.83 53.01 L74.00 53.53 L75.17 53.97 L76.33 54.34 L77.50 54.63 L78.67 54.83 L79.83 54.96 L81.00 55.00 L82.17 54.96 L83.33 54.83 L84.50 54.63 L85.67 54.34 L86.83 53.97 L88.00 53.53 L89.17 53.01 L90.33 52.43 L91.50 51.78 L92.67 51.07 L93.83 50.31 L95.00 49.50 L96.17 48.65 L97.33 47.76 L98.50 46.85 L99.67 45.91 L100.83 44.96 L102.00 44.00" fill="none" stroke="#4F95F0" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <line class="draw" pathLength="1" style="--t:0s;--d:.26s" x1="18" y1="84" x2="102" y2="84" stroke="#F4F5F7" stroke-width="15" stroke-linecap="round"/>
+</svg><figcaption>5 · Sea level: the line is drawn, then one swell rises and settles</figcaption></figure>
+</div>
+<button type="button" onclick="const s=document.getElementById('stage');const h=s.innerHTML;s.innerHTML='';requestAnimationFrame(()=>s.innerHTML=h)">Play again</button>
+</main></body></html>

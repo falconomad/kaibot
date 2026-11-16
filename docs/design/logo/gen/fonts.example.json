@@ -1,0 +1,8 @@
+{
+  "_how": "Copy to fonts.json and point each key at a font file on your machine. Any format fontTools reads (ttf, otf, woff). Sources: npm pack @fontsource/<family> (files/<family>-latin-<weight>-normal.woff), or the families' own repositories.",
+  "outfit-600": "/path/to/outfit-latin-600-normal.woff",
+  "manrope-700": "/path/to/manrope-latin-700-normal.woff",
+  "jost-500": "/path/to/jost-latin-500-normal.woff",
+  "sora-600": "/path/to/sora-latin-600-normal.woff",
+  "fraunces-600": "/path/to/fraunces-latin-600-normal.woff"
+}
