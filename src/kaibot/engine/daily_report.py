@@ -85,9 +85,13 @@ def load_fixture(directory: Path = FIXTURE):
     return m, {"bars": f"committed fixture {where}", "window": meta["window"]}
 
 
-def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str):
+def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str, screen=None):
     """The daily store (#124) under `data/daily`: `mode` "pit" (the S&P 500 as it was, #123) or "today" (the stocks
-    of `universe_file`). The same preparation as scripts/momentum_core.py (`--bars store`)."""
+    of `universe_file`). The same preparation as scripts/momentum_core.py (`--bars store`).
+
+    `screen(symbols, stocks)` (the live daily path's integrity gate, #230; None in research): called with the keys
+    the view will read and its stocks before anything is read; it may raise, and the stocks it returns may not be
+    bought (`Market.from_panel(exclude=...)`, as a disputed key's never-bought window)."""
     import yaml
 
     from kaibot.ingest.daily_store import DailyStore
@@ -115,6 +119,7 @@ def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str)
     else:
         names = [s for s in stocks if s in have]
     symbols = [*names, *[e for e in etfs if e in have], spy]
+    exclude = list(screen(symbols, names)) if screen is not None else []
     panel = store.panel(symbols, start, end)
     if mode == "pit":
         member = ms.mask(panel.dates, panel.symbols)
@@ -124,7 +129,8 @@ def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str)
     # Amendment 4's 40% sector cap: a stock's sector is the one the universe file lists it under; a stock it does
     # not list (point-in-time: a former member, whose store key is not a universe ticker) is its own sector
     sectors = mc.universe_sectors(cfg)
-    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors)
+    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors,
+                             exclude=exclude)
     m.notes["sectors"] = {"from_universe_file": sum(s in sectors for s in names),
                           "own_sector": sum(s not in sectors for s in names)}
     return m, {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs "

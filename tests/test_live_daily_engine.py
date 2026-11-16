@@ -57,9 +57,9 @@ def daily_view(px_b: float) -> DailyData:
 
 
 class DailyAccount(Account):
-    def __init__(self, tmp_path, monkeypatch, gap_b=1.0, book_end=None, view=True):
+    def __init__(self, tmp_path, monkeypatch, gap_b=1.0, book_end=None, view=True, failed_check=None, dropped=None):
         monkeypatch.setenv("KAIBOT_MULTIDAY", "on")
-        self.has_view = view
+        self.has_view, self.failed_check, self.dropped = view, failed_check, dict(dropped or {})
         f = frames()["B"]
         self.px_b = float(f[f["ts"] < f["ts"].iloc[0] + timedelta(hours=6, minutes=30)]["c"].iloc[-1])
         self.view = daily_view(self.px_b)
@@ -73,8 +73,11 @@ class DailyAccount(Account):
         self.broker.shorting_enabled = False  # as Alpaca reports it once shorting is off (paper_start step 3)
 
     def load(self, k: date, now):
+        if self.failed_check:  # StoreLoader: the store fails a hard integrity check (kaibot.ingest.daily_integrity)
+            raise ld.StoreFailedCheck(self.failed_check)
         if str(k) != DAY1 or not self.has_view:
             raise ld.DataNotReady(f"the daily store has no SPY bar for {k} (run ./scripts/fetch_daily.sh)")
+        self.view.dropped = dict(self.dropped)  # StoreLoader: stocks the integrity gate left out tonight (#230)
         return self.view
 
     def engine(self, journal=None) -> Engine:
@@ -202,6 +205,21 @@ def test_the_heartbeat_says_plainly_when_the_daily_store_was_not_refreshed(tmp_p
     assert st["multi_day"]["note"].startswith(f"{MD}: no decision today: daily store not refreshed")
     kinds = [e["type"] for e in a.store.tables["event"]]
     assert "multi_day_no_decision" in kinds and a.cls_orders() == []
+
+
+def test_the_heartbeat_says_plainly_when_the_daily_prices_failed_the_check(tmp_path, monkeypatch):
+    """A daily store that fails a hard integrity check: no decision, no order, and the heartbeat says why."""
+    why = f"1 bad bar in 1 key: B {DAY1} ohlc_order"
+    a = DailyAccount(tmp_path, monkeypatch, failed_check=why)
+    a.ticks(a.open1, 0, 390)
+    st = a.after_close(a.open1) or a.eng.tick()
+    assert st["multi_day"]["rules"][MD]["waiting"] == why
+    assert not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 2)
+    st = a.eng._status(1)
+    assert st["multi_day"]["note"] == f"{MD}: no decision today: daily prices failed the check ({why})"
+    ev = [e for e in a.store.tables["event"] if e["type"] == "multi_day_no_decision"]
+    assert ev and a.cls_orders() == []
 
 
 # ---------------------------------------------------------------- QA-Ops review of #207: venue conflicts
@@ -557,3 +575,104 @@ def test_a_breach_from_an_earlier_session_confirms_nothing(tmp_path, monkeypatch
     assert not eng.daily.account.book_ended()  # DAY2's first check
     a.ticks(a.open2, 1, 2)
     assert eng.daily.account.book_ended()  # confirmed a minute later
+
+
+def test_a_failed_check_keeps_the_positions_and_sells_nothing(tmp_path, monkeypatch):
+    """QA-Ops review of #234. The book holds 40 B and the store fails the integrity check on the evening: no
+    decision, so at the next session nothing is sold and nothing is bought. "No decision" never means "sell"."""
+    why = f"1 bad bar in 1 key: ZZZ {DAY1} ohlc_order"  # a stock the rule neither holds nor ranks
+    a = DailyAccount(tmp_path, monkeypatch, failed_check=why)
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))
+    a.broker.pos["B"] = {"qty": 40, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": 40, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    assert not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 390)
+    assert a.cls_orders() == []
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B"]  # no sale, no buy, at any time in force
+    assert float(a.broker.pos["B"]["qty"]) == 40 and a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == 40
+    sends = [b for *_, b in a.eng.journal.entries(kinds=("md_send",))]
+    assert [(b["session"], b["targets"], b.get("note")) for b in sends] == [(DAY1, [], "no decision"),
+                                                                             (DAY2, [], "no decision")]
+    assert a.eng.kill is None and a.eng.account_clean
+    kinds = [e["type"] for e in a.store.tables["event"]]
+    assert "multi_day_error" not in kinds and kinds.count("multi_day_waiting") == 1  # said once, not every tick
+
+
+def test_a_check_that_fails_after_the_decision_sends_nothing_new(tmp_path, monkeypatch):
+    """QA-Ops review of #234. The decision was taken on a good store; the engine restarts and, at the send step,
+    the store fails the check: the decided buy is not sent (the view cannot be read), and nothing is sold."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    assert len(list(a.eng.journal.entries(kinds=("md_decision",)))) == 1
+    a.failed_check = f"1 bad bar in 1 key: ZZZ {DAY1} bad_price"
+    a.restart()
+    a.ticks(a.open2, 0, 390)
+    assert a.cls_orders() == [] and not [o for o in a.broker.orders.values() if o["symbol"] == "B"]
+    kinds = [e["type"] for e in a.store.tables["event"]]
+    assert "multi_day_error" not in kinds and "multi_day_waiting" in kinds
+
+
+def test_a_failed_check_leaves_the_books_own_protection_working(tmp_path, monkeypatch):
+    """QA-Ops review of #234. While the store fails the check the held book is still protected: B opens 30% lower
+    and the book's run end (5% here) sells it at market, exactly as with a good store."""
+    a = DailyAccount(tmp_path, monkeypatch, gap_b=0.7, book_end=5.0,
+                     failed_check=f"1 bad bar in 1 key: ZZZ {DAY1} ohlc_order")
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))
+    a.broker.pos["B"] = {"qty": 40, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": 40, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    a.ticks(a.open1, 30, 390)
+    a.after_close(a.open1)
+    assert float(a.broker.pos["B"]["qty"]) == 40 and not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 4)
+    assert len([b for *_, b in a.eng.journal.entries(kinds=("md_book_end",))]) == 1
+    assert any(h["kind"] == "book_drawdown" for h in a.store.tables["halt"])
+    assert "B" not in a.broker.pos and a.eng.daily.account.book_ended() and a.eng.kill is None
+
+
+def _hold_b(a):
+    a.ticks(a.open1, 0, 30)
+    px = float(a.eng.market.last_close("B"))
+    a.broker.pos["B"] = {"qty": 40, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "B", "side": "buy", "qty": 40, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-B-20260803-buy-1", "session": DAY1})
+    a.ticks(a.open1, 30, 390)
+
+
+def test_a_held_stock_that_fails_the_check_means_no_decision_and_no_sale(tmp_path, monkeypatch):
+    """#230 (QA-Ops proposal, point 3): the gate dropped B from the evening's view and the rule holds B. Deciding on
+    the rest would route B through the "not in the view" path, which sells it: so no decision for this rule, B is
+    kept, and the heartbeat says why."""
+    why = f"1 bad bar in 1 key: B {DAY1} ohlc_order"
+    a = DailyAccount(tmp_path, monkeypatch, dropped={"B": why})
+    _hold_b(a)
+    st = a.after_close(a.open1) or a.eng.tick()
+    assert st["multi_day"]["rules"][MD]["waiting"] == f"held {why}"
+    assert not list(a.eng.journal.entries(kinds=("md_decision",)))
+    a.ticks(a.open2, 0, 390)
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B"]
+    assert float(a.broker.pos["B"]["qty"]) == 40
+    note = a.eng._status(1)["multi_day"]["note"]
+    assert note == f"{MD}: no decision today: daily prices failed the check (held {why})"
+
+
+def test_a_stock_that_is_not_held_is_left_out_and_the_rule_decides(tmp_path, monkeypatch):
+    """#230 (QA-Ops proposal, point 2): the gate dropped ZZZ, which the rule does not hold: it decides on the rest
+    as usual (buys B at the next session), and the event and the heartbeat name what was left out."""
+    why = f"1 bad bar in 1 key: ZZZ {DAY1} bad_price"
+    a = DailyAccount(tmp_path, monkeypatch, dropped={"ZZZ": why})
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    assert len(list(a.eng.journal.entries(kinds=("md_decision",)))) == 1
+    ev = [e for e in a.store.tables["event"] if e["type"] == "multi_day_view_dropped"]
+    assert len(ev) == 1 and ev[0]["payload"]["dropped"] == {"ZZZ": why}
+    a.ticks(a.open2, 0, 2)
+    assert [o["symbol"] for o in a.cls_orders()] == ["B"]
+    note = a.eng._status(1)["multi_day"]["note"]
+    assert note == f"{MD}: decided without ZZZ: daily prices failed the check ({why})"

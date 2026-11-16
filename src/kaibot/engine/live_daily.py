@@ -89,6 +89,11 @@ class DataNotReady(RuntimeError):
     """The daily store does not hold the decision's session yet (or not as available at this time)."""
 
 
+class StoreFailedCheck(DataNotReady):
+    """The daily store holds the session, but a bar inside the decision's look-back fails a hard integrity check
+    (kaibot.ingest.daily_integrity): no decision on those prices. The message is the check's plain reason."""
+
+
 class Account(Protocol):
     """What the daily path needs from the engine (or, in the parity test, from a SimBroker account and a ledger)."""
 
@@ -191,7 +196,7 @@ def with_session(data: DailyData, day: date, splits: Mapping[str, float] | None 
         raw_c=add(data.raw_c), raw_h=add(data.raw_h), raw_l=add(data.raw_l), v_first=add(data.v_first),
         v_last=add(data.v_last), raw_v=add(data.raw_v), stocks=data.stocks, spy=data.spy, member=member, split=split,
         div=div, terminal={}, exits={}, spy_tr=None, universe=data.universe, notes=dict(data.notes),
-        sig_unfilled_c=add(data.sig_unfilled_c), sector=dict(data.sector))
+        sig_unfilled_c=add(data.sig_unfilled_c), sector=dict(data.sector), dropped=dict(data.dropped))
 
 
 def as_of(data: DailyData, k: int) -> DailyData:
@@ -217,13 +222,19 @@ class StoreLoader:
     scripts/fetch_daily.sh on the Mac; free Alpaca history under the shared budget). The same preparation as the
     ten-year test (`engine/daily_report.load_store`, `mode` "pit": the S&P 500 members of each date), read only up to
     k and only once k's bars are available (`available_ts`, 20:15 ET): otherwise DataNotReady (fail closed: no
-    decision, no order). Live, a held company whose bars stop is the venue's business (Alpaca books a delisting),
-    so the research runner's terminal closes are dropped."""
+    decision, no order). Before the view is read, the bars of the keys it loads, over its look-back, pass the live
+    integrity gate (kaibot.ingest.daily_integrity.StoreGate, #230): a structural error, a bad bar in SPY or a sector
+    ETF, more than 1% of the stocks failing, or an unreadable file: StoreFailedCheck (no decision for any rule).
+    Otherwise a stock with a bad bar is dropped from the evening's view (never bought; `data.dropped`, key ->
+    reason), and a rule that holds a dropped stock does not decide (`LiveDaily.after_close`). Live, a held company
+    whose bars stop is the venue's business (Alpaca books a delisting), so the research runner's terminal closes
+    are dropped. docs/ops/daily_bars.md says what to do when the gate trips."""
 
     LOOKBACK_DAYS = 600  # ~410 sessions: the longest signal window (SPY's 200-day average) plus ATR and ADV
 
     def __init__(self, root: Path, universe_file: Path, mode: str = "pit", market: str = "SPY") -> None:
         self.root, self.universe_file, self.mode, self.market = Path(root), Path(universe_file), mode, market
+        self._gate = None  # kaibot.ingest.daily_integrity.StoreGate, made at the first decision
 
     def available(self, k: date, now: datetime) -> str | None:
         """None when session k's bars are in the store and were available at `now`; else why not."""
@@ -251,9 +262,22 @@ class StoreLoader:
             raise DataNotReady(why)
         from kaibot.engine import daily_report as dr
 
+        start = k - timedelta(days=self.LOOKBACK_DAYS)
+        if self._gate is None:
+            from kaibot.ingest.daily_integrity import StoreGate
+
+            self._gate = StoreGate(self.root / "daily", self.market)
+        dropped: dict[str, str] = {}
+
+        def screen(symbols, stocks):
+            v = self._gate(start, k, symbols, stocks)
+            if v.block:
+                raise StoreFailedCheck(v.block)
+            dropped.update(v.dropped)
+            return sorted(v.dropped)
+
         try:
-            m, _ = dr.load_store(self.root, self.universe_file, self.mode, str(k - timedelta(days=self.LOOKBACK_DAYS)),
-                                 str(k))
+            m, _ = dr.load_store(self.root, self.universe_file, self.mode, str(start), str(k), screen=screen)
         except (SystemExit, ValueError, FileNotFoundError) as e:
             raise DataNotReady(f"daily store unreadable: {e}") from None
         data = DailyData.from_market(m)
@@ -263,6 +287,7 @@ class StoreLoader:
         if why:
             raise DataNotReady(why)
         data.terminal = {}
+        data.dropped = dropped
         return data
 
     MIN_COVERAGE = 0.97  # of the stocks that had a bar the session before: a normal day misses a few halted names
@@ -405,6 +430,8 @@ class LiveDaily:
         self._rid: int | None = None
         self._data: dict[date, DailyData] = {}  # the day's view, read once per decision session
         self._waiting: dict[str, str] = {}  # rule -> why the last decision could not be taken (event once)
+        self._failed_check: set[str] = set()  # rules whose last wait was a store failing the integrity check
+        self._dropped: dict[str, tuple[str, str]] = {}  # rule -> (fill session, note): stocks the gate left out
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
@@ -689,12 +716,33 @@ class LiveDaily:
             try:
                 data = self._view(closed, now)
             except DataNotReady as e:
+                if isinstance(e, StoreFailedCheck):
+                    self._failed_check.add(r.name)
+                else:
+                    self._failed_check.discard(r.name)
                 if self._waiting.get(r.name) != str(e):
                     self._waiting[r.name] = str(e)
                     self.event("multi_day_waiting", {"strategy": r.name, "session": str(closed), "why": str(e)[:200]})
                 continue
-            self._waiting.pop(r.name, None)
             held = {s: q for s, (q, _) in self.account.held(r.name).items()}
+            hit = sorted(set(data.dropped) & set(held))
+            if hit:  # a held stock failed the check: never through the "not in the view" path (it would sell it)
+                why = "held " + "; ".join(data.dropped[s] for s in hit)
+                self._failed_check.add(r.name)
+                if self._waiting.get(r.name) != why[:200]:
+                    self._waiting[r.name] = why[:200]
+                    self.event("multi_day_waiting", {"strategy": r.name, "session": str(closed), "why": why[:200]})
+                continue
+            self._waiting.pop(r.name, None)
+            self._failed_check.discard(r.name)
+            if data.dropped:
+                text = "decided without " + ", ".join(sorted(data.dropped)) + ": daily prices failed the check ("
+                text += "; ".join(data.dropped[s] for s in sorted(data.dropped)) + ")"
+                self._dropped[r.name] = (str(fill), text[:240])
+                self.event("multi_day_view_dropped", {"strategy": r.name, "session": str(closed),
+                                                      "dropped": {s: w[:160] for s, w in data.dropped.items()}})
+            else:
+                self._dropped.pop(r.name, None)
             tl = decide_after_close(r.strategy, data, data.index_of(closed), fill, held)
             body = {"run_id": rid, "strategy": r.name, "session": str(closed), "fill_session": str(fill),
                     "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl)}
@@ -865,6 +913,14 @@ class LiveDaily:
             self.event("multi_day_waiting", {"strategy": r.name, "session": str(session), "why": str(e)[:200]})
             _, targets = plan_session(r.builder, None, r.name, {}, pending, None, 0, 0.0, 0.0)
             return self._planned(r, session, rid, prev, targets, None)
+        hit = sorted(set(data.dropped) & (set(held) | set(tl.weights)))
+        if hit:  # the store changed since the decision (restart) and a name of it now fails the check: no new
+            # sizing on those prices, only the sales already pending (as when the view went away)
+            self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
+                                             "why": ("failed the check since the decision: "
+                                                     + "; ".join(data.dropped[s] for s in hit))[:200]})
+            _, targets = plan_session(r.builder, None, r.name, {}, pending, None, 0, 0.0, 0.0)
+            return self._planned(r, session, rid, prev, targets, None)
         live = with_session(data, session, self.account.splits(session))
         i = len(live.dates) - 1
         sized = {}
@@ -897,7 +953,9 @@ class LiveDaily:
             except Exception as e:  # the note must never stop the send step
                 why = f"{type(e).__name__}"
         first = not any(b.get("strategy") == rule for b in self._entries("md_decision"))
-        note = ("no decision today: daily store not refreshed (see logs/fetch_daily.log)" if why else
+        failed = why is not None and rule in self._failed_check and self._waiting.get(rule) == why
+        note = ("no decision today: daily prices failed the check" if failed else
+                "no decision today: daily store not refreshed (see logs/fetch_daily.log)" if why else
                 "no decision yet: the first one is taken after a close" if first else
                 "no decision today: none was taken after the last close (engine off then?)")
         self._missed[rule] = (str(session), note + (f" ({why})" if why else ""))
@@ -936,6 +994,10 @@ class LiveDaily:
             if miss is not None and (today is None or miss[0] == str(today)):
                 row["note"] = miss[1]
                 notes.append(f"{r.name}: {miss[1]}")
+            drop = self._dropped.get(r.name)
+            if drop is not None and (today is None or drop[0] == str(today)) and "note" not in row:
+                row["note"] = drop[1]
+                notes.append(f"{r.name}: {drop[1]}")
             if r.name in self._waiting:  # the next decision cannot be taken yet
                 row["waiting"] = self._waiting[r.name][:200]
             rules[r.name] = row
@@ -963,7 +1025,8 @@ class LiveDaily:
         return [x for x in om.orders.values() if x.session == str(session) and x.purpose != "stop"] if om else []
 
 
-__all__ = ["LiveDaily", "Rule", "StoreLoader", "DataNotReady", "live_limits", "live_builder", "with_session",
+__all__ = ["LiveDaily", "Rule", "StoreLoader", "DataNotReady", "StoreFailedCheck", "live_limits", "live_builder",
+           "with_session",
            "as_of", "target_to_json", "target_from_json", "SEND_FROM", "SEND_UNTIL", "PREREG_STOP_ATR"]
 
 
