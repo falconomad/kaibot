@@ -21,13 +21,13 @@ describe("Tape page states", () => {
   it("empty: a replay explains that replays have no tape", () => {
     const r = replayRun();
     const html = render(<Tape />, { ctx: ctxFor(r), seeds: [{ key: ["tape", r.id], data: [], infinite: true }] });
-    expect(text(html)).toContain("Replays don't record a tape");
+    expect(text(html)).toContain("Replays don't record activity");
   });
 
   it("error: a plain sentence with the server's message and a retry", () => {
     const html = render(<Tape />, { seeds: [{ key: ["tape", 1], error: boom() }] });
     expect(hasAlert(html)).toBe(true);
-    expect(text(html)).toContain("The tape couldn't load.");
+    expect(text(html)).toContain("The activity couldn't load.");
     expect(text(html)).toContain("permission denied for function");
     expect(text(html)).toContain("Try again");
   });

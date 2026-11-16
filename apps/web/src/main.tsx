@@ -18,7 +18,6 @@ import { STALE } from "./lib/poll";
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
 const Health = lazy(() => load["/health"]().then((m) => ({ default: m.Health })));
 const Tape = lazy(() => load["/activity"]().then((m) => ({ default: m.Tape })));
-const Holdings = lazy(() => load["/holdings"]().then((m) => ({ default: m.Holdings })));
 const Report = lazy(() => load["/report"]().then((m) => ({ default: m.Report })));
 const Onboarding = lazy(() => load["/start"]().then((m) => ({ default: m.Onboarding })));
 const TradeDetailPage = lazy(() => load["/positions/:id"]().then((m) => ({ default: m.TradeDetailPage })));
@@ -27,7 +26,7 @@ const Strategy = lazy(() => load["/strategy"]().then((m) => ({ default: m.Strate
 const StrategyHome = lazy(() => load["/strategy"]().then((m) => ({ default: m.StrategyHome })));
 const FineTune = lazy(() => load["/strategy/fine-tune"]().then((m) => ({ default: m.FineTune })));
 const More = lazy(() => load["/more"]().then((m) => ({ default: m.More })));
-const Trades = lazy(() => load["/positions"]().then((m) => ({ default: m.Trades })));
+const Positions = lazy(() => load["/positions"]().then((m) => ({ default: m.Positions })));
 
 /** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton. */
 const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense>;
@@ -70,7 +69,7 @@ function Gate() {
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<Live />} />
-        <Route path="positions" element={page(<Trades />)} />
+        <Route path="positions" element={page(<Positions />)} />
         <Route path="positions/:id" element={page(<TradeDetailPage />, "detail")} />
         <Route path="activity" element={page(<Tape />)} />
         <Route path="more" element={page(<More />)} />
@@ -78,7 +77,7 @@ function Gate() {
         <Route path="trades" element={<Navigate to="/positions" replace />} />
         <Route path="trades/:id" element={<OldTrade />} />
         <Route path="tape" element={<Navigate to="/activity" replace />} />
-        <Route path="holdings" element={page(<Holdings />)} />
+        <Route path="holdings" element={<Navigate to="/positions" replace />} />
         <Route path="report" element={page(<Report />)} />
         <Route path="health" element={page(<Health />)} />
         <Route path="gate" element={page(<GoNoGo />)} />

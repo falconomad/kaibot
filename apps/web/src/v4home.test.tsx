@@ -45,7 +45,7 @@ describe("Home holdings and page", () => {
     expect(rows.map((r) => r.value)).toEqual([...rows.map((r) => r.value)].sort((a, b) => b - a));
     const n = rows.find((r) => r.symbol === "NVDA")!;
     expect(n).toMatchObject({ value: 2070, gain: 70, to: "/positions/7", bar: { stop: 190, now: 207, target: 220 } });
-    expect(rows.find((r) => r.symbol === "AAPL")!.to).toBe("/holdings");
+    expect(rows.find((r) => r.symbol === "AAPL")!.to).toBe("/positions");
     const html = inRouter(<TopHoldings rows={rows} max={null} />);
     expect(text(html)).toMatch(/^Holding 5 NVDA/);
     expect(html.match(/class="hold-row"/g)).toHaveLength(3);

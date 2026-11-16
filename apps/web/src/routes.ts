@@ -1,11 +1,10 @@
 // Every screen that is not the first one (sign-in, Home) is its own chunk, fetched when its route is first shown.
 // The loaders live here so main.tsx can build the lazy components and the nav can warm a chunk on hover or focus.
 export const ROUTE_LOADERS = {
-  "/positions": () => import("./pages/Trades"),
+  "/positions": () => import("./pages/Positions"),
   "/positions/:id": () => import("./pages/TradeDetail"),
   "/activity": () => import("./pages/Tape"),
   "/more": () => import("./pages/More"),
-  "/holdings": () => import("./pages/Holdings"),
   "/report": () => import("./pages/Report"),
   "/health": () => import("./pages/Health"),
   "/gate": () => import("./pages/Gate"),

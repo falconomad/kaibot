@@ -40,7 +40,6 @@ const NAV: { to: string; label: string; icon: string }[] = [
   { to: "/", label: "Home", icon: "M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z" },
   { to: "/positions", label: "Positions", icon: "M4 7 H20 M4 12 H20 M4 17 H14" },
   { to: "/activity", label: "Activity", icon: "M4 6 H20 M4 10 H16 M4 14 H20 M4 18 H12" },
-  { to: "/holdings", label: "Holdings", icon: "M4 6 H20 V18 H4 Z M4 10 H20" },
   { to: "/report", label: "Report", icon: "M5 20 V12 M12 20 V5 M19 20 V9" },
   { to: "/gate", label: "Go / no-go", icon: "M5 12 L10 17 L19 7" },
   { to: "/health", label: "Engine", icon: "M3 12 H7 L10 5 L14 19 L17 12 H21" },
@@ -50,7 +49,7 @@ const NAV: { to: string; label: string; icon: string }[] = [
 const MORE_ICON = "M5 12 H5.01 M12 12 H12.01 M19 12 H19.01";
 export const TABS = ["/", "/positions", "/activity", "/health", "/more"] as const;
 /** Pages reached from More: the More tab is the active one on them. */
-export const UNDER_MORE = ["/more", "/report", "/gate", "/strategy", "/holdings", "/settings"];
+export const UNDER_MORE = ["/more", "/report", "/gate", "/strategy", "/settings"];
 
 /** The Engine tab's dot: red while a halt or breach is in force, amber while the engine is offline. */
 export type EngineDot = "breach" | "offline" | null;

@@ -79,7 +79,7 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
               );
             })}
             <text className="axis" x={M.l} y={H - 6} fontSize="12" fill="var(--slate)">{day(data[0].session)}</text>
-            <text className="axis" x={W - M.r} y={H - 6} fontSize="12" fill="var(--slate)" textAnchor="end">{day(last.session)}</text>
+            <text className="axis" x={W - M.r} y={H - 6} fontSize="12" fill="var(--slate)" textAnchor="end">{last.live ? "now" : day(last.session)}</text>
             <defs>
               <linearGradient id="kb-potfill" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.28" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />
@@ -92,7 +92,7 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
               <path className="morph" d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </g>
             <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="4.5" fill="var(--s-pot)" stroke="var(--surface)" strokeWidth="2" />
-            <text className="fade-late axis" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {whole(last.pot)}</text>
+            <text className="fade-late axis" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {whole(last.pot)}{last.live ? " now" : ""}</text>
             <text className="fade-late axis" x={W - M.r + 10} y={ly2 + 4} fontSize="12" fill="var(--slate)">SPY {whole(last.spy)}</text>
             {h && hover !== null && (
               <g>
