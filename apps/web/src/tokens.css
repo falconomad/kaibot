@@ -3,20 +3,62 @@
 /* Tests are not shipped: keep their words from being picked up as utility classes. */
 @source not "./**/*.test.ts";
 @source not "./**/*.test.tsx";
+/* Outfit (brand system v1, #265): SIL Open Font License 1.1, (c) 2021 The Outfit Project Authors; licence in public/
+   fonts/OFL.txt. Self-hosted, latin subset, four weights; Inter is the fallback. */
+@font-face { font-family: "Outfit"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/fonts/outfit-latin-400-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "Outfit"; font-style: normal; font-weight: 500; font-display: swap;
+  src: url("/fonts/outfit-latin-500-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "Outfit"; font-style: normal; font-weight: 600; font-display: swap;
+  src: url("/fonts/outfit-latin-600-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "Outfit"; font-style: normal; font-weight: 700; font-display: swap;
+  src: url("/fonts/outfit-latin-700-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
 :root {
-  color-scheme: dark;
-  --paper: #0A0B0D; --surface: #131519; --surface-2: #1B1E24; --rule: #262A31; --rule-strong: #3A404A;
-  --ink: #F4F5F7; --slate: #A1A8B3; --stale: #8A929E; /* #8A929E: >= 4.5:1 on every surface and tint (was #7E8693, 3.9:1 on the warn and gain tints) */
-  --sea: #4F95F0; --sea-ink: #7FB2FF; --sea-tint: #132A4A;
-  --gain: #3DDC97; --gain-tint: #12301F; --loss: #FF6B6B; --loss-tint: #2A1517;
-  --pass: #3DDC97; --warn: #F5B64C; --warn-tint: #33280F; --fail: #FF6B6B;
-  --ai: #C9B6FF; --ai-tint: #1E1A2B;
-  --s-pot: #4F95F0; --s-spy: #C4862F;
-  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; --font-num: "Inter", system-ui, sans-serif;
-  --font-ai: "Inter", system-ui, sans-serif;
+  /* brand system v1 (docs/design/brand/tokens_v1.css, #265): every colour derives from the Rising k logo */
+  --blue-50: #ECF4FF; --blue-100: #D9E9FF; --blue-200: #B4D4FE; --blue-300: #7FB4F9; --blue-400: #4F95F0; --blue-500: #2F6FDE;
+  --blue-600: #1A54B7; --blue-700: #174189; --blue-800: #142C56; --blue-900: #0F1F39; --blue-950: #081327;
+  --grey-0: #FFFFFF; --grey-50: #F4F5F7; --grey-100: #E4E6EA; --grey-200: #CDD1D9; --grey-300: #B2B8C1; --grey-400: #989FAB; --grey-500: #808692;
+  --grey-600: #5D646F; --grey-700: #40454F; --grey-750: #31363D; --grey-800: #262A31; --grey-850: #1B1E23; --grey-900: #131519; --grey-950: #0A0B0D;
+  --font-ui: "Outfit", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; --font-num: "Outfit", "Inter", system-ui, sans-serif;
+  --font-ai: "Outfit", "Inter", system-ui, sans-serif;
   --ease: cubic-bezier(.2, .7, .2, 1);
   --radius: 24px;
+  --stroke: 2px; --point: 8px; --d-draw: 300ms; --d-point: 180ms; --ease-pop: cubic-bezier(.3, 1.4, .5, 1);
+}
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #0A0B0D; --surface: #131519; --surface-2: #1B1E23; --rule: #262A31; --rule-strong: #40454F;
+  --ink: #F4F5F7; --slate: #B2B8C1; --stale: #989FAB;
+  --sea: #4F95F0; --sea-ink: #7FB4F9; --sea-tint: #0F1F39;
+  --gain: #3ADD98; --gain-tint: #092B1C; --loss: #FF716D; --loss-tint: #371715;
+  --pass: #3ADD98; --warn: #F7B746; --warn-tint: #32240B; --fail: #FF716D;
+  --ai: #C9B7FD; --ai-tint: #231E30;
+  --s-pot: #4F95F0; --s-spy: #808692;
+  --on-sea: #0A0B0D; --sea-line: #174189; --focus: #7FB4F9; --selection: #174189; --live: #4F95F0; --control: #808692;
+  --gain-line: #0A5C3B; --loss-line: #AD4B48; --warn-line: #906E34; --warn-text: #F7B746; --on-warn: #0A0B0D; --paper-edge: #F7B746; --ai-line: #50466C;
+  --exp-bg: #1B1E23; --exp-line: #808692; --exp-hatch: #40454F; --exp-text: #F4F5F7;
+  --s-grid: #262A31; --s-up: #10A66E; --s-down: #BC262F;
+  --scrim: rgba(0, 0, 0, .6); --bar-bg: rgba(10, 11, 13, .86); --elev-sheet: 0 -12px 40px rgba(0, 0, 0, .55);
+}
+/* The light theme is defined and proven by Design, and not switched on: nothing sets data-theme="light" yet. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --paper: #F4F5F7; --surface: #FFFFFF; --surface-2: #E4E6EA; --rule: #CDD1D9; --rule-strong: #989FAB;
+  --ink: #0A0B0D; --slate: #40454F; --stale: #5D646F;
+  --sea: #2F6FDE; --sea-ink: #1A54B7; --sea-tint: #ECF4FF;
+  --gain: #00764C; --gain-tint: #D8F8E5; --loss: #BC262F; --loss-tint: #FFE9E6;
+  --pass: #00764C; --warn: #F7B746; --warn-tint: #FFECCF; --fail: #BC262F;
+  --ai: #6844AA; --ai-tint: #F0EBFF;
+  --s-pot: #2F6FDE; --s-spy: #5D646F;
+  --on-sea: #FFFFFF; --sea-line: #B4D4FE; --focus: #2F6FDE; --selection: #B4D4FE; --live: #2F6FDE; --control: #5D646F;
+  --gain-line: #8ECFAC; --loss-line: #D14E4D; --warn-line: #A87507; --warn-text: #835B05; --on-warn: #0A0B0D; --paper-edge: #A87507; --ai-line: #C0B7DF;
+  --exp-bg: #E4E6EA; --exp-line: #5D646F; --exp-hatch: #B2B8C1; --exp-text: #0A0B0D;
+  --s-grid: #CDD1D9; --s-up: #039F68; --s-down: #A7021D;
+  --scrim: rgba(10, 11, 13, .45); --bar-bg: rgba(244, 245, 247, .88); --elev-sheet: 0 -12px 40px rgba(10, 11, 13, .18);
 }
 
-body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
+/* Outfit's figures are proportional unless asked: tabular figures everywhere, so money lines up; and its word space is
+   tight, so body text gets a little more (brand system v1, section 3). */
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums; word-spacing: 0.06em; }
 .num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }

@@ -36,7 +36,7 @@ const health = (hb: Heartbeat[], halts: HealthResp["halts"] = []): HealthResp =>
 describe("Home (#210, v4 status rows)", () => {
   it("the experiment row states the label in full; its sheet holds the badge, cap, stop line and the no-decision note", () => {
     const html = render(<Live />, { ctx: ctx(withExp), seeds: [trades(["trades-all", 1])] });
-    expect(html).toMatch(/<button type="button" class="status-row info"[^>]*><span class="status-text">Experiment: failed the ten-year test<\/span>/);
+    expect(html).toMatch(/<button type="button" class="status-row exp"[^>]*><span class="status-text">Experiment: failed the ten-year test<\/span>/);
     const sheet = text(render(<ExperimentCard beats={withExp} />));
     expect(sheet).toContain(BADGE);
     expect(sheet).toContain("up to 60% invested");

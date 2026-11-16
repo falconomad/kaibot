@@ -73,7 +73,7 @@ export function Positions() {
       {!showClosed && (
         <>
           {expHeld && (
-            <StatusRow tone="info" title={ruleName(expHeld.strategy)} text={<>{ruleName(expHeld.strategy)} is an experiment: it failed the ten-year test</>}>
+            <StatusRow tone="exp" title={ruleName(expHeld.strategy)} text={<>{ruleName(expHeld.strategy)} is an experiment: it failed the ten-year test</>}>
               <ExperimentSheetBody e={expHeld} />
             </StatusRow>
           )}

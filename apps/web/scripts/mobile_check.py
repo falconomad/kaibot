@@ -250,7 +250,7 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         fails.append(f"not reachable on a phone: {missing}")
     pg.click("nav.tabbar a[href='/']")
     pg.wait_for_timeout(800)
-    btn = pg.locator(".status-row.info, .exp-btn").first
+    btn = pg.locator(".status-row.exp, .status-row.info, .exp-btn").first
     if btn.count():
         btn.click()
         pg.wait_for_selector("[role=dialog]")

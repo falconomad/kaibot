@@ -15,7 +15,7 @@ import { StockBadge } from "./StockBadge";
 import { Tick } from "./Tick";
 import { NAME, REPO_DIR } from "../brand/brand";
 
-type Tone = "breach" | "warn" | "info" | "neutral";
+type Tone = "breach" | "warn" | "info" | "neutral" | "exp";
 
 /** One status row: the fact in a few words; the explanation opens in a sheet. */
 export function StatusRow({ tone, text, title, children, phoneDup = false }: { tone: Tone; text: ReactNode; title: string; children: ReactNode;
@@ -97,7 +97,7 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
     );
   } else if (exps.length) {
     rows.push(
-      <StatusRow key="exp" tone="info" title={ruleName(exps[0].strategy)} text={exps[0].label}>
+      <StatusRow key="exp" tone="exp" title={ruleName(exps[0].strategy)} text={exps[0].label}>
         <ExperimentSheetBody e={exps[0]} md={md} />
       </StatusRow>,
     );

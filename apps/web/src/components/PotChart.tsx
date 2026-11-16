@@ -2,8 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import type { Curve } from "../lib/model";
 import { day, money } from "../lib/fmt";
 
-// Pot vs SPY scaled to the same start. One y-axis (both are dollars). Palette validated with the dataviz
-// validator (light #1A6FA0/#A8640F on #FFF, dark #4E9BCB/#BE8028 on #171E26); SPY is also dashed + labelled.
+// Pot vs SPY scaled to the same start. One y-axis (both are dollars). Brand system v1 (#265): the pot's line is the
+// brand blue and ends in the live point; the benchmark is neutral grey, told apart by its dots and its label.
 const W = 760, H = 240, M = { t: 12, r: 92, b: 24, l: 64 };
 
 /** Optional chapter boundaries (M5 S48): a dashed rule at the first session on or after each `session`. */
@@ -48,7 +48,7 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
     <div className={compact ? "potchart compact" : "potchart"}>
       <div className="legend" style={{ marginBottom: 6 }}>
         <span><i className="sw" style={{ borderColor: "var(--s-pot)" }} />Pot, after costs</span>
-        <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dashed" }} />SPY, same start</span>
+        <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dotted" }} />SPY, same start</span>
         <span className="spacer" />
         <button style={{ minHeight: 44, fontSize: 13, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
       </div>
@@ -89,10 +89,12 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
             {/* Lines start flat on the baseline and rise into shape once, when the chart first appears. */}
             <g className="rise" style={{ transformOrigin: `0 ${H - M.b}px` }}>
               <path className="morph" d={g.area} fill="url(#kb-potfill)" />
-              <path className="morph" d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+              <path className="morph" d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="1.5" strokeDasharray="0.1 5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
               <path className="morph" d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </g>
-            <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="4.5" fill="var(--s-pot)" stroke="var(--surface)" strokeWidth="2" />
+            {/* the live point: the same point as in the logo, with one faint ring */}
+            <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="9" fill="none" stroke="var(--live)" strokeOpacity="0.35" strokeWidth="1.5" />
+            <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="5" fill="var(--live)" />
             <text className="fade-late axis" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {whole(last.pot)}{last.live ? " now" : ""}</text>
             <text className="fade-late axis" x={W - M.r + 10} y={ly2 + 4} fontSize="12" fill="var(--slate)">SPY {whole(last.spy)}</text>
             {h && hover !== null && (
