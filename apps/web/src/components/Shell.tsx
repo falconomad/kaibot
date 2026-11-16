@@ -99,7 +99,7 @@ export function engineChip(o: Overview | undefined, run: Run) {
   const state = beat.detail?.state ?? "unknown";
   if (state === "stopped" || age > 90)
     return { dot: "var(--stale)", text: "Engine offline", sub: `last seen ${ago(age)}`, live: false };
-  return { dot: state === "error" ? "var(--warn)" : "var(--sea)", text: STATE_TEXT[state] ?? state,
+  return { dot: state === "error" ? "var(--warn)" : "var(--live)", text: STATE_TEXT[state] ?? state,
     sub: `${beat.detail?.host ?? ""} · ${Math.round(age)} s ago`, live: true };
 }
 

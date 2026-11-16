@@ -95,7 +95,7 @@ export function Tape() {
         </div>
       </section>
       {expShown && (
-        <StatusRow tone="info" title={ruleName(expShown.strategy)} text={expShown.label}>
+        <StatusRow tone="exp" title={ruleName(expShown.strategy)} text={expShown.label}>
           <ExperimentSheetBody e={expShown} />
         </StatusRow>
       )}

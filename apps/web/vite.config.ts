@@ -26,7 +26,7 @@ function brand(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), brand()],
   // Tests read app.css as text (`?raw`) to check the focus and reduced-motion rules; by default vitest blanks CSS.
-  test: { css: { include: /(app|v4tokens)\.css/ } },
+  test: { css: { include: /(app|v4tokens|tokens)\.css/ } },
   build: {
     rollupOptions: {
       output: {

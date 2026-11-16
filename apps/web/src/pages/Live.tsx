@@ -75,10 +75,10 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <button className="full-sm" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
           {!confirm ? <button className="danger full-sm" onClick={() => setConfirm(true)}>Flatten and stop</button> : (
-            <span className="banner swap full-sm" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", background: "var(--loss-tint)", borderColor: "#5A2A2E" }}>
+            <span className="banner swap full-sm" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", background: "var(--loss-tint)", borderColor: "var(--loss-line)" }}>
               Sell every position at market now and end this run?
               <button onClick={() => setConfirm(false)}>Cancel</button>
-              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)", color: "#0A0B0D" }} disabled={cmd.isPending}
+              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)", color: "var(--paper)" }} disabled={cmd.isPending}
                 onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
             </span>
           )}

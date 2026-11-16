@@ -88,7 +88,7 @@ describe("Activity: the label once in full, a compact tag on rows", () => {
     strategy: "trend_momentum", trade_id: 7, exit_reason: "target", pnl_usd: 38.2 }];
   it("banner row with the full label; the row's tag says Experiment, named in full for screen readers; chips on one line", () => {
     const html = render(<Tape />, { ctx, seeds: [{ key: ["tape", 1], data: items, infinite: true }] });
-    expect(html).toMatch(/class="status-row info"[^>]*><span class="status-text">Experiment: failed the ten-year test<\/span>/);
+    expect(html).toMatch(/class="status-row exp"[^>]*><span class="status-text">Experiment: failed the ten-year test<\/span>/);
     expect(html).toContain('<span class="row-tag" aria-label="Experiment: failed the ten-year test" title="Experiment: failed the ten-year test">Experiment</span>');
     expect(text(html).split("Experiment: failed the ten-year test").length - 1).toBe(1);
     expect(html).toContain('class="chips chips-scroll"');
