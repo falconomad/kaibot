@@ -5,6 +5,7 @@ restart rebuilds the open ones from the journal. On the simulated venue of the S
 from __future__ import annotations
 
 import contextlib
+import types
 
 from test_failsafe_drills import MD, QTY, Account
 
@@ -122,7 +123,8 @@ def test_a_crash_between_the_sleeves_own_sale_and_its_entry_is_found_by_client_i
     after the venue took the order and before `md_exit` was written. At the restart the sale is found at the venue
     by the client id of its journalled intent, booked once when it fills, and not sent a second time."""
     a = _held(tmp_path, monkeypatch)
-    monkeypatch.setattr(a.eng.pos, "on", lambda sym: [object()] if sym == "B" else [])  # B: the submit path
+    intraday = types.SimpleNamespace(qty=0.0)  # an intraday position in B (no shares yet): the sleeve's own sale
+    monkeypatch.setattr(a.eng.pos, "on", lambda sym: [intraday] if sym == "B" else [])
 
     def dies(*args, **kw):
         raise SystemExit("killed after the broker call")
