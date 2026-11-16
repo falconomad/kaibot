@@ -8,7 +8,8 @@
 - Respect `config/sources.yaml` budgets; free tiers only; never scrape X, Reddit or Yahoo in the live path.
 - The engine (`python -m kaibot.engine`, `scripts/run_engine.sh`) runs on the user's Mac for now and must stay portable:
   env-only settings, outgoing connections only, same Docker image anywhere (decision 11). Never run two engines at once.
-- Run `ruff check .` and `pytest -q` before committing. Deploy only outside 09:30-16:00 ET.
+- Run `ruff check .` and `pytest -q` before committing. Deploy only outside 09:30-16:00 ET; dashboard-only changes
+  (`apps/web/`, `docs/`) may deploy at any time (stakeholder, 16 Nov 2026; `docs/teams.md`).
 - Decisions live in `docs/decisions/`; the backlog in GitHub issues (milestones M0-M7, labels team:* and epic:*).
 - Engine v3 (decision 15, milestone M7): one decision core for test and live. Never add another simulator; go/no-go numbers
   come only from the engine with `SimBroker`. A rule needs a pre-registration in `docs/prereg/` before its first run.
