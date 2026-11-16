@@ -147,7 +147,7 @@ def make_preopen_evidence(desk):
 
 def make_preopen(gateway, desk, env: Mapping[str, str] | None = None):
     """The daily path's pre-open review (agents/preopen_daily.PreopenDesk), or None when it is off. On with no
-    ANTHROPIC_API_KEY (the gateway has no client) it is built but skips every session: the rules decide alone."""
+    ANTHROPIC_API_KEY (the gateway has no client) it is built and skips every session's buys (fail closed)."""
     from kaibot.agents import preopen
 
     env = os.environ if env is None else env

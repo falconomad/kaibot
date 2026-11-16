@@ -19,15 +19,15 @@ returns), errors, answers for another session, misses a candidate, names an unkn
 evidence it was not shown, or fails the contract vetoes every increase of that session. So does a review that is
 switched on with no reviewer or no gateway wired (a configuration error, not "off").
 
-No LLM to ask is not a broken answer (stakeholder rule for #131, as the intraday room's "skipped"): with no
-ANTHROPIC_API_KEY, or an exhausted daily budget, the review is SKIPPED and the rules' plan goes ahead exactly as the
-rules decided (status "skipped", the reason logged and journalled). Budget (#186): the state comes from
-`Gateway.state()`, never from the caller, and the one model call per session goes through `Gateway.call()` (worst
-case reserved, actual settled, `limits.preopen` in config/llm.yaml). Skipped: the daily soft cap (`rules_only`), the
-pre-open daily cap (`limits.preopen.daily_usd`), an unreadable state, a refused or failed reservation, no client.
-The monthly hard cap is the PRD's "no new entries" for the whole engine (status "no_entries": no increase).
-Off (the default) leaves the plan unchanged and calls nothing, not even the budget. Switching it on is the
-stakeholder's decision.
+Budget (#186, kept by Product for #131): the state comes from `Gateway.state()`, never from the caller, and the one
+model call per session goes through `Gateway.call()` (worst case reserved, actual settled, `limits.preopen` in
+config/llm.yaml). When the review is ON and cannot give a valid answer for any reason, that session's buys are
+skipped (every increase vetoed; sales always go ahead) and the reason is logged and journalled: the daily soft cap
+(`rules_only`), the pre-open daily cap (`limits.preopen.daily_usd`), an unreadable state, a refused or failed
+reservation (status "budget"), the monthly hard cap (status "no_entries"), no ANTHROPIC_API_KEY (status "no_key"),
+and every broken answer above. On with no gateway wired is a configuration error and vetoes too.
+Off (the default) leaves the plan unchanged and calls nothing, not even the budget: buys go ahead as the rules
+decided. Switching it on is the stakeholder's decision.
 """
 
 from __future__ import annotations
@@ -56,8 +56,8 @@ MULTIPLIER = {"allow": 1.0, "downgrade": 0.5, "veto": 0.0}
 MAX_CANDIDATES = 50  # PreopenVerdicts.verdicts max_length; more growth keys than this fails closed
 FLAG_ENV = "KAIBOT_PREOPEN_REVIEW"
 ON = ("1", "on", "true", "yes")
-STATUSES = ("off", "skipped", "done", "invalid", "timeout", "error", "no_entries")
-PASS_THROUGH = ("off", "skipped")  # the rules' plan goes ahead unchanged
+STATUSES = ("off", "done", "budget", "no_key", "invalid", "timeout", "error", "no_entries")
+PASS_THROUGH = ("off",)  # only "off" leaves the rules' plan unchanged; every other non-done status: no buys
 
 # What the reviewer is shown about a candidate. Shares, prices and ATR stay out: the review judges events, not size.
 TOTAL_S = 120.0  # the whole review's time limit; the daily orders wait for the auction, so this is generous
@@ -160,9 +160,8 @@ class ReviewOutcome:
     cost_usd: float = 0.0
 
     def multiplier(self, cid: str) -> float:
-        """Share of the rules' increase that goes through: 1.0 when the review is off or skipped (no key, daily
-        budget reached: the rules decide alone); per verdict when done; 0.0 for every failure and the monthly hard
-        cap (fail closed)."""
+        """Share of the rules' increase that goes through: 1.0 when the review is off; per verdict when done; 0.0
+        for every failure, a missing key and every exhausted budget (fail closed: no buys that session)."""
         if self.status in PASS_THROUGH:
             return 1.0
         if self.status != "done":
@@ -267,11 +266,6 @@ class Charged:
     refused: str | None = None  # why the gateway gave no answer: refused, no_client, error, ...
 
 
-# Gateway.call() reasons that mean "no LLM to ask" (budget or key), not a broken answer: the review is skipped.
-SKIP_REASONS = {"refused": "the budget refused the reservation", "reserve_failed": "the reservation could not be made",
-                "no_client": "no ANTHROPIC_API_KEY"}
-
-
 def preopen_limits(gateway) -> tuple[dict | None, str | None]:
     """limits.preopen from config/llm.yaml, checked. Any doubt -> (None, reason): the review fails closed."""
     lim = (getattr(getattr(gateway, "cfg", None), "limits", None) or {}).get("preopen")
@@ -310,25 +304,23 @@ class GatewayReviewer:
 
 
 def _budget_block(gateway, lim: dict) -> tuple[str, str] | None:
-    """(status, reason) when the budget does not allow the review; None when it does. No call is made either way
-    but "ok": "skipped" lets the rules decide alone, "no_entries" (monthly hard cap) allows no increase."""
+    """(status, reason) when the budget does not allow the review; None when it does. Fails closed."""
     try:
         st = gateway.state()
     except Exception as e:  # Gateway.state() already fails closed; any other gateway must too
         st = {"state": "rules_only", "error": repr(e)[:100]}
     if not isinstance(st, Mapping):
-        return "skipped", f"LLM budget state unreadable ({type(st).__name__}): rules_only, the rules decide alone"
+        return "budget", f"LLM budget state unreadable ({type(st).__name__}): treated as rules_only"
     state = st.get("state")
     if state == "no_entries":
         return "no_entries", "monthly LLM budget reached: no new entries"
     if state != "ok":
-        return "skipped", f"LLM budget state {state!r}: rules_only, the rules decide alone"
+        return "budget", f"LLM budget state {state!r}: rules_only, every increase vetoed"
     day = st.get("day")
     if not isinstance(day, int | float) or isinstance(day, bool):
-        return "skipped", f"LLM day spend unreadable ({day!r}): the rules decide alone"
+        return "budget", f"LLM day spend unreadable ({day!r}): every increase vetoed"
     if day >= lim["daily_usd"]:
-        return "skipped", (f"pre-open daily cap reached (${day:.4f} of ${lim['daily_usd']:.2f}): the rules decide "
-                           "alone")
+        return "budget", f"pre-open daily cap reached (${day:.4f} of ${lim['daily_usd']:.2f}): every increase vetoed"
     return None
 
 
@@ -377,9 +369,11 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
         out.latency_ms = int((clock() - t0) * 1000)
         if isinstance(answer, Charged):
             out.cost_usd = answer.cost_usd
-            if answer.refused in SKIP_REASONS and out.status == "done":
-                out.status = "skipped"
-                out.error = f"no LLM answer ({SKIP_REASONS[answer.refused]}): the rules decide alone"
+            if answer.refused in ("refused", "reserve_failed") and out.status == "done":
+                out.status = "budget"
+                out.error = f"LLM budget gateway {answer.refused} the reservation: every increase vetoed"
+            elif answer.refused == "no_client" and out.status == "done":
+                out.status, out.error = "no_key", "no ANTHROPIC_API_KEY: no buys this session"
             elif answer.refused and out.status == "done":
                 out.status, out.error = "invalid", f"no answer from the gateway ({answer.refused})"
             answer = answer.answer
@@ -392,10 +386,7 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
             else:
                 out.answer = v.model_dump(mode="json")
                 out.verdicts = {x.candidate_id: x.verdict for x in v.verdicts}
-    if out.status in PASS_THROUGH:
-        log.warning("pre-open review %s for %s: %s (%d candidates, the rules' plan goes ahead)", out.status,
-                    session.isoformat(), out.error, len(cands))
-    elif out.status != "done":
+    if out.status != "done":
         log.warning("pre-open review %s for %s: %s (%d candidates, every increase vetoed)", out.status,
                     session.isoformat(), out.error, len(cands))
     return apply(plan, current, out), out, cands

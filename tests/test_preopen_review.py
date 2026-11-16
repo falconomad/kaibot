@@ -147,11 +147,11 @@ def test_reviewer_crash_is_no_increase_not_a_crash():
     assert out.status == "error" and reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
 
 
-def test_budget_soft_cap_or_unknown_skips_and_hard_cap_blocks():
-    rev = StubReviewer()  # #131: no LLM to ask (daily cap, unreadable state) -> the rules decide alone
+def test_budget_soft_cap_or_unknown_vetoes_and_hard_cap_blocks():
+    rev = StubReviewer()  # #186: an exhausted or unreadable budget vetoes every increase (was: skipped)
     for gw in (budget(day=CFG.daily_soft_usd), budget(down=True)):
         reviewed, out, _ = run(rev, gw=gw)
-        assert out.status == "skipped" and reviewed == {(S, "A"): 40, (S, "B"): 21, (S, "C"): 10}
+        assert out.status == "budget" and reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
     reviewed, out, _ = run(rev, gw=budget(month=CFG.monthly_hard_usd))
     assert out.status == "no_entries" and reviewed == {(S, "A"): 0, (S, "B"): 1, (S, "C"): 0}
     assert rev.calls == 0

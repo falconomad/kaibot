@@ -19,8 +19,11 @@ What an agent can do here: veto or halve a buy the rules chose. It never sets a 
 the share counts come from the portfolio builder and every reviewed target lies between the holding and the rules'
 target (`preopen.apply`, checked again by `preopen.violations` before anything is journalled).
 
-No LLM to ask (no ANTHROPIC_API_KEY, the daily budget reached): status "skipped", the rules' plan goes ahead exactly
-as the rules decided, and the reason is journalled. Replay and simulation use `DeterministicReviewer` (no key, no
+Fail closed while ON (#186, Product for #131): no valid answer for any reason (no ANTHROPIC_API_KEY, daily budget used,
+monthly cap, a broken or timed-out answer) skips that session's BUYS; sales always go ahead; the reason is journalled
+(`md_review.status`/`error`, the `multi_day_review` event, the heartbeat note). OFF: nothing here exists.
+
+Replay and simulation use `DeterministicReviewer` (no key, no
 network, no spend) with `inline=True`, so a SimBroker run is reproducible.
 """
 
@@ -166,9 +169,9 @@ class PreopenDesk:
             out = ReviewOutcome("done", session)
             return self._body(out, plan, current, dict(plan), [], tl)
         if self.needs_key and not getattr(self.gateway, "enabled", False):
-            out = ReviewOutcome("skipped", session, error="no ANTHROPIC_API_KEY: the rules decide alone")
-            log.warning("pre-open review skipped for %s: %s", session, out.error)
-            return self._body(out, plan, current, dict(plan), [], tl)
+            out = ReviewOutcome("no_key", session, error="no ANTHROPIC_API_KEY: no buys this session")
+            log.warning("pre-open review %s for %s: %s", out.status, session, out.error)
+            return self._body(out, plan, current, preopen.apply(plan, current, out), [], tl)
         evidence = None
         if self.evidence_fn is not None:
             try:
@@ -231,7 +234,8 @@ def reviewed_plan(rule: str, planned: dict, held: Mapping[str, tuple[float, floa
     """Apply a journalled `md_review` to a fresh plan (the send step's). Returns (the `md_send` body, its `review`
     block). A vetoed buy (or one floored to the holding) is dropped from the targets: the target loop sends nothing
     for a symbol it is not given, and the holding stays as it is. A downgrade sends the reviewed whole shares.
-    Pass-through statuses (off, skipped) keep the plan; any growing key the review did not see is vetoed."""
+    "off" keeps the plan; every other non-done status skips every buy; a growing key the review did not see is
+    vetoed."""
     session = date.fromisoformat(str(record["session"]))
     out = ReviewOutcome(str(record.get("status")), session, verdicts=dict(record.get("verdicts") or {}))
     plan, current = keys_of(rule, planned, held)
@@ -283,14 +287,14 @@ def status_block(record: Mapping | None, today: date | None) -> dict | None:
         return None
     st = record.get("status")
     if st in preopen.PASS_THROUGH:
-        note = f"pre-open review skipped: {record.get('error') or 'rules decide alone'}"
+        note = "pre-open review off"
     elif st == "done":
         v, d = record.get("vetoed") or [], record.get("downgraded") or []
         note = ("pre-open review: no change" if not v and not d else
                 "pre-open review: " + ", ".join(([f"vetoed {', '.join(v)}"] if v else [])
                                                 + ([f"halved {', '.join(d)}"] if d else [])))
     else:
-        note = f"pre-open review {st}: no buys today ({record.get('error') or 'fail closed'})"
+        note = f"no new buys on {record.get('session')}: pre-open review {st} ({record.get('error') or 'fail closed'})"
     return {"session": record.get("session"), "status": st, "vetoed": list(record.get("vetoed") or []),
             "downgraded": list(record.get("downgraded") or []), "reasons": _reasons(record),
             "cost_usd": float(record.get("cost_usd") or 0.0), "note": note[:240]}

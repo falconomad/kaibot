@@ -139,7 +139,7 @@ def daily_path(data=None, review=None):
         ca = CorporateActionGuard(get=lambda path, params: http.call("GET", f"{DATA_URL}{path}", params))
     if review is not None:
         log.warning("pre-open review of the daily path: ON (KAIBOT_PREOPEN_REVIEW=on, %s)",
-                    "LLM key set" if review.gateway.enabled else "no ANTHROPIC_API_KEY: skipped, rules decide alone")
+                    "LLM key set" if review.gateway.enabled else "no ANTHROPIC_API_KEY: no daily buys until it is set")
     return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review)
 
 

@@ -103,25 +103,40 @@ def test_a_job_with_no_outcome_becomes_a_timeout_with_no_increase():
     assert {t[0] for t in out["targets"]} == {"H", "Z"} and sorted(block["vetoed"]) == ["A", "B"]
 
 
-def test_no_key_skips_with_no_budget_read_and_the_rules_decide_alone():
+def test_no_key_skips_the_sessions_buys_with_no_budget_read_and_sales_go_ahead():
     store = FakeStore()
     calls = []
     store.rpc = lambda fn, args: calls.append(fn)
     gw = Gateway(store, None, LLMConfig.load())  # no ANTHROPIC_API_KEY
     rec = run_desk(PreopenDesk(GatewayReviewer(gw), gw, env=ON_ENV, inline=True))
-    assert rec["status"] == "skipped" and "ANTHROPIC_API_KEY" in rec["error"] and calls == []
+    assert rec["status"] == "no_key" and "ANTHROPIC_API_KEY" in rec["error"] and calls == []
     out, block = reviewed_plan(R, dict(PLANNED), HELD, rec)
-    assert out["targets"] == PLANNED["targets"] and block["vetoed"] == [] and block["downgraded"] == {}
-    assert status_block(rec, D)["note"].startswith("pre-open review skipped")
+    assert {t[0]: t[1] for t in out["targets"]} == {"H": 2, "Z": 0}  # trim and sale still go out
+    assert sorted(block["vetoed"]) == ["A", "B"]
+    assert status_block(rec, D)["note"].startswith(f"no new buys on {D}")
 
 
-def test_exhausted_daily_budget_skips_and_the_rules_decide_alone():
+@pytest.mark.parametrize("day, month, status", [
+    (3.0, 0.0, "budget"),  # daily budget used: amber "No new buys on <day>"
+    (4.0, 190.0, "no_entries"),  # monthly cap: red
+])
+def test_exhausted_budget_skips_the_sessions_buys_and_sales_go_ahead(day, month, status):
     store = FakeStore()
-    store.llm["day"] = LLMConfig.load().daily_soft_usd
+    store.llm.update(day=day, month=month)
     llm = FakeLLM({PREOPEN_TOOL["name"]: {}})
     gw = Gateway(store, llm, LLMConfig.load())
     rec = run_desk(PreopenDesk(GatewayReviewer(gw), gw, env=ON_ENV, inline=True))
-    assert rec["status"] == "skipped" and llm.calls == []
+    assert rec["status"] == status and rec["error"] and llm.calls == []
+    out, _ = reviewed_plan(R, dict(PLANNED), HELD, rec)
+    assert {t[0]: t[1] for t in out["targets"]} == {"H": 2, "Z": 0}
+    ev = event_body(rec)
+    assert ev["status"] == status and ev["error"] == rec["error"] and sorted(ev["vetoed"]) == ["A", "B"]
+
+
+def test_off_leaves_the_rules_plan_unchanged():
+    rec = run_desk(PreopenDesk(DeterministicReviewer(veto={"A"}), offline_gateway(), env={}, inline=True,
+                               needs_key=False))
+    assert rec["status"] == "off"
     assert reviewed_plan(R, dict(PLANNED), HELD, rec)[0]["targets"] == PLANNED["targets"]
 
 

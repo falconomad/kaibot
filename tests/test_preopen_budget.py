@@ -3,9 +3,8 @@ Offline: FakeStore mirrors the budget RPCs and FakeLLM stands in for the API. No
 
 - every pre-open call is reserved and settled through `Gateway.call()`, one charge per call, and `cost_usd` is filled;
 - the budget state comes from `Gateway.state()`, never from the caller;
-- #131 (stakeholder rule): with no LLM to ask (daily soft cap, the pre-open cap, a refused reservation, an
-  unreadable state, no key) the review is skipped and the rules' plan goes ahead unchanged, the reason logged; the
-  monthly hard cap is "no new entries" (every increase vetoed), and every broken answer still vetoes;
+- when the budget is exhausted (soft cap, the pre-open cap, monthly hard cap, a refused reservation or an unreadable
+  state) every increase is vetoed (fail closed) and the reason is logged;
 - no LLM output sets price, size, stop or exit;
 - the review stays off by default; switching it on is the stakeholder's decision."""
 
@@ -136,22 +135,22 @@ def test_on_without_a_gateway_fails_closed():
     assert out.status == "error" and "gateway" in out.error and reviewed == NO_INCREASE and rev.calls == 0
 
 
-@pytest.mark.parametrize("day, month, status, want", [
-    (CFG.daily_soft_usd, 0.0, "skipped", PLAN),  # daily soft cap reached: rules_only, the rules decide alone
-    (CFG.daily_soft_usd + 1, CFG.monthly_hard_usd, "no_entries", NO_INCREASE),  # monthly hard cap: no new entries
+@pytest.mark.parametrize("day, month, status", [
+    (CFG.daily_soft_usd, 0.0, "budget"),  # daily soft cap reached: rules_only
+    (CFG.daily_soft_usd + 1, CFG.monthly_hard_usd, "no_entries"),  # monthly hard cap
 ])
-def test_exhausted_budget_makes_no_call_and_logs_why(caplog, day, month, status, want):
+def test_exhausted_budget_vetoes_every_increase_and_logs_why(caplog, day, month, status):
     store, llm, gw = setup()
     store.llm.update(day=day, month=month)
     with caplog.at_level(logging.WARNING, logger="kaibot.preopen"):
         reviewed, out, _ = run(gw)
-    assert out.status == status and reviewed == want and out.verdicts == {}
+    assert out.status == status and reviewed == NO_INCREASE and out.verdicts == {}
     assert llm.calls == [] and "llm_call" not in store.tables  # nothing reserved, nothing spent
     assert out.error and out.error in caplog.text and D.isoformat() in caplog.text
     assert violations(PLAN, CUR, reviewed) == []
 
 
-def test_unreadable_budget_state_skips_the_review(caplog):
+def test_unreadable_budget_state_vetoes_every_increase(caplog):
     store, llm, gw = setup()
 
     def down(fn, args):
@@ -160,25 +159,25 @@ def test_unreadable_budget_state_skips_the_review(caplog):
     store.rpc = down
     with caplog.at_level(logging.WARNING, logger="kaibot.preopen"):
         reviewed, out, _ = run(gw)
-    assert out.status == "skipped" and reviewed == PLAN and llm.calls == []
+    assert out.status == "budget" and reviewed == NO_INCREASE and llm.calls == []
     assert "rules_only" in out.error and out.error in caplog.text
 
 
-def test_state_that_is_not_a_dict_skips_the_review():
+def test_state_that_is_not_a_dict_fails_closed():
     store, llm, gw = setup()
     store.rpc = lambda fn, args: None
     reviewed, out, _ = run(gw)
-    assert out.status == "skipped" and reviewed == PLAN and llm.calls == []
+    assert out.status == "budget" and reviewed == NO_INCREASE and llm.calls == []
 
 
-def test_preopen_daily_cap_skips_even_when_the_room_budget_is_ok(caplog):
+def test_preopen_daily_cap_vetoes_even_when_the_room_budget_is_ok(caplog):
     cfg = dataclasses.replace(CFG, limits={**CFG.limits, "preopen": {**CFG.limits["preopen"], "daily_usd": 0.5}})
     store, llm, gw = setup(cfg=cfg)
     store.llm["day"] = 0.6
     assert gw.state()["state"] == "ok"
     with caplog.at_level(logging.WARNING, logger="kaibot.preopen"):
         reviewed, out, _ = run(gw)
-    assert out.status == "skipped" and "pre-open daily cap" in out.error and reviewed == PLAN
+    assert out.status == "budget" and "pre-open daily cap" in out.error and reviewed == NO_INCREASE
     assert llm.calls == [] and out.error in caplog.text
 
 
@@ -192,15 +191,15 @@ def test_reservation_is_capped_by_the_preopen_cap():
     reviewed, out, _ = run(gw)
     reserve = [a for fn, a in seen if fn == "llm_reserve"]
     assert reserve and reserve[0]["p_daily_soft"] == 0.5
-    assert out.status == "skipped" and "refused" in out.error and reviewed == PLAN and llm.calls == []
+    assert out.status == "budget" and "refused" in out.error and reviewed == NO_INCREASE and llm.calls == []
 
 
-def test_refused_reservation_skips_and_logs(caplog):
+def test_refused_reservation_vetoes_and_logs(caplog):
     store, llm, gw = setup()
     store.llm["day"] = CFG.daily_soft_usd - 0.0001  # state is ok, but the reservation cannot fit
     with caplog.at_level(logging.WARNING, logger="kaibot.preopen"):
         reviewed, out, _ = run(gw)
-    assert out.status == "skipped" and "refused" in out.error and reviewed == PLAN
+    assert out.status == "budget" and "refused" in out.error and reviewed == NO_INCREASE
     assert llm.calls == [] and store.llm["open"] == {} and out.error in caplog.text
 
 
@@ -230,21 +229,12 @@ def test_a_timeout_at_or_over_the_total_limit_is_refused():
     assert out.status == "error" and "timeout_s" in out.error and reviewed == NO_INCREASE and llm.calls == []
 
 
-def test_stored_lists_with_an_exhausted_daily_budget_keep_the_rules_plan():
+def test_stored_lists_with_an_exhausted_budget_never_increase():
     store, _, gw = setup()
     store.llm["day"] = CFG.daily_soft_usd
     rep = evaluate(load_lists(PREOPEN_SET), gateway=gw)
     assert rep["contract_violations"] == [] and rep["verdicts"] == {}
-    assert set(rep["statuses"]) <= {"skipped", "done"}  # "done" only for a list with nothing to increase
-    for row in rep["rows"]:
-        assert all(a["reviewed"] == a["rules"] for a in row["arms"].values())
-
-
-def test_stored_lists_at_the_monthly_hard_cap_never_increase():
-    store, _, gw = setup()
-    store.llm.update(day=CFG.daily_soft_usd + 1, month=CFG.monthly_hard_usd)
-    rep = evaluate(load_lists(PREOPEN_SET), gateway=gw)
-    assert set(rep["statuses"]) <= {"no_entries", "done"}
+    assert set(rep["statuses"]) <= {"budget", "done"}  # "done" only for a list with nothing to increase
     for row in rep["rows"]:
         assert all(a["reviewed"] == a["current"] for a in row["arms"].values())
 
@@ -327,12 +317,12 @@ def test_off_reads_no_budget_and_spends_nothing(monkeypatch):
     assert seen == [] and llm.calls == []
 
 
-def test_on_with_the_flags_but_no_key_skips_and_the_rules_decide():
+def test_on_with_the_flags_but_no_key_fails_closed():
     store = FakeStore()
     gw = from_env(store, {"KAIBOT_ROOM": "on"})  # no ANTHROPIC_API_KEY: the gateway has no client
     reviewed, out, _ = run(gw)
-    assert out.status == "skipped" and "ANTHROPIC_API_KEY" in out.error and reviewed == PLAN
-    assert "llm_call" not in store.tables
+    assert out.status == "no_key" and reviewed == NO_INCREASE and "llm_call" not in store.tables
+    assert "ANTHROPIC_API_KEY" in out.error
 
 
 def test_preopen_limits_in_config():
