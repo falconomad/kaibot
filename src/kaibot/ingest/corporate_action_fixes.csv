@@ -1,0 +1,10 @@
+# Corporate actions missing from Alpaca's /v1/corporate-actions for a store key, each verified against a primary
+# source (company press release or SEC filing). Added to data/daily/corporate_actions.parquet by sync_actions at
+# every fetch (id kaibot-fix:<line>), unless Alpaca lists the same action for that key itself. Only splits, reverse
+# splits and stock dividends here (they change the share count): ratio = new shares per old share.
+# Why Alpaca lacks them: the key's earlier ticker (BLL until 2022 for Ball; CHK until 2024 for Expand Energy; DD for
+# the old Dow Chemical line since 2019) carries the action, and actions are tied to keys by today's ticker.
+key,type,ex_date,ratio,source,note
+BALL@2026-11-05,forward_split,2017-05-17,2.0,https://www.sec.gov/Archives/edgar/data/9389/000000938917000011/ex99-1.htm,"Ball (then BLL) two-for-one split: record 2017-05-08, distributed 2017-05-16; first split-adjusted session 2017-05-17 (Alpaca's own factor 0.4999 on that day)"
+EXE@2026-11-05,reverse_split,2020-04-15,0.005,https://www.sec.gov/Archives/edgar/data/895126/000089512620000096/ex9912020-04x13prreres.htm,"Chesapeake Energy (then CHK) 1-for-200 reverse split effective 2020-04-14 17:00 CT; split-adjusted trading from the open of 2020-04-15"
+DOW@2017-08-24,reverse_split,2026-06-24,0.3333333333333333,https://www.sec.gov/Archives/edgar/data/0001666700/000166670026000034/dupontrssannouncement.htm,"DuPont de Nemours (DD; this key is the 2017 Dow Chemical line, which continued as DowDuPont and DD) 1-for-3 reverse split effective 2026-06-24 00:01 ET, split-adjusted trading that day"
