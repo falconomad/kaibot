@@ -11,7 +11,7 @@ def flat_days(n_days=40, price=100.0, seed=1):
     o = np.c_[c[:, :1], c[:, :-1]]
     h, l = np.maximum(o, c) + 0.01, np.minimum(o, c) - 0.01  # noqa: E741
     v = np.full_like(c, 1e5)
-    dates = np.arange(np.datetime64("2025-01-02"), np.datetime64("2025-01-02") + n_days)
+    dates = np.arange(np.datetime64("2025-01-02"), np.datetime64("2025-01-02") + np.timedelta64(n_days, "D"))
     return SymbolDays("X", dates, o, h, l, c, v, c.copy())
 
 
