@@ -13,16 +13,20 @@ with an announced action gets a plain heartbeat note instead.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 
 CA_PATH = "/v1/corporate-actions"
 GUARD_SESSIONS = 35
-# 35 sessions counted as weekdays plus two, so market holidays (at most two in any seven weeks) never shorten it
+# QA-Ops (#271): the window's end is the 35th NYSE session after the fill session on the exchange calendar, and never
+# earlier than 37 weekdays on. (Weekdays alone fell one session short over Thanksgiving, Christmas and New Year: from
+# Wed 18 Nov 2026, 37 weekdays reach 8 Jan 2027, only 34 sessions on.)
 WINDOW_WEEKDAYS = GUARD_SESSIONS + 2
+READ_DEADLINE_S = 25.0  # QA-Ops (#271): the whole read, every chunk and page; past it: a failed read (no buys)
 CHUNK = 50  # symbols per request (as the daily store's fetch)
 MAX_PAGES = 10
 
@@ -53,20 +57,27 @@ class Announced:
     action: str  # plain name: "split", "reverse split", "spin-off", "cash merger", "symbol change", ...
     on: str  # the ex or effective date, YYYY-MM-DD
 
+    @property
+    def when(self) -> str:
+        return self.on or "a date not given yet"
+
     def note(self) -> str:
         """The heartbeat's line for a held stock."""
-        return f"{self.symbol}: {self.action} on {self.on} — the engine does not handle this yet, check before then"
+        return f"{self.symbol}: {self.action} on {self.when} — the engine does not handle this yet, check before then"
 
     def skip_text(self) -> str:
         """What Activity shows for a skipped buy."""
-        return f"skipped: corporate action on {self.on}"
+        return f"skipped: corporate action on {self.when}"
 
 
 def parse(payload: dict) -> list[Announced]:
     """Alpaca's GET /v1/corporate-actions answer -> the announced actions this guard cares about (others ignored;
     a row without a symbol or a date is ignored too: it cannot be placed)."""
     out = []
-    block = (payload or {}).get("corporate_actions") or {}
+    # QA-Ops (#271): an answer that is not Alpaca's shape is a failed read (no buys), never "nothing announced"
+    if not isinstance(payload, dict) or "corporate_actions" not in payload:
+        raise ValueError(f"unexpected corporate-actions answer ({type(payload).__name__} without corporate_actions)")
+    block = payload["corporate_actions"] if payload["corporate_actions"] is not None else {}
     if not isinstance(block, dict):
         raise ValueError(f"unexpected corporate-actions answer ({type(block).__name__})")
     for name, rows in block.items():
@@ -79,8 +90,11 @@ def parse(payload: dict) -> list[Announced]:
                 continue
             on = next((str(r[f])[:10] for f in date_fields if r.get(f)), None)
             sym = next((str(r[f]).upper() for f in sym_fields if r.get(f)), None)
-            if on and len(on) == 10 and sym:
-                out.append(Announced(sym, plain, on))
+            if not sym:
+                continue  # cannot be placed on a stock
+            # QA-Ops (#271): a guarded action with no readable date is kept with an empty date (inside every
+            # window): the stock is not bought, rather than bought into an action the engine cannot place in time
+            out.append(Announced(sym, plain, on if on and len(on) == 10 and on[4] == "-" else ""))
     return out
 
 
@@ -89,6 +103,15 @@ def window(session: date) -> tuple[date, date]:
     its open is already in the venue's share count, but not in the evening's prices) to GUARD_SESSIONS sessions
     later."""
     end = np.busday_offset(np.datetime64(session, "D"), WINDOW_WEEKDAYS, roll="forward").astype(object)
+    try:
+        from kaibot.ingest import nyse_sessions
+
+        after = [d for d in nyse_sessions.sessions(session, session + timedelta(days=GUARD_SESSIONS * 2 + 30))
+                 if d > session]
+        if len(after) >= GUARD_SESSIONS:
+            end = max(end, after[GUARD_SESSIONS - 1])
+    except Exception:  # the calendar is a refinement only: the weekday end still stands
+        pass
     return session, end
 
 
@@ -97,8 +120,10 @@ class CorporateActionGuard:
     in `window(session)`, or ({}, why) when the read failed. `get(path, params)`: Alpaca's market-data GET (an
     `AlpacaData`'s `_d`, or any callable with that shape: a fake feed in tests)."""
 
-    def __init__(self, data=None, *, get: Callable[[str, dict], dict] | None = None) -> None:
+    def __init__(self, data=None, *, get: Callable[[str, dict], dict] | None = None,
+                 deadline_s: float = READ_DEADLINE_S, clock: Callable[[], float] = time.monotonic) -> None:
         self.get = get or getattr(data, "get", None) or data._d
+        self.deadline_s, self.clock = deadline_s, clock
         self._cache: dict[date, dict[str, Announced | None]] = {}  # one decision evening at a time
 
     def lookup(self, evening: date, session: date, symbols: Iterable[str]) -> tuple[dict[str, Announced],
@@ -127,6 +152,7 @@ class CorporateActionGuard:
 
     def _read(self, symbols: Sequence[str], start: date, end: date) -> list[Announced]:
         out: list[Announced] = []
+        stop = self.clock() + self.deadline_s
         for i in range(0, len(symbols), CHUNK):
             part = symbols[i:i + CHUNK]
             token = None
@@ -135,8 +161,10 @@ class CorporateActionGuard:
                      "end": str(end), "limit": 1000}
                 if token:
                     p["page_token"] = token
+                if self.clock() > stop:
+                    raise TimeoutError(f"the corporate-actions read took longer than {self.deadline_s:g} s")
                 d = self.get(CA_PATH, p)
-                out += [a for a in parse(d) if str(start) <= a.on <= str(end)]
+                out += [a for a in parse(d) if not a.on or str(start) <= a.on <= str(end)]
                 token = (d or {}).get("next_page_token")
                 if not token:
                     break

@@ -42,7 +42,11 @@ def test_parse_reads_each_kind_and_ignores_dividends_and_unknown_lists():
     assert got == {"AAA": ("split", "2026-12-01"), "BBB": ("reverse split", "2026-11-19"),
                    "CCC": ("spin-off", "2026-12-10"), "DDD": ("cash merger", "2026-11-25"),
                    "EEE": ("symbol change", "2026-11-20")}
-    assert cg.parse({"corporate_actions": {"spin_offs": [{"source_symbol": "X"}]}}) == []  # no date: ignored
+    # QA-Ops (#271): a guarded action with no readable date is kept (the stock is not bought), one with no symbol
+    # cannot be placed
+    undated = {"corporate_actions": {"spin_offs": [{"source_symbol": "X"}]}}
+    assert cg.parse(undated) == [cg.Announced("X", "spin-off", "")]
+    assert cg.parse({"corporate_actions": {"spin_offs": [{"ex_date": "2026-12-01"}]}}) == []
     with pytest.raises(ValueError):
         cg.parse({"corporate_actions": ["not", "an", "object"]})
 
@@ -50,7 +54,9 @@ def test_parse_reads_each_kind_and_ignores_dividends_and_unknown_lists():
 def test_window_is_at_least_35_sessions_from_the_fill_session():
     a, b = cg.window(date(2026, 11, 18))
     assert a == date(2026, 11, 18)
-    assert b == date(2027, 1, 8)  # 37 weekdays on: 35 sessions even with Thanksgiving and Christmas closed
+    # QA-Ops (#271): 35 NYSE sessions after the fill session. 37 weekdays (8 Jan 2027) are only 34 sessions here:
+    # Thanksgiving, Christmas and New Year's Day are all closed
+    assert b == date(2027, 1, 11)
 
 
 def test_lookup_finds_actions_in_the_window_only_and_reads_each_symbol_once_per_evening():
@@ -61,7 +67,7 @@ def test_lookup_finds_actions_in_the_window_only_and_reads_each_symbol_once_per_
     assert why is None and set(got) == {"GGG"} and got["GGG"].on == "2026-11-30"
     assert feed.calls[0][0] == "/v1/corporate-actions"
     p = feed.calls[0][1]
-    assert p["start"] == "2026-11-18" and p["end"] == "2027-01-08" and "spin_off" in p["types"].split(",")
+    assert p["start"] == "2026-11-18" and p["end"] == "2027-01-11" and "spin_off" in p["types"].split(",")
     g.lookup(date(2026, 11, 17), date(2026, 11, 18), ["GGG", "AAA"])
     assert len(feed.calls) == 1  # cached for the evening
     g.lookup(date(2026, 11, 18), date(2026, 11, 19), ["GGG"])
@@ -82,3 +88,48 @@ def test_texts():
     a = cg.Announced("BBB", "reverse split", "2026-11-19")
     assert a.note() == "BBB: reverse split on 2026-11-19 — the engine does not handle this yet, check before then"
     assert a.skip_text() == "skipped: corporate action on 2026-11-19"
+
+
+# ---------------------------------------------------------------- QA-Ops second key (#271)
+
+
+@pytest.mark.parametrize("fill", [date(2026, 11, 18), date(2026, 12, 23), date(2027, 3, 15), date(2027, 6, 30)])
+def test_the_window_always_reaches_35_sessions_after_the_fill_session(fill):
+    from kaibot.ingest import nyse_sessions
+
+    a, b = cg.window(fill)
+    assert a == fill
+    assert len([d for d in nyse_sessions.sessions(fill, b) if d > fill]) >= cg.GUARD_SESSIONS
+
+
+@pytest.mark.parametrize("answer", [None, {}, [], "<html>bad gateway</html>", {"message": "forbidden"},
+                                    {"corporate_actions": ["x"]}])
+def test_a_garbled_answer_is_a_failed_read_never_nothing_announced(answer):
+    g = cg.CorporateActionGuard(get=lambda path, params: answer)
+    got, why = g.lookup(date(2026, 11, 17), date(2026, 11, 18), ["AAA"])
+    assert got == {} and why is not None and "read failed" in why
+    assert g.known(date(2026, 11, 17), ["AAA"]) == {}  # nothing cached: the next read asks again
+
+
+def test_an_empty_answer_of_alpacas_shape_means_nothing_announced():
+    g = cg.CorporateActionGuard(get=lambda path, params: {"corporate_actions": {}, "next_page_token": None})
+    assert g.lookup(date(2026, 11, 17), date(2026, 11, 18), ["AAA"]) == ({}, None)
+
+
+def test_an_announced_action_without_a_date_blocks_the_buy():
+    g = cg.CorporateActionGuard(get=Feed({"cash_mergers": [{"acquiree_symbol": "DDD", "acquirer_symbol": "BIG"}]}))
+    got, why = g.lookup(date(2026, 11, 17), date(2026, 11, 18), ["DDD", "AAA"])
+    assert why is None and set(got) == {"DDD"}
+    assert got["DDD"].skip_text() == "skipped: corporate action on a date not given yet"
+
+
+def test_a_slow_read_stops_at_its_deadline_and_counts_as_failed():
+    t = [0.0]
+
+    def slow(path, params):
+        t[0] += 20.0  # each page takes 20 s
+        return {"corporate_actions": {}, "next_page_token": "more"}
+
+    g = cg.CorporateActionGuard(get=slow, clock=lambda: t[0])
+    got, why = g.lookup(date(2026, 11, 17), date(2026, 11, 18), ["AAA"])
+    assert got == {} and "longer than 25 s" in why and t[0] <= 40.0

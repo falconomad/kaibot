@@ -124,7 +124,19 @@ def daily_path(data=None):
 
     # #266 (trend_momentum.md Amendment 6): no buy of a stock with an announced split, spin-off, merger or symbol
     # change in the next 35 sessions, read from Alpaca's market-data corporate actions (free)
-    ca = CorporateActionGuard(data) if data is not None else None
+    ca = None
+    if data is not None:
+        import copy
+
+        from kaibot.broker.alpaca import ORDER_DEADLINE_S, ORDER_TIMEOUT_S
+        from kaibot.engine.config import DATA_URL
+
+        # QA-Ops (#271): the read runs inside the engine's loop (the send step at 09:31), so each request is bounded
+        # like an order call (6 s an attempt, 20 s in all, retries included) and the guard stops the whole read at
+        # 25 s (a failed read: no buys). Same client, same keys in its headers, same rate budget.
+        http = copy.copy(data.http)
+        http.timeout_s, http.deadline_s = ORDER_TIMEOUT_S, ORDER_DEADLINE_S
+        ca = CorporateActionGuard(get=lambda path, params: http.call("GET", f"{DATA_URL}{path}", params))
     return lambda eng: live_daily.for_engine(eng, load, ca=ca)
 
 
