@@ -567,7 +567,7 @@ def test_timestamps_in_fixtures_are_midnight_new_york():
     assert [db.session_date(b["t"]) for b in adjusted(FIX_RAW["bars"])][0] == date(2026, 10, 19)
 
 
-# ---------------------------------------------------------------- verified fixes to Alpaca's table (PR C, #260)
+# ---------------------------------------------------------------- verified fixes to Alpaca's table (PR C, #262)
 
 
 def test_every_fix_is_well_formed_and_cites_a_primary_source():
