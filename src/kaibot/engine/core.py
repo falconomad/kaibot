@@ -379,6 +379,7 @@ class Engine:
         self.run = self.store.active_run()
         self._restore_positions()
         self._attach_ledger()
+        self._rebuild_md_exits()  # #252: a flatten sale sent before a restart is still booked when it fills
         try:
             self._adopt_orphans()
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
@@ -814,7 +815,7 @@ class Engine:
                                     strategy=",".join(k[0] for k, _ in keys), qty=sum(q for _, q in keys),
                                     reason=reason)
                     if o:
-                        self._md_exits[o["id"]] = {"run_id": rid, "keys": keys, "reason": reason}
+                        self._md_exit_sent(o, rid, keys, reason)
                     continue
                 for k, q in keys:
                     for oo in self.broker.open_orders():
@@ -826,27 +827,53 @@ class Engine:
                     o = self._order("sell", lambda sym=sym, q=q, coid=coid: self.broker.submit(
                         OrderRequest(sym, "sell", q, "market", "day", coid)), coid=coid, symbol=sym,
                         strategy=k[0], qty=q, reason=reason)
-                    self._md_exits[o["id"]] = {"run_id": rid, "keys": [(k, q)], "reason": reason}
+                    self._md_exit_sent(o, rid, [(k, q)], reason)
                 failed.pop(sym, None)
             except Exception as e:
                 log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
                 failed[sym] = e
+
+    def _md_exit_sent(self, o: dict, rid, keys: list, reason: str) -> None:
+        """#252: a multi-day flatten sale is journalled as soon as the venue has given it an id (`md_exit`), so a
+        restart before its fill still books it (`_rebuild_md_exits`)."""
+        self._md_exits[o["id"]] = {"run_id": rid, "keys": keys, "reason": reason}
+        self.journal.append("md_exit", {"order_id": o["id"], "run_id": rid, "coid": o.get("client_order_id"),
+                                        "keys": [[list(k), q] for k, q in keys], "reason": reason,
+                                        "ts": self.now().isoformat()})
+
+    def _rebuild_md_exits(self) -> None:
+        """#252: the multi-day flatten sales journalled as sent and not yet booked or dropped (start-up)."""
+        done = {b.get("order_id") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",))}
+        for _, _, _, b in self.journal.entries(kinds=("md_exit",)):
+            if b.get("order_id") in done:
+                continue
+            self._md_exits[b["order_id"]] = {"run_id": b.get("run_id"), "reason": b.get("reason"),
+                                             "keys": [((k[0], k[1]), float(q)) for k, q in b.get("keys") or []]}
+
+    def _md_exit_booked(self, oid: str) -> bool:
+        """The ledger already holds this sale's fill (a crash after the booking, before `md_exit_done`)."""
+        return any(b.get("order_id") == oid and b.get("side") == "sell"
+                   for _, _, _, b in self.journal.entries(kinds=("fill",)))
 
     def _sync_md_exits(self) -> None:
         for oid, x in list(self._md_exits.items()):
             o = self.broker.order(oid)
             if o["status"] == "filled":
                 px, ts = float(o["filled_avg_price"]), o.get("filled_at")
-                for (strategy, sym), q in x["keys"]:
-                    if x["run_id"] is not None:
-                        self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
-                                            "side": "sell", "qty": q, "px": px, "fees": sell_fees(q, px),
-                                            "coid": o.get("client_order_id"), "ts": ts, "reason": x["reason"]})
-                keys = [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]
-                self.store.event("multi_day_sold", {"order_id": oid, "keys": keys, "px": px,
-                                                    "reason": x["reason"]}, self._rid())
+                if not self._md_exit_booked(oid):
+                    for (strategy, sym), q in x["keys"]:
+                        if x["run_id"] is not None:
+                            self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
+                                                "side": "sell", "qty": q, "px": px, "fees": sell_fees(q, px),
+                                                "coid": o.get("client_order_id"), "order_id": oid, "ts": ts,
+                                                "reason": x["reason"]})
+                    keys = [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]
+                    self.store.event("multi_day_sold", {"order_id": oid, "keys": keys, "px": px,
+                                                        "reason": x["reason"]}, self._rid())
+                self.journal.append("md_exit_done", {"order_id": oid, "state": "booked"})
                 self._md_exits.pop(oid)
             elif o["status"] in ("canceled", "expired", "rejected"):
+                self.journal.append("md_exit_done", {"order_id": oid, "state": o["status"]})
                 self._md_exits.pop(oid)  # not sold: the next full flatten tries again
 
     def _attach_ledger(self) -> None:
