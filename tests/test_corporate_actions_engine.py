@@ -140,3 +140,38 @@ def test_a_spin_off_record_without_a_share_ratio_is_not_adopted(tmp_path, monkey
     (ev,) = [e for e in a.store.tables["event"] if e["type"] == "corporate_action_not_adopted"]
     assert "no share ratio" in str(ev)
     assert not a.eng.account_clean
+
+# ---------------------------------------------------------------- a late credit (after the session start)
+
+
+def test_a_spin_off_credited_after_the_session_start_is_adopted_at_the_next_tick(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed(SPIN))
+    a.hold()
+    a.ticks(a.open2, 0, 3)  # the session starts before Alpaca has credited anything
+    assert (MD, "BN") not in a.eng.ledger.book(a.rid).sleeves
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)  # credited at 09:33
+    a.ticks(a.open2, 3, 10)
+    assert a.eng.ledger.book(a.rid).sleeves[(MD, "BN")].qty == 20
+    assert a.eng.kill is None and a.eng.account_clean and a.eng.recon.last.diffs == []
+    assert a.eng.entry_block() is None
+    assert len([x for *_, x in a.eng.journal.entries(kinds=("spinoff",))]) == 1
+
+
+def test_a_split_credited_after_the_session_start_is_booked_at_the_next_tick(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed({}))
+    a.hold()
+    a.ticks(a.open2, 0, 3)
+    a.broker.pos["B"]["qty"] = QTY * 2  # a 2-for-1 split applied late, with Alpaca's SSP row
+    a.broker.non_trade.append({"activity_type": "SSP", "id": "ssp1", "date": DAY2, "symbol": "B", "qty": str(QTY)})
+    a.ticks(a.open2, 3, 10)
+    assert a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == QTY * 2
+    assert a.eng.kill is None and a.eng.recon.last.diffs == []
+
+
+def test_a_late_difference_without_a_record_still_halts_entries(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed({}))
+    a.hold()
+    a.ticks(a.open2, 0, 3)
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
+    a.ticks(a.open2, 3, 10)
+    assert (MD, "BN") not in a.eng.ledger.book(a.rid).sleeves and a.eng.kill == "drift"
