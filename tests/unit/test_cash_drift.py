@@ -167,3 +167,94 @@ def test_a_multi_day_sleeve_sold_by_a_flatten_books_the_venues_fee():
     assert booked == [("fill", {"run_id": 7, "strategy": "trend_momentum", "symbol": "B", "side": "sell",
                                 "qty": 40, "px": 101.5, "fees": 0.33, "coid": "c1", "ts": T,
                                 "reason": "flatten"})]
+
+
+# ---------------------------------------------------------------- QA-Ops second key (#241): every part, once
+
+
+def _sim_sale(**script):
+    """A SimBroker on cost model v1 (it charges a sale fee) that bought 100 A and sold them at market."""
+    from test_sim_broker import bar, buy, venue
+
+    from kaibot.broker import OrderRequest
+    from kaibot.broker.sim import COSTS_V1
+
+    b, _ = venue(costs=COSTS_V1)
+    buy(b, 100)
+    b.advance(bar(30))
+    for kind, arg in script.items():
+        getattr(b.script, kind)("A", *arg)
+    s = b.submit(OrderRequest("A", "sell", 100, "market", "day"))
+    for m in (31, 32, 33):
+        b.advance(bar(m))
+    assert s["status"] == "filled"
+    return b, s
+
+
+def test_a_partly_filled_sale_books_the_fee_of_every_part_not_only_the_last_minute():
+    b, s = _sim_sale(fills=([40, 30, 30],))
+    parts = [f for f in b.fills if f["order_id"] == s["id"]]
+    assert len(parts) == 3 and all(f["fees"] > 0 for f in parts)
+    got = _engine(b)._venue_fees(s["id"], s["filled_at"], s["submitted_at"])
+    assert got == pytest.approx(sum(f["fees"] for f in parts))
+    assert _engine(b)._venue_fees(s["id"], s["filled_at"]) < got  # from the last fill only: the first parts missed
+
+
+def test_an_activity_the_venue_reports_twice_is_booked_once():
+    b, s = _sim_sale(duplicate=())
+    rows = [f for f in b.fills if f["order_id"] == s["id"]]
+    assert len(rows) == 2 and rows[0]["id"] == rows[1]["id"]  # the same activity twice
+    assert _engine(b)._venue_fees(s["id"], s["filled_at"], s["submitted_at"]) == pytest.approx(rows[0]["fees"])
+
+
+def test_the_order_sync_passes_the_orders_sending_time_on_every_exit_path():
+    """The sale sent by the engine (time / daily stop / flatten / manual) and a bracket's leg: the fee lookup gets
+    the order's `submitted_at`, so it reaches back to the first part."""
+    calls = []
+    eng = _engine(_Broker())
+    eng._md_exits = {}
+    eng._on_exit_fill = lambda p, px, reason, ts, oid=None, since=None: calls.append((reason, oid, since))
+    sent = types.SimpleNamespace(status="open", exit_order_id="x1", order_id="e1", exit_reason="time")
+    legged = types.SimpleNamespace(status="open", exit_order_id=None, order_id="e2", armed=False)
+    orders = {"x1": {"id": "x1", "status": "filled", "filled_avg_price": "100", "filled_at": T,
+                     "submitted_at": "2026-11-18T20:55:00+00:00"},
+              "e2": {"id": "e2", "status": "filled", "submitted_at": "2026-11-18T14:31:00+00:00",
+                     "legs": [{"id": "e2s", "type": "stop", "status": "filled", "filled_avg_price": "99",
+                               "filled_at": T}]}}
+    eng.broker.order = orders.__getitem__
+    eng.pos = types.SimpleNamespace(values=lambda: [sent, legged])
+    eng._sync_orders()
+    assert calls == [("time", "x1", "2026-11-18T20:55:00+00:00"), ("stop", "e2s", "2026-11-18T14:31:00+00:00")]
+
+
+def test_the_reconciliation_still_catches_a_real_cash_difference(frame):
+    """The fix books what the venue reports; cash the venue takes without reporting it on a fill (an Alpaca FEE
+    activity, a fee the engine never read) still shows: $40 stays inside the $50 tolerance at $100k, $60 more
+    blocks entries at the next check."""
+    sd = from_frame("SPY", frame)
+    days = [str(d) for d in sd.dates][-4:]
+    costs = costs_for("0", {"SPY": adv_table(frame)})
+    profiles = load_profiles()
+    start = pd.Timestamp(f"{days[0]} 09:00", tz=ET).tz_convert(UTC).to_pydatetime() - timedelta(minutes=30)
+    blocked = []
+    with tempfile.TemporaryDirectory() as tmp:
+        store = JournalStore(Journal(Path(tmp) / "journal.sqlite"))
+        sim = simulation({"SPY": frame}, {}, "SPY", store=store, policies=profiles, start=start,
+                         cache_dir=Path(tmp) / "h", vix=pd.Series(dtype=float), fomc=set(), costs=costs,
+                         cash=100_000.0, calendar=se.calendar_of(sd), strategies={lv: [] for lv in profiles})
+        costs.clock = sim.clock
+        eng = sim.engine
+        eng.shadow_only = ()
+        strat = registry.research_intraday()["spy_noise_band"]
+        eng.live_strategies = lambda: (strat,)
+        store.insert("command", {"kind": "new_run", "payload": {"amount_usd": 100_000.0, "level": "balanced"},
+                                 "idempotency_key": "drift-recon", "applied_at": None})
+        eng.startup()
+        eng.apply_commands()
+        for day, taken in zip(days, (0.0, 40.0, 60.0, 0.0), strict=True):
+            sim.broker.cash -= taken  # after the previous close: the venue takes cash the engine is not told of
+            assert not run_sessions(eng, sim.broker, sim.clock, [day], strict=True).errors
+            blocked.append(not eng._reconciled())
+        store.journal.close()
+    assert blocked[:2] == [False, False]  # nothing, then $40: inside the tolerance
+    assert blocked[2:] == [True, True], blocked  # $100 in all: blocked from the next check on
