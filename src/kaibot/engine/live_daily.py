@@ -80,6 +80,7 @@ log = logging.getLogger("kaibot.engine.daily")
 SEND_FROM, SEND_UNTIL = time(9, 31), time(15, 45)  # Alpaca refuses `cls` orders 15:50-19:00: five minutes' margin
 DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel", "md_review")
 PREOPEN_FROM = time(8, 30)  # #131: the pre-open review starts here, before the 09:31 send window
+REVIEW_WAIT_UNTIL_S = 300.0  # the send stops waiting for a running review 5 minutes before the window ends
 # Product call on #207 (13 Nov 2026): a rule whose book reached its run end stays RETIRED across runs and restarts,
 # until the stakeholder re-enables it explicitly: KAIBOT_REENABLE=<rule>:<retirement date>, read once at start-up.
 RETIRE_KINDS = ("md_retired", "md_reenabled")
@@ -786,7 +787,9 @@ class LiveDaily:
             if planned is None:
                 if self.review is not None and self._review_record(r.name, session) is None \
                         and self.review.pending(r.name, session):
-                    continue  # #131: the pre-open review is still running (it has its own hard deadline)
+                    if self._window_left(self.now()) > REVIEW_WAIT_UNTIL_S:
+                        continue  # #131: the pre-open review is still running (it has its own hard deadline)
+                    self._review_cut(r.name, session, rid)  # too close to the window's end: sales must go out
                 planned = self._plan(r, session, rid)
                 if planned is None:
                     continue
@@ -843,6 +846,26 @@ class LiveDaily:
         return done
 
     # ---------------------------------------------------------------- the pre-open review (#131, off by default)
+    def _window_left(self, now: datetime) -> float:
+        """Seconds left in today's send window (15:45 ET, or the early close minus 15 minutes)."""
+        et = now.astimezone(NY)
+        end = datetime.combine(et.date(), self.send_until(et.date()), tzinfo=NY)
+        return (end - et).total_seconds()
+
+    def _review_cut(self, rule: str, session: date, rid: int) -> None:
+        """Backend-quant key on #248: a review still running this close to the end of the send window must not
+        hold back the rule's SALES (the send waits for the whole plan). It is journalled as a timeout: fail closed,
+        no buys this session, sales go out now. A late outcome from the worker is ignored (the journal's wins)."""
+        from kaibot.agents.preopen_daily import EVENT, event_body
+
+        rec = {"run_id": rid, "strategy": rule, "session": str(session), "status": "timeout",
+               "error": f"still running {REVIEW_WAIT_UNTIL_S:.0f} s before the send window closes: no buys, sales "
+                        "go out", "verdicts": {}, "answer": None, "latency_ms": None, "cost_usd": 0.0, "arms": {},
+               "candidates": [], "targets": [], "vetoed": [], "downgraded": [], "allowed": [],
+               "pass_through": False}
+        self.journal.append("md_review", rec)
+        self.event(EVENT, event_body(rec))
+
     def _review_record(self, rule: str, session: date) -> dict | None:
         """The journalled `md_review` of (rule, session), collecting a finished one first (journal, then event)."""
         rec = self._send_entry(rule, session, "md_review")
