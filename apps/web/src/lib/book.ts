@@ -19,6 +19,8 @@ export interface BookPosition {
   opened: string | null;   // first buy, YYYY-MM-DD
   dividends: number;
   stop: { price: number; state: "resting" | "missing" | "re-arming" } | null;
+  /** #229 (0020): the rule's sell readings at its last decision, and the sector its daily view uses (raw, read by lib/multiday). */
+  sellWhen?: unknown; sector?: unknown;
 }
 export interface Book {
   runId: number; session: string | null; ts: string | null;
@@ -51,7 +53,7 @@ export function parseBook(raw: unknown, runId = 0): Book {
     if (qty <= 0) return [];
     const s = obj(o.stop), sp = num(s?.price), st = STOP_STATES.find((k) => k === s?.state);
     return [{ rule, symbol, qty, avgCost: avg, mark, priced: num(o.last) !== null, opened: str(o.opened_session, 10),
-      dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null }];
+      dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null, sellWhen: o.sell_when, sector: o.sector }];
   });
   const diffs = Object.entries(obj(rec?.positions) ?? {}).slice(0, 50).map(([symbol, v]) => {
     const d = obj(v);
