@@ -13,6 +13,7 @@ import { ExperimentSheetBody, engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
 import { Tick } from "./Tick";
+import { NAME, REPO_DIR } from "../brand/brand";
 
 type Tone = "breach" | "warn" | "info" | "neutral";
 
@@ -58,7 +59,7 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
         title={risk.severity === "breach" || risk.red?.length ? "Limit or safety halt in force" : "Heads up"}
         text={<>{first}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
         <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>
-        <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
+        <p className="muted">{NAME} applies its limits by itself. Open trades keep their stop at the broker.</p>
         <p><Link to="/health">Engine health</Link></p>
       </StatusRow>,
     );
@@ -66,16 +67,16 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
   if (active && !engineLive)
     rows.push(
       <StatusRow key="off" tone="warn" title="The engine isn't running" text="Engine offline: nothing new trades">
-        <p>Nothing trades until you start it on your Mac: open Terminal in the kaibot folder and run <code className="num">./scripts/run_engine.sh</code>.</p>
+        <p>Nothing trades until you start it on your Mac: open Terminal in the <code className="num">{REPO_DIR}</code> folder and run <code className="num">./scripts/run_engine.sh</code>.</p>
         <p className="muted">Open trades keep their stop-loss at Alpaca meanwhile.</p>
       </StatusRow>,
     );
   if (unprotected.length || offBooks)
     rows.push(
       <StatusRow key="book" tone="breach" title="The multi-day book needs attention" phoneDup
-        text={unprotected.length ? `${unprotected.length} stock${unprotected.length === 1 ? " has" : "s have"} no safety stop` : "Kaibot's books and the broker disagree"}>
-        {unprotected.length > 0 && <p>No safety stop at the broker for {unprotected.join(", ")}. Kaibot places it again.</p>}
-        {offBooks && <p>Kaibot's books and the broker disagree. Buying stops until the two match again.</p>}
+        text={unprotected.length ? `${unprotected.length} stock${unprotected.length === 1 ? " has" : "s have"} no safety stop` : `${NAME}'s books and the broker disagree`}>
+        {unprotected.length > 0 && <p>No safety stop at the broker for {unprotected.join(", ")}. {NAME} places it again.</p>}
+        {offBooks && <p>{NAME}'s books and the broker disagree. Buying stops until the two match again.</p>}
         <p><Link to="/positions">Positions</Link></p>
       </StatusRow>,
     );
@@ -186,7 +187,7 @@ export function TopHoldings({ rows, max, top = 3 }: { rows: HoldingRowData[]; ma
             </li>
           ))}
         </ul>
-      ) : <p className="muted" style={{ margin: 0, fontSize: 14 }}>Nothing held right now. Kaibot is flat by 15:55 every day; multi-day stocks show here once bought.</p>}
+      ) : <p className="muted" style={{ margin: 0, fontSize: 14 }}>Nothing held right now. {NAME} is flat by 15:55 every day; multi-day stocks show here once bought.</p>}
     </section>
   );
 }

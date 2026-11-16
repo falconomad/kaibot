@@ -19,6 +19,7 @@ import { StatusRow } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
+import { NAME } from "../brand/brand";
 
 const PAGE = 100;
 type Filter = "all" | "fills" | "skipped" | "room" | "alerts";
@@ -86,7 +87,7 @@ export function Tape() {
     <>
       <section aria-labelledby="act-h" className="pos-head">
         <h1 id="act-h" className="page-title">Activity</h1>
-        <p className="muted desk-only" style={{ margin: 0 }}>What Kaibot did, and what it passed on.</p>
+        <p className="muted desk-only" style={{ margin: 0 }}>What {NAME} did, and what it passed on.</p>
         <div className="chips chips-scroll" role="group" aria-label="Show">
           {FILTERS.map(([k, l]) => <button key={k} type="button" className="chip-btn" aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>)}
           <button type="button" className="chip-btn" aria-pressed={testOnly} onClick={() => setTestOnly(!testOnly)}

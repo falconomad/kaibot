@@ -41,10 +41,11 @@ export function ctxFor(run: Run, over: Partial<RunCtx> = {}): RunCtx {
   return { run, runs: [run], overview: emptyOverview(run), retryOverview: () => {}, ...over };
 }
 
-/** Render `page` at `path` (matched by `route`) inside the shell's outlet context, as the dashboard does. */
+/** Render `page` at `path` (matched by `route`) inside the shell's outlet context, as the dashboard does.
+ *  Every page rendered here is also read for the earlier display name (#254): a page test fails if it comes back. */
 export function render(page: ReactElement, opts: { seeds?: Seed[]; ctx?: RunCtx; path?: string; route?: string; children?: ReactNode } = {}) {
   const { seeds = [], ctx = ctxFor(paperRun()), path = "/", route = "/", children } = opts;
-  return renderToStaticMarkup(
+  const html = renderToStaticMarkup(
     <QueryClientProvider client={seededClient(seeds)}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
@@ -55,11 +56,27 @@ export function render(page: ReactElement, opts: { seeds?: Seed[]; ctx?: RunCtx;
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  const shown = earlierName(html);
+  if (shown.length) throw new Error(`The earlier name shows on this page: ${shown.map((x) => `"${x}"`).join(", ")}. `
+    + "Write NAME or BRAND from src/brand/brand.ts instead (brandText() for text that comes from outside apps/web).");
+  return html;
 }
 
 /** Visible text: tags dropped, entities decoded, whitespace collapsed. */
 export const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
   .replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim();
+
+/** Where the earlier display name ("kaibot") is shown in rendered markup (#254): in the text a person reads, or in an
+ *  attribute they read or hear (aria-label, alt, title, placeholder). Returns each place with a few words around it.
+ *  Not counted, because nobody reads them as the app's name:
+ *  - text inside <code>: a literal path or command (the repo's folder on the Mac is still `kaibot`);
+ *  - links, class names, ids and data attributes;
+ *  - an identifier such as KAIBOT_REENABLE in an engine message: an env var keeps its name. */
+export function earlierName(html: string): string[] {
+  const noCode = html.replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, " ");
+  const heard = [...noCode.matchAll(/\s(?:aria-label|aria-description|aria-valuetext|alt|title|placeholder)="([^"]*)"/g)].map((m) => m[1]);
+  return [text(noCode), ...heard].flatMap((s) => [...s.matchAll(/.{0,24}\bkaibot\b.{0,24}/gi)].map((m) => m[0].trim()));
+}
 
 /** A loading skeleton or placeholder announced to screen readers. */
 export const hasStatus = (html: string) => /role="status"/.test(html);

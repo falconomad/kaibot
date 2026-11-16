@@ -16,6 +16,7 @@ import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 import { ExperimentSheetBody, HaltTag, engineDetail, experimentsOf } from "../components/Experiment";
 import { findExperiment, multiDayFrom } from "../lib/experiment";
+import { NAME } from "../brand/brand";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -171,7 +172,7 @@ export function Health() {
             title={risk.severity === "breach" || risk.red?.length ? "Limit or safety halt in force" : "Heads up"}
             text={<>{risk.items[0]}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
             <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>
-            <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
+            <p className="muted">{NAME} applies its limits by itself. Open trades keep their stop at the broker.</p>
           </StatusRow>
         )}
         {noDecisionRows(md)}
@@ -196,9 +197,9 @@ export function Health() {
             <span>Last check</span><span /><span className="v">{lastDead ? `${dateEt(lastDead.start)} ${timeEt(lastDead.start)} ET · ${lastDead.status}` : "not run yet"}</span>
           </div>
         </CheckRow>
-        <CheckRow ok={d.account_clean !== false} name="Paper account" line={d.account_clean === false ? "Has positions or orders Kaibot didn't place" : "Clean"}>
-          <p>{d.account_clean === false ? "The paper account holds positions or orders Kaibot didn't place. Entries stay off until it is clean."
-            : "The paper account holds only what Kaibot placed."}</p>
+        <CheckRow ok={d.account_clean !== false} name="Paper account" line={d.account_clean === false ? `Has positions or orders ${NAME} didn't place` : "Clean"}>
+          <p>{d.account_clean === false ? `The paper account holds positions or orders ${NAME} didn't place. Entries stay off until it is clean.`
+            : `The paper account holds only what ${NAME} placed.`}</p>
         </CheckRow>
       </ul>
 

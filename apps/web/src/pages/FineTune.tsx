@@ -12,6 +12,7 @@ import {
 import { money } from "../lib/fmt";
 import { RETIRED_TEXT } from "../lib/explain";
 import { DayBar, ExcludeEditor, LOCKED, LockIcon, reducedMotion, useStrategy, usd0, type Ctx } from "./StrategyShared";
+import { NAME } from "../brand/brand";
 
 /** Up/Down/Home/End move between the accordion's row headers (Enter/Space toggle them, as native buttons). */
 function rowKeys(e: KeyboardEvent<HTMLButtonElement>) {
@@ -236,8 +237,8 @@ function FocusEditor({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBo
         </ul>
       </>)}
       <span className={tooFew ? "kb-warn" : "muted"} style={{ fontSize: 13 }} role={tooFew ? "alert" : undefined}>
-        {tooFew ? `“Only these” needs at least ${MIN_FOCUS} stocks.` : body.focus.mode === "only" ? "Kaibot trades only these stocks."
-          : body.focus.mode === "prefer" ? "Kaibot looks at your focus first, then the rest, when slots compete." : "No focus: every stock is equal."}
+        {tooFew ? `“Only these” needs at least ${MIN_FOCUS} stocks.` : body.focus.mode === "only" ? `${NAME} trades only these stocks.`
+          : body.focus.mode === "prefer" ? `${NAME} looks at your focus first, then the rest, when slots compete.` : "No focus: every stock is equal."}
       </span>
       <ExcludeEditor body={body} edit={edit} universe={universe} />
     </section>

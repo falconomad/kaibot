@@ -1,6 +1,7 @@
 // M5 estimator (S45). Split from derive.ts: only the Strategy pages need it (and it pulls in config.ts).
 import { SESSION_OPEN, focusSet, toMin, type ConfigBody, type Themes } from "./config";
 import { BAR } from "./model";
+import { NAME } from "../brand/brand";
 
 // ---------------------------------------------------------------- M5 estimator (S45, contract "Estimator")
 export interface EstimatorData { dip_per_month: Record<string, number>; entry_share_by_half_hour: Record<string, number> }
@@ -41,7 +42,7 @@ export function estimateTrades(body: ConfigBody, est: EstimatorData, themes: The
 
 /** Plain words for the evidence pace. */
 export function paceText(e: Estimate): string {
-  if (e.unmeasured.length) return "Kaibot has no measured trade rate for tickers new to it. The figure appears after this list's first replay.";
+  if (e.unmeasured.length) return `${NAME} has no measured trade rate for tickers new to it. The figure appears after this list's first replay.`;
   if (e.monthsTo900 === null) return e.spyNotEstimated ? "The dip rule is off; the SPY late-day rule is not estimated yet." : "No trades expected.";
   const m = e.monthsTo900;
   const when = m >= 24 ? `about ${Math.round(m / 12)} years` : `about ${Math.max(1, Math.round(m))} months`;

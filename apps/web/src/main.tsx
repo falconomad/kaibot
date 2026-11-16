@@ -8,7 +8,7 @@ import "./v4tokens.css";
 import "./app.css";
 import { api, supa } from "./lib/api";
 import { Shell } from "./components/Shell";
-import { SignIn } from "./pages/SignIn";
+import { NotOwner, SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
 import { Skeleton } from "./components/Skeleton";
 import { ROUTE_LOADERS as load } from "./routes";
@@ -55,15 +55,7 @@ function Gate() {
 
   if (session === undefined || (session && owner.isPending)) return <Skeleton variant="center" />;
   if (!session) return <SignIn />;
-  if (owner.isError || owner.data === false)
-    return (
-      <div className="center"><div className="card">
-        <h1 style={{ margin: 0, fontSize: 18 }}>{owner.isError ? "Couldn't check who owns this dashboard" : "Not your dashboard"}</h1>
-        <p className="muted">{owner.isError ? "The server didn't answer. Try again in a moment." : "This Kaibot belongs to another account. Nothing here is visible to you."}</p>
-        {owner.isError && <button onClick={() => owner.refetch()}>Try again</button>}
-        <button onClick={() => supa.auth.signOut()}>Sign out</button>
-      </div></div>
-    );
+  if (owner.isError || owner.data === false) return <NotOwner failed={owner.isError} retry={() => { void owner.refetch(); }} />;
   return (
     <Suspense fallback={<Skeleton variant="center" />}>
     <Routes>

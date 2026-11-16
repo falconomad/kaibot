@@ -3,8 +3,16 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>kaibot · paper</title>
+    <!-- The name is written once, in src/brand/brand.ts; the build puts it where the BRAND placeholder stands (vite.config.ts). -->
+    <title>%BRAND% · paper</title>
+    <meta name="application-name" content="%BRAND%" />
+    <meta name="apple-mobile-web-app-title" content="%BRAND%" />
     <meta name="robots" content="noindex, nofollow" />
+    <!-- The icons are drawn from one file, src/brand/symbol.svg (`npm run icons`); the manifest is written by the build. -->
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/src/brand/symbol.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />

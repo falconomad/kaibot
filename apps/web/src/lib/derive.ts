@@ -5,6 +5,7 @@ import type { AttributionGroup, Evidence, Halt, Level, Overview, Report, Run, Sc
 import { BAR, LEVELS } from "./model";
 import { experimentHaltText, haltTone, retirementUndone } from "./experiment";
 import { ruleName } from "./explain";
+import { NAME } from "../brand/brand";
 
 export const etToday = (d = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
 
@@ -43,7 +44,7 @@ export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, dd
   const detail = (beat?.detail ?? {}) as { halted?: boolean; account_clean?: boolean };
   if (run.status === "paused") add("Entries paused", "warn");
   if (detail.halted) add("Engine halted entries for today", "breach");
-  if (detail.account_clean === false) add("Paper account has positions or orders Kaibot didn't place", "breach");
+  if (detail.account_clean === false) add(`Paper account has positions or orders ${NAME} didn't place`, "breach");
   // A watchdog halt is over once the engine is back: a fresh heartbeat newer than the halt.
   const fresh = !!beat?.ts && ageS(beat.ts, now) < 120;
   // #210: the experiment's planned end (book stop line, retirement) is amber, never a red breach; a re-enabling is

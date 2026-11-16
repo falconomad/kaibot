@@ -1,0 +1,11 @@
+{
+  "note": "The favicon and app icons drawn from symbol.svg by `npm run icons` (scripts/gen_icons.py). `scale` is the symbol's share of the icon's width; `background` fills the square behind it (null = transparent). Change this file or symbol.svg, run `npm run icons`, commit the result.",
+  "background": "#F4F5F7",
+  "icons": [
+    { "file": "favicon.ico", "sizes": [16, 32, 48], "scale": 1, "background": null, "use": "favicon" },
+    { "file": "apple-touch-icon.png", "sizes": [180], "scale": 1, "use": "apple" },
+    { "file": "icons/icon-192.png", "sizes": [192], "scale": 1, "use": "manifest", "purpose": "any" },
+    { "file": "icons/icon-512.png", "sizes": [512], "scale": 1, "use": "manifest", "purpose": "any" },
+    { "file": "icons/icon-maskable-512.png", "sizes": [512], "scale": 0.75, "use": "manifest", "purpose": "maskable" }
+  ]
+}

@@ -47,7 +47,7 @@ describe("My lists on the Strategy page", () => {
     expect(html).toContain('aria-label="NBIS, accepted"');
     expect(t).toContain("This list");
     expect(t).toContain("not measured yet");
-    expect(t).toMatch(/new to Kaibot, so there is no measured trade rate/);
+    expect(t).toMatch(/new to Kaibo, so there is no measured trade rate/);
     expect(t).toContain("trades/mo not measured yet");
     expect(html).toContain('aria-label="Loading your lists"'); // the saved lists are still loading: skeleton cards
     expect(glitches(html)).toEqual([]);
@@ -99,7 +99,7 @@ describe("the My lists card", () => {
     const items = Array.from({ length: 40 }, (_, i) => ok(`Q${String.fromCharCode(65 + (i % 26))}${String.fromCharCode(65 + Math.floor(i / 26))}`));
     const html = card(fakeEd(items));
     expect(html).toMatch(/<input[^>]*id="ml-add"[^>]*disabled=""/);
-    expect(text(html)).toContain("This list is full: 40 tickers is the most Kaibot can scan in time.");
+    expect(text(html)).toContain("This list is full: 40 tickers is the most Kaibo can scan in time.");
   });
 
   it("before the database update, delete is hidden with a plain note", () => {
@@ -124,7 +124,7 @@ describe("the My lists card", () => {
     const est = estimateTrades({ ...d, focus: { ...d.focus, mode: "only", symbols: ["MSFT"], custom: { name: "x", tickers: [{ symbol: "NBIS", etf: "XLK" }] } } }, EST, {});
     const t = text(renderToStaticMarkup(<ThisListCard ed={ed} est={est} nextOpen="Mon 16 Nov 09:30 ET" />));
     expect(t).toContain("Trades a month not measured yet");
-    expect(t).toContain("NBIS is new to Kaibot");
-    expect(t).toMatch(/Accepted 2 Refused, never traded 1 New to Kaibot 1 Room left 37 of 40/);
+    expect(t).toContain("NBIS is new to Kaibo");
+    expect(t).toMatch(/Accepted 2 Refused, never traded 1 New to Kaibo 1 Room left 37 of 40/);
   });
 });

@@ -14,6 +14,7 @@ import { Skeleton } from "../components/Skeleton";
 import { Accordion } from "../components/Accordion";
 import { BAR } from "../lib/model";
 import { STALE, poll } from "../lib/poll";
+import { NAME } from "../brand/brand";
 
 const STATE_TEXT = { pass: "pass", fail: "fail", unknown: "unknown", provisional: "on track (provisional)", pending: "not yet" };
 
@@ -85,7 +86,7 @@ export function Gate() {
             <Progress now={trades} bar={BAR.trades} />
           </div>
         )}
-        <p style={{ fontSize: 14, marginBottom: 0 }}><b>There is no go-live button.</b><span className="desk-only"> Kaibot trades paper only; clearing the bar opens a written discussion.</span></p>
+        <p style={{ fontSize: 14, marginBottom: 0 }}><b>There is no go-live button.</b><span className="desk-only"> {NAME} trades paper only; clearing the bar opens a written discussion.</span></p>
       </section>
       <V3Verdicts exps={exps} />
       {latest && (strategies.length
