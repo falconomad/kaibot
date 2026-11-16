@@ -34,6 +34,15 @@ main > *, .enter { animation: kb-in var(--d-base) var(--ease) both; }
 .sk-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .sk-row { display: flex; flex-wrap: wrap; gap: 16px; }
 .sk-row > * { flex: 1 1 260px; }
+/* v4 PR 7: number tick. The new value fades in (200 ms); the tint is a class held for 600 ms, so it also shows with
+   reduced motion, where only the fade and the colour's return are off. */
+@keyframes kb-tick { from { opacity: .25; } to { opacity: 1; } }
+.tick { animation: kb-tick var(--d-base) var(--ease) both; transition: color var(--d-base) var(--ease); }
+.tint-up, .tint-up * { color: var(--up) !important; } .tint-down, .tint-down * { color: var(--down) !important; }
+/* v4 PR 7: route fades. A tab change cross-fades with a 4 px rise (kb-in above); a push to a detail page
+   (/positions/12, /strategy/fine-tune) slides in 24 px from the right and fades, 240 ms. */
+@keyframes kb-push { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+main[data-nav="push"] > * { animation: kb-push 240ms var(--ease) both; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .sk { background: var(--surface-2); }
@@ -559,7 +568,9 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .more-signout { align-self: flex-start; }
 
 /* bottom sheet: transform and opacity only; height never animates */
-@keyframes kb-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+/* v4 PR 7: the sheet arrives on a spring: a 1.5% overshoot settling back, in the same 320 ms. A strip under the sheet
+   (::after, same colour) covers the overshoot, so no gap shows at the bottom edge. */
+@keyframes kb-sheet-in { 0% { transform: translateY(100%); } 70% { transform: translateY(-1.5%); } 100% { transform: none; } }
 @keyframes kb-sheet-out { from { transform: none; } to { transform: translateY(100%); } }
 @keyframes kb-fade-out { from { opacity: 1; } to { opacity: 0; } }
 .sheet-root { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; }
@@ -567,6 +578,8 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .sheet { position: relative; width: min(560px, 100%); max-height: 88vh; max-height: 88dvh; display: flex; flex-direction: column;
   background: var(--surface); border: 1px solid var(--line-strong); border-bottom: 0; border-radius: var(--r-card) var(--r-card) 0 0;
   box-shadow: var(--elev-sheet); padding-bottom: env(safe-area-inset-bottom); animation: kb-sheet-in var(--d-sheet) var(--ease) both; outline: none; }
+.sheet::after { content: ""; position: absolute; left: -1px; right: -1px; top: 100%; height: 24px; background: var(--surface); pointer-events: none; }
+@media (min-width: 761px) { .sheet::after { display: none; } }
 .sheet-root.leaving .sheet { animation: kb-sheet-out var(--d-sheet-out) var(--ease-out) both; }
 .sheet-root.leaving .sheet-scrim { animation: kb-fade-out var(--d-sheet-out) var(--ease-out) both; }
 .sheet-head { position: relative; display: flex; align-items: center; gap: 12px; padding: 18px 12px 8px 20px; touch-action: none; cursor: grab; }
@@ -681,7 +694,7 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .section-h { margin: 8px 0 0; font-size: var(--t-cap); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .headline { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
-.headline .ok-dot { width: 12px; height: 12px; border-radius: 999px; flex: none; }
+.headline .ok-dot { position: relative; width: 12px; height: 12px; border-radius: 999px; flex: none; }
 .headline b { font-size: var(--t-lg); } .headline .muted { font-size: var(--t-sm); }
 .check-list { list-style: none; margin: 0; padding: 0; }
 .check-list li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); font-size: var(--t-sm); }

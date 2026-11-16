@@ -162,7 +162,7 @@ export function Health() {
     <>
       <h1 className="page-title">Engine</h1>
       <div className="headline">
-        <i className="ok-dot" style={{ background: chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
+        <i className={chip.live ? "ok-dot live-dot" : "ok-dot"} style={{ background: chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
         <span><b>{chip.text}</b><br /><span className="muted">{beatTs ? `Checked in ${ageText(ageS(beatTs))}` : "Has not checked in yet"}</span></span>
       </div>
       <div className="status-rows">

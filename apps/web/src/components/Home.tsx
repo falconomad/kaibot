@@ -12,6 +12,7 @@ import { LEVELS } from "../lib/model";
 import { ExperimentSheetBody, engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
+import { Tick } from "./Tick";
 
 type Tone = "breach" | "warn" | "info" | "neutral";
 
@@ -179,8 +180,8 @@ export function TopHoldings({ rows, max, top = 3 }: { rows: HoldingRowData[]; ma
                 <StockBadge symbol={r.symbol} size={40} />
                 <span className="hold-mid"><b>{r.symbol}</b>
                   {r.bar ? <PriceBar {...r.bar} /> : r.sub ? <span className="muted">{r.sub}</span> : null}</span>
-                <span className="hold-end num"><b>{money(r.value)}</b>
-                  {r.gain !== null && <span className={r.gain > 0 ? "gain" : r.gain < 0 ? "loss" : "flat"}>{signedMoney(r.gain)}</span>}</span>
+                <span className="hold-end num"><b><Tick value={r.value}>{money(r.value)}</Tick></b>
+                  {r.gain !== null && <Tick value={r.gain} className={r.gain > 0 ? "gain" : r.gain < 0 ? "loss" : "flat"}>{signedMoney(r.gain)}</Tick>}</span>
               </button>
             </li>
           ))}
