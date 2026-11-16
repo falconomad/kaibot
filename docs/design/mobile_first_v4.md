@@ -3,7 +3,8 @@
 Issue #226. Answers the stakeholder's ask of 16 Nov 2026: the phone views carry too much text and data; make it easy,
 friendly and good-looking; desktop only needs targeted fixes. The measurements behind this are in `audit_2026-11-16.md`.
 
-**Status: proposal.** Needs the stakeholder's approval (through Product) before Frontend builds any of it.
+**Status: approved and being built** (Product, 16 Nov 2026), **except Run & settings**: the stakeholder prefers the previous
+design of that page, so it is out of v4 and keeps its v3 layout (see the note under the hierarchy table).
 
 ## The idea in five lines
 
@@ -85,9 +86,13 @@ general knowledge of those apps rather than a cited source.
 | **Strategy** | The starting point in use | Focus; boldness; sticky "Review & apply" | Trading hours, extra caution, Fine-tune | Nothing; carousels are fixed so the page fits (audit #1) |
 | **My lists** | The list in use | Add tickers; accepted and refused counts | Per-ticker reason sheet | Company names on chips (already hidden) |
 | **Fine-tune** | One group of settings at a time | Accordion groups; value and its limit | Locked rows explanation | — |
-| **Run & settings** | This run: amount, level, status | Pause; Flatten and stop (confirmation sheet); level from next session | Level comparison (cards, not a 7-column table); past runs | Level table as a table |
+| **Run & settings** | *Out of v4: keeps the previous (v3) design, the stakeholder's preference (16 Nov 2026)* | | | |
 | **New run** | One question per step | Step dots; Next | "What does this level mean" sheet | — (fix the cut-off "+", audit #2) |
 | **Sign in** | Email and one button | Paper-only line | — | — |
+
+**Run & settings is out of v4.** The stakeholder prefers the previous design of that page (Product, 16 Nov 2026). It keeps
+its v3 layout, including the level table and the inline "Flatten and stop" confirmation. It is still reached from More on a
+phone. The PR 1 fixes (44 px targets, keyboard access to its scrolling tables) still apply, because they change no layout.
 
 ## Wireframes, before and after (390 px)
 
@@ -302,7 +307,7 @@ Each PR keeps tests green and is checked with the audit script before and after.
 | **3. Home** | Hero, chart, status rows with sheets, top positions, Details section | 50 words or fewer in the first screen with a halt and the experiment showing |
 | **4. Positions, Activity, Trade detail** | Rows in place of tables on phones; position and activity sheets; Trade detail accordions | No table wider than its box; "Why" visible without sideways scrolling |
 | **5. Engine, Go / no-go, Report** | Status-first Engine with Technical details; Go / no-go checklist; Report summary and accordions | 100 words or fewer in each first screen; no table wider than its box |
-| **6. Settings, Strategy, New run** | Level cards; Flatten-and-stop confirmation sheet; Strategy sticky action; New run one question per step | 0 tap targets under 44 px on these pages |
+| **6. Strategy, New run** | Strategy sticky action; New run one question per step. Run & settings is out of v4 and keeps its previous design; only the PR 1 fixes (tap targets, table keyboard access) apply to it | 0 tap targets under 44 px on these pages |
 | **7. Motion** | Durations and easings above; number tick; chart morph; transform-only animations | Tab change settles within 200 ms; reduced motion still shows 0 running animations |
 
 Desktop items 2 to 6 ride along with the PR that touches the same page.
