@@ -2,7 +2,7 @@
 // grouped by day. One row per event: what happened, one plain sentence why, one number. A tap opens the row's sheet:
 // the full "why", prices, the counterfactual, the agent room's transcript and the trade. Test-only (shadow) rows are
 // off by default; the "Test only" chip turns them on (Product, 16 Nov 2026). Today's halts are listed as alerts.
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
@@ -20,12 +20,13 @@ import { Sheet } from "../components/Sheet";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { NAME } from "../brand/brand";
+import { CA_REASON, type CaSkip, caSkips, onDay } from "../lib/corpactions";
 
 const PAGE = 100;
 type Filter = "all" | "fills" | "skipped" | "room" | "alerts";
 const FILTERS: [Filter, string][] = [["all", "All"], ["fills", "Buys & sells"], ["skipped", "Skipped"], ["room", "Agent room"], ["alerts", "Alerts"]];
 type Signal = Extract<TapeItem, { kind: "signal" }>;
-type Row = { kind: "item"; it: TapeItem; ts: string } | { kind: "halt"; h: Halt; ts: string };
+type Row = { kind: "item"; it: TapeItem; ts: string } | { kind: "halt"; h: Halt; ts: string } | { kind: "ca"; c: CaSkip; ts: string };
 const tone = (v: number | null | undefined) => (!v ? "flat" : v > 0 ? "gain" : "loss");
 
 const taken = (it: Signal) => it.mode === "live" && !!it.approved && !it.veto && (it.qty ?? 0) > 0;
@@ -72,6 +73,11 @@ export function Tape() {
     ...poll(run.kind === "paper" ? 15_000 : false),
   });
   const exps = experimentsOf(overview?.heartbeat);
+  // #266: buys the multi-day rule left out because of an announced corporate action (engine events, read through
+  // kb_health; none until the engine and the RPC send them). The same query as Engine's, so it is shared.
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: run.kind === "paper", retry: false, ...poll(60_000) });
+  const caRows: Row[] = caSkips(health.data?.events).filter((c) => !run.started_on || c.ts.slice(0, 10) >= run.started_on)
+    .map((c) => ({ kind: "ca", c, ts: c.ts }));
   const all = q.data?.pages.flat() ?? [];
   const halts: Row[] = (overview?.halts_today ?? []).map((h) => ({ kind: "halt", h, ts: h.ts }));
   const items: Row[] = all.filter((it) => testOnly || !(it.kind === "signal" && it.mode === "shadow"))
@@ -79,7 +85,8 @@ export function Tape() {
       : filter === "skipped" ? it.kind === "signal" && it.mode === "live" && !taken(it)
       : filter === "room" ? it.kind === "signal" && !!it.room : false))
     .map((it) => ({ kind: "item", it, ts: it.ts }));
-  const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...items].sort((a, b) => b.ts.localeCompare(a.ts));
+  const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...(filter === "all" || filter === "skipped" ? caRows : []), ...items]
+    .sort((a, b) => b.ts.localeCompare(a.ts));
   const expShown = exps.find((e) => e.experiment && rows.some((r) => r.kind === "item" && findExperiment(r.it.strategy, [e]))) ?? null;
   const shadowN = all.filter((it) => it.kind === "signal" && it.mode === "shadow").length;
   let lastDay = "";
@@ -110,7 +117,7 @@ export function Tape() {
             lastDay = d;
             const v = r.kind === "halt"
               ? { icon: "halt", head: haltText(r.h), line: `${haltTone(r.h.kind) === "breach" ? "Limit or safety halt" : "Note"} · ${timeEt(r.ts)}`, value: "", valueTone: "" }
-              : rowView(r.it);
+              : r.kind === "ca" ? caView(r.c) : rowView(r.it);
             const exp = r.kind === "item" ? findExperiment(r.it.strategy, exps) : null;
             return (
               <li key={`${r.kind}-${r.ts}-${i}`}>
@@ -127,9 +134,25 @@ export function Tape() {
         </ul>
       )}
       {q.hasNextPage && <p><button disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>{q.isFetchingNextPage ? "Loading…" : "Older"}</button></p>}
-      <Sheet open={open !== null} onClose={() => setOpen(null)} title={open ? (open.kind === "halt" ? "Halt" : rowView(open.it).head) : ""}>
-        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : <ItemSheet it={open.it} exp={findExperiment(open.it.strategy, exps)} />)}
+      <Sheet open={open !== null} onClose={() => setOpen(null)} title={open ? (open.kind === "halt" ? "Halt" : open.kind === "ca" ? caView(open.c).head : rowView(open.it).head) : ""}>
+        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : open.kind === "ca" ? <CaSheet c={open.c} />
+          : <ItemSheet it={open.it} exp={findExperiment(open.it.strategy, exps)} />)}
       </Sheet>
+    </>
+  );
+}
+
+/** "Skipped NVDA: split on Nov 20, 2026" */
+function caView(c: CaSkip) {
+  return { icon: "skipped", head: `Skipped ${c.symbol}: ${c.action} on ${onDay(c.on)}`,
+    line: `${c.strategy ? ruleName(c.strategy) : "Multi-day rule"} · ${timeEt(c.ts)}`, value: "", valueTone: "" };
+}
+
+function CaSheet({ c }: { c: CaSkip }) {
+  return (
+    <>
+      <p>{CA_REASON}</p>
+      <p className="muted">{c.symbol} has a {c.action} announced for {onDay(c.on)}, so this buy was left out. Nothing was sold because of it.</p>
     </>
   );
 }

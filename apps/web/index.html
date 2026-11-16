@@ -13,8 +13,10 @@
     <link rel="icon" href="/src/brand/logo/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=k1" />
     <link rel="manifest" href="/manifest.webmanifest?v=k1" />
-    <!-- Outfit, the interface font (self-hosted, SIL OFL 1.1): the two weights the first screen uses load first. -->
+    <!-- Outfit, the interface font (self-hosted, SIL OFL 1.1): all four weights (56 kB) load first, so no text is laid out twice. -->
     <link rel="preload" href="/fonts/outfit-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/outfit-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/outfit-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/outfit-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

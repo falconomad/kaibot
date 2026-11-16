@@ -13,6 +13,8 @@ production data, account or key is used.
 is reachable from the tab bar or More; the experiment sheet opens as a dialog with focus inside, closes on Escape and
 returns focus; and with reduced motion on, nothing animates.
 
+Text contrast (#265): axe-core's color-contrast rule runs on every page at every width; a failure fails the check.
+
 The display name (#254): every page at every width fails if it shows the name wrongly in its text, its tab title or in
 what a screen reader says. Wrong is the earlier name ("kaibot"), or today's name with a capital, written so or put in
 capitals by CSS: it is always lowercase, as the first word of a sentence too (stakeholder, 16 Nov 2026). Text inside
@@ -102,6 +104,12 @@ WRONG_NAME = r"""(brand) => {
 
 GLOW_LAYER = """() => { const st = getComputedStyle(document.body, '::before');
   return { position: st.position, z: st.zIndex, image: st.backgroundImage.slice(0, 4), transform: st.transform }; }"""
+# axe-core (dev dependency) checks text contrast on every page at every width: WCAG 2 AA, the color-contrast rule.
+AXE = (WEB / "node_modules" / "axe-core" / "axe.min.js").read_text()
+AXE_RUN = """async () => {
+  const r = await axe.run(document, { runOnly: { type: 'rule', values: ['color-contrast'] }, resultTypes: ['violations'] });
+  return r.violations.flatMap((v) => v.nodes.map((n) => `${n.target.join(' ')}: ${(n.any[0] || {}).message || v.help}`));
+}"""
 
 
 def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
@@ -109,6 +117,10 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     layer = page.evaluate(GLOW_LAYER)
     if layer["position"] != "fixed" or not layer["image"].startswith("url(") or layer["z"] != "-1":
         fails.append(f"{name}@{w}: the page glow layer is missing or not fixed: {layer}")
+    page.evaluate(AXE)
+    low = page.evaluate(AXE_RUN)
+    if low:
+        fails.append(f"{name}@{w}: {len(low)} text contrast failures (axe): {low[:2]}")
     wrong = page.evaluate(WRONG_NAME, brand_name())
     if wrong:
         fails.append(f"{name}@{w}: the name is shown wrongly (always lowercase {brand_name()!r}): {wrong[:3]}")
@@ -123,7 +135,7 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     if phone and m["tapSmall"]:
         fails.append(f"{name}@{w}: {len(m['tapSmall'])} tap targets under 44 px")
     over = "YES" if m["docOverflow"] else "no"
-    print(f"{name:13} {w:5}  overflow={over:3}  tap<44={len(m['tapSmall']):3}  text<12={m['smallWords']:4}  "
+    print(f"{name:13} {w:5}  overflow={over:3}  tap<44={len(m['tapSmall']):3}  text<12={m['smallWords']:4}  contrast={len(low)}  "
           f"tables-wider={row['tables_wider']}  cls={m['cls']:.3f}  words={m['foldWords']}", flush=True)
     return row
 

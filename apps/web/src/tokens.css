@@ -5,6 +5,12 @@
 @source not "./**/*.test.tsx";
 /* Outfit (brand system v1, #265): SIL Open Font License 1.1, (c) 2021 The Outfit Project Authors; licence in public/
    fonts/OFL.txt. Self-hosted, latin subset, four weights; Inter is the fallback. */
+/* While Outfit loads (a slow connection), text is set in Arial resized to Outfit's measures, so the swap moves nothing.
+   Outfit, measured in Chromium per 1000 units: average letter 447.7 (English letter frequencies, as capsize weighs
+   them), ascent 1000, descent 260, no line gap. Arial (capsize): average 904 of 2048 = 441.4. So size-adjust is
+   447.7 / 441.4, and the ascent and descent are Outfit's divided by it. Liberation Sans and Arimo have Arial's metrics. */
+@font-face { font-family: "Outfit Fallback"; src: local("Arial"), local("ArialMT"), local("Liberation Sans"), local("Arimo");
+  size-adjust: 101.43%; ascent-override: 98.59%; descent-override: 25.63%; line-gap-override: 0%; }
 @font-face { font-family: "Outfit"; font-style: normal; font-weight: 400; font-display: swap;
   src: url("/fonts/outfit-latin-400-normal.woff2") format("woff2"); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
 @font-face { font-family: "Outfit"; font-style: normal; font-weight: 500; font-display: swap;
@@ -19,8 +25,8 @@
   --blue-600: #1A54B7; --blue-700: #174189; --blue-800: #142C56; --blue-900: #0F1F39; --blue-950: #081327;
   --grey-0: #FFFFFF; --grey-50: #F4F5F7; --grey-100: #E4E6EA; --grey-200: #CDD1D9; --grey-300: #B2B8C1; --grey-400: #989FAB; --grey-500: #808692;
   --grey-600: #5D646F; --grey-700: #40454F; --grey-750: #31363D; --grey-800: #262A31; --grey-850: #1B1E23; --grey-900: #131519; --grey-950: #0A0B0D;
-  --font-ui: "Outfit", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; --font-num: "Outfit", "Inter", system-ui, sans-serif;
-  --font-ai: "Outfit", "Inter", system-ui, sans-serif;
+  --font-ui: "Outfit", "Outfit Fallback", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; --font-num: "Outfit", "Outfit Fallback", "Inter", system-ui, sans-serif;
+  --font-ai: "Outfit", "Outfit Fallback", "Inter", system-ui, sans-serif;
   --ease: cubic-bezier(.2, .7, .2, 1);
   --radius: 24px;
   --stroke: 2px; --point: 8px; --d-draw: 300ms; --d-point: 180ms; --ease-pop: cubic-bezier(.3, 1.4, .5, 1);

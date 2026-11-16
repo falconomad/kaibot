@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Curve } from "../lib/model";
 import { day, money } from "../lib/fmt";
 
@@ -6,12 +6,28 @@ import { day, money } from "../lib/fmt";
 // brand blue and ends in the live point; the benchmark is neutral grey, told apart by its dots and its label.
 const W = 760, H = 240, M = { t: 12, r: 92, b: 24, l: 64 };
 
+// Brand system v1 (section 4): the line draws itself once per app load, left to right in --d-draw (a clip that grows
+// with a transform; no repaint of the line), and the live point pops and pulses once when a new value arrives.
+let drawn = false;
+/** Tests only. */
+export const resetChartDraw = () => { drawn = false; };
+
 /** Optional chapter boundaries (M5 S48): a dashed rule at the first session on or after each `session`. */
 export interface ChartMarker { session: string; label: string }
 
 /** `compact` (v4 Home): no legend or table button; on phones also no axis labels (CSS), the line only. */
 export function PotChart({ data, start, markers = [], compact = false }: { data: Curve[]; start: number; markers?: ChartMarker[]; compact?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [draw] = useState(() => !drawn && data.length > 1);
+  useEffect(() => { if (draw) drawn = true; }, [draw]);
+  // A new last value (a poll, a live price): the point pops once. Not on the first render, not when nothing changed.
+  const lastPot = data.at(-1)?.pot;
+  const prevPot = useRef(lastPot);
+  const [pops, setPops] = useState(0);
+  useEffect(() => {
+    if (lastPot !== undefined && prevPot.current !== undefined && lastPot !== prevPot.current) setPops((n) => n + 1);
+    prevPot.current = lastPot;
+  }, [lastPot]);
   const [table, setTable] = useState(false);
   const ref = useRef<SVGSVGElement>(null);
   const g = useMemo(() => {
@@ -86,15 +102,16 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
                 <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.28" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />
               </linearGradient>
             </defs>
-            {/* Lines start flat on the baseline and rise into shape once, when the chart first appears. */}
-            <g className="rise" style={{ transformOrigin: `0 ${H - M.b}px` }}>
+            {draw && <clipPath id="kb-potdraw"><rect className="chart-draw" x={0} y={0} width={W} height={H} /></clipPath>}
+            <g clipPath={draw ? "url(#kb-potdraw)" : undefined}>
               <path className="morph" d={g.area} fill="url(#kb-potfill)" />
               <path className="morph" d={g.spy} fill="none" stroke="var(--s-spy)" strokeWidth="1.5" strokeDasharray="0.1 5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
               <path className="morph" d={g.pot} fill="none" stroke="var(--s-pot)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
             </g>
             {/* the live point: the same point as in the logo, with one faint ring */}
             <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="9" fill="none" stroke="var(--live)" strokeOpacity="0.35" strokeWidth="1.5" />
-            <circle className="fade-late" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="5" fill="var(--live)" />
+            <circle key={`p${pops}`} className={pops ? "fade-late point-pop" : "fade-late"} cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="5" fill="var(--live)" />
+            {pops > 0 && <circle key={`r${pops}`} className="point-pulse" cx={g.x(data.length - 1)} cy={g.y(last.pot)} r="5" fill="none" stroke="var(--live)" strokeWidth="1.5" />}
             <text className="fade-late axis" x={W - M.r + 10} y={ly1 + 4} fontSize="12" fontWeight="600" fill="var(--ink)">Pot {whole(last.pot)}{last.live ? " now" : ""}</text>
             <text className="fade-late axis" x={W - M.r + 10} y={ly2 + 4} fontSize="12" fill="var(--slate)">SPY {whole(last.spy)}</text>
             {h && hover !== null && (
