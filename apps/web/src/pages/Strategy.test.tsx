@@ -45,7 +45,7 @@ for (const [name, path, heading] of [["Strategy", "/strategy", "Strategy"]] as c
       expect(hasAlert(html)).toBe(true);
       expect(t).toContain("Strategy settings aren't available");
       expect(t).toContain("kb_get_config does not exist");
-      expect(t).toContain("Kaibo keeps trading on its level's defaults meanwhile.");
+      expect(t).toContain("kaibo keeps trading on its level's defaults meanwhile.");
     });
 
     it("error: an empty answer from the server is treated as an error, not as defaults", () => {

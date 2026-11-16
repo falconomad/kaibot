@@ -13,9 +13,11 @@ production data, account or key is used.
 is reachable from the tab bar or More; the experiment sheet opens as a dialog with focus inside, closes on Escape and
 returns focus; and with reduced motion on, nothing animates.
 
-The display name (#254): every page at every width fails if it shows the earlier name ("kaibot") in its text, its tab
-title or in what a screen reader says (text inside <code> is a literal path or command and is not counted). --interact
-also checks the tab title, the logo in the header, and that the favicon, the home-screen icon and the manifest load.
+The display name (#254): every page at every width fails if it shows the name wrongly in its text, its tab title or in
+what a screen reader says. Wrong is the earlier name ("kaibot"), or today's name with a capital, written so or put in
+capitals by CSS: it is always lowercase, as the first word of a sentence too (stakeholder, 16 Nov 2026). Text inside
+<code> is a literal path or command and is not counted. --interact also checks the tab title, the logo in the header,
+and that the favicon, the home-screen icon and the manifest load.
 """
 from __future__ import annotations
 
@@ -65,27 +67,43 @@ def serve(mock, dist: pathlib.Path, now: dt.datetime):
     return handler
 
 
-# Where the earlier display name shows: the tab title, the page's text (hidden text included, <code> left out) and the
-# attributes a person reads or hears. Text nodes are joined with a space, so a word never runs into its neighbour's.
-# KAIBOT_SOMETHING in an engine message is an env var, not the name.
-EARLIER_NAME = r"""() => {
+def brand_name() -> str:
+    """The display name, read from the one place it is written (src/brand/brand.ts)."""
+    source = (WEB / "src" / "brand" / "brand.ts").read_text()
+    return re.search(r'^export const BRAND = "([^"]+)";$', source, re.M).group(1)
+
+
+# Where the app's name is shown wrongly: the earlier name ("kaibot", in any case), today's name with a capital, or
+# today's name put in capitals by CSS (text-transform). Read: the tab title, the page's text (hidden text included,
+# <code> left out) and the attributes a person reads or hears. Text nodes are joined with a space, so a word never runs
+# into its neighbour's. KAIBOT_SOMETHING in an engine message is an env var, not the name.
+WRONG_NAME = r"""(brand) => {
   const literal = (n) => n.parentElement.closest('code, script, style');
   const skip = (n) => (literal(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT);
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: skip });
+  const anyCase = new RegExp(`\\b(?:kaibot|${brand})\\b`, 'gi');
+  const around = (s, m) => s.slice(Math.max(0, m.index - 24), m.index + m[0].length + 24).trim();
+  const wrong = (s) => [...s.matchAll(anyCase)].filter((m) => m[0] !== brand).map((m) => around(s, m));
   const words = [];
-  while (walk.nextNode()) words.push(walk.currentNode.nodeValue);
+  const byCss = [];
+  while (walk.nextNode()) {
+    const node = walk.currentNode;
+    words.push(node.nodeValue);
+    const shape = getComputedStyle(node.parentElement).textTransform;
+    if (shape !== 'none' && new RegExp(`\\b${brand}\\b`, 'i').test(node.nodeValue))
+      byCss.push(`${node.nodeValue.trim().slice(0, 40)} (CSS text-transform: ${shape})`);
+  }
   const said = [...document.querySelectorAll('[aria-label], [alt], [title], [placeholder]')]
     .flatMap((e) => ['aria-label', 'alt', 'title', 'placeholder'].map((a) => e.getAttribute(a) || ''));
-  const read = [document.title, words.join(' ').replace(/\s+/g, ' '), ...said];
-  return read.flatMap((s) => s.match(/.{0,24}\bkaibot\b.{0,24}/gi) || []);
+  return [document.title, words.join(' ').replace(/\s+/g, ' '), ...said].flatMap(wrong).concat(byCss);
 }"""
 
 
 def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     m = page.evaluate(metrics)
-    earlier = page.evaluate(EARLIER_NAME)
-    if earlier:
-        fails.append(f"{name}@{w}: the earlier name shows: {earlier[:3]}")
+    wrong = page.evaluate(WRONG_NAME, brand_name())
+    if wrong:
+        fails.append(f"{name}@{w}: the name is shown wrongly (always lowercase {brand_name()!r}): {wrong[:3]}")
     phone = w <= 430
     row = {"page": name, "w": w, "overflow": m["docOverflow"], "offscreen": m["offscreen"][:3],
            "tap<44": len(m["tapSmall"]), "taps": m["tapSmall"], "text<12": m["smallWords"],
@@ -148,8 +166,7 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
 
     ctx, pg = page()
     # The name is written once, in src/brand/brand.ts; the built app must show that name and no other.
-    source = (WEB / "src" / "brand" / "brand.ts").read_text()
-    name = re.search(r'^export const BRAND = "([^"]+)";$', source, re.M).group(1)
+    name = brand_name()
     brand = pg.evaluate(BRAND_JS)
     # Playwright never lets a favicon.ico request through, so that one file is read from the build instead.
     ico = dist / str(brand["ico"]).lstrip("/")
