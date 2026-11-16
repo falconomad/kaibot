@@ -67,7 +67,7 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
           <tbody>{trades.map((t) => (
             <tr key={t.id}>
               <td className="num">{timeEt(t.entry_ts)}</td>
-              <td><Link to={`/trades/${t.id}`} className="rowlink"><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
+              <td><Link to={`/positions/${t.id}`} className="rowlink"><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
               <td className="muted" title={`code: ${t.strategy}`}>{strat(t.strategy)}</td>
               <td className="muted" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}</td>
               <td className="r num">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>

@@ -17,3 +17,6 @@ export function onTabKeys(e: KeyboardEvent<HTMLElement>): void {
 
 /** Props for one tab button. */
 export const tabProps = (selected: boolean) => ({ role: "tab" as const, "aria-selected": selected, tabIndex: selected ? 0 : -1 });
+
+/** True when the person asked the system for less motion. */
+export const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;

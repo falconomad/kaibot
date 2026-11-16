@@ -15,6 +15,10 @@ const warm = (to: string) => ({ onPointerEnter: () => { preloadRoute(to); }, onF
 
 export interface RunCtx {
   run: Run; runs: Run[]; overview: Overview | undefined;
+  /** v4: the header's "Day vs stop" and "Run drawdown" meters, for pages that show them on phones (Home, More). */
+  meters?: { dayPct: number; dd: number; replay: boolean };
+  /** v4: pick another run (the picker lives in More on phones). */
+  pickRun?: (id: number) => void;
   /** Set when the overview failed and has no data to show; pages show an error with a retry instead of a skeleton. */
   overviewError?: unknown; retryOverview?: () => void;
 }
@@ -29,37 +33,57 @@ export function Logo({ size = 26 }: { size?: number }) {
   );
 }
 
-const NAV: { to: string; label: string; short: string; icon: string; tab?: boolean }[] = [
-  { to: "/", label: "Home", short: "Home", icon: "M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z", tab: true },
-  { to: "/holdings", label: "Holdings", short: "Holdings", icon: "M4 6 H20 V18 H4 Z M4 10 H20" },
-  { to: "/trades", label: "Trades", short: "Trades", icon: "M4 7 H20 M4 12 H20 M4 17 H14", tab: true },
-  { to: "/tape", label: "Tape", short: "Tape", icon: "M4 6 H20 M4 10 H16 M4 14 H20 M4 18 H12", tab: true },
-  { to: "/report", label: "Report", short: "Report", icon: "M5 20 V12 M12 20 V5 M19 20 V9", tab: true },
-  { to: "/gate", label: "Go / no-go", short: "Gate", icon: "M5 12 L10 17 L19 7" },
-  { to: "/health", label: "Engine", short: "Engine", icon: "M3 12 H7 L10 5 L14 19 L17 12 H21" },
-  { to: "/strategy", label: "Strategy", short: "Strategy", icon: "M4 7 H14 M18 7 H20 M4 17 H8 M12 17 H20 M16 5 A2 2 0 1 0 16 9 A2 2 0 1 0 16 5 M10 15 A2 2 0 1 0 10 19 A2 2 0 1 0 10 15", tab: true },
-  { to: "/settings", label: "Run & settings", short: "Run", icon: "M12 9 A3 3 0 1 0 12 15 A3 3 0 1 0 12 9 M12 3 V6 M12 18 V21 M3 12 H6 M18 12 H21", tab: true },
+// v4 (docs/design/mobile_first_v4.md, "Navigation"). Desktop and tablet: the top navigation. Phones: five tabs; the
+// rest is under More (Report, Go / no-go, Strategy, Holdings, Run & settings, New run, the run picker, Sign out).
+const NAV: { to: string; label: string; icon: string }[] = [
+  { to: "/", label: "Home", icon: "M3 11 L12 4 L21 11 V20 H14 V14 H10 V20 H3 Z" },
+  { to: "/positions", label: "Positions", icon: "M4 7 H20 M4 12 H20 M4 17 H14" },
+  { to: "/activity", label: "Activity", icon: "M4 6 H20 M4 10 H16 M4 14 H20 M4 18 H12" },
+  { to: "/holdings", label: "Holdings", icon: "M4 6 H20 V18 H4 Z M4 10 H20" },
+  { to: "/report", label: "Report", icon: "M5 20 V12 M12 20 V5 M19 20 V9" },
+  { to: "/gate", label: "Go / no-go", icon: "M5 12 L10 17 L19 7" },
+  { to: "/health", label: "Engine", icon: "M3 12 H7 L10 5 L14 19 L17 12 H21" },
+  { to: "/strategy", label: "Strategy", icon: "M4 7 H14 M18 7 H20 M4 17 H8 M12 17 H20 M16 5 A2 2 0 1 0 16 9 A2 2 0 1 0 16 5 M10 15 A2 2 0 1 0 10 19 A2 2 0 1 0 10 15" },
+  { to: "/settings", label: "Run & settings", icon: "M12 9 A3 3 0 1 0 12 15 A3 3 0 1 0 12 9 M12 3 V6 M12 18 V21 M3 12 H6 M18 12 H21" },
 ];
+const MORE_ICON = "M5 12 H5.01 M12 12 H12.01 M19 12 H19.01";
+export const TABS = ["/", "/positions", "/activity", "/health", "/more"] as const;
+/** Pages reached from More: the More tab is the active one on them. */
+export const UNDER_MORE = ["/more", "/report", "/gate", "/strategy", "/holdings", "/settings"];
 
-function TabBar() {
+/** The Engine tab's dot: red while a halt or breach is in force, amber while the engine is offline. */
+export type EngineDot = "breach" | "offline" | null;
+
+function TabBar({ dot }: { dot: EngineDot }) {
+  const { pathname } = useLocation();
+  const moreActive = UNDER_MORE.some((p) => pathname === p || pathname.startsWith(p + "/"));
   return (
     <nav className="tabbar" aria-label="Main">
-      {NAV.filter((n) => n.tab).map((n) => (
-        <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={n.icon} /></svg>
-          {n.short}
-        </NavLink>
-      ))}
+      {TABS.map((to) => {
+        const n = NAV.find((x) => x.to === to);
+        const label = n?.label ?? "More";
+        const more = to === "/more";
+        return (
+          <NavLink key={to} to={to} end={to === "/"} {...warm(to)} className={({ isActive }) => (isActive || (more && moreActive) ? "active" : "")}
+            aria-label={to === "/health" && dot ? `Engine: ${dot === "breach" ? "a halt is in force" : "offline"}` : undefined}>
+            <span className="tab-ico">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={n?.icon ?? MORE_ICON} /></svg>
+              {to === "/health" && dot && <i className={`tab-dot ${dot}`} aria-hidden="true" />}
+            </span>
+            {label}
+          </NavLink>
+        );
+      })}
     </nav>
   );
 }
 
-function Meter({ label, value, frac }: { label: string; value: string; frac: number }) {
+export function Meter({ label, value, frac }: { label: string; value: string; frac: number }) {
   return (
     <div className="meter">
       <div className="row"><span className="cap">{label}</span><span className="num" style={{ fontSize: 12 }}>{value}</span></div>
       <div className="bar" role="meter" aria-label={label} aria-valuenow={Math.round(frac * 100)} aria-valuemin={0} aria-valuemax={100}>
-        <i style={{ width: `${Math.min(100, Math.max(0, frac * 100))}%`, background: frac >= 0.8 ? "var(--fail)" : undefined }} />
+        <i style={{ transform: `scaleX(${Math.min(1, Math.max(0, frac))})`, background: frac >= 0.8 ? "var(--fail)" : undefined }} />
       </div>
     </div>
   );
@@ -106,6 +130,7 @@ export function Shell() {
   const [picked, setPicked] = useState<number | null>(() => Number(localStorage.getItem("kb.run")) || null);
   const list = runs.data ?? [];
   const run = list.find((r) => r.id === picked) ?? list[0];
+  const pickRun = (id: number) => { setPicked(id); localStorage.setItem("kb.run", String(id)); };
   // 5 s only while the engine is live in a session; slower when the market is closed or the engine is off (lib/poll.ts).
   const overview = useQuery({ queryKey: ["overview", run?.id], queryFn: () => api.overview(run!.id), enabled: !!run,
     refetchInterval: (q) => overviewPollMs(run, q.state.data), refetchIntervalInBackground: false });
@@ -115,7 +140,8 @@ export function Shell() {
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    mainRef.current?.focus({ preventScroll: false });
+    window.scrollTo?.(0, 0); // v4: a new tab or page starts at its top
+    mainRef.current?.focus({ preventScroll: true });
   }, [pathname]);
 
   if (runs.isPending) return <div className="shell"><main><Skeleton variant="dashboard" /></main></div>;
@@ -137,8 +163,9 @@ export function Shell() {
   const peak = Math.max(run.amount_usd, run.peak_equity ?? 0, ...c.map((p) => p.pot));
   const dd = ((peak - nowPot) / peak) * 100;
   const dayPct = live ? live.dayPct : last ? (last.pnl / (nowPot - last.pnl)) * 100 : 0;
-  const risk = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status)
-    ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] };
+  const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
+  const risk = active ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] };
+  const dot: EngineDot = risk.severity === "breach" ? "breach" : active && !chip.live ? "offline" : null;
 
   return (
     <div className="shell">
@@ -149,20 +176,19 @@ export function Shell() {
           {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>{n.label}</NavLink>)}
         </nav>
         <div className="spacer" />
+        <span className="pill" title={lv ? `Paper trading only · ${lv.name} level` : "Paper trading only"}>PAPER<span className="hide-sm">{lv ? ` · ${lv.name.toUpperCase()}` : ""}</span></span>
         {list.length > 1 && (
-          <select aria-label="Run" className="chip" value={run.id}
-            onChange={(e) => { setPicked(Number(e.target.value)); localStorage.setItem("kb.run", e.target.value); }}>
+          <select aria-label="Run" className="chip hide-sm" value={run.id} onChange={(e) => pickRun(Number(e.target.value))}>
             {list.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
           </select>
         )}
-        <Link to="/health" className="chip" aria-label={`Engine: ${chip.text}`}>
+        <Link to="/health" className="chip engine-chip" aria-label={`Engine: ${chip.text}`}>
           <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
-            style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot }} />
+            style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
           <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
         </Link>
-        <span className="pill">PAPER{lv ? ` · ${lv.name.toUpperCase()}` : ""}</span>
         {lv && (
-          <div className="meters">
+          <div className="meters hide-sm">
             <Meter label={run.kind === "replay" ? "Last day vs stop" : "Day vs stop"}
               value={`${pct(dayPct)} / −${lv.stop.toFixed(2)}%`} frac={dayPct < 0 ? -dayPct / lv.stop : 0} />
             <Meter label="Run drawdown" value={`${dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={dd / lv.runDd} />
@@ -184,11 +210,11 @@ export function Shell() {
         <div className="body" key="ready">
           <main key={run.id} id="main" ref={mainRef} tabIndex={-1}>
             <Outlet context={{ run, runs: list, overview: o, overviewError: !o && overview.isError ? overview.error : undefined,
-              retryOverview: () => { void overview.refetch(); } } satisfies RunCtx} />
+              retryOverview: () => { void overview.refetch(); }, meters: { dayPct, dd, replay: run.kind === "replay" }, pickRun } satisfies RunCtx} />
           </main>
         </div>
       )}
-      <TabBar />
+      <TabBar dot={dot} />
       <div className="foot">Paper trading only · simulated money · times ET (CET in brackets) · <Link to="/start">New run</Link> · <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a></div>
     </div>
   );

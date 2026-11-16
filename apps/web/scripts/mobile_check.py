@@ -7,7 +7,11 @@ text links excepted). It also prints text under 12 px, tables wider than their b
 production data, account or key is used.
 
     cd apps/web && VITE_SUPABASE_URL=http://localhost:54321 VITE_SUPABASE_PUBLISHABLE_KEY=mock npm run build
-    python scripts/mobile_check.py --dist dist [--routes home,tape] [--widths 390] [--json out.json]
+    python scripts/mobile_check.py --dist dist [--routes home,tape] [--widths 390] [--json out.json] [--interact]
+
+--interact (v4 PR 2) also checks, at 390 px: the top bar is at most 60 px; the tab bar has five 48 px items; every page
+is reachable from the tab bar or More; the experiment sheet opens as a dialog with focus inside, closes on Escape and
+returns focus; and with reduced motion on, nothing animates.
 """
 from __future__ import annotations
 
@@ -72,6 +76,65 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     return row
 
 
+REACH = ["/", "/positions", "/activity", "/health", "/more", "/report", "/gate", "/holdings", "/strategy", "/settings",
+         "/start"]
+
+
+def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
+    def page(reduced: bool = False):
+        ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True,
+                                  reduced_motion="reduce" if reduced else "no-preference")
+        ctx.add_init_script(session)
+        ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+        pg = ctx.new_page()
+        pg.goto(audit.APP + "/", wait_until="load")
+        pg.wait_for_selector("main > *")
+        pg.wait_for_timeout(1500)
+        return ctx, pg
+
+    ctx, pg = page()
+    header = pg.evaluate("Math.round(document.querySelector('header.top').getBoundingClientRect().height)")
+    tabs = pg.evaluate("[...document.querySelectorAll('nav.tabbar a')].map(a => [a.textContent.trim(), "
+                       "Math.round(a.getBoundingClientRect().height)])")
+    print("header", header, "px; tabs", tabs)
+    if header > 60:
+        fails.append(f"top bar is {header} px (want <= 60)")
+    if [t[0] for t in tabs] != ["Home", "Positions", "Activity", "Engine", "More"] or any(t[1] < 48 for t in tabs):
+        fails.append(f"tab bar: {tabs}")
+    links = set(pg.evaluate("[...document.querySelectorAll('nav.tabbar a')].map(a => a.getAttribute('href'))"))
+    pg.click("nav.tabbar a[href='/more']")
+    pg.wait_for_selector(".more-list")
+    links |= set(pg.evaluate("[...document.querySelectorAll('.more-list a')].map(a => a.getAttribute('href'))"))
+    missing = [r for r in REACH if r not in links]
+    print("reachable on a phone:", sorted(links))
+    if missing:
+        fails.append(f"not reachable on a phone: {missing}")
+    pg.click("nav.tabbar a[href='/']")
+    pg.wait_for_timeout(800)
+    btn = pg.locator(".exp-btn").first
+    if btn.count():
+        btn.click()
+        pg.wait_for_selector("[role=dialog]")
+        pg.wait_for_timeout(400)
+        inside = pg.evaluate("!!document.activeElement.closest('[role=dialog]')")
+        pg.keyboard.press("Escape")
+        pg.wait_for_timeout(400)
+        gone = pg.locator("[role=dialog]").count() == 0
+        back = pg.evaluate("document.activeElement && document.activeElement.classList.contains('exp-btn')")
+        print("sheet: focus inside", inside, "closed on Escape", gone, "focus returned", back)
+        if not (inside and gone and back):
+            fails.append(f"sheet: focus inside={inside} closed={gone} focus back={back}")
+    else:
+        fails.append("no experiment label on Home to open the sheet")
+    ctx.close()
+    ctx, pg = page(reduced=True)
+    running = pg.evaluate("document.getAnimations().filter(a => a.playState === 'running').length")
+    print("reduced motion: running animations", running)
+    if running:
+        fails.append(f"{running} animations run with reduced motion on")
+    ctx.close()
+
+
 def main(a) -> int:
     dist = pathlib.Path(a.dist).resolve()
     metrics = (TOOLS / "metrics.js").read_text()
@@ -106,6 +169,8 @@ def main(a) -> int:
                     page.wait_for_timeout(700)
                 rows.append(check(page, name, w, metrics, fails))
                 ctx.close()
+        if a.interact:
+            interact(browser, dist, now, session, fails)
         browser.close()
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rows, indent=1))
@@ -119,4 +184,5 @@ if __name__ == "__main__":
     ap.add_argument("--routes")
     ap.add_argument("--widths")
     ap.add_argument("--json")
+    ap.add_argument("--interact", action="store_true")
     sys.exit(main(ap.parse_args()))

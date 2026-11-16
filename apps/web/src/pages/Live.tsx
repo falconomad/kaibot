@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, lazy, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { engineChip, livePot, useRunCtx } from "../components/Shell";
+import { Meter, engineChip, livePot, useRunCtx } from "../components/Shell";
 import { PotChart } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
@@ -36,8 +36,8 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
       <tbody>
         {rows.map((t) => (
           <tr key={t.id} className="click" tabIndex={0} aria-label={`${t.symbol} trade on ${dateEt(t.entry_ts)}: open details`}
-            onClick={() => nav(`/trades/${t.id}`)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(`/trades/${t.id}`); } }}>
+            onClick={() => nav(`/positions/${t.id}`)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); nav(`/positions/${t.id}`); } }}>
             <td title={`code: ${t.strategy}`}><StockCell symbol={t.symbol} sub={`${t.qty} sh · ${ruleName(t.strategy)}`} />
               <RuleExperiment code={t.strategy} beats={beats} /></td>
             <td className="num muted">{dateEt(t.entry_ts)} {timeEt(t.entry_ts)}</td>
@@ -106,7 +106,7 @@ function Positions({ positions }: { positions: Record<string, { qty: number; fil
         const span = p.target - p.stop || 1;
         const at = (v: number | null) => `${Math.max(0, Math.min(100, (((v ?? p.stop) - p.stop) / span) * 100)).toFixed(1)}%`;
         return (
-          <button key={s} type="button" className="posrow" onClick={() => nav(`/trades/${p.trade_id}`)}
+          <button key={s} type="button" className="posrow" onClick={() => nav(`/positions/${p.trade_id}`)}
             style={{ display: "flex", alignItems: "center", gap: 16, padding: "12px", borderRadius: 16, border: 0, background: "transparent",
               textAlign: "left", height: "auto", fontWeight: 400, width: "100%" }}>
             <StockBadge symbol={s} size={44} />
@@ -159,7 +159,7 @@ const BookSection = lazy(() => import("../components/BookSection").then((m) => (
 const RANGES = [["1W", 5], ["1M", 21], ["3M", 63], ["ALL", 0]] as const;
 
 export function Live() {
-  const { run, overview, overviewError, retryOverview } = useRunCtx();
+  const { run, overview, overviewError, retryOverview, meters } = useRunCtx();
   const trades = useQuery({ queryKey: ["trades-all", run.id], queryFn: () => api.trades(run.id, 500, 0) });
   const evidence = useQuery({ queryKey: ["evidence", run.id], queryFn: () => api.evidence(run.id), ...poll(60_000) });
   // S48: chapter boundaries on the pot chart. Optional: if the RPC isn't there yet, the chart simply has no markers.
@@ -212,6 +212,12 @@ export function Live() {
             <span className="muted">SPY same start {s.spyPct >= 0 ? "▲" : "▼"} {pct(s.spyPct)}</span>
           </div>
         </div>
+        {lv && meters && run.kind === "paper" && (
+          <div className="phone-only meters meters-home" aria-label="Limits">
+            <Meter label="Day vs stop" value={`${pct(meters.dayPct)} / −${lv.stop.toFixed(2)}%`} frac={meters.dayPct < 0 ? -meters.dayPct / lv.stop : 0} />
+            <Meter label="Run drawdown" value={`${meters.dd.toFixed(1)} / ${lv.runDd.toFixed(1)}%`} frac={meters.dd / lv.runDd} />
+          </div>
+        )}
         <div className="range" role="group" aria-label="Chart range">
           {RANGES.map(([k]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{k}</button>)}
         </div>

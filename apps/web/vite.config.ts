@@ -6,7 +6,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   // Tests read app.css as text (`?raw`) to check the focus and reduced-motion rules; by default vitest blanks CSS.
-  test: { css: { include: /app\.css/ } },
+  test: { css: { include: /(app|v4tokens)\.css/ } },
   build: {
     rollupOptions: {
       output: {

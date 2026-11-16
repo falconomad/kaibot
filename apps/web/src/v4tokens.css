@@ -1,0 +1,17 @@
+:root {
+  /* v4 role tokens (docs/design/mobile_first_v4.md, "Tokens"): aliases of the v3 values, so nothing already built shifts.
+     New code uses these names; a light theme can follow by changing only this block. */
+  --bg: var(--paper); --line: var(--rule); --line-strong: var(--rule-strong);
+  --text: var(--ink); --text-2: var(--slate); --text-3: var(--stale);
+  --accent: var(--sea); --accent-text: var(--sea-ink); --accent-tint: var(--sea-tint);
+  --up: var(--gain); --up-tint: var(--gain-tint); --down: var(--loss); --down-tint: var(--loss-tint);
+  --amber: var(--warn); --amber-tint: var(--warn-tint);
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-12: 48px;
+  --t-hero: 44px; --t-xl: 28px; --t-lg: 20px; --t-md: 16px; --t-sm: 14px; --t-cap: 12px;
+  --r-tag: 8px; --r-input: 12px; --r-row: 16px; --r-card: 24px; --r-pill: 999px;
+  --tap: 44px; --tab-item: 48px; --row: 64px; --btn: 52px; --topbar: 56px;
+  --d-fast: 120ms; --d-base: 200ms; --d-sheet: 320ms; --d-sheet-out: 240ms;
+  --ease-out: cubic-bezier(.4, 0, 1, 1);
+  --elev-sheet: 0 -12px 40px rgba(0, 0, 0, .55);
+}
+@media (min-width: 761px) { :root { --t-hero: 60px; } }

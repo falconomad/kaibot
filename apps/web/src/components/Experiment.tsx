@@ -1,6 +1,7 @@
 // #210: the paper experiment's badge (with its cap and stop line) and the daily path's status card (Home, Engine).
 // Everything comes from the engine heartbeat; with no `experiments` / `multi_day` fields nothing renders.
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
+import { Sheet } from "./Sheet";
 import type { Halt, Heartbeat } from "../lib/api";
 import { ruleName } from "../lib/explain";
 import { type Experiment, experimentView, haltTone, retirementUndone, experimentsFrom, findExperiment, multiDayFrom, noDecisionText, parseRetired, retiredText } from "../lib/experiment";
@@ -9,17 +10,21 @@ export const engineDetail = (beats: Heartbeat[] | undefined) => beats?.find((b) 
 export const experimentsOf = (beats: Heartbeat[] | undefined) => experimentsFrom(engineDetail(beats));
 
 /** The calm badge: "Experiment — failed the ten-year test · paper only". Hover shows the one-line explanation; a tap
- *  (or Enter) opens it inline, so it works on a phone. Clicks never reach a clickable row underneath. */
+ *  (or Enter) opens it in a bottom sheet with the rule's limits (v4). Clicks never reach a clickable row underneath. */
 export function ExperimentBadge({ e, limits = false }: { e: Experiment; limits?: boolean }) {
   const [open, setOpen] = useState(false);
   const v = experimentView(e);
   const stop = (ev: MouseEvent | KeyboardEvent) => ev.stopPropagation();
   return (
-    <span className="exp">
-      <button type="button" className="exp-btn" title={v.tip} aria-expanded={open}
-        onClick={(ev) => { stop(ev); setOpen(!open); }} onKeyDown={stop}><span className="tag exp-tag">{v.text}</span></button>
+    <span className="exp" onClick={stop} onKeyDown={stop}>
+      <button type="button" className="exp-btn" title={v.tip} aria-haspopup="dialog" aria-expanded={open}
+        onClick={() => setOpen(true)}><span className="tag exp-tag">{v.text}</span></button>
       {limits && (v.cap || v.stop) && <span className="muted exp-limits">{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}
-      {open && <span className="exp-tip" role="note">{v.tip}</span>}
+      <Sheet open={open} onClose={() => setOpen(false)} title={v.text}>
+        <p>{v.tip}</p>
+        {(v.cap || v.stop) && <p className="muted">{[v.cap && `It holds ${v.cap}`, v.stop && `it ${v.stop}`].filter(Boolean).join("; ")}.</p>}
+        <p className="muted" style={{ fontSize: 14 }}>There is no trade-by-trade control: Kaibot decides on its own within these limits.</p>
+      </Sheet>
     </span>
   );
 }
