@@ -30,6 +30,10 @@ run it again. Do not reorder them.
 | 5 | `migrations/0018_m7_ledger.sql` (whole file; PR #160, once merged) | The ledger's tables (`ledger_day`, `ledger_position`), engine-assigned ids and `jseq` for idempotent replication from the local journal, `kb_report` start equity from the mark-to-market close, and `kb_book` / `kb_equity_series` for the multi-day dashboard | No: only `alter`, `add column if not exists`, `create ... if not exists` and `create or replace` |
 | 6 | `migrations/0019_deadman_overnight.sql` (whole file; PR for #120, once merged). **Before the first multi-day position is held overnight**; it can wait until then | The off-box dead-man no longer flattens the whole account: while the engine is silent it cancels entry orders, verifies (re-creates) every multi-day protective stop and raises the alarm; in the last 4 minutes it sells intraday shares only. One pg_cron job `kaibot_deadman` replaces the four `kaibot_deadman_*` jobs (docs/ops/failsafe.md) | **Yes**: `cron.unschedule(...)`, `net.http_delete(...)` and `net.http_post(...)` (paper orders, only when the dead-man acts). **First** turn shorting off on the paper account: Alpaca dashboard, paper account, Account Configurations, Shorting off (or `PATCH /v2/account/configurations {"no_shorting": true}`); check `GET /v2/account/configurations` gives `"no_shorting": true` and `GET /v2/account` gives `shorting_enabled: false` |
 
+| 7 | `migrations/0021_kb_health_multiday_events.sql` (whole file; PR for #266's events). Any time: dashboard read only | `kb_health` also returns the live daily path's events, among them the corporate-action skips the dashboard now labels (`multi_day_ca_skip`, `multi_day_ca_unread`, #271/#273), the #207 multi-day events and #266's adoption events. Same function as 0007 otherwise, owner-only | No: one `create or replace function`, then the revoke/grant of 0007 |
+
+0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
+
 To get step 1 as one SQL text: `sed -n '244,268p;351,362p' migrations/0014_m5_custom_tickers.sql`.
 Running the whole 0014 file again instead is also safe (every statement is `if not exists` or `create or replace`),
 **but only before step 3**: 0014's `config_check` has the old hard-coded strategy list, and 0016 replaces it.
@@ -53,6 +57,8 @@ select name, retired from kaibot.strategy_registry order by position;           
 -- step 5: the ledger tables exist and the replica can take the journal's ids
 select count(*) from pg_tables where schemaname = 'kaibot' and tablename in ('ledger_day', 'ledger_position'); -- 2
 select count(*) from information_schema.columns where table_schema = 'kaibot' and column_name = 'jseq';      -- 6
+-- step 7: kb_health returns the corporate-action skips
+select prosrc like '%multi_day_ca_skip%' and prosrc like '%multi_day_ca_unread%' from pg_proc where proname = 'kb_health'; -- true
 -- step 6: one dead-man job, and it knows the multi-day rules
 select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';    -- kaibot_deadman | * 13-21 * * 1-5
 select count(*) from kaibot.strategy_holding where holding = 'multi_day';                          -- 3
