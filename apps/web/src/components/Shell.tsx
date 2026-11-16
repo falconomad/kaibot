@@ -188,7 +188,7 @@ export function Shell() {
           <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
         </Link>
       </header>
-      {risk.severity !== "ok" && pathname !== "/" && (
+      {risk.severity !== "ok" && pathname !== "/" && pathname !== "/health" && (
         <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
           <b>{risk.severity === "breach" ? "Limit or safety halt in force:" : "Heads up:"}</b> {risk.items.join(" · ")}
           {" "}<Link to="/health">Engine health</Link>

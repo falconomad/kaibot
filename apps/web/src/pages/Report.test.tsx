@@ -41,7 +41,7 @@ describe("Report page states", () => {
     const r = replayRun();
     const html = render(<Report />, { ctx: ctxFor(r), seeds: [
       { key: ["evidence", r.id], data: evidence }, { key: ["report", r.id, undefined], data: report }, { key: ["attribution", r.id, 4], data: attribution }] });
-    expect(text(html)).toContain("Replay.");
+    expect(text(html)).toContain("Replay: these numbers come from past data");
     expect(text(html)).not.toContain("Chapters");
     expect(text(html)).not.toContain("Room vs rules-only");
     expect(hasStatus(html)).toBe(false);

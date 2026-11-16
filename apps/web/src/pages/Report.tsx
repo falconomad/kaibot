@@ -7,14 +7,15 @@ import { api, type AttributionGroup } from "../lib/api";
 import { DIM_LABEL, FLAG_TEXT, dayVsBenchmarks, etToday, evidenceVerdict, flagged, fmtR, haltResolved, haltText } from "../lib/derive";
 import { MIN_VETOES, roomAbVerdict } from "../lib/roomview";
 import { BAR } from "../lib/model";
-import { R, day, money, pct, px, signedMoney, timeEt, tone } from "../lib/fmt";
+import { R, day, money, pct, signedMoney, timeEt, tone } from "../lib/fmt";
 import { exitText, ruleLabel, ruleName, vetoText } from "../lib/explain";
-import { Empty, ErrorState, RuleName, TestPhaseBanner } from "../components/States";
+import { Empty, ErrorState, RuleName } from "../components/States";
+import { Accordion } from "../components/Accordion";
 import { HaltTag } from "../components/Experiment";
 import { STALE, poll } from "../lib/poll";
 import type { Heartbeat } from "../lib/api";
 import { Skeleton } from "../components/Skeleton";
-import { StockCell } from "../components/StockBadge";
+import { StockBadge, StockCell } from "../components/StockBadge";
 
 const strat = ruleName;
 
@@ -39,47 +40,39 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
   const closed = trades.filter((t) => t.pnl_usd !== null);
   const best = [...closed].sort((a, c) => (c.pnl_usd ?? 0) - (a.pnl_usd ?? 0))[0];
   const worst = [...closed].sort((a, c) => (a.pnl_usd ?? 0) - (c.pnl_usd ?? 0))[0];
+  const verdict = b.beatSpy && b.beatCash ? "ahead of the S&P 500 and cash" : b.beatCash ? "ahead of cash, behind the S&P 500"
+    : b.beatSpy ? "ahead of the S&P 500, behind cash" : "behind the S&P 500 and cash";
   return (
     <section className="card" aria-labelledby="day-h">
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <h2 id="day-h" style={{ margin: 0 }}>Report card · {day(r.session)}</h2>
+        <h2 id="day-h" style={{ margin: 0 }}>{day(r.session)}</h2>
         <span className="spacer" />
-        <label className="muted" style={{ fontSize: 13 }}>Session{" "}
+        <label className="muted" style={{ fontSize: 13 }}>Day{" "}
           <select value={r.session} onChange={(e) => setSession(e.target.value)}>
             {r.sessions.map((s) => <option key={s} value={s}>{day(s)}</option>)}
           </select>
         </label>
       </div>
-      <div className="kv" style={{ marginTop: 12 }}>
-        <span>Pot, after costs</span><span /><span className={`v ${tone(r.day?.pnl)}`}>{signedMoney(r.day?.pnl)} · {pct(b.potPct)}</span>
-        <span>SPY (buy and hold)</span><span /><span className="v">{pct(b.spyPct)}</span>
-        <span>Cash</span><span /><span className="v">{pct(b.cashPct, 3)}</span>
-        <span>Verdict</span><span /><span className="v">{b.beatSpy && b.beatCash ? "beat SPY and cash" : b.beatCash ? "beat cash, not SPY" : b.beatSpy ? "beat SPY, not cash" : "behind SPY and cash"}</span>
+      <p className="verdict" style={{ marginTop: 8 }}><span className={tone(r.day?.pnl)}>{signedMoney(r.day?.pnl)} · {pct(b.potPct)}</span>, {verdict}.</p>
+      <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>S&amp;P 500 {pct(b.spyPct)} · cash {pct(b.cashPct, 3)}</p>
+      <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Trades that day</h3>
+      {trades.length ? (
+        <ul className="rows" aria-label="Trades that day">{trades.map((t) => (
+          <li key={t.id}><Link to={`/positions/${t.id}`} className="row">
+            <StockBadge symbol={t.symbol} size={36} />
+            <span className="row-mid"><b>{t.symbol}</b><span className="muted">{strat(t.strategy)} · {exitText(t.exit_reason)} · {timeEt(t.entry_ts)}</span></span>
+            <span className="row-end num"><b className={tone(t.pnl_usd)}>{signedMoney(t.pnl_usd)}</b><span className="muted">{R(t.pnl_usd, t.risk_usd)}</span></span>
+          </Link></li>))}</ul>
+      ) : <p className="muted">No trades this session. Most days with no qualifying setup end flat; that is the rules working.</p>}
+      <Accordion title="More about this day" hint="broker vs shadow, setups, shadow rules, halts">
+      <div className="kv">
         <span>Broker vs shadow P&amp;L</span><span /><span className="v">{signedMoney(r.day?.pnl_venue)} / {signedMoney(r.day?.pnl_shadow)} <span className="muted">(the worse is reported)</span></span>
         <span>Setups seen / taken</span><span /><span className="v">{r.signals?.live ?? 0} / {r.signals?.approved ?? 0}</span>
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>One day says almost nothing about an edge. Read the evidence counter, not the daily colour.</p>
-
-      <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Trades</h3>
-      {trades.length ? (
-        <table className="list" tabIndex={0} aria-label="Trades">
-          <thead><tr><th>Time (ET)</th><th>Stock</th><th>Strategy</th><th>Why it closed</th><th className="r">Entry → exit</th><th className="r">P&amp;L</th><th className="r">R</th></tr></thead>
-          <tbody>{trades.map((t) => (
-            <tr key={t.id}>
-              <td className="num">{timeEt(t.entry_ts)}</td>
-              <td><Link to={`/positions/${t.id}`} className="rowlink"><StockCell symbol={t.symbol} sub={`${t.qty} sh`} /></Link></td>
-              <td className="muted" title={`code: ${t.strategy}`}>{strat(t.strategy)}</td>
-              <td className="muted" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}</td>
-              <td className="r num">{px(t.entry_px)} → {t.exit_px === null ? "open" : px(t.exit_px)}</td>
-              <td className={`r num ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)}</td>
-              <td className="r num">{R(t.pnl_usd, t.risk_usd)}</td>
-            </tr>))}</tbody>
-        </table>
-      ) : <p className="muted">No trades this session. Most days with no qualifying setup end flat; that is the rules working.</p>}
       {best && worst && best.id !== worst.id && (
-        <p className="muted" style={{ fontSize: 13 }}>Best {best.symbol} {signedMoney(best.pnl_usd)} · worst {worst.symbol} {signedMoney(worst.pnl_usd)}</p>
+        <p className="muted" style={{ fontSize: 13, margin: 0 }}>Best {best.symbol} {signedMoney(best.pnl_usd)} · worst {worst.symbol} {signedMoney(worst.pnl_usd)}</p>
       )}
-
+      <p className="muted" style={{ fontSize: 12, margin: 0 }}>One day says almost nothing about an edge. Read the evidence counter, not the daily colour.</p>
       {(r.vetoes?.length ?? 0) > 0 && (<>
         <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Setups not taken, and why</h3>
         <div className="kv">{r.vetoes!.map((v) => (<Fragment key={v.reason}><span title={`code: ${v.reason}`}>{vetoText(v.reason)}</span><span /><span className="v">{v.n}</span></Fragment>))}</div>
@@ -102,6 +95,7 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
           <li key={i}><span className="num">{timeEt(h.ts)}</span> <span title={`code: ${h.kind}`}>{haltText(h)}</span><HaltTag x={h} all={r.halts!} />
             {haltResolved(h, beat?.ts) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}</li>))}</ul>
       </>)}
+      </Accordion>
     </section>
   );
 }
@@ -290,22 +284,18 @@ export function Report() {
   const { run, overview } = useRunCtx();
   return (
     <>
-      {run.kind === "paper" && <TestPhaseBanner />}
-      {run.kind === "replay" && <div className="banner"><b>Replay.</b> These numbers come from past data, not live paper trading.</div>}
-      <div className="grid">
-        <EvidenceCard runId={run.id} />
-        <section className="card" aria-labelledby="how-h">
-          <h2 id="how-h">How to read this</h2>
-          <p style={{ fontSize: 13, marginTop: 0 }}>The report card is ready after each session closes (16:00 ET, 22:00 CET). Every number is after costs and uses the
-            worse of the broker's fills and Kaibot's shadow cost model.</p>
-          <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Expect 4–5 losing days in 10. What matters is the evidence counter: {BAR.trades}+ trades over {BAR.months}+ months with t &gt; {BAR.t}.</p>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Pot start {money(run.amount_usd)}.</p>
-        </section>
-      </div>
-      {run.kind === "paper" && <ChaptersCard runId={run.id} />}
+      <h1 className="page-title">Report</h1>
+      {run.kind === "replay" && <p className="muted" style={{ margin: 0 }}>Replay: these numbers come from past data, not live paper trading.</p>}
       <DayCard runId={run.id} beat={overview?.heartbeat.find((h) => h.process === "engine")} />
-      {run.kind === "paper" && <RoomAbCard runId={run.id} />}
-      <Attribution runId={run.id} />
+      <Accordion title="Evidence counter" hint={`toward ${BAR.trades}+ trades with t > ${BAR.t}`}><EvidenceCard runId={run.id} /></Accordion>
+      <Accordion title="What worked, and what did not"><Attribution runId={run.id} /></Accordion>
+      {run.kind === "paper" && <Accordion title="Agent room"><RoomAbCard runId={run.id} /></Accordion>}
+      {run.kind === "paper" && <Accordion title="Chapters" hint="settings versions"><ChaptersCard runId={run.id} /></Accordion>}
+      <Accordion title="How to read this">
+        <p style={{ fontSize: 14, margin: 0 }}>The report is ready after each session closes (16:00 ET, 22:00 CET). Every number is after costs and uses the
+          worse of the broker's fills and Kaibot's shadow cost model. Expect 4–5 losing days in 10; what matters is the evidence counter:
+          {" "}{BAR.trades}+ trades over {BAR.months}+ months with t &gt; {BAR.t}. Pot start {money(run.amount_usd)}.</p>
+      </Accordion>
     </>
   );
 }
