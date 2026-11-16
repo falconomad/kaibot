@@ -391,6 +391,12 @@ def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics:
             if zero:
                 fails.append(f"stress-{name}@{w}: a position with 0 shares left is shown as held")
             if name == "positions":
+                # 3 orders tonight; one held row (SUPERLONG, still at the broker) is tagged; NFLX is filled, TSLA not held yet
+                plan = pg.evaluate("[document.querySelectorAll('.nc-list li').length, [...document.querySelectorAll('.row-plan')].map(t => t.closest('.row').querySelector('b').textContent + ': ' + t.textContent).join(), "
+                                   "(document.querySelector('.next-close')?.scrollWidth || 0) > (document.querySelector('.next-close')?.clientWidth || 0) + 1]")
+                print(f"stress plan {w}: {plan[0]} orders, tags [{plan[1]}], overflow {plan[2]}")
+                if plan[0] != 3 or plan[1] != "SUPERLONG: Selling tonight" or plan[2]:
+                    fails.append(f"stress-positions@{w}: the next close's plan is missing or overflows: {plan}")
                 pg.locator(".rows .row").first.click()
                 pg.wait_for_selector("[role=dialog]")
                 pg.wait_for_timeout(500)
@@ -400,6 +406,17 @@ def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics:
                 print(f"stress sheet {w}: {sheet}, misaligned {bad}")
                 if sheet["over"] or sheet["right"] > sheet["w"] or bad:
                     fails.append(f"stress-sheet@{w}: {sheet} {bad}")
+            if name == "positions":
+                pg.keyboard.press("Escape")
+                pg.wait_for_timeout(400)
+                pg.get_by_role("tab", name="Closed").click()
+                pg.wait_for_timeout(1200)
+                sold = pg.evaluate("document.querySelectorAll('[aria-label=\\'Sold from the multi-day book\\'] .row').length")
+                bad = pg.evaluate(MISALIGN)
+                print(f"stress sold {w}: {sold} sold rows, misaligned {bad}")
+                if sold != 4 or bad:
+                    fails.append(f"stress-sold@{w}: {sold} sold rows, {bad}")
+                check(pg, "stress-sold", w, metrics, fails)
             ctx.close()
 
 

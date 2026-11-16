@@ -6,7 +6,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { BookChecks } from "../components/Book";
-import { ExperimentSheetBody, experimentsOf } from "../components/Experiment";
+import { ExperimentSheetBody, engineDetail, experimentsOf } from "../components/Experiment";
 import { StatusRow } from "../components/Home";
 import { Tick } from "../components/Tick";
 import { Sheet } from "../components/Sheet";
@@ -23,6 +23,9 @@ import { type Experiment, experimentView, findExperiment } from "../lib/experime
 import { R, dateEt, day, money, px, signedMoney, timeEt } from "../lib/fmt";
 import { sectorOf } from "../components/Book";
 import { NAME } from "../brand/brand";
+import { type Plan, type Sold, STATE_TEXT, bookLine, buyText, lineText, parsePlan, parseSold, reasonText, rowTag, sectorText, sellWhen } from "../lib/multiday";
+import { poll } from "../lib/poll";
+import { etToday } from "../lib/derive";
 
 const PAGE = 50;
 type IntradayPos = { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number };
@@ -43,6 +46,18 @@ export function Positions() {
     enabled: tab === "closed" || run.kind === "replay" });
   const exps = experimentsOf(overview?.heartbeat);
   const b = book.data;
+  // #229 (PR #247): the next close's plan, the book's stop line, and the sold holdings. Absent until 0020 and the
+  // engine code are live: then nothing new shows.
+  const paper = run.kind === "paper";
+  const planQ = useQuery({ queryKey: ["md-plan", run.id], queryFn: () => api.multidayPlan(run.id), enabled: paper, retry: false, ...poll(60_000) });
+  const plans: Plan[] = parsePlan(planQ.data);
+  const soldQ = useQuery({ queryKey: ["md-sold", run.id], queryFn: () => api.bookClosed(run.id), enabled: paper && tab === "closed", retry: false });
+  const sold: Sold[] = parseSold(soldQ.data);
+  const line = bookLine((engineDetail(overview?.heartbeat) as { multi_day?: unknown } | null)?.multi_day, run.id);
+  // Only a plan whose fill session is today or later: an old plan is history, not "tonight".
+  const today = etToday();
+  const tonight = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today).flatMap((pl) => pl.orders.map((o) => ({ ...o, rule: pl.rule, fillsAt: pl.fillsAt })));
+  const current = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today);
   const live = run.kind === "paper" ? livePot(run, overview) : null;
   const open: Open[] = [
     ...Object.entries(live?.positions ?? {}).map(([symbol, p]): Open => {
@@ -62,6 +77,7 @@ export function Positions() {
         <h1 id="pos-h" className="page-title">Positions</h1>
         <p className="muted num" style={{ margin: 0 }}>{open.length} open{open.length ? ` · ${money(invested)} invested` : ""}
           {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</p>
+        {line && <p className={`muted num ${line.ended ? "loss" : ""}`} style={{ margin: 0 }} title={`peak ${money(line.peak)}, now ${money(line.equity)}`}>Multi-day book: {lineText(line)}</p>}
         {run.kind === "paper" && (
           <div className="seg" role="tablist" aria-label="Show" onKeyDown={onTabKeys}>
             <button {...tabProps(tab === "open")} onClick={() => setTab("open")}>Open</button>
@@ -90,7 +106,11 @@ export function Positions() {
                       <span className="muted">{o.kind === "day"
                         ? `${o.p.qty} shares · in at ${px(o.p.fill)}${o.p.status === "pending" ? " · filling" : ""}`
                         : `${ruleName(o.p.rule)} · ${o.p.qty} shares${holdingView(o.p, b!).days !== null ? ` · ${holdingView(o.p, b!).days} days` : ""}`}</span>
-                      {o.kind === "book" && findExperiment(o.p.rule, exps) && <span className="row-tag">Experiment: failed the ten-year test</span>}
+                      {o.kind === "book" && (() => {
+                        // one line of tags: the plan's tag joins the experiment's, so it adds no height when it arrives
+                        const t = rowTag(current, o.p.rule, o.symbol), x = findExperiment(o.p.rule, exps);
+                        return x || t ? <span className="row-tags">{x && <span className="row-tag">Experiment: failed the ten-year test</span>}{t && <span className="row-plan">{t}</span>}</span> : null;
+                      })()}
                     </span>
                     <span className="row-end num"><b><Tick value={o.value}>{money(o.value)}</Tick></b>
                       {o.gain !== null && <Tick value={o.gain} className={tone(o.gain)}>{signedMoney(o.gain)}</Tick>}</span>
@@ -101,11 +121,14 @@ export function Positions() {
           ) : book.isPending && run.kind === "paper" ? <Skeleton /> : (
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
           )}
+          {/* below the list: the plan arrives after the rows, and must not push them down */}
+          {tonight.length > 0 && <NextClose orders={tonight} />}
         </>
       )}
 
       {showClosed && (closed.isPending ? <Skeleton /> : closed.isError ? <ErrorState compact what="Trades" error={closed.error} retry={() => closed.refetch()} /> : (
         <>
+          {sold.length > 0 && <SoldList sold={sold} />}
           {closed.data.rows.length ? (
             <ul className="rows" aria-label="Trades">
               {closed.data.rows.map((t) => (
@@ -194,14 +217,60 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
         <span>Bought at</span><span /><span className="v">{px(p.avgCost)} a share</span>
         <span>Price at the close</span><span /><span className="v">{px(p.mark)}{p.priced ? "" : " (last known)"}</span>
         <span>Size, of the pot</span><span /><span className="v">{v.share !== null ? `${(v.share * 100).toFixed(1)}%` : "—"}</span>
-        <span>Sector</span><span /><span className="v">{sectorOf(p.symbol) ?? "not known"}</span>
+        <span>Sector</span><span /><span className="v">{sectorText(p.sector) ?? sectorOf(p.symbol) ?? "not known"}</span>
         <span>Safety stop at the broker</span><span /><span className={`v ${p.stop ? "" : "loss"}`}>{p.stop
           ? `${px(p.stop.price)} · ${p.stop.state === "resting" ? "in place" : p.stop.state === "re-arming" ? "being placed again" : "missing"}${v.stopBelowPct !== null ? ` · ${v.stopBelowPct.toFixed(1)}% below` : ""}`
           : `none: ${NAME} places it again`}</span>
         {p.dividends > 0 && <><span>Dividends</span><span /><span className="v">{money(p.dividends)}</span></>}
       </div>
+      {(() => {
+        const rs = sellWhen(p.sellWhen);
+        return rs.length > 0 && (
+          <>
+            <h3 className="sheet-sub">Sells when</h3>
+            <ul className="sell-when">{rs.map((r) => <li key={r.code} className={r.met ? "met" : ""}>{r.met && <b>Met: sells at the next close. </b>}{r.text}</li>)}</ul>
+          </>
+        );
+      })()}
       {RULES[p.rule] && <p className="muted" style={{ fontSize: 14 }}>The rule {RULES[p.rule].what}. Prices are at the last close.</p>}
     </>
+  );
+}
+
+/** #229 item 2: what the multi-day rule sends at the next close, and where each order stands. */
+function NextClose({ orders }: { orders: (ReturnType<typeof parsePlan>[number]["orders"][number] & { rule: string; fillsAt: string | null })[] }) {
+  const at = orders.find((o) => o.fillsAt)?.fillsAt ?? null;
+  return (
+    <section className="card next-close" aria-labelledby="nc-h">
+      <h2 id="nc-h" className="section-h" style={{ margin: 0 }}>At the {at ? `close of ${day(at)}` : "next close"}</h2>
+      <ul className="nc-list">{orders.map((o) => {
+        const d = o.sharesTarget - o.sharesNow;
+        const what = o.sharesTarget === 0 ? `Sell all ${o.sharesNow}` : d > 0 ? `${o.sharesNow ? "Add" : "Buy"} ${d}` : `Sell ${-d}`;
+        return (
+          <li key={`${o.rule}-${o.symbol}`}>
+            <b>{o.symbol}</b><span className="muted">{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</span>
+            <span className={`nc-state ${o.state}`}>{STATE_TEXT[o.state]}{o.state === "working" && o.sharesNow > 0 && o.sharesTarget > o.sharesNow ? ` · ${o.sharesNow} of ${o.sharesTarget} held` : ""}</span>
+          </li>
+        );
+      })}</ul>
+    </section>
+  );
+}
+
+/** #229 item 4: the multi-day book's sold holdings, newest first (the Sold tab of the boards, under Closed). */
+function SoldList({ sold }: { sold: Sold[] }) {
+  return (
+    <ul className="rows" aria-label="Sold from the multi-day book">
+      <li><h2 className="day-head">Sold from the multi-day book</h2></li>
+      {sold.map((x) => (
+        <li key={`${x.rule}-${x.symbol}-${x.closed}`}><div className="row">
+          <StockBadge symbol={x.symbol} size={40} />
+          <span className="row-mid"><b>{x.symbol}</b>
+            <span className="muted">{reasonText(x.reason)} · {day(x.closed)}{x.days !== null ? ` · held ${x.days} days` : ""}</span></span>
+          <span className="row-end num"><b className={tone(x.pnl)}>{x.pnl === null ? "—" : signedMoney(x.pnl)}</b><span className="muted">{x.qty} sh</span></span>
+        </div></li>
+      ))}
+    </ul>
   );
 }
 

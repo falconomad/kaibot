@@ -137,6 +137,15 @@ async function rpc<T>(fn: string, args?: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
+/** An RPC that may not be in production yet: a missing function is "not yet" (null), any other error stays an error. */
+async function optional<T>(call: () => Promise<T>): Promise<T | null> {
+  try { return await call(); } catch (e) {
+    const x = e as { code?: string; message?: string };
+    if (x?.code === "PGRST202" || x?.code === "42883" || /could not find the function|function .* does not exist/i.test(String(x?.message ?? ""))) return null;
+    throw e;
+  }
+}
+
 // Postgres numerics arrive as strings; coerce the fields we do maths on.
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 function fixTrade(t: Trade): Trade {
@@ -209,6 +218,9 @@ export const api = {
   deleteTickerList: (name: string) => rpc<{ ok: boolean }>("kb_delete_ticker_list", { p_name: name }),
   // #130: the multi-day book (0018, contract docs/ops/ledger.md). Parsed defensively in lib/book.ts.
   book: async (run: number) => parseBook(await rpc<unknown>("kb_book", { p_run: run, p_session: null }), run),
+  /** #229 (migration 0020): null while 0020 isn't applied (the function does not exist yet). */
+  multidayPlan: async (run: number) => optional(() => rpc<unknown>("kb_multiday_plan", { p_run: run })),
+  bookClosed: async (run: number, limit = 50) => optional(() => rpc<unknown>("kb_book_closed", { p_run: run, p_limit: limit })),
   equitySeries: async (run: number) => parseSeries(await rpc<unknown>("kb_equity_series", { p_run: run, p_from: null, p_to: null })),
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
