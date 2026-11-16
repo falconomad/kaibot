@@ -191,3 +191,36 @@ def test_a_late_adoption_does_not_lift_the_drift_halt_while_another_difference_s
     assert a.eng.ledger.book(a.rid).sleeves[(MD, "BN")].qty == 20  # adopted
     assert a.eng.kill == "drift"  # but not lifted
     assert not [e for e in a.store.tables["event"] if e["type"] == "halt_cleared"]
+
+
+# ---------------------------------------------------------------- a cash merger of a held stock
+
+CASH = {"cash_mergers": [{"acquiree_symbol": "B", "acquirer_symbol": "BIG", "rate": 120.0, "effective_date": DAY2,
+                          "id": "m1"}]}
+
+
+def test_a_cash_merger_closes_the_sleeve_at_the_cash_price_and_books_the_cash(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed(CASH))
+    a.hold()
+    a.broker.cash = 10_000.0 - QTY * a.b_px  # a cash book, so the reconciliation compares cash too
+    cash0 = a.eng.ledger.book(a.rid).cash
+    a.broker.cash_merger("B", price=120.0, day=DAY2)  # Alpaca, before DAY2's open
+    a.ticks(a.open2, 0, 6)
+    b = a.eng.ledger.book(a.rid)
+    assert (MD, "B") not in b.sleeves
+    assert abs(b.cash - cash0 - QTY * 120.0) < 1e-6
+    (f,) = [x for *_, x in a.eng.journal.entries(kinds=("fill",)) if x["side"] == "sell"]
+    assert f["px"] == 120.0 and f["fees"] == 0.0 and f["reason"] == "cash_merger" and f["ref"] == "alpaca-ca:m1"
+    assert "cash_merger_booked" in _kinds(a)
+    assert a.eng.kill is None and a.eng.account_clean and a.eng.recon.last.diffs == []
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"]  # no sale tried
+    a.eng.flatten_all("test")  # a later full flatten has nothing of B to sell
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"]
+
+
+def test_a_vanished_position_without_a_merger_record_is_not_booked(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed({}))
+    a.hold()
+    a.broker.cash_merger("B", price=120.0, day=DAY2)
+    a.ticks(a.open2, 0, 3)
+    assert (MD, "B") in a.eng.ledger.book(a.rid).sleeves  # never guessed: entries stay blocked, as before

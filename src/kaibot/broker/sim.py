@@ -300,6 +300,21 @@ class SimBroker(BrokerBase):
         self.non_trade.append({"activity_type": "SSO", "id": f"{day}::sso{len(self.non_trade) + 1}", "date": day,
                                "symbol": new, "qty": str(_num(whole))})
 
+    def cash_merger(self, symbol: str, *, price: float, day: str) -> None:
+        """Alpaca's cash merger (its documented MA rows): the position is removed (an MA row with the negative
+        quantity, no cash) and the cash is posted (an MA row with quantity 0 and the net amount)."""
+        p = self.pos.pop(symbol, None)
+        if p is None:
+            return
+        qty = float(p["qty"])
+        if self.cash is not None:
+            self.cash += qty * price
+        n = len(self.non_trade)
+        self.non_trade.append({"activity_type": "MA", "id": f"{day}::ma{n + 1}", "date": day, "symbol": symbol,
+                               "qty": str(-qty), "net_amount": "0"})
+        self.non_trade.append({"activity_type": "MA", "id": f"{day}::ma{n + 2}", "date": day, "symbol": symbol,
+                               "qty": "0", "net_amount": str(qty * price)})
+
     def symbol_change(self, old: str, new: str, *, day: str) -> None:
         """Alpaca updates the asset's symbol: the position is renamed (an SC activity names the new symbol)."""
         if old not in self.pos:

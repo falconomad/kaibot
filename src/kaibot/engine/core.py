@@ -1545,6 +1545,9 @@ class Engine:
                                                          "action": "nothing adopted; entries stay blocked"},
                              self._rid())
             return
+        for x in [y for y in links if y.kind == "cash_merger" and y.symbol in gone]:
+            self._book_cash_merger(b, x, today)
+            gone.discard(x.symbol)
         for x in links:
             p = foreign.get(x.new_symbol)
             why = None
@@ -1586,6 +1589,29 @@ class Engine:
                                                                   "new_symbol": x.new_symbol, "why": why,
                                                                   "action": "entries stay blocked: check the "
                                                                             "paper account"}, self._rid())
+
+    def _book_cash_merger(self, b, x, today: date) -> None:
+        """#266: Alpaca removed a held position and paid cash for it under a sourced cash-merger record: every
+        sleeve of the stock is closed at the cash price (a `fill` sale with no fee, reason `cash_merger`), so the
+        cash is in the ledger, the sleeve is gone and nothing tries to sell it. The price is Alpaca's own cash
+        (its MA cash row over the shares held) when it has posted it, else the record's rate."""
+        qty = sum(s.qty for s in b.holders(x.symbol))
+        px = float(x.ratio)
+        try:
+            rows = self.broker.activities(self.now() - timedelta(days=10), types=("MA",))
+            paid = sum(float(r.get("net_amount") or 0) for r in rows if r.get("symbol") == x.symbol
+                       and float(r.get("net_amount") or 0) > 0)
+            if paid > 0 and qty > 0:
+                px = paid / qty
+        except Exception:
+            log.exception("cash merger %s: Alpaca's MA rows unreadable (the record's rate is used)", x.symbol)
+        for s in list(b.holders(x.symbol)):
+            self._book("fill", {"run_id": b.run_id, "strategy": s.strategy, "symbol": x.symbol, "side": "sell",
+                                "qty": s.qty, "px": px, "fees": 0.0, "reason": "cash_merger", "ref": x.ref,
+                                "session": str(today), "ts": self.now()})
+        self.store.event("cash_merger_booked", {"symbol": x.symbol, "qty": qty, "price": round(px, 6),
+                                                "cash": round(qty * px, 2), "ex_date": x.on, "ref": x.ref},
+                         self._rid())
 
     def _accrue_dividends(self, b, today: date) -> None:
         """S78 (#118): the dividends going ex today, booked to the sleeves holding the stock at this open (they held
