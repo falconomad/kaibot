@@ -9,7 +9,7 @@ production data, account or key is used.
     cd apps/web && VITE_SUPABASE_URL=http://localhost:54321 VITE_SUPABASE_PUBLISHABLE_KEY=mock npm run build
     python scripts/mobile_check.py --dist dist [--routes home,tape] [--widths 390] [--json out.json] [--interact]
 
---interact (v4 PR 2) also checks, at 390 px: the top bar is at most 60 px; the tab bar has five 48 px items; every page
+--interact (v4 PR 2) also checks, at 390 px: the top bar is 64 px (72 px at 1280); the tab bar has five 48 px items; every page
 is reachable from the tab bar or More; the experiment sheet opens as a dialog with focus inside, closes on Escape and
 returns focus; and with reduced motion on, nothing animates.
 
@@ -19,6 +19,7 @@ capitals by CSS: it is always lowercase, as the first word of a sentence too (st
 <code> is a literal path or command and is not counted. --interact also checks the tab title, the logo in the header,
 and that the favicon, the home-screen icon and the manifest load.
 """
+# ruff: noqa: E501  (the browser scripts in this file are JavaScript inside strings; a few lines run past 120)
 from __future__ import annotations
 
 import argparse
@@ -137,12 +138,12 @@ BRAND_JS = r"""async () => {
   for (const sel of ['link[rel=icon][type="image/svg+xml"]', 'link[rel=apple-touch-icon]'])
     icons[href(sel)] = !!(await img(href(sel)));
   for (const i of (m?.icons || [])) { const s = await img(i.src); icons[i.src] = !!s && `${s[0]}x${s[1]}` === i.sizes; }
-  const symbol = document.querySelector('header.top .brand .logo-symbol');
+  const symbol = document.querySelector('header.top .brand svg.logo-word');
   return {
     title: document.title,
     label: document.querySelector('header.top .brand')?.getAttribute('aria-label') || null,
-    word: document.querySelector('header.top .brand .logo-word')?.textContent || null,
-    symbol: !!symbol && symbol.complete && symbol.naturalWidth > 0,
+    word: symbol?.getAttribute('aria-label') || null,
+    symbol: !!symbol && symbol.querySelectorAll('path').length === 10 && !document.querySelector('header.top .brand img'),
     logos: document.querySelectorAll('.logo').length,
     homeLabel: document.querySelector('meta[name=apple-mobile-web-app-title]')?.getAttribute('content') || null,
     manifest: m ? [m.name, m.short_name, m.display] : null,
@@ -150,6 +151,28 @@ BRAND_JS = r"""async () => {
     ico: href('link[rel=icon][sizes]'),
   };
 }"""
+
+
+# The header's parts on a phone: sizes as drawn, tap areas, one row, and the logo's box against its drawn letters.
+HEADER_JS = r"""() => {
+  const h = (sel) => document.querySelector(sel).getBoundingClientRect();
+  const logo = document.querySelector('header.top .logo');
+  const drawn = logo.querySelector('g').getBoundingClientRect(), box = logo.getBoundingClientRect();
+  const tops = [...document.querySelector('header.top').children].filter((e) => e.getBoundingClientRect().height > 0)
+    .map((e) => Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2));
+  return {
+    logo: Math.round(box.height * 10) / 10,
+    pill: Math.round(h('header.top .pill').height),
+    chip: Math.round(h('header.top .engine-chip').height - 2 * parseFloat(getComputedStyle(document.querySelector('header.top .engine-chip'), '::before').top)),
+    chipTap: Math.round(h('header.top .engine-chip').height),
+    homeTap: Math.round(h('header.top .brand').height),
+    rows: new Set(tops).size,
+    hug: Math.round((Math.abs(drawn.width - box.width) + Math.abs(drawn.height - box.height)) * 10) / 10,
+  };
+}"""
+
+# The logo's motion (docs/design/logo): which of its animations are running now.
+LOGO_MOTION = "document.getAnimations().filter(a => /^kb-logo-/.test(a.animationName) && a.playState === 'running').map(a => a.animationName)"
 
 
 def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
@@ -161,10 +184,33 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         pg = ctx.new_page()
         pg.goto(audit.APP + "/", wait_until="load")
         pg.wait_for_selector("main > *")
+        early = sorted(set(pg.evaluate(LOGO_MOTION)))
         pg.wait_for_timeout(1500)
-        return ctx, pg
+        return ctx, pg, early
 
-    ctx, pg = page()
+    ctx, pg, early = page()
+    # The logo's motion: plays once as the header first shows, is over within a second and a half, and never again:
+    # not on a tab change, and not when the header is drawn anew after New run.
+    later = pg.evaluate(LOGO_MOTION)
+    pg.click("nav.tabbar a[href='/positions']")
+    pg.wait_for_timeout(120)
+    on_tab = pg.evaluate(LOGO_MOTION)
+    pg.evaluate("history.pushState({}, '', '/start'); dispatchEvent(new PopStateEvent('popstate'))")
+    pg.wait_for_selector(".steps")
+    on_start = pg.evaluate(LOGO_MOTION)
+    pg.evaluate("history.pushState({}, '', '/'); dispatchEvent(new PopStateEvent('popstate'))")
+    pg.wait_for_selector("nav.tabbar")
+    pg.wait_for_timeout(120)
+    on_back = pg.evaluate(LOGO_MOTION)
+    print("logo motion: at first paint", early, "| after 1.5 s", later, "| tab change", on_tab, "| New run", on_start, "| back", on_back)
+    if early != ["kb-logo-draw", "kb-logo-pop", "kb-logo-pulse"]:
+        fails.append(f"the logo's load motion did not play at first paint: {early}")
+    if later or on_tab or on_start or on_back:
+        fails.append(f"the logo moved again: after 1.5 s {later}, tab change {on_tab}, New run {on_start}, back {on_back}")
+    still = pg.evaluate("document.querySelectorAll('.logo-moving, .logo clipPath, .logo-pulse').length")
+    if still:
+        fails.append(f"the logo keeps {still} motion parts after it has finished")
+    pg.wait_for_timeout(600)
     # The name is written once, in src/brand/brand.ts; the built app must show that name and no other.
     name = brand_name()
     brand = pg.evaluate(BRAND_JS)
@@ -184,8 +230,14 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     tabs = pg.evaluate("[...document.querySelectorAll('nav.tabbar a')].map(a => [a.textContent.trim(), "
                        "Math.round(a.getBoundingClientRect().height)])")
     print("header", header, "px; tabs", tabs)
-    if header > 60:
-        fails.append(f"top bar is {header} px (want <= 60)")
+    if header != 64:
+        fails.append(f"top bar is {header} px on a phone (want 64)")
+    hdr = pg.evaluate(HEADER_JS)
+    print("header parts:", hdr)
+    if not 25.5 <= hdr["logo"] <= 26.5 or hdr["pill"] != 36 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
+        fails.append(f"header parts on a phone (logo 26, Paper 36, chip 36 drawn and 44 to tap, home link 44): {hdr}")
+    if hdr["rows"] != 1 or abs(hdr["hug"]) > 0.5:
+        fails.append(f"header: one row, and the logo's box must hug its letters: {hdr}")
     if [t[0] for t in tabs] != ["Home", "Positions", "Activity", "Engine", "More"] or any(t[1] < 48 for t in tabs):
         fails.append(f"tab bar: {tabs}")
     links = set(pg.evaluate("[...document.querySelectorAll('nav.tabbar a')].map(a => a.getAttribute('href'))"))
@@ -214,11 +266,26 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     else:
         fails.append("no experiment row on Home to open the sheet")
     ctx.close()
-    ctx, pg = page(reduced=True)
+    ctx, pg, early = page(reduced=True)
     running = pg.evaluate("document.getAnimations().filter(a => a.playState === 'running').length")
-    print("reduced motion: running animations", running)
-    if running:
-        fails.append(f"{running} animations run with reduced motion on")
+    paths = pg.evaluate("document.querySelectorAll('header.top .logo path').length")
+    print("reduced motion: running animations", running, "| logo motion at first paint", early, "| logo paths", paths)
+    if running or early or paths != 10:
+        fails.append(f"reduced motion: {running} animations run, the logo moved {early}, or its mark is not whole ({paths} paths)")
+    ctx.close()
+    # 1280 px: the header is 72 px, the wordmark 28 px.
+    ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+    ctx.add_init_script(session)
+    ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+    pg = ctx.new_page()
+    pg.goto(audit.APP + "/", wait_until="load")
+    pg.wait_for_selector("main > *")
+    pg.wait_for_timeout(1200)
+    wide = pg.evaluate("[Math.round(document.querySelector('header.top').getBoundingClientRect().height), "
+                       "Math.round(document.querySelector('header.top .logo').getBoundingClientRect().height)]")
+    print("1280 px: header", wide[0], "px, wordmark", wide[1], "px")
+    if wide != [72, 28]:
+        fails.append(f"at 1280 px the header is {wide[0]} px and the wordmark {wide[1]} px (want 72 and 28)")
     ctx.close()
 
 

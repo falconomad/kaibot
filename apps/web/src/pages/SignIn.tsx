@@ -18,7 +18,7 @@ export function SignIn() {
   return (
     <div className="center">
       <form className="card" onSubmit={send}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><Logo />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><Logo animate />
           <span className="pill">PAPER</span></div>
         {state === "sent" ? (
           <>

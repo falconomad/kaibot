@@ -13,7 +13,13 @@ import ts from "typescript";
 import { BRAND, NAME, REPO_DIR, brandText } from "./brand/brand";
 import { ICONS, MANIFEST_PATH, backgroundOf, brandHtml, manifest, manifestJson } from "./brand/assets";
 import lock from "./brand/icons.lock.json";
-import { Logo } from "./components/Logo";
+import { Logo, ROLES, TIMING, mark, resetLogoMotion } from "./components/Logo";
+import { capsule, circle, drawnFrom } from "./brand/mark";
+import wordDark from "./brand/logo/wordmark-on-dark.svg?raw";
+import wordLight from "./brand/logo/wordmark-on-light.svg?raw";
+import symbolDark from "./brand/logo/symbol-on-dark.svg?raw";
+import iconDark from "./brand/logo/icon-dark.svg?raw";
+import tokens from "./v4tokens.css?raw";
 import { Shell } from "./components/Shell";
 import { NotOwner, SignIn } from "./pages/SignIn";
 import { Onboarding } from "./pages/Onboarding";
@@ -125,34 +131,126 @@ describe("text from outside apps/web is shown with the name in lowercase", () =>
   });
 });
 
-describe("the logo: one component, one symbol file", () => {
-  it("symbol and wordmark; the symbol is decoration next to the word", () => {
-    // (react-dom/server also writes a preload hint for the image in front of the markup; the browser build does not)
-    const html = renderToStaticMarkup(<Logo />).replace(/^<link rel="preload"[^>]*>/, "");
-    expect(html).toMatch(/^<span class="logo"><img class="logo-symbol" src="[^"]*symbol\.svg[^"]*" alt="" width="26" height="26" style="width:26px;height:26px"\/><span class="logo-word">kaibo<\/span><\/span>$/);
+const ds = (html: string) => [...html.matchAll(/<path[^>]*\bd="([^"]+)"/g)].map((m) => m[1]);
+const fileDs = (svg: string) => [...svg.matchAll(/<path[^>]*\bd="([^"]+)"/g)].map((m) => m[1]);
+const still = (el: React.ReactElement) => renderToStaticMarkup(el);
+
+describe("the logo: Design's Rising k, drawn from the delivered files", () => {
+  it("the files have the shape the logo expects: the k's arm, leg and stem, the point, then the other letters", () => {
+    const w = mark("word", "dark"), k = mark("symbol", "dark");
+    expect(w.parts).toHaveLength(10);
+    expect(k.parts).toHaveLength(4);
+    expect(w.parts.map((p) => p.fill)).toEqual(["#4F95F0", "#F4F5F7", "#F4F5F7", "#F4F5F7", "#F4F5F7", "#F4F5F7", "#4F95F0", "#F4F5F7", "#F4F5F7", "#F4F5F7"]);
+    expect(k.parts.map((p) => p.fill)).toEqual(["#4F95F0", "#4F95F0", "#F4F5F7", "#F4F5F7"]);
+    for (const [kind, m] of [["word", w], ["symbol", k]] as const) {
+      for (const part of ["arm", "leg", "stem"] as const) expect(capsule(m.parts[ROLES[kind][part]].d), `${kind} ${part}`).not.toBeNull();
+      expect(circle(m.parts[ROLES[kind].point].d)?.r).toBe(9);
+      // the same k in both files: stem 15 wide and 88 tall, standing on the baseline
+      expect(capsule(m.parts[ROLES[kind].stem].d)).toEqual({ ends: [[7.5, -80.5], [7.5, -7.5]], r: 7.5 });
+    }
+    // on light: the same paths, in Design's two light-background colours
+    expect(mark("word", "light").parts.map((p) => p.d)).toEqual(w.parts.map((p) => p.d));
+    expect([...new Set(mark("word", "light").parts.map((p) => p.fill))]).toEqual(["#2F6FDE", "#0A0B0D"]);
+    expect([...new Set(mark("symbol", "light").parts.map((p) => p.fill))]).toEqual(["#2F6FDE", "#0A0B0D"]);
   });
-  it("symbol only: no wordmark, and the symbol carries the name", () => {
-    const html = renderToStaticMarkup(<Logo symbolOnly size={40} />);
-    expect(html).toContain('alt="kaibo" width="40" height="40"');
-    expect(html).not.toContain("logo-word");
+
+  it("the box hugs the letters: Design's wordmark file less its 14 units of clear space; the k out of its 120 square", () => {
+    expect(mark("word", "dark").box).toEqual([0, -88, 301.55, 88]);
+    expect(/viewBox="([^"]+)"/.exec(wordDark)?.[1]).toBe("-14 -102 329.55 116");
+    expect(mark("symbol", "dark").box).toEqual([21.57, 16, 76.86, 88]);
+    expect(mark("symbol", "dark").shift).toEqual([21.57, 104]);
   });
-  it("size: the wordmark scales with the symbol", () => {
-    expect(renderToStaticMarkup(<Logo size={52} />)).toContain('<span class="logo" style="font-size:36px">');
-    expect(css).toMatch(/\.logo \{[^}]*font-weight: 700; font-size: 18px; letter-spacing: -0\.02em;/);
+
+  it("the wordmark alone, with Design's paths as delivered: no tile beside it, no font, and it says its name", () => {
+    const html = still(<Logo />);
+    expect(html).toMatch(/^<svg class="logo logo-word" viewBox="0 -88 301.55 88" role="img" aria-label="kaibo" style="aspect-ratio:301.55 \/ 88">/);
+    expect(ds(html)).toEqual(fileDs(wordDark));
+    expect(html).not.toMatch(/<img|<text|logo-symbol|logo-moving|clip-path|animation/);
+    expect(text(html)).toBe("");
+    expect(ds(still(<Logo on="light" />))).toEqual(fileDs(wordLight));
+    expect(still(<Logo on="light" />)).toContain('fill="#2F6FDE"');
   });
+
+  it("symbolOnly draws the k with its point; size is the height of the letters", () => {
+    const html = still(<Logo symbolOnly size={40} />);
+    expect(html).toMatch(/^<svg class="logo" viewBox="21.57 16 76.86 88" role="img" aria-label="kaibo" style="aspect-ratio:76.86 \/ 88;height:40px"><g transform="translate\(21.57 104\)">/);
+    expect(ds(html)).toEqual(fileDs(symbolDark));
+    expect(still(<Logo size={18} />)).toContain("height:18px");
+  });
+
   it("the header, sign-in and New run all draw it, each once, and nothing else draws a logo", () => {
     const run = paperRun();
     const header = render(<Shell />, { route: "*", seeds: [{ key: ["runs"], data: [run] }, { key: ["overview", 1], data: emptyOverview(run) }] });
-    expect(header).toMatch(/<a class="brand" aria-label="kaibo home"[^>]*><span class="logo"><img class="logo-symbol"[^>]*alt=""[^>]*\/><span class="logo-word">kaibo<\/span><\/span><\/a>/);
+    expect(header).toMatch(/<a class="brand" aria-label="kaibo home"[^>]*><svg class="logo logo-word[^"]*" viewBox="0 -88 301.55 88" role="img" aria-label="kaibo"/);
     const signIn = render(<SignIn />);
     const start = render(<Onboarding />);
-    for (const html of [header, signIn, start]) expect(html.match(/class="logo"/g)).toHaveLength(1);
-    expect(text(signIn)).toMatch(/^kaibo PAPER Sign in/);
-    expect(text(start)).toMatch(/^kaibo PAPER 1 Amount/);
+    for (const html of [header, signIn, start]) expect(html.match(/class="logo /g)).toHaveLength(1);
+    expect(text(signIn)).toMatch(/^PAPER Sign in/);
     const sources = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-    const drawsSymbol = Object.keys(sources).filter((f) => !/\.test\.tsx$/.test(f) && /symbol\.svg|M8 18 L12\.5 12\.5/.test(sources[f]));
-    expect(drawsSymbol).toEqual(["./components/Logo.tsx"]);
+    const draws = Object.keys(sources).filter((f) => !/\.test\.tsx$/.test(f) && /brand\/logo\/|<Logo\b/.test(sources[f])).sort();
+    expect(draws).toEqual(["./components/Logo.tsx", "./components/Shell.tsx", "./pages/Onboarding.tsx", "./pages/SignIn.tsx"]);
   });
+
+  it("the size comes from the stylesheet: 26 px on phones, 28 px above, in a 64 px and a 72 px header", () => {
+    expect(css).toMatch(/\.logo \{ display: block; flex: none; height: 28px;/);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*\.logo \{ height: 26px; \}/);
+    expect(css).toMatch(/header\.top \{[^}]*min-height: 72px;/);
+    expect(css).toMatch(/header\.top \{ flex-wrap: nowrap; min-height: var\(--topbar\);/);
+    expect(tokens).toMatch(/--topbar: 64px;/);
+    expect(css).toMatch(/\.haltbar-wrap \{[^}]*top: var\(--topbar\)/);
+    expect(css).toMatch(/header\.top \.pill \{[^}]*min-height: 36px/);
+    expect(css).toMatch(/header\.top \.engine-chip::before \{[^}]*inset: 4px 0;/);
+    expect(css).toMatch(/\.brand \{[^}]*min-height: 44px/);
+  });
+});
+
+describe("the logo's motion on load", () => {
+  it("stem, leg, arm, then the point with one pulse: each stroke slides out inside its own outline", () => {
+    resetLogoMotion();
+    const html = still(<Logo animate />);
+    expect(html).toContain('class="logo logo-word logo-moving"');
+    expect(html.match(/<clipPath /g)).toHaveLength(3);
+    expect(html.match(/class="logo-draw"/g)).toHaveLength(3);
+    // the stem starts its whole height below; the leg and the arm start behind the point where they meet
+    expect(html).toContain('class="logo-draw" style="--fx:0px;--fy:88px;animation-delay:0s;animation-duration:0.2s"');
+    expect(html).toContain("--fx:-41.24px;--fy:-25.61px;animation-delay:0.12s;animation-duration:0.24s");
+    expect(html).toContain("--fx:-35.74px;--fy:38.26px;animation-delay:0.26s;animation-duration:0.3s");
+    expect(html).toMatch(/class="logo-pop" style="animation-delay:0.56s;animation-duration:0.18s"/);
+    expect(html).toMatch(/<circle class="logo-pulse" cx="150.65" cy="-76.5" r="9" fill="none" stroke="#4F95F0" stroke-width="2.5" style="animation-delay:0.66s;animation-duration:0.3s"/);
+    // the paths themselves are still Design's, and the box is the same: nothing around the logo moves
+    expect([...new Set(ds(html))].sort()).toEqual([...fileDs(wordDark)].sort());
+    expect(html).toContain('viewBox="0 -88 301.55 88"');
+    const k = still(<Logo animate symbolOnly />);
+    expect(k).toMatch(/<circle class="logo-pulse" cx="67.86" cy="-68.94" r="9"/);
+  });
+
+  it("under one second in all; position and opacity only", () => {
+    const end = Math.max(...Object.values(TIMING).map(([at, lasts]) => at + lasts));
+    expect(end).toBeGreaterThan(0.85);
+    expect(end).toBeLessThan(1);
+    for (const name of ["kb-logo-draw", "kb-logo-pop", "kb-logo-pulse"]) {
+      const body = new RegExp(`@keyframes ${name} \\{([^@]*?)\\}\\s*\\}`).exec(css)?.[1] ?? "";
+      const props = [...body.matchAll(/([a-z-]+)\s*:/g)].map((m) => m[1]);
+      expect(props.length, name).toBeGreaterThan(1);
+      expect(props.every((p) => p === "transform" || p === "opacity"), name).toBe(true);
+    }
+    expect(drawnFrom(mark("word", "dark").parts[ROLES.word.stem].d, "bottom")).toEqual([0, 88]);
+  });
+
+  it("only where asked, and with reduced motion the finished mark simply shows", () => {
+    expect(still(<Logo />)).not.toContain("logo-moving");
+    vi.stubGlobal("window", { matchMedia: (q: string) => ({ matches: q === "(prefers-reduced-motion: reduce)" }) });
+    try {
+      const html = still(<Logo animate />);
+      expect(html).not.toMatch(/logo-moving|logo-draw|logo-pop|logo-pulse|clipPath/);
+      expect(ds(html)).toEqual(fileDs(wordDark));
+    } finally { vi.unstubAllGlobals(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }); }
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
+    expect(css).toMatch(/\.logo-pulse \{[^}]*opacity: 0;/);
+  });
+});
+
+describe("the name in sentences next to the logo", () => {
   it("signed in to someone else's dashboard: the name in the sentence", () => {
     const html = renderToStaticMarkup(<MemoryRouter><NotOwner failed={false} retry={() => {}} /></MemoryRouter>);
     expect(text(html)).toBe("Not your dashboard This kaibo belongs to another account. Nothing here is visible to you. Sign out");
@@ -170,7 +268,7 @@ describe("the browser tab, the home-screen label and the manifest read the same 
     expect(html).not.toContain("%BRAND%");
   });
   it("index.html links the favicon to the logo's own file, and the icons and manifest the build serves", () => {
-    expect(indexHtml).toContain('<link rel="icon" href="/src/brand/symbol.svg" type="image/svg+xml" />');
+    expect(indexHtml).toContain('<link rel="icon" href="/src/brand/logo/favicon.svg" type="image/svg+xml" />');
     expect(indexHtml).toContain('<link rel="icon" href="/favicon.ico" sizes="32x32" />');
     expect(indexHtml).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" />');
     expect(indexHtml).toContain(`<link rel="manifest" href="/${MANIFEST_PATH}" />`);
@@ -211,13 +309,16 @@ function sizes(b: Uint8Array): number[][] {
   });
 }
 
-describe("the favicon and app icons come from the one symbol file", () => {
-  const stale = "The icons in public/ do not match src/brand/symbol.svg and icons.json: run `npm run icons` and commit the result.";
+describe("the favicon and app icons come from Design's files", () => {
+  const stale = "The icons in public/ do not match src/brand/logo/ and icons.json: run `npm run icons` and commit the result.";
 
-  it("they were drawn from today's symbol.svg and icons.json", async () => {
-    const symbol = bytes("./brand/symbol.svg"), spec = bytes("./brand/icons.json");
-    const inputs = new Uint8Array(symbol.length + 1 + spec.length);
-    inputs.set(symbol, 0); inputs[symbol.length] = 0x0a; inputs.set(spec, symbol.length + 1);
+  it("they were drawn from today's logo files and icons.json", async () => {
+    const names = [...new Set(ICONS.map((i) => i.source))].sort();
+    expect(names).toEqual(["favicon.svg", "icon-dark.svg"]);
+    const chunks = [...names.flatMap((n) => [bytes(`./brand/logo/${n}`), new Uint8Array([0x0a])]), bytes("./brand/icons.json")];
+    const inputs = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let at = 0;
+    for (const c of chunks) { inputs.set(c, at); at += c.length; }
     expect(await sha(inputs), stale).toBe(lock.inputs);
   });
 
@@ -230,13 +331,16 @@ describe("the favicon and app icons come from the one symbol file", () => {
     }
   });
 
-  it("the list covers a browser tab, an iPhone home screen and the manifest", () => {
+  it("the tab uses Design's small-size favicon; the home screen and the manifest use the dark icon", () => {
     const by = (use: string) => ICONS.filter((i) => i.use === use);
-    expect(by("favicon").map((i) => [i.file, i.sizes])).toEqual([["favicon.ico", [16, 32, 48]]]);
-    expect(by("apple").map((i) => [i.file, i.sizes])).toEqual([["apple-touch-icon.png", [180]]]);
-    expect(by("manifest").map((i) => i.sizes[0]).sort()).toEqual([192, 512, 512]);
-    // an iPhone paints transparent pixels black, so every home-screen icon has a colour behind the symbol
-    for (const i of [...by("apple"), ...by("manifest")]) expect(backgroundOf(i), i.file).toMatch(/^#[0-9A-F]{6}$/i);
+    expect(by("favicon").map((i) => [i.file, i.source, i.sizes])).toEqual([["favicon.ico", "favicon.svg", [16, 32]]]);
+    expect(by("apple").map((i) => [i.file, i.source, i.sizes])).toEqual([["apple-touch-icon.png", "icon-dark.svg", [180]]]);
+    expect(by("manifest").map((i) => [i.source, i.sizes[0], i.purpose])).toEqual([["icon-dark.svg", 192, "any"], ["icon-dark.svg", 512, "any"], ["icon-dark.svg", 512, "maskable"]]);
+    // an iPhone paints transparent pixels black and a phone may crop a maskable icon to a circle: both are filled to
+    // the edge with the dark icon's own tile colour (the generator refuses a maskable icon that leaves the safe zone)
+    const tile = /<path fill="(#[0-9A-F]{6})"/i.exec(iconDark)?.[1];
+    expect(tile).toBe("#14171C");
+    for (const i of [...by("apple"), ...by("manifest").filter((m) => m.purpose === "maskable")]) expect(backgroundOf(i), i.file).toBe(tile);
     expect(backgroundOf(by("favicon")[0])).toBeNull();
   });
 });

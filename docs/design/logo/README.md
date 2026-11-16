@@ -3,6 +3,9 @@
 Issue #255, 16 Nov 2026. Six original logo concepts for kaibo, for the stakeholder to choose from. Nothing in the app
 changes here.
 
+**Chosen: concept 1, Rising k (stakeholder, 16 Nov 2026).** The app draws it from copies of its files in
+`apps/web/src/brand/logo/`.
+
 | Read | What it is |
 |---|---|
 | [`logo_concepts.md`](logo_concepts.md) | The six concepts, the recommendation, the lookalike check, motion, colours, fonts and files |

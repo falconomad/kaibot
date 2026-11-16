@@ -1,6 +1,6 @@
 // What the build writes from the brand (#254): the name in index.html and the web app manifest. Used by vite.config.ts
 // and the tests only, so none of it ships in the app's JavaScript. The icons the manifest lists are drawn from
-// symbol.svg by `npm run icons` (scripts/gen_icons.py) to the list in icons.json.
+// Design's files in logo/ by `npm run icons` (scripts/gen_icons.py) to the list in icons.json.
 import iconSpec from "./icons.json";
 import { BRAND } from "./brand";
 
@@ -9,7 +9,7 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** index.html says %BRAND% wherever the name goes (the title and the meta tags); the build fills it in. */
 export const brandHtml = (html: string) => html.replace(/%BRAND%/g, esc(BRAND));
 
-export interface IconSpec { file: string; sizes: number[]; scale: number; background?: string | null; use: "favicon" | "apple" | "manifest"; purpose?: "any" | "maskable" }
+export interface IconSpec { file: string; source: string; sizes: number[]; scale: number; background?: string | null; use: "favicon" | "apple" | "manifest"; purpose?: "any" | "maskable" }
 export const ICONS = iconSpec.icons as IconSpec[];
 /** The colour behind the symbol in an icon: its own, or the list's (null = transparent). scripts/gen_icons.py reads it the same way. */
 export const backgroundOf = (i: IconSpec): string | null => (i.background === undefined ? iconSpec.background : i.background);
