@@ -13,6 +13,7 @@ import { Live } from "./pages/Live";
 import { Skeleton } from "./components/Skeleton";
 import { ROUTE_LOADERS as load } from "./routes";
 import { STALE } from "./lib/poll";
+import { primeGlowFromUrl } from "./lib/glow";
 
 // Lazy routes (see routes.ts). Sign-in, the shell and Home stay in the first load so the first screen is one round trip.
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
@@ -85,6 +86,9 @@ function Gate() {
     </Suspense>
   );
 }
+
+// Landing from the emailed sign-in link: the glow starts where sign-in had it (lib/glow.ts).
+primeGlowFromUrl();
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={qc}>

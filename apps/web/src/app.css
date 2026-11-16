@@ -789,3 +789,8 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .chart-draw { transform-box: fill-box; transform-origin: left; animation: kb-draw-x var(--d-draw) var(--ease) both; }
 .chart .point-pop { transform-box: fill-box; transform-origin: center; animation: kb-point-pop var(--d-point) var(--ease-pop) both; }
 .chart .point-pulse { transform-box: fill-box; transform-origin: center; opacity: 0; animation: kb-point-pulse .6s var(--ease) var(--d-point) forwards; }
+/* the live point over the stretched phone chart (PotChart): a round dot with one faint ring, centred on the line's end */
+.chart-point { display: none; position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 999px; background: var(--live);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--live) 22%, transparent); pointer-events: none; }
+.chart .chart-point.point-pop { transform-origin: center; animation: kb-point-pop var(--d-point) var(--ease-pop) both; }
+@media (max-width: 760px) { .potchart.compact .chart-point { display: block; } }

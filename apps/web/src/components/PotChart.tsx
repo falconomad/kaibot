@@ -122,6 +122,10 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
               </g>
             )}
           </svg>
+          {/* Phones stretch the compact chart to fit (preserveAspectRatio none), which would draw a circle as an oval:
+              there the live point is a dot laid over the chart at the line's end, in percent of the chart's box. */}
+          {compact && <span key={`d${pops}`} className={`chart-point${pops ? " point-pop" : ""}`} aria-hidden="true"
+            style={{ left: `${(g.x(data.length - 1) / W) * 100}%`, top: `${(g.y(last.pot) / H) * 100}%` }} />}
           {h && hover !== null && (
             <div className="tip" style={{ left: `${(g.x(hover) / W) * 100}%`, top: 0, transform: `translateX(${hover > data.length / 2 ? "-105%" : "5%"})` }}>
               <div className="muted">{day(h.session)}</div>
