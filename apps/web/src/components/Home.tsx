@@ -70,19 +70,7 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
         <p><Link to="/positions">Positions</Link></p>
       </StatusRow>,
     );
-  // Product, 16 Nov 2026: a skipped decision (the daily prices were not refreshed, or their check failed) is a fact the
-  // stakeholder sees without a tap: the rule's decision for that session did not happen.
-  for (const r of md?.rules ?? []) {
-    if (r.retired || !r.note || !/^no decision today/i.test(r.note)) continue;
-    rows.push(
-      <StatusRow key={`nd-${r.rule}`} tone="warn" title="No decision today" text={`No decision today: ${ruleName(r.rule)} skipped its decision`}>
-        <p>{noDecisionText(r.note)}</p>
-        <p className="muted">{ruleName(r.rule)} decides after a close and trades at the next close. This session's decision was skipped, so it bought and
-          sold nothing new; its stocks keep their safety stops.</p>
-        <p className="muted" style={{ fontSize: 13 }} title="engine note">{r.note}</p>
-      </StatusRow>,
-    );
-  }
+  rows.push(...noDecisionRows(md));
   if (run.kind === "replay")
     rows.push(
       <StatusRow key="replay" tone="neutral" title="Replay, not live trading" text="Replay on past data, not live trading">
@@ -112,6 +100,19 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
       </StatusRow>,
     );
   return rows.length ? <div className="status-rows">{rows}</div> : null;
+}
+
+/** Product, 16 Nov 2026: a skipped decision (the daily prices were not refreshed, or their check failed) is a fact the
+ *  stakeholder sees without a tap: the rule's decision for that session did not happen. Home and Engine. */
+export function noDecisionRows(md: ReturnType<typeof multiDayFrom>): ReactNode[] {
+  return (md?.rules ?? []).filter((r) => !r.retired && r.note && /^no decision today/i.test(r.note)).map((r) => (
+    <StatusRow key={`nd-${r.rule}`} tone="warn" title="No decision today" text={`No decision today: ${ruleName(r.rule)} skipped its decision`}>
+      <p>{noDecisionText(r.note!)}</p>
+      <p className="muted">{ruleName(r.rule)} decides after a close and trades at the next close. This session's decision was skipped, so it bought and
+        sold nothing new; its stocks keep their safety stops.</p>
+      <p className="muted" style={{ fontSize: 13 }} title="engine note">{r.note}</p>
+    </StatusRow>
+  ));
 }
 
 // ---------------------------------------------------------------- top holdings

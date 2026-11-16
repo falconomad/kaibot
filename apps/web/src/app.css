@@ -581,7 +581,6 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .meters-home .meter .row { flex-direction: column; align-items: flex-start; gap: 2px; }
 
 /* ---------- v4 PR 3: Home ---------- */
-.desk-only { display: initial; }
 @media (max-width: 760px) { .desk-only { display: none !important; } }
 .status-rows { display: flex; flex-direction: column; gap: 10px; }
 .status-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 56px; height: auto; padding: 12px 16px; border-radius: var(--r-row);
@@ -667,3 +666,34 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; width: 100%; min-height: var(--btn); margin-top: 12px; color: var(--text);
   background: var(--surface-2); text-decoration: none; }
 .sheet-body .kv { margin: 8px 0 12px; }
+
+/* ---------- v4 PR 5: accordions, Engine, Go / no-go, Report, Trade detail ---------- */
+.acc { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); }
+.acc > summary { list-style: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-height: var(--row); padding: 14px 20px; }
+.acc > summary::-webkit-details-marker { display: none; }
+.acc > summary::after { content: "›"; margin-left: auto; color: var(--text-2); font-size: 20px; line-height: 1; transition: transform var(--d-base) var(--ease); }
+.acc[open] > summary::after { transform: rotate(90deg); }
+.acc-title { font-weight: 600; font-size: var(--t-md); }
+.acc-hint { color: var(--text-2); font-size: var(--t-sm); }
+.acc-body { display: flex; flex-direction: column; gap: 16px; padding: 0 20px 20px; animation: kb-fade var(--d-base) var(--ease) both; min-width: 0; }
+.acc-body > .card, .acc-body .grid > .card { padding: 0; border: 0; background: transparent; animation: none; }
+.acc-body h2 { font-size: var(--t-md); margin: 0 0 8px; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.section-h { margin: 8px 0 0; font-size: var(--t-cap); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
+.headline { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+.headline .ok-dot { width: 12px; height: 12px; border-radius: 999px; flex: none; }
+.headline b { font-size: var(--t-lg); } .headline .muted { font-size: var(--t-sm); }
+.check-list { list-style: none; margin: 0; padding: 0; }
+.check-list li { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); font-size: var(--t-sm); }
+.check-list li:first-child { border-top: 0; }
+.check-list .st { flex: none; min-width: 64px; font-weight: 700; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .04em; }
+.check-list .st.pass { color: var(--up); } .check-list .st.fail { color: var(--down); } .check-list .st.pending, .check-list .st.unknown { color: var(--text-3); }
+.check-list .st.provisional { color: var(--accent-text); }
+.verdict { margin: 0; font-size: var(--t-lg); font-weight: 600; }
+/* Activity: the filter chips stay on one line and scroll sideways inside their row */
+.chips-scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 2px; scroll-padding: 0 16px; scroll-snap-type: x proximity; }
+.chips-scroll::-webkit-scrollbar { display: none; }
+.chips-scroll > * { flex: none; scroll-snap-align: start; }
+@media (min-width: 761px) { .chips-scroll { margin: 0; padding: 0; flex-wrap: wrap; } }
+/* v4 rule: on phones a halt is a red row on Home and Engine and a red dot on the Engine tab; the strip is desktop-only */
+@media (max-width: 760px) { .riskstrip { display: none; } }

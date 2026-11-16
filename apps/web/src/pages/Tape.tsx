@@ -12,9 +12,10 @@ import { RoomBySignal } from "../components/Room";
 import { fmtR, haltText } from "../lib/derive";
 import { roomOutcome } from "../lib/roomview";
 import { causeText, exitText, explainSignal, ruleName } from "../lib/explain";
-import { findExperiment, haltTone } from "../lib/experiment";
+import { type Experiment, findExperiment, haltTone } from "../lib/experiment";
 import { dateEt, money, px, signedMoney, timeEt } from "../lib/fmt";
-import { experimentsOf } from "../components/Experiment";
+import { ExperimentBadge, experimentsOf } from "../components/Experiment";
+import { StatusRow } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
@@ -78,19 +79,26 @@ export function Tape() {
       : filter === "room" ? it.kind === "signal" && !!it.room : false))
     .map((it) => ({ kind: "item", it, ts: it.ts }));
   const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...items].sort((a, b) => b.ts.localeCompare(a.ts));
+  const expShown = exps.find((e) => e.experiment && rows.some((r) => r.kind === "item" && findExperiment(r.it.strategy, [e]))) ?? null;
   const shadowN = all.filter((it) => it.kind === "signal" && it.mode === "shadow").length;
   let lastDay = "";
   return (
     <>
       <section aria-labelledby="act-h" className="pos-head">
         <h1 id="act-h" className="page-title">Activity</h1>
-        <p className="muted" style={{ margin: 0 }}>What Kaibot did, and what it passed on.</p>
-        <div className="chips" role="group" aria-label="Show">
+        <p className="muted desk-only" style={{ margin: 0 }}>What Kaibot did, and what it passed on.</p>
+        <div className="chips chips-scroll" role="group" aria-label="Show">
           {FILTERS.map(([k, l]) => <button key={k} type="button" className="chip-btn" aria-pressed={filter === k} onClick={() => setFilter(k)}>{l}</button>)}
           <button type="button" className="chip-btn" aria-pressed={testOnly} onClick={() => setTestOnly(!testOnly)}
             title="Rules that are only measured, never traded">Test only{shadowN ? ` · ${shadowN}` : ""}</button>
         </div>
       </section>
+      {expShown && (
+        <StatusRow tone="info" title={expShown.label} text={expShown.label}>
+          <ExperimentBadge e={expShown} limits />
+          <p className="muted" style={{ marginTop: 12 }}>Rows marked "Experiment" belong to this rule. It trades on paper only and never real money.</p>
+        </StatusRow>
+      )}
       {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="The activity" error={q.error} retry={() => q.refetch()} /> : !rows.length ? (
         <Empty>{run.kind === "replay" ? "Replays don't record activity: only live paper runs do."
           : all.length ? "Nothing of this kind in the loaded part. Choose All, or load older entries."
@@ -110,7 +118,7 @@ export function Tape() {
                 <button type="button" className={`row ${r.kind === "halt" && haltTone(r.h.kind) === "breach" ? "alert" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(r)}>
                   <span className={`row-ico ${v.icon}`} aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[v.icon]} /></svg></span>
                   <span className="row-mid"><b>{v.head}</b><span className="muted">{v.line}{r.kind === "item" ? ` · ${timeEt(r.ts)}` : ""}</span>
-                    {exp && <span className="row-tag">Experiment: failed the ten-year test</span>}</span>
+                    {exp && <span className="row-tag" aria-label={exp.label} title={exp.label}>Experiment</span>}</span>
                   {v.value && <span className={`row-end num ${v.valueTone}`}><b>{v.value}</b></span>}
                 </button>
               </li>
@@ -120,7 +128,7 @@ export function Tape() {
       )}
       {q.hasNextPage && <p><button disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>{q.isFetchingNextPage ? "Loading…" : "Older"}</button></p>}
       <Sheet open={open !== null} onClose={() => setOpen(null)} title={open ? (open.kind === "halt" ? "Halt" : rowView(open.it).head) : ""}>
-        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : <ItemSheet it={open.it} />)}
+        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : <ItemSheet it={open.it} exp={findExperiment(open.it.strategy, exps)} />)}
       </Sheet>
     </>
   );
@@ -136,11 +144,13 @@ function HaltSheet({ h }: { h: Halt }) {
   );
 }
 
-function ItemSheet({ it }: { it: TapeItem }) {
+function ItemSheet({ it, exp }: { it: TapeItem; exp: Experiment | null }) {
+  const label = exp ? <p style={{ margin: "0 0 12px" }}><ExperimentBadge e={exp} limits /></p> : null;
   if (it.kind === "fill") {
     const cost = Math.abs(it.venue_px - it.shadow_px) * it.qty + it.fees;
     return (
       <>
+        {label}
         <div className="kv">
           <span>{it.side === "buy" ? "Bought" : "Sold"}</span><span /><span className="v num">{it.qty} at {px(it.venue_px)}</span>
           <span>Shadow price</span><span /><span className="v num">{px(it.shadow_px)}</span>
@@ -159,6 +169,7 @@ function ItemSheet({ it }: { it: TapeItem }) {
   const cf = it.counterfactual ?? (!taken(it) ? it.room?.counterfactual ?? null : null);
   return (
     <>
+      {label}
       <p>{ex.outcome}</p>
       <p className="muted">{ex.saw}</p>
       <div className="kv">

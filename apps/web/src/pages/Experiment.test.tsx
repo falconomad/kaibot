@@ -66,8 +66,8 @@ describe("Engine (#210)", () => {
   it("the card, the note, and halt rows toned: ended amber, re-enable info, breach red", () => {
     const html = render(<Health />, { seeds: [{ key: ["health"], data: health(withExp, halts) }, { key: ["llm_budget"], data: budget }] });
     const t = text(html);
-    expect(t).toContain(BADGE);
-    expect(t).toContain("No decision today");
+    expect(t).toContain("Trend momentum Experiment: failed the ten-year test");
+    expect(t).toContain("No decision today: Trend momentum skipped its decision");
     expect(t).toContain("Trend momentum switched back on by you info");
     expect(t).toContain("Experiment ended: Trend momentum retired");
     expect(t).toContain("experiment ended · switched back on later");
@@ -122,7 +122,7 @@ describe("Gate page verdicts (#210 follow-up)", () => {
     const html = render(<Gate />, { ctx: ctx(withExp), seeds: [none] });
     const t = text(html);
     expect(t).toContain("Engine v3 rules: the ten-year test");
-    expect(t).toContain(`Trend momentum ${BADGE} up to 60% invested · retires if it falls 21% from its peak`);
+    expect(t).toContain(`Trend momentum ${BADGE}`);
     expect(t).toContain("12-month momentum failed the ten-year test");
     expect(t).toContain("SPY trend filter failed the ten-year test");
     expect(t).toContain("SPY noise band ten-year test: waiting for the engine run");

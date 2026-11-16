@@ -34,7 +34,7 @@ describe("Engine health page states", () => {
     expect(t).toContain("No halts recorded.");
     expect(t).toContain("Nothing logged yet.");
     expect(t).toContain("No scan yet today");
-    expect(t).toContain("not run yet");
+    expect(t).toContain("Safety net Not armed");
     expect(t).toContain("Code version running now not reported");
     expect(hasStatus(html)).toBe(false);
     expect(glitches(html)).toEqual([]);

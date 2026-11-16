@@ -1,16 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Fragment } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { RoomTranscript } from "../components/Room";
-import { onTabKeys, tabProps } from "../lib/a11y";
 import { api, type Trade, type TradeDetail } from "../lib/api";
 import { R, dateEt, money, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
 import { RULES, bindingText, checkText, exitText, ruleName } from "../lib/explain";
 import { ErrorState, RuleName } from "../components/States";
+import { Accordion } from "../components/Accordion";
 import { STALE } from "../lib/poll";
 import { Skeleton } from "../components/Skeleton";
 import { StockBadge, companyName } from "../components/StockBadge";
-import { RuleExperiment, experimentsOf } from "../components/Experiment";
+import { experimentsOf } from "../components/Experiment";
 import { useRunCtx } from "../components/Shell";
 import { type Experiment, findExperiment } from "../lib/experiment";
 
@@ -43,7 +43,7 @@ function Ladder({ t }: { t: Trade }) {
   );
 }
 
-const TABS = [["why", "Why"], ["gate", "Gate checks"], ["room", "Agent room"], ["fills", "Fills & costs"]] as const;
+const TABS = [["why", "Why: what the rule saw"], ["gate", "Gate checks"], ["room", "Agent room"], ["fills", "Fills and costs"]] as const;
 
 function NotRecorded({ what, replay }: { what: string; replay: boolean }) {
   return <p className="muted">{replay
@@ -61,11 +61,8 @@ function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp
       .map(([k, v]) => [LABELS[k], typeof v === "number" ? Number(v.toFixed(3)) : v]));
     return (
       <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
-        <span>Rule</span><span className="v"><RuleName code={t.strategy} exp={exp} limits />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 12, fontWeight: 400 }}>{RULES[t.strategy].what}</div>}</span>
-        <span>Exit</span><span className="v" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}{t.exit_ts ? ` · ${timeEt(t.exit_ts)} ET` : ""}</span>
-        <span>Risk (1R)</span><span className="v">{money(t.risk_usd)}</span>
-        <span>Result</span><span className={`v ${tone(t.pnl_usd)}`}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         {Object.entries(f).map(([k, v]) => <Fragment key={k}><span>{k}</span><span className="v">{String(v)}</span></Fragment>)}
+        {!Object.keys(f).length && !replay && <span className="muted" style={{ gridColumn: "1 / -1" }}>No rule inputs were stored for this trade.</span>}
         {replay && <span className="muted" style={{ gridColumn: "1 / -1", fontSize: 12 }}>Replay trades store prices and the exit only. Live trades also store every feature the rules used (z-score, residual, turnover, news check, quality score).</span>}
       </div>
     );
@@ -109,7 +106,6 @@ export function TradeDetailPage() {
   const beats = useRunCtx()?.overview?.heartbeat;
   const [params] = useSearchParams();
   const initial = TABS.find(([k]) => k === params.get("tab"))?.[0] ?? "why";
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>(initial);
   // A closed trade no longer changes: keep it for minutes instead of refetching on every focus.
   const q = useQuery({ queryKey: ["trade", id], queryFn: () => api.trade(Number(id)),
     staleTime: (qq) => (qq.state.data?.trade.exit_ts ? STALE.daily : STALE.default) });
@@ -117,27 +113,33 @@ export function TradeDetailPage() {
   if (q.isError) return <ErrorState what="This trade" error={q.error} retry={() => q.refetch()} />;
   if (!q.data) return <section className="card"><p style={{ marginTop: 0 }}>Trade not found. It may belong to a run you can't see.</p><Link to="/positions">All trades</Link></section>;
   const d = q.data, t = d.trade;
+  const exp = findExperiment(t.strategy, experimentsOf(beats));
   return (
     <>
-      <Link to="/" className="back">← Home</Link>
+      <Link to="/positions" className="back">← Positions</Link>
       <section className="card">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}<RuleExperiment code={t.strategy} beats={beats} /></span></span></span>
+          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}</span></span></span>
           <span className={`num ${tone(t.pnl_usd)}`} style={{ fontSize: 18 }}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         </div>
         <p className="muted num" style={{ margin: "4px 0 0" }}>
           {dateEt(t.entry_ts)} · in {timeBoth(t.entry_ts)}{t.exit_ts ? ` · out ${timeEt(t.exit_ts)} ET` : ""} · {t.qty} sh · {d.run.label ?? `run ${d.run.id}`}
         </p>
       </section>
-      <div className="grid trade-grid">
-        <section className="card"><h2>Price levels</h2><Ladder t={t} /></section>
-        <section className="card">
-          <div className="tabs" role="tablist" aria-label="Trade details" onKeyDown={onTabKeys}>
-            {TABS.map(([k, l]) => <button key={k} id={`tab-${k}`} aria-controls="trade-panel" {...tabProps(tab === k)} onClick={() => setTab(k)}>{l}</button>)}
-          </div>
-          <div role="tabpanel" id="trade-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} style={{ paddingTop: 12 }}><Tab id={tab} d={d} exp={findExperiment(t.strategy, experimentsOf(beats))} /></div>
-        </section>
-      </div>
+      <section className="card" aria-label="This trade">
+        <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
+          <span>Why it closed</span><span className="v" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}{t.exit_ts ? ` · ${timeEt(t.exit_ts)} ET` : ""}</span>
+          <span>Rule</span><span className="v"><RuleName code={t.strategy} exp={exp} limits />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 13, fontWeight: 400 }}>It {RULES[t.strategy].what}</div>}</span>
+          <span>Stop · target</span><span className="v num">{px(t.stop_px)} · {px(t.target_px)}</span>
+          <span>Risk (1R)</span><span className="v">{money(t.risk_usd)}</span>
+        </div>
+        <Ladder t={t} />
+      </section>
+      {TABS.map(([k, l]) => (
+        <Accordion key={k} id={`trade-${k}`} title={l} open={initial === k && params.has("tab")}>
+          <Tab id={k} d={d} exp={exp} />
+        </Accordion>
+      ))}
     </>
   );
 }

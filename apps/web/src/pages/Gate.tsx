@@ -11,6 +11,8 @@ import { experimentsOf } from "../components/Experiment";
 import { findExperiment, type Experiment } from "../lib/experiment";
 import { Empty, ErrorState, RuleName } from "../components/States";
 import { Skeleton } from "../components/Skeleton";
+import { Accordion } from "../components/Accordion";
+import { BAR } from "../lib/model";
 import { STALE, poll } from "../lib/poll";
 
 const STATE_TEXT = { pass: "pass", fail: "fail", unknown: "unknown", provisional: "on track (provisional)", pending: "not yet" };
@@ -30,17 +32,12 @@ function StrategyCard({ name, st, exp }: { name: string; st: GateStrategy; exp: 
       </p>
       <div className="bar-track" role="img" aria-label={`${Math.round(done * 100)}% of the required trades`}><i style={{ width: `${done * 100}%` }} /></div>
       {st.kills.length > 0 && <ul className="loss" style={{ fontSize: 13 }}>{st.kills.map((k) => <li key={k}>Kill: {k}</li>)}</ul>}
-      <table className="list" tabIndex={0} aria-label="Criteria">
-        <thead><tr><th>Criterion</th><th>Now</th><th>Bar</th><th>State</th></tr></thead>
-        <tbody>
-          {gateRows(st).map((r) => (
-            <tr key={r.key}>
-              <td>{r.label}</td><td>{r.value}</td><td>{r.limit}</td>
-              <td><span className={`gate-dot gate-${r.state}`}>{STATE_TEXT[r.state]}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <ul className="check-list" aria-label="The bar, criterion by criterion">
+        {gateRows(st).map((r) => (
+          <li key={r.key}><span className={`st ${r.state}`}>{STATE_TEXT[r.state]}</span>
+            <span><b style={{ fontWeight: 600 }}>{r.label}</b><br /><span className="muted num">now {r.value} · bar {r.limit}</span></span></li>
+        ))}
+      </ul>
       <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
         {st.excluded_older_code > 0 && <>{st.excluded_older_code} older trades on earlier code don't count. </>}
         {st.random_missing_days && st.random_missing_days.length > 0 && <>No random baseline for {st.random_missing_days.length} trading day(s), so that row stays unknown. </>}
@@ -55,12 +52,12 @@ function V3Verdicts({ exps }: { exps: Experiment[] }) {
   return (
     <section className="card" aria-labelledby="v3-h">
       <h2 id="v3-h">Engine v3 rules: the ten-year test</h2>
-      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>Each rule is tested on ten years of past prices, after costs, before it may trade on paper.
+      <p className="muted desk-only" style={{ marginTop: 0, fontSize: 13 }}>Each rule is tested on ten years of past prices, after costs, before it may trade on paper.
         A rule that fails never trades real money.</p>
       <ul className="v3-list">
         {V3_RULES.map((k) => (
-          <li key={k}><b><RuleName code={k} exp={findExperiment(k, exps)} limits /></b>
-            <div className="muted" style={{ fontSize: 13 }}>{RULES[k].what}</div></li>
+          <li key={k}><b><RuleName code={k} exp={findExperiment(k, exps)} /></b>
+            <div className="muted desk-only" style={{ fontSize: 13 }}>{RULES[k].what}</div></li>
         ))}
       </ul>
     </section>
@@ -75,44 +72,59 @@ export function Gate() {
   if (q.isPending) return <Skeleton />;
   if (q.isError) return <ErrorState what="The go / no-go review" error={q.error} retry={() => q.refetch()} />;
   const latest = q.data.latest;
+  const strategies = Object.entries(latest?.report.strategies ?? {});
+  const trades = strategies.reduce((n, [, st]) => n + st.n_trades, 0);
   return (
     <>
+      <h1 className="page-title">Go / no-go</h1>
       <section className="card" aria-labelledby="gate-h">
-        <h2 id="gate-h">Go / no-go review</h2>
-        <p style={{ marginTop: 0, fontWeight: 600 }}>{latest ? gateOverallText(latest.overall) : "No gate report yet. The engine writes one after each session closes."}</p>
-        <p className="muted" style={{ fontSize: 13 }}>
-          The bar was fixed before any forward data existed: ≥ 900 trades over ≥ 3 months, t &gt; 3 after costs, deflated Sharpe &gt; 0,
-          above the 95th percentile of 1,000 random entries, a higher Sharpe than SPY, and drawdown within the cap. The engine computes this report
-          and it can't be edited afterwards.
-        </p>
-        <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
-          <b>There is no go-live button.</b> Kaibot trades paper only. Clearing the bar opens a written discussion, never a switch.
-        </p>
+        <h2 id="gate-h" className="sr-only">The verdict</h2>
+        <p className="verdict">{latest ? gateOverallText(latest.overall) : "No gate report yet. The engine writes one after each session closes."}</p>
         {latest && (
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+          <div className="kv" style={{ marginTop: 12 }}>
+            <Progress now={trades} bar={BAR.trades} />
+          </div>
+        )}
+        <p style={{ fontSize: 14, marginBottom: 0 }}><b>There is no go-live button.</b><span className="desk-only"> Kaibot trades paper only; clearing the bar opens a written discussion.</span></p>
+      </section>
+      <V3Verdicts exps={exps} />
+      {latest && (strategies.length
+        ? strategies.map(([k, st]) => (
+          <Accordion key={k} title={<RuleName code={k} exp={findExperiment(k, exps)} />} hint={gateStatusText(st.status).label}>
+            <StrategyCard name={k} st={st} exp={findExperiment(k, exps)} />
+          </Accordion>))
+        : <section className="card"><Empty>The latest report judged no strategy: none traded on the current code yet.</Empty></section>)}
+      {q.data.history.length > 1 && (
+        <Accordion title="Verdict history" hint={`${q.data.history.length} reports`}>
+          <ul className="check-list">
+            {q.data.history.slice(0, 20).map((h) => (
+              <li key={h.id}><span className="st">{day(h.session)}</span>
+                <span>{h.overall}<br /><span className="muted">{Object.entries(h.n_trades ?? {}).map(([k, n]) => `${ruleName(k)}: ${n}`).join(" · ")}</span></span></li>
+            ))}
+          </ul>
+        </Accordion>
+      )}
+      <Accordion title="How the bar was fixed">
+        <p style={{ margin: 0, fontSize: 14 }}>The bar was fixed before any forward data existed: ≥ {BAR.trades} trades over ≥ {BAR.months} months, t &gt; {BAR.t} after costs,
+          deflated Sharpe &gt; 0, above the {BAR.randomPct}th percentile of 1,000 random entries, a higher Sharpe than SPY, and drawdown within the cap.
+          The engine computes this report and it can't be edited afterwards.</p>
+        {latest && (
+          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
             Report for {day(latest.session)} · computed {timeBoth(latest.ts)} · code {latest.fingerprint.slice(0, 8)}
             {latest.report.frozen_since && <> frozen since {dateEt(latest.report.frozen_since)}</>} · bar <code>{latest.bar_sha.slice(0, 12)}</code>
           </p>
         )}
-      </section>
-      <V3Verdicts exps={exps} />
-      {latest && (Object.keys(latest.report.strategies ?? {}).length
-        ? Object.entries(latest.report.strategies).map(([k, st]) => <StrategyCard key={k} name={k} st={st} exp={findExperiment(k, exps)} />)
-        : <section className="card"><Empty>The latest report judged no strategy: none traded on the current code yet.</Empty></section>)}
-      {q.data.history.length > 1 && (
-        <section className="card" aria-labelledby="gh-h">
-          <h2 id="gh-h">Verdict history</h2>
-          <table className="list" tabIndex={0} aria-label="Verdict history">
-            <thead><tr><th>Session</th><th>Verdict</th><th>Trades</th></tr></thead>
-            <tbody>
-              {q.data.history.slice(0, 20).map((h) => (
-                <tr key={h.id}><td>{day(h.session)}</td><td>{h.overall}</td>
-                  <td>{Object.entries(h.n_trades ?? {}).map(([k, n]) => `${ruleName(k)}: ${n}`).join(" · ")}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+      </Accordion>
+    </>
+  );
+}
+
+function Progress({ now, bar }: { now: number; bar: number }) {
+  return (
+    <>
+      <span>Trades so far</span>
+      <div className="prog" role="img" aria-label={`${now} of ${bar} trades`}><i style={{ width: `${Math.min(100, (now / bar) * 100)}%` }} /></div>
+      <span className="v num">{now.toLocaleString("en-US")} / {bar.toLocaleString("en-US")}</span>
     </>
   );
 }

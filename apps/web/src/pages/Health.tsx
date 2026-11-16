@@ -1,15 +1,21 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { Accordion } from "../components/Accordion";
+import { StatusRow, noDecisionRows } from "../components/Home";
+import { Sheet } from "../components/Sheet";
+import { engineChip, useRunCtx } from "../components/Shell";
 import { api, type Heartbeat } from "../lib/api";
 import { ageS, ageText, haltResolved, haltText, scanSummary, sessionTime } from "../lib/derive";
 import { engineVersion } from "../lib/engine";
-import { commandText } from "../lib/explain";
+import { commandText, ruleName } from "../lib/explain";
 import { Empty, ErrorState, RuleName } from "../components/States";
 import { poll } from "../lib/poll";
 import { budgetText } from "../lib/roomview";
 import { dateEt, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
-import { ExperimentCard, HaltTag, experimentsOf } from "../components/Experiment";
-import { findExperiment } from "../lib/experiment";
+import { ExperimentCard, HaltTag, engineDetail, experimentsOf } from "../components/Experiment";
+import { findExperiment, multiDayFrom } from "../lib/experiment";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -130,42 +136,90 @@ function VersionCard({ h }: { h: HealthData }) {
 
 type HealthData = Awaited<ReturnType<typeof api.health>>;
 
+/** v4 Engine (docs/design/mobile_first_v4.md, "Engine"): is it running, and is it safe. The status, a halt, four
+ *  safety checks and today first; the technical detail (version, fingerprints, LLM budget, processes, halts, the
+ *  operations log) behind one "Technical details" row. */
 export function Health() {
   const q = useQuery({ queryKey: ["health"], queryFn: api.health, ...poll(15_000) });
+  const { run, overview, risk } = useRunCtx();
   if (q.isPending) return <Skeleton />;
   if (q.isError) return <ErrorState what="Engine health" error={q.error} retry={() => q.refetch()} />;
   const h = q.data;
   const procs = h.heartbeat.filter((b) => b.process in PROC);
   const lastDead = h.deadman.runs[0];
-  const beatTs = h.heartbeat.find((b) => b.process === "engine")?.ts;
+  const engine = h.heartbeat.find((b) => b.process === "engine");
+  const watchdog = h.heartbeat.find((b) => b.process === "watchdog");
+  const beatTs = engine?.ts;
   const recovered = h.events.filter((e) => e.type === "watchdog_recovered").map((e) => e.ts);
+  const chip = engineChip({ ...(overview ?? {}), heartbeat: h.heartbeat } as never, run);
+  const d = (engine?.detail ?? {}) as Record<string, unknown>;
+  const wd = (watchdog?.detail ?? {}) as Record<string, unknown>;
+  const wdOk = !!watchdog && ageS(watchdog.ts) <= PROC.watchdog.staleS;
+  const exps = experimentsOf(h.heartbeat).filter((e) => e.experiment);
+  const md = multiDayFrom(engineDetail(h.heartbeat));
+  const scan = scanSummary(engine?.detail?.scan, engine?.detail?.entries_today ?? 0);
   return (
     <>
-      <section className="card" aria-labelledby="proc-h">
-        <h2 id="proc-h">Processes</h2>
-        <table className="list" tabIndex={0} aria-label="Processes">
-          <thead><tr><th>Process</th><th>State</th><th>Last heartbeat</th><th>Detail</th></tr></thead>
-          <tbody>{procs.length ? procs.map((b) => <Proc key={b.process} h={b} />) : <tr><td colSpan={4} className="muted">No process has reported yet.</td></tr>}</tbody>
-        </table>
-        {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 12 }}>Waiting for the engine: {h.pending_commands.map((c) => commandText(c.kind)).join(", ")}</p>}
-      </section>
+      <h1 className="page-title">Engine</h1>
+      <div className="headline">
+        <i className="ok-dot" style={{ background: chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
+        <span><b>{chip.text}</b><br /><span className="muted">{beatTs ? `Checked in ${ageText(ageS(beatTs))}` : "Has not checked in yet"}</span></span>
+      </div>
+      <div className="status-rows">
+        {risk && risk.severity !== "ok" && (
+          <StatusRow tone={risk.severity === "breach" ? "breach" : "warn"} title={risk.severity === "breach" ? "Limit or safety halt in force" : "Heads up"}
+            text={<>{risk.items[0]}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
+            <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>
+            <p className="muted">Kaibot applies its limits by itself. Open trades keep their stop at the broker.</p>
+          </StatusRow>
+        )}
+        {noDecisionRows(md)}
+      </div>
 
-      <ExperimentCard beats={h.heartbeat} />
-
-      <VersionCard h={h} />
-
-      <ScanCard beat={h.heartbeat.find((b) => b.process === "engine")} />
-
-      <div className="grid">
-        <section className="card" aria-labelledby="dm-h">
-          <h2 id="dm-h">Off-box dead-man</h2>
-          <p style={{ fontSize: 13, marginTop: 0 }}>If the engine's heartbeat is more than 3 minutes old at 15:56 ET, Supabase closes every paper position by itself,
-            even if your Mac is off.</p>
+      <h2 className="section-h">Safety checks</h2>
+      <ul className="rows">
+        <CheckRow ok={chip.live} name="Engine" line={engine ? `${String(d.state ?? "—")} · ${String(d.host ?? "").slice(0, 16) || "host unknown"}` : "never connected"}>
+          <p>{PROC.engine.what}.</p>
+          <div className="kv"><span>State</span><span /><span className="v">{String(d.state ?? "—")}</span>
+            <span>Last heartbeat</span><span /><span className="v">{beatTs ? ageText(ageS(beatTs)) : "never"}</span>
+            {typeof d.code_sha === "string" && <><span>Code version</span><span /><span className="v num">{d.code_sha}</span></>}</div>
+        </CheckRow>
+        <CheckRow ok={wdOk} name="Watchdog" line={watchdog ? `${String(wd.state ?? "watching")} · ${ageText(ageS(watchdog.ts))}` : "not reporting"}>
+          <p>A separate process: it cancels entries if the engine goes quiet and flattens at 15:55 ET.</p>
+        </CheckRow>
+        <CheckRow ok={h.deadman.armed} name="Safety net" line={h.deadman.armed ? `Armed · ${lastDead ? `last check ${timeEt(lastDead.start)} ET` : "15:56 ET"}` : "Not armed"}>
+          <p>If the engine's heartbeat is more than 3 minutes old at 15:56 ET, Supabase closes every paper position by itself, even if your Mac is off.</p>
           <div className="kv">
             <span>Armed (paper keys in Vault)</span><span /><span className={`v ${h.deadman.armed ? "gain" : "loss"}`}>{h.deadman.armed ? "yes" : "no: see docs/ops/failsafe.md"}</span>
             <span>Schedules</span><span /><span className="v">{h.deadman.jobs.filter((j) => j.active).length} active</span>
             <span>Last check</span><span /><span className="v">{lastDead ? `${dateEt(lastDead.start)} ${timeEt(lastDead.start)} ET · ${lastDead.status}` : "not run yet"}</span>
           </div>
+        </CheckRow>
+        <CheckRow ok={d.account_clean !== false} name="Paper account" line={d.account_clean === false ? "Has positions or orders Kaibot didn't place" : "Clean"}>
+          <p>{d.account_clean === false ? "The paper account holds positions or orders Kaibot didn't place. Entries stay off until it is clean."
+            : "The paper account holds only what Kaibot placed."}</p>
+        </CheckRow>
+      </ul>
+
+      <h2 className="section-h">Today</h2>
+      <ul className="rows">
+        <SheetRow head="Today's scan" line={scan.headline}><ScanCard beat={engine} /></SheetRow>
+        {exps.length > 0 && (
+          <SheetRow head={ruleName(exps[0].strategy)} line={exps[0].label}><ExperimentCard beats={h.heartbeat} /></SheetRow>
+        )}
+        <li><Link to="/gate" className="row"><span className="row-mid"><b>Go / no-go</b><span className="muted">The ten-year test and the bar for real money</span></span>
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6 L15 12 L9 18" /></svg></Link></li>
+      </ul>
+      {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 13, margin: 0 }}>Waiting for the engine: {h.pending_commands.map((c) => commandText(c.kind)).join(", ")}</p>}
+
+      <Accordion title="Technical details" hint="version, processes, LLM budget, halts, log">
+        <VersionCard h={h} />
+        <section className="card" aria-labelledby="proc-h">
+          <h2 id="proc-h">Processes</h2>
+          <table className="list" tabIndex={0} aria-label="Processes">
+            <thead><tr><th>Process</th><th>State</th><th>Last heartbeat</th><th>Detail</th></tr></thead>
+            <tbody>{procs.length ? procs.map((b) => <Proc key={b.process} h={b} />) : <tr><td colSpan={4} className="muted">No process has reported yet.</td></tr>}</tbody>
+          </table>
         </section>
         <LlmBudgetCard />
         <section className="card" aria-labelledby="halt-h">
@@ -177,22 +231,48 @@ export function Health() {
                 {x.reason && <div className="muted" style={{ fontSize: 12 }}>{x.reason}</div>}</li>))}</ul>
           ) : <Empty>No halts recorded.</Empty>}
         </section>
-      </div>
-
-      <section className="card" aria-labelledby="ev-h">
-        <h2 id="ev-h">Operations log</h2>
-        <table className="list" tabIndex={0} aria-label="Operations log">
-          <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
-          <tbody>{!h.events.length && <tr><td colSpan={3} className="muted">Nothing logged yet.</td></tr>}{h.events.map((e, i) => (
-            <tr key={i}>
-              <td className="num" title={timeBoth(e.ts)}>{dateEt(e.ts)} {timeEt(e.ts)}</td>
-              <td title={`code: ${e.type}`}>{eventText(e)}</td>
-              <td className="muted num" style={{ fontSize: 12, maxWidth: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {summary(e.payload)}</td>
-            </tr>))}</tbody>
-        </table>
-      </section>
+        <section className="card" aria-labelledby="ev-h">
+          <h2 id="ev-h">Operations log</h2>
+          <table className="list" tabIndex={0} aria-label="Operations log">
+            <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
+            <tbody>{!h.events.length && <tr><td colSpan={3} className="muted">Nothing logged yet.</td></tr>}{h.events.map((e, i) => (
+              <tr key={i}>
+                <td className="num" title={timeBoth(e.ts)}>{dateEt(e.ts)} {timeEt(e.ts)}</td>
+                <td title={`code: ${e.type}`}>{eventText(e)}</td>
+                <td className="muted num" style={{ fontSize: 12, maxWidth: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {summary(e.payload)}</td>
+              </tr>))}</tbody>
+          </table>
+        </section>
+      </Accordion>
     </>
+  );
+}
+
+/** One safety check: a dot, the name, one line; the detail opens in a sheet. */
+function CheckRow({ ok, name, line, children }: { ok: boolean; name: string; line: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li>
+      <button type="button" className="row" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <i className="ok-dot" style={{ width: 10, height: 10, borderRadius: 999, flex: "none", background: ok ? "var(--up)" : "var(--down)" }} aria-hidden="true" />
+        <span className="row-mid"><b>{name}</b><span className="muted">{line}</span></span>
+        <span className="sr-only">{ok ? "OK" : "Problem"}</span>
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title={name}>{children}</Sheet>
+    </li>
+  );
+}
+
+function SheetRow({ head, line, children }: { head: string; line: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li>
+      <button type="button" className="row" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <span className="row-mid"><b>{head}</b><span className="muted">{line}</span></span>
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title={head}>{children}</Sheet>
+    </li>
   );
 }
 
