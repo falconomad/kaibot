@@ -12,6 +12,7 @@ import { LEVELS } from "../lib/model";
 import { ExperimentSheetBody, engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
+import { CA_REASON, caNotes, onDay } from "../lib/corpactions";
 import { Tick } from "./Tick";
 import { NAME, REPO_DIR } from "../brand/brand";
 
@@ -114,14 +115,35 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
 /** Product, 16 Nov 2026: a skipped decision (the daily prices were not refreshed, or their check failed) is a fact the
  *  stakeholder sees without a tap: the rule's decision for that session did not happen. Home and Engine. */
 export function noDecisionRows(md: ReturnType<typeof multiDayFrom>): ReactNode[] {
-  return (md?.rules ?? []).filter((r) => !r.retired && r.note && /^no decision today/i.test(r.note)).map((r) => (
+  return [...caRows(md), ...(md?.rules ?? []).filter((r) => !r.retired && r.note && /^no decision today/i.test(r.note)).map((r) => (
     <StatusRow key={`nd-${r.rule}`} tone="warn" title="No decision today" text={`No decision today: ${ruleName(r.rule)} skipped its decision`}>
       <p>{noDecisionText(r.note!)}</p>
       <p className="muted">{ruleName(r.rule)} decides after a close and trades at the next close. This session's decision was skipped, so it bought and
         sold nothing new; its stocks keep their safety stops.</p>
       <p className="muted" style={{ fontSize: 13 }} title="engine note">{r.note}</p>
     </StatusRow>
-  ));
+  ))];
+}
+
+/** #266: a held stock with a split, spin-off, merger or ticker change announced, and a session the list couldn't be
+ *  read (no new buys then). Amber: something to know, not a halt. */
+function caRows(md: ReturnType<typeof multiDayFrom>): ReactNode[] {
+  const { held, unread } = caNotes(md?.raw);
+  return [
+    ...held.map((a) => (
+      <StatusRow key={`ca-${a.symbol}`} tone="warn" title={`${a.symbol}: ${a.action} coming`} text={`${a.symbol}: ${a.action} on ${onDay(a.on)}`}>
+        <p>{a.symbol}, which {NAME} holds, has a {a.action} announced for {onDay(a.on)}. The engine does not handle this yet, so check the holding before then.</p>
+        <p className="muted">{CA_REASON} It keeps the stocks it already holds, with their safety stops.</p>
+        <p className="muted" style={{ fontSize: 13 }} title="engine note">{a.line}</p>
+      </StatusRow>
+    )),
+    ...unread.slice(0, 1).map((u) => (
+      <StatusRow key="ca-unread" tone="warn" title="No new buys this session" text="No new buys this session: corporate actions couldn't be read">
+        <p>The list of announced corporate actions couldn't be read, so the multi-day rule buys nothing new this session. Sales and stops go on.</p>
+        <p className="muted" style={{ fontSize: 13 }} title="engine note">{u}</p>
+      </StatusRow>
+    )),
+  ];
 }
 
 /** Stakeholder, 16 Nov 2026: an ended run is on screen while a newer run is scheduled (or already running). One row

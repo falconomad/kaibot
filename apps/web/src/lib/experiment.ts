@@ -23,7 +23,7 @@ export interface Experiment {
 }
 
 export interface DailyRuleState { rule: string; retired: boolean; note: string | null; lastDecision: string | null; waiting: string | null }
-export interface MultiDay { bookEnded: boolean; rules: DailyRuleState[] }
+export interface MultiDay { bookEnded: boolean; rules: DailyRuleState[]; /** the block as sent, for optional fields (#266) */ raw: Record<string, unknown> }
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null);
 const str = (v: unknown, max = 300) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
@@ -62,7 +62,7 @@ export function multiDayFrom(detail: unknown): MultiDay | null {
     const r = obj(v) ?? {};
     return { rule, retired: r.retired === true, note: str(r.note), lastDecision: str(r.last_decision, 20), waiting: str(r.waiting, 200) };
   });
-  return { bookEnded: md.book === "ended", rules };
+  return { bookEnded: md.book === "ended", rules, raw: md };
 }
 
 export const findExperiment = (code: string, list: Experiment[]) => list.find((e) => e.strategy === baseRule(code)) ?? null;
