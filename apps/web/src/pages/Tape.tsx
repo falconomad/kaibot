@@ -96,7 +96,6 @@ export function Tape() {
       {expShown && (
         <StatusRow tone="info" title={ruleName(expShown.strategy)} text={expShown.label}>
           <ExperimentSheetBody e={expShown} />
-          <p className="muted" style={{ fontSize: 14 }}>Rows marked "Experiment" belong to this rule.</p>
         </StatusRow>
       )}
       {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="The activity" error={q.error} retry={() => q.refetch()} /> : !rows.length ? (

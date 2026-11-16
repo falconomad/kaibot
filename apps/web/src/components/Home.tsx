@@ -16,10 +16,12 @@ import { StockBadge } from "./StockBadge";
 type Tone = "breach" | "warn" | "info" | "neutral";
 
 /** One status row: the fact in a few words; the explanation opens in a sheet. */
-export function StatusRow({ tone, text, title, children }: { tone: Tone; text: ReactNode; title: string; children: ReactNode }) {
+export function StatusRow({ tone, text, title, children, phoneDup = false }: { tone: Tone; text: ReactNode; title: string; children: ReactNode;
+  /** v4 PR 6: the phone halt bar already says this on every page, so on phones the row is not shown a second time. */
+  phoneDup?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div role={tone === "breach" ? "alert" : tone === "warn" ? "status" : undefined}>
+    <div role={tone === "breach" ? "alert" : tone === "warn" ? "status" : undefined} className={phoneDup ? "dup-phone" : undefined}>
       <button type="button" className={`status-row ${tone}`} aria-haspopup="dialog" onClick={() => setOpen(true)}>
         {tone === "breach" && <i className="status-dot" aria-hidden="true" />}
         <span className="status-text">{text}</span>
@@ -29,6 +31,10 @@ export function StatusRow({ tone, text, title, children }: { tone: Tone; text: R
     </div>
   );
 }
+
+/** True when the phone halt bar shows every item of the risk row (all of them are red kinds). */
+export const allRed = (risk: { items: string[]; red?: string[] }) =>
+  risk.items.length > 0 && risk.items.every((t) => risk.red?.includes(t));
 
 /** The rows above the pot, in order: a halt or breach, the engine off, a broken safety check of the multi-day book,
  *  then the experiment (or the test phase when no experiment runs). Never hidden; only their explanations are. */
@@ -47,7 +53,7 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
   if (risk && risk.severity !== "ok") {
     const first = risk.items[0] ?? (risk.severity === "breach" ? "A limit or safety halt is in force" : "Heads up");
     rows.push(
-      <StatusRow key="risk" tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"}
+      <StatusRow key="risk" tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"} phoneDup={allRed(risk)}
         title={risk.severity === "breach" || risk.red?.length ? "Limit or safety halt in force" : "Heads up"}
         text={<>{first}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
         <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>
@@ -65,7 +71,7 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
     );
   if (unprotected.length || offBooks)
     rows.push(
-      <StatusRow key="book" tone="breach" title="The multi-day book needs attention"
+      <StatusRow key="book" tone="breach" title="The multi-day book needs attention" phoneDup
         text={unprotected.length ? `${unprotected.length} stock${unprotected.length === 1 ? " has" : "s have"} no safety stop` : "Kaibot's books and the broker disagree"}>
         {unprotected.length > 0 && <p>No safety stop at the broker for {unprotected.join(", ")}. Kaibot places it again.</p>}
         {offBooks && <p>Kaibot's books and the broker disagree. Buying stops until the two match again.</p>}

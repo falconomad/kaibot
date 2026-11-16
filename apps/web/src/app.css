@@ -709,20 +709,11 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
     background: var(--down-tint); border: 1px solid #5A2A2E; font-size: var(--t-sm); }
   .haltbar-in > i { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--down); }
   .haltbar-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dup-phone { display: none; }
   .haltbar-more { flex: none; font-size: var(--t-cap); font-weight: 700; color: var(--text-2); }
 }
 
-/* Run & settings */
-.run-pick { display: flex; flex-direction: column; gap: 6px; font-size: var(--t-sm); color: var(--text-2); }
-.level-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-.level-card { padding: 16px 18px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); min-width: 0; }
-.level-card.on { border-color: var(--accent); }
-.level-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: var(--t-md); }
-.row.current { background: var(--surface-2); }
-.sheet-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 8px; }
-.sheet-actions button { flex: 1 1 140px; min-height: var(--btn); }
-button.danger-fill { background: var(--down); border-color: var(--down); color: #0A0B0D; }
-a.btn { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; color: var(--text); }
-@media (max-width: 760px) { .kb-strategy { padding-bottom: 120px; } }
+/* Strategy on phones: hours and caution behind a tap; the card's own heading names the group for screen readers only */
+.kb-fold .acc-body .kb-card > .kb-h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .exp-pill { display: inline-block; white-space: normal; line-height: 1.35; font-size: var(--t-sm); padding: 4px 10px; }
 .chart-empty { display: flex; flex-direction: column; gap: 4px; justify-content: center; min-height: 140px; padding: 20px; border: 1px dashed var(--line-strong); border-radius: var(--r-row); font-size: var(--t-sm); }

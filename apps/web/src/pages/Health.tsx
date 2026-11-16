@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Accordion } from "../components/Accordion";
-import { StatusRow, noDecisionRows } from "../components/Home";
+import { StatusRow, allRed, noDecisionRows } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { engineChip, useRunCtx } from "../components/Shell";
 import { api, type Heartbeat } from "../lib/api";
@@ -167,7 +167,7 @@ export function Health() {
       </div>
       <div className="status-rows">
         {risk && risk.severity !== "ok" && (
-          <StatusRow tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"}
+          <StatusRow tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"} phoneDup={allRed(risk)}
             title={risk.severity === "breach" || risk.red?.length ? "Limit or safety halt in force" : "Heads up"}
             text={<>{risk.items[0]}{risk.items.length > 1 ? <span className="muted"> · {risk.items.length - 1} more</span> : null}</>}>
             <ul className="sheet-list">{risk.items.map((t) => <li key={t}>{t}</li>)}</ul>

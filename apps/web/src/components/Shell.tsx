@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { api, supa, type Overview, type Run } from "../lib/api";
 import { LEVELS, curve } from "../lib/model";
-import { riskStatus } from "../lib/derive";
+import { defaultRun, riskStatus, runEndedRed } from "../lib/derive";
 import { Skeleton } from "./Skeleton";
 import { ErrorState } from "./States";
 import { STALE, overviewPollMs, poll } from "../lib/poll";
@@ -152,7 +152,7 @@ export function Shell() {
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, ...poll(60_000) });
   const [picked, setPicked] = useState<number | null>(() => Number(localStorage.getItem("kb.run")) || null);
   const list = runs.data ?? [];
-  const run = list.find((r) => r.id === picked) ?? list[0];
+  const run = list.find((r) => r.id === picked) ?? defaultRun(list);
   const pickRun = (id: number) => { setPicked(id); localStorage.setItem("kb.run", String(id)); };
   // 5 s only while the engine is live in a session; slower when the market is closed or the engine is off (lib/poll.ts).
   const overview = useQuery({ queryKey: ["overview", run?.id], queryFn: () => api.overview(run!.id), enabled: !!run,
@@ -193,7 +193,7 @@ export function Shell() {
   const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
   const risk = active ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] as string[], red: [] as string[] };
   const checks = bookQ.data?.session ? bookChecks(bookQ.data) : null;
-  const red = [...risk.red,
+  const red = [...risk.red, ...(run.kind === "paper" ? runEndedRed(run) : []),
     ...(checks?.missing.length ? [`${checks.missing.length} stock${checks.missing.length === 1 ? " has" : "s have"} no safety stop (${checks.missing.join(", ")})`] : []),
     ...(checks?.reconciled && !checks.reconciled.ok ? ["Kaibot's books and the broker disagree"] : [])];
   const dot: EngineDot = risk.severity === "breach" ? "breach" : active && !chip.live ? "offline" : null;
@@ -219,7 +219,7 @@ export function Shell() {
           <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
         </Link>
       </header>
-      {red.length > 0 && pathname !== "/" && pathname !== "/health" && <PhoneHaltBar items={red} />}
+      {red.length > 0 && <PhoneHaltBar items={red} />}
       {risk.severity !== "ok" && pathname !== "/" && pathname !== "/health" && (
         <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
           <b>{risk.severity === "breach" ? "Limit or safety halt in force:" : "Heads up:"}</b> {risk.items.join(" · ")}

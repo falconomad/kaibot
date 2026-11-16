@@ -61,6 +61,25 @@ export function riskStatus(run: Run, o: Overview | undefined, dayPct: number, dd
   return { severity, items: [...new Set(items)], red: [...new Set(red)] };
 }
 
+/** The run shown when you haven't picked one: the newest, except while the newest paper run is only scheduled. Then
+ *  the last paper run that traded stays on screen (Home labels it "Last run (ended)" and shows the new run in a row)
+ *  until the new run starts (stakeholder, 16 Nov 2026). `runs` is newest first, as kb_runs returns it. */
+export function defaultRun<T extends Pick<Run, "kind" | "status" | "started_on">>(runs: T[]): T | undefined {
+  const first = runs[0];
+  if (!first || first.kind !== "paper" || first.status !== "scheduled") return first;
+  return runs.find((r) => r.kind === "paper" && r.status !== "scheduled" && !!r.started_on) ?? first;
+}
+
+/** v4 (Product, 16 Nov 2026): a run that a limit ended is a red kind on the phone bar. A run you stopped, or one
+ *  replaced by a new run, is not: nothing went wrong. The engine ends a run with status "ended" and the reason
+ *  "drawdown N% from peak" (engine/core.py), or marks it "halted". */
+export function runEndedRed(run: Pick<Run, "status" | "end_reason">): string[] {
+  const why = (run.end_reason ?? "").trim();
+  if (run.status === "halted") return [`Run ended by a limit${why ? `: ${why}` : ""}`];
+  if (run.status === "ended" && /^drawdown\b/i.test(why)) return [`Run ended: ${why}`];
+  return [];
+}
+
 export const HALT_TEXT: Record<string, string> = {
   daily_stop: "Daily stop: flattened and halted for today",
   run_drawdown: "Run drawdown cap: run ended",

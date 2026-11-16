@@ -19,18 +19,16 @@ export function Settings() {
   const live = ["scheduled", "running", "paused"].includes(run.status);
   return (
     <>
-      <h1 className="page-title">Run &amp; settings</h1>
-      {runs.length > 1 && pickRun && (
-        <label className="run-pick">Run shown
-          <select value={run.id} onChange={(e) => pickRun(Number(e.target.value))}>
-            {runs.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
-          </select>
-        </label>
-      )}
       <section className="card" aria-labelledby="run-h">
         <h2 id="run-h">This run</h2>
         <div className="kv">
-          <span>Run</span><span /><span className="v">{run.label ?? `Run ${run.id}`}</span>
+          {/* v4: the header no longer has the run picker, so it sits here, in the old "Run" line (stakeholder, 16 Nov 2026:
+              the pre-v4 Run & settings stays as it was). */}
+          <span>Run</span><span /><span className="v">{runs.length > 1 && pickRun
+            ? <select aria-label="Run shown" value={run.id} onChange={(e) => pickRun(Number(e.target.value))} style={{ maxWidth: "100%" }}>
+                {runs.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
+              </select>
+            : run.label ?? `Run ${run.id}`}</span>
           <span>Status</span><span /><span className="v">{STATUS[run.status] ?? run.status}{run.end_reason ? ` · ${run.end_reason}` : ""}</span>
           <span>Pot at start</span><span /><span className="v">{money(run.amount_usd)}</span>
           <span>Started / ended</span><span /><span className="v">{run.started_on ? day(run.started_on) : "—"} / {run.ended_on ? day(run.ended_on) : "—"}</span>
@@ -46,41 +44,45 @@ export function Settings() {
         : overviewError ? <ErrorState what="The run controls" error={overviewError} retry={retryOverview} />
         : <section className="card" aria-labelledby="ctl-h"><h2 id="ctl-h">Controls</h2><p className="skeleton" role="status">Loading…</p></section>)}
 
-      <section aria-labelledby="lv-h" className="stack">
-        <h2 id="lv-h" className="section-h">The levels</h2>
-        <ul className="level-cards">{(Object.keys(LEVELS) as Level[]).map((k) => {
-          const l = LEVELS[k];
-          return (
-            <li key={k} className={`level-card ${k === plan.current ? "on" : ""}`}>
-              <div className="level-head"><b>{l.name}</b>{k === plan.current && <span className="tag info">current</span>}</div>
-              <div className="kv">
-                <span>Risk per trade</span><span /><span className="v num">{l.risk}% ({money((run.amount_usd * l.risk) / 100)})</span>
-                <span>Daily stop</span><span /><span className="v num">−{l.stop}%</span>
-                <span>Largest position</span><span /><span className="v num">{l.pos}%</span>
-                <span>Positions at once</span><span /><span className="v num">{l.maxPositions}</span>
-                <span>Run ends at</span><span /><span className="v num">−{l.runDd}% from the peak</span>
-              </div>
-              <p className="muted" style={{ fontSize: 13, margin: "8px 0 0" }}>{l.strategies}</p>
-            </li>
-          );
-        })}</ul>
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>The engine enforces these from config/profiles.yaml; the dashboard only shows them. No level uses shorts or leverage.</p>
+      <section className="card" aria-labelledby="lv-h">
+        <h2 id="lv-h">The levels</h2>
+        <table className="list" tabIndex={0} aria-label="The levels">
+          <thead><tr><th>Level</th><th className="r">Risk per trade</th><th className="r">Daily stop</th><th className="r">Largest position</th>
+            <th className="r">Positions</th><th className="r">Run ends at</th><th>Strategies</th></tr></thead>
+          <tbody>{(Object.keys(LEVELS) as Level[]).map((k) => {
+            const l = LEVELS[k];
+            return (
+              <tr key={k} style={k === plan.current ? { background: "var(--paper)" } : undefined}>
+                <td><b>{l.name}</b>{k === plan.current && <span className="muted"> · current</span>}</td>
+                <td className="r num">{l.risk}% ({money((run.amount_usd * l.risk) / 100)})</td>
+                <td className="r num">−{l.stop}%</td><td className="r num">{l.pos}%</td><td className="r num">{l.maxPositions}</td>
+                <td className="r num">−{l.runDd}%</td><td className="muted">{l.strategies}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table>
+        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The engine enforces these from config/profiles.yaml; the dashboard only shows them. No level uses shorts,
+          leverage or overnight holds.</p>
       </section>
 
-      <section aria-labelledby="runs-h" className="stack">
+      <section className="card" aria-labelledby="runs-h">
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h2 id="runs-h" className="section-h" style={{ margin: 0 }}>All runs</h2>
+          <h2 id="runs-h" style={{ margin: 0 }}>All runs</h2>
           <span className="spacer" />
-          <Link to="/start" className="btn">New run</Link>
+          <Link to="/start"><button className="primary">New run</button></Link>
         </div>
-        <ul className="rows" aria-label="All runs">{runs.map((r) => (
-          <li key={r.id}><div className={`row ${r.id === run.id ? "current" : ""}`}>
-            <span className="row-mid"><b>{r.label ?? `Run ${r.id}`}</b>
-              <span className="muted">{r.kind} · {STATUS[r.status] ?? r.status}{["scheduled", "running", "paused"].includes(r.status) ? "" : " · read-only"}
-                {" · "}{r.started_on ? day(r.started_on) : "—"} to {r.ended_on ? day(r.ended_on) : "now"}</span></span>
-            <span className="row-end num"><b>{money(r.amount_usd)}</b>{r.id === run.id && <span className="muted">shown</span>}</span>
-          </div></li>))}</ul>
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>Starting a new run closes the current run's positions first and keeps every old run read-only.</p>
+        <p className="muted" style={{ fontSize: 13 }}>Starting a new run closes the current run's positions first and keeps every old run read-only, so its record
+          can't change. Pick a run in the Run menu above to look at it.</p>
+        <table className="list" tabIndex={0} aria-label="All runs">
+          <thead><tr><th>Run</th><th>Kind</th><th>Status</th><th className="r">Amount</th><th>From</th><th>To</th></tr></thead>
+          <tbody>{runs.map((r) => (
+            <tr key={r.id} style={r.id === run.id ? { background: "var(--paper)" } : undefined}>
+              <td><b>{r.label ?? `Run ${r.id}`}</b></td><td className="muted">{r.kind}</td>
+              <td>{STATUS[r.status] ?? r.status}{["scheduled", "running", "paused"].includes(r.status) ? "" : <span className="muted"> · read-only</span>}</td>
+              <td className="r num">{money(r.amount_usd)}</td>
+              <td className="num">{r.started_on ? day(r.started_on) : "—"}</td><td className="num">{r.ended_on ? day(r.ended_on) : "—"}</td>
+            </tr>))}</tbody>
+        </table>
       </section>
 
       <section className="card" aria-labelledby="acct-h" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>

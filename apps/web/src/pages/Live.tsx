@@ -13,7 +13,6 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { STALE, poll } from "../lib/poll";
 import { RuleExperiment } from "../components/Experiment";
-import { Sheet } from "../components/Sheet";
 import { HomeStatus, NewRunRow, TopHoldings, holdingRows } from "../components/Home";
 import { type StartState, startState } from "../lib/startstate";
 import { useBook } from "../components/useBook";
@@ -74,15 +73,14 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
       {ended ? <p>This run has {run.status}{run.end_reason ? `: ${run.end_reason}` : ""}. Start a new run from the menu.</p> : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           <button className="full-sm" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
-          <button className="danger full-sm" aria-haspopup="dialog" onClick={() => setConfirm(true)}>Flatten and stop</button>
-          <Sheet open={confirm} onClose={() => setConfirm(false)} title="Flatten and stop?">
-            <p>Sell every position at market now and end this run. This can't be undone; the run's record stays read-only.</p>
-            <div className="sheet-actions">
-              <button type="button" onClick={() => setConfirm(false)} data-autofocus>Cancel</button>
-              <button type="button" className="primary danger-fill" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>
-                {cmd.isPending ? "Sending…" : "Flatten and stop"}</button>
-            </div>
-          </Sheet>
+          {!confirm ? <button className="danger full-sm" onClick={() => setConfirm(true)}>Flatten and stop</button> : (
+            <span className="banner swap full-sm" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", background: "var(--loss-tint)", borderColor: "#5A2A2E" }}>
+              Sell every position at market now and end this run?
+              <button onClick={() => setConfirm(false)}>Cancel</button>
+              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)", color: "#0A0B0D" }} disabled={cmd.isPending}
+                onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
+            </span>
+          )}
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>Level from next session
             <select value={plan.next?.level ?? plan.current ?? "balanced"} disabled={cmd.isPending}
               onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
@@ -181,7 +179,7 @@ export function Live() {
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
-          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer ? "Last run (ended)"
+          <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer?.status === "scheduled" ? "Last run (ended)"
             : ended ? "Paper pot · run ended" : "Paper pot"}</h1>
           <div className="hero num">{money(pot)}</div>
           <div className="num home-change">
