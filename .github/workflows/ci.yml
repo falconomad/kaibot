@@ -18,8 +18,8 @@ jobs:
       # fixtures) on one worker. Same tests, same example counts; ~14 min -> see docs/ops/hygiene.md (#221)
       - name: pytest
         run: |
-          (while sleep 2; do free -m | awk '/^Mem:/{print $3}'; done) > mem.txt &
-          uv run pytest -q -n 4 --dist worksteal --durations=30; rc=$?
+          (while sleep 2; do free -m | awk '/^Mem:/{print $3}'; done) > mem.txt & sampler=$!
+          rc=0; uv run pytest -q -n 4 --dist worksteal --durations=30 || rc=$?; kill $sampler
           echo "pytest peak memory used on the runner: $(sort -n mem.txt | tail -1) MB of $(free -m | awk '/^Mem:/{print $2}') MB" | tee -a "$GITHUB_STEP_SUMMARY"
           exit $rc
   hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
