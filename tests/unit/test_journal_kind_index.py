@@ -12,6 +12,7 @@ import shutil
 import sqlite3
 import time
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -169,5 +170,37 @@ def test_a_kind_read_on_a_large_journal_is_fast(tmp_path):
         for _ in range(20):
             j.entries(kinds=("md_book_peak",))
         assert (time.perf_counter() - t) / 20 < 0.02
+    finally:
+        j.close()
+
+
+def test_a_rollback_to_the_old_code_reads_and_appends_an_indexed_journal(copies):
+    """QA-Ops (#249): after a downgrade the old code opens a journal that has the index: it appends and reads as
+    before, SQLite keeps the index current, and the new code afterwards reads the same as the old one."""
+    import kaibot.engine.journal as jm
+
+    a, b = copies
+    Journal(a).close()  # the new code added the index
+    assert "entry_kind_seq" in indexes(a)
+    real = jm.SCHEMA
+    jm.SCHEMA = OLD_SCHEMA  # the code before #244
+    try:
+        for p in (a, b):
+            j = Journal(p, now=lambda: datetime(2026, 11, 20, 15, tzinfo=UTC))  # same stamps in both files
+            try:
+                for i in range(40):
+                    j.append("md_decision" if i % 4 == 0 else "row", {"after_rollback": i})
+            finally:
+                j.close()
+    finally:
+        jm.SCHEMA = real
+    assert "entry_kind_seq" in indexes(a)  # the old schema script neither drops nor breaks it
+    assert _old_reads(a) == _old_reads(b)  # indexed and never-indexed files: same rows after the old appends
+    j = Journal(a)
+    try:
+        assert reads(j) == _old_reads(b)
+        assert j.count(("md_decision",)) == len(j.entries(kinds=("md_decision",)))
+        with pytest.raises(sqlite3.DatabaseError, match="append-only"):
+            j.db.execute("delete from entry where seq = 1")
     finally:
         j.close()
