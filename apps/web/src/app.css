@@ -2,6 +2,17 @@
    Class names are shared by every page, so restyling here restyles the whole app. */
 * { box-sizing: border-box; }
 body { font-size: 15px; line-height: 1.5; }
+/* The page background on every screen (stakeholder, 16 Nov 2026): sign-in's blue glow from the bottom left. One layer
+   fixed to the viewport (a fixed background attachment would be ignored by iOS Safari), so it never scrolls, repeats or
+   stretches with a long page, and scrolling moves the content over it without repainting it. Its size is a share of
+   the viewport, so it reads the same at 390 px and at 1440 px. Cards, sheets and rows stay opaque on top of it. */
+/* The layer is three screens wide and tall with the glow at its centre; a translate puts the centre on the place's
+   anchor (lib/glow.ts), so the light can drift without repainting. A faint noise on top keeps the fade from banding. */
+body::before { content: ""; position: fixed; z-index: -1; pointer-events: none; top: -100vh; left: -100vw; width: 300vw; height: 300vh;
+  background: var(--glow-noise), var(--glow); will-change: transform;
+  transform: translate(var(--glow-x, -50vw), var(--glow-y, 50vh)); transition: transform 600ms var(--ease); }
+body[data-glow-move="long"]::before { transition-duration: 900ms; }
+body[data-glow-move="none"]::before { transition: none; }
 a { color: var(--sea-ink); text-decoration: none; }
 a:hover { color: var(--blue-200); }
 .serif { font-family: var(--font-ai); }
@@ -50,7 +61,7 @@ main[data-nav="push"] > * { animation: kb-push 240ms var(--ease) both; }
 
 /* ---------- top bar + nav ---------- */
 header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
-  min-height: 72px; padding: 13px max(24px, env(safe-area-inset-left)); background: var(--bar-bg); backdrop-filter: blur(14px);
+  min-height: 72px; padding: 13px max(24px, env(safe-area-inset-left)); background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px); border-bottom: 1px solid var(--surface-2); }
 .brand { display: flex; align-items: center; min-height: 44px; color: var(--ink); }
 .brand:hover { color: var(--ink); }
@@ -170,8 +181,7 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
   border: 3px solid var(--surface); transition: left .6s var(--ease); }
 
 /* ---------- full-screen pages (sign in, onboarding, empty states) ---------- */
-.center { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px;
-  background: radial-gradient(110% 70% at 0% 100%, var(--sea-tint) 0%, var(--paper) 60%); }
+.center { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .center .card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 14px; padding: 28px; animation: kb-in var(--d-base) var(--ease) both; }
 .steps { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; }
 .steps span { padding: 6px 12px; border-radius: 999px; background: var(--surface); color: var(--stale); transition: color .3s var(--ease), background-color .3s var(--ease); }

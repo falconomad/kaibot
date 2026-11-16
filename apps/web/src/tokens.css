@@ -39,6 +39,8 @@
   --exp-bg: #1B1E23; --exp-line: #808692; --exp-hatch: #40454F; --exp-text: #F4F5F7;
   --s-grid: #262A31; --s-up: #10A66E; --s-down: #BC262F;
   --scrim: rgba(0, 0, 0, .6); --bar-bg: rgba(10, 11, 13, .86); --elev-sheet: 0 -12px 40px rgba(0, 0, 0, .55);
+  /* the glow, on a layer 300% of the screen (app.css): 110% by 70% of the screen, as sign-in had it */
+  --glow: radial-gradient(36.667% 23.333% at 50% 50%, var(--sea-tint) 0%, var(--paper) 60%); --glow-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 /* The light theme is defined and proven by Design, and not switched on: nothing sets data-theme="light" yet. */
 :root[data-theme="light"] {
@@ -55,6 +57,7 @@
   --exp-bg: #E4E6EA; --exp-line: #5D646F; --exp-hatch: #B2B8C1; --exp-text: #0A0B0D;
   --s-grid: #CDD1D9; --s-up: #039F68; --s-down: #A7021D;
   --scrim: rgba(10, 11, 13, .45); --bar-bg: rgba(244, 245, 247, .88); --elev-sheet: 0 -12px 40px rgba(10, 11, 13, .18);
+  --glow: radial-gradient(36.667% 23.333% at 50% 50%, var(--blue-100) 0%, var(--paper) 60%);
 }
 
 /* Outfit's figures are proportional unless asked: tabular figures everywhere, so money lines up; and its word space is

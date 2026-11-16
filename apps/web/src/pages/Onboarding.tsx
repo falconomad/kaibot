@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Logo } from "../components/Logo";
+import { useGlow } from "../lib/glow";
 import { BRAND, NAME } from "../brand/brand";
 import { api, type Level } from "../lib/api";
 import { LEVELS } from "../lib/model";
@@ -14,6 +15,7 @@ import { ruleName } from "../lib/explain";
 const STEPS = ["Amount", "Level", "Contract", "Start"];
 
 export function Onboarding() {
+  useGlow("start");
   const [step, setStep] = useState(1);
   const [amount, setAmount] = useState(5000);
   const [level, setLevel] = useState<Level>("balanced");

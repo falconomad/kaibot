@@ -10,6 +10,7 @@ import { STALE, overviewPollMs, poll } from "../lib/poll";
 import { bookChecks } from "../lib/book";
 import { Sheet } from "./Sheet";
 import { preloadRoute } from "../routes";
+import { anchorFor, useGlow } from "../lib/glow";
 import { BRAND, NAME } from "../brand/brand";
 import { Logo } from "./Logo";
 
@@ -53,6 +54,7 @@ export type EngineDot = "breach" | "offline" | null;
 
 function TabBar({ dot }: { dot: EngineDot }) {
   const { pathname } = useLocation();
+  useGlow(anchorFor(pathname));
   const moreActive = UNDER_MORE.some((p) => pathname === p || pathname.startsWith(p + "/"));
   return (
     <nav className="tabbar" aria-label="Main">

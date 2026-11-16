@@ -187,3 +187,14 @@ layout rule changes.
 `contrast_v1.md`. `gen/mock.py` and `gen/render.py` draw the proofs with Playwright from static mockups in the v4
 layout, with invented sample numbers; "before" uses the values on main today. Outfit is embedded at render time from a
 local copy (`gen/fonts.example.json`) and is not in the repository. Original work; no other brand's assets.
+
+## 8. The page glow (added 16 Nov 2026, stakeholder)
+
+Every page stands on sign-in's background: a radial glow of `--sea-tint` fading into `--paper` (110% by 70% of the
+screen), with a faint noise so the fade does not band on phones. It is one layer fixed to the screen (`body::before`
+in `apps/web/src/app.css`), so it never scrolls or repeats. Each place has its own anchor (`apps/web/src/lib/glow.ts`):
+sign-in bottom-left, Home top-right, small offsets for Positions, Activity, Engine and More. Moving between places
+drifts the light with a transform only (no repaint): 900 ms from sign-in to Home, 600 ms between tabs, the house
+easing; with reduced motion it jumps. Cards, rows and sheets stay opaque `--surface`, as the sign-in card is, so text
+on them keeps its contrast; text that stands on the glow passes AA at its brightest point. The light theme defines the
+same glow from `--blue-100` and stays off.
