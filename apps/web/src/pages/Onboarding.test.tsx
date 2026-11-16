@@ -23,7 +23,7 @@ beforeEach(() => { seed.states = []; seed.mutation = {}; });
 describe("Onboarding (new run) page states", () => {
   it("empty: the first step asks for an amount, with the default filled in", () => {
     const html = render(<Onboarding />, { path: "/start", route: "/start" });
-    expect(text(html)).toContain("How much paper money should Kaibo trade?");
+    expect(text(html)).toContain("How much paper money should kaibo trade?");
     expect(html).toContain('aria-current="step"');
     expect(hasAlert(html)).toBe(false);
     expect(glitches(html)).toEqual([]);

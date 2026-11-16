@@ -1,8 +1,9 @@
-// The app's display name and logo (#254; stakeholder, 16 Nov 2026: "on the app UI the name should be kaibo").
-// Three nets keep the earlier name from coming back where a person reads it:
-// 1. every page-render test reads what it rendered (testkit `render` throws on the earlier name);
+// The app's display name and logo (#254; stakeholder, 16 Nov 2026: "on the app UI the name should be kaibo", and
+// "dont capitalize": it is lowercase everywhere, as the first word of a sentence too).
+// Three nets keep a wrong name (the earlier one, or today's with a capital) from showing where a person reads it:
+// 1. every page-render test reads what it rendered (testkit `render` throws on a wrong name);
 // 2. the text written in the source (string literals and JSX text, never identifiers or comments) is read here, for
-//    the states no test renders: closed sheets, error branches;
+//    the states no test renders: closed sheets, error branches. No text may spell the name itself; it comes from BRAND;
 // 3. text that comes from outside apps/web (engine reasons, the shared presets file) passes through brandText.
 // Code identifiers, routes, storage keys, RPC names and env vars are not display names and are not checked.
 import { describe, expect, it, vi } from "vitest";
@@ -20,20 +21,24 @@ import { PRESETS, SPEC } from "./lib/config";
 import { applyBlockers, itemFromCheck } from "./lib/tickers";
 import indexHtml from "../index.html?raw";
 import css from "./app.css?raw";
-import { earlierName, emptyOverview, paperRun, render, text } from "./pages/testkit";
+import { ExperimentSheetBody } from "./components/Experiment";
+import { riskStatus } from "./lib/derive";
+import { roomOutcome } from "./lib/roomview";
+import { emptyOverview, paperRun, render, text, wrongName } from "./pages/testkit";
 
 vi.mock("./lib/api", () => import("./pages/testkit-api"));
 vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
 
-describe("the display name is written once", () => {
-  it("kaibo: lowercase as the wordmark, capitalised in a sentence", () => {
+describe("the display name is written once, in lowercase", () => {
+  it("kaibo: one lowercase form, for the wordmark and for a sentence", () => {
     expect(BRAND).toBe("kaibo");
-    expect(NAME).toBe("Kaibo");
+    expect(BRAND).toBe(BRAND.toLowerCase());
+    expect(NAME).toBe(BRAND);
   });
 
-  it("the source writes the name through BRAND or NAME: no string or JSX text spells the earlier one", () => {
+  it("the source never spells the name: no string or JSX text writes it, in either form or any case", () => {
     const sources = import.meta.glob("./**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-    // brand.ts is the one module that knows the earlier name (brandText) and the repo's folder (REPO_DIR).
+    // brand.ts is the one module that writes the name, knows the earlier one (brandText) and the repo's folder (REPO_DIR).
     const files = Object.keys(sources).filter((f) => !/\.test\.tsx?$/.test(f) && !/\/testkit[^/]*$/.test(f) && f !== "./brand/brand.ts");
     expect(files.length).toBeGreaterThan(40);
     const found: string[] = [];
@@ -43,55 +48,80 @@ describe("the display name is written once", () => {
         const written = ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateHead(n) || ts.isTemplateMiddle(n)
           || ts.isTemplateTail(n) || ts.isJsxText(n);
         const importPath = ts.isStringLiteral(n) && (ts.isImportDeclaration(n.parent) || ts.isExportDeclaration(n.parent));
-        if (written && !importPath && /kaibot/i.test(n.text))
+        if (written && !importPath && /kaibot?/i.test(n.text))
           found.push(`${f}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1} "${n.text.trim().slice(0, 60)}"`);
         ts.forEachChild(n, visit);
       };
       visit(sf);
     }
-    expect(found, "A string or JSX text spells the earlier name: write NAME or BRAND from src/brand/brand.ts. If it is never shown to a person "
-      + "(a storage key, a schema name), it is not a display name: leave it out of this check and say why.").toEqual([]);
+    expect(found, "A string or JSX text spells the app's name: write NAME or BRAND from src/brand/brand.ts, so it stays lowercase and in one "
+      + "place. If the text is never shown to a person (a storage key, a schema name), it is not a display name: leave it out of this check "
+      + "and say why.").toEqual([]);
   });
 
-  it("the reader of rendered pages finds the earlier name in text and in what a screen reader says, and only there", () => {
-    expect(earlierName("<p>Kaibot trades on its own.</p>")).toEqual(["Kaibot trades on its own."]);
-    expect(earlierName('<a aria-label="kaibot home" href="/"><img alt="" src="/x.svg"/></a>')).toEqual(["kaibot home"]);
-    expect(earlierName('<img alt="Kaibot" src="/x.svg"/><input placeholder="Ask kaibot"/><span title="About Kaibot">i</span>')).toHaveLength(3);
-    // not the name: a literal path, a link, a class, an env var in an engine message, and the new name itself
-    expect(earlierName(`<p>Open Terminal in the <code class="num">${REPO_DIR}</code> folder.</p>`)).toEqual([]);
-    expect(earlierName('<a class="kaibot-x" href="https://example.com/kaibot" data-app="kaibot">Docs</a>')).toEqual([]);
-    expect(earlierName("<p>re-enabled by the stakeholder (KAIBOT_REENABLE)</p>")).toEqual([]);
-    expect(earlierName(`<p>${NAME} trades on its own.</p><b>${BRAND}</b>`)).toEqual([]);
+  it("the reader of rendered pages finds the earlier name in text and in what a screen reader says", () => {
+    expect(wrongName("<p>Kaibot trades on its own.</p>")).toEqual(["Kaibot trades on its own."]);
+    expect(wrongName('<a aria-label="kaibot home" href="/"><img alt="" src="/x.svg"/></a>')).toEqual(["kaibot home"]);
+    expect(wrongName('<img alt="Kaibot" src="/x.svg"/><input placeholder="Ask kaibot"/><span title="About Kaibot">i</span>')).toHaveLength(3);
   });
 
-  it("a page that shows the earlier name fails its render test", () => {
-    expect(() => render(<p>Kaibot applies its limits by itself.</p>)).toThrow(/earlier name shows on this page: "Kaibot applies its limits/);
+  it("and today's name with a capital, wherever it stands: it is lowercase as the first word of a sentence too", () => {
+    expect(wrongName("<p>Kaibo manages each trade itself.</p>")).toEqual([expect.stringMatching(/^Kaibo manages each trade/)]);
+    expect(wrongName("<p>Buying stops. Kaibo's books and the broker disagree.</p>")).toEqual([expect.stringMatching(/^Buying stops\. Kaibo's books/)]);
+    expect(wrongName("<b>KAIBO</b>")).toEqual(["KAIBO"]);
+    expect(wrongName('<a aria-label="Kaibo home" href="/"><img alt="Kaibo" src="/x.svg"/></a>')).toEqual(["Kaibo home", "Kaibo"]);
+    // the right form next to a wrong one: only the wrong one is reported
+    expect(wrongName("<p>kaibo is the name, not Kaibo.</p>")).toEqual(["kaibo is the name, not Kaibo."]);
+    expect(wrongName("<p>kaibo manages each trade itself.</p><p>kaibo's books and the broker disagree.</p><b>kaibo</b>")).toEqual([]);
+    expect(wrongName(`<p>${NAME} trades on its own.</p><b>${BRAND}</b>`)).toEqual([]);
+  });
+
+  it("not the name: a literal path, a link, a class, an env var in an engine message", () => {
+    expect(wrongName(`<p>Open Terminal in the <code class="num">${REPO_DIR}</code> folder.</p>`)).toEqual([]);
+    expect(wrongName('<a class="kaibot-x Kaibo-y" href="https://example.com/Kaibo" data-app="kaibot">Docs</a>')).toEqual([]);
+    expect(wrongName("<p>re-enabled by the stakeholder (KAIBOT_REENABLE)</p>")).toEqual([]);
+  });
+
+  it("a page that shows the earlier name, or a capitalised one, fails its render test", () => {
+    expect(() => render(<p>Kaibot applies its limits by itself.</p>)).toThrow(/name is shown wrongly on this page: "Kaibot applies its limits/);
+    expect(() => render(<p>Kaibo applies its limits by itself.</p>)).toThrow(/name is shown wrongly on this page: "Kaibo applies its limits.*always lowercase "kaibo"/);
     expect(() => render(<p>{NAME} applies its limits by itself.</p>)).not.toThrow();
+  });
+
+  it("sentences that start with the name start lowercase", () => {
+    expect(text(renderToStaticMarkup(<ExperimentSheetBody e={{ strategy: "trend_momentum", label: "Experiment: failed the ten-year test",
+      evidence: "failed_gate_b", experiment: true, realMoney: false, level: null, capPct: null, retirePct: null }} />)))
+      .toContain("There is no trade-by-trade control: kaibo decides on its own within these limits.");
+    expect(riskStatus(paperRun(), { ...emptyOverview(paperRun()), heartbeat: [{ process: "engine", ts: new Date().toISOString(), detail: { account_clean: false } }] }, 0, 0).items)
+      .toEqual(["Paper account has positions or orders kaibo didn't place"]);
+    expect(roomOutcome("error", null).text).toBe("No trade: the room call failed, and kaibo fails closed.");
   });
 });
 
-describe("text from outside apps/web is shown with today's name", () => {
-  it("brandText: the capitalised name in a sentence, nothing else", () => {
-    expect(brandText("CRWV closed at $3.10; Kaibot only trades stocks above $5.")).toBe("CRWV closed at $3.10; Kaibo only trades stocks above $5.");
-    expect(brandText("Kaibot's books")).toBe("Kaibo's books");
+describe("text from outside apps/web is shown with the name in lowercase", () => {
+  it("brandText: the capitalised name in a sentence, the earlier one or today's; nothing else", () => {
+    expect(brandText("CRWV closed at $3.10; Kaibot only trades stocks above $5.")).toBe("CRWV closed at $3.10; kaibo only trades stocks above $5.");
+    expect(brandText("Kaibot's books")).toBe("kaibo's books");
+    expect(brandText("Kaibo default")).toBe("kaibo default");
+    expect(brandText("Kaibo needs more than $20M a day. Kaibot checks again at the open.")).toBe("kaibo needs more than $20M a day. kaibo checks again at the open.");
     // a module, a folder, a command or an env var is not the display name
-    for (const s of ["python -m kaibot.engine", "~/kaibot/scripts/run_engine.sh", "KAIBOT_REENABLE", "Kaibots", "kaibot"]) expect(brandText(s)).toBe(s);
+    for (const s of ["python -m kaibot.engine", "~/kaibot/scripts/run_engine.sh", "KAIBOT_REENABLE", "Kaibots", "kaibot", "kaibo"]) expect(brandText(s)).toBe(s);
     expect(brandText(null)).toBeNull();
     expect(brandText(undefined)).toBeUndefined();
   });
 
   it("the engine's reason for refusing a ticker", () => {
     const reason = "SPY is a reference fund Kaibot compares stocks against, so it cannot be traded.";
-    expect(itemFromCheck({ symbol: "SPY", status: "refused", reason }).reason).toBe("SPY is a reference fund Kaibo compares stocks against, so it cannot be traded.");
-    expect(itemFromCheck({ symbol: "ZZZT", status: "refused", reason: null }).reason).toBe("Kaibo's safety filters refused this ticker.");
+    expect(itemFromCheck({ symbol: "SPY", status: "refused", reason }).reason).toBe("SPY is a reference fund kaibo compares stocks against, so it cannot be traded.");
+    expect(itemFromCheck({ symbol: "ZZZT", status: "refused", reason: null }).reason).toBe("kaibo's safety filters refused this ticker.");
     expect(applyBlockers([{ symbol: "CRWV", etf: "XLK" }], [{ symbol: "CRWV", status: "refused", reason: "CRWV closed at $3.10; Kaibot only trades stocks above $5." }])[0].why)
-      .toBe("CRWV closed at $3.10; Kaibo only trades stocks above $5.");
+      .toBe("CRWV closed at $3.10; kaibo only trades stocks above $5.");
   });
 
-  it("the shared presets file (config/presets.yaml, not ours to edit): its first preset reads 'Kaibo default'", () => {
+  it("the shared presets file (config/presets.yaml, not ours to edit): its first preset reads 'kaibo default'", () => {
     expect(SPEC.presets.default.name).toBe("Kaibot default");
-    expect(PRESETS.find((p) => p.key === "default")?.name).toBe("Kaibo default");
-    for (const p of PRESETS) expect(earlierName(`<p>${p.name} ${p.blurb}</p>`)).toEqual([]);
+    expect(PRESETS.find((p) => p.key === "default")?.name).toBe("kaibo default");
+    for (const p of PRESETS) expect(wrongName(`<p>${p.name} ${p.blurb}</p>`)).toEqual([]);
   });
 });
 
@@ -125,7 +155,7 @@ describe("the logo: one component, one symbol file", () => {
   });
   it("signed in to someone else's dashboard: the name in the sentence", () => {
     const html = renderToStaticMarkup(<MemoryRouter><NotOwner failed={false} retry={() => {}} /></MemoryRouter>);
-    expect(text(html)).toBe("Not your dashboard This Kaibo belongs to another account. Nothing here is visible to you. Sign out");
+    expect(text(html)).toBe("Not your dashboard This kaibo belongs to another account. Nothing here is visible to you. Sign out");
     expect(text(renderToStaticMarkup(<NotOwner failed retry={() => {}} />))).toContain("Try again");
   });
 });

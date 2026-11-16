@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import type { RunCtx } from "../components/Shell";
 import type { Overview, Run } from "../lib/api";
+import { BRAND } from "../brand/brand";
 
 /** One cached query. No `data` and no `error` is left out of the cache, so the page sees it pending (loading). */
 export type Seed = { key: QueryKey; data?: unknown; error?: unknown; infinite?: boolean };
@@ -42,7 +43,8 @@ export function ctxFor(run: Run, over: Partial<RunCtx> = {}): RunCtx {
 }
 
 /** Render `page` at `path` (matched by `route`) inside the shell's outlet context, as the dashboard does.
- *  Every page rendered here is also read for the earlier display name (#254): a page test fails if it comes back. */
+ *  Every page rendered here is also read for the app's name (#254): a page test fails if the earlier name comes back,
+ *  or if today's name is shown with a capital. */
 export function render(page: ReactElement, opts: { seeds?: Seed[]; ctx?: RunCtx; path?: string; route?: string; children?: ReactNode } = {}) {
   const { seeds = [], ctx = ctxFor(paperRun()), path = "/", route = "/", children } = opts;
   const html = renderToStaticMarkup(
@@ -56,9 +58,10 @@ export function render(page: ReactElement, opts: { seeds?: Seed[]; ctx?: RunCtx;
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  const shown = earlierName(html);
-  if (shown.length) throw new Error(`The earlier name shows on this page: ${shown.map((x) => `"${x}"`).join(", ")}. `
-    + "Write NAME or BRAND from src/brand/brand.ts instead (brandText() for text that comes from outside apps/web).");
+  const wrong = wrongName(html);
+  if (wrong.length) throw new Error(`The app's name is shown wrongly on this page: ${wrong.map((x) => `"${x}"`).join(", ")}. `
+    + `It is always lowercase "${BRAND}", at the start of a sentence too: write NAME or BRAND from src/brand/brand.ts `
+    + "(brandText() for text that comes from outside apps/web).");
   return html;
 }
 
@@ -66,16 +69,20 @@ export function render(page: ReactElement, opts: { seeds?: Seed[]; ctx?: RunCtx;
 export const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
   .replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim();
 
-/** Where the earlier display name ("kaibot") is shown in rendered markup (#254): in the text a person reads, or in an
- *  attribute they read or hear (aria-label, alt, title, placeholder). Returns each place with a few words around it.
+/** Where the app's name is shown wrongly in rendered markup (#254). Wrong is: the earlier name ("kaibot", in any
+ *  case), or today's name with a capital ("Kaibo", "KAIBO"). It is always lowercase, as the first word of a sentence
+ *  too (stakeholder, 16 Nov 2026: "dont capitalize"). Read: the text a person reads, and the attributes they read or
+ *  hear (aria-label, alt, title, placeholder). Returns each place with a few words around it.
  *  Not counted, because nobody reads them as the app's name:
  *  - text inside <code>: a literal path or command (the repo's folder on the Mac is still `kaibot`);
  *  - links, class names, ids and data attributes;
  *  - an identifier such as KAIBOT_REENABLE in an engine message: an env var keeps its name. */
-export function earlierName(html: string): string[] {
+export function wrongName(html: string): string[] {
   const noCode = html.replace(/<code\b[^>]*>[\s\S]*?<\/code>/gi, " ");
   const heard = [...noCode.matchAll(/\s(?:aria-label|aria-description|aria-valuetext|alt|title|placeholder)="([^"]*)"/g)].map((m) => m[1]);
-  return [text(noCode), ...heard].flatMap((s) => [...s.matchAll(/.{0,24}\bkaibot\b.{0,24}/gi)].map((m) => m[0].trim()));
+  const anyCase = new RegExp(`\\b(?:kaibot|${BRAND})\\b`, "gi");
+  return [text(noCode), ...heard].flatMap((s) => [...s.matchAll(anyCase)].filter((m) => m[0] !== BRAND)
+    .map((m) => s.slice(Math.max(0, (m.index ?? 0) - 24), (m.index ?? 0) + m[0].length + 24).trim()));
 }
 
 /** A loading skeleton or placeholder announced to screen readers. */
