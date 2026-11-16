@@ -20,13 +20,13 @@ import { Sheet } from "../components/Sheet";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { NAME } from "../brand/brand";
-import { CA_REASON, type CaSkip, caSkips, onDay } from "../lib/corpactions";
+import { type CaEvent, caEvents } from "../lib/corpactions";
 
 const PAGE = 100;
 type Filter = "all" | "fills" | "skipped" | "room" | "alerts";
 const FILTERS: [Filter, string][] = [["all", "All"], ["fills", "Buys & sells"], ["skipped", "Skipped"], ["room", "Agent room"], ["alerts", "Alerts"]];
 type Signal = Extract<TapeItem, { kind: "signal" }>;
-type Row = { kind: "item"; it: TapeItem; ts: string } | { kind: "halt"; h: Halt; ts: string } | { kind: "ca"; c: CaSkip; ts: string };
+type Row = { kind: "item"; it: TapeItem; ts: string } | { kind: "halt"; h: Halt; ts: string } | { kind: "ca"; c: CaEvent; ts: string };
 const tone = (v: number | null | undefined) => (!v ? "flat" : v > 0 ? "gain" : "loss");
 
 const taken = (it: Signal) => it.mode === "live" && !!it.approved && !it.veto && (it.qty ?? 0) > 0;
@@ -76,7 +76,9 @@ export function Tape() {
   // #266: buys the multi-day rule left out because of an announced corporate action (engine events, read through
   // kb_health; none until the engine and the RPC send them). The same query as Engine's, so it is shared.
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: run.kind === "paper", retry: false, ...poll(60_000) });
-  const caRows: Row[] = caSkips(health.data?.events).filter((c) => !run.started_on || c.ts.slice(0, 10) >= run.started_on)
+  const caRows: Row[] = caEvents((health.data?.events ?? []).filter((e) => e.run_id === null || e.run_id === run.id))
+    .filter((c) => filter === "all" || (filter === "skipped" ? c.type === "multi_day_ca_skip" : filter === "alerts" ? c.tone !== "note"
+      : filter === "fills" ? c.type === "spin_off_adopted" : false))
     .map((c) => ({ kind: "ca", c, ts: c.ts }));
   const all = q.data?.pages.flat() ?? [];
   const halts: Row[] = (overview?.halts_today ?? []).map((h) => ({ kind: "halt", h, ts: h.ts }));
@@ -85,7 +87,7 @@ export function Tape() {
       : filter === "skipped" ? it.kind === "signal" && it.mode === "live" && !taken(it)
       : filter === "room" ? it.kind === "signal" && !!it.room : false))
     .map((it) => ({ kind: "item", it, ts: it.ts }));
-  const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...(filter === "all" || filter === "skipped" ? caRows : []), ...items]
+  const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...caRows, ...items]
     .sort((a, b) => b.ts.localeCompare(a.ts));
   const expShown = exps.find((e) => e.experiment && rows.some((r) => r.kind === "item" && findExperiment(r.it.strategy, [e]))) ?? null;
   const shadowN = all.filter((it) => it.kind === "signal" && it.mode === "shadow").length;
@@ -122,7 +124,7 @@ export function Tape() {
             return (
               <li key={`${r.kind}-${r.ts}-${i}`}>
                 {head && <h2 className="day-head">{d}</h2>}
-                <button type="button" className={`row ${r.kind === "halt" && haltTone(r.h.kind) === "breach" ? "alert" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(r)}>
+                <button type="button" className={`row ${(r.kind === "halt" && haltTone(r.h.kind) === "breach") || (r.kind === "ca" && r.c.tone === "alert") ? "alert" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(r)}>
                   <span className={`row-ico ${v.icon}`} aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[v.icon]} /></svg></span>
                   <span className="row-mid"><b>{v.head}</b><span className="muted">{v.line}{r.kind === "item" ? ` · ${timeEt(r.ts)}` : ""}</span>
                     {exp && <span className="row-tag" aria-label={exp.label} title={exp.label}>Experiment</span>}</span>
@@ -142,19 +144,13 @@ export function Tape() {
   );
 }
 
-/** "Skipped NVDA: split on Nov 20, 2026" */
-function caView(c: CaSkip) {
-  return { icon: "skipped", head: `Skipped ${c.symbol}: ${c.action} on ${onDay(c.on)}`,
-    line: `${c.strategy ? ruleName(c.strategy) : "Multi-day rule"} · ${timeEt(c.ts)}`, value: "", valueTone: "" };
+/** A corporate-action event as a row: its words come from lib/corpactions. */
+function caView(c: CaEvent) {
+  return { icon: c.icon, head: c.head, line: `${c.line} · ${timeEt(c.ts)}`, value: "", valueTone: "" };
 }
 
-function CaSheet({ c }: { c: CaSkip }) {
-  return (
-    <>
-      <p>{CA_REASON}</p>
-      <p className="muted">{c.symbol} has a {c.action} announced for {onDay(c.on)}, so this buy was left out. Nothing was sold because of it.</p>
-    </>
-  );
+function CaSheet({ c }: { c: CaEvent }) {
+  return <p>{c.detail}</p>;
 }
 
 function HaltSheet({ h }: { h: Halt }) {
