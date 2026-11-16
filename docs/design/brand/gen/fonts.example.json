@@ -1,0 +1,7 @@
+{
+  "_how": "Copy to fonts.json and point each key at an Outfit font file (ttf, otf or woff). Source: npm pack @fontsource/outfit (files/outfit-latin-<weight>-normal.woff). Outfit is under the SIL Open Font License 1.1.",
+  "outfit-400": "/path/to/outfit-latin-400-normal.woff",
+  "outfit-500": "/path/to/outfit-latin-500-normal.woff",
+  "outfit-600": "/path/to/outfit-latin-600-normal.woff",
+  "outfit-700": "/path/to/outfit-latin-700-normal.woff"
+}
