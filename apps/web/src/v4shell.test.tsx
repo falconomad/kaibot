@@ -44,7 +44,7 @@ describe("v4 shell", () => {
     const run = paperRun();
     const t = text(render(<More />, { ctx: { ...ctxFor(run, { runs: [run, paperRun({ id: 9, label: "Replay A" })] }),
       meters: { dayPct: -0.4, dd: 1.2, replay: false }, pickRun: () => {} } }));
-    for (const w of ["Report", "Go / no-go", "Holdings", "Strategy", "Run & settings", "New run", "Sign out", "Day vs stop", "Run drawdown", "Replay A"])
+    for (const w of ["Report", "Go / no-go", "Strategy", "Run & settings", "New run", "Sign out", "Day vs stop", "Run drawdown", "Replay A"])
       expect(t, w).toContain(w);
   });
   it("old routes redirect: /trades -> /positions (with the id), /tape -> /activity", () => {

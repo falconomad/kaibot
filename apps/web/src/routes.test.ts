@@ -12,7 +12,7 @@ describe("lazy routes (#80)", () => {
   it("imports no other page eagerly: every other page goes through a loader", () => {
     const eagerPages = [...mainSrc.matchAll(/from "\.\/pages\/(\w+)"/g)].map((m) => m[1]).sort();
     expect(eagerPages).toEqual(["Live", "SignIn"]);
-    expect(Object.keys(ROUTE_LOADERS)).toHaveLength(12);
+    expect(Object.keys(ROUTE_LOADERS)).toHaveLength(11);
     for (const path of Object.keys(ROUTE_LOADERS)) expect(mainSrc).toContain(`load["${path}"]()`);
   });
 

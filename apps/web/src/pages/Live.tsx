@@ -7,7 +7,7 @@ import { api, type CommandKind, type Level, type Overview, type Run, type Trade 
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { R, dateEt, day, money, pct, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
 import { commandText, exitText, ruleName } from "../lib/explain";
-import { ageS, ageText, evidenceVerdict, levelPlan } from "../lib/derive";
+import { ageS, ageText, etToday, evidenceVerdict, levelPlan } from "../lib/derive";
 import { StockCell } from "../components/StockBadge";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
@@ -141,10 +141,20 @@ export function Live() {
   const daily = overview.daily;
   const marked = (series.data ?? []).filter((p) => p.marked);
   const c = marked.length ? mtmCurve(run.amount_usd, series.data!, daily) : curve(run.amount_usd, daily);
+  // Product, 16 Nov 2026: the line ends at the hero figure. Today's live pot (paper, ledger from today) is the last
+  // point, marked live; the S&P 500 line holds its last close there.
+  const liveNow = run.kind === "paper" ? livePot(run, overview) : null;
+  const todayEt = etToday();
+  const tail = c.at(-1);
+  if (liveNow && overview.ledger && etToday(new Date(overview.ledger.ts)) === todayEt) {
+    const point = { session: todayEt, pot: liveNow.pot, spy: tail?.spy ?? run.amount_usd, live: true };
+    if (tail?.session === todayEt) c[c.length - 1] = { ...tail, pot: liveNow.pot, live: true };
+    else c.push(point);
+  }
   const keep = RANGES.find((r) => r[0] === range)![1];
   const shown = keep && c.length > keep ? c.slice(-keep - 1) : c;
   const s = stats(run.amount_usd, daily, trades.data.rows);
-  const live = run.kind === "paper" ? livePot(run, overview) : null;
+  const live = liveNow;
   const chip = engineChip(overview, run);
   const pot = live?.pot ?? c.at(-1)?.pot ?? run.amount_usd;
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);

@@ -77,8 +77,7 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     return row
 
 
-REACH = ["/", "/positions", "/activity", "/health", "/more", "/report", "/gate", "/holdings", "/strategy", "/settings",
-         "/start"]
+REACH = ["/", "/positions", "/activity", "/health", "/more", "/report", "/gate", "/strategy", "/settings", "/start"]
 
 
 def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:

@@ -7,7 +7,7 @@ import { ExperimentCard } from "../components/Experiment";
 import { Live } from "./Live";
 import { Tape } from "./Tape";
 import { TradeDetailPage } from "./TradeDetail";
-import { Trades } from "./Trades";
+import { Positions } from "./Positions";
 import { ctxFor, emptyOverview, glitches, paperRun, render, text } from "./testkit";
 
 vi.mock("../lib/api", () => import("./testkit-api"));
@@ -84,9 +84,12 @@ describe("Engine (#210)", () => {
 });
 
 describe("Trades, Tape, Trade detail (#210)", () => {
-  it("Trades: the badge on the rule's rows only when the engine names it", () => {
-    expect(text(render(<Trades />, { ctx: ctx(withExp), seeds: [trades(["trades", 1, 0])] }))).toContain(BADGE);
-    expect(text(render(<Trades />, { ctx: ctx(old), seeds: [trades(["trades", 1, 0])] }))).not.toContain("Experiment");
+  it("Positions: closed trades of the rule carry the experiment label in full, only when the engine names it", () => {
+    const rp = { ...run, kind: "replay" as const };
+    const c = (hb: Heartbeat[]) => ctxFor(rp, { overview: { ...emptyOverview(rp), heartbeat: hb } });
+    const seeds = [{ key: ["trades", 1, 0], data: { total: 1, rows: [trade] } }];
+    expect(text(render(<Positions />, { ctx: c(withExp), seeds }))).toContain("Experiment: failed the ten-year test");
+    expect(text(render(<Positions />, { ctx: c(old), seeds }))).not.toContain("Experiment");
   });
   it("Tape: on a fill and on a setup", () => {
     const items: TapeItem[] = [
@@ -96,7 +99,7 @@ describe("Trades, Tape, Trade detail (#210)", () => {
         reasons: [], veto: null, approved: true, qty: 1, binding: null, trade_id: null, counterfactual: null },
     ];
     const t = text(render(<Tape />, { ctx: ctx(withExp), seeds: [{ key: ["tape", 1], data: items, infinite: true }] }));
-    expect(t.split(BADGE).length - 1).toBe(1); // the fill only: the dip rule is no experiment
+    expect(t.split("Experiment: failed the ten-year test").length - 1).toBe(1); // the fill only: the dip rule is no experiment
   });
   it("Trade detail: badge in the header, cap and stop line next to the rule", () => {
     const d: TradeDetail = { trade, run, gate: null, room: null, fills: [] };

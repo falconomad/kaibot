@@ -14,7 +14,7 @@ export const LEVELS: Record<Level, { name: string; risk: number; stop: number; p
 // Go-live bar (docs/decisions): fixed in advance, shown as progress, never relaxed in the UI.
 export const BAR = { trades: 900, months: 3, t: 3, randomPct: 95 };
 
-export interface Curve { session: string; pot: number; spy: number }
+export interface Curve { session: string; pot: number; spy: number; /** today's live value, not a close */ live?: boolean }
 
 export function curve(start: number, daily: Daily[]): Curve[] {
   let pot = start, spy = start;

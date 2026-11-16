@@ -6,7 +6,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type { Overview, Run } from "../lib/api";
 import { type Book, bookChecks, holdingView } from "../lib/book";
 import { TEST_PHASE, ruleName } from "../lib/explain";
-import { experimentView, experimentsFrom, multiDayFrom, parseRetired, retiredText } from "../lib/experiment";
+import { experimentView, experimentsFrom, multiDayFrom, noDecisionText, parseRetired, retiredText } from "../lib/experiment";
 import { money, px, signedMoney } from "../lib/fmt";
 import { ExperimentCard, engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
@@ -67,9 +67,22 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
         text={unprotected.length ? `${unprotected.length} stock${unprotected.length === 1 ? " has" : "s have"} no safety stop` : "Kaibot's books and the broker disagree"}>
         {unprotected.length > 0 && <p>No safety stop at the broker for {unprotected.join(", ")}. Kaibot places it again.</p>}
         {offBooks && <p>Kaibot's books and the broker disagree. Buying stops until the two match again.</p>}
-        <p><Link to="/holdings">Holdings</Link></p>
+        <p><Link to="/positions">Positions</Link></p>
       </StatusRow>,
     );
+  // Product, 16 Nov 2026: a skipped decision (the daily prices were not refreshed, or their check failed) is a fact the
+  // stakeholder sees without a tap: the rule's decision for that session did not happen.
+  for (const r of md?.rules ?? []) {
+    if (r.retired || !r.note || !/^no decision today/i.test(r.note)) continue;
+    rows.push(
+      <StatusRow key={`nd-${r.rule}`} tone="warn" title="No decision today" text={`No decision today: ${ruleName(r.rule)} skipped its decision`}>
+        <p>{noDecisionText(r.note)}</p>
+        <p className="muted">{ruleName(r.rule)} decides after a close and trades at the next close. This session's decision was skipped, so it bought and
+          sold nothing new; its stocks keep their safety stops.</p>
+        <p className="muted" style={{ fontSize: 13 }} title="engine note">{r.note}</p>
+      </StatusRow>,
+    );
+  }
   if (run.kind === "replay")
     rows.push(
       <StatusRow key="replay" tone="neutral" title="Replay, not live trading" text="Replay on past data, not live trading">
@@ -118,7 +131,7 @@ export function holdingRows(positions: Record<string, IntradayPos>, book: Book |
   });
   for (const p of book?.positions ?? []) {
     const v = holdingView(p, book!);
-    rows.push({ key: `m-${p.rule}-${p.symbol}`, symbol: p.symbol, value: v.value, gain: v.gain, to: "/holdings", bar: null,
+    rows.push({ key: `m-${p.rule}-${p.symbol}`, symbol: p.symbol, value: v.value, gain: v.gain, to: "/positions", bar: null,
       sub: `${ruleName(p.rule)}${v.days !== null ? ` · ${v.days} d` : ""}` });
   }
   return rows.sort((a, b) => b.value - a.value);
