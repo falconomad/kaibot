@@ -14,7 +14,7 @@ jobs:
       - run: ./scripts/lock_deps.sh --check  # uv.lock and the requirements exports agree (one locked set, #122)
       - run: uv sync --locked
       - run: uv run ruff check .
-      - run: uv run pytest -q
+      - run: uv run pytest -q --durations=30  # the slowest tests, in the log of every run (#221)
   hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
     runs-on: ubuntu-latest
     steps:
