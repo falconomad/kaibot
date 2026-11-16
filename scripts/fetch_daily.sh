@@ -7,7 +7,9 @@
 #   ./scripts/fetch_daily.sh            download + check: about 7 minutes and 180 MB of transfer for today's 300
 #                                       symbols (about 17 minutes while the engine runs); 50 MB on disk
 #   ./scripts/fetch_daily.sh --status   show what is stored and exit
-#   ./scripts/fetch_daily.sh --check    only the offline checks (no keys, no network)
+#   ./scripts/fetch_daily.sh --check    only the offline checks (no keys, no network, no .env)
+# Exit code of a run or --check: 0 fine (warnings, and errors older than the engine's 600-day window, are listed
+# only), 3 a bar inside that window fails a hard integrity check, anything else the download or check stopped.
 # Alpaca allows 200 requests/min per account. This uses 120/min, or 40/min while the engine is running.
 # How to read the result and how the research harness uses the store: docs/ops/daily_bars.md
 set -euo pipefail
@@ -46,7 +48,25 @@ fi
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 mkdir -p logs data
 trap 'echo; echo "Stopped. Run again to resume."; exit 130' INT TERM
+# Under the nightly job (scripts/service_run.sh) this script's output is already appended to logs/fetch_daily.log:
+# then nothing is tee'd into it a second time (a plain tee would also truncate the job's earlier nights).
+LOG=logs/fetch_daily.log
+TO_LOG="$LOG"
+[ "$LOG" -ef /dev/stdout ] && TO_LOG=/dev/null
 awake .venv/bin/python scripts/fetch_daily.py --env "$ENV_FILE" --per-min "$PER_MIN" ${ARGS[@]+"${ARGS[@]}"} \
-  2>&1 | tee logs/fetch_daily.log
+  2>&1 | tee "$TO_LOG"
 echo "Checking (offline)…"
-.venv/bin/python scripts/fetch_daily.py --check 2>&1 | tee logs/fetch_daily_check.log
+rc=0
+.venv/bin/python scripts/fetch_daily.py --check 2>&1 | tee logs/fetch_daily_check.log || rc=$?
+# The integrity summary goes into logs/fetch_daily.log too (on a nightly run it is already there through stdout).
+SUMMARY=data/daily/check/integrity.txt
+if [ "$TO_LOG" != /dev/null ] && [ -f "$SUMMARY" ]; then
+  { echo "== integrity check $(date '+%Y-%m-%d %H:%M:%S %Z') (exit $rc)"; cat "$SUMMARY"; } >>"$LOG"
+fi
+case "$rc" in
+  0) ;;
+  3) echo "The daily store has a bar that fails a hard check inside the engine's 600-day window (see $SUMMARY and"
+     echo "docs/ops/daily_bars.md). Older findings alone do not fail this run." ;;
+  *) echo "The offline check stopped (exit $rc): see logs/fetch_daily_check.log." ;;
+esac
+exit "$rc"
