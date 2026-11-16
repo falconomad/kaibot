@@ -183,3 +183,30 @@ before earnings" variant of section 5 on the point-in-time universe and changes 
    repeats the hold-through and neighbour runs of the earlier report exactly. A row with the same label and the
    same events digest as a row of the earlier finished report of the same window was counted there, so it logs
    `n_trials` 0. The SEC variant does not replace the headline variant's earlier rows; both stay in the registry.
+
+## Amendment 6 (16 Nov 2026, backend-quant for Product, issue #266, before the first live paper buy): a live-safety exclusion
+
+Written on 16 Nov 2026, before the rule's first live decision (Tue 17 Nov) and first buys (Wed 18 Nov closing
+auction). No live result of the rule existed yet. This is a **live-safety exclusion**, not a change to the rule:
+the live path has no safe handling yet for a split, spin-off, merger or ticker change of a held stock (the written
+answer on #266). So, on the live paper path only, it does not buy into one. That means fewer eligible names: a
+deviation from section 2, stated here so that live results are read with it.
+
+1. **Exclusion.** On the live daily path (`engine/live_daily.py`, `KAIBOT_MULTIDAY=on`), no stock is bought, and no
+   holding is added to, if it has an announced forward split, reverse split, unit split, spin-off (as the parent),
+   cash, stock or stock-and-cash merger (as the company acquired), or symbol change, with its ex or effective
+   date from the fill session to 35 sessions after it (`engine/corp_guard.py`: 37 weekdays, so market holidays
+   never shorten it).
+2. **Source.** Alpaca's corporate actions (GET /v1/corporate-actions, the free market-data API), read once per
+   decision evening and symbol. If the read fails, nothing is bought that session, and the heartbeat says why.
+3. **What does not change.** The decision is the frozen rule's: its ranking, its target list and the sizing of
+   the other names are unchanged. A skipped buy leaves its cash unspent; the next-ranked name does not get the
+   slot. Held stocks are never sold because of the exclusion, and sales go out as decided. A held stock with an
+   announced action gets a heartbeat note ("<SYM>: <action> on <date> — the engine does not handle this yet,
+   check before then"). Each skip is journalled in the session's `md_send` entry (`ca_skipped`) and shown in
+   Activity as "skipped: corporate action on <date>".
+4. **Research and Gate B unchanged.** The research runner, the ten-year runs and the Gate B marks do not apply the
+   exclusion, so no trial row changes. Live-versus-research tracking (Gate C) counts a skipped buy as a known
+   deviation, not as tracking error.
+5. **End.** The exclusion is removed when #266's handling of these actions on held positions is merged with both
+   keys. Its removal is a further amendment.
