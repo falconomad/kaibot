@@ -823,11 +823,20 @@ class Engine:
             self._flatten_beat(reason, sym, len(by_sym))
             try:
                 if not self.pos.on(sym):
-                    o = self._order("close_position", lambda sym=sym: self.broker.close_position(sym), symbol=sym,
-                                    strategy=",".join(k[0] for k, _ in keys), qty=sum(q for _, q in keys),
-                                    reason=reason)
-                    if o:
-                        self._md_exit_sent(o, rid, keys, reason)
+                    # #252 follow-up: no `close_position` (it carries no client id). The symbol's open orders (its
+                    # stops) are cancelled; once none is left the sleeves' shares are sold with a client id that is
+                    # journalled first (`md_exit_intent`), so a crash after the call is matched at start-up
+                    for oo in self.broker.open_orders():
+                        if oo.get("symbol") == sym and oo.get("status") != "pending_cancel":
+                            self._order("cancel", lambda oid=oo["id"]: self.broker.cancel_order(oid),
+                                        order_id=oo["id"], symbol=sym, strategy=",".join(k[0] for k, _ in keys))
+                    left = [oo for oo in self.broker.open_orders() if oo.get("symbol") == sym]
+                    if left:
+                        failed[sym] = f"{sym}: waiting for {len(left)} cancel(s) before the sale"
+                        continue
+                    coid = f"kbfl-{clean(keys[0][0][0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
+                    self._md_exit_submit(sym, keys, coid, reason, rid)
+                    failed.pop(sym, None)
                     continue
                 for k, q in keys:
                     for oo in self.broker.open_orders():
@@ -836,14 +845,20 @@ class Engine:
                             self._order("cancel", lambda oid=oo["id"]: self.broker.cancel_order(oid),
                                         order_id=oo["id"], symbol=sym, strategy=k[0])
                     coid = f"kbfl-{clean(k[0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
-                    o = self._order("sell", lambda sym=sym, q=q, coid=coid: self.broker.submit(
-                        OrderRequest(sym, "sell", q, "market", "day", coid)), coid=coid, symbol=sym,
-                        strategy=k[0], qty=q, reason=reason)
-                    self._md_exit_sent(o, rid, [(k, q)], reason)
+                    self._md_exit_submit(sym, [(k, q)], coid, reason, rid)
                 failed.pop(sym, None)
             except Exception as e:
                 log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
                 failed[sym] = e
+
+    def _md_exit_submit(self, sym: str, keys: list, coid: str, reason: str, rid) -> None:
+        """The sale, with its intent journalled BEFORE the call (`md_exit_intent`: client id, run, keys, reason)."""
+        qty = sum(q for _, q in keys)
+        self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
+                                               "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
+        o = self._order("sell", lambda: self.broker.submit(OrderRequest(sym, "sell", qty, "market", "day", coid)),
+                        coid=coid, symbol=sym, strategy=",".join(k[0] for k, _ in keys), qty=qty, reason=reason)
+        self._md_exit_sent(o, rid, keys, reason)
 
     def _md_exit_sent(self, o: dict, rid, keys: list, reason: str) -> None:
         """#252: a multi-day flatten sale is journalled as soon as the venue has given it an id (`md_exit`), so a
@@ -855,6 +870,23 @@ class Engine:
 
     def _rebuild_md_exits(self) -> None:
         """#252: the multi-day flatten sales journalled as sent and not yet booked or dropped (start-up)."""
+        done = {b.get("order_id") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",))}
+        closed = {b.get("coid") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",)) if b.get("coid")}
+        sent = {b.get("coid") for _, _, _, b in self.journal.entries(kinds=("md_exit",))}
+        for _, _, _, b in self.journal.entries(kinds=("md_exit_intent",)):
+            if b["coid"] in sent or b["coid"] in closed:
+                continue
+            try:
+                o = self.broker.order_by_client_id(b["coid"])  # the venue has it: the crash came after the call
+            except Exception:  # unreadable now: looked up again at the next start; the reconciliation still checks
+                log.exception("flatten sale %s: lookup by client id failed", b["coid"])
+                continue
+            keys = [((k[0], k[1]), float(q)) for k, q in b.get("keys") or []]
+            if o is None:
+                self.journal.append("md_exit_done", {"coid": b["coid"], "order_id": None, "state": "never_sent"})
+                continue
+            self._md_exit_sent(o, b.get("run_id"), keys, b.get("reason"))
+            self.store.event("multi_day_exit_recovered", {"coid": b["coid"], "order_id": o["id"]}, b.get("run_id"))
         done = {b.get("order_id") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",))}
         sent = set()
         for _, _, _, b in self.journal.entries(kinds=("md_exit",)):

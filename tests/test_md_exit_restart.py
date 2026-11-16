@@ -149,10 +149,11 @@ def test_a_crash_between_the_sleeves_own_sale_and_its_entry_is_found_by_client_i
     assert a.eng._md_exits == {} and len(_fills(a)) == 1
 
 
-def test_a_crash_before_the_entry_of_a_close_position_shows_in_the_reconciliation(tmp_path, monkeypatch):
-    """close_position has no client id: if the process dies between the broker call and `md_exit`, the sale cannot
-    be rebuilt. It is not booked silently either: once it fills, the reconciliation reports B (ledger 40, venue 0)
-    and entries are blocked."""
+def test_a_crash_before_the_entry_of_a_sale_of_a_symbol_only_the_rule_holds_is_recovered(tmp_path, monkeypatch):
+    """QA-Ops's #279 test of the close_position window, turned round by #282: the sale of a symbol no intraday
+    position holds now carries a `kbfl-` client id journalled first, so a crash between the broker call and
+    `md_exit` is found at the venue at the restart and booked once when it fills (it used to show only as a
+    reconciliation difference)."""
     a = _held(tmp_path, monkeypatch)
 
     def dies(*args, **kw):
@@ -162,9 +163,69 @@ def test_a_crash_before_the_entry_of_a_close_position_shows_in_the_reconciliatio
     with contextlib.suppress(SystemExit):
         a.eng._flatten_md("book_drawdown", {}, a.eng.monotonic())
     a.restart()
-    assert a.eng._md_exits == {}
+    assert len(a.eng._md_exits) == 1
     a.ticks(a.open2, 5, 8)
-    assert _fills(a) == [] and "B" not in a.broker.pos
-    diffs = a.eng.recon.check("test").diffs
-    assert diffs and "B" in str(diffs)
-    assert a.eng.entry_block() is not None
+    (f,) = _fills(a)
+    assert f["qty"] == QTY and "B" not in a.broker.pos
+    assert a.eng.recon.check("test").diffs == []
+
+
+# ---------------------------------------------------------------- the crash window between the call and `md_exit`
+
+
+def test_an_intent_is_journalled_before_the_call_with_the_client_id(tmp_path, monkeypatch):
+    a = _held(tmp_path, monkeypatch)
+    seen = []
+    real = a.broker.submit
+
+    def submit(order):
+        seen.append([b["coid"] for *_, b in a.eng.journal.entries(kinds=("md_exit_intent",))])
+        return real(order)
+
+    a.broker.submit = submit
+    x = _flatten(a)
+    assert seen and x["coid"] in seen[-1]  # the intent was in the journal before the venue got the order
+    assert x["coid"].startswith("kbfl-")
+
+
+def test_a_crash_after_the_call_and_before_md_exit_is_matched_by_client_id(tmp_path, monkeypatch):
+    a = _held(tmp_path, monkeypatch)
+    real = a.broker.submit
+
+    def submit_then_die(order):
+        real(order)  # the venue has the order ...
+        raise SystemExit("killed")  # ... and the engine dies before it hears back
+
+    a.broker.submit = submit_then_die
+    with contextlib.suppress(SystemExit):
+        a.eng._flatten_md("book_drawdown", {}, a.eng.monotonic())
+    assert not list(a.eng.journal.entries(kinds=("md_exit",)))
+    (intent,) = [b for *_, b in a.eng.journal.entries(kinds=("md_exit_intent",))]
+    a.broker.submit = real
+    a.restart()
+    (x,) = [b for *_, b in a.eng.journal.entries(kinds=("md_exit",))]
+    assert x["coid"] == intent["coid"] and x["order_id"] in a.eng._md_exits
+    a.ticks(a.open2, 5, 8)
+    (f,) = _fills(a)
+    assert f["qty"] == QTY and f["order_id"] == x["order_id"]
+    assert (MD, "B") not in a.eng.ledger.book(a.rid).sleeves
+
+
+def test_an_intent_the_venue_never_got_is_closed_at_start_up(tmp_path, monkeypatch):
+    a = _held(tmp_path, monkeypatch)
+
+    def refused(order):
+        raise SystemExit("killed before the call reached the venue")
+
+    real = a.broker.submit
+    a.broker.submit = refused
+    with contextlib.suppress(SystemExit):
+        a.eng._flatten_md("book_drawdown", {}, a.eng.monotonic())
+    a.broker.submit = real
+    a.restart()
+    assert a.eng._md_exits == {}
+    (done,) = [b for *_, b in a.eng.journal.entries(kinds=("md_exit_done",))]
+    assert done["state"] == "never_sent"
+    a.eng._flatten_md("book_drawdown", {}, a.eng.monotonic())  # the next flatten sells it
+    a.ticks(a.open2, 5, 8)
+    assert len(_fills(a)) == 1
