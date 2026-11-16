@@ -97,10 +97,10 @@ def build(settings: Settings) -> Engine:
                   calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
                   pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
                   ex_dividends=ExDateDividends(data),  # S78: dividends accrued at the ex-date (#118)
-                  daily=daily_path())
+                  daily=daily_path(data))
 
 
-def daily_path():
+def daily_path(data=None):
     """#206: the live daily path's factory, only with KAIBOT_MULTIDAY=on and a multi-day rule enabled in
     config/profiles.yaml (`multi_day.rules`); None otherwise, and then nothing of it is imported. The daily view is
     read from the daily store under KAIBOT_DAILY_DATA (default <repo>/data, the folder holding daily/, which
@@ -120,7 +120,24 @@ def daily_path():
     root = Path(os.environ.get("KAIBOT_DAILY_DATA") or ROOT / "data")
     load = live_daily.StoreLoader(root, ROOT / "config" / "universe_history.yaml")
     log.info("multi-day daily path: ON (%s; daily store %s)", ", ".join(enabled_multi_day()), root / "daily")
-    return lambda eng: live_daily.for_engine(eng, load)
+    from kaibot.engine.corp_guard import CorporateActionGuard
+
+    # #266 (trend_momentum.md Amendment 6): no buy of a stock with an announced split, spin-off, merger or symbol
+    # change in the next 35 sessions, read from Alpaca's market-data corporate actions (free)
+    ca = None
+    if data is not None:
+        import copy
+
+        from kaibot.broker.alpaca import ORDER_DEADLINE_S, ORDER_TIMEOUT_S
+        from kaibot.engine.config import DATA_URL
+
+        # QA-Ops (#271): the read runs inside the engine's loop (the send step at 09:31), so each request is bounded
+        # like an order call (6 s an attempt, 20 s in all, retries included) and the guard stops the whole read at
+        # 25 s (a failed read: no buys). Same client, same keys in its headers, same rate budget.
+        http = copy.copy(data.http)
+        http.timeout_s, http.deadline_s = ORDER_TIMEOUT_S, ORDER_DEADLINE_S
+        ca = CorporateActionGuard(get=lambda path, params: http.call("GET", f"{DATA_URL}{path}", params))
+    return lambda eng: live_daily.for_engine(eng, load, ca=ca)
 
 
 EXIT_JOURNAL = 4

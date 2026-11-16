@@ -381,9 +381,10 @@ class LiveDaily:
                  event: Callable[[str, dict], None] = lambda kind, body: None,
                  known_order_ids: Callable[[], set[str]] = set,
                  session_close: Callable[[date], time | None] = lambda d: None,
-                 store=None, reenable: str | None = None) -> None:
+                 store=None, reenable: str | None = None, ca=None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
-        level can change between sessions, and with it the book's caps)."""
+        level can change between sessions, and with it the book's caps). `ca`: the live-safety exclusion of
+        announced corporate actions (engine/corp_guard.CorporateActionGuard; #266, Amendment 6); None: none."""
         self._rules = rules if callable(rules) else (lambda r=list(rules): r)
         if not callable(rules):
             self.rules  # noqa: B018 - a rule whose pre-registration has a stop is refused at once
@@ -408,6 +409,9 @@ class LiveDaily:
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
+        self.ca = ca
+        self._ca_unread: dict[str, tuple[str, str]] = {}  # rule -> (session, why the read failed): no buys then
+        self._ca_evening: date | None = None  # the decision evening whose held names the heartbeat notes cover
 
     # ---------------------------------------------------------------- state
     @property
@@ -700,6 +704,7 @@ class LiveDaily:
                     "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl)}
             self.journal.append("md_decision", body)
             buy = list(tl.features.get("buy") or []) if tl else []
+            self._ca_prewarm(closed, fill, set(held) | set((tl.weights if tl else {}) or {}))
             self.event("multi_day_decision", {"strategy": r.name, "session": str(closed), "fill_session": str(fill),
                                               "decides": tl is not None,
                                               "buy": buy[:10],
@@ -898,7 +903,61 @@ class LiveDaily:
                 self.event("multi_day_overnight_off", {"strategy": r.name, "session": str(session),
                                                        "not_bought": [t.symbol for t in cut][:30]})
             targets = [t for t in targets if t not in cut]
-        return self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash)
+        targets, ca = self._ca_cut(r.name, session, prev, targets, held)
+        return {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca}
+
+    def _ca_prewarm(self, evening: date, session: date, symbols) -> None:
+        """The evening's read of announced corporate actions for the held and decided names (the heartbeat's notes;
+        the send step's read uses the same cache). A failure here only means the send step reads again."""
+        if self.ca is None or not symbols:
+            return
+        try:
+            self.ca.lookup(evening, session, symbols)
+            self._ca_evening = evening
+        except Exception:  # never stops a decision
+            log.exception("corporate-actions read (evening) failed")
+
+    def _ca_cut(self, rule: str, session: date, prev: date, targets: list[Target],
+                held: Mapping[str, tuple[float, float | None]]) -> tuple[list[Target], dict]:
+        """#266, trend_momentum.md Amendment 6 (a live-safety exclusion): no buy, and no add to a holding, of a
+        stock with an announced split, reverse split, spin-off, merger or symbol change in the next 35 sessions; if
+        the read fails, no buy at all this session. Sales and kept holdings are never touched. Returns the targets
+        left and what the send entry journals (`ca_skipped`: [symbol, action, date, text]; `ca_unread`: why)."""
+        if self.ca is None:
+            return targets, {}
+        buys = [t for t in targets if t.shares > float(held.get(t.symbol, (0.0, None))[0])]
+        if not buys:
+            return targets, {}
+        found, why = self.ca.lookup(prev, session, {t.symbol for t in buys} | set(held))
+        self._ca_evening = prev if why is None else self._ca_evening
+        if why is not None:
+            self._ca_unread[rule] = (str(session), why)
+            self.event("multi_day_ca_unread", {"strategy": rule, "session": str(session), "why": why[:200],
+                                               "not_bought": [t.symbol for t in buys][:30],
+                                               "text": "no new buys this session: " + why[:160]})
+            return [t for t in targets if t not in buys], {"ca_unread": why}
+        self._ca_unread.pop(rule, None)
+        cut = [t for t in buys if t.symbol.upper() in found]
+        if not cut:
+            return targets, {}
+        out = []
+        for t in cut:
+            a = found[t.symbol.upper()]
+            out.append([t.symbol, a.action, a.on, a.skip_text()])
+            self.event("multi_day_ca_skip", {"strategy": rule, "session": str(session), "symbol": t.symbol,
+                                             "action": a.action, "on": a.on, "text": a.skip_text()})
+        return [t for t in targets if t not in cut], {"ca_skipped": out}
+
+    def _ca_notes(self, today: date | None) -> list[str]:
+        """Heartbeat lines: why nothing was bought (a failed read), and each held stock with an announced action."""
+        if self.ca is None:
+            return []
+        out = [f"{r}: no new buys this session: {w}" for r, (s, w) in sorted(self._ca_unread.items())
+               if today is None or s == str(today)]
+        if self._ca_evening is not None:
+            held = {s for r in self.rules for s in self.account.held(r.name)}
+            out += [a.note() for _, a in sorted(self.ca.known(self._ca_evening, held).items())]
+        return out
 
     def _no_decision(self, rule: str, session: date, prev: date) -> None:
         """No decision for this session: say why, plainly (heartbeat `multi_day.note`, event)."""
@@ -955,6 +1014,10 @@ class LiveDaily:
         out: dict = {"book": "ended" if ended else "open", "rules": rules}
         if any(v.get("retired") for v in rules.values()):
             out["retired"] = sorted(k for k, v in rules.items() if v.get("retired"))
+        ca_notes = self._ca_notes(today)
+        if ca_notes:
+            out["corporate_actions"] = ca_notes
+            notes = ca_notes + notes
         if ended and not any(v.get("retired") for v in rules.values()):
             notes.insert(0, "multi-day book closed: its run-drawdown end was reached (no new multi-day trades)")
         if notes:
@@ -1058,7 +1121,7 @@ def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Call
 
 
 def for_engine(engine, load: Callable[[date, datetime], DailyData],
-               rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None) -> LiveDaily:
+               rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None) -> LiveDaily:
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
@@ -1084,7 +1147,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
-                     store=engine.store, reenable=os.environ.get(REENABLE_FLAG))
+                     store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca)
 
 
 def calendar_close(cal: dict | None) -> time | None:
