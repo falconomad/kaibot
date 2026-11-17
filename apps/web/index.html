@@ -18,10 +18,12 @@
     <link rel="preload" href="/fonts/outfit-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/outfit-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/outfit-latin-700-normal.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- Inter is only the fallback behind Outfit and its measured Arial (tokens.css), so its stylesheet from another host must
+         not hold up the first paint (#297): it is fetched as a print sheet, which never blocks, and applies once loaded. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
     <meta name="theme-color" content="#0A0B0D" />
+    <!-- The hosts the first screen talks to next: the data API (the build fills the address in from the env) and the logos. -->
+    <link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />
     <link rel="preconnect" href="https://static2.finnhub.io" />
   </head>
   <body>
