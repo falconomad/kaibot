@@ -129,12 +129,16 @@ def load_store(data: Path, universe_file: Path, mode: str, start: str, end: str,
     # Amendment 4's 40% sector cap: a stock's sector is the one the universe file lists it under; a stock it does
     # not list (point-in-time: a former member, whose store key is not a universe ticker) is its own sector
     sectors = mc.universe_sectors(cfg)
+    # #266 (amendment 6 of both momentum pre-registrations, a data correction): spin-offs are value kept in the
+    # signals and credited at their ex-date in research; the records are the store's table, as of this view
+    spins = mc.spin_off_records(store.actions())
     m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors,
-                             exclude=exclude)
+                             exclude=exclude, spin_offs=spins)
     m.notes["sectors"] = {"from_universe_file": sum(s in sectors for s in names),
                           "own_sector": sum(s not in sectors for s in names)}
-    return m, {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs "
-                       "and share counts raw; dividends credited", "stocks": len(names), "excluded_split_basis": bad,
+    return m, {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends, spin-offs "
+                       "as value kept; orders, costs and share counts raw; dividends and spin-off value credited",
+               "stocks": len(names), "excluded_split_basis": bad,
                "sectors": m.notes["sectors"]}
 
 

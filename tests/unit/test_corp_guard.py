@@ -133,3 +133,22 @@ def test_a_slow_read_stops_at_its_deadline_and_counts_as_failed():
     g = cg.CorporateActionGuard(get=slow, clock=lambda: t[0])
     got, why = g.lookup(date(2026, 11, 17), date(2026, 11, 18), ["AAA"])
     assert got == {} and "longer than 25 s" in why and t[0] <= 40.0
+
+
+def test_the_engines_corporate_action_reads_are_bounded_like_an_order_call():
+    """QA-Ops (#275): the guard's and the session start's reads (RecentActions) run in the engine's loop. Both get
+    the market-data client with the order calls' bounds (6 s an attempt, 20 s in all), never the plain one (30 s an
+    attempt, no deadline); the plain client itself is left as it is."""
+    from kaibot.broker.alpaca import ORDER_DEADLINE_S, ORDER_TIMEOUT_S
+    from kaibot.engine import __main__ as entry
+    from kaibot.engine.alpaca import AlpacaData
+
+    data = AlpacaData("k", "s")
+    seen = []
+    get = entry.bounded_data_get(data)
+    http = next(c.cell_contents for c in get.__closure__ if hasattr(c.cell_contents, "deadline_s"))
+    assert (http.timeout_s, http.deadline_s) == (ORDER_TIMEOUT_S, ORDER_DEADLINE_S)
+    assert data.http.deadline_s is None and data.http.timeout_s == 30.0  # the plain client is unchanged
+    http.call = lambda method, url, params=None, body=None: seen.append((method, url)) or {"corporate_actions": {}}
+    assert get("/v1/corporate-actions", {}) == {"corporate_actions": {}} and seen[0][0] == "GET"
+    assert seen[0][1].startswith("https://data.alpaca.markets/")

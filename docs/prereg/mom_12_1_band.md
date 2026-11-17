@@ -179,3 +179,45 @@ before earnings" variant of section 5 on the point-in-time universe and changes 
    repeats the hold-through and neighbour runs of the earlier report exactly. A row with the same label and the
    same events digest as a row of the earlier finished report of the same window was counted there, so it logs
    `n_trials` 0. The SEC variant does not replace the headline variant's earlier rows; both stay in the registry.
+
+## Amendment 6 (16 Nov 2026, backend-quant, issue #266, before any rerun on corrected data): spin-offs in the inputs, a data correction
+
+Written before any run with the change; no result with spin-off-adjusted inputs had been seen, on real or synthetic
+history. It corrects the rule's **inputs**, not the rule. Section 2 says "split-adjusted, no dividends". A spin-off
+is neither a split nor a dividend, so the inputs read it as a one-day fall of the parent (#262: CTVA about -85% on
+2026-10-01, DD -58%, BDX -21%, and others, inside the 12-1 window). No published version of the rule meant that.
+
+1. **Signals.** A spin-off is value kept. Every split-adjusted price of the parent before its ex-date is
+   multiplied by P / (P + V). P is the parent's close on the ex-date, per share held before; V is the spun value per
+   parent share. The record is the daily store's corporate-actions table (type `spin_off`, Alpaca's row). V is
+   taken, in this order, from: the record's ratio times the new company's first close (when the store has it);
+   else Alpaca's own close factor that day, net of the table's split and dividend; else the ex-day fall itself.
+   Point in time: only rows before the ex-date move, and V reads nothing after the ex-date close. Disputed keys
+   (section 2's split dispute windows) are left alone. Code: `replay/multiday_core.spin_off_factors`, through
+   `Market.from_panel`. It is the one core for research and live (decision 15).
+2. **Research P&L.** V is credited as cash at the ex-date, as a dividend is, to a position held over it. On the
+   live paper path, the spun shares Alpaca credits are adopted at Alpaca's cost basis and sold at the next closing
+   auction (#266), so both pay the same value up to one session's move of the new shares.
+3. **Dividends unchanged.** Cash dividends are still not in the signals. Nothing else in sections 2-7 changes.
+4. **Trials.** A data correction adds no configuration. The first runs on corrected data repeat the earlier
+   frozen base, neighbour and stress rows exactly, each logged as a `trial` row with `n_trials` 0 and the new data
+   digest. The earlier rows stay in the registry, marked as before this amendment, and the Gate B verdict is read
+   from the corrected runs only. If a corrected run changes a verdict, both results are reported side by side. The
+   Data fixes of #264 (verified split rows) count as part of the same correction.
+
+## Amendment 7 (17 Nov 2026, backend-quant with QA-Ops's review of #275, before any rerun on corrected data): no unsourced spin-off value
+
+Written before any run with Amendment 6's correction; no result of it had been seen. It narrows Amendment 6's item 1
+and changes nothing else.
+
+1. **Two sources only.** V, the spun value per parent share, comes only from the record's ratio times the new
+   company's first close, or from Alpaca's own close factor that day (net of the table's split and dividend).
+   Amendment 6's third source, "the ex-day fall itself", is not used. It would count the parent's own move that
+   day as spun value and could lift its momentum.
+2. **A spin-off with neither source** is not adjusted and no value is credited. Its key is not rankable, so it is
+   never bought, from the ex-date for 273 sessions (12-1's 252 plus the skipped month), while the unadjusted fall
+   is inside the look-back. Before the ex-date nothing changes (point in time). Code:
+   `replay/multiday_core.SPIN_UNSOURCED_SESSIONS`.
+3. **Trials.** As Amendment 6's item 4. A configuration an earlier finished report counted, made before this data
+   correction, logs `n_trials` 0 on its first corrected run (`scripts/momentum_core.n_trials_of`; reports record
+   `data_corrections`).

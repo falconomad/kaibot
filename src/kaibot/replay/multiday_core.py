@@ -418,6 +418,96 @@ def run_rule(bars: DailyBars, ind: Indicators, pol: RiskPolicy, sig: Signals, sp
 
 # ---------------------------------------------------------------- what one run reads (issue #143)
 
+def spin_off_records(actions) -> list[dict]:
+    """#266: the daily store's spin-off rows (`DailyStore.actions()`, type `spin_off`; Alpaca's row kept in `raw`)
+    as {key, ex_date, new_symbol, ratio}: `ratio` new shares per parent share from Alpaca's `new_rate` /
+    `source_rate` when both are there (None otherwise). One record per key and ex-date."""
+    import json
+
+    out: dict[tuple[str, str], dict] = {}
+    if actions is None or not len(actions):
+        return []
+    for r in actions.to_dict("records"):
+        if r.get("type") != "spin_off" or not r.get("key") or r.get("ex_date") is None:
+            continue
+        try:
+            raw = json.loads(r.get("raw") or "{}")
+        except (TypeError, ValueError):
+            raw = {}
+        ratio = None
+        try:
+            nr, sr = float(raw.get("new_rate")), float(raw.get("source_rate"))
+            ratio = nr / sr if nr > 0 and sr > 0 else None
+        except (TypeError, ValueError):
+            pass
+        new = raw.get("new_symbol")
+        key = (str(r["key"]), str(r["ex_date"])[:10])
+        out.setdefault(key, {"key": key[0], "ex_date": key[1], "new_symbol": str(new).upper() if new else None,
+                             "ratio": ratio})
+    return list(out.values())
+
+
+SPIN_MIN_STEP = 0.02  # a spin-off keeps at least 2% of the parent: a smaller step is a data error, not adjusted
+# QA-Ops (#275): an unsourced spin-off's key is not rankable from its ex-date while the unadjusted fall is inside the
+# momentum rules' longest look-back (12-1: 252 sessions plus the skipped month)
+SPIN_UNSOURCED_SESSIONS = 252 + 21
+
+
+def spin_off_factors(panel, records: Sequence[Mapping], disputed: Sequence[str] = ()) -> tuple[np.ndarray,
+                                                                                               np.ndarray, list]:
+    """#266: (price factor, cash credit, notes), all (panel sessions x symbols). A spin-off of key j going ex at
+    its first bar k on or after the ex-date keeps value P / (P + V) (P: the parent's close at k per share held
+    before; V: the spun value per parent share); every price of j before k is multiplied by it, so the ex-date is
+    not a fall. V, in this order:
+      1. `child_close`: the record's ratio x the new company's close at k, when the store has that key;
+      2. `alpaca_factor`: Alpaca's own close factor that day (ref_total), net of the table's split and dividend;
+    QA-Ops second key (#275, Product): no third source. The ex-day fall itself would count the parent's own move
+    that day as spun value and could lift its momentum, so a spin-off with neither source is not adjusted and its
+    note carries the panel `row` of k: `Market.from_panel` then makes the key unrankable (never bought) from k for
+    SPIN_UNSOURCED_SESSIONS sessions, while the unadjusted fall is inside the rule's look-back.
+    Only rows before k move, and V uses rows <= k only: a view cut before the ex-date is one constant per
+    symbol away (point in time). The credit row k is V (research books it as cash at the ex-date, as a dividend:
+    the spun shares are sold at that close on the live path). Disputed keys are left alone (they are not
+    traded through such windows)."""
+    n, m = panel.c.shape
+    factor, credit = np.ones((n, m)), np.zeros((n, m))
+    notes: list = []
+    bad = set(disputed)
+    for r in records:
+        key, ex = str(r["key"]), np.datetime64(str(r["ex_date"])[:10], "D")
+        if key not in panel._col:
+            continue
+        j = panel.col(key)
+        note = {"key": key, "ex_date": str(ex)}
+        if key in bad:
+            notes.append({**note, "source": "skipped: disputed key"})
+            continue
+        rows = np.flatnonzero(np.isfinite(panel.c[:, j]))
+        pos = int(np.searchsorted(panel.dates[rows], ex))
+        if pos <= 0 or pos >= len(rows):
+            continue  # before the window, or not in it yet
+        k, prev_row = int(rows[pos]), int(rows[pos - 1])
+        p = float(panel.c[k, j] * panel.split[k, j])
+        step, src = None, None
+        child, ratio = r.get("new_symbol"), r.get("ratio")
+        if child and ratio and child in panel._col and math.isfinite(panel.c[k, panel.col(child)]):
+            v = float(ratio) * float(panel.c[k, panel.col(child)])
+            step, src = p / (p + v), "child_close"
+        if step is None and np.isfinite(panel.ref_total[[prev_row, k], j]).all():
+            alp = float(panel.ref_total[prev_row, j] / panel.ref_total[k, j])
+            tab = float(panel.pf_total[prev_row, j] / panel.pf_total[k, j])
+            if tab > 0 and SPIN_MIN_STEP < alp / tab < 0.999:
+                step, src = alp / tab, "alpaca_factor"
+        if step is None or not (SPIN_MIN_STEP < step <= 1.0):
+            notes.append({**note, "source": "not adjusted: no sourced value", "row": k})
+            continue
+        factor[:k, j] *= step
+        credit[k, j] += p * (1.0 - step) / step
+        notes.append({**note, "source": src, "step": round(step, 6), "value_per_share": round(p * (1 - step) / step,
+                                                                                               6)})
+    return factor, credit, notes
+
+
 DISPUTE_WINDOW = 5  # sessions around a split the store's table and Alpaca's bars disagree about: no entries
 SPLIT_TOL = 0.01  # the share basis of the two sources differs beyond 1% (the store's check uses the same)
 EXPOSURE_TOLERANCE_PTS = 2.0  # a random run's average exposure may differ from the rule's by this much
@@ -525,7 +615,8 @@ class Market:
     def from_panel(cls, panel, stocks: Sequence[str], spy: str, *, member: np.ndarray | None = None,
                    terminal_returns: Mapping[str, float] | None = None, exclude: Sequence[str] = (),
                    disputed: Sequence[str] = (), default_terminal: float = -0.30,
-                   sectors: Mapping[str, str] | None = None) -> Market:
+                   sectors: Mapping[str, str] | None = None,
+                   spin_offs: Sequence[Mapping] | None = None) -> Market:
         """From a RAW `kaibot.ingest.daily_store.DailyPanel` (any duck-typed equal). The session calendar is
         SPY's. `member` is (panel sessions x panel symbols) bool, `exclude` keys that may never be bought,
         `terminal_returns` key -> return booked when a held company's bars stop more than `TERMINAL_SLACK`
@@ -537,6 +628,8 @@ class Market:
         entry from `DISPUTE_WINDOW` sessions before the first of them to `DISPUTE_WINDOW` after the last, and a
         position still held is sold at the market at the close before the first (`exits`). A disputed key
         without Alpaca's factor cannot be located and is never bought."""
+        # `spin_offs` (#266): the store's spin-off records (`spin_off_records`); each is value kept in the signals
+        # and its value credited as cash at the ex-date in research (`spin_off_factors`). None: none adjusted.
         if getattr(panel, "kind", "raw") != "raw":
             raise ValueError("pass the raw panel: the market side reads raw prices")
         j_spy = panel.col(spy)
@@ -544,6 +637,12 @@ class Market:
         if not keep.any():
             raise ValueError(f"no {spy} bars in the panel")
         adj = panel.adjusted("split", source="auto")  # no dividends in the signals (both pre-registrations, item 1)
+        spin_notes: list = []
+        credit = None
+        if spin_offs is not None:
+            spin, credit, spin_notes = spin_off_factors(panel, spin_offs, disputed)
+            adj = dataclasses.replace(adj, **{k: getattr(adj, k) * spin for k in ("o", "h", "l", "c", "c1555")},
+                                      pf_split=adj.pf_split * spin)
         lost = int(((panel.split[~keep] != 1.0) | (panel.div[~keep] > 0)).sum())
 
         def bars_of(pn) -> DailyBars:
@@ -552,9 +651,16 @@ class Market:
         raw, sig = bars_of(panel), bars_of(adj)
         factor = adj.factor[keep]
         split, div = panel.split[keep], panel.div[keep]
+        if credit is not None:
+            div = div + credit[keep]
         cols = raw.cols(stocks)
         allowed = np.ones(raw.c.shape, dtype=bool)
         allowed[:, raw.cols(exclude)] = False
+        kept_rows = np.flatnonzero(keep)
+        for nt in spin_notes:  # QA-Ops (#275): an unsourced spin-off is never ranked on its unadjusted fall
+            if "row" in nt and nt["key"] in raw._col:
+                kk = int(np.searchsorted(kept_rows, int(nt["row"])))
+                allowed[kk:kk + SPIN_UNSOURCED_SESSIONS, raw.col(nt["key"])] = False
         exits: dict[int, list[int]] = {}
         windows: dict[str, object] = {}
         n_s = len(raw.dates)
@@ -597,6 +703,7 @@ class Market:
         spy_tr = spy_full[keep]
         notes = {"sessions_dropped_off_spy_calendar": int((~keep).sum()), "actions_on_dropped_sessions": lost,
                  "excluded_keys": sorted(set(exclude) & set(raw.symbols)), "terminal_closes": len(terminal),
+                 **({"spin_offs": spin_notes} if spin_offs is not None else {}),
                  "disputed_splits": windows, "spy_total_return": spy_info,
                  "adjustment_sources": dict(sorted(pd.Series(adj.adj_source).value_counts().items()))
                  if adj.adj_source else {}, **{f"panel_{k}": v for k, v in getattr(panel, "notes", {}).items()}}

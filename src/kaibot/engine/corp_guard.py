@@ -172,3 +172,63 @@ class CorporateActionGuard:
                 raise ValueError(f"the corporate actions did not end after {MAX_PAGES} pages")
         return out
 
+
+
+# ---------------------------------------------------------------- #266: actions to adopt on held positions
+@dataclass(frozen=True)
+class Link:
+    """A spin-off (parent -> new symbol, `ratio` new shares per parent share when Alpaca gives the rates) or a
+    symbol change (old -> new) that went ex recently: the sourced record the engine adopts a venue change by."""
+
+    kind: str  # "spin_off" | "symbol_change"
+    symbol: str  # the parent, or the old symbol
+    new_symbol: str
+    on: str
+    ratio: float | None = None
+    ref: str = ""
+
+
+def _rate(r: dict, k: str) -> float | None:
+    try:
+        x = float(r.get(k))
+    except (TypeError, ValueError):
+        return None
+    return x if x > 0 else None
+
+
+def parse_links(payload: dict) -> list[Link]:
+    out = []
+    block = (payload or {}).get("corporate_actions") or {}
+    for r in block.get("spin_offs") or []:
+        src, new = r.get("source_symbol") or r.get("symbol"), r.get("new_symbol")
+        on = str(r.get("ex_date") or r.get("process_date") or "")[:10]
+        if src and new and len(on) == 10:
+            nr, sr = _rate(r, "new_rate"), _rate(r, "source_rate")
+            out.append(Link("spin_off", str(src).upper(), str(new).upper(), on, nr / sr if nr and sr else None,
+                            f"alpaca-ca:{r.get('id') or f'{src}:{new}:{on}'}"))
+    for r in block.get("name_changes") or []:
+        old, new = r.get("old_symbol"), r.get("new_symbol")
+        on = str(r.get("process_date") or r.get("ex_date") or "")[:10]
+        if old and new and old != new and len(on) == 10:
+            out.append(Link("symbol_change", str(old).upper(), str(new).upper(), on, None,
+                            f"alpaca-ca:{r.get('id') or f'{old}:{new}:{on}'}"))
+    return out
+
+
+class RecentActions:
+    """`(today, symbols) -> [Link]` that went ex from LOOKBACK_DAYS before today up to today, for these symbols
+    (Alpaca GET /v1/corporate-actions, types spin_off and name_change)."""
+
+    LOOKBACK_DAYS = 10
+
+    def __init__(self, data=None, *, get: Callable[[str, dict], dict] | None = None) -> None:
+        self.get = get or getattr(data, "get", None) or data._d
+
+    def __call__(self, today: date, symbols: Sequence[str]) -> list[Link]:
+        syms = sorted({str(s).upper() for s in symbols if s})
+        if not syms:
+            return []
+        start = np.datetime64(today, "D") - np.timedelta64(self.LOOKBACK_DAYS, "D")
+        p = {"symbols": ",".join(syms), "types": "spin_off,name_change", "start": str(start), "end": str(today),
+             "limit": 1000}
+        return [x for x in parse_links(self.get(CA_PATH, p)) if str(start) <= x.on <= str(today)]

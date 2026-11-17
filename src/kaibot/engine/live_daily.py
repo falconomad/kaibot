@@ -122,6 +122,8 @@ class Account(Protocol):
 
     def book_ended(self) -> bool: ...  # the multi-day book reached its own run end this run (no more trading)
 
+    def adopted(self, strategy: str) -> dict[str, str]: ...  # #266: held shares a corporate action credited -> why
+
 
 # ---------------------------------------------------------------- the live book's limits
 
@@ -1027,7 +1029,8 @@ class LiveDaily:
         prev = self.prev_session(session)
         dec = self._decision_for(r.name, session)
         held = self.account.held(r.name)
-        pending = self._pending(r.name, session, held)
+        pending = {**self._pending(r.name, session, held),
+                   **{s: w for s, w in self._adopted(r.name).items() if s in held}}
         tl = target_from_json(dec["target"]) if dec is not None else None
         if dec is None:
             self._no_decision(r.name, session, prev)
@@ -1058,13 +1061,17 @@ class LiveDaily:
             j = live._col.get(s)
             px = float(live.px[i - 1, j]) / live.split_at(i, j) if j is not None else math.nan
             sized[s] = (q, px if math.isfinite(px) else (mark if mark is not None else math.nan))
-        unknown = [s for s in held if s not in live._col]
+        adopted = {s: w for s, w in self._adopted(r.name).items() if s in held}
+        unknown = [s for s in held if s not in live._col and s not in adopted]
         if unknown:  # a held name outside the daily view (it left the store): only sold, never sized
             pending = {**pending, **{s: "not_in_daily_view" for s in unknown}}
         eq, cash = float(self.account.equity()), float(self.account.cash())
         plan, targets = plan_session(r.builder, tl, r.name, {s: v for s, v in sized.items() if s not in unknown},
                                      {s: w for s, w in pending.items() if s not in unknown}, live, i, eq, cash)
         targets += [Target(r.name, s, 0, "sell", {"why": "not_in_daily_view"}) for s in unknown]
+        if adopted:  # #266: shares a spin-off credited are sold at this closing auction, whatever the rule decided
+            targets = [t for t in targets if t.symbol not in adopted]
+            targets = [Target(r.name, s, 0, "sell", {"why": w}) for s, w in adopted.items()] + targets
         if r.builder.limits.max_overnight_pct <= 0:  # allow_overnight false: nothing may be held over the close
             cut = [t for t in targets if t.shares > float(held.get(t.symbol, (0.0, None))[0])]
             if cut:
@@ -1073,6 +1080,10 @@ class LiveDaily:
             targets = [t for t in targets if t not in cut]
         targets, ca = self._ca_cut(r.name, session, prev, targets, held)
         return {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca}
+
+    def _adopted(self, rule: str) -> dict[str, str]:
+        f = getattr(self.account, "adopted", None)  # an Account without corporate actions adopts nothing
+        return dict(f(rule)) if f is not None else {}
 
     def _ca_prewarm(self, evening: date, session: date, symbols) -> None:
         """The evening's read of announced corporate actions for the held and decided names (the heartbeat's notes;
@@ -1276,6 +1287,13 @@ class EngineAccount:
         rid = self.run_id()
         return rid is not None and any(b.get("run_id") == rid for _, _, _, b in
                                        self.e.journal.entries(kinds=("md_book_end",)))
+
+    def adopted(self, strategy: str) -> dict[str, str]:
+        b = self._book()
+        if b is None:
+            return {}
+        return {sym: "spin_off_adopted" for (st, sym), s in b.sleeves.items()
+                if st == strategy and s.qty > 1e-9 and str(s.origin or "").startswith("spin_off:")}
 
     def splits(self, day: date) -> dict[str, float]:
         out: dict[str, float] = {}

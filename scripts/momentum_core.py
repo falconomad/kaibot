@@ -283,11 +283,13 @@ def load_market(a: argparse.Namespace, data: Path, stocks: list[str], etfs: list
     rep = store.adjustment_report()
     bad = rep[rep.get("split_basis_days", pd.Series(dtype=float)).fillna(0) > 0]["key"].astype(str).tolist() \
         if len(rep) else []
-    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors)
+    # #266 (amendment 6/7 of the momentum pre-registrations): spin-offs as value kept, as the live view reads them
+    m = mc.Market.from_panel(panel, names, spy, member=member, terminal_returns=tr, disputed=bad, sectors=sectors,
+                             spin_offs=mc.spin_off_records(store.actions()))
     print(f"panel: {len(m.raw.dates)} sessions x {len(m.raw.symbols)} symbols, {time.time() - t0:.0f}s", flush=True)
     print(f"SPY total return: {m.notes['spy_total_return']['source']}", flush=True)
-    info = {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends; orders, costs and "
-                    "share counts raw; dividends credited",
+    info = {"bars": "daily store (data/daily): raw bars; signals split-adjusted without dividends, spin-offs as value "
+                    "kept; orders, costs and share counts raw; dividends and spin-off value credited",
             "stocks": len(names), "companies_without_bars": len(missing),
             "companies_without_bars_sample": missing[:25], "excluded_split_basis": bad, **m.notes}
     extra = "|".join([a.start, a.end, mode, *symbols])
@@ -305,6 +307,27 @@ def run_label(spec_name: str, fill: str, cost: float, exposure_pct: float, earni
 def summary_name(costs: str = "v1", which: str = "core") -> str:
     name = SUMMARY_PIT if which == "core_pit" else SUMMARY
     return name if costs == "v1" else name.replace(".md", f"_costs{costs}.md")
+
+
+# #266: corrections of the rules' INPUTS this code applies (amendment 7 of trend_momentum, 6 of mom_12_1_band). A
+# report records them; a configuration counted by an earlier report made before one of them is not a new trial.
+DATA_CORRECTIONS = ("spin_offs",)
+
+
+def n_trials_of(label: str, events: str, fill: str, cost: float, prior: dict | None) -> int:
+    """One configuration = one frozen rule at one exposure cap and earnings version, at the base fill and 1x costs
+    (stress reports count 0). Not a new trial (#203): the same label with the same events in the earlier finished
+    report; and (#266, the amendments' item 4) the same label in an earlier report made before a data correction
+    this run applies: the first runs on corrected inputs repeat counted configurations."""
+    if not (fill == "base" and cost == 1.0):
+        return 0
+    rows = (prior or {}).get("rows") or []
+    if any(r.get("label") == label and r.get("events_sha256") == events for r in rows):
+        return 0
+    newly = set(DATA_CORRECTIONS) - set((prior or {}).get("data_corrections") or [])
+    if prior is not None and newly and any(r.get("label") == label for r in rows):
+        return 0
+    return 1
 
 
 def find_report(reports: Path, level: str, version: str, costs: str = "v1", mode: str = "today",
@@ -382,7 +405,7 @@ def run_version(a: argparse.Namespace) -> None:
     # an earlier finished report of the same window was already counted there, so it is a report of it (n_trials 0)
     prior = find_report(out, a.level, a.version, a.costs, mode, bars_src, start=a.start, end=a.end,
                         universe=Path(uni_file).name)
-    counted = {(r.get("label"), r.get("events_sha256")) for r in (prior[1].get("rows") or [])} if prior else set()
+    prior_rep = prior[1] if prior else None
 
     def one(sp: mc.CoreSpec, kind: str, fill: str, cost: float, exposure_pct: float, earnings: str) -> dict:
         exposure, earn_mode = exposure_pct, earnings
@@ -417,7 +440,7 @@ def run_version(a: argparse.Namespace) -> None:
             "gate_v2_sha256": gate_sha,
             # one configuration = one frozen rule at one exposure cap and earnings version; the same configuration
             # under higher costs or the stress fill is a report of it, not another configuration
-            "n_trials": int(fill == "base" and cost == 1.0 and (label, row["events_sha256"]) not in counted),
+            "n_trials": n_trials_of(label, row["events_sha256"], fill, cost, prior_rep),
             "params": {**sp.params(), "fill": fill, "cost_multiple": cost, "exposure_cap_pct": exposure,
                        "earnings": earn_mode, "kind": kind},
             "window": [str(bars.dates[i0]), str(bars.dates[i1])],
@@ -501,6 +524,7 @@ def run_version(a: argparse.Namespace) -> None:
         "earnings_variant": VARIANT_REPORTED[variant] if variant else "skipped",
         "oos_window": [str(bars.dates[i0]), str(bars.dates[i1])], "oos_sessions": int(i1 - i0 + 1),
         "input_sha256": input_sha, "symbols": len(symbols), "base_label": base_label, "rows": rows,
+        "data_corrections": list(DATA_CORRECTIONS),
         "benchmarks": bench, "control": control, "control_entries_matched_diagnostic": diagnostic, "gate_b": gate,
         "warnings": warn, "runtime_s": round(time.time() - t0, 1), "peak_rss_mb": round(peak_rss_mb(), 0),
         "files": {"spy_daily": f"{tag}/spy_daily.csv"},
