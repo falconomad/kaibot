@@ -226,6 +226,58 @@ def test_a_vanished_position_without_a_merger_record_is_not_booked(tmp_path, mon
     assert (MD, "B") in a.eng.ledger.book(a.rid).sleeves  # never guessed: entries stay blocked, as before
 
 
+# ---------------------------------------------------------------- the fail-safes on an ex-date (#266 follow-up)
+from kaibot.engine import failsafe  # noqa: E402
+
+
+def _rows(a, session):
+    return {(r["strategy"], r["symbol"]): r for r in a.store.tables.get("ledger_position", [])
+            if r["run_id"] == a.rid and str(r["session"]) == session}
+
+
+def test_after_a_split_at_the_open_the_fail_safes_read_the_split_share_count(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed({}))
+    a.hold()
+    a.broker.pos["B"]["qty"] = QTY * 2  # a 2-for-1 split before DAY2's open, with Alpaca's SSP row
+    a.broker.non_trade.append({"activity_type": "SSP", "id": "ssp1", "date": DAY2, "symbol": "B", "qty": str(QTY)})
+    a.ticks(a.open2, 0, 2)
+    rows = _rows(a, DAY2)
+    assert rows[(MD, "B")]["qty"] == QTY * 2  # written at the session start, not only at the close
+    book = failsafe.book_from_store(a.store)
+    assert sum(s.qty for s in book.sleeves if s.symbol == "B") == QTY * 2
+    p = failsafe.plan(a.broker.positions(), a.broker.open_orders(), book, flatten=True)
+    assert not [x for x in p.sell if x[0] == "B"] and "B" not in p.close  # no split share is sold as "intraday"
+    assert p.multi_day["B"] == QTY * 2
+    pj = failsafe.plan(a.broker.positions(), a.broker.open_orders(), failsafe.book_from_journal(a.eng.journal),
+                       flatten=True)
+    assert not [x for x in pj.sell if x[0] == "B"] and pj.multi_day["B"] == QTY * 2  # the watchdog's view too
+
+
+def test_after_a_spin_off_the_fail_safes_count_the_new_shares_as_the_rule_s(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed(SPIN))
+    a.hold()
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
+    a.ticks(a.open2, 0, 2)
+    rows = _rows(a, DAY2)
+    assert rows[(MD, "BN")]["qty"] == 20 and rows[(MD, "B")]["qty"] == QTY
+    p = failsafe.plan(a.broker.positions(), [], failsafe.book_from_store(a.store), flatten=True)
+    assert "BN" not in p.close and p.multi_day["BN"] == 20
+
+
+def test_a_row_written_at_the_open_for_a_sleeve_sold_during_the_day_is_zero_at_the_close(tmp_path, monkeypatch):
+    a = Held(tmp_path, monkeypatch, Feed(SPIN))
+    a.hold()
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
+    a.ticks(a.open2, 0, 2)
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "BN", "side": "sell", "qty": 20.0, "px": 45.0,
+                         "fees": 0.0, "session": DAY2})  # as if the closing auction had sold the spun shares
+    a.broker.pos.pop("BN")
+    a.ticks(a.open2, 2, 390)
+    a.after_close(a.open2)
+    rows = _rows(a, DAY2)
+    assert rows[(MD, "BN")]["qty"] == 0 and rows[(MD, "B")]["qty"] == QTY
+
+
 def test_a_flatten_of_two_multi_day_symbols_sells_both(tmp_path, monkeypatch):
     """QA-Ops (#275 on #282): the flatten reads the venue's positions once for every symbol (#275) and #282's sale
     path read them again into the same name; the second symbol then failed (`float` has no `.get`) and the flatten

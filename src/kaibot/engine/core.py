@@ -1517,6 +1517,7 @@ class Engine:
                                                                                                 "div_paid"))))
         if not b.sleeves and not due:  # nothing held and no accrued dividend waiting for its payment
             return
+        shares0 = {k: s.qty for k, s in b.sleeves.items()}
         try:
             if self.corporate_actions is not None:
                 acts = list(self.corporate_actions(today) or ())
@@ -1535,6 +1536,30 @@ class Engine:
             self._book_action(b, a)
         if self.corporate_actions is None and self.daily is not None and self.recent_actions is not None:
             self._adopt_actions(b, today)
+        if self.daily is not None and {k: s.qty for k, s in b.sleeves.items()} != shares0:
+            self._write_positions(b, today)
+
+    def _write_positions(self, b, today: date) -> None:
+        """#266: the share count changed at this open (a split, spin-off, symbol change or cash merger booked). The
+        fail-safes (the dead-man of migration 0019 and the watchdog's store view) read the last session's
+        `ledger_position` rows, so today's rows are written now, from the ledger as it stands: they never act on
+        a pre-split count. The close overwrites them (and zeroes a row whose sleeve was sold in between)."""
+        md_stops = self._md_stops() if self._md_sleeves() else {}
+        from kaibot.engine.failsafe import clean
+
+        for (strategy, sym), sl in b.sleeves.items():
+            if sl.qty <= 1e-9:
+                continue
+            ms = md_stops.get((clean(strategy), clean(sym)))
+            mark = sl.mark if sl.mark is not None else sl.avg_cost
+            self.store.upsert("ledger_position", {
+                "run_id": b.run_id, "session": str(today), "strategy": strategy, "symbol": sym, "qty": sl.qty,
+                "avg_cost": round(sl.avg_cost, 4), "mark": round(mark, 4), "priced": False,
+                "opened_session": sl.opened, "dividends": round(sl.dividends, 2),
+                "stop_px": round(ms, 2) if ms is not None else None,
+                "stop_state": "resting" if ms is not None else "missing"}, "run_id,session,strategy,symbol")
+        self.store.event("positions_rewritten", {"session": str(today), "why": "corporate action at the open",
+                                                 "sleeves": len(b.sleeves)}, b.run_id)
 
     LATE_RETRY_MIN = 5  # a difference that stays: the venue's record is read again at most every 5 minutes
 
@@ -2574,6 +2599,13 @@ class Engine:
                 "stop_px": round(p.stop, 2) if p is not None else (round(ms, 2) if ms is not None else None),
                 "stop_state": "resting" if (p is not None and p.stop_order_id) or ms is not None else "missing"},
                 "run_id,session,strategy,symbol")
+        # #266: a row written at this session's open (`_write_positions`) for a sleeve sold since is zeroed
+        held_now = {(r["strategy"], r["symbol"]) for r in c.positions}
+        if self.daily is not None:
+            for r in self.store.select("ledger_position", {"run_id": f"eq.{d.run_id}", "session": f"eq.{d.day}"}):
+                if (r["strategy"], r["symbol"]) not in held_now and float(r.get("qty") or 0) != 0:
+                    self.store.upsert("ledger_position", {**r, "qty": 0.0, "priced": False},
+                                      "run_id,session,strategy,symbol")
 
     def _reconcile(self, b) -> dict:
         """Cash and positions against the broker. Positions: the ledger's shares per symbol (all rules) against

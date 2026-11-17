@@ -240,6 +240,8 @@ class FakeStore:
                 rows = [r for r in rows if str(r.get(k)) in opts]
         if params.get("order", "").startswith("from_session.desc"):
             rows.sort(key=lambda r: (r["from_session"], r["id"]), reverse=True)
+        if params.get("order", "").startswith("session.desc"):  # #266: the fail-safes read the last session's rows
+            rows.sort(key=lambda r: str(r.get("session")), reverse=True)
         if params.get("order", "").startswith("id.desc"):
             rows.sort(key=lambda r: r["id"], reverse=True)
         if "limit" in params:
