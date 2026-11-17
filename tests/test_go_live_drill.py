@@ -17,9 +17,11 @@ The same session is run three times: straight, with the engine killed between th
 venue took some orders, before the engine heard back), and killed between the send and the fills. Each run must
 send every order once, sell only shares held, keep the caps, and end with the ledger equal to the broker.
 
-The decision itself is fixed (`Wants`: the rule's name and holding policy, a fixed ranked list), so the drill tests
-the path, not the rule's signals. The daily view is fed directly (`load`), as the #206 tests do; the store gate's
-own reading of the files is tested in tests/unit/test_daily_integrity.py.
+The decision itself is fixed (`Wants`: the rule's name and holding policy, a ranked list of the view's rankable
+stocks), so the drill tests the path, not the rule's signals. The daily view is read as live reads it: a daily
+store on disk (bars stamped available at 20:15 ET, as scripts/fetch_daily.py writes them) through
+`live_daily.StoreLoader` and its integrity gate (#263), which finds FAILED's bad bar and leaves it out; the evening
+decision is taken after 20:15 ET.
 """
 
 from __future__ import annotations
@@ -27,7 +29,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, timedelta
 
-import numpy as np
 import pandas as pd
 import pytest
 from fakes import Clock, FakeData, FakeStore
@@ -37,7 +38,6 @@ from test_failsafe_drills import DAY1, DAY2, MD, TwoDays
 from kaibot.broker.sim import COSTS_V1
 from kaibot.engine import live_daily as ld
 from kaibot.engine.core import Engine
-from kaibot.engine.daily import DailyData
 from kaibot.engine.journal import Journal
 from kaibot.engine.market import LiveMarket
 from kaibot.replay.data import ET
@@ -67,8 +67,14 @@ class Wants(mom.TrendMomentum):
         return True
 
     def on_event(self, ctx):
-        # FAILED is not rankable tonight: StoreLoader passes it to Market.from_panel(exclude=), member False (#263)
-        ranked = [s for s in STOCKS if s not in (SOLD, FAILED)]
+        # what the store gate left out tonight is not rankable: member False (#263, Market.from_panel(exclude=))
+        mem = ctx.view.d.member
+        k = ctx.view.k
+
+        def rankable(sym):
+            return sym in ctx.view.d._col and (mem is None or bool(mem[k, ctx.view.col(sym)]))
+
+        ranked = [s for s in STOCKS if s != SOLD and rankable(s)]
         keep = [s for s in ranked if s in ctx.held]
         buy = [s for s in ranked if s not in ctx.held]
         sell = {s: "rank" for s in ctx.held if s not in ranked}
@@ -87,23 +93,6 @@ def _frames() -> dict:
             a[c] = a[c] * k / 100.0
         f[s] = a
     return f
-
-
-def _view(frames: dict) -> DailyData:
-    """The evening view of DAY1: daily bars aggregated from the minute bars (so the view's closes are the venue's)."""
-    syms = [*STOCKS, "SPY"]
-    day = {}
-    for s in syms:
-        x = frames[s]
-        d = x.assign(day=x["ts"].dt.tz_convert(ET).dt.date)
-        g = d.groupby("day").agg(o=("o", "first"), h=("h", "max"), l=("l", "min"), c=("c", "last"), v=("v", "sum"))
-        day[s] = g[g.index <= pd.Timestamp(DAY1).date()]
-    dates = np.array([np.datetime64(str(x)) for x in day["SPY"].index], dtype="datetime64[D]")
-    col = {k: np.column_stack([day[s][k].to_numpy() for s in syms]) for k in ("o", "h", "l", "c", "v")}
-    return DailyData(dates=dates, symbols=syms, sig_c=col["c"].copy(), sig_h=col["h"].copy(), sig_l=col["l"].copy(),
-                     raw_o=col["o"], raw_c=col["c"].copy(), raw_h=col["h"], raw_l=col["l"], v_first=col["v"] * 0.02,
-                     v_last=col["v"] * 0.02, raw_v=col["v"], stocks=np.arange(len(STOCKS)), spy=len(STOCKS),
-                     sig_unfilled_c=col["c"].copy(), sector=dict(SECTOR))
 
 
 class Venue(TwoDays):
@@ -137,7 +126,8 @@ class Drill:
         self.broker.costs, self.broker.cash = COSTS_V1, POT
         self.broker.wash_check, self.broker.shorting_enabled = True, False
         self.store, self.jpath, self.tmp = FakeStore(), tmp_path / "journal.sqlite", tmp_path
-        self.view = _view(self.frames)
+        self.write_store()
+        self.loader = ld.StoreLoader(self.tmp, self.universe, mode="today")  # the live loader and its gate (#263)
         s = Wants()
         lim = ld.live_limits(s, load_profiles()[LEVEL], rule_book_limits(MD, LEVEL, research=True))
         self.limits = lim
@@ -149,11 +139,41 @@ class Drill:
         self.eng.apply_commands()
         self.rid = self.eng.run["id"]
 
+    def write_store(self) -> None:
+        """The daily store under tmp/daily as scripts/fetch_daily.py writes it: one bar per session to DAY2, each
+        stamped available at 20:15 ET; FAILED's bar of the session before DAY1 has a high below its close."""
+        import json
+
+        import pyarrow.parquet as pq
+
+        from kaibot.ingest.daily_bars import actions_table, bars_path, bars_table
+
+        root = self.tmp / "daily"
+        bad = pd.Timestamp(DAY1).date() - timedelta(days=1)
+        while bad.weekday() >= 5:
+            bad -= timedelta(days=1)
+        for sym in [*STOCKS, "SPY"]:
+            x = self.frames[sym]
+            d = x.assign(day=x["ts"].dt.tz_convert(ET).dt.date)
+            g = d.groupby("day").agg(o=("o", "first"), h=("h", "max"), l=("l", "min"), c=("c", "last"),
+                                     v=("v", "sum"))
+            rows = [{"t": f"{day}T04:00:00Z", "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v, "vw": r.c}
+                    for day, r in g.iterrows()]
+            if sym == FAILED:
+                for r in rows:
+                    if r["t"].startswith(str(bad)):
+                        r["h"] = r["c"] * 0.5  # a high below the close: the gate's ohlc_order
+            p = bars_path(root, sym)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            pq.write_table(bars_table(rows, pd.Timestamp(DAY2).date()), p)
+        pq.write_table(actions_table([]), root / "corporate_actions.parquet")
+        self.universe = self.tmp / "universe.yaml"
+        self.universe.write_text(json.dumps({"sectors": {sec: [s for s in STOCKS if SECTOR[s] == sec]
+                                                         for sec in SECTORS}, "market": "SPY"}))
+        self.bad_day = bad
+
     def load(self, k, now):
-        if str(k) != DAY1:
-            raise ld.DataNotReady(f"the daily store has no SPY bar for {k}")
-        self.view.dropped = {FAILED: f"1 bad bar in 1 key: {FAILED} {DAY1} ohlc_order"}
-        return self.view
+        return self.loader(k, now)
 
     def engine(self) -> Engine:
         from kaibot.engine.corp_guard import CorporateActionGuard  # (#271)
@@ -195,7 +215,10 @@ class Drill:
                                     "px": px, "fees": 0.0, "coid": f"kb{self.rid}-{MD}-{sym}-20260731-buy-1",
                                     "session": "2026-07-31"})
         self.tick_to(self.open1, 30, 390)
-        self.after_close(self.open1)  # the decision for DAY2
+        self.after_close(self.open1)  # 16:30 ET: the store's bars of DAY1 are not available yet: no decision
+        assert not list(self.eng.journal.entries(kinds=("md_decision",)))
+        self.clock.t = self.open1 + timedelta(hours=11)  # 20:30 ET, after the nightly refresh's 20:15 stamp
+        self.eng.tick()  # the decision for DAY2, on the store read through the gate
 
     def cls(self):
         return [o for o in self.broker.orders.values() if o["time_in_force"] == "cls"]
@@ -315,6 +338,7 @@ def test_the_heartbeat_says_what_happened(runs):
     kinds = [e["type"] for e in d.store.tables["event"]]
     skip = [e for e in d.store.tables["event"] if e["type"] == "multi_day_ca_skip"]
     assert [e["payload"]["symbol"] for e in skip] == [SPUN]
-    if "dropped" in DailyData.__dataclass_fields__:  # with #263's gate: FAILED left out tonight, said once
-        assert "multi_day_view_dropped" in kinds
+    (drop,) = [e for e in d.store.tables["event"] if e["type"] == "multi_day_view_dropped"]  # said once
+    assert drop["payload"]["dropped"] == {FAILED: f"1 bad bar in 1 key: {FAILED} {d.bad_day} ohlc_order"}
+    assert f"decided without {FAILED}" in (st.get("note") or "")  # on the fill session's heartbeat
     assert "multi_day_error" not in kinds and "multi_day_ca_unread" not in kinds
