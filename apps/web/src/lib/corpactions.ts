@@ -46,7 +46,7 @@ export function caSkips(events: { type: string; ts: string; payload: Record<stri
 // ---------------------------------------------------------------- the events in plain words (Activity and Engine)
 
 export type CaTone = "note" | "warn" | "alert";
-export interface CaEvent { ts: string; type: string; head: string; line: string; detail: string; tone: CaTone; icon: "skipped" | "bought" | "took" | "halt" }
+export interface CaEvent { ts: string; type: string; symbol: string | null; head: string; line: string; detail: string; tone: CaTone; icon: "skipped" | "bought" | "took" | "halt" }
 type Ev = { type: string; ts: string; payload: Record<string, unknown> };
 const shares = (q: number | null) => (q === null ? "" : `${Number.isInteger(q) ? q : Number(q.toFixed(4))} share${q === 1 ? "" : "s"} of `);
 const qtyOf = (v: unknown) => { const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN; return Number.isFinite(n) ? n : null; };
@@ -57,27 +57,27 @@ export function caEvent(e: Ev): CaEvent | null {
   const p = e.payload ?? {};
   if (e.type === "multi_day_ca_skip") {
     const symbol = words(p.symbol, 10), action = words(p.action), on = words(p.on, 30);
-    return symbol && action && on ? { ts: e.ts, type: e.type, head: `Skipped ${symbol}: ${action} on ${onDay(on)}`, tone: "note", icon: "skipped",
+    return symbol && action && on ? { ts: e.ts, type: e.type, symbol, head: `Skipped ${symbol}: ${action} on ${onDay(on)}`, tone: "note", icon: "skipped",
       line: "Multi-day rule", detail: `${CA_REASON} ${symbol} has a ${action} announced for ${onDay(on)}, so this buy was left out.` } : null;
   }
   if (e.type === "multi_day_ca_unread") {
     const why = words(p.why, 200);
-    return { ts: e.ts, type: e.type, head: "Couldn't read upcoming splits and spin-offs: no new buys today", tone: "warn", icon: "halt",
+    return { ts: e.ts, type: e.type, symbol: null, head: "Couldn't read upcoming splits and spin-offs: no new buys today", tone: "warn", icon: "halt",
       line: "Multi-day rule", detail: `The list of announced corporate actions couldn't be read, so the multi-day rule bought nothing new this session. Sales and stops went on.${why ? ` (${why})` : ""}` };
   }
   if (e.type === "spin_off_adopted") {
     const parent = words(p.parent, 10), symbol = words(p.symbol, 10), q = qtyOf(p.qty);
-    return parent && symbol ? { ts: e.ts, type: e.type, head: `Added ${shares(q)}${symbol} from the ${parent} spin-off: sells at tonight's close`, tone: "note", icon: "bought",
+    return parent && symbol ? { ts: e.ts, type: e.type, symbol, head: `Added ${shares(q)}${symbol} from the ${parent} spin-off: sells at tonight's close`, tone: "note", icon: "bought",
       line: "Multi-day book", detail: `${parent} spun off ${symbol}, and the shares arrived in the paper account. ${NAME} took them into its books and sells them at the next closing auction; it doesn't keep stocks it didn't choose.` } : null;
   }
   if (e.type === "symbol_change_adopted") {
     const from = words(p.symbol, 10), to = words(p.new_symbol, 10);
-    return from && to ? { ts: e.ts, type: e.type, head: `Renamed: ${from} is now ${to}`, tone: "note", icon: "took",
+    return from && to ? { ts: e.ts, type: e.type, symbol: to, head: `Renamed: ${from} is now ${to}`, tone: "note", icon: "took",
       line: "Multi-day book", detail: `${from} trades as ${to} from now on. Same shares, same cost; the books follow the new ticker.` } : null;
   }
   if (e.type === "corporate_action_not_adopted") {
     const symbol = words(p.symbol, 10), kind = KIND[String(p.kind)] ?? words(p.kind, 30)?.replace(/_/g, " ") ?? "corporate action", why = words(p.why, 200);
-    return symbol ? { ts: e.ts, type: e.type, head: `Couldn't take in the ${symbol} ${kind}: no new buys until it's checked`, tone: "alert", icon: "halt",
+    return symbol ? { ts: e.ts, type: e.type, symbol, head: `Couldn't take in the ${symbol} ${kind}: no new buys until it's checked`, tone: "alert", icon: "halt",
       line: "Multi-day book", detail: `The books and the paper account disagree after the ${symbol} ${kind}${why ? `: ${why}` : ""}. New buys stay blocked until the paper account is checked.` } : null;
   }
   return null;
