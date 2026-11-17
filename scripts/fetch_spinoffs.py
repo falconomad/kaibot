@@ -74,7 +74,7 @@ def _write(data: Path, events: list[sp.Event], rows: list[dict], misses: list[di
         w.writeheader()
         w.writerows(misses)
     both = df[df["alpaca_ratio"].notna()]
-    same = ((both["ratio"] - both["alpaca_ratio"]).abs() <= 1e-6 * both["alpaca_ratio"].clip(lower=1.0))
+    same = (both["ratio"] - both["alpaca_ratio"]).abs() <= sp.RATIO_TOL  # Alpaca rounds to five decimals
     meta = {"built_at": datetime.now(UTC).isoformat(timespec="seconds"), "events": len(events), "rows": int(len(df)),
             "misses": len(misses), "known_before_ex": int(df["known_before_ex"].sum()) if len(df) else 0,
             "with_value": int(df["value_per_parent_share"].notna().sum()),

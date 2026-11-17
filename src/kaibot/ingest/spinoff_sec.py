@@ -58,6 +58,7 @@ WINDOW_AFTER_DAYS = 7
 MAX_FILINGS = 25  # per event
 MAX_EXHIBITS = 3  # per filing
 MAX_DOC_BYTES = 8 * 1024 * 1024
+RATIO_TOL = 1e-5  # Alpaca writes its rates with five decimals (0.33333 for one for three, 0.24192 for 0.241917)
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 ARCHIVE_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc}/{doc}"
@@ -445,23 +446,32 @@ def _names_child(child_text: str, title: str, words: int) -> bool:
     return bool(want) and company_of(child_text).split()[:len(want)] == want
 
 
-def choose(found: Sequence[tuple[Filing, dict]], child_title: str = "") -> tuple[list[tuple[Filing, dict]], str, str]:
+def same_ratio(a: float, b: float) -> bool:
+    """Two ratios are the same number, allowing for Alpaca's rounding to five decimals."""
+    return bool(abs(a - b) <= RATIO_TOL)
+
+
+def choose(found: Sequence[tuple[Filing, dict]], child_title: str = "",
+           siblings: bool = False) -> tuple[list[tuple[Filing, dict]], str, str]:
     """The statements that give this spin-off's ratio: (statements, how, why not).
 
     `found` is every statement of every candidate filing, oldest filing first. With one ratio in all of them, that
     is it ("only_ratio"). With several (a parent that spins off two companies on one day), only the statements whose
     new company starts with the first word, then the first two words, of the new symbol's EDGAR name count
-    ("child_name"). Still several, or no name to go by: no row."""
+    ("child_name"). Still several, or no name to go by: no row. `siblings`: the seeds list another spin-off of this
+    parent on the same ex-date, so one stated ratio may be the other company's and only the name may decide."""
     if not found:
         return [], "", "no ratio statement in the filings read"
     ratios = {round(s["new_shares"] / s["parent_shares"], 9) for _, s in found}
-    if len(ratios) == 1:
+    if len(ratios) == 1 and not siblings:
         return list(found), "only_ratio", ""
     for words in (1, 2):
         hit = [(f, s) for f, s in found if _names_child(s["child"], child_title, words)]
         if hit and len({round(s["new_shares"] / s["parent_shares"], 9) for _, s in hit}) == 1:
             return hit, "child_name", ""
     seen = sorted({f"{s['new_shares']:g} per {s['parent_shares']:g} ({company_of(s['child'])})" for _, s in found})
+    if len(ratios) == 1:
+        return [], "", "the parent has several spin-offs that day and the stated ratio names another: " + seen[0]
     return [], "", "several ratios stated: " + "; ".join(seen)[:300]
 
 
@@ -474,6 +484,9 @@ def collect(events: Sequence[Event], cache: Cache, tickers: Mapping[str, tuple[s
     for e in events:
         d = e.ex_date - timedelta(days=WINDOW_BEFORE_DAYS + 2)
         since[ciks[e.id]] = min(d, since.get(ciks[e.id], d))
+    same_day: dict[tuple[str, date], set] = {}  # a parent's spin-offs of one ex-date
+    for e in events:
+        same_day.setdefault((ciks[e.id], e.ex_date), set()).add(e.id)
     for e in events:
         cik = ciks[e.id]
         base = {"parent": e.parent, "new_symbol": e.new_symbol, "ex_date": e.ex_date.isoformat()}
@@ -492,7 +505,8 @@ def collect(events: Sequence[Event], cache: Cache, tickers: Mapping[str, tuple[s
                 continue
             read += 1
             found += [(f, s) for s in ex.found]
-        hit, how, why = choose(found, tickers.get(e.new_symbol, ("", ""))[1] if e.new_symbol else "")
+        hit, how, why = choose(found, tickers.get(e.new_symbol, ("", ""))[1] if e.new_symbol else "",
+                               siblings=len(same_day[(cik, e.ex_date)]) > 1)
         if not hit:
             misses.append({**base, "reason": f"{why} ({read} of {len(cands)} candidate 8-Ks read)"})
             continue
@@ -573,7 +587,7 @@ def compare(rows: Sequence[dict], reference: Sequence[Mapping], closes: Callable
             line.update(sec_ratio=r["ratio"], alpaca_ratio=ar, available_ts=str(r["available_ts"]),
                         known_before_ex=bool(r["known_before_ex"]), filing_url=r["filing_url"])
             if ar == ar and ar is not None:
-                line["ratio_agrees"] = bool(abs(r["ratio"] - ar) <= 1e-6 * max(1.0, ar))
+                line["ratio_agrees"] = same_ratio(r["ratio"], ar)
             if closes is not None and r.get("new_symbol"):
                 ex = date.fromisoformat(key[1])
                 imp = implied_factor(closes(key[0], ex), closes(r["new_symbol"], ex), r["ratio"])

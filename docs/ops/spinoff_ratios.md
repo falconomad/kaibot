@@ -10,6 +10,13 @@ built in reaches `data.sec.gov` (filing lists) but not `www.sec.gov` (the docume
 tests are real, the 8-K documents in the tests are synthetic, and the check against the #262 spin-offs is a script
 the Mac runs (below). Until that check has run, the rows are not to be used.
 
+Second look, the same evening (review before the PR): `www.sec.gov` still answers 403 here ("Request Rate Threshold
+Exceeded", from SEC's own edge, on the first request; not retried). The 13 recorded filing lists were downloaded
+again from `data.sec.gov` and every recorded row is identical to the live one. Alpaca's record ratios for the 15
+spin-offs were read from the paper API (table below). Two defects were fixed: a ratio was compared with Alpaca's
+to six decimals although Alpaca writes five (GE, EXC and T would have been reported as different), and a parent with
+two spin-offs on one ex-date could give one company's ratio to the other.
+
 ## Source note: where a free spin-off ratio or value can come from
 
 | Source | Carries | Free? Limits | Used here |
@@ -81,6 +88,8 @@ Alpaca's close factor next to the factor the SEC ratio implies. Please send `dat
    decimals, either order), only next to "distribution", "spin-off" or "separation", and only when A and B are
    different companies. No model reads the filing.
 6. A row is written only if the filings state exactly one ratio for the new company. Several, or none: a miss.
+   When the seeds list two spin-offs of one parent on one ex-date, a ratio counts only if its sentence names the
+   new company (the first word or two of its EDGAR name); one stated ratio is never given to both.
 
 ## Point in time
 
@@ -115,6 +124,30 @@ Verified, with real EDGAR filing lists (`tests/fixtures/spinoff/recorded`, from 
 
 So for all 15 spin-offs the parent filed 8-Ks the collector would read, and each has at least one accepted before
 the ex-date opened. **That is all that is verified about the real filings.**
+
+Alpaca's side of the check, read from `/v1/corporate-actions` (`spin_offs`) on 17 Nov 2026. It has a ratio for all
+15; the close factors are the ones stated in #262:
+
+| Parent | Ex-date | New symbol | Alpaca ratio (new per parent share) | Alpaca close factor (#262) |
+|---|---|---|---|---|
+| EXC | 2022-02-02 | CEG | 0.33333 | 0.712 |
+| T | 2022-04-11 | WBD | 0.24192 | 0.764 |
+| GE | 2023-01-04 | GEHC | 0.33333 | 0.778 |
+| DHR | 2023-10-02 | VLTO | 0.333333333 | 0.872 |
+| MMM | 2024-04-01 | SOLV | 0.25 | 0.802 |
+| GE | 2024-04-02 | GEV | 0.25 | 0.798 |
+| LEN | 2025-01-21 | MRP | 0.5 | 0.916 |
+| HON | 2025-10-30 | SOLS | 0.25 | 0.942 |
+| DD | 2025-11-03 | Q | 0.5 | not stated (-58% that day) |
+| CMCSA | 2026-01-05 | VSNT | 0.04 | 0.937 |
+| BDX | 2026-02-10 | WAT | 0.135343142914 | not stated (-21%) |
+| APTV | 2026-04-01 | VGNT | 0.33333333333 | not stated (-15%) |
+| FDX | 2026-06-01 | FDXF | 0.5 | not stated (-19%) |
+| HON | 2026-06-29 | HONA | 0.5 | not stated |
+| SPGI | 2026-07-01 | MBGL | 1 | 0.946 |
+
+Alpaca writes five decimals for some (0.33333, 0.24192), so "equal" means within 0.00001 (`RATIO_TOL`). The SEC
+column of this table is empty until `--check262` has run where `www.sec.gov` answers.
 
 Not verified:
 - **Whether those documents state the ratio in words the patterns read.** The test documents are synthetic. The

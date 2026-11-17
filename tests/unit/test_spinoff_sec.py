@@ -210,6 +210,27 @@ def test_no_row_without_exactly_one_ratio(built):
     assert sp.choose([], "x")[2] and sp.choose(two)[0] == [] and sp.choose(two, "B Corp")[0] == two[1:]
 
 
+def test_one_stated_ratio_is_not_given_to_a_sibling_spin_off_of_the_same_day(tmp_path):
+    """A parent with two spin-offs on one ex-date whose filings state only one company's ratio: the other company
+    gets no row (before, both got the same ratio as "only_ratio")."""
+    one = [(None, {"new_shares": 1, "parent_shares": 2, "child": "Otter Systems common stock"})]
+    assert sp.choose(one, "")[1] == sp.choose(one, "Crane Devices Inc")[1] == "only_ratio"  # no sibling: as before
+    assert sp.choose(one, "Otter Systems Inc", siblings=True)[1:] == ("child_name", "")
+    hit, how, why = sp.choose(one, "Crane Devices Inc", siblings=True)
+    assert hit == [] and "several spin-offs that day" in why and "1 per 2 (OTTER SYSTEMS)" in why
+    assert sp.choose(one, "", siblings=True)[0] == []  # no name to go by
+
+    def only_otter(url):  # the synthetic 8-K with the sentence about the second company removed
+        body = FakeSec()(url)
+        return body.split(b" and one share of ")[0] if url.endswith("zzq-20260311.htm") else body
+
+    assert b" and one share of " in FakeSec()(sp.ARCHIVE_URL.format(cik=9003, acc="999999900326000004",
+                                                                   doc="zzq-20260311.htm"))
+    rows, misses = sp.collect(EVENTS[1:3], sp.Cache(tmp_path, only_otter), tickers())
+    assert [(r["new_symbol"], r["ratio"], r["match"]) for r in rows] == [("ZZO", 0.5, "child_name")]
+    assert [m["new_symbol"] for m in misses] == ["ZZC"] and "several spin-offs that day" in misses[0]["reason"]
+
+
 def test_available_ts_is_the_acceptance_time_never_the_ex_date(built):
     df = built[2]
     accepted = {}
@@ -392,6 +413,18 @@ def test_compare_with_alpacas_ratio_and_close_factor(built):
     off = sp.compare(rows, ref[:1], lambda s, d: {"ZZP": 100.0, "ZZN": 90.0}[s])[0]
     assert off["agrees"] is False and off["factor_diff"] == pytest.approx(100 / 130 - 0.875)
     assert sp.compare(rows, ref[:1])[0]["agrees"] is None and math.isnan(sp.implied_factor(0, 1, 1))
+
+
+@pytest.mark.parametrize("sec,alpaca,same", [
+    (1 / 3, 0.33333, True),  # Alpaca's GE / GEHC and EXC / CEG records (read 17 Nov 2026): five decimals
+    (1 / 3, 0.333333333, True), (0.241917, 0.24192, True), (0.25, 0.25, True), (0.04, 0.04, True),
+    (1 / 3, 0.3333, False), (0.25, 0.2, False), (0.5, 0.51, False), (0.135343, 0.135443, False),
+])
+def test_ratio_equals_alpacas_up_to_its_five_decimals(sec, alpaca, same):
+    assert sp.same_ratio(sec, alpaca) is same
+    row = {"parent": "P", "ex_date": "2026-01-02", "ratio": sec, "alpaca_ratio": alpaca, "available_ts": "",
+           "known_before_ex": True, "filing_url": "", "new_symbol": ""}
+    assert sp.compare([row], [{"parent": "P", "ex_date": "2026-01-02"}])[0]["ratio_agrees"] is same
 
 
 # ---------------------------------------------------------------- the script, end to end with fake SEC
