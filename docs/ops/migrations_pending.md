@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 16 Nov 2026 (0019 applied 13 Nov; 0020 written, not applied). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all applied; nothing pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -12,9 +12,15 @@ Owner: backend-quant. Last checked against main on 16 Nov 2026 (0019 applied 13 
 - 0019: **applied by Product on 13 Nov 2026, about 18:55 CET** (step 6 below; the stakeholder delegated the decision).
   Its read-only checks passed: one pg_cron job `kaibot_deadman` (the four `kaibot_deadman_*` jobs are gone).
   Shorting off on the paper account is done by `./scripts/go_live_paper.sh` (`./scripts/alpaca_no_shorting.sh`).
-- 0020: **written, not applied** (#229, PR for the multi-day dashboard's data). Read-only RPCs only: step 7 below.
-  The multi-day experiment of #133 itself needs no database change (its caps and label are in `config/profiles.yaml`
-  and `strategies/registry.py`, and reach the dashboard in the heartbeat's `detail.experiments`).
+- 0020: **applied by Product on 17 Nov 2026, about 13:49 CET** (step 7 below). The multi-day experiment of #133 itself
+  needs no database change (its caps and label are in `config/profiles.yaml` and `strategies/registry.py`, and reach the
+  dashboard in the heartbeat's `detail.experiments`).
+- 0021: **applied by Product on 17 Nov 2026, about 13:53 CET** (step 8 below).
+- 0022: **applied by Product on 17 Nov 2026, 21:16 UTC (16:16 ET, after the close)** (step 9 below; PR #295, keys from
+  QA-Ops and Backend-quant on eaf0cd4). Checked: both function bodies in the database match the file byte for byte
+  (md5), neither runs for anon or authenticated, one pg_cron job unchanged. `deadman_split_like(80, 40)` = 2,
+  `(50, 40)` = null; `(4, 40)` = 0.125, not 0.1: 1/8 comes before 1/10 in the ratio order and 40 x 1/8 = 5 is within
+  the one-share tolerance. Harmless (the stop is capped at the 4 shares held); the comment's expected value was off.
 
 ## Apply in this order
 
@@ -64,7 +70,7 @@ select prosrc like '%multi_day_ca_skip%' and prosrc like '%multi_day_ca_unread%'
 select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';    -- kaibot_deadman | * 13-21 * * 1-5
 select count(*) from kaibot.strategy_holding where holding = 'multi_day';                          -- 3
 -- step 9 (0022): the dead-man knows split ratios
-select kaibot.deadman_split_like(80, 40), kaibot.deadman_split_like(50, 40);                    -- 2 | (null)
+select kaibot.deadman_split_like(80, 40), kaibot.deadman_split_like(50, 40);                    -- 2 | (null)  (checked 17 Nov)
 select prosrc like '%deadman_split_like%' from pg_proc where proname = 'deadman_act';           -- true
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
