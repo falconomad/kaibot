@@ -1,0 +1,357 @@
+{
+ "AAPL": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "ABBV": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "ADBE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "AMD": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "AMT": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "AMZN": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "AVGO": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "BA": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "BAC": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "BKNG": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "CAT": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "COP": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "COST": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "CRM": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "CSCO": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "CVX": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "DE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "DIS": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "DUK": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "GE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "GOOGL": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "GS": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "HD": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "HON": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "INTC": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "JNJ": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "JPM": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "KO": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "LIN": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "LLY": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "LOW": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "MA": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "MCD": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "META": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "MRK": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "MS": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "MSFT": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "NEE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "NFLX": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "NKE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "NVDA": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "ORCL": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "PEP": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "PFE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "PG": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "PLD": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "QCOM": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "RTX": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "SBUX": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "SPY": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "TMO": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "TMUS": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "TSLA": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "TXN": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "UNH": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "UPS": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "V": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "WFC": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "WMT": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLB": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLC": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLF": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLI": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLK": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLP": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLRE": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLU": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLV": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XLY": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ },
+ "XOM": {
+  "bg": null,
+  "pad": 12,
+  "sampled": false
+ }
+}
