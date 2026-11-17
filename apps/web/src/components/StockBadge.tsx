@@ -22,7 +22,13 @@ function tint(s: string) {
 
 /** A company tile: an iOS-style squircle (app.css .badge) with the company's logo on its own colour, or its initials.
  *  The tile is laid out at its size before the logo arrives, and the logo fades in when it has loaded. */
-export function StockBadge({ symbol, size = 40 }: { symbol: string; size?: number }) {
+/** Every tile is drawn 8% larger than the size it is given (stakeholder, 17 Nov 2026: "increase logo sizes in all
+ *  screens up by 5-10%"), so call sites keep their sizes and the scale lives here. */
+export const TILE_SCALE = 1.08;
+const scaled = (n: number) => Math.round(n * TILE_SCALE);
+
+export function StockBadge({ symbol, size: base = 40 }: { symbol: string; size?: number }) {
+  const size = scaled(base);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const logo = META[symbol]?.logo;
@@ -49,7 +55,8 @@ export function StockBadge({ symbol, size = 40 }: { symbol: string; size?: numbe
 }
 
 /** The same tile for a row with no company (a halt, a note): a neutral squircle with a small icon, so rows line up. */
-export function SystemTile({ size = 36, tone, children }: { size?: number; tone?: string; children: ReactNode }) {
+export function SystemTile({ size: base = 36, tone, children }: { size?: number; tone?: string; children: ReactNode }) {
+  const size = scaled(base);
   return <span className={`badge sys${tone ? ` ${tone}` : ""}`} style={{ width: size, height: size, flex: "none" }} aria-hidden="true">{children}</span>;
 }
 
