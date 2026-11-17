@@ -558,6 +558,10 @@ CASES = {
     "ex-date: a 2-for-1 split while the engine was down": ({"B": ("80", "50")}, [], [(MD, "B", 40, None)], True),
     "ex-date: a 1-for-10 reverse split": ({"B": ("4", "1000")}, [], [(MD, "B", 40, None)], True),
     "ex-date: a symbol change": ({"B2": ("40", "100"), "A": ("7", "100")}, [BRACKET_A], [(MD, "B", 40, None)], True),
+    # #291 QA: Alpaca cancels GTC stops on a reverse split and a symbol change; the book's stop price is the old basis
+    "ex-date: a 1-for-10 reverse split, its stop cancelled": ({"B": ("4", "50")}, [], [(MD, "B", 40, 4.0)], True),
+    "ex-date: a 2-for-1 split, no stop resting": ({"B": ("80", "50")}, [], [(MD, "B", 40, 80.0)], True),
+    "ex-date: a symbol change, its stop cancelled": ({"B2": ("40", "100")}, [], [(MD, "B", 40, 95.0)], True),
 }
 
 
@@ -632,6 +636,12 @@ def test_the_plan_cases_say_what_decision_15_says():
     assert rev["multi_day"] == {"B": 4} and [s[2] for s in rev["stops"]] == [4]
     ren = got["ex-date: a symbol change"]
     assert ren["close"] == ["A"] and ren["multi_day"] == {"B2": 40}
+    # #291 QA: the re-created stop covers every kept share, at the emergency price (10% below the last), never at the
+    # book's stop on the old basis ($4 under a $50 stock after a 1-for-10 is no protection)
+    assert got["ex-date: a 1-for-10 reverse split, its stop cancelled"]["stops"] == [(MD, "B", 4, 45.0)]
+    assert got["ex-date: a 2-for-1 split, no stop resting"]["stops"] == [(MD, "B", 80, 45.0)]
+    ren = got["ex-date: a symbol change, its stop cancelled"]
+    assert ren["stops"] == [(MD, "B2", 40, 90.0)] and ren["multi_day"] == {"B2": 40} and ren["close"] == []
 
 
 # ======================================================================= the dead-man's schedule and guards

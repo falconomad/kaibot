@@ -214,6 +214,7 @@ def plan(positions: Mapping[str, dict], orders: list[dict], book: BookView | Non
         md = min(max(book_md, sum(covered.values())), have)
         if sym in renamed:
             md = have
+            mine = [s for s in sleeves if s.symbol == renamed[sym]]  # #291 QA: its stop went with the old symbol
             out.alarms.append(f"{sym}: {have:g} shares, no book row, and {renamed[sym]} with the same shares is gone "
                               f"at the broker (a symbol change?): kept as multi-day, not sold")
         # #291: the broker's count differs from the book's (a split or a spin-off went ex while the engine was
@@ -226,16 +227,20 @@ def plan(positions: Mapping[str, dict], orders: list[dict], book: BookView | Non
             out.alarms.append(f"{sym}: the broker holds {have:g} shares, the book {book_md:g}, a {split:g} ratio (a "
                               f"split today?): {md:g} kept as multi-day, nothing of them sold")
         free = max(have - sum(_left(o) for o in sells), 0.0)
-        # #291: after a reverse split, never try to protect more shares than the broker holds (no false alarm)
-        cap = int(math.floor(have + EPS)) if split is not None and split < 1 else 10 ** 12
+        # #291: on a split or a renamed holding the book is on yesterday's basis: a stop covers the sleeve's shares
+        # times the ratio, never more than the shares kept (no false alarm after a reverse split), and the book's
+        # stop price (the old basis, or another symbol's) is not used: the emergency stop below the last price is
+        rebased = split is not None or sym in renamed
+        scale = split if split is not None else 1.0
+        cap = int(math.floor(md + EPS)) if rebased else 10 ** 12
         last = float(p.get("current_price") or 0) or None
         for s in mine:
-            want = int(math.floor(s.qty + EPS)) - int(math.floor(covered.get(clean(s.strategy), 0.0) + EPS))
+            want = int(math.floor(s.qty * scale + EPS)) - int(math.floor(covered.get(clean(s.strategy), 0.0) + EPS))
             want = min(want, cap - int(math.floor(sum(covered.values()) + EPS)))
             if want < 1:
                 continue
             q = min(want, int(math.floor(free + EPS)))
-            px, why = _stop_price(s.stop, last)
+            px, why = _stop_price(None if rebased else s.stop, last)
             if q >= 1 and px is not None:
                 out.stops.append(StopOrder(s.strategy, sym, q, px, why))
                 free -= q

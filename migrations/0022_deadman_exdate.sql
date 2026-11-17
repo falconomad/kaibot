@@ -16,6 +16,9 @@
 --      plan says (one stock held both ways);
 --   2. a multi-day symbol gone at the broker while an unexplained position (no book row, no sell order) holds
 --      exactly its shares: that position is the renamed holding, kept, not closed.
+--   In both, the protective stop the dead-man re-creates (Alpaca cancels GTC stops on a reverse split and on a
+--   symbol change) covers the sleeve's shares times the ratio, at most the shares kept, at the emergency price
+--   (10% below the last), never at the book's stop price: that is on the old basis or another symbol's.
 -- An alarm says each. Nothing ever sells more than the broker holds (as before). The on-laptop watchdog
 -- (src/kaibot/engine/failsafe.plan) follows the same rules; tests/test_failsafe_drills.py runs both on one set of
 -- cases.
@@ -77,6 +80,7 @@ declare
   ratio numeric;    -- #291: the broker's count over the book's, when it is a split's ratio
   cap integer;      -- #291: after a reverse split, the most shares a stop may cover
   renamed jsonb := '{}'::jsonb;  -- #291: unexplained position -> the gone multi-day symbol it holds the shares of
+  sp numeric;       -- #291: the sleeve's stop price, null when the book is on yesterday's basis (split, renamed)
   any_md boolean := false;
   others text[];
   res jsonb := jsonb_build_object('canceled', '[]'::jsonb, 'stops', '[]'::jsonb, 'cancel', '[]'::jsonb,
@@ -161,20 +165,25 @@ begin
       where not (z.type in ('stop', 'stop_limit') and kaibot.deadman_md((kaibot.deadman_coid(z.coid))[1]));
     ratio := kaibot.deadman_split_like(have, book_md);
     cap := 2147483647;
+    if renamed ? sym then
+      cap := floor(md)::integer;
+    end if;
     if ratio is not null then
       md := case when ratio > 1 then have - other else least(md, have) end;
-      if ratio < 1 then
-        cap := floor(have)::integer;
-      end if;
+      cap := floor(md)::integer;  -- #291: a stop covers at most the shares kept
       res := jsonb_set(res, '{alarms}', (res->'alarms') || to_jsonb(format(
                '%s: the broker holds %s shares, the book %s (a split today?): %s kept as multi-day, nothing of them sold',
                sym, have, book_md, md)));
     end if;
     select greatest(have - coalesce(sum(z.qty), 0), 0) into free from kaibot.deadman_sells(ord, sym) z;
     for s in select lp.strategy, sum(lp.qty) as qty, max(lp.stop_px) as stop_px from kaibot.ledger_position lp
-             where lp.run_id = rid and lp.session = sess and lp.symbol = sym and kaibot.deadman_md(lp.strategy)
+             where lp.run_id = rid and lp.session = sess and lp.symbol = coalesce(renamed->>sym, sym)  -- #291
+               and kaibot.deadman_md(lp.strategy)
              group by lp.strategy order by lp.strategy loop
-      select floor(s.qty)::integer - floor(coalesce(sum(z.qty), 0))::integer into want
+      -- #291: on a split the sleeve's shares times the ratio; the book's stop price is on the old basis (or, for a
+      -- renamed holding, another symbol's): not used, the emergency stop below the last price is
+      sp := case when ratio is not null or renamed ? sym then null else s.stop_px end;
+      select floor(s.qty * coalesce(ratio, 1) + 0.000000001)::integer - floor(coalesce(sum(z.qty), 0))::integer into want
         from kaibot.deadman_sells(ord, sym) z
         where z.type in ('stop', 'stop_limit')
           and (kaibot.deadman_coid(z.coid))[1] = kaibot.deadman_clean(s.strategy);
@@ -186,14 +195,14 @@ begin
                               and st->>'symbol' = sym and st->>'strategy' = s.strategy
                               and (st->>'qty')::integer >= want);
       q := least(want, floor(free)::integer);
-      if s.stop_px is not null and s.stop_px > 0 and (last is null or s.stop_px < last) then
-        px := round(s.stop_px, 2); why := 'known stop';
+      if sp is not null and sp > 0 and (last is null or sp < last) then
+        px := round(sp, 2); why := 'known stop';
       elsif last is null then
-        px := case when s.stop_px > 0 then round(s.stop_px, 2) end; why := 'known stop (no last price)';
+        px := case when sp > 0 then round(sp, 2) end; why := 'known stop (no last price)';
       else
         px := floor(last * 0.90 * 100) / 100;
-        why := 'emergency: 10% below the last price ' || case when s.stop_px is null then '(no stop known)'
-               else format('(stop %s not below the last price %s)', s.stop_px, last) end;
+        why := 'emergency: 10% below the last price ' || case when sp is null then '(no stop known)'
+               else format('(stop %s not below the last price %s)', sp, last) end;
       end if;
       if q >= 1 and px is not null then
         perform net.http_post(

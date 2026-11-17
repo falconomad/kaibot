@@ -61,3 +61,38 @@ def test_intraday_shares_with_their_legs_are_still_sold_beside_the_book():
 def test_unchanged_books_plan_as_before():
     p = fs.plan(pos(B=40), [], book(("B", 40)), flatten=True, names=(MD,))
     assert p.multi_day["B"] == 40 and not p.sell and not p.close and not any("split" in a for a in p.alarms)
+
+
+def book_at(stop, *sleeves):
+    return fs.BookView([fs.SleeveView(MD, s, q, stop) for s, q in sleeves], "store", 1)
+
+
+def test_a_reverse_split_re_creates_its_cancelled_stop_on_todays_basis():
+    """QA on #291: Alpaca cancels GTC stops on a reverse split. The book's stop ($4, yesterday's basis) under a $50
+    stock would be no protection: the stop covers the broker's shares at the emergency price instead."""
+    p = fs.plan({"B": {"qty": "4", "current_price": "50"}}, [], book_at(4.0, ("B", 40)), flatten=True, names=(MD,))
+    assert [(s.symbol, s.qty, s.stop) for s in p.stops] == [("B", 4, 45.0)] and not p.unprotected
+    assert p.stops[0].why.startswith("emergency")
+
+
+def test_a_forward_split_protects_every_kept_share():
+    p = fs.plan({"B": {"qty": "80", "current_price": "50"}}, [], book_at(80.0, ("B", 40)), flatten=True, names=(MD,))
+    assert p.multi_day["B"] == 80 and [(s.qty, s.stop) for s in p.stops] == [(80, 45.0)] and not p.unprotected
+    # 41 shares at 3-for-2 is 61.5; the broker holds 60 (+-1 tolerance): the stop never asks for the 61st share
+    p = fs.plan({"B": {"qty": "60", "current_price": "50"}}, [], book_at(80.0, ("B", 41)), flatten=True, names=(MD,))
+    assert p.multi_day["B"] == 60 and [s.qty for s in p.stops] == [60] and not p.unprotected
+
+
+def test_a_renamed_holding_gets_the_old_symbols_stop_back():
+    """QA on #291: Alpaca cancels GTC stops on a symbol change; the kept holding must not be left unprotected."""
+    p = fs.plan({"B2": {"qty": "40", "current_price": "100"}}, [], book_at(95.0, ("B", 40)), flatten=True,
+                names=(MD,))
+    assert [(s.strategy, s.symbol, s.qty, s.stop) for s in p.stops] == [(MD, "B2", 40, 90.0)]
+    assert p.multi_day == {"B2": 40} and not p.close and not p.unprotected
+    # the next pass sees its own stop on B2: still multi-day, nothing added, nothing sold
+    st = p.stops[0]
+    legs = [{"id": "d1", "symbol": "B2", "side": "sell", "type": "stop", "qty": "40", "status": "new",
+             "client_order_id": f"kbwd-{MD}-B2-20261117100000-wdstop", "stop_price": str(st.stop)}]
+    p = fs.plan({"B2": {"qty": "40", "current_price": "100"}}, legs, book_at(95.0, ("B", 40)), flatten=True,
+                names=(MD,))
+    assert p.multi_day == {"B2": 40} and not p.stops and not p.close and not p.sell
