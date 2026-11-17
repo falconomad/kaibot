@@ -373,12 +373,15 @@ class Engine:
         self._closed_cache: tuple | None = None
         self._breach: tuple[int, datetime] | None = None  # #211: (run, first check) of an unconfirmed book breach
         self._breach_rid: int | None = None  # the run whose journalled breach `_breach` was read for
+        self.book_line: dict | None = None  # #229: the multi-day book's peak and stop line (heartbeat)
+        self._book_peak_ts: str | None = None
 
     # ================= lifecycle =================
     def startup(self) -> None:
         self.run = self.store.active_run()
         self._restore_positions()
         self._attach_ledger()
+        self._rebuild_md_exits()  # #252: a flatten sale sent before a restart is still booked when it fills
         try:
             self._adopt_orphans()
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
@@ -568,6 +571,8 @@ class Engine:
         if self.daily is not None:
             try:
                 st["multi_day"] = self.daily.status(self.now().astimezone(_et()).date())
+                if self.book_line is not None and self.book_line.get("run_id") == self._rid():
+                    st["multi_day"]["book_line"] = dict(self.book_line)  # #229
             except Exception:
                 log.exception("daily path status unavailable")
         return st
@@ -609,6 +614,7 @@ class Engine:
         for _, _, _, e in self.journal.entries(kinds=("md_book_peak",)):
             if e.get("run_id") == rid:
                 peak = float(e["peak"])
+                self._book_peak_ts = e.get("ts")
         return peak
 
     def _book_end_check(self, book_pnl: float) -> None:
@@ -625,6 +631,8 @@ class Engine:
             return
         ended = self.daily.account.book_ended()
         if ended:
+            if self.book_line is not None and self.book_line.get("run_id") == rid:
+                self.book_line = {**self.book_line, "ended": True}
             if self._md_sleeves():  # closed: whatever is still held is sold (a sale under way is not repeated)
                 self._flatten_md("book_drawdown", {}, self.monotonic())
             return
@@ -636,7 +644,12 @@ class Engine:
         peak = self._book_peak(rid)
         if peak is None or equity > peak + 0.005:
             peak = max(peak or float(b.amount), equity)
-            self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self.now().isoformat()})
+            self._book_peak_ts = self.now().isoformat()
+            self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self._book_peak_ts})
+        # #229, reporting only: the book's distance to its stop line, repeated in every heartbeat (`_daily_status`)
+        self.book_line = {"run_id": rid, "equity": round(equity, 2), "peak": round(peak, 2),
+                          "peak_ts": self._book_peak_ts, "drawdown_pct": round(drawdown_pct(peak, equity), 2),
+                          "end_pct": end, "ended": False}
         if self._breach_rid != rid:  # QA-Ops second key on #213: an unconfirmed breach survives a restart
             self._breach, self._breach_rid = self._journalled_breach(rid), rid
         if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
@@ -814,7 +827,7 @@ class Engine:
                                     strategy=",".join(k[0] for k, _ in keys), qty=sum(q for _, q in keys),
                                     reason=reason)
                     if o:
-                        self._md_exits[o["id"]] = {"run_id": rid, "keys": keys, "reason": reason}
+                        self._md_exit_sent(o, rid, keys, reason)
                     continue
                 for k, q in keys:
                     for oo in self.broker.open_orders():
@@ -826,27 +839,77 @@ class Engine:
                     o = self._order("sell", lambda sym=sym, q=q, coid=coid: self.broker.submit(
                         OrderRequest(sym, "sell", q, "market", "day", coid)), coid=coid, symbol=sym,
                         strategy=k[0], qty=q, reason=reason)
-                    self._md_exits[o["id"]] = {"run_id": rid, "keys": [(k, q)], "reason": reason}
+                    self._md_exit_sent(o, rid, [(k, q)], reason)
                 failed.pop(sym, None)
             except Exception as e:
                 log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
                 failed[sym] = e
+
+    def _md_exit_sent(self, o: dict, rid, keys: list, reason: str) -> None:
+        """#252: a multi-day flatten sale is journalled as soon as the venue has given it an id (`md_exit`), so a
+        restart before its fill still books it (`_rebuild_md_exits`)."""
+        self._md_exits[o["id"]] = {"run_id": rid, "keys": keys, "reason": reason}
+        self.journal.append("md_exit", {"order_id": o["id"], "run_id": rid, "coid": o.get("client_order_id"),
+                                        "keys": [[list(k), q] for k, q in keys], "reason": reason,
+                                        "ts": self.now().isoformat()})
+
+    def _rebuild_md_exits(self) -> None:
+        """#252: the multi-day flatten sales journalled as sent and not yet booked or dropped (start-up)."""
+        done = {b.get("order_id") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",))}
+        sent = set()
+        for _, _, _, b in self.journal.entries(kinds=("md_exit",)):
+            sent.add(b.get("coid"))
+            if b.get("order_id") in done:
+                continue
+            self._md_exits[b["order_id"]] = {"run_id": b.get("run_id"), "reason": b.get("reason"),
+                                             "keys": [((k[0], k[1]), float(q)) for k, q in b.get("keys") or []]}
+        # QA-Ops (#279): a sleeve's own market sale (`kbfl-` client id) whose intent is journalled but whose md_exit
+        # is not (the process died between the broker call and the entry) is found at the venue by its client id
+        # and rebuilt, so it is booked when it fills and the next flatten does not send it again. (A close_position
+        # has no client id: that window stays, and the reconciliation shows it as a share difference.)
+        for _, _, _, b in self.journal.entries(kinds=("intent",)):
+            coid = str(b.get("coid") or "")
+            if b.get("action") != "sell" or not coid.startswith("kbfl-") or coid in sent:
+                continue
+            try:
+                o = self.broker.order_by_client_id(coid)
+            except Exception:
+                log.exception("multi-day flatten sale %s: unreadable at the venue (the reconciliation decides)", coid)
+                continue
+            if o and o.get("id") and o["id"] not in self._md_exits and o["id"] not in done:
+                self._md_exit_sent(o, b.get("run_id"), [((b.get("strategy"), b.get("symbol")), float(b["qty"]))],
+                                   str(b.get("reason") or "flatten"))
+                sent.add(coid)
+
+    def _md_exit_booked(self, oid: str, strategy: str, symbol: str) -> bool:
+        """The ledger already holds this sale's fill for this sleeve (a crash after its booking, before
+        `md_exit_done`; QA-Ops: per sleeve, so a crash between two sleeves of one order books the second)."""
+        return any(b.get("order_id") == oid and b.get("side") == "sell" and b.get("strategy") == strategy
+                   and b.get("symbol") == symbol for _, _, _, b in self.journal.entries(kinds=("fill",)))
 
     def _sync_md_exits(self) -> None:
         for oid, x in list(self._md_exits.items()):
             o = self.broker.order(oid)
             if o["status"] == "filled":
                 px, ts = float(o["filled_avg_price"]), o.get("filled_at")
-                for (strategy, sym), q in x["keys"]:
-                    if x["run_id"] is not None:
-                        self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
-                                            "side": "sell", "qty": q, "px": px, "fees": sell_fees(q, px),
-                                            "coid": o.get("client_order_id"), "ts": ts, "reason": x["reason"]})
-                keys = [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]
-                self.store.event("multi_day_sold", {"order_id": oid, "keys": keys, "px": px,
-                                                    "reason": x["reason"]}, self._rid())
+                fresh = [(k, q) for k, q in x["keys"] if not self._md_exit_booked(oid, k[0], k[1])]
+                if fresh:
+                    fees = (self._venue_fees(oid, ts, o.get("submitted_at") or o.get("created_at"))
+                            if x["run_id"] is not None else 0.0)  # #238: the venue's fee
+                    total = sum(q for _, q in x["keys"]) or 1.0
+                    for (strategy, sym), q in fresh:
+                        if x["run_id"] is not None:  # one order for every sleeve of the symbol: its fee by shares
+                            self._book("fill", {"run_id": x["run_id"], "strategy": strategy, "symbol": sym,
+                                                "side": "sell", "qty": q, "px": px, "fees": fees * q / total,
+                                                "coid": o.get("client_order_id"), "order_id": oid, "ts": ts,
+                                                "reason": x["reason"]})
+                    keys = [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]
+                    self.store.event("multi_day_sold", {"order_id": oid, "keys": keys, "px": px,
+                                                        "reason": x["reason"]}, self._rid())
+                self.journal.append("md_exit_done", {"order_id": oid, "state": "booked"})
                 self._md_exits.pop(oid)
             elif o["status"] in ("canceled", "expired", "rejected"):
+                self.journal.append("md_exit_done", {"order_id": oid, "state": o["status"]})
                 self._md_exits.pop(oid)  # not sold: the next full flatten tries again
 
     def _attach_ledger(self) -> None:
@@ -1205,6 +1268,8 @@ class Engine:
             elif self.day is None:
                 self._finalize_missed(now)  # S77 (audit D8): a restart after the close still closes the day
             self._daily_step("after_close", lambda: self._daily_after_close(now))  # #206: decide for the next session
+            if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+                self._daily_step("preopen", lambda: self.daily.preopen())  # the pre-open review, from 08:30 ET
             self._maybe_prepare(clk, now)
             return self._daily_status({"state": "market_closed", "next_open": clk.get("next_open"),
                                        "account_clean": self.account_clean})
@@ -1236,6 +1301,8 @@ class Engine:
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
         self._manage_stops(m)
+        if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+            self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
         self._daily_step("send", lambda: self.daily.send(d.day))  # #206: closing-auction orders, 09:31-15:45 ET
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
@@ -1828,14 +1895,54 @@ class Engine:
                 continue
             if p.exit_order_id:  # we sent a market sell (time / daily stop / manual)
                 if o["status"] == "filled":
-                    self._on_exit_fill(p, float(o["filled_avg_price"]), p.exit_reason or "manual", o.get("filled_at"))
+                    self._on_exit_fill(p, float(o["filled_avg_price"]), p.exit_reason or "manual", o.get("filled_at"),
+                                       o.get("id"), o.get("submitted_at") or o.get("created_at"))
                 continue
             for leg in o.get("legs") or []:
                 if leg["status"] == "filled":
                     is_target = leg.get("type") == "limit"
                     reason = "target" if is_target else ("trail" if p.armed else "stop")
-                    self._on_exit_fill(p, float(leg["filled_avg_price"]), reason, leg.get("filled_at"))
+                    self._on_exit_fill(p, float(leg["filled_avg_price"]), reason, leg.get("filled_at"), leg.get("id"),
+                                       leg.get("submitted_at") or o.get("submitted_at") or o.get("created_at"))
                     break
+
+    def _venue_fees(self, order_id: str | None, ts, since=None) -> float:
+        """#238: the fees the venue charged on this order's fills: the `fees` of its FILL activities from a minute
+        before the order was sent (`since`, its `submitted_at`) or else a minute before the fill (`ts`) on, each
+        activity once. `SimBroker` reports them there; Alpaca's FILL activities carry none (its regulatory fees are
+        separate FEE activities at the end of the day), so nothing is booked on the fill. Never an estimate: an
+        estimate the venue does not charge piles up in the ledger's cash with every sale until the reconciliation
+        blocks entries. A failed read books 0 and says so (the reconciliation then shows any difference).
+        QA-Ops (#241): from the order's sending, not from its last fill, so the parts of a partly filled order that
+        traded more than a minute before the last part are counted; and by activity id, so an activity the venue
+        reports twice (a repeated page) is counted once."""
+        if order_id is None:
+            return 0.0
+        after = None
+        for t in (ts, since):
+            if t:
+                t = t if isinstance(t, datetime) else datetime.fromisoformat(str(t))
+                t = t - timedelta(minutes=1)
+                after = t if after is None or t < after else after
+        try:
+            rows = self.broker.activities(after, types=("FILL",))
+        except Exception as e:  # a fee unread must not stop booking the fill
+            log.warning("venue fee of order %s unread: %s", order_id, e)
+            self.store.event("venue_fee_unread", {"order_id": order_id, "error": f"{type(e).__name__}: {e}"[:160]},
+                             (self.run or {}).get("id"))
+            return 0.0
+        seen: set = set()
+        total = 0.0
+        for a in rows:
+            if str(a.get("order_id")) != str(order_id):
+                continue
+            aid = a.get("id")
+            if aid is not None:
+                if aid in seen:
+                    continue
+                seen.add(aid)
+            total += float(a.get("fees") or 0.0)
+        return total
 
     def _on_entry_fill(self, p: Pos, o: dict) -> None:
         p.fill = float(o["filled_avg_price"])
@@ -1887,11 +1994,14 @@ class Engine:
             },
         )
 
-    def _on_exit_fill(self, p: Pos, px: float, reason: str, ts) -> None:
-        fees = sell_fees(p.qty, px)
+    def _on_exit_fill(self, p: Pos, px: float, reason: str, ts, order_id: str | None = None, since=None) -> None:
+        # #238: the ledger and the venue P&L book the fee the venue charged on this order; the shadow P&L keeps the
+        # shadow cost model's own estimate (it prices what the trade would cost, not what it cost)
+        fees = self._venue_fees(order_id, ts, since)
+        fees_shadow = sell_fees(p.qty, px)
         shadow_exit = px if reason == "target" else sell_px(px, p.qty, p.sigma, self.market.bar_volume(p.symbol))
         pnl_v = (px - p.fill) * p.qty - fees
-        pnl_s = (shadow_exit - (p.shadow_entry or p.fill)) * p.qty - fees
+        pnl_s = (shadow_exit - (p.shadow_entry or p.fill)) * p.qty - fees_shadow
         self.store.insert(
             "fill",
             {

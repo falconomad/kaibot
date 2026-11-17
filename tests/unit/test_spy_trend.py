@@ -79,7 +79,7 @@ def test_checks_are_the_last_session_of_each_month_and_week():
     m = d[st.check_flags(d, "month")]
     assert [str(x) for x in m] == ["2026-01-30", "2026-02-27"], "the last stored session is never a check"
     w = d[st.check_flags(d, "week")]
-    assert all(pd.Timestamp(x).dayofweek == 4 for x in w)
+    assert all(pd.Timestamp(x).day_of_week == 4 for x in w)
 
 
 def test_the_ten_month_average_is_the_mean_of_ten_month_end_closes(market):

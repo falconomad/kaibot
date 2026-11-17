@@ -112,6 +112,7 @@ class DailyData:
     split: np.ndarray | None = None  # shares per share at the session's open
     div: np.ndarray | None = None  # cash per share of the previous close's shares, ex-date this session
     terminal: dict[int, tuple[int, float]] = field(default_factory=dict)  # column -> (last bar, return)
+    dropped: dict[str, str] = field(default_factory=dict)  # live gate (#230): stocks left out tonight -> why
     exits: dict[int, list[int]] = field(default_factory=dict)  # column -> sessions it is sold at the close
     spy_tr: np.ndarray | None = None  # SPY total return per session (None: price only)
     universe: str = "today"

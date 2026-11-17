@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import subprocess
 from datetime import UTC, date, datetime, timedelta
 
@@ -565,3 +566,62 @@ def test_timestamps_in_fixtures_are_midnight_new_york():
     assert db.session_date("2026-10-27T04:00:00Z") == date(2026, 10, 27)
     assert db.session_date("2026-11-11T05:00:00Z") == date(2026, 11, 11)
     assert [db.session_date(b["t"]) for b in adjusted(FIX_RAW["bars"])][0] == date(2026, 10, 19)
+
+
+# ---------------------------------------------------------------- verified fixes to Alpaca's table (PR C, #262)
+
+
+def test_every_fix_is_well_formed_and_cites_a_primary_source():
+    fixes = db.load_fixes()
+    assert fixes, "the fixes file is empty"
+    for f in fixes:
+        assert f["type"] in db.SHARE_TYPES and f["ratio"] > 0 and f["source"].startswith("https://")
+        assert f["id"].startswith("kaibot-fix:") and f["key"] and f["dup"] is False
+        assert set(db.ACTIONS_SCHEMA.names) <= set(f)
+    got = {(f["key"], f["type"], f["ex_date"].isoformat(), round(f["ratio"], 6)) for f in fixes}
+    assert ("BALL@2026-11-05", "forward_split", "2017-05-17", 2.0) in got
+    assert ("EXE@2026-11-05", "reverse_split", "2020-04-15", 0.005) in got
+    assert ("DOW@2017-08-24", "reverse_split", "2026-06-24", round(1 / 3, 6)) in got
+
+
+def test_a_fix_is_added_only_inside_its_keys_bars_and_only_when_alpaca_lacks_it():
+    fix = {**db.normalise_action("forward_split", {"symbol": "BLL", "old_rate": 1, "new_rate": 2,
+                                                   "ex_date": "2017-05-17"})[0],
+           "key": "BALL@2026-11-05", "id": "kaibot-fix:1", "dup": False, "source": "https://example.org/8-k"}
+    span = db.Span("BALL@2026-11-05", "BALL", date(2016, 1, 4), date(2026, 11, 13), ended=False)
+    late = db.Span("BALL@2026-11-05", "BALL", date(2018, 1, 2), date(2026, 11, 13), ended=False)
+    assert [r["id"] for r in db.with_fixes([], [span], [fix])] == ["kaibot-fix:1"]
+    assert db.with_fixes([], [late], [fix]) == []  # before the key's first bar: nothing to adjust
+    assert db.with_fixes([], [], [fix]) == []  # key not in the store
+    alpaca_has = {**fix, "id": "alpaca-1", "raw": "{}"}
+    assert [r["id"] for r in db.with_fixes([alpaca_has], [span], [fix])] == ["alpaca-1"]
+
+
+def test_sync_actions_writes_the_fixes_into_the_table(tmp_path, alpaca, monkeypatch):
+    fix = {**db.normalise_action("forward_split", {"symbol": "AAA", "old_rate": 1, "new_rate": 2,
+                                                   "ex_date": "2026-10-15"})[0],
+           "key": "AAA", "id": "kaibot-fix:9", "dup": False, "source": "https://example.org/8-k"}
+    monkeypatch.setattr(db, "load_fixes", lambda path=None: [fix])
+    assert run(tmp_path, "--symbols", "AAA") == 0
+    t = pq.read_table(db.actions_path(store(tmp_path))).to_pylist()
+    mine = [r for r in t if r["id"] == "kaibot-fix:9"]
+    assert len(mine) == 1 and mine[0]["key"] == "AAA" and mine[0]["ratio"] == 2.0
+    assert db.read_meta(db.actions_path(store(tmp_path)))["fixes"] == 1
+
+
+def test_a_fix_stays_out_when_alpaca_lists_the_same_split_a_few_days_apart():
+    """QA-Ops (#264): once Alpaca lists the action itself, dated a session or two from the filing (or as a stock
+    dividend instead of a split), the fix goes quiet, so the split is never applied twice; another action of the
+    key is no reason to drop it."""
+    fix = {**db.normalise_action("forward_split", {"symbol": "BLL", "old_rate": 1, "new_rate": 2,
+                                                   "ex_date": "2017-05-17"})[0],
+           "key": "BALL@2026-11-05", "id": "kaibot-fix:1", "dup": False, "source": "https://example.org/8-k"}
+    span = db.Span("BALL@2026-11-05", "BALL", date(2016, 1, 4), date(2026, 11, 13), ended=False)
+    for ex, kind in ((date(2017, 5, 16), "forward_split"), (date(2017, 5, 19), "stock_dividend")):
+        alpaca = {**fix, "id": "alpaca-1", "raw": "{}", "ex_date": ex, "type": kind}
+        assert [r["id"] for r in db.with_fixes([alpaca], [span], [fix])] == ["alpaca-1"], (ex, kind)
+    other = [{**fix, "id": "alpaca-2", "raw": "{}", "ex_date": date(2017, 5, 16), "ratio": 1.05},  # other ratio
+             {**fix, "id": "alpaca-3", "raw": "{}", "ex_date": date(2018, 5, 17)},  # a year later
+             {**fix, "id": "alpaca-4", "raw": "{}", "type": "cash_dividend", "ratio": math.nan}]
+    assert sorted(r["id"] for r in db.with_fixes(other, [span], [fix])) == [
+        "alpaca-2", "alpaca-3", "alpaca-4", "kaibot-fix:1"]

@@ -671,7 +671,7 @@
   {
    "config_version": 0,
    "pnl_shadow": -138.56,
-   "pnl_venue": -85.25,
+   "pnl_venue": -82.64,
    "run_id": 3,
    "session": "2026-09-15",
    "spy_ret": 0.007909,
@@ -680,7 +680,7 @@
   {
    "config_version": 0,
    "pnl_shadow": 41.45,
-   "pnl_venue": 117.44,
+   "pnl_venue": 120.59,
    "run_id": 3,
    "session": "2026-09-16",
    "spy_ret": -0.00146,
@@ -689,7 +689,7 @@
   {
    "config_version": 0,
    "pnl_shadow": 24.49,
-   "pnl_venue": 44.39,
+   "pnl_venue": 45.9,
    "run_id": 3,
    "session": "2026-09-17",
    "spy_ret": 0.000252,
@@ -711,7 +711,7 @@
   ],
   [
    "session_end",
-   "e1bed2aec9d9ebe8"
+   "cc54689b803b0054"
   ],
   [
    "shadow_session_end",
@@ -723,7 +723,7 @@
   ],
   [
    "session_end",
-   "456954715c657d99"
+   "091d5ec4203ffb41"
   ],
   [
    "shadow_session_end",
@@ -735,7 +735,7 @@
   ],
   [
    "session_end",
-   "8ad0bd711a6dc816"
+   "80677b3e665be048"
   ],
   [
    "shadow_session_end",
@@ -764,7 +764,7 @@
    "venue_px": 59.67
   },
   {
-   "fees": 0.4149,
+   "fees": 0.0,
    "id": 97,
    "order_id": 78,
    "qty": 48,
@@ -775,7 +775,7 @@
    "venue_px": 304.96
   },
   {
-   "fees": 0.4613,
+   "fees": 0.0,
    "id": 98,
    "order_id": 82,
    "qty": 251,
@@ -806,7 +806,7 @@
    "venue_px": 131.74
   },
   {
-   "fees": 0.4342,
+   "fees": 0.0,
    "id": 241,
    "order_id": 210,
    "qty": 114,
@@ -817,7 +817,7 @@
    "venue_px": 131.04
   },
   {
-   "fees": 0.4584,
+   "fees": 0.0,
    "id": 296,
    "order_id": 195,
    "qty": 252,
@@ -848,7 +848,7 @@
    "venue_px": 638.66
   },
   {
-   "fees": 0.43,
+   "fees": 0.0,
    "id": 427,
    "order_id": 377,
    "qty": 94,
@@ -859,7 +859,7 @@
    "venue_px": 158.59
   },
   {
-   "fees": 0.411,
+   "fees": 0.0,
    "id": 431,
    "order_id": 397,
    "qty": 23,
@@ -880,7 +880,7 @@
    "venue_px": 44.03
   },
   {
-   "fees": 0.4703,
+   "fees": 0.0,
    "id": 554,
    "order_id": 535,
    "qty": 340,
@@ -921,7 +921,7 @@
    "venue_px": 288.38
   },
   {
-   "fees": 0.4329,
+   "fees": 0.0,
    "id": 620,
    "order_id": 596,
    "qty": 96,
@@ -932,7 +932,7 @@
    "venue_px": 156.23
   },
   {
-   "fees": 0.4623,
+   "fees": 0.0,
    "id": 622,
    "order_id": 600,
    "qty": 258,
@@ -953,7 +953,7 @@
    "venue_px": 43.54
   },
   {
-   "fees": 0.4152,
+   "fees": 0.0,
    "id": 635,
    "order_id": 604,
    "qty": 51,
@@ -974,7 +974,7 @@
    "venue_px": 285.05
   },
   {
-   "fees": 0.4211,
+   "fees": 0.0,
    "id": 711,
    "order_id": 664,
    "qty": 52,
@@ -985,7 +985,7 @@
    "venue_px": 285.31
   },
   {
-   "fees": 0.4741,
+   "fees": 0.0,
    "id": 720,
    "order_id": 628,
    "qty": 344,
@@ -1006,7 +1006,7 @@
    "venue_px": 42.47
   },
   {
-   "fees": 0.4748,
+   "fees": 0.0,
    "id": 870,
    "order_id": 831,
    "qty": 353,
@@ -1047,7 +1047,7 @@
    "venue_px": 59.21
   },
   {
-   "fees": 0.204,
+   "fees": 0.0,
    "id": 974,
    "order_id": 959,
    "qty": 26,
@@ -1058,7 +1058,7 @@
    "venue_px": 276.26
   },
   {
-   "fees": 0.2114,
+   "fees": 0.0,
    "id": 976,
    "order_id": 955,
    "qty": 48,
@@ -1069,7 +1069,7 @@
    "venue_px": 152.46
   },
   {
-   "fees": 0.2275,
+   "fees": 0.0,
    "id": 982,
    "order_id": 963,
    "qty": 126,
@@ -1100,7 +1100,7 @@
    "venue_px": 58.05
   },
   {
-   "fees": 0.2297,
+   "fees": 0.0,
    "id": 1156,
    "order_id": 1143,
    "qty": 128,
@@ -1111,7 +1111,7 @@
    "venue_px": 58.57
   },
   {
-   "fees": 0.2141,
+   "fees": 0.0,
    "id": 1159,
    "order_id": 1133,
    "qty": 28,
@@ -1142,7 +1142,7 @@
    "venue_px": 57.37
   },
   {
-   "fees": 0.2287,
+   "fees": 0.0,
    "id": 1305,
    "order_id": 1280,
    "qty": 130,
@@ -1153,7 +1153,7 @@
    "venue_px": 57.3
   },
   {
-   "fees": 0.1963,
+   "fees": 0.0,
    "id": 1309,
    "order_id": 1270,
    "qty": 11,
@@ -1216,14 +1216,14 @@
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "16055931f197968c",
+   "checks": "d0f89a95ab119eb5",
    "qty": 94,
    "signal_id": 375
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "34ea12c4084ee779",
+   "checks": "34e426a881886f5a",
    "qty": 23,
    "signal_id": 395
   },
@@ -1244,56 +1244,56 @@
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "9515e06a41292451",
+   "checks": "fb7ea1d122f55f9b",
    "qty": 96,
    "signal_id": 594
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "909156a6c537a730",
+   "checks": "c526935625451b37",
    "qty": 258,
    "signal_id": 598
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "4493a2f1c2b336a4",
+   "checks": "340715ce763ae7fd",
    "qty": 51,
    "signal_id": 602
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "dd50901647d66a98",
+   "checks": "f9def6d87bed528a",
    "qty": 344,
    "signal_id": 626
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "05dc41f2cb04ab76",
+   "checks": "e2a489951e3d42dc",
    "qty": 52,
    "signal_id": 662
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "8b17f2c5b9888e07",
+   "checks": "1bfabfa67d348fa8",
    "qty": 353,
    "signal_id": 829
   },
   {
    "approved": false,
    "binding": "position_cap",
-   "checks": "2ed63400c9cd2f40",
+   "checks": "7d394a49b6258082",
    "qty": 0,
    "signal_id": 833
   },
   {
    "approved": false,
    "binding": "position_cap",
-   "checks": "7089bb23fb3d01f0",
+   "checks": "bc13d653eb6d51e7",
    "qty": 0,
    "signal_id": 841
   },
@@ -1321,28 +1321,28 @@
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "485377212a34c711",
+   "checks": "509b7c270cfbf412",
    "qty": 28,
    "signal_id": 1131
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "4ebcf9d8ef34b0a5",
+   "checks": "16fdf7e5d31f212f",
    "qty": 128,
    "signal_id": 1141
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "2e744d8a491b76da",
+   "checks": "888ef859db8eb5f2",
    "qty": 11,
    "signal_id": 1268
   },
   {
    "approved": true,
    "binding": "position_cap",
-   "checks": "3220d4c2da6a0a9c",
+   "checks": "c7a97654428aea55",
    "qty": 130,
    "signal_id": 1278
   }
@@ -1350,9 +1350,9 @@
  "halts": [],
  "ledger": {
   "last": {
-   "cash": 92929.55,
+   "cash": 92930.19,
    "equity_shadow": 99931.58,
-   "equity_venue": 99949.23,
+   "equity_venue": 99950.55,
    "id": 1308,
    "positions": {
     "SPY": {
@@ -1369,7 +1369,7 @@
    "ts": "2026-09-17T19:59:07+00:00"
   },
   "rows": 1167,
-  "sha": "89036e2e25cd5026"
+  "sha": "97f1d10d50c0d872"
  },
  "orders": [
   {
@@ -1642,7 +1642,7 @@
    "status": "running"
   }
  ],
- "sha_of_every_row": "1f287afe848bba1e",
+ "sha_of_every_row": "c965678893df1540",
  "signals": [
   {
    "entry": 306.49,
@@ -1930,11 +1930,11 @@
    "exit_px": 304.96,
    "exit_reason": "stop",
    "exit_ts": "2026-09-15T14:50:00+00:00",
-   "features": "cccaab42bac6938a",
+   "features": "9ebb3120ebee03ee",
    "id": 79,
    "pnl_shadow": -76.495878,
    "pnl_usd": -76.5,
-   "pnl_venue": -73.374907,
+   "pnl_venue": -72.96,
    "qty": 48,
    "risk_usd": 73.285714,
    "stop_px": 304.953214,
@@ -1950,11 +1950,11 @@
    "exit_px": 60.14,
    "exit_reason": "target",
    "exit_ts": "2026-09-15T14:50:00+00:00",
-   "features": "2e446b4560e70008",
+   "features": "766e026d9a8ec65a",
    "id": 83,
    "pnl_shadow": 105.687894,
    "pnl_usd": 105.69,
-   "pnl_venue": 117.508689,
+   "pnl_venue": 117.97,
    "qty": 251,
    "risk_usd": 58.3575,
    "stop_px": 59.8675,
@@ -1970,11 +1970,11 @@
    "exit_px": 59.46,
    "exit_reason": "trail",
    "exit_ts": "2026-09-15T17:56:00+00:00",
-   "features": "719ef17125e195ed",
+   "features": "6b500d9e5a85b3cc",
    "id": 196,
    "pnl_shadow": 14.625288,
-   "pnl_usd": 12.14,
-   "pnl_venue": 12.141615,
+   "pnl_usd": 12.6,
+   "pnl_venue": 12.6,
    "qty": 252,
    "risk_usd": 51.3,
    "stop_px": 59.456429,
@@ -1990,11 +1990,11 @@
    "exit_px": 131.04,
    "exit_reason": "stop",
    "exit_ts": "2026-09-15T17:02:00+00:00",
-   "features": "0194e120b333bbbf",
+   "features": "51b4654f36dd9173",
    "id": 211,
    "pnl_shadow": -104.314889,
    "pnl_usd": -104.31,
-   "pnl_venue": -80.234216,
+   "pnl_venue": -79.8,
    "qty": 114,
    "risk_usd": 79.637143,
    "stop_px": 131.041429,
@@ -2010,11 +2010,11 @@
    "exit_px": 158.59,
    "exit_reason": "time",
    "exit_ts": "2026-09-15T19:56:00+00:00",
-   "features": "da7d114544549c30",
+   "features": "9693c28683e53da2",
    "id": 378,
    "pnl_shadow": -31.766288,
    "pnl_usd": -31.77,
-   "pnl_venue": -20.170031,
+   "pnl_venue": -19.74,
    "qty": 94,
    "risk_usd": 85.405714,
    "stop_px": 157.891429,
@@ -2030,11 +2030,11 @@
    "exit_px": 636.89,
    "exit_reason": "moc",
    "exit_ts": "2026-09-15T19:59:00+00:00",
-   "features": "b466c657ef5a2d76",
+   "features": "727ed9a2054595f0",
    "id": 398,
    "pnl_shadow": -46.293311,
    "pnl_usd": -46.29,
-   "pnl_venue": -41.121045,
+   "pnl_venue": -40.71,
    "qty": 23,
    "risk_usd": 43.420714,
    "stop_px": 636.772143,
@@ -2050,11 +2050,11 @@
    "exit_px": 43.79,
    "exit_reason": "stop",
    "exit_ts": "2026-09-16T15:20:00+00:00",
-   "features": "afd7d3ece261bcad",
+   "features": "6942afb8a827b6fd",
    "id": 536,
    "pnl_shadow": -78.162049,
-   "pnl_usd": -82.07,
-   "pnl_venue": -82.070343,
+   "pnl_usd": -81.6,
+   "pnl_venue": -81.6,
    "qty": 340,
    "risk_usd": 81.235714,
    "stop_px": 43.791071,
@@ -2070,11 +2070,11 @@
    "exit_px": 156.23,
    "exit_reason": "target",
    "exit_ts": "2026-09-16T16:10:00+00:00",
-   "features": "a1f25dbce732635b",
+   "features": "694f891c72d16af0",
    "id": 597,
    "pnl_shadow": 142.269976,
-   "pnl_usd": 137.81,
-   "pnl_venue": 137.807117,
+   "pnl_usd": 138.24,
+   "pnl_venue": 138.24,
    "qty": 96,
    "risk_usd": 69.325714,
    "stop_px": 155.387857,
@@ -2090,11 +2090,11 @@
    "exit_px": 58.49,
    "exit_reason": "target",
    "exit_ts": "2026-09-16T16:11:00+00:00",
-   "features": "d2c0c1d7246da9da",
+   "features": "30bf9defb511e650",
    "id": 601,
    "pnl_shadow": 118.44013,
    "pnl_usd": 118.44,
-   "pnl_venue": 128.537658,
+   "pnl_venue": 129.0,
    "qty": 258,
    "risk_usd": 64.684286,
    "stop_px": 58.219286,
@@ -2110,11 +2110,11 @@
    "exit_px": 286.85,
    "exit_reason": "stop",
    "exit_ts": "2026-09-16T16:18:00+00:00",
-   "features": "2273b18c4ef5ea91",
+   "features": "5363de9a349c66ec",
    "id": 605,
    "pnl_shadow": -85.017521,
    "pnl_usd": -85.02,
-   "pnl_venue": -78.445162,
+   "pnl_venue": -78.03,
    "qty": 51,
    "risk_usd": 77.811429,
    "stop_px": 286.854286,
@@ -2130,11 +2130,11 @@
    "exit_px": 43.6,
    "exit_reason": "trail",
    "exit_ts": "2026-09-16T17:36:00+00:00",
-   "features": "551c1b054eece8b6",
+   "features": "959dad7e951587d2",
    "id": 629,
    "pnl_shadow": -2.935467,
    "pnl_usd": -2.94,
-   "pnl_venue": 20.16594,
+   "pnl_venue": 20.64,
    "qty": 344,
    "risk_usd": 53.074286,
    "stop_px": 43.595714,
@@ -2150,11 +2150,11 @@
    "exit_px": 285.31,
    "exit_reason": "trail",
    "exit_ts": "2026-09-16T17:28:00+00:00",
-   "features": "e2b32b99714f6bb8",
+   "features": "ae8742e9730580b4",
    "id": 665,
    "pnl_shadow": 9.455029,
    "pnl_usd": 9.46,
-   "pnl_venue": 13.098924,
+   "pnl_venue": 13.52,
    "qty": 52,
    "risk_usd": 73.264286,
    "stop_px": 285.311071,
@@ -2170,11 +2170,11 @@
    "exit_px": 42.41,
    "exit_reason": "time",
    "exit_ts": "2026-09-16T19:56:00+00:00",
-   "features": "871e81697d1e705c",
+   "features": "c581f570d080bfc4",
    "id": 832,
    "pnl_shadow": -62.599956,
    "pnl_usd": -62.6,
-   "pnl_venue": -21.654784,
+   "pnl_venue": -21.18,
    "qty": 353,
    "risk_usd": 86.232857,
    "stop_px": 42.225714,
@@ -2190,11 +2190,11 @@
    "exit_px": 152.46,
    "exit_reason": "stop",
    "exit_ts": "2026-09-17T14:51:00+00:00",
-   "features": "9ec7cc5723bacc18",
+   "features": "d327500e3dd8cea6",
    "id": 956,
    "pnl_shadow": -31.380519,
-   "pnl_usd": -32.37,
-   "pnl_venue": -32.371411,
+   "pnl_usd": -32.16,
+   "pnl_venue": -32.16,
    "qty": 48,
    "risk_usd": 32.04,
    "stop_px": 152.4625,
@@ -2210,11 +2210,11 @@
    "exit_px": 276.26,
    "exit_reason": "stop",
    "exit_ts": "2026-09-17T14:50:00+00:00",
-   "features": "848b49a97cc66d6a",
+   "features": "ecc4604d9a89b414",
    "id": 960,
    "pnl_shadow": -36.783107,
-   "pnl_usd": -37.9,
-   "pnl_venue": -37.903997,
+   "pnl_usd": -37.7,
+   "pnl_venue": -37.7,
    "qty": 26,
    "risk_usd": 37.523571,
    "stop_px": 276.266786,
@@ -2230,11 +2230,11 @@
    "exit_px": 58.98,
    "exit_reason": "stop",
    "exit_ts": "2026-09-17T14:56:00+00:00",
-   "features": "f7c2894929d7e3f7",
+   "features": "37aa8456d81b6b18",
    "id": 964,
    "pnl_shadow": -36.628202,
    "pnl_usd": -36.63,
-   "pnl_venue": -29.207511,
+   "pnl_venue": -28.98,
    "qty": 126,
    "risk_usd": 28.35,
    "stop_px": 58.985,
@@ -2250,11 +2250,11 @@
    "exit_px": 269.07,
    "exit_reason": "target",
    "exit_ts": "2026-09-17T17:41:00+00:00",
-   "features": "45567761f4091f95",
+   "features": "b452fe737d920e19",
    "id": 1134,
    "pnl_shadow": 81.638281,
    "pnl_usd": 81.64,
-   "pnl_venue": 85.745908,
+   "pnl_venue": 85.96,
    "qty": 28,
    "risk_usd": 43.02,
    "stop_px": 267.423571,
@@ -2270,11 +2270,11 @@
    "exit_px": 58.57,
    "exit_reason": "target",
    "exit_ts": "2026-09-17T17:39:00+00:00",
-   "features": "1e4b2b5023f9adfa",
+   "features": "a1cca103b629daf5",
    "id": 1144,
    "pnl_shadow": 56.483412,
    "pnl_usd": 56.48,
-   "pnl_venue": 66.330337,
+   "pnl_venue": 66.56,
    "qty": 128,
    "risk_usd": 33.874286,
    "stop_px": 58.275357,
@@ -2290,11 +2290,11 @@
    "exit_px": 636.05,
    "exit_reason": "moc",
    "exit_ts": "2026-09-17T19:59:00+00:00",
-   "features": "a4d3b216b76bb64f",
+   "features": "ec858c75bb8d10fa",
    "id": 1271,
    "pnl_shadow": -1.119422,
    "pnl_usd": -1.12,
-   "pnl_venue": 1.12367,
+   "pnl_venue": 1.32,
    "qty": 11,
    "risk_usd": 15.227143,
    "stop_px": 634.545714,
@@ -2310,11 +2310,11 @@
    "exit_px": 57.3,
    "exit_reason": "time",
    "exit_ts": "2026-09-17T19:56:00+00:00",
-   "features": "c02d8276f33a2068",
+   "features": "da12e92213fa4e10",
    "id": 1281,
    "pnl_shadow": -7.715927,
-   "pnl_usd": -9.33,
-   "pnl_venue": -9.328662,
+   "pnl_usd": -9.1,
+   "pnl_venue": -9.1,
    "qty": 130,
    "risk_usd": 22.425,
    "stop_px": 57.1975,

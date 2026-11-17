@@ -321,7 +321,8 @@ def test_on_with_the_flags_but_no_key_fails_closed():
     store = FakeStore()
     gw = from_env(store, {"KAIBOT_ROOM": "on"})  # no ANTHROPIC_API_KEY: the gateway has no client
     reviewed, out, _ = run(gw)
-    assert out.status == "invalid" and reviewed == NO_INCREASE and "llm_call" not in store.tables
+    assert out.status == "no_key" and reviewed == NO_INCREASE and "llm_call" not in store.tables
+    assert "ANTHROPIC_API_KEY" in out.error
 
 
 def test_preopen_limits_in_config():

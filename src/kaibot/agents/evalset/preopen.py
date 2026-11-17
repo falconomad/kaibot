@@ -117,3 +117,28 @@ def evaluate(lists: list[dict], reviewer=None, gateway=None) -> dict:
     return {"lists": len(lists), "candidates": n_cands, "statuses": dict(statuses), "verdicts": dict(verdicts),
             "contract_violations": bad, "expected_match": (match / n_expected) if n_expected else None,
             "rows": rows}
+
+
+def from_journal(records) -> list[dict]:
+    """Stored candidate lists (format version 1, as `load_lists` reads them) from the journal's `md_review`
+    bodies (engine/live_daily, agents/preopen_daily), so the offline evals run on the real lists of past sessions.
+    `expected` is the reviewer's own verdict when it answered (status done): a regression check, not a grade."""
+    out = []
+    for n, r in enumerate(records, 1):
+        arms = r.get("arms") or {}
+        if not arms:
+            continue
+        case = {"format_version": FORMAT_VERSION, "synthetic": False,
+                "case_id": f"journal-{r.get('strategy')}-{r.get('session')}-{n}", "session": str(r["session"]),
+                "targets": r.get("targets") or [], "current": {k: a["current"] for k, a in arms.items()},
+                "plan": {k: a["rules"] for k, a in arms.items()}}
+        if r.get("status") == "done" and r.get("verdicts"):
+            case["expected"] = dict(r["verdicts"])
+        out.append(case)
+    return out
+
+
+def write_lists(cases: list[dict], path: Path) -> int:
+    """Write stored lists as JSON lines (the evals' input file). Returns the number written."""
+    Path(path).write_text("".join(json.dumps(c, default=str) + "\n" for c in cases))
+    return len(cases)
