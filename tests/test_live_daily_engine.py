@@ -676,3 +676,30 @@ def test_a_stock_that_is_not_held_is_left_out_and_the_rule_decides(tmp_path, mon
     assert [o["symbol"] for o in a.cls_orders()] == ["B"]
     note = a.eng._status(1)["multi_day"]["note"]
     assert note == f"{MD}: decided without ZZZ: daily prices failed the check ({why})"
+
+def test_a_daily_step_failing_every_tick_is_one_event_until_it_recovers(tmp_path, monkeypatch):
+    """QA-Ops follow-up (Health shows the last 80 events of its types): a step that fails the same way at every tick
+    writes one `multi_day_error`, not one a minute; once it works again, the next failure is an event again."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    broken = {"on": True}
+    real = a.eng.daily.send
+
+    def send(day):
+        if broken["on"]:
+            raise RuntimeError("venue unreachable")
+        return real(day)
+
+    a.eng.daily.send = send
+    a.ticks(a.open2, 0, 20)  # 20 ticks, the same failure each time
+
+    def errors():
+        return [e for e in a.store.tables["event"] if e["type"] == "multi_day_error"]
+
+    assert len(errors()) == 1 and "venue unreachable" in str(errors()[0])
+    broken["on"] = False
+    a.ticks(a.open2, 20, 22)
+    broken["on"] = True
+    a.ticks(a.open2, 22, 25)
+    assert len(errors()) == 2

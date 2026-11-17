@@ -133,9 +133,21 @@ table.list td.r, table.list th.r { text-align: right; }
 .tag { font-size: 12px; font-weight: 700; letter-spacing: .02em; padding: 3px 8px; border-radius: 999px; white-space: nowrap; background: var(--surface-2); color: var(--slate); }
 .tag.allow { color: var(--gain); background: var(--gain-tint); } .tag.veto { color: var(--loss); background: var(--loss-tint); }
 .tag.downgrade { color: var(--warn); background: var(--warn-tint); }
-.badge { display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; color: var(--ink); font-weight: 700; letter-spacing: -0.01em; overflow: hidden; }
-.badge.logo { background: #fff; }
-.badge.logo img { width: 100%; height: 100%; object-fit: contain; padding: 15%; display: block; animation: kb-fade .4s var(--ease) both; }
+/* Company tiles (stakeholder, 17 Nov 2026): an iOS-style continuous-corner squircle (a superellipse, n = 5), the same for
+   a logo and for the initials. The shape is a mask, so the curve is smooth at every size; a hairline (white at 8%)
+   traced on the same curve keeps the tile's edge on the dark glow. The tile is drawn at its size before the logo loads,
+   and the logo fades in: no layout shift. Colours per logo come from data/logo_colors.json (npm run logo-colors). */
+:root { --squircle: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27 preserveAspectRatio=%27none%27%3E%3Cpath d=%27M100.00 50.00 L99.96 66.80 L99.83 72.14 L99.61 76.01 L99.31 79.12 L98.92 81.75 L98.44 84.05 L97.87 86.08 L97.20 87.89 L96.44 89.52 L95.58 91.00 L94.61 92.33 L93.53 93.53 L92.33 94.61 L91.00 95.58 L89.52 96.44 L87.89 97.20 L86.08 97.87 L84.05 98.44 L81.75 98.92 L79.12 99.31 L76.01 99.61 L72.14 99.83 L66.80 99.96 L50.00 100.00 L33.20 99.96 L27.86 99.83 L23.99 99.61 L20.88 99.31 L18.25 98.92 L15.95 98.44 L13.92 97.87 L12.11 97.20 L10.48 96.44 L9.00 95.58 L7.67 94.61 L6.47 93.53 L5.39 92.33 L4.42 91.00 L3.56 89.52 L2.80 87.89 L2.13 86.08 L1.56 84.05 L1.08 81.75 L0.69 79.12 L0.39 76.01 L0.17 72.14 L0.04 66.80 L0.00 50.00 L0.04 33.20 L0.17 27.86 L0.39 23.99 L0.69 20.88 L1.08 18.25 L1.56 15.95 L2.13 13.92 L2.80 12.11 L3.56 10.48 L4.42 9.00 L5.39 7.67 L6.47 6.47 L7.67 5.39 L9.00 4.42 L10.48 3.56 L12.11 2.80 L13.92 2.13 L15.95 1.56 L18.25 1.08 L20.88 0.69 L23.99 0.39 L27.86 0.17 L33.20 0.04 L50.00 0.00 L66.80 0.04 L72.14 0.17 L76.01 0.39 L79.12 0.69 L81.75 1.08 L84.05 1.56 L86.08 2.13 L87.89 2.80 L89.52 3.56 L91.00 4.42 L92.33 5.39 L93.53 6.47 L94.61 7.67 L95.58 9.00 L96.44 10.48 L97.20 12.11 L97.87 13.92 L98.44 15.95 L98.92 18.25 L99.31 20.88 L99.61 23.99 L99.83 27.86 L99.96 33.20Z%27/%3E%3C/svg%3E");
+  --squircle-line: url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27 preserveAspectRatio=%27none%27%3E%3Cpath d=%27M100.00 50.00 L99.96 66.80 L99.83 72.14 L99.61 76.01 L99.31 79.12 L98.92 81.75 L98.44 84.05 L97.87 86.08 L97.20 87.89 L96.44 89.52 L95.58 91.00 L94.61 92.33 L93.53 93.53 L92.33 94.61 L91.00 95.58 L89.52 96.44 L87.89 97.20 L86.08 97.87 L84.05 98.44 L81.75 98.92 L79.12 99.31 L76.01 99.61 L72.14 99.83 L66.80 99.96 L50.00 100.00 L33.20 99.96 L27.86 99.83 L23.99 99.61 L20.88 99.31 L18.25 98.92 L15.95 98.44 L13.92 97.87 L12.11 97.20 L10.48 96.44 L9.00 95.58 L7.67 94.61 L6.47 93.53 L5.39 92.33 L4.42 91.00 L3.56 89.52 L2.80 87.89 L2.13 86.08 L1.56 84.05 L1.08 81.75 L0.69 79.12 L0.39 76.01 L0.17 72.14 L0.04 66.80 L0.00 50.00 L0.04 33.20 L0.17 27.86 L0.39 23.99 L0.69 20.88 L1.08 18.25 L1.56 15.95 L2.13 13.92 L2.80 12.11 L3.56 10.48 L4.42 9.00 L5.39 7.67 L6.47 6.47 L7.67 5.39 L9.00 4.42 L10.48 3.56 L12.11 2.80 L13.92 2.13 L15.95 1.56 L18.25 1.08 L20.88 0.69 L23.99 0.39 L27.86 0.17 L33.20 0.04 L50.00 0.00 L66.80 0.04 L72.14 0.17 L76.01 0.39 L79.12 0.69 L81.75 1.08 L84.05 1.56 L86.08 2.13 L87.89 2.80 L89.52 3.56 L91.00 4.42 L92.33 5.39 L93.53 6.47 L94.61 7.67 L95.58 9.00 L96.44 10.48 L97.20 12.11 L97.87 13.92 L98.44 15.95 L98.92 18.25 L99.31 20.88 L99.61 23.99 L99.83 27.86 L99.96 33.20Z%27 fill=%27none%27 stroke=%27white%27 stroke-opacity=%27.08%27 stroke-width=%272%27 vector-effect=%27non-scaling-stroke%27/%3E%3C/svg%3E"); }
+.badge { position: relative; display: inline-flex; align-items: center; justify-content: center; border-radius: 22%; color: var(--ink);
+  font-weight: 700; letter-spacing: -0.01em; overflow: hidden; -webkit-mask: var(--squircle) center / 100% 100% no-repeat; mask: var(--squircle) center / 100% 100% no-repeat; }
+.badge::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--squircle-line) center / 100% 100% no-repeat; }
+.badge.logo { background: var(--tile-bg, var(--grey-50)); }
+.badge.logo img { width: 100%; height: 100%; object-fit: contain; padding: var(--tile-pad, 12%); display: block; opacity: 0; transition: opacity var(--d-base) var(--ease); }
+.badge.logo img.loaded { opacity: 1; }
+.badge.sys { background: var(--surface-2); color: var(--text-2); }
+/* a system row's icon keeps its meaning colour: a halt is red */
+.badge.sys.halt { color: var(--down); }
 .stockcell { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
 .stockcell-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .stockcell-text b { font-size: 15px; } .stockcell-text .muted { font-size: 12px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -316,7 +328,7 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 .kb-tcard:hover:not(:disabled) { transform: translateY(-2px); filter: none; }
 .kb-tcard[aria-pressed=true] { border-color: var(--sea); background: var(--sea-tint); }
 .kb-faces { display: flex; }
-.kb-faces .badge { margin-right: -7px; border: 2px solid var(--surface-2); box-sizing: content-box; }
+.kb-faces .badge { margin-right: -10px; border: 2px solid var(--surface-2); box-sizing: content-box; }
 .kb-tcard[aria-pressed=true] .kb-faces .badge { border-color: var(--sea-tint); }
 .kb-tname { font-size: 14px; font-weight: 600; line-height: 1.25; }
 .kb-tmeta { font-size: 12px; color: var(--stale); }

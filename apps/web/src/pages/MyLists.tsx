@@ -287,7 +287,7 @@ function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; on
     const nm = i.name || (companyName(i.symbol) !== i.symbol ? companyName(i.symbol) : "");
     return (
       <li className="kb-chip ok" aria-label={`${i.symbol}${nm ? `, ${nm}` : ""}, accepted`}>
-        <StockBadge symbol={i.symbol} size={28} />
+        <StockBadge symbol={i.symbol} size={36} />
         <span className="num kb-chip-sym">{i.symbol}</span>
         {nm && <span className="kb-chip-name muted">{nm}</span>}
         {remove}
