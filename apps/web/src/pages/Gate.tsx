@@ -27,19 +27,19 @@ function StrategyCard({ name, st, exp }: { name: string; st: GateStrategy; exp: 
         <h2 id={`g-${name}`} style={{ margin: 0 }}><RuleName code={name} exp={exp} /></h2>
         <span className={`tag gate-${s.tone}`}>{s.label}</span>
       </div>
-      <p className="muted" style={{ fontSize: 13 }}>
+      <p className="muted" style={{ fontSize: 14 }}>
         {st.n_trades.toLocaleString("en-US")} trades on the current code · {money(st.pnl_usd)} after costs
         {st.trades_to_go > 0 && <> · {st.trades_to_go.toLocaleString("en-US")} more needed before it can pass</>}
       </p>
       <div className="bar-track" role="img" aria-label={`${Math.round(done * 100)}% of the required trades`}><i style={{ width: `${done * 100}%` }} /></div>
-      {st.kills.length > 0 && <ul className="loss" style={{ fontSize: 13 }}>{st.kills.map((k) => <li key={k}>Kill: {k}</li>)}</ul>}
+      {st.kills.length > 0 && <ul className="loss" style={{ fontSize: 14 }}>{st.kills.map((k) => <li key={k}>Kill: {k}</li>)}</ul>}
       <ul className="check-list" aria-label="The bar, criterion by criterion">
         {gateRows(st).map((r) => (
           <li key={r.key}><span className={`st ${r.state}`}>{STATE_TEXT[r.state]}</span>
             <span><b style={{ fontWeight: 600 }}>{r.label}</b><br /><span className="muted num">now {r.value} · bar {r.limit}</span></span></li>
         ))}
       </ul>
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>
         {st.excluded_older_code > 0 && <>{st.excluded_older_code} older trades on earlier code don't count. </>}
         {st.random_missing_days && st.random_missing_days.length > 0 && <>No random baseline for {st.random_missing_days.length} trading day(s), so that row stays unknown. </>}
         Deflated against {Math.max(st.n_trials, 1)} logged trial{Math.max(st.n_trials, 1) === 1 ? "" : "s"}.
@@ -53,12 +53,12 @@ function V3Verdicts({ exps }: { exps: Experiment[] }) {
   return (
     <section className="card" aria-labelledby="v3-h">
       <h2 id="v3-h">Engine v3 rules: the ten-year test</h2>
-      <p className="muted desk-only" style={{ marginTop: 0, fontSize: 13 }}>Each rule is tested on ten years of past prices, after costs, before it may trade on paper.
+      <p className="muted desk-only" style={{ marginTop: 0, fontSize: 14 }}>Each rule is tested on ten years of past prices, after costs, before it may trade on paper.
         A rule that fails never trades real money.</p>
       <ul className="v3-list">
         {V3_RULES.map((k) => (
           <li key={k}><b><RuleName code={k} exp={findExperiment(k, exps)} /></b>
-            <div className="muted desk-only" style={{ fontSize: 13 }}>{RULES[k].what}</div></li>
+            <div className="muted desk-only" style={{ fontSize: 14 }}>{RULES[k].what}</div></li>
         ))}
       </ul>
     </section>
@@ -86,7 +86,7 @@ export function Gate() {
             <Progress now={trades} bar={BAR.trades} />
           </div>
         )}
-        <p style={{ fontSize: 14, marginBottom: 0 }}><b>There is no go-live button.</b><span className="desk-only"> {NAME} trades paper only; clearing the bar opens a written discussion.</span></p>
+        <p style={{ fontSize: 15, marginBottom: 0 }}><b>There is no go-live button.</b><span className="desk-only"> {NAME} trades paper only; clearing the bar opens a written discussion.</span></p>
       </section>
       <V3Verdicts exps={exps} />
       {latest && (strategies.length
@@ -106,11 +106,11 @@ export function Gate() {
         </Accordion>
       )}
       <Accordion title="How the bar was fixed">
-        <p style={{ margin: 0, fontSize: 14 }}>The bar was fixed before any forward data existed: ≥ {BAR.trades} trades over ≥ {BAR.months} months, t &gt; {BAR.t} after costs,
+        <p style={{ margin: 0, fontSize: 15 }}>The bar was fixed before any forward data existed: ≥ {BAR.trades} trades over ≥ {BAR.months} months, t &gt; {BAR.t} after costs,
           deflated Sharpe &gt; 0, above the {BAR.randomPct}th percentile of 1,000 random entries, a higher Sharpe than SPY, and drawdown within the cap.
           The engine computes this report and it can't be edited afterwards.</p>
         {latest && (
-          <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>
             Report for {day(latest.session)} · computed {timeBoth(latest.ts)} · code {latest.fingerprint.slice(0, 8)}
             {latest.report.frozen_since && <> frozen since {dateEt(latest.report.frozen_since)}</>} · bar <code>{latest.bar_sha.slice(0, 12)}</code>
           </p>

@@ -120,7 +120,7 @@ export function noDecisionRows(md: ReturnType<typeof multiDayFrom>): ReactNode[]
       <p>{noDecisionText(r.note!)}</p>
       <p className="muted">{ruleName(r.rule)} decides after a close and trades at the next close. This session's decision was skipped, so it bought and
         sold nothing new; its stocks keep their safety stops.</p>
-      <p className="muted" style={{ fontSize: 13 }} title="engine note">{r.note}</p>
+      <p className="muted" style={{ fontSize: 14 }} title="engine note">{r.note}</p>
     </StatusRow>
   ))];
 }
@@ -134,13 +134,13 @@ function caRows(md: ReturnType<typeof multiDayFrom>): ReactNode[] {
       <StatusRow key={`ca-${a.symbol}`} tone="warn" title={`${a.symbol}: ${a.action} coming`} text={`${a.symbol}: ${a.action} on ${onDay(a.on)}`}>
         <p>{a.symbol}, which {NAME} holds, has a {a.action} announced for {onDay(a.on)}. The engine does not handle this yet, so check the holding before then.</p>
         <p className="muted">{CA_REASON} It keeps the stocks it already holds, with their safety stops.</p>
-        <p className="muted" style={{ fontSize: 13 }} title="engine note">{a.line}</p>
+        <p className="muted" style={{ fontSize: 14 }} title="engine note">{a.line}</p>
       </StatusRow>
     )),
     ...unread.slice(0, 1).map((u) => (
       <StatusRow key="ca-unread" tone="warn" title="No new buys this session" text="No new buys this session: corporate actions couldn't be read">
         <p>The list of announced corporate actions couldn't be read, so the multi-day rule buys nothing new this session. Sales and stops go on.</p>
-        <p className="muted" style={{ fontSize: 13 }} title="engine note">{u}</p>
+        <p className="muted" style={{ fontSize: 14 }} title="engine note">{u}</p>
       </StatusRow>
     )),
   ];
@@ -209,7 +209,7 @@ export function TopHoldings({ rows, max, top = 3 }: { rows: HoldingRowData[]; ma
             </li>
           ))}
         </ul>
-      ) : <p className="muted" style={{ margin: 0, fontSize: 14 }}>Nothing held right now. {NAME} is flat by 15:55 every day; multi-day stocks show here once bought.</p>}
+      ) : <p className="muted" style={{ margin: 0, fontSize: 15 }}>Nothing held right now. {NAME} is flat by 15:55 every day; multi-day stocks show here once bought.</p>}
     </section>
   );
 }

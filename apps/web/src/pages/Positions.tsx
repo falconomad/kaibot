@@ -162,7 +162,7 @@ export function Positions() {
 
 function ExperimentInfo({ e }: { e: Experiment }) {
   const v = experimentView(e);
-  return <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{v.text}</span>{(v.cap || v.stop) && <span className="muted" style={{ display: "block", fontSize: 13, marginTop: 6 }}>{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}</p>;
+  return <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{v.text}</span>{(v.cap || v.stop) && <span className="muted" style={{ display: "block", fontSize: 14, marginTop: 6 }}>{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}</p>;
 }
 
 function Bar({ stop, now, target }: { stop: number; now: number; target: number }) {
@@ -197,7 +197,7 @@ function DaySheet({ o, exps }: { o: Extract<Open, { kind: "day" }>; exps: Experi
         {rule && RULES[rule] && <><span>Why</span><span /><span className="v">It {RULES[rule].what}</span></>}
         {p.fill !== null && <><span>If it hits the stop</span><span /><span className="v loss">{signedMoney((p.stop - p.fill) * p.qty)}</span></>}
       </div>
-      <p className="muted" style={{ fontSize: 14 }}>{NAME} manages each trade itself; the stop and target rest at the broker.</p>
+      <p className="muted" style={{ fontSize: 15 }}>{NAME} manages each trade itself; the stop and target rest at the broker.</p>
       <Link to={`/positions/${p.trade_id}`} className="btn sheet-cta">Full trade details</Link>
     </>
   );
@@ -232,7 +232,7 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
           </>
         );
       })()}
-      {RULES[p.rule] && <p className="muted" style={{ fontSize: 14 }}>The rule {RULES[p.rule].what}. Prices are at the last close.</p>}
+      {RULES[p.rule] && <p className="muted" style={{ fontSize: 15 }}>The rule {RULES[p.rule].what}. Prices are at the last close.</p>}
     </>
   );
 }

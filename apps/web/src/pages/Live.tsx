@@ -69,7 +69,7 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
   return (
     <section className="card" aria-labelledby="ctl-h">
       <h2 id="ctl-h">Controls</h2>
-      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>No trade-by-trade control. You can pause new entries, or close everything and stop the run.
+      <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>No trade-by-trade control. You can pause new entries, or close everything and stop the run.
         The engine applies a command within about 10 seconds; nothing here changes until it does.</p>
       {ended ? <p>This run has {run.status}{run.end_reason ? `: ${run.end_reason}` : ""}. Start a new run from the menu.</p> : (
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -82,7 +82,7 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
                 onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
             </span>
           )}
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>Level from next session
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>Level from next session
             <select value={plan.next?.level ?? plan.current ?? "balanced"} disabled={cmd.isPending}
               onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
               {(Object.keys(LEVELS) as Level[]).map((k) => <option key={k} value={k}>{LEVELS[k].name}</option>)}
@@ -90,9 +90,9 @@ export function Controls({ run, overview }: { run: Run; overview: Overview }) {
           </label>
         </div>
       )}
-      {plan.next && <p className="muted" style={{ fontSize: 12 }}>{LEVELS[plan.current ?? "balanced"].name} today; {LEVELS[plan.next.level].name} from {day(plan.next.from_session)}.</p>}
+      {plan.next && <p className="muted" style={{ fontSize: 13 }}>{LEVELS[plan.current ?? "balanced"].name} today; {LEVELS[plan.next.level].name} from {day(plan.next.from_session)}.</p>}
       {cmd.isError && <p className="loss" role="alert">{String(cmd.error)}</p>}
-      {pending.length > 0 && <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => commandText(p.kind)).join(", ")}</p>}
+      {pending.length > 0 && <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => commandText(p.kind)).join(", ")}</p>}
     </section>
   );
 }
@@ -235,7 +235,7 @@ export function Live() {
               <span>Max drawdown</span><span /><span className="v">{s.maxDdPct.toFixed(1)}% / {lv?.runDd ?? "—"}%</span>
               <span>Hit rate</span><span /><span className="v">{(s.hitRate * 100).toFixed(1)}%</span>
             </div>
-            {evidence.data && <p style={{ fontSize: 13, marginBottom: 0 }}>{evidenceVerdict(evidence.data).text}</p>}
+            {evidence.data && <p style={{ fontSize: 14, marginBottom: 0 }}>{evidenceVerdict(evidence.data).text}</p>}
           </section>
           {lv && (
             <section aria-labelledby="rules-h">
@@ -248,9 +248,9 @@ export function Live() {
               </div>
             </section>
           )}
-          <p className="muted" style={{ fontSize: 13, margin: 0 }}>Reported P&amp;L is the worse of broker fills and the stricter cost model.
+          <p className="muted" style={{ fontSize: 14, margin: 0 }}>Reported P&amp;L is the worse of broker fills and the stricter cost model.
             {run.kind === "paper" && <> Pause or stop the run in <Link to="/settings">Run &amp; settings</Link>.</>}</p>
-          {beatTs && <p className="muted" style={{ fontSize: 12, margin: 0 }}>Updated {ageText(ageS(beatTs))}</p>}
+          {beatTs && <p className="muted" style={{ fontSize: 13, margin: 0 }}>Updated {ageText(ageS(beatTs))}</p>}
         </div>
       </details>
     </>

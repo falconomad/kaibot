@@ -80,7 +80,7 @@ function TabBar({ dot }: { dot: EngineDot }) {
 export function Meter({ label, value, frac }: { label: string; value: string; frac: number }) {
   return (
     <div className="meter">
-      <div className="row"><span className="cap">{label}</span><span className="num" style={{ fontSize: 12 }}>{value}</span></div>
+      <div className="row"><span className="cap">{label}</span><span className="num" style={{ fontSize: 13 }}>{value}</span></div>
       <div className="bar" role="meter" aria-label={label} aria-valuenow={Math.round(frac * 100)} aria-valuemin={0} aria-valuemax={100}>
         <i style={{ transform: `scaleX(${Math.min(1, Math.max(0, frac))})`, background: frac >= 0.8 ? "var(--fail)" : undefined }} />
       </div>

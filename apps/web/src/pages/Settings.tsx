@@ -35,7 +35,7 @@ export function Settings() {
           <span>Level now</span><span /><span className="v">{plan.current ? LEVELS[plan.current].name : "—"}</span>
           <span>Scheduled change</span><span /><span className="v">{plan.next ? `${LEVELS[plan.next.level].name} from ${day(plan.next.from_session)}` : "none"}</span>
         </div>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>A level change never applies mid-session: it starts a new segment at the next open, so each
+        <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>A level change never applies mid-session: it starts a new segment at the next open, so each
           level's statistics stay clean.</p>
       </section>
 
@@ -61,7 +61,7 @@ export function Settings() {
             );
           })}</tbody>
         </table>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The engine enforces these from config/profiles.yaml; the dashboard only shows them. No level uses shorts,
+        <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>The engine enforces these from config/profiles.yaml; the dashboard only shows them. No level uses shorts,
           leverage or overnight holds.</p>
       </section>
 
@@ -71,7 +71,7 @@ export function Settings() {
           <span className="spacer" />
           <Link to="/start"><button className="primary">New run</button></Link>
         </div>
-        <p className="muted" style={{ fontSize: 13 }}>Starting a new run closes the current run's positions first and keeps every old run read-only, so its record
+        <p className="muted" style={{ fontSize: 14 }}>Starting a new run closes the current run's positions first and keeps every old run read-only, so its record
           can't change. Pick a run in the Run menu above to look at it.</p>
         <table className="list" tabIndex={0} aria-label="All runs">
           <thead><tr><th>Run</th><th>Kind</th><th>Status</th><th className="r">Amount</th><th>From</th><th>To</th></tr></thead>
@@ -88,7 +88,7 @@ export function Settings() {
       <section className="card" aria-labelledby="acct-h" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
         <div style={{ flex: "1 1 300px" }}>
           <h2 id="acct-h" style={{ marginBottom: 4 }}>Account</h2>
-          <span className="muted" style={{ fontSize: 14 }}>Signed in as the owner · Alpaca paper account · data on Supabase</span>
+          <span className="muted" style={{ fontSize: 15 }}>Signed in as the owner · Alpaca paper account · data on Supabase</span>
         </div>
         <button className="full-sm" onClick={() => supa.auth.signOut()}>Sign out</button>
       </section>

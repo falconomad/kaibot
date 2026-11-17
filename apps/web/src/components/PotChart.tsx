@@ -66,7 +66,7 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
         <span><i className="sw" style={{ borderColor: "var(--s-pot)" }} />Pot, after costs</span>
         <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dotted" }} />SPY, same start</span>
         <span className="spacer" />
-        <button style={{ minHeight: 44, fontSize: 13, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
+        <button style={{ minHeight: 44, fontSize: 14, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
       </div>
       {table ? (
         <div style={{ maxHeight: 260, overflow: "auto" }}>

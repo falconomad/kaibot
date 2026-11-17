@@ -52,8 +52,8 @@ describe("v4 shell", () => {
     expect(mainSrc).toContain('<Route path="tape" element={<Navigate to="/activity" replace />} />');
     expect(mainSrc).toMatch(/<Navigate to=\{`\/positions\/\$\{id\}\$\{search\}`\} replace \/>/);
   });
-  it("tokens: role names exist as aliases; nothing below 12 px; only transform and opacity animate", () => {
-    for (const t of ["--bg", "--text", "--accent", "--up", "--down", "--amber", "--t-cap: 12px", "--tap: 44px", "--d-base: 200ms", "--d-sheet: 320ms"])
+  it("tokens: role names exist as aliases; nothing below 13 px; only transform and opacity animate", () => {
+    for (const t of ["--bg", "--text", "--accent", "--up", "--down", "--amber", "--t-cap: 13px", "--tap: 44px", "--d-base: 200ms", "--d-sheet: 320ms"])
       expect(tokens, t).toContain(t);
     const keyframes = [...css.matchAll(/@keyframes [\w-]+ \{([^@]*?)\}\s*\}?/g)].map((m) => m[1]).join(" ");
     expect(keyframes).not.toMatch(/box-shadow|background-position|width:|height:/);

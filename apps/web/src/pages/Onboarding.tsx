@@ -56,14 +56,14 @@ export function Onboarding() {
                 onBlur={() => setAmount(clamp(amount))} />
               <button aria-label="More" onClick={() => setAmount(clamp(amount + 500))}>+</button>
             </div>
-            <p className="muted" style={{ fontSize: 12 }}>$1,000 to $100,000 · trades in USD</p>
+            <p className="muted" style={{ fontSize: 13 }}>$1,000 to $100,000 · trades in USD</p>
           </section>
         )}
 
         {step === 2 && (
           <section className="card">
             <h1 style={{ margin: "0 0 4px", fontSize: 20 }}>Choose a level</h1>
-            <button type="button" className="linkbtn" aria-haspopup="dialog" onClick={() => setLevelInfo(true)} style={{ minHeight: 44, fontSize: 14 }}>What does a level mean?</button>
+            <button type="button" className="linkbtn" aria-haspopup="dialog" onClick={() => setLevelInfo(true)} style={{ minHeight: 44, fontSize: 15 }}>What does a level mean?</button>
             <Sheet open={levelInfo} onClose={() => setLevelInfo(false)} title="What a level means">
               <p>A level sets how much {NAME} may risk: the loss allowed on one trade, the worst day before it stops for the day, the largest
                 single position, and the drawdown that ends the run.</p>
@@ -80,12 +80,12 @@ export function Onboarding() {
                     <b>{l.name}</b>
                     <span className="num muted">{l.risk}% risk per trade · {l.maxPositions} positions max</span>
                     <span>Worst allowed day <b className="num loss">−{money((amount * l.stop) / 100)}</b> <span className="muted">(−{l.stop}%)</span></span>
-                    <span className="muted" style={{ fontSize: 12 }}>{l.strategies}</span>
+                    <span className="muted" style={{ fontSize: 13 }}>{l.strategies}</span>
                   </button>
                 );
               })}
             </div>
-            <p className="muted" style={{ fontSize: 12 }}>Only the loss cap is shown, because it is a rule, not a forecast. In the M0 replay no level showed a reliable edge.</p>
+            <p className="muted" style={{ fontSize: 13 }}>Only the loss cap is shown, because it is a rule, not a forecast. In the M0 replay no level showed a reliable edge.</p>
           </section>
         )}
 

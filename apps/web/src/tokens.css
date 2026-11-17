@@ -34,7 +34,7 @@
 :root, :root[data-theme="dark"] {
   color-scheme: dark;
   --paper: #0A0B0D; --surface: #131519; --surface-2: #1B1E23; --rule: #262A31; --rule-strong: #40454F;
-  --ink: #F4F5F7; --slate: #B2B8C1; --stale: #989FAB;
+  --ink: #F4F5F7; --slate: #C0C5CD; --stale: #A7ADB8;
   --sea: #4F95F0; --sea-ink: #7FB4F9; --sea-tint: #0F1F39;
   --gain: #3ADD98; --gain-tint: #092B1C; --loss: #FF716D; --loss-tint: #371715;
   --pass: #3ADD98; --warn: #F7B746; --warn-tint: #32240B; --fail: #FF716D;
