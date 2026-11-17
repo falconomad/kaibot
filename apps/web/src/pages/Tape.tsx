@@ -21,6 +21,7 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { NAME } from "../brand/brand";
 import { type CaEvent, caEvents } from "../lib/corpactions";
+import { StockBadge, SystemTile } from "../components/StockBadge";
 
 const PAGE = 100;
 type Filter = "all" | "fills" | "skipped" | "room" | "alerts";
@@ -125,7 +126,12 @@ export function Tape() {
               <li key={`${r.kind}-${r.ts}-${i}`}>
                 {head && <h2 className="day-head">{d}</h2>}
                 <button type="button" className={`row ${(r.kind === "halt" && haltTone(r.h.kind) === "breach") || (r.kind === "ca" && r.c.tone === "alert") ? "alert" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(r)}>
-                  <span className={`row-ico ${v.icon}`} aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[v.icon]} /></svg></span>
+                  {/* the company's tile when the row is about a stock; a neutral icon tile otherwise, so the column lines up */}
+                  {(() => {
+                    const sym = r.kind === "item" ? r.it.symbol : r.kind === "ca" ? r.c.symbol : null;
+                    return sym ? <StockBadge symbol={sym} size={36} />
+                      : <SystemTile size={36} tone={v.icon}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[v.icon]} /></svg></SystemTile>;
+                  })()}
                   <span className="row-mid"><b>{v.head}</b><span className="muted">{v.line}{r.kind === "item" ? ` · ${timeEt(r.ts)}` : ""}</span>
                     {exp && <span className="row-tag" aria-label={exp.label} title={exp.label}>Experiment</span>}</span>
                   {v.value && <span className={`row-end num ${v.valueTone}`}><b>{v.value}</b></span>}
