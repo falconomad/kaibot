@@ -257,6 +257,33 @@ def test_fetch_is_frugal_resumable_and_works_offline(built):
     assert empty[0]["reason"].startswith("no filing list")
 
 
+def test_filing_lists_reach_back_only_as_far_as_the_spin_off_needs(tmp_path):
+    old = "CIK0000000007-submissions-001.json"
+    docs = {"CIK0000000007.json": {"cik": "7", "name": "Seven", "filings": {
+                "recent": _block(), "files": [{"name": old, "filingFrom": "2010-01-01", "filingTo": "2019-12-31"}]}},
+            old: _block(accessionNumber=["0000000001-19-000009", "x", "y", "z"], filingDate=["2019-06-03"] * 4)}
+    urls = []
+
+    def get(url):
+        urls.append(url.rsplit("/", 1)[-1])
+        return json.dumps(docs[urls[-1]]).encode()
+
+    c = sp.Cache(tmp_path, get)
+    assert len(c.filings("0000000007", D(2025, 11, 1))) == 1 and urls == ["CIK0000000007.json"]
+    assert len(c.filings("0000000007", D(2025, 12, 1))) == 1 and len(urls) == 1  # cached
+    assert len(c.filings("0000000007", D(2019, 1, 1))) == 2 and urls[1:] == ["CIK0000000007.json", old]
+    assert len(sp.Cache(tmp_path, None).filings("0000000007", D(2018, 1, 1))) == 2  # offline: what is cached
+    again = sp.Cache(tmp_path, get)
+    again.filings("0000000007", D(2025, 1, 1), refresh=True)
+    again.filings("0000000007", D(2025, 1, 1), refresh=True)  # a parent with two spin-offs is re-read once
+    assert len(urls) == 5 and again.requests == 2 and urls[-1] == old  # and it keeps reaching back to 2019
+    two = [sp.Event("SVN", D(2026, 2, 20), "A", cik="0000000007"),
+           sp.Event("SVN", D(2019, 7, 1), "B", cik="0000000007")]
+    n = len(urls)
+    sp.collect(two, sp.Cache(tmp_path / "x", lambda u: get(u) if "submissions" in u else b""), {})
+    assert urls[n:n + 2] == ["CIK0000000007.json", old]  # one read that covers the older spin-off too
+
+
 def test_an_unreadable_filing_is_retried_next_run(tmp_path):
     get = FakeSec()
 

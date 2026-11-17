@@ -322,11 +322,12 @@ class Cache:
     filing states). A file that exists is never fetched again unless `refresh` (submissions only: a filing never
     changes). Written atomically, so a stopped run resumes where it stopped. `get` None = offline."""
 
-    def __init__(self, root: Path, get: Callable[[str], bytes] | None, start: date = date(2016, 1, 1)):
+    def __init__(self, root: Path, get: Callable[[str], bytes] | None):
         self.root = Path(root)
         (self.root / "submissions").mkdir(parents=True, exist_ok=True)
         (self.root / "filings").mkdir(parents=True, exist_ok=True)
-        self.get, self.start = get, start
+        self.get = get
+        self._fresh: set[str] = set()  # filing lists read in this run: `refresh` reads each once
         self.requests = 0
         self.errors: dict[str, str] = {}
 
@@ -340,23 +341,32 @@ class Cache:
         tmp.write_text(json.dumps(obj))
         tmp.replace(path)
 
-    def filings(self, cik: str, refresh: bool = False) -> list[Filing] | None:
+    def filings(self, cik: str, since: date, refresh: bool = False) -> list[Filing] | None:
+        """The CIK's 8-Ks filed from `since` on. Only the older-filings files that reach `since` are fetched; a
+        cached list that starts later than `since` is fetched again."""
         p = self.root / "submissions" / f"CIK{cik}.json"
-        if p.is_file() and not (refresh and self.get):
+        cached = json.loads(p.read_text()) if p.is_file() else None
+        stale = cached is not None and ((refresh and cik not in self._fresh)
+                                        or date.fromisoformat(cached["since"]) > since)
+        if stale and self.get is not None:
+            since = min(since, date.fromisoformat(cached["since"]))  # a re-read never shortens what is cached
+            cached = None
+        if cached is not None:
             return [Filing(r["accession"], r["form"], date.fromisoformat(r["filing_date"]),
                            datetime.fromisoformat(r["accepted_ts"]).astimezone(UTC), r["items"], r["doc"])
-                    for r in json.loads(p.read_text())["filings"]]
+                    for r in cached["filings"]]
         if self.get is None:
             return None
         try:
             doc = json.loads(self._fetch(SUBMISSIONS_URL.format(name=f"CIK{cik}.json")))
-            older = {n: json.loads(self._fetch(SUBMISSIONS_URL.format(name=n))) for n in older_files(doc, self.start)}
-            out = filings_from_submissions(cik, doc, older, self.start)
+            older = {n: json.loads(self._fetch(SUBMISSIONS_URL.format(name=n))) for n in older_files(doc, since)}
+            out = filings_from_submissions(cik, doc, older, since)
         except Exception as e:  # noqa: BLE001  (one bad company must not stop the run)
             self.errors[cik] = f"{type(e).__name__}: {str(e)[:160]}"
             log.warning("spinoff: CIK %s failed: %s", cik, self.errors[cik])
             return None
-        self._write(p, {"cik": cik, "name": str(doc.get("name", ""))[:200],
+        self._fresh.add(cik)
+        self._write(p, {"cik": cik, "name": str(doc.get("name", ""))[:200], "since": since.isoformat(),
                         "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
                         "filings": [{**asdict(f), "filing_date": f.filing_date.isoformat(),
                                      "accepted_ts": f.accepted_ts.isoformat()} for f in out]})
@@ -459,13 +469,18 @@ def collect(events: Sequence[Event], cache: Cache, tickers: Mapping[str, tuple[s
             refresh: bool = False) -> tuple[list[dict], list[dict]]:
     """(rows, misses): one row per event whose filings state exactly one ratio, one miss with the reason otherwise."""
     rows, misses = [], []
+    ciks = {e.id: e.cik or tickers.get(e.parent, ("", ""))[0] for e in events}
+    since: dict[str, date] = {}  # per parent: far enough back for its earliest spin-off, and no further
     for e in events:
-        cik = e.cik or tickers.get(e.parent, ("", ""))[0]
+        d = e.ex_date - timedelta(days=WINDOW_BEFORE_DAYS + 2)
+        since[ciks[e.id]] = min(d, since.get(ciks[e.id], d))
+    for e in events:
+        cik = ciks[e.id]
         base = {"parent": e.parent, "new_symbol": e.new_symbol, "ex_date": e.ex_date.isoformat()}
         if not cik:
             misses.append({**base, "reason": "parent ticker not in today's SEC ticker table (give a cik)"})
             continue
-        fl = cache.filings(cik, refresh)
+        fl = cache.filings(cik, since[cik], refresh)
         if fl is None:
             misses.append({**base, "reason": f"no filing list for CIK {cik}: {cache.errors.get(cik, 'not cached')}"})
             continue
