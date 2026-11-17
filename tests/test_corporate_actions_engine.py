@@ -175,3 +175,18 @@ def test_a_late_difference_without_a_record_still_halts_entries(tmp_path, monkey
     a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
     a.ticks(a.open2, 3, 10)
     assert (MD, "BN") not in a.eng.ledger.book(a.rid).sleeves and a.eng.kill == "drift"
+
+
+def test_a_late_adoption_does_not_lift_the_drift_halt_while_another_difference_stays(tmp_path, monkeypatch):
+    """QA-Ops (#285): the late spin-off is adopted, but the books still disagree elsewhere (here: a cash difference
+    the reconciliation reports). The drift halt stays until they agree."""
+    a = Held(tmp_path, monkeypatch, Feed(SPIN))
+    a.hold()
+    a.ticks(a.open2, 0, 3)
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
+    a.eng.kill = "drift"  # the drift check halted entries before the late credit was adopted
+    monkeypatch.setattr(a.eng, "_reconciled", lambda: False)
+    a.ticks(a.open2, 3, 10)
+    assert a.eng.ledger.book(a.rid).sleeves[(MD, "BN")].qty == 20  # adopted
+    assert a.eng.kill == "drift"  # but not lifted
+    assert not [e for e in a.store.tables["event"] if e["type"] == "halt_cleared"]

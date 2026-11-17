@@ -1509,7 +1509,9 @@ class Engine:
             return
         self.check_account()
         self._startup_reconcile("recheck")
-        if self.kill == "drift":
+        # QA-Ops (#285): the drift halt is lifted only when the books really agree again (the account guard and the
+        # reconciliation both clean), not merely because one symbol's count moved
+        if self.kill == "drift" and self.account_clean and self._reconciled():
             self._drift_seen = {}
             self.kill = None
             self.store.event("halt_cleared", {"kind": "drift", "day": str(self.day.day),
