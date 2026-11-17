@@ -4,6 +4,7 @@
 - stub.py    a deterministic stand-in for the model (no network), used by default and in CI
 - runner.py  replays the real Room over a set and reports veto/downgrade rates, agreement, violations and cost
 - preopen.py stored candidate lists and a stub for the pre-open review of daily rules (issue #131)
+- preopen_cost.py  the offline token and cost measurement of the pre-open review and cheaper variants (issue #299)
 - export.py  builds real cases from the Supabase room_session / signal / trade tables (documented, run by hand)
 
 How to run it: docs/ops/agent_room.md, "Offline evaluation".
