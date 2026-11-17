@@ -103,6 +103,7 @@ class DeadmanDb:
         self.sql(STUBS)
         self.file(ROOT / "migrations" / "0017_deadman_early_close.sql")
         self.file(ROOT / "migrations" / "0019_deadman_overnight.sql")
+        self.file(ROOT / "migrations" / "0022_deadman_exdate.sql")  # #291: the ex-date rules
         self.sql("insert into vault.decrypted_secrets values ('kaibot_alpaca_paper_key_id', 'k'), "
                  "('kaibot_alpaca_paper_secret', 's')")
 

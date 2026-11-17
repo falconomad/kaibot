@@ -156,6 +156,23 @@ def _md_stop(o: dict, names) -> tuple[str, str] | None:
     return (p[0], p[1]) if p is not None and is_multi_day(p[0], names) else None
 
 
+SPLIT_RATIOS = (2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 15.0, 20.0, 1.5)  # #291: forward splits (3-for-2 the smallest)
+
+
+def split_like(have: float, book: float) -> float | None:
+    """#291: the broker's shares over the book's when that is a split's ratio (forward, or its inverse for a reverse
+    split, whole shares, +-1 share for cash in lieu); None otherwise. Without a record the fail-safes cannot know
+    a split happened; a split ratio is the only case where they keep shares the book does not explain. Any other
+    excess is intraday, as decision 15's plan says (one stock held both ways)."""
+    if book <= EPS or have <= EPS:
+        return None
+    for r in SPLIT_RATIOS:
+        for x in (r, 1.0 / r):
+            if abs(have - math.floor(book * x + EPS)) <= 1.0 + EPS and abs(have - book) >= 1.0 - EPS:
+                return x
+    return None
+
+
 def plan(positions: Mapping[str, dict], orders: list[dict], book: BookView | None, *, flatten: bool,
          names: Iterable[str] | None = None) -> Plan:
     """The fail-safe plan for a silent engine. `positions`: the broker's, by symbol (qty, current_price); `orders`:
@@ -166,6 +183,20 @@ def plan(positions: Mapping[str, dict], orders: list[dict], book: BookView | Non
     canceled = {o["id"] for o in out.cancel}
     live = [o for o in orders if o.get("id") not in canceled]
     sleeves = book.multi_day(names) if book is not None else []
+    # #291: a multi-day symbol gone at the broker (a symbol change while the engine was down?): an unexplained
+    # position holding exactly its shares is taken as the renamed holding and kept, never closed as intraday
+    book_qty: dict[str, float] = {}
+    for s in sleeves:
+        book_qty[s.symbol] = book_qty.get(s.symbol, 0.0) + s.qty
+    gone = {sym: q for sym, q in book_qty.items() if float((positions.get(sym) or {}).get("qty") or 0) <= EPS}
+    renamed: dict[str, str] = {}
+    for sym in sorted(positions):
+        if sym in book_qty or _open_sells(live, sym):
+            continue
+        have = float(positions[sym].get("qty") or 0)
+        old = next((o for o, q in sorted(gone.items()) if abs(q - have) <= EPS and o not in renamed.values()), None)
+        if old is not None:
+            renamed[sym] = old
     for sym in sorted(positions):
         p = positions[sym]
         have = float(p.get("qty") or 0)
@@ -181,17 +212,39 @@ def plan(positions: Mapping[str, dict], orders: list[dict], book: BookView | Non
         mine = [s for s in sleeves if s.symbol == sym]
         book_md = sum(s.qty for s in mine)
         md = min(max(book_md, sum(covered.values())), have)
+        if sym in renamed:
+            md = have
+            mine = [s for s in sleeves if s.symbol == renamed[sym]]  # #291 QA: its stop went with the old symbol
+            out.alarms.append(f"{sym}: {have:g} shares, no book row, and {renamed[sym]} with the same shares is gone "
+                              f"at the broker (a symbol change?): kept as multi-day, not sold")
+        # #291: the broker's count differs from the book's (a split or a spin-off went ex while the engine was
+        # down: the book is on yesterday's basis). Shares that nothing explains (no intraday leg holds them) are
+        # kept as multi-day, and stops cover at most the broker's shares
+        other = sum(_left(o) for o in sells if _md_stop(o, names) is None)
+        split = split_like(have, book_md)
+        if split is not None:
+            md = have - other if split > 1 else min(md, have)
+            out.alarms.append(f"{sym}: the broker holds {have:g} shares, the book {book_md:g}, a {split:g} ratio (a "
+                              f"split today?): {md:g} kept as multi-day, nothing of them sold")
         free = max(have - sum(_left(o) for o in sells), 0.0)
+        # #291: on a split or a renamed holding the book is on yesterday's basis: a stop covers the sleeve's shares
+        # times the ratio, never more than the shares kept (no false alarm after a reverse split), and the book's
+        # stop price (the old basis, or another symbol's) is not used: the emergency stop below the last price is
+        rebased = split is not None or sym in renamed
+        scale = split if split is not None else 1.0
+        cap = int(math.floor(md + EPS)) if rebased else 10 ** 12
         last = float(p.get("current_price") or 0) or None
         for s in mine:
-            want = int(math.floor(s.qty + EPS)) - int(math.floor(covered.get(clean(s.strategy), 0.0) + EPS))
+            want = int(math.floor(s.qty * scale + EPS)) - int(math.floor(covered.get(clean(s.strategy), 0.0) + EPS))
+            want = min(want, cap - int(math.floor(sum(covered.values()) + EPS)))
             if want < 1:
                 continue
             q = min(want, int(math.floor(free + EPS)))
-            px, why = _stop_price(s.stop, last)
+            px, why = _stop_price(None if rebased else s.stop, last)
             if q >= 1 and px is not None:
                 out.stops.append(StopOrder(s.strategy, sym, q, px, why))
                 free -= q
+                cap -= q
             if q < want or px is None:
                 miss = want - (q if px is not None else 0)
                 out.unprotected[sym] = out.unprotected.get(sym, 0.0) + miss
