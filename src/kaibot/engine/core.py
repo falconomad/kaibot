@@ -38,7 +38,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
-from kaibot.broker.alpaca import CANCEL_WAIT_S
+from kaibot.broker.alpaca import CANCEL_POLL_S, CANCEL_POLLS, CANCEL_WAIT_S
 from kaibot.broker.protocol import Broker, OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import (
@@ -360,6 +360,7 @@ class Engine:
         self.peak: float | None = None
         self.on_progress = lambda status: None
         self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
+        self.sleep = time.sleep  # QA-Ops (#282): the short wait for a cancel inside a flatten (a no-op in tests)
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
@@ -841,6 +842,14 @@ class Engine:
                             self._order("cancel", lambda oid=oo["id"]: self.broker.cancel_order(oid),
                                         order_id=oo["id"], symbol=sym, strategy=",".join(k[0] for k, _ in keys))
                     left = [oo for oo in self.broker.open_orders() if oo.get("symbol") == sym]
+                    # QA-Ops (#282): Alpaca confirms a cancel within a moment; wait for it here, inside the flatten's
+                    # time budget, as close_position's cancel-and-wait did (CANCEL_POLLS x CANCEL_POLL_S), so the
+                    # sale goes out on this tick, not one minute later
+                    polls = 0
+                    while left and polls < CANCEL_POLLS and self.monotonic() - t0 < FLATTEN_BUDGET_S - CLOSE_MAX_S:
+                        self.sleep(CANCEL_POLL_S)
+                        polls += 1
+                        left = [oo for oo in self.broker.open_orders() if oo.get("symbol") == sym]
                     if left:
                         failed[sym] = f"{sym}: waiting for {len(left)} cancel(s) before the sale"
                         continue

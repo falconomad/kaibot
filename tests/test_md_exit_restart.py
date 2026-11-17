@@ -229,3 +229,29 @@ def test_an_intent_the_venue_never_got_is_closed_at_start_up(tmp_path, monkeypat
     a.eng._flatten_md("book_drawdown", {}, a.eng.monotonic())  # the next flatten sells it
     a.ticks(a.open2, 5, 8)
     assert len(_fills(a)) == 1
+
+
+def test_a_cancel_that_takes_a_moment_does_not_put_the_sale_off_to_the_next_tick(tmp_path, monkeypatch):
+    """QA-Ops (#282): Alpaca shows a cancelled stop as open for a moment (pending_cancel). The flatten waits for it
+    inside its time budget, as close_position's cancel-and-wait did, and sends the sale in the same call."""
+    a = _held(tmp_path, monkeypatch)
+    assert a.stop_b()  # the sleeve's protective stop rests at the venue
+    real, lag = a.broker.open_orders, {"n": 2}
+
+    def open_orders():
+        rows = real()
+        gone = [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["type"] == "stop"
+                and o["status"] == "canceled"]
+        if gone and lag["n"] > 0:  # the venue still lists the cancelled stop, as pending_cancel, twice
+            lag["n"] -= 1
+            rows = rows + [{**gone[0], "status": "pending_cancel"}]
+        return rows
+
+    slept = []
+    monkeypatch.setattr(a.broker, "open_orders", open_orders)
+    monkeypatch.setattr(a.eng, "sleep", slept.append)
+    failed = {}
+    a.eng._flatten_md("book_drawdown", failed, a.eng.monotonic())
+    assert failed == {} and slept  # waited, then sold
+    (x,) = [b for *_, b in a.eng.journal.entries(kinds=("md_exit",))]
+    assert x["keys"] == [[[MD, "B"], QTY]]
