@@ -548,9 +548,20 @@ class Engine:
         try:
             call()
         except Exception as e:
+            why = f"{type(e).__name__}: {e}"[:200]
+            seen = getattr(self, "_daily_errors", None)
+            if seen is None:
+                seen = self._daily_errors = {}
+            if seen.get(step) == why:  # QA-Ops: the same failure again (every tick): logged, one event only
+                log.warning("daily path: %s still failing: %s", step, why)
+                return
+            seen[step] = why
             log.exception("daily path: %s failed", step)
-            self.store.event("multi_day_error", {"step": step, "error": f"{type(e).__name__}: {e}"[:200]},
-                             self._rid())
+            self.store.event("multi_day_error", {"step": step, "error": why}, self._rid())
+        else:
+            errs = getattr(self, "_daily_errors", None)
+            if errs:
+                errs.pop(step, None)  # recovered: the next failure is an event again
 
     def _md_symbols(self) -> set[str]:
         """#206: symbols the multi-day book holds or has a working order of the daily path in (empty without the
