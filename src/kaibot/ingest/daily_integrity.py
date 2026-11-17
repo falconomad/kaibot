@@ -33,6 +33,10 @@ written by `bars_table` therefore never trips either check.
 Outputs under <data>/daily/check: integrity.csv (every finding), integrity_summary.csv (one verdict per key:
 clean, warn or error), integrity.txt (plain words).
 
+The live daily path (engine/live_daily.StoreLoader, only with KAIBOT_MULTIDAY=on) asks `StoreGate` before each
+evening's decision, on the keys that view loads only, over its look-back: see `live_verdict` for what drops one
+stock and what stops every decision, and docs/ops/daily_bars.md for what to do. Warnings never block.
+
 Exit codes of `scripts/fetch_daily.py --check` (and so of the nightly refresh, scripts/fetch_daily.sh): 0 when no
 error lies inside the live window, 3 when one does, 1 when there is no store. The live window is the live daily
 path's look-back (`LIVE_WINDOW_DAYS`, engine/live_daily.StoreLoader.LOOKBACK_DAYS) before the store's last session:
@@ -43,7 +47,8 @@ make the nightly job report FAILED.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from functools import cache
 from pathlib import Path
@@ -53,7 +58,7 @@ import pandas as pd
 
 from kaibot.ingest import nyse_sessions
 from kaibot.ingest.alpaca_history import ET
-from kaibot.ingest.daily_bars import COMPLETE_AT, SHARE_TYPES
+from kaibot.ingest.daily_bars import COMPLETE_AT, SHARE_TYPES, bars_path
 from kaibot.ingest.daily_store import DailyStore
 
 LIVE_WINDOW_DAYS = 600  # = engine/live_daily.StoreLoader.LOOKBACK_DAYS (a test pins it)
@@ -97,9 +102,12 @@ def _num(df: pd.DataFrame, col: str) -> np.ndarray:
     return pd.to_numeric(df[col], errors="coerce").to_numpy(dtype=float) if col in df else np.full(len(df), np.nan)
 
 
-def check_bars(key: str, bars: pd.DataFrame, actions: pd.DataFrame | None = None) -> list[dict]:
+def check_bars(key: str, bars: pd.DataFrame, actions: pd.DataFrame | None = None, *,
+               calendar: np.ndarray | None = None, due: Callable[[date], np.datetime64] | None = None) -> list[dict]:
     """Every finding for one key's raw bars (columns of `DailyStore.bars`). `actions` are that key's corporate
-    actions (columns type, ex_date); without them every large move is reported as a jump."""
+    actions (columns type, ex_date); without them every large move is reported as a jump. `calendar` (sorted
+    datetime64[D] sessions) replaces the NYSE rule calendar and `due(d)` the earliest allowed `available_ts` of
+    session d (default: its close plus 15 minutes); the live gate passes SPY's sessions and the store's own stamp."""
     out: list[dict] = []
     if not len(bars):
         return out
@@ -133,7 +141,11 @@ def check_bars(key: str, bars: pd.DataFrame, actions: pd.DataFrame | None = None
 
     # --- the NYSE calendar
     first, last = dates[0].astype(object), dates[-1].astype(object)
-    cal = np.array(nyse_sessions.sessions(first, last), dtype="datetime64[D]")
+    if calendar is None:
+        cal = np.array(nyse_sessions.sessions(first, last), dtype="datetime64[D]")
+    else:
+        cal = np.asarray(calendar, dtype="datetime64[D]")
+        cal = cal[(cal >= dates[0]) & (cal <= dates[-1])]
     for i in np.flatnonzero(~np.isin(dates, cal)):
         out.append(_finding(key, dates[i], "not_a_session", f"weekday {dates[i].astype(object):%a}"))
     missing = ~np.isin(cal, dates)
@@ -143,21 +155,23 @@ def check_bars(key: str, bars: pd.DataFrame, actions: pd.DataFrame | None = None
                             f"{n} session{'s' if n > 1 else ''} through {cal[b]}" if n > 1 else "1 session"))
 
     # --- point in time: a bar must not be stamped as known before its session was over
-    if "available_ts" in bars:
+    if "available_ts" in bars and len(cal):
         ts = (pd.to_datetime(bars["available_ts"], utc=True).dt.tz_convert(None).to_numpy()
               .astype("datetime64[s]")[order])  # UTC, NaT where missing
-        on_cal = np.isin(dates, cal)
-        for i in range(len(dates)):
-            d = dates[i].astype(object)
-            if not on_cal[i]:
-                continue  # already an error above; no close to compare with
-            due = _due(d)
-            if np.isnat(ts[i]) or ts[i] < due:
+        on_cal = np.isin(dates, cal)  # off-calendar bars are already errors above: no close to compare with
+        cal_o = cal.astype(object)
+        floor = np.array([(due or _due)(d) for d in cal_o], dtype="datetime64[s]")
+        stamp = np.array([_stamp(d) for d in cal_o], dtype="datetime64[s]")
+        j = np.clip(np.searchsorted(cal, dates), 0, len(cal) - 1)
+        early = on_cal & (np.isnat(ts) | (ts < floor[j]))
+        off = on_cal & ~early & (ts != stamp[j])
+        for i in np.flatnonzero(early | off):
+            if early[i]:
                 out.append(_finding(key, dates[i], "early_available",
-                                    f"available_ts {ts[i]} is before {due} UTC"))
-            elif ts[i] != _stamp(d):
+                                    f"available_ts {ts[i]} is before {floor[j[i]]} UTC"))
+            else:
                 out.append(_finding(key, dates[i], "off_stamp",
-                                    f"available_ts {ts[i]} UTC, the store writes {_stamp(d)} UTC"))
+                                    f"available_ts {ts[i]} UTC, the store writes {stamp[j[i]]} UTC"))
 
     # --- flat, unchanged runs
     flat = ok & (o == h) & (h == lo) & (lo == c)
@@ -222,6 +236,105 @@ def _save(df: pd.DataFrame, path: Path) -> None:
     tmp = path.with_name(path.name + ".tmp")
     df.to_csv(tmp, index=False)
     os.replace(tmp, path)
+
+
+# ---------------------------------------------------------------- the live daily path's gate (#230)
+
+STRUCTURAL = ("duplicate_date", "unsorted", "early_available")  # the series itself cannot be trusted: no decision
+MAX_DROPPED_SHARE = 0.01  # more than this share of the view's stocks failing (at least one is allowed): no decision
+
+
+@dataclass(frozen=True)
+class LiveVerdict:
+    """The gate's answer for one evening's view. `block`: why no rule may decide (None: they may). `dropped`: stocks
+    with a bad bar that leave this evening's view (key -> plain reason); a rule holding one of them does not decide
+    (`engine/live_daily`), because the "not in the view" path would sell it."""
+
+    block: str | None = None
+    dropped: Mapping[str, str] = field(default_factory=dict)
+
+
+def failure_reason(errors: pd.DataFrame, show: int = 3) -> str | None:
+    """None when there is no error; else one short line, e.g. "2 bad bars in 1 key: AAA 2026-11-13 ohlc_order,
+    AAA 2026-11-12 bad_price" (at most `show` named, newest first, then ", ...")."""
+    if errors is None or not len(errors):
+        return None
+    e = errors.sort_values(["date", "key"], ascending=[False, True])
+    n, k = len(e), e["key"].nunique()
+    named = [f"{r.key} {r.date} {r.kind}" for r in e.head(show).itertuples()]
+    return (f"{n} bad bar{'s' if n > 1 else ''} in {k} key{'s' if k > 1 else ''}: " + ", ".join(named)
+            + (", ..." if n > show else ""))[:200]
+
+
+def window_errors(store: DailyStore, start, end, keys: Sequence[str], market: str = "SPY") -> pd.DataFrame:
+    """The hard errors on bars dated start..end of `keys`, the live way: the session calendar is `market`'s own
+    bars (SPY, the calendar the engine's daily view uses; SPY itself is not checked against a calendar) and a bar
+    must be stamped no earlier than the store's own `available_ts` (COMPLETE_AT ET of its date), which is the time
+    the live path relies on. No rule-based calendar (nyse_sessions is research-only). Raises when a file is
+    unreadable."""
+    spy = store.bars(market, start=start, end=end)
+    cal = np.unique(np.asarray(spy["date"]).astype("datetime64[D]"))
+    found = []
+    for key in keys:
+        bars = store.bars(key, start=start, end=end)
+        fs = check_bars(key, bars, calendar=(np.asarray(bars["date"]).astype("datetime64[D]") if key == market
+                                             else cal), due=_stamp)
+        found += [f for f in fs if f["severity"] == "error"]
+    return pd.DataFrame(found, columns=FINDING_COLUMNS)
+
+
+def live_verdict(errors: pd.DataFrame, stocks: Sequence[str]) -> LiveVerdict:
+    """Sort the window's errors (`window_errors`) into the gate's answer. No decision for anyone when an error is
+    structural (STRUCTURAL), sits in a key that is not one of the view's `stocks` (SPY, the sector ETFs), or hits
+    more than MAX_DROPPED_SHARE of the stocks (at least one stock may fail). Otherwise each failing stock is
+    dropped from this evening's view."""
+    if not len(errors):
+        return LiveVerdict()
+    stock = set(stocks)
+    hard = errors[errors["kind"].isin(STRUCTURAL) | ~errors["key"].isin(stock)]
+    if len(hard):
+        return LiveVerdict(block=failure_reason(hard))
+    bad = sorted(errors["key"].unique())
+    allowed = max(1, int(MAX_DROPPED_SHARE * len(stock)))
+    if len(bad) > allowed:
+        return LiveVerdict(block=f"{len(bad)} of {len(stock)} stocks fail the check (more than {allowed}): "
+                                 + (failure_reason(errors) or "")[:150])
+    return LiveVerdict(dropped={k: failure_reason(errors[errors["key"] == k]) or k for k in bad})
+
+
+class StoreGate:
+    """The live daily path's gate on the store under `root` (<data>/daily): `gate(start, end, keys, stocks)` is the
+    `LiveVerdict` for the bars of the keys the view loads, dated start..end. Cached until one of those files
+    changes (name, size, mtime), so an engine waiting on a bad store does not re-read it every tick. A bars file
+    that cannot be read blocks too ("bars unreadable: ..."), never an exception (QA-Ops review of #234)."""
+
+    def __init__(self, root: str | Path, market: str = "SPY") -> None:
+        self.root, self.market = Path(root), market
+        self._last: tuple | None = None
+        self._verdict = LiveVerdict()
+
+    def _fingerprint(self, keys: Sequence[str]) -> tuple:
+        out = []
+        for k in keys:
+            try:
+                st = bars_path(self.root, k).stat()
+                out.append((k, st.st_size, st.st_mtime_ns))
+            except OSError:
+                out.append((k, None, None))
+        return tuple(out)
+
+    def __call__(self, start, end, keys: Sequence[str], stocks: Sequence[str]) -> LiveVerdict:
+        keys = sorted(set(keys) | {self.market})
+        fp = (str(start), str(end), tuple(sorted(stocks)), self._fingerprint(keys))
+        if fp != self._last:
+            try:
+                errs = window_errors(DailyStore(self.root), start, end, keys, self.market)
+                self._verdict = live_verdict(errs, stocks)
+            except Exception as e:  # unreadable or missing file of a key the view needs: fail closed
+                what = str(e).replace(str(self.root / "bars") + os.sep, "")
+                self._verdict = LiveVerdict(block=f"bars unreadable: {type(e).__name__}: {what}"[:200])
+            self._last = fp
+        return self._verdict
 
 
 def run_integrity(data_dir: str | Path, keys: Sequence[str] | None = None,

@@ -232,6 +232,43 @@ there), `dropped_duplicate` (the table has a row there that was flagged as a rep
 `adjusted(source="auto")` uses Alpaca's factor for every `mismatch` key and the table for the rest, and records
 which in `adj_source`.
 
+## When the bar integrity check fails (#169, #230)
+
+`./scripts/fetch_daily.sh` (and the nightly job, `logs/fetch_daily.log`) ends with a line like
+`Bar integrity: 741 keys: 688 clean, 53 warn, 0 error.` The details are in `data/daily/check/integrity.csv`,
+one row per finding (`key, date, severity, kind, detail`), and in `integrity_summary.csv`, one verdict per key.
+
+**Exit code.** 0: no error inside the engine's 600-day window. Warnings and older errors ("Old findings") are only
+listed. 3: at least one error inside that window. Anything else: the download or the check stopped.
+
+**Warnings** (`missing_sessions`, `stale`, `jump`, `zero_volume`, `off_stamp`) never block anything. A `jump`
+with no corporate action is usually real news, or a spin-off or split missing from the table: compare the date
+with `adjustment_steps.csv`. Fix the table, not the bars.
+
+**What the engine does with errors** (only with `KAIBOT_MULTIDAY=on`, on the keys the evening's view loads, over
+its 600-day look-back). The heartbeat's `multi_day.note` says which case applies.
+
+| Case | Engine | Heartbeat |
+|---|---|---|
+| One stock (up to 1% of the view) with `bad_price`, `ohlc_order`, `bad_volume` or `not_a_session`, **not held** | left out of tonight's view (never bought), the rule decides on the rest | `decided without X: daily prices failed the check (...)` |
+| The same in a stock the rule **holds** | that rule does not decide tonight; it keeps the position (nothing is sold because of the check) | `no decision today: daily prices failed the check (held X: ...)` |
+| SPY or a sector ETF, any structural error (`duplicate_date`, `unsorted`, `early_available`), more than 1% of the stocks, or a bars file that cannot be read | no rule decides; positions are kept, pending sales and the book's own run end still work | `no decision today: daily prices failed the check (...)` |
+
+Live, `early_available` means a bar stamped before 20:15 ET of its session, which is the stamp the store itself
+writes. The live session calendar is SPY's own bars, not the rule-based `nyse_sessions`.
+
+**Repair one key** (on the Mac, from the repo root). Download it again:
+
+    .venv/bin/python scripts/fetch_daily.py --env ~/Projects/kaibot-secrets/.env --refresh --symbols KEY
+    ./scripts/fetch_daily.sh --check
+
+If Alpaca serves the same bad bar again (a vendor print), tell the Data team with the `integrity.csv` row. For a
+stock that is not held, nothing else is needed: the gate leaves it out every evening until it is repaired.
+
+**Quarantine.** Do not move or delete a bars file to get rid of a finding. A held stock that is missing from the
+store is sold by the daily path ("not in the daily view"). If a held stock's bars cannot be repaired, decide with
+Product whether to close the position by hand. Until then that rule does not decide.
+
 ## Alpaca parameters
 
 Checked against docs.alpaca.markets on 12 Nov 2026 (bars reference, corporate-actions reference, market-data FAQ,

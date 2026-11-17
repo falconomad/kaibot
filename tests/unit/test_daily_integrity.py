@@ -241,3 +241,69 @@ def test_fetch_daily_check_exit_codes(tmp_path, capsys):
     assert mod.main(["--data", str(tmp_path / "data"), "--check"]) == 3
     out = capsys.readouterr().out
     assert "bad_price (error)" in out and "Old findings: 1 error" in out
+
+
+# ---------------------------------------------------------------- the live gate (#230, PR B)
+
+
+def _errs(*rows) -> pd.DataFrame:
+    return pd.DataFrame([di._finding(k, d, kind) for k, d, kind in rows], columns=di.FINDING_COLUMNS)
+
+
+def test_live_verdict_drops_a_stock_and_blocks_on_spy_structure_or_too_many():
+    stocks = [f"S{i:03d}" for i in range(300)]  # 1% of 300: up to 3 stocks may be dropped
+    assert di.live_verdict(_errs(), stocks) == di.LiveVerdict()
+    v = di.live_verdict(_errs(("S001", DAYS[3], "ohlc_order"), ("S002", DAYS[4], "bad_price")), stocks)
+    assert v.block is None and sorted(v.dropped) == ["S001", "S002"]
+    assert v.dropped["S001"] == f"1 bad bar in 1 key: S001 {DAYS[3]} ohlc_order"
+    assert "SPY" in di.live_verdict(_errs(("SPY", DAYS[3], "bad_volume")), stocks).block
+    assert "XLK" in di.live_verdict(_errs(("XLK", DAYS[3], "ohlc_order")), stocks).block  # a sector ETF too
+    for kind in di.STRUCTURAL:
+        assert kind in di.live_verdict(_errs(("S001", DAYS[3], kind)), stocks).block
+    many = di.live_verdict(_errs(*[(f"S{i:03d}", DAYS[3], "bad_price") for i in range(4)]), stocks)
+    assert many.block.startswith("4 of 300 stocks fail the check (more than 3)") and not many.dropped
+    assert di.live_verdict(_errs(("S001", DAYS[3], "bad_price")), stocks[:20]).dropped  # at least one may fail
+
+
+def test_window_errors_uses_spys_sessions_and_the_stores_own_stamp(tmp_path):
+    root = tmp_path / "daily"
+    spy = frame()
+    _write(root, "SPY", spy.drop(index=[12]).reset_index(drop=True))  # SPY has no bar on DAYS[12]
+    aaa = frame()
+    aaa.loc[20, "available_ts"] = aaa.loc[20, "available_ts"] - pd.Timedelta(hours=4)  # 16:15 ET: close + 15
+    _write(root, "AAA", aaa)
+    assert di.check_bars("AAA", aaa) == [di._finding("AAA", DAYS[20], "off_stamp",
+                                                      di.check_bars("AAA", aaa)[0]["detail"])]  # research: warn
+    errs = di.window_errors(DailyStore(root), DAYS[0], DAYS[-1], ["AAA", "SPY"])
+    assert [(r.key, r.date, r.kind) for r in errs.itertuples()] == [
+        ("AAA", str(DAYS[12]), "not_a_session"),  # a bar on a day SPY has none (the view drops such days)
+        ("AAA", str(DAYS[20]), "early_available")]  # live: before the 20:15 ET the path relies on
+    assert di.window_errors(DailyStore(root), DAYS[13], DAYS[19], ["AAA"]).empty  # the window only
+
+
+def test_the_store_gate_caches_and_fails_closed_on_an_unreadable_file(tmp_path, monkeypatch):
+    import os
+
+    root = tmp_path / "daily"
+    _write(root, "SPY", frame())
+    _write(root, "AAA", frame())
+    gate = di.StoreGate(root)
+    calls = []
+    real = di.window_errors
+    monkeypatch.setattr(di, "window_errors", lambda *a, **k: calls.append(1) or real(*a, **k))
+    assert gate(DAYS[0], DAYS[-1], ["AAA", "SPY"], ["AAA"]) == di.LiveVerdict()
+    assert gate(DAYS[0], DAYS[-1], ["AAA", "SPY"], ["AAA"]) == di.LiveVerdict() and len(calls) == 1
+    (root / "bars" / "symbol=ZZZ.parquet").write_bytes(b"junk")  # a key the view does not load: no re-check
+    assert gate(DAYS[0], DAYS[-1], ["AAA", "SPY"], ["AAA"]) == di.LiveVerdict() and len(calls) == 1
+    bad = frame()
+    bad.loc[29, "l"] = bad.loc[29, "o"] * 1.5
+    _write(root, "AAA", bad)
+    f = root / "bars" / "symbol=AAA.parquet"
+    st = f.stat()
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+    assert gate(DAYS[0], DAYS[-1], ["AAA", "SPY"], ["AAA"]).dropped == {
+        "AAA": f"1 bad bar in 1 key: AAA {DAYS[29]} ohlc_order"}
+    assert len(calls) == 2
+    f.write_bytes(b"PAR1 truncated")
+    v = gate(DAYS[0], DAYS[-1], ["AAA", "SPY"], ["AAA"])
+    assert v.block.startswith("bars unreadable: ") and "symbol=AAA.parquet" in v.block
