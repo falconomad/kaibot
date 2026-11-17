@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "icons": "python3 scripts/gen_icons.py",
+    "logo-colors": "python3 scripts/logo_colors.py",
     "check:mobile": "VITE_SUPABASE_URL=http://localhost:54321 VITE_SUPABASE_PUBLISHABLE_KEY=mock vite build --outDir /tmp/kb-dist-check --emptyOutDir && python3 scripts/mobile_check.py --dist /tmp/kb-dist-check --interact --stress"
   },
   "dependencies": {

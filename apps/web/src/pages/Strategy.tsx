@@ -309,7 +309,7 @@ function FocusCard({ body, edit, ctx, toFine, source, setSource, ed }: { body: C
       <div className="kb-tgrid" role="group" aria-label="Themes">
         {cards.map((c) => (
           <button key={c.key ?? "_all"} type="button" aria-pressed={c.on} className="kb-tcard" onClick={() => edit(toggleTheme(body, c.key))}>
-            <span aria-hidden="true" className="kb-faces">{(c.key ? c.syms : ["AAPL", "JPM", "XOM"]).slice(0, 3).map((s) => <StockBadge key={s} symbol={s} size={24} />)}</span>
+            <span aria-hidden="true" className="kb-faces">{(c.key ? c.syms : ["AAPL", "JPM", "XOM"]).slice(0, 3).map((s) => <StockBadge key={s} symbol={s} size={36} />)}</span>
             <span className="kb-tname">{c.name}</span>
             <span className="num kb-tmeta">{c.syms.filter((s) => !body.focus.exclude.includes(s)).length} stocks · ≈ {Math.round(themeRate(c.syms, body, b) * 10) / 10}/mo</span>
             {c.on && <span aria-hidden="true" className="kb-check">✓</span>}

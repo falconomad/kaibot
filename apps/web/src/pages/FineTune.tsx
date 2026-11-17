@@ -230,7 +230,7 @@ function FocusEditor({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBo
         <span className="cap">Your focus · {set.length} stocks</span>
         <ul className="kb-symlist" aria-label="Stocks in your focus">
           {set.map((s) => (
-            <li key={s}><StockBadge symbol={s} size={22} /><b>{s}</b>
+            <li key={s}><StockBadge symbol={s} size={32} /><b>{s}</b>
               <button type="button" aria-label={`Never trade ${s}`} title={full ? `Limit of ${MAX_EXCLUDED} reached` : "Never trade"} disabled={full}
                 onClick={() => edit(excludeStock(body, s, universe))}>×</button></li>
           ))}

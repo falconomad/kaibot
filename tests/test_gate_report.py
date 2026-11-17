@@ -73,6 +73,19 @@ def test_frozen_since_uses_last_unbroken_stretch():
     assert gr.frozen_since(s, "C") is None
 
 
+def test_a_start_without_a_time_is_left_out_and_the_report_still_builds():
+    """QA-Ops: an engine_start row without `ts` (the engine tests' fake store writes none) sorted first as
+    datetime.min and, on the current code, made the whole report fail ("date not yet supported on Timestamps
+    outside the range"). It is left out; the timed starts decide the stretch."""
+    s = [{"ts": None, "fingerprint": "A"}, {"ts": "2026-01-04T14:00:00Z", "fingerprint": "A"},
+         {"ts": "", "fingerprint": "A"}]
+    assert gr.frozen_since(s, "A") == datetime(2026, 1, 4, 14, tzinfo=UTC)
+    assert gr.frozen_since([{"fingerprint": "A"}], "A") is None  # nothing timed: nothing frozen yet
+    rep = gr.evaluate(BAR, strategies=["dip_reversal"], trades=[], sessions=[], random_days=[], starts=s,
+                      fingerprint_now="A", amount=1000.0, dd_cap_pct=10.0)
+    assert rep["strategies"]["dip_reversal"] is not None
+
+
 def composed(core="c1", dip="d1", spy="s1"):
     """An engine-start fingerprint in the per-rule format (kaibot.evaluation.fingerprint)."""
     return f"all-{core}{dip}{spy};core={core};dip_reversal={dip};spy_late_momentum={spy}"
