@@ -44,10 +44,11 @@ describe("the tile", () => {
     delete TILES.TESTA; delete (symbols as Record<string, unknown>).TESTA;
   });
   it("not sampled yet: a soft white tile; unreadable or no logo: the initials", () => {
-    expect(renderToStaticMarkup(<StockBadge symbol="AAPL" />)).toMatch(/--tile-bg:var\(--grey-50\);--tile-pad:12%/);
     const was = TILES.AAPL;
-    TILES.AAPL = { ...was, unreadable: true, sampled: false };
+    TILES.AAPL = { bg: null, pad: 12, sampled: false };
     try {
+      expect(renderToStaticMarkup(<StockBadge symbol="AAPL" />)).toMatch(/--tile-bg:var\(--grey-50\);--tile-pad:12%/);
+      TILES.AAPL = { ...was, unreadable: true, sampled: false };
       expect(renderToStaticMarkup(<StockBadge symbol="AAPL" size={48} />)).toMatch(/^<span class="badge" style="[^"]*background:#[0-9A-F]{6}[^"]*" aria-hidden="true">AAPL<\/span>$/);
     } finally { TILES.AAPL = was; }
     expect(renderToStaticMarkup(<StockBadge symbol="ZZZZ" size={48} />)).toContain(">ZZZZ</span>");

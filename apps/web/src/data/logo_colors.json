@@ -1,248 +1,248 @@
 {
  "AAPL": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "ABBV": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#00003A",
+  "pad": 0,
+  "sampled": true
  },
  "ADBE": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#ED1C24",
+  "pad": 0,
+  "sampled": true
  },
  "AMD": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "AMT": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "AMZN": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "AVGO": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#CC092F",
+  "pad": 0,
+  "sampled": true
  },
  "BA": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#0065B3",
+  "pad": 0,
+  "sampled": true
  },
  "BAC": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#157FC4",
+  "pad": 0,
+  "sampled": true
  },
  "BKNG": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "CAT": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#08090D",
+  "pad": 0,
+  "sampled": true
  },
  "COP": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "COST": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "CRM": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#009CDB",
+  "pad": 0,
+  "sampled": true
  },
  "CSCO": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#1BA0D7",
+  "pad": 0,
+  "sampled": true
  },
  "CVX": {
-  "bg": null,
+  "bg": "#F4F5F7",
   "pad": 12,
-  "sampled": false
+  "sampled": true
  },
  "DE": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#FCE24C",
+  "pad": 0,
+  "sampled": true
  },
  "DIS": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#187BE0",
+  "pad": 0,
+  "sampled": true
  },
  "DUK": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "GE": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#3B73B9",
+  "pad": 0,
+  "sampled": true
  },
  "GOOGL": {
-  "bg": null,
+  "bg": "#F4F5F7",
   "pad": 12,
-  "sampled": false
+  "sampled": true
  },
  "GS": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#64A8F0",
+  "pad": 0,
+  "sampled": true
  },
  "HD": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#F6821F",
+  "pad": 0,
+  "sampled": true
  },
  "HON": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#DE1E34",
+  "pad": 0,
+  "sampled": true
  },
  "INTC": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#0071C5",
+  "pad": 0,
+  "sampled": true
  },
  "JNJ": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#E92431",
+  "pad": 0,
+  "sampled": true
  },
  "JPM": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "KO": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#ED1C24",
+  "pad": 0,
+  "sampled": true
  },
  "LIN": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#005590",
+  "pad": 0,
+  "sampled": true
  },
  "LLY": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#ED1D24",
+  "pad": 0,
+  "sampled": true
  },
  "LOW": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#004990",
+  "pad": 0,
+  "sampled": true
  },
  "MA": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "MCD": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#BD0017",
+  "pad": 0,
+  "sampled": true
  },
  "META": {
-  "bg": null,
+  "bg": "#F4F5F7",
   "pad": 12,
-  "sampled": false
+  "sampled": true
  },
  "MRK": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#009394",
+  "pad": 0,
+  "sampled": true
  },
  "MS": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "MSFT": {
-  "bg": null,
+  "bg": "#F4F5F7",
   "pad": 12,
-  "sampled": false
+  "sampled": true
  },
  "NEE": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "NFLX": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "NKE": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "NVDA": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "ORCL": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#F80000",
+  "pad": 0,
+  "sampled": true
  },
  "PEP": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#28458E",
+  "pad": 0,
+  "sampled": true
  },
  "PFE": {
-  "bg": null,
+  "bg": "#F4F5F7",
   "pad": 12,
-  "sampled": false
+  "sampled": true
  },
  "PG": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#003CAE",
+  "pad": 0,
+  "sampled": true
  },
  "PLD": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#054D53",
+  "pad": 0,
+  "sampled": true
  },
  "QCOM": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#3253DC",
+  "pad": 0,
+  "sampled": true
  },
  "RTX": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#E31937",
+  "pad": 0,
+  "sampled": true
  },
  "SBUX": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "SPY": {
   "bg": null,
@@ -250,49 +250,49 @@
   "sampled": false
  },
  "TMO": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "TMUS": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#ED008C",
+  "pad": 0,
+  "sampled": true
  },
  "TSLA": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#E82127",
+  "pad": 0,
+  "sampled": true
  },
  "TXN": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#14171A",
+  "pad": 0,
+  "sampled": true
  },
  "UNH": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#1A4687",
+  "pad": 0,
+  "sampled": true
  },
  "UPS": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#330000",
+  "pad": 0,
+  "sampled": true
  },
  "V": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#22275E",
+  "pad": 0,
+  "sampled": true
  },
  "WFC": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#E61B27",
+  "pad": 0,
+  "sampled": true
  },
  "WMT": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#007DC3",
+  "pad": 0,
+  "sampled": true
  },
  "XLB": {
   "bg": null,
@@ -350,8 +350,8 @@
   "sampled": false
  },
  "XOM": {
-  "bg": null,
-  "pad": 12,
-  "sampled": false
+  "bg": "#ED1B2D",
+  "pad": 0,
+  "sampled": true
  }
 }
