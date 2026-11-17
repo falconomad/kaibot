@@ -204,3 +204,20 @@ is neither a split nor a dividend, so the inputs read it as a one-day fall of th
    digest. The earlier rows stay in the registry, marked as before this amendment, and the Gate B verdict is read
    from the corrected runs only. If a corrected run changes a verdict, both results are reported side by side. The
    Data fixes of #264 (verified split rows) count as part of the same correction.
+
+## Amendment 7 (17 Nov 2026, backend-quant with QA-Ops's review of #275, before any rerun on corrected data): no unsourced spin-off value
+
+Written before any run with Amendment 6's correction; no result of it had been seen. It narrows Amendment 6's item 1
+and changes nothing else.
+
+1. **Two sources only.** V, the spun value per parent share, comes only from the record's ratio times the new
+   company's first close, or from Alpaca's own close factor that day (net of the table's split and dividend).
+   Amendment 6's third source, "the ex-day fall itself", is not used. It would count the parent's own move that
+   day as spun value and could lift its momentum.
+2. **A spin-off with neither source** is not adjusted and no value is credited. Its key is not rankable, so it is
+   never bought, from the ex-date for 273 sessions (12-1's 252 plus the skipped month), while the unadjusted fall
+   is inside the look-back. Before the ex-date nothing changes (point in time). Code:
+   `replay/multiday_core.SPIN_UNSOURCED_SESSIONS`.
+3. **Trials.** As Amendment 6's item 4. A configuration an earlier finished report counted, made before this data
+   correction, logs `n_trials` 0 on its first corrected run (`scripts/momentum_core.n_trials_of`; reports record
+   `data_corrections`).
