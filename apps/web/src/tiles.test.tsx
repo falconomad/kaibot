@@ -38,7 +38,7 @@ describe("the tile", () => {
     TILES.TESTA = { bg: "#C8102E", pad: 0, sampled: true };
     (symbols as Record<string, unknown>).TESTA = { name: "Test A", logo: "https://example.com/a.png", industry: null };
     const html = renderToStaticMarkup(<StockBadge symbol="TESTA" size={36} />);
-    expect(html).toMatch(/^<span class="badge logo" style="width:36px;height:36px;flex:none;--tile-bg:#C8102E;--tile-pad:0%"><img src="https:\/\/example.com\/a.png" alt="" width="36" height="36"/);
+    expect(html).toMatch(/^<span class="badge logo" style="width:39px;height:39px;flex:none;--tile-bg:#C8102E;--tile-pad:0%"><img src="https:\/\/example.com\/a.png" alt="" width="39" height="39"/);
     expect(html).not.toContain('class="loaded"');
     expect(css).toMatch(/\.badge\.logo img \{[^}]*opacity: 0; transition: opacity/);
     delete TILES.TESTA; delete (symbols as Record<string, unknown>).TESTA;
@@ -52,10 +52,10 @@ describe("the tile", () => {
       expect(renderToStaticMarkup(<StockBadge symbol="AAPL" size={48} />)).toMatch(/^<span class="badge" style="[^"]*background:#[0-9A-F]{6}[^"]*" aria-hidden="true">AAPL<\/span>$/);
     } finally { TILES.AAPL = was; }
     expect(renderToStaticMarkup(<StockBadge symbol="ZZZZ" size={48} />)).toContain(">ZZZZ</span>");
-    expect(renderToStaticMarkup(<StockBadge symbol="ZZZZ" size={40} />)).toContain(">ZZZ</span>");
+    expect(renderToStaticMarkup(<StockBadge symbol="ZZZZ" size={40} />)).toContain(">ZZZZ</span>");
     expect(renderToStaticMarkup(<StockBadge symbol="ZZZZ" size={36} />)).toContain(">ZZZ</span>");
     expect(renderToStaticMarkup(<StockBadge symbol="BRK.B" size={36} />)).toContain(">BRK</span>");
-    expect(renderToStaticMarkup(<SystemTile><i /></SystemTile>)).toBe('<span class="badge sys" style="width:36px;height:36px;flex:none" aria-hidden="true"><i></i></span>');
+    expect(renderToStaticMarkup(<SystemTile><i /></SystemTile>)).toBe('<span class="badge sys" style="width:39px;height:39px;flex:none" aria-hidden="true"><i></i></span>');
   });
 });
 
