@@ -141,6 +141,7 @@ def test_a_spin_off_record_without_a_share_ratio_is_not_adopted(tmp_path, monkey
     assert "no share ratio" in str(ev)
     assert not a.eng.account_clean
 
+
 # ---------------------------------------------------------------- a late credit (after the session start)
 
 

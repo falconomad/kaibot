@@ -1579,7 +1579,9 @@ class Engine:
                     foreign.pop(x.new_symbol)
                     gone.discard(x.symbol)
                     continue
-            if why:
+            said = getattr(self, "_not_adopted_said", set())
+            if why and (str(today), x.ref, why) not in said:  # #285: the late retry says it once a session
+                self._not_adopted_said = said | {(str(today), x.ref, why)}
                 self.store.event("corporate_action_not_adopted", {"kind": x.kind, "symbol": x.symbol,
                                                                   "new_symbol": x.new_symbol, "why": why,
                                                                   "action": "entries stay blocked: check the "
