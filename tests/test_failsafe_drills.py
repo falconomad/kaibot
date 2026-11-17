@@ -554,6 +554,10 @@ CASES = {
                                   stop_price="91.00")], [(MD, "B", 40, 91.0)], False),
     "an intraday neighbour name is not multi-day": (
         {"B": ("40", "100")}, [_o("s9", "B", "sell", "stop", 40, f"kb{R}-dip_reversal-B-20260803-stop-1")], [], True),
+    # #291 (migration 0022): an ex-date with the engine down since before the open; the book is yesterday's
+    "ex-date: a 2-for-1 split while the engine was down": ({"B": ("80", "50")}, [], [(MD, "B", 40, None)], True),
+    "ex-date: a 1-for-10 reverse split": ({"B": ("4", "1000")}, [], [(MD, "B", 40, None)], True),
+    "ex-date: a symbol change": ({"B2": ("40", "100"), "A": ("7", "100")}, [BRACKET_A], [(MD, "B", 40, None)], True),
 }
 
 
@@ -621,6 +625,13 @@ def test_the_plan_cases_say_what_decision_15_says():
               "a re-priced dead-man stop with its sleeve"):  # #197: still multi-day, never sold, no stop added
         assert got[c]["multi_day"] == {"B": 40} and got[c]["close"] == [] and got[c]["stops"] == [], c
     assert got["a re-priced fail-safe stop next to intraday shares, no book"]["sell"] == [("B", 10)]
+    # #291: on an ex-date nothing of the rule's holding is sold as intraday, and no more is protected than is held
+    split = got["ex-date: a 2-for-1 split while the engine was down"]
+    assert split["multi_day"] == {"B": 80} and split["sell"] == [] and split["close"] == []
+    rev = got["ex-date: a 1-for-10 reverse split"]
+    assert rev["multi_day"] == {"B": 4} and [s[2] for s in rev["stops"]] == [4]
+    ren = got["ex-date: a symbol change"]
+    assert ren["close"] == ["A"] and ren["multi_day"] == {"B2": 40}
 
 
 # ======================================================================= the dead-man's schedule and guards
