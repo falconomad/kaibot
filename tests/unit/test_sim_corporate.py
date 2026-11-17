@@ -47,3 +47,12 @@ def test_a_symbol_change_renames_the_position():
     assert "A" not in pos and pos["A2"]["qty"] == before["qty"]
     (row,) = b.activities(types=("SC",))
     assert row["symbol"] == "A2" and row["date"] == NEXT
+
+
+def test_a_cash_merger_removes_the_position_and_credits_the_cash():
+    b, _ = held_a()
+    cash = b.cash
+    b.cash_merger("A", price=120.0, day=NEXT)
+    assert "A" not in b.positions() and abs(b.cash - cash - 30 * 120.0) < 1e-6
+    rows = b.activities(types=("MA",))
+    assert [float(r["qty"]) for r in rows] == [-30.0, 0.0] and float(rows[1]["net_amount"]) == 3600.0

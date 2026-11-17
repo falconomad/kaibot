@@ -180,7 +180,7 @@ class Link:
     """A spin-off (parent -> new symbol, `ratio` new shares per parent share when Alpaca gives the rates) or a
     symbol change (old -> new) that went ex recently: the sourced record the engine adopts a venue change by."""
 
-    kind: str  # "spin_off" | "symbol_change"
+    kind: str  # "spin_off" | "symbol_change" | "cash_merger" (`ratio`: cash per share, `new_symbol` empty)
     symbol: str  # the parent, or the old symbol
     new_symbol: str
     on: str
@@ -206,6 +206,12 @@ def parse_links(payload: dict) -> list[Link]:
             nr, sr = _rate(r, "new_rate"), _rate(r, "source_rate")
             out.append(Link("spin_off", str(src).upper(), str(new).upper(), on, nr / sr if nr and sr else None,
                             f"alpaca-ca:{r.get('id') or f'{src}:{new}:{on}'}"))
+    for r in block.get("cash_mergers") or []:
+        sym, rate = r.get("acquiree_symbol"), _rate(r, "rate")
+        on = str(r.get("effective_date") or r.get("ex_date") or r.get("process_date") or "")[:10]
+        if sym and rate and len(on) == 10:  # `ratio` here: the cash paid per share
+            out.append(Link("cash_merger", str(sym).upper(), "", on, rate,
+                            f"alpaca-ca:{r.get('id') or f'{sym}:cash:{on}'}"))
     for r in block.get("name_changes") or []:
         old, new = r.get("old_symbol"), r.get("new_symbol")
         on = str(r.get("process_date") or r.get("ex_date") or "")[:10]
@@ -217,7 +223,7 @@ def parse_links(payload: dict) -> list[Link]:
 
 class RecentActions:
     """`(today, symbols) -> [Link]` that went ex from LOOKBACK_DAYS before today up to today, for these symbols
-    (Alpaca GET /v1/corporate-actions, types spin_off and name_change)."""
+    (Alpaca GET /v1/corporate-actions, types spin_off, name_change and cash_merger)."""
 
     LOOKBACK_DAYS = 10
 
@@ -229,6 +235,6 @@ class RecentActions:
         if not syms:
             return []
         start = np.datetime64(today, "D") - np.timedelta64(self.LOOKBACK_DAYS, "D")
-        p = {"symbols": ",".join(syms), "types": "spin_off,name_change", "start": str(start), "end": str(today),
-             "limit": 1000}
+        p = {"symbols": ",".join(syms), "types": "spin_off,name_change,cash_merger", "start": str(start),
+             "end": str(today), "limit": 1000}
         return [x for x in parse_links(self.get(CA_PATH, p)) if str(start) <= x.on <= str(today)]
