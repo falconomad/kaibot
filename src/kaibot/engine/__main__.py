@@ -101,7 +101,22 @@ def build(settings: Settings) -> Engine:
                   daily=daily_path(data, review=make_preopen(gw, locked)),  # #131: review None unless switched on
                   # #266: spin-offs and symbol changes of held multi-day positions, adopted from Alpaca's record
                   # (only used with the daily path: KAIBOT_MULTIDAY=on)
-                  recent_actions=RecentActions(data))
+                  recent_actions=RecentActions(get=bounded_data_get(data)))
+
+
+def bounded_data_get(data):
+    """QA-Ops (#271, #275): Alpaca market-data GETs made inside the engine's loop (the corporate-actions reads of
+    the send step and of the session start), bounded like an order call: 6 s an attempt, 20 s in all, retries
+    included. Same client, same keys in its headers, same rate budget. The plain client (30 s an attempt, five
+    attempts, no deadline) could hold the loop for minutes, past the watchdog's 90 s."""
+    import copy
+
+    from kaibot.broker.alpaca import ORDER_DEADLINE_S, ORDER_TIMEOUT_S
+    from kaibot.engine.config import DATA_URL
+
+    http = copy.copy(data.http)
+    http.timeout_s, http.deadline_s = ORDER_TIMEOUT_S, ORDER_DEADLINE_S
+    return lambda path, params: http.call("GET", f"{DATA_URL}{path}", params)
 
 
 def daily_path(data=None, review=None):
@@ -128,19 +143,9 @@ def daily_path(data=None, review=None):
 
     # #266 (trend_momentum.md Amendment 6): no buy of a stock with an announced split, spin-off, merger or symbol
     # change in the next 35 sessions, read from Alpaca's market-data corporate actions (free)
-    ca = None
-    if data is not None:
-        import copy
-
-        from kaibot.broker.alpaca import ORDER_DEADLINE_S, ORDER_TIMEOUT_S
-        from kaibot.engine.config import DATA_URL
-
-        # QA-Ops (#271): the read runs inside the engine's loop (the send step at 09:31), so each request is bounded
-        # like an order call (6 s an attempt, 20 s in all, retries included) and the guard stops the whole read at
-        # 25 s (a failed read: no buys). Same client, same keys in its headers, same rate budget.
-        http = copy.copy(data.http)
-        http.timeout_s, http.deadline_s = ORDER_TIMEOUT_S, ORDER_DEADLINE_S
-        ca = CorporateActionGuard(get=lambda path, params: http.call("GET", f"{DATA_URL}{path}", params))
+    # QA-Ops (#271): the read runs inside the engine's loop (the send step at 09:31): each request is bounded
+    # (bounded_data_get) and the guard stops the whole read at 25 s (a failed read: no buys)
+    ca = CorporateActionGuard(get=bounded_data_get(data)) if data is not None else None
     if review is not None:
         log.warning("pre-open review of the daily path: ON (KAIBOT_PREOPEN_REVIEW=on, %s)",
                     "LLM key set" if review.gateway.enabled else "no ANTHROPIC_API_KEY: no daily buys until it is set")
