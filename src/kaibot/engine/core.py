@@ -1394,6 +1394,7 @@ class Engine:
         self._sync_orders()
         self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
         self._recheck_reconcile(m)
+        self._late_actions(m)  # #266: a split or spin-off Alpaca credits after the session start
         self._check_drift()
         if any(p.carried for p in self.pos.values()):
             for p in [p for p in self.pos.values() if p.carried and p.status in ("open", "pending")]:
@@ -1535,6 +1536,52 @@ class Engine:
         if self.corporate_actions is None and self.daily is not None and self.recent_actions is not None:
             self._adopt_actions(b, today)
 
+    LATE_RETRY_MIN = 5  # a difference that stays: the venue's record is read again at most every 5 minutes
+
+    def _late_actions(self, m: int) -> None:
+        """#266: the share count at the broker changed after the session start (Alpaca credited a split or a
+        spin-off late). The session's corporate-actions step runs again (idempotent: every action is booked once
+        by its ref) when a difference first shows, before the drift check halts entries; if the books then match,
+        a drift halt it caused is cleared and the account is checked again. Only with the daily path."""
+        if self.daily is None or self.corporate_actions is not None or self.day is None or self.run is None:
+            return
+        b = self.ledger.book(self._rid())
+        if b is None or not b.sleeves:
+            return
+        try:
+            bpos = self.broker.positions()
+        except Exception:
+            return
+        unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
+        unsettled |= {k[1] for x in self._md_exits.values() for k, _ in x["keys"]} | self.daily.working_symbols()
+        mine = b.qty_by_symbol()
+        intraday: dict[str, float] = {}
+        for p in self.pos.values():
+            intraday[p.symbol] = intraday.get(p.symbol, 0.0) + p.qty
+        diff = tuple(sorted(s for s in set(mine) | set(bpos) if s not in unsettled
+                            and abs(float((bpos.get(s) or {}).get("qty") or 0) - intraday.get(s, 0.0)
+                                    - mine.get(s, 0.0)) > 1e-9))
+        if not diff:
+            self._late_seen = None
+            return
+        last = getattr(self, "_late_seen", None)
+        if last is not None and last[0] == diff and m - last[1] < self.LATE_RETRY_MIN:
+            return
+        self._late_seen = (diff, m)
+        before = dict(mine)
+        self._corporate_actions(self.day.day)
+        if b.qty_by_symbol() == before:
+            return
+        self.check_account()
+        self._startup_reconcile("recheck")
+        # QA-Ops (#285): the drift halt is lifted only when the books really agree again (the account guard and the
+        # reconciliation both clean), not merely because one symbol's count moved
+        if self.kill == "drift" and self.account_clean and self._reconciled():
+            self._drift_seen = {}
+            self.kill = None
+            self.store.event("halt_cleared", {"kind": "drift", "day": str(self.day.day),
+                                              "why": "a late corporate action was adopted"}, self._rid())
+
     def _adopt_actions(self, b, today: date) -> None:
         """#266: what Alpaca did before the open to a held multi-day position, adopted from the venue's positions and
         a sourced record (Alpaca's corporate actions of the last days), never guessed:
@@ -1597,7 +1644,9 @@ class Engine:
                     foreign.pop(x.new_symbol)
                     gone.discard(x.symbol)
                     continue
-            if why:
+            said = getattr(self, "_not_adopted_said", set())
+            if why and (str(today), x.ref, why) not in said:  # #285: the late retry says it once a session
+                self._not_adopted_said = said | {(str(today), x.ref, why)}
                 self.store.event("corporate_action_not_adopted", {"kind": x.kind, "symbol": x.symbol,
                                                                   "new_symbol": x.new_symbol, "why": why,
                                                                   "action": "entries stay blocked: check the "
