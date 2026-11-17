@@ -1,5 +1,7 @@
 """v3 · Design system (issue #79): tokens, type, spacing, components and motion on one board.
 
+Replaced by docs/design/brand/design_system_v1.md (issue #296); the board says so at its top.
+
 Run from this folder: python3 designsystem.py
 Writes ../project/v3/DesignSystem.dc.html.
 """
@@ -34,6 +36,14 @@ COLOURS = [
     ("SPY series", "#C4862F", "--s-spy", "Benchmark line, always dashed"),
     ("warn", "#F5B64C", "--warn", "Warnings, PAPER pill"),
 ]
+
+
+# Issue #296: this board is kept for the record. The app runs on kaibo brand v1 since 16 Nov 2026.
+NEW_PAGE = "https://github.com/falconomad/kaibot/blob/main/docs/design/brand/design_system_v1.md"
+REPLACED = ('<div role="note" style="border: 1px solid #5A4520; background: #33280F; border-radius: 16px; padding: 14px 18px; font-size: 15px; line-height: 1.5">'
+            '<b>Replaced.</b> This board shows the v3 dark theme and is no longer the reference. '
+            f'Use the <a href="{NEW_PAGE}" target="_blank" rel="noopener noreferrer">kaibo design system, brand v1</a> '
+            '(<code>docs/design/brand/design_system_v1.md</code>).</div>')
 
 
 def swatch(name, hx, tok, use):
@@ -120,6 +130,7 @@ PAGE = f'''  <main class="page" style="max-width: 1240px; margin: 0 auto; box-si
       <h1 class="h1" style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -0.03em">Design system</h1>
       <span style="font-size: 15px; color: #A1A8B3">The v3 dark theme: colour, type, spacing, components and motion.</span>
     </div>
+    {REPLACED}
     <section class="enter d1" aria-labelledby="ds-c" style="display: flex; flex-direction: column; gap: 14px">
       <h2 id="ds-c" style="margin: 0; font-size: 20px; font-weight: 600">Colour</h2>
       <div class="sw">{"".join(swatch(*c) for c in COLOURS)}</div>
