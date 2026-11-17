@@ -72,7 +72,7 @@ export function FineTune() {
       <Link to="/strategy" className="kb-back">← Strategy</Link>
       <h1 className="kb-h1" tabIndex={-1}>Fine-tune</h1>
       <span className="muted">Every setting, one row each. Pickier or smaller, never riskier than {levelName}.</span>
-      <div className="num muted" style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", fontSize: 14 }}>
+      <div className="num muted" style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", fontSize: 15 }}>
         <span><b style={{ color: "var(--ink)" }}>≈ {Math.round(est.perMonth)}</b> trades a month</span>
         <span><b style={{ color: "var(--ink)" }}>{usd0(usd.maxLoss)}</b> max loss a trade</span>
         <span><b style={{ color: "var(--ink)" }}>{usd0(usd.position)}</b> largest position</span>
@@ -100,14 +100,14 @@ export function FineTune() {
           <div key={k} className="kb-srow-static">
             <span style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
               <span title={`code: ${k}`}>{STRATEGY_NAME[k]} <span className="tag retired">{RETIRED_TEXT}</span></span>
-              <span className="muted" style={{ fontSize: 12 }}>{!allowed ? `Not part of ${levelName}` : k === "dip_reversal" ? "No-news dips in the 59 stocks" : "Up to 1 a day on qualifying days · not estimated yet"}</span>
+              <span className="muted" style={{ fontSize: 13 }}>{!allowed ? `Not part of ${levelName}` : k === "dip_reversal" ? "No-news dips in the 59 stocks" : "Up to 1 a day on qualifying days · not estimated yet"}</span>
             </span>
             <Switch label={STRATEGY_NAME[k]} on={body.strategies[k]} disabled={!allowed || (body.strategies[k] && !Object.entries(body.strategies).some(([o, v]) => o !== k && v))}
               onChange={(v) => edit({ ...body, strategies: { ...body.strategies, [k]: v } })} />
           </div>
         );
       })}
-      <div className="kb-srow-static"><span className="muted" style={{ flex: 1, fontSize: 13 }}>Opening-breakout rule · News rule</span><span className="tag">test only, never traded</span></div>
+      <div className="kb-srow-static"><span className="muted" style={{ flex: 1, fontSize: 14 }}>Opening-breakout rule · News rule</span><span className="tag">test only, never traded</span></div>
     </Group>
 
     <Group title="Timing">
@@ -127,10 +127,10 @@ export function FineTune() {
       <Row id="pause" label="Pause after a losing streak" value={`${body.timing.pause_losses} losses → ${body.timing.pause_minutes} min`}
         changed={body.timing.pause_losses !== baseline.timing.pause_losses || body.timing.pause_minutes !== baseline.timing.pause_minutes}
         open={open === "pause"} onToggle={() => toggle("pause")}>
-        <span className="muted" style={{ fontSize: 12 }}>Losses in a row</span>
+        <span className="muted" style={{ fontSize: 13 }}>Losses in a row</span>
         <Stepper label={LABEL.pause_losses} value={body.timing.pause_losses} min={b.pause_losses.min} max={b.pause_losses.max}
           text={`${body.timing.pause_losses} losses`} onChange={(v) => setNum("pause_losses", v)} />
-        <span className="muted" style={{ fontSize: 12 }}>Pause length</span>
+        <span className="muted" style={{ fontSize: 13 }}>Pause length</span>
         {slider("pause_minutes")}
       </Row>
     </Group>
@@ -140,7 +140,7 @@ export function FineTune() {
         changed={(["min_price_usd", "min_adv_usd", "max_spread_bp"] as const).some((k) => body.advanced[k] !== baseline.advanced[k])}
         open={open === "adv"} onToggle={() => toggle("adv")}>
         {(["min_price_usd", "min_adv_usd", "max_spread_bp"] as const).map((k) => (
-          <div key={k} style={{ display: "flex", flexDirection: "column", gap: 2 }}><span className="muted" style={{ fontSize: 12 }}>{LABEL[k]} (tighten only)</span>{slider(k)}</div>
+          <div key={k} style={{ display: "flex", flexDirection: "column", gap: 2 }}><span className="muted" style={{ fontSize: 13 }}>{LABEL[k]} (tighten only)</span>{slider(k)}</div>
         ))}
       </Row>
       <Row id="locked" label="Safety rules" icon={<LockIcon />} value="Always on" valueClass="gain" changed={false} open={open === "locked"} onToggle={() => toggle("locked")}>
@@ -152,7 +152,7 @@ export function FineTune() {
 
     <div className="kb-row" style={{ gap: 12 }}>
       <button type="button" onClick={reset} disabled={busy}>Reset to level defaults</button>
-      <span className="muted" style={{ fontSize: 13, flex: "1 1 260px" }}>Coming later, once each passes a replay: exit style presets, more stocks, your own themes, days off, news-room strictness.</span>
+      <span className="muted" style={{ fontSize: 14, flex: "1 1 260px" }}>Coming later, once each passes a replay: exit style presets, more stocks, your own themes, days off, news-room strictness.</span>
     </div>
   </>);
 }
@@ -161,7 +161,7 @@ function Group({ title, sub, children }: { title: string; sub?: string; children
   const id = `g-${title.toLowerCase().replace(/\W+/g, "-")}`;
   return (
     <section className="kb-sect" aria-labelledby={`${id}-h`} id={id}>
-      <div style={{ padding: "0 4px" }}><h2 id={`${id}-h`} className="cap kb-cap">{title}</h2>{sub && <span className="muted" style={{ fontSize: 13 }}>{sub}</span>}</div>
+      <div style={{ padding: "0 4px" }}><h2 id={`${id}-h`} className="cap kb-cap">{title}</h2>{sub && <span className="muted" style={{ fontSize: 14 }}>{sub}</span>}</div>
       <div className="card kb-group">{children}</div>
     </section>
   );
@@ -226,7 +226,7 @@ function FocusEditor({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBo
         </label>
         <button type="button" onClick={doAdd} disabled={!universe.includes(add.trim().toUpperCase())}>Add</button>
       </div>
-      {all ? <span className="muted" style={{ fontSize: 13 }}>All {universe.length - body.focus.exclude.length} stocks. Pick themes or add stocks to set a focus.</span> : (<>
+      {all ? <span className="muted" style={{ fontSize: 14 }}>All {universe.length - body.focus.exclude.length} stocks. Pick themes or add stocks to set a focus.</span> : (<>
         <span className="cap">Your focus · {set.length} stocks</span>
         <ul className="kb-symlist" aria-label="Stocks in your focus">
           {set.map((s) => (
@@ -236,7 +236,7 @@ function FocusEditor({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBo
           ))}
         </ul>
       </>)}
-      <span className={tooFew ? "kb-warn" : "muted"} style={{ fontSize: 13 }} role={tooFew ? "alert" : undefined}>
+      <span className={tooFew ? "kb-warn" : "muted"} style={{ fontSize: 14 }} role={tooFew ? "alert" : undefined}>
         {tooFew ? `“Only these” needs at least ${MIN_FOCUS} stocks.` : body.focus.mode === "only" ? `${NAME} trades only these stocks.`
           : body.focus.mode === "prefer" ? `${NAME} looks at your focus first, then the rest, when slots compete.` : "No focus: every stock is equal."}
       </span>

@@ -34,10 +34,10 @@ function Proc({ h }: { h: Heartbeat }) {
       <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill={ok ? "var(--sea)" : age > p.staleS ? "var(--stale)" : "var(--warn)"} /></svg>
           <b>{p.name}</b><span className="sr-only">{ok ? "healthy" : "not healthy"}</span></div>
-        <div className="muted" style={{ fontSize: 12 }}>{p.what}</div></td>
+        <div className="muted" style={{ fontSize: 13 }}>{p.what}</div></td>
       <td className="num">{String(d.state ?? "—")}</td>
       <td className="num">{ageText(age)}</td>
-      <td className="muted num" style={{ fontSize: 12 }}>
+      <td className="muted num" style={{ fontSize: 13 }}>
         {d.code_sha ? `code version ${d.code_sha} · ` : ""}{d.host ? `host ${String(d.host).slice(0, 12)} · ` : ""}
         {d.account_clean === false ? "account NOT clean · " : ""}{d.halted ? "entries halted · " : ""}
         {typeof d.engine_heartbeat_age_s === "number" ? `sees engine ${Math.round(d.engine_heartbeat_age_s)} s` : ""}
@@ -77,14 +77,14 @@ function LlmBudgetCard() {
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <h2 id="llm-h" style={{ margin: 0 }}>LLM budget</h2><span className={`tag ${cls}`}>{label}</span>
       </div>
-      <p style={{ fontSize: 13 }} className={t.tone === "breach" ? "loss" : undefined}>{t.text}</p>
+      <p style={{ fontSize: 14 }} className={t.tone === "breach" ? "loss" : undefined}>{t.text}</p>
       <div className="kv">
         <span>Today</span><span /><span className="v">{usd(b.day_usd)} / ${b.caps.daily_soft}</span>{bar(b.day_usd / b.caps.daily_soft)}
         <span>This month</span><span /><span className="v">{usd(b.month_usd)} / ${b.caps.monthly_hard}</span>{bar(b.month_usd / b.caps.monthly_hard)}
         <span>Calls today</span><span /><span className="v">{b.calls_today}{b.open_reserved_usd > 0 ? ` · ${usd(b.open_reserved_usd)} reserved` : ""}</span>
         {purposes.length > 0 && (<><span>By purpose</span><span /><span className="v">{purposes.map(([k, v]) => `${k} ${usd(v)}`).join(" · ")}</span></>)}
       </div>
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Above ${b.caps.daily_soft} a day the rules decide alone; ${b.caps.monthly_alert} a month raises an alert;
+      <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Above ${b.caps.daily_soft} a day the rules decide alone; ${b.caps.monthly_alert} a month raises an alert;
         at ${b.caps.monthly_hard} no new entries. Each call reserves its worst case first, so the caps can't be overshot.</p>
     </section>
   );
@@ -98,7 +98,7 @@ function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
     <section className="card" aria-labelledby="scan-h">
       <h2 id="scan-h">Today's scan</h2>
       <p style={{ fontWeight: 600, marginTop: 0 }}>{headline}</p>
-      <ul style={{ fontSize: 13, margin: "0 0 8px", paddingLeft: 18 }}>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
+      <ul style={{ fontSize: 14, margin: "0 0 8px", paddingLeft: 18 }}>{lines.map((l) => <li key={l}>{l}</li>)}</ul>
       {near.length > 0 && (
         <div>
           <table className="list" tabIndex={0} aria-label="Today's scan">
@@ -107,7 +107,7 @@ function ScanCard({ beat }: { beat: Heartbeat | undefined }) {
           </table>
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>The dip rule (retired, systems test only) buys only a fall of at least 1.5σ that its sector doesn't explain, on calm volume, with no company news in 24 h, after a 5-minute higher low. Quiet up-days often have none.</p>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>The dip rule (retired, systems test only) buys only a fall of at least 1.5σ that its sector doesn't explain, on calm volume, with no company news in 24 h, after a 5-minute higher low. Quiet up-days often have none.</p>
     </section>
   );
 }
@@ -128,9 +128,9 @@ function VersionCard({ h }: { h: HealthData }) {
           <span key={p.key} style={{ display: "contents" }}><RuleName code={p.key} exp={findExperiment(p.key, experimentsOf(h.heartbeat))} /><span /><span className="v num">{p.hash}</span></span>
         ))}
       </div>
-      {fp?.unknown && <p className="loss" style={{ fontSize: 13 }}>The engine couldn't compute its fingerprint at start, so no trade from this start counts toward a verdict.</p>}
-      {v.mismatch && <p className="muted" style={{ fontSize: 13 }}>The running code differs from the code at the last logged start; the start may be older than this log.</p>}
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Evidence for a rule only counts while its part of the fingerprint (shared core plus the rule's own files) stays the same.
+      {fp?.unknown && <p className="loss" style={{ fontSize: 14 }}>The engine couldn't compute its fingerprint at start, so no trade from this start counts toward a verdict.</p>}
+      {v.mismatch && <p className="muted" style={{ fontSize: 14 }}>The running code differs from the code at the last logged start; the start may be older than this log.</p>}
+      <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Evidence for a rule only counts while its part of the fingerprint (shared core plus the rule's own files) stays the same.
         Changing one rule doesn't restart another rule's count.</p>
     </section>
   );
@@ -213,7 +213,7 @@ export function Health() {
         <li><Link to="/gate" className="row"><span className="row-mid"><b>Go / no-go</b><span className="muted">The ten-year test and the bar for real money</span></span>
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6 L15 12 L9 18" /></svg></Link></li>
       </ul>
-      {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 13, margin: 0 }}>Waiting for the engine: {h.pending_commands.map((c) => commandText(c.kind)).join(", ")}</p>}
+      {h.pending_commands.length > 0 && <p className="muted" style={{ fontSize: 14, margin: 0 }}>Waiting for the engine: {h.pending_commands.map((c) => commandText(c.kind)).join(", ")}</p>}
 
       <Accordion title="Technical details" hint="version, processes, LLM budget, halts, log">
         <VersionCard h={h} />
@@ -228,10 +228,10 @@ export function Health() {
         <section className="card" aria-labelledby="halt-h">
           <h2 id="halt-h">Recent halts</h2>
           {h.halts.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{h.halts.slice(0, 12).map((x, i) => (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>{h.halts.slice(0, 12).map((x, i) => (
               <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <span title={`code: ${x.kind}`}>{haltText(x)}</span><HaltTag x={x} all={h.halts} />
                 {haltResolved(x, beatTs, recovered) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}
-                {x.reason && <div className="muted" style={{ fontSize: 12 }}>{x.reason}</div>}</li>))}</ul>
+                {x.reason && <div className="muted" style={{ fontSize: 13 }}>{x.reason}</div>}</li>))}</ul>
           ) : <Empty>No halts recorded.</Empty>}
         </section>
         <section className="card" aria-labelledby="ev-h">
@@ -242,7 +242,7 @@ export function Health() {
               <tr key={i}>
                 <td className="num" title={timeBoth(e.ts)}>{dateEt(e.ts)} {timeEt(e.ts)}</td>
                 <td title={`code: ${e.type}`}>{eventText(e)}</td>
-                <td className="muted num" style={{ fontSize: 12, maxWidth: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <td className="muted num" style={{ fontSize: 13, maxWidth: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {summary(e.payload)}</td>
               </tr>))}</tbody>
           </table>

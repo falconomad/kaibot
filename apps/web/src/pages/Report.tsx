@@ -48,15 +48,15 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <h2 id="day-h" style={{ margin: 0 }}>{day(r.session)}</h2>
         <span className="spacer" />
-        <label className="muted" style={{ fontSize: 13 }}>Day{" "}
+        <label className="muted" style={{ fontSize: 14 }}>Day{" "}
           <select value={r.session} onChange={(e) => setSession(e.target.value)}>
             {r.sessions.map((s) => <option key={s} value={s}>{day(s)}</option>)}
           </select>
         </label>
       </div>
       <p className="verdict" style={{ marginTop: 8 }}><span className={tone(r.day?.pnl)}>{signedMoney(r.day?.pnl)} · {pct(b.potPct)}</span>, {verdict}.</p>
-      <p className="muted" style={{ fontSize: 13, margin: "4px 0 0" }}>S&amp;P 500 {pct(b.spyPct)} · cash {pct(b.cashPct, 3)}</p>
-      <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Trades that day</h3>
+      <p className="muted" style={{ fontSize: 14, margin: "4px 0 0" }}>S&amp;P 500 {pct(b.spyPct)} · cash {pct(b.cashPct, 3)}</p>
+      <h3 style={{ fontSize: 15, margin: "16px 0 6px" }}>Trades that day</h3>
       {trades.length ? (
         <ul className="rows" aria-label="Trades that day">{trades.map((t) => (
           <li key={t.id}><Link to={`/positions/${t.id}`} className="row">
@@ -71,16 +71,16 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
         <span>Setups seen / taken</span><span /><span className="v">{r.signals?.live ?? 0} / {r.signals?.approved ?? 0}</span>
       </div>
       {best && worst && best.id !== worst.id && (
-        <p className="muted" style={{ fontSize: 13, margin: 0 }}>Best {best.symbol} {signedMoney(best.pnl_usd)} · worst {worst.symbol} {signedMoney(worst.pnl_usd)}</p>
+        <p className="muted" style={{ fontSize: 14, margin: 0 }}>Best {best.symbol} {signedMoney(best.pnl_usd)} · worst {worst.symbol} {signedMoney(worst.pnl_usd)}</p>
       )}
-      <p className="muted" style={{ fontSize: 12, margin: 0 }}>One day says almost nothing about an edge. Read the evidence counter, not the daily colour.</p>
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>One day says almost nothing about an edge. Read the evidence counter, not the daily colour.</p>
       {(r.vetoes?.length ?? 0) > 0 && (<>
-        <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Setups not taken, and why</h3>
+        <h3 style={{ fontSize: 15, margin: "16px 0 6px" }}>Setups not taken, and why</h3>
         <div className="kv">{r.vetoes!.map((v) => (<Fragment key={v.reason}><span title={`code: ${v.reason}`}>{vetoText(v.reason)}</span><span /><span className="v">{v.n}</span></Fragment>))}</div>
       </>)}
 
       {(r.shadow?.length ?? 0) > 0 && (<>
-        <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Shadow strategies (never traded, counterfactual after costs)</h3>
+        <h3 style={{ fontSize: 15, margin: "16px 0 6px" }}>Shadow strategies (never traded, counterfactual after costs)</h3>
         <table className="list" tabIndex={0} aria-label="Shadow strategies (never traded, counterfactual after costs)">
           <thead><tr><th>Time (ET)</th><th>Strategy</th><th>Stock</th><th className="r">Would have made</th><th className="r">R</th></tr></thead>
           <tbody>{r.shadow!.map((s, i) => (
@@ -91,7 +91,7 @@ function DayCard({ runId, beat }: { runId: number; beat: Heartbeat | undefined }
       </>)}
 
       {(r.halts?.length ?? 0) > 0 && (<>
-        <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>Halts</h3>
+        <h3 style={{ fontSize: 15, margin: "16px 0 6px" }}>Halts</h3>
         <ul style={{ margin: 0, paddingLeft: 18 }}>{r.halts!.map((h, i) => (
           <li key={i}><span className="num">{timeEt(h.ts)}</span> <span title={`code: ${h.kind}`}>{haltText(h)}</span><HaltTag x={h} all={r.halts!} />
             {haltResolved(h, beat?.ts) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}</li>))}</ul>
@@ -122,9 +122,9 @@ function EvidenceCard({ runId }: { runId: number }) {
         <span>t-stat</span><span /><span className="v">{e?.t?.toFixed(2) ?? "—"} <span className="muted">/ {BAR.t}</span></span>
         <span>Sessions</span><span /><span className="v">{e?.sessions ?? 0}</span>
       </div>
-      <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 13, marginBottom: 0 }}>{v.text}</p>
+      <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 14, marginBottom: 0 }}>{v.text}</p>
       {e.by_strategy.length > 1 && (
-        <p className="muted" style={{ fontSize: 12 }}>{e.by_strategy.map((s) => `${ruleLabel(s.strategy)}: ${s.n} trades, ${fmtR(s.mean_r)}`).join(" · ")}</p>
+        <p className="muted" style={{ fontSize: 13 }}>{e.by_strategy.map((s) => `${ruleLabel(s.strategy)}: ${s.n} trades, ${fmtR(s.mean_r)}`).join(" · ")}</p>
       )}
       </>)}
     </section>
@@ -168,7 +168,7 @@ function Attribution({ runId }: { runId: number }) {
       {q.isPending ? <Skeleton /> : q.isError ? <ErrorState compact what="Attribution" error={q.error} retry={() => q.refetch()} /> : !a || a.n === 0 ? (
         <Empty>No closed trades in this period. Try a longer period.</Empty>
       ) : (<>
-        <p className="muted" style={{ fontSize: 13 }}>{a.n} closed trades since {day(a.since.slice(0, 10))}. A <b>kill</b> flag means ≥ 20 trades with t ≤ −2;
+        <p className="muted" style={{ fontSize: 14 }}>{a.n} closed trades since {day(a.since.slice(0, 10))}. A <b>kill</b> flag means ≥ 20 trades with t ≤ −2;
           {" "}<b>watch</b> means losing on average over ≥ 10. Flags are prompts to investigate, never automatic changes.</p>
         {flags.length > 0 && (
           <div className="banner warn" role="status">
@@ -180,7 +180,7 @@ function Attribution({ runId }: { runId: number }) {
         </div>
         <GroupTable rows={a.groups.filter((g) => g.dim === dim)} />
         {weeksList.length > 1 && (<>
-          <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>By week</h3>
+          <h3 style={{ fontSize: 15, margin: "16px 0 6px" }}>By week</h3>
           <table className="list" tabIndex={0} aria-label="By week">
             <thead><tr><th>Week of</th>{[...new Set(a.weekly.map((w) => w.strategy))].map((s) => <th key={s} className="r">{strat(s)}</th>)}</tr></thead>
             <tbody>{weeksList.map((wk) => (
@@ -221,7 +221,7 @@ function RoomAbCard({ runId }: { runId: number }) {
         <p className="muted">No agent-room sessions in this period. Dip-reversal candidates that pass every rule go to the room from M3 on;
           until then every trade is rules-only.</p>
       ) : (<>
-        <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 13, marginTop: 10 }}>{v.text}</p>
+        <p className={tone(v.tone === "gain" ? 1 : v.tone === "loss" ? -1 : 0)} style={{ fontSize: 14, marginTop: 10 }}>{v.text}</p>
         <div className="kv">
           <span>Candidates sent to the room</span><span /><span className="v">{ab.n}</span>
           <span className="muted">answered · no answer · rules-only</span><span /><span className="v muted">{st.done ?? 0} · {noAnswer} · {st.skipped ?? 0}</span>
@@ -241,7 +241,7 @@ function RoomAbCard({ runId }: { runId: number }) {
           <span>Spend per avoided loss</span><span /><span className="v">{usd3(ab.spend.per_loss_avoided)}</span>
         </div>
         <div className="prog" aria-hidden="true" style={{ marginTop: 12 }}><i style={{ width: `${Math.min(1, ab.veto.n_cf / MIN_VETOES) * 100}%` }} /></div>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>{Math.min(ab.veto.n_cf, MIN_VETOES)} / {MIN_VETOES} vetoes with a known outcome before any verdict.
+        <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>{Math.min(ab.veto.n_cf, MIN_VETOES)} / {MIN_VETOES} vetoes with a known outcome before any verdict.
           Counterfactuals use the same cost model at full size, scored after the close. The room is never replayed: it is judged forward only.</p>
       </>)}
     </section>
@@ -254,9 +254,9 @@ function ChaptersCard({ runId }: { runId: number }) {
   return (
     <section className="card" aria-labelledby="ch-h">
       <h2 id="ch-h">Chapters</h2>
-      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Each time you apply new Strategy settings, a new chapter starts at the next open, so each setup is judged on its own trades.
+      <p className="muted" style={{ fontSize: 14, marginTop: 0 }}>Each time you apply new Strategy settings, a new chapter starts at the next open, so each setup is judged on its own trades.
         The go-live review judges one frozen setup only.</p>
-      {q.isPending ? <Skeleton /> : q.isError ? <p className="muted" style={{ fontSize: 13 }}>Chapters aren't available yet: {String((q.error as Error).message)}</p>
+      {q.isPending ? <Skeleton /> : q.isError ? <p className="muted" style={{ fontSize: 14 }}>Chapters aren't available yet: {String((q.error as Error).message)}</p>
         : !q.data.length ? <Empty>No chapters yet. Everything so far ran on the level's defaults.</Empty> : (
         <table className="list" tabIndex={0} aria-label="Chapters">
           <thead><tr><th>Chapter</th><th>Dates</th><th className="r">Trades</th><th className="r">P&amp;L</th><th className="r">Mean R</th><th className="r">t</th><th>Verdict</th></tr></thead>
@@ -276,7 +276,7 @@ function ChaptersCard({ runId }: { runId: number }) {
           })}</tbody>
         </table>
       )}
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Under 30 trades a chapter says nothing about an edge. Narrow settings slow the evidence a lot.</p>
+      <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Under 30 trades a chapter says nothing about an edge. Narrow settings slow the evidence a lot.</p>
     </section>
   );
 }
@@ -293,7 +293,7 @@ export function Report() {
       {run.kind === "paper" && <Accordion title="Agent room"><RoomAbCard runId={run.id} /></Accordion>}
       {run.kind === "paper" && <Accordion title="Chapters" hint="settings versions"><ChaptersCard runId={run.id} /></Accordion>}
       <Accordion title="How to read this">
-        <p style={{ fontSize: 14, margin: 0 }}>The report is ready after each session closes (16:00 ET, 22:00 CET). Every number is after costs and uses the
+        <p style={{ fontSize: 15, margin: 0 }}>The report is ready after each session closes (16:00 ET, 22:00 CET). Every number is after costs and uses the
           worse of the broker's fills and {NAME}'s shadow cost model. Expect 4–5 losing days in 10; what matters is the evidence counter:
           {" "}{BAR.trades}+ trades over {BAR.months}+ months with t &gt; {BAR.t}. Pot start {money(run.amount_usd)}.</p>
       </Accordion>

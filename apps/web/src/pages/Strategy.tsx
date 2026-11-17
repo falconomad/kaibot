@@ -9,7 +9,8 @@ import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { livePot, useRunCtx } from "../components/Shell";
 import { PillSwitch, RadioGroup } from "../components/ConfigControls";
-import { StockBadge } from "../components/StockBadge";
+import { StockBadge, StockCell } from "../components/StockBadge";
+import { Sheet } from "../components/Sheet";
 import { Accordion } from "../components/Accordion";
 import { Skeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
@@ -295,6 +296,8 @@ function FocusCard({ body, edit, ctx, toFine, source, setSource, ed }: { body: C
     { key: null, name: "All stocks", syms: universe.filter((s) => !body.focus.exclude.includes(s)), on: all },
     ...Object.entries(themes).map(([k, t]) => ({ key: k, name: t.label, syms: t.symbols, on: !all && body.focus.themes.includes(k) })),
   ];
+  const [peek, setPeek] = useState<string | null>(null);
+  const peekCard = peek === null ? null : cards.find((c) => (c.key ?? "_all") === peek) ?? null;
   return (
     <section className="card kb-card" aria-labelledby="fo-h">
       <div className="kb-row">
@@ -307,23 +310,58 @@ function FocusCard({ body, edit, ctx, toFine, source, setSource, ed }: { body: C
         options={[{ value: "themes" as const, label: "Themes" }, { value: "lists" as const, label: "My lists" }]} />
       {source === "lists" ? <MyListsCard ed={ed} mode={body.focus.mode} /> : <>
       <div className="kb-tgrid" role="group" aria-label="Themes">
-        {cards.map((c) => (
-          <button key={c.key ?? "_all"} type="button" aria-pressed={c.on} className="kb-tcard" onClick={() => edit(toggleTheme(body, c.key))}>
-            <span aria-hidden="true" className="kb-faces">{(c.key ? c.syms : ["AAPL", "JPM", "XOM"]).slice(0, 3).map((s) => <StockBadge key={s} symbol={s} size={36} />)}</span>
-            <span className="kb-tname">{c.name}</span>
-            <span className="num kb-tmeta">{c.syms.filter((s) => !body.focus.exclude.includes(s)).length} stocks · ≈ {Math.round(themeRate(c.syms, body, b) * 10) / 10}/mo</span>
-            {c.on && <span aria-hidden="true" className="kb-check">✓</span>}
-          </button>
-        ))}
+        {cards.map((c) => {
+          const live = c.syms.filter((s) => !body.focus.exclude.includes(s)).length;
+          return (
+            <div key={c.key ?? "_all"} className={`kb-tcard ${c.on ? "on" : ""}`}>
+              <button type="button" className="kb-tcard-open" aria-haspopup="dialog" aria-label={`${c.name}: see its ${live} stocks`} onClick={() => setPeek(c.key ?? "_all")}>
+                <span aria-hidden="true" className="kb-faces">{(c.key ? c.syms : ["AAPL", "JPM", "XOM"]).slice(0, 3).map((s) => <StockBadge key={s} symbol={s} size={36} />)}</span>
+                <span className="kb-tname">{c.name}</span>
+                <span className="num kb-tmeta">{live} stocks · ≈ {Math.round(themeRate(c.syms, body, b) * 10) / 10}/mo</span>
+              </button>
+              <button type="button" className="kb-tcheck" aria-pressed={c.on} aria-label={c.on ? `Remove ${c.name} from focus` : `Add ${c.name} to focus`} onClick={() => edit(toggleTheme(body, c.key))}>
+                <span aria-hidden="true">{c.on ? "✓" : "+"}</span>
+              </button>
+            </div>
+          );
+        })}
       </div>
-      <div className="kb-row" style={{ fontSize: 13 }}>
+      <ThemeSheet card={peekCard} exclude={body.focus.exclude} onClose={() => setPeek(null)} onToggle={() => peekCard && edit(toggleTheme(body, peekCard.key))} />
+      <div className="kb-row" style={{ fontSize: 14 }}>
         <span className={`num swap ${tooFew ? "kb-warn" : "muted"}`} style={{ flex: 1 }} role={tooFew ? "alert" : undefined}>{note}</span>
-        <button type="button" className="linkbtn" style={{ fontSize: 13, fontWeight: 600, textDecoration: "none" }} onClick={() => toFine("#exclude")}>Exclude a stock</button>
+        <button type="button" className="linkbtn" style={{ fontSize: 14, fontWeight: 600, textDecoration: "none" }} onClick={() => toFine("#exclude")}>Exclude a stock</button>
       </div>
       </>}
       <NeverTraded body={body} edit={edit} />
-      {!all && body.focus.mode === "prefer" && <span className="muted" style={{ fontSize: 12 }}>Prefer still trades all {universe.length} stocks; your focus goes first when slots compete.</span>}
+      {!all && body.focus.mode === "prefer" && <span className="muted" style={{ fontSize: 13 }}>Prefer still trades all {universe.length} stocks; your focus goes first when slots compete.</span>}
     </section>
+  );
+}
+
+/** A theme's stocks, behind a tap on its card (stakeholder, 17 Nov 2026): every stock with its logo and name, rising in
+ *  one after another, with the add/remove button at the bottom. Stocks you never trade stay listed, dimmed. */
+type ThemeCardData = { key: string | null; name: string; syms: string[]; on: boolean };
+export function ThemeSheet({ card, exclude, onClose, onToggle }: { card: ThemeCardData | null; exclude: string[]; onClose: () => void; onToggle: () => void }) {
+  const [last, setLast] = useState(card);
+  useEffect(() => { if (card) setLast(card); }, [card]);
+  const c = card ?? last;
+  if (!c) return null;
+  const syms = [...c.syms].sort((a, z) => Number(exclude.includes(a)) - Number(exclude.includes(z)) || a.localeCompare(z));
+  const live = syms.filter((s) => !exclude.includes(s)).length;
+  return (
+    <Sheet open={card !== null} onClose={onClose} title={c.name}>
+      <p className="muted kb-peek-sub">{live} stocks{live < syms.length ? ` · ${syms.length - live} you never trade` : ""}</p>
+      <ul className="kb-peek" aria-label={`Stocks in ${c.name}`}>
+        {syms.map((s, i) => (
+          <li key={s} className={exclude.includes(s) ? "off" : undefined} style={{ animationDelay: `${Math.min(i, 14) * 28}ms` }}>
+            <StockCell symbol={s} sub={exclude.includes(s) ? "never traded" : undefined} />
+          </li>
+        ))}
+      </ul>
+      <button type="button" className={`kb-peek-btn ${c.on ? "" : "primary"}`} onClick={onToggle}>
+        {c.key === null ? (c.on ? "Trading all stocks ✓" : "Trade all stocks") : c.on ? "In your focus · remove" : "Add to focus"}
+      </button>
+    </Sheet>
   );
 }
 
@@ -345,8 +383,8 @@ function BoldCard({ body, edit, ctx, usd }: { body: ConfigBody; edit: (b: Config
           className: cur !== null && i <= cur ? (i === cur ? "on" : "past") : undefined,
           content: <span aria-hidden="true" className="tick" style={{ height: 8 + i * 5 }} />,
         }))} />
-      <div className="kb-row muted" style={{ justifyContent: "space-between", fontSize: 12 }}><span>Careful</span><span>Max for {levelName}</span></div>
-      {lastOn < 4 && <span className="muted" style={{ fontSize: 12 }}>Steps above {steps[lastOn].name} would exceed {levelName}, so they're off.</span>}
+      <div className="kb-row muted" style={{ justifyContent: "space-between", fontSize: 13 }}><span>Careful</span><span>Max for {levelName}</span></div>
+      {lastOn < 4 && <span className="muted" style={{ fontSize: 13 }}>Steps above {steps[lastOn].name} would exceed {levelName}, so they're off.</span>}
       <div className="num kb-stats">
         <Stat k="Max loss a trade" v={usd0(usd.maxLoss)} />
         <Stat k="Largest position" v={usd0(usd.position)} />
@@ -385,7 +423,7 @@ function HoursCard({ body, edit, ctx }: { body: ConfigBody; edit: (b: ConfigBody
         onChange={(k) => edit({ ...body, timing: { ...body.timing, ...hoursWindow(k, b) } })}
         options={HOURS.map((h) => ({ value: h.key, label: h.name }))} />
       <DayBar body={body} />
-      <span className="num swap muted" style={{ fontSize: 12 }}>
+      <span className="num swap muted" style={{ fontSize: 13 }}>
         {shape === null && "Custom hours (Fine-tune) · "}New trades {body.timing.entry_start}–{body.timing.entry_end} ET · amber = Fed/CPI quiet (±{body.timing.event_window_min} min) · red = sell-all 15:55
       </span>
     </section>
@@ -406,7 +444,7 @@ function SafetyCard({ body, edit, ctx, toFine }: { body: ConfigBody; edit: (b: C
       <div className="kb-pills">
         {CAUTION.map((c) => <PillSwitch key={c.key} label={c.name} on={on[c.key]} onChange={(v) => edit(setCaution(body, c.key, v, b))} />)}
       </div>
-      <span className="swap muted" style={{ fontSize: 12, lineHeight: 1.5 }}>{note}</span>
+      <span className="swap muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{note}</span>
       <details className="kb-locked">
         <summary>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gain)" strokeWidth="2.5" aria-hidden="true"><path d="M5 12 L10 17 L19 7" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -414,7 +452,7 @@ function SafetyCard({ body, edit, ctx, toFine }: { body: ConfigBody; edit: (b: C
         </summary>
         <ul>{LOCKED.map((l) => <li key={l}>{l}</li>)}</ul>
       </details>
-      <button type="button" className="linkbtn" style={{ alignSelf: "flex-start", fontSize: 13, textDecoration: "none" }} onClick={() => toFine("#g-timing")}>Exact minutes and levels in Fine-tune</button>
+      <button type="button" className="linkbtn" style={{ alignSelf: "flex-start", fontSize: 14, textDecoration: "none" }} onClick={() => toFine("#g-timing")}>Exact minutes and levels in Fine-tune</button>
     </section>
   );
 }
@@ -433,9 +471,9 @@ function OutcomeBar({ est, maxLoss, changes, save, pendingDate, canApply, invali
         <span className="hide-sm" style={{ color: changes ? "var(--sea-ink)" : "var(--stale)", fontWeight: 600 }}>
           {changes ? `${changes} change${changes === 1 ? "" : "s"}` : pendingDate ? `Applies ${openLabel(pendingDate)}` : "Same as now"}
         </span>
-        <span className={`hide-sm ${save.kind === "error" ? "loss" : "muted"}`} aria-live="polite" style={{ fontSize: 12 }}>{saveText}</span>
+        <span className={`hide-sm ${save.kind === "error" ? "loss" : "muted"}`} aria-live="polite" style={{ fontSize: 13 }}>{saveText}</span>
       </div>
-      {invalid && changes > 0 && <span id="kb-dock-why" className="kb-warn hide-sm" style={{ fontSize: 12, maxWidth: 200 }}>{invalid}</span>}
+      {invalid && changes > 0 && <span id="kb-dock-why" className="kb-warn hide-sm" style={{ fontSize: 13, maxWidth: 200 }}>{invalid}</span>}
       {onUndo && <button type="button" className="kb-dock-undo" onClick={onUndo}>Undo</button>}
       <button type="button" className="primary kb-dock-go" disabled={!canApply} aria-describedby={invalid && changes > 0 ? "kb-dock-why" : undefined} onClick={onReview}>Review &amp; apply</button>
     </div>
@@ -482,16 +520,16 @@ function ReviewSheet({ open, onClose, fallbackFocus, diff, est, estBase, maxLoss
           <div className="kb-impact">
             <span className="cap">Impact</span>
             <span className="num" style={{ fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em" }}>{est.unmeasured.length ? "Trades a month not measured yet" : `≈ ${Math.round(est.perMonth)} trades a month`}
-              <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}> now ≈ {Math.round(estBase)}</span></span>
-            <span className="num" style={{ fontSize: 14 }}>Max loss a trade <b>{usd0(maxLoss)}</b> <span className="muted">now {usd0(maxLossBase)}</span></span>
-            <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{paceText(est)}{est.spyNotEstimated && est.perMonth > 0 ? " The SPY late-day rule adds up to 1 a day on qualifying days (not estimated yet)." : ""}</span>
+              <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}> now ≈ {Math.round(estBase)}</span></span>
+            <span className="num" style={{ fontSize: 15 }}>Max loss a trade <b>{usd0(maxLoss)}</b> <span className="muted">now {usd0(maxLossBase)}</span></span>
+            <span className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{paceText(est)}{est.spyNotEstimated && est.perMonth > 0 ? " The SPY late-day rule adds up to 1 a day on qualifying days (not estimated yet)." : ""}</span>
           </div>
-          <span className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>
+          <span className="muted" style={{ fontSize: 14, lineHeight: 1.5 }}>
             Applies at the next open, likely {openLabel(nextOpen)}. Open trades keep their rules. <b style={{ color: "var(--ink)" }}>Starts a new chapter in your report</b> (version {nextVersion}).
           </span>
-          {refused.length > 0 && <span style={{ fontSize: 13, color: "var(--loss)", lineHeight: 1.5 }}>Left out, never traded: {refused.join(", ")}.</span>}
-          {errors.length > 0 && <ul className="kb-warn" style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>{errors.map((x) => <li key={x}>{x}</li>)}</ul>}
-          {error && <p className="loss" role="alert" style={{ margin: 0, fontSize: 13 }}>{error}</p>}
+          {refused.length > 0 && <span style={{ fontSize: 14, color: "var(--loss)", lineHeight: 1.5 }}>Left out, never traded: {refused.join(", ")}.</span>}
+          {errors.length > 0 && <ul className="kb-warn" style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>{errors.map((x) => <li key={x}>{x}</li>)}</ul>}
+          {error && <p className="loss" role="alert" style={{ margin: 0, fontSize: 14 }}>{error}</p>}
           <button type="button" className="primary" style={{ minHeight: 52, fontSize: 16 }} disabled={!canApply} onClick={onApply}>{busy ? "Applying…" : "Apply at next open"}</button>
           <button type="button" onClick={onReset} disabled={busy}>Reset to {levelName} defaults</button>
         </div>

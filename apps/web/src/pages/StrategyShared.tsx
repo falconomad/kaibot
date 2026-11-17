@@ -118,7 +118,7 @@ export function ExcludeEditor({ body, edit, universe }: { body: ConfigBody; edit
         </label>
         <button type="button" onClick={add} disabled={full || !sym}>Exclude</button>
       </div>
-      <span id={`${listId}-m`} className={full || msg ? "kb-warn" : "muted"} style={{ fontSize: 13 }} role="status">
+      <span id={`${listId}-m`} className={full || msg ? "kb-warn" : "muted"} style={{ fontSize: 14 }} role="status">
         {full ? `You can exclude up to ${MAX_EXCLUDED} stocks. Put one back to exclude another.`
           : msg ?? `Excluded stocks are never traded, whatever the focus. Up to ${MAX_EXCLUDED}.`}
       </span>

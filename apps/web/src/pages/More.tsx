@@ -43,7 +43,7 @@ export function More() {
           </Link>
         ))}
       </nav>
-      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Paper trading only · simulated money · times ET (CET in brackets)</p>
+      <p className="muted" style={{ fontSize: 14, margin: 0 }}>Paper trading only · simulated money · times ET (CET in brackets)</p>
       <button type="button" className="more-signout" onClick={() => { void supa.auth.signOut(); }}>Sign out</button>
     </>
   );

@@ -163,8 +163,8 @@ function HaltSheet({ h }: { h: Halt }) {
   return (
     <>
       <p>{haltText(h)}</p>
-      {h.reason && <p className="muted" style={{ fontSize: 14 }}>{h.reason}</p>}
-      <p className="muted" style={{ fontSize: 14 }}>{dateEt(h.ts)} {timeEt(h.ts)} ET · <Link to="/health">Engine health</Link></p>
+      {h.reason && <p className="muted" style={{ fontSize: 15 }}>{h.reason}</p>}
+      <p className="muted" style={{ fontSize: 15 }}>{dateEt(h.ts)} {timeEt(h.ts)} ET · <Link to="/health">Engine health</Link></p>
     </>
   );
 }
@@ -185,7 +185,7 @@ function ItemSheet({ it, exp }: { it: TapeItem; exp: Experiment | null }) {
           {it.side === "sell" && <><span>Why it sold</span><span /><span className="v">{exitText(it.exit_reason)}</span></>}
           {it.side === "sell" && <><span>Result</span><span /><span className={`v num ${tone(it.pnl_usd)}`}>{signedMoney(it.pnl_usd)}</span></>}
         </div>
-        <p className="muted" style={{ fontSize: 13 }}>{dateEt(it.ts)} {timeEt(it.ts)} ET</p>
+        <p className="muted" style={{ fontSize: 14 }}>{dateEt(it.ts)} {timeEt(it.ts)} ET</p>
         {it.trade_id && <Link to={`/positions/${it.trade_id}`} className="btn sheet-cta">Full trade details</Link>}
       </>
     );
@@ -203,7 +203,7 @@ function ItemSheet({ it, exp }: { it: TapeItem; exp: Experiment | null }) {
         {it.target !== null && <><span>Target</span><span /><span className="v num">{px(it.target)}</span></>}
         {cf?.pnl_usd !== undefined && <><span>{it.mode === "shadow" ? "Result if traded" : "Would have made"}</span><span /><span className={`v num ${tone(cf.pnl_usd)}`}>{signedMoney(cf.pnl_usd)} · {fmtR(cf.r_multiple)}</span></>}
       </div>
-      {ex.detail && <p className="muted" style={{ fontSize: 13 }} title="engine codes">{ex.detail}</p>}
+      {ex.detail && <p className="muted" style={{ fontSize: 14 }} title="engine codes">{ex.detail}</p>}
       {it.signal_id !== undefined && it.room && <RoomBySignal signalId={it.signal_id} />}
       {it.trade_id && <Link to={`/positions/${it.trade_id}`} className="btn sheet-cta">Full trade details</Link>}
     </>

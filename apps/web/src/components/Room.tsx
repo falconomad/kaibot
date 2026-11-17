@@ -69,7 +69,7 @@ export function RoomTranscript({ s, trade, compact }: { s: RoomSession; trade?: 
         </span>
       </div>
       <p className="room-out">{out.text}</p>
-      {s.status === "error" && s.error && <p className="muted num" style={{ fontSize: 12 }}>error: {s.error.slice(0, 300)}</p>}
+      {s.status === "error" && s.error && <p className="muted num" style={{ fontSize: 13 }}>error: {s.error.slice(0, 300)}</p>}
       {v.unverified > 0 && (
         <div className="banner warn" role="status">{v.unverified} citation{v.unverified === 1 ? " is" : "s are"} not in the evidence pack.
           The engine rejects such answers; treat this transcript as unverified.</div>
@@ -131,7 +131,7 @@ export function RoomTranscript({ s, trade, compact }: { s: RoomSession; trade?: 
           ))}</ul>
         </details>
       )}
-      <p className="muted" style={{ fontSize: 12, margin: 0 }}>Model text is shown as written and is not advice. The room can only veto or halve a trade; it never sets price, size, stop or exit.</p>
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>Model text is shown as written and is not advice. The room can only veto or halve a trade; it never sets price, size, stop or exit.</p>
     </div>
   );
 }

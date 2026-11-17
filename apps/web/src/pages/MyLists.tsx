@@ -182,7 +182,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
     <section aria-labelledby="ml-h" className="kb-ml">
       <div className="kb-ml-head">
         <h3 id="ml-h" className="kb-ml-title">My lists</h3>
-        <span className={`num ${t.full ? "kb-warn" : "muted"}`} aria-live="polite" style={{ fontSize: 13, fontWeight: 600 }}>{t.total} of {MAX_TICKERS}</span>
+        <span className={`num ${t.full ? "kb-warn" : "muted"}`} aria-live="polite" style={{ fontSize: 14, fontWeight: 600 }}>{t.total} of {MAX_TICKERS}</span>
         <span className="muted kb-ml-sub">Your own tickers. Type any US stock and {NAME} checks it before it can be traded.</span>
       </div>
 
@@ -198,8 +198,8 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
           { value: NEW, label: "New list", description: ed.isNew ? (t.total ? "Not saved yet" : "Empty") : "Start from scratch",
             content: <LCard name="New list" meta={ed.isNew ? (t.total ? "Not saved yet" : "Empty") : "Start from scratch"} /> }]} />
       )}
-      {listsMissing && <span className="muted" style={{ fontSize: 13 }}>Saved lists need a database update that isn't applied yet. You can still check tickers and use them.</span>}
-      {ed.lists.isError && !listsMissing && <span className="loss" role="alert" style={{ fontSize: 13 }}>Couldn't load your saved lists: {rpcErrorText(ed.lists.error)}</span>}
+      {listsMissing && <span className="muted" style={{ fontSize: 14 }}>Saved lists need a database update that isn't applied yet. You can still check tickers and use them.</span>}
+      {ed.lists.isError && !listsMissing && <span className="loss" role="alert" style={{ fontSize: 14 }}>Couldn't load your saved lists: {rpcErrorText(ed.lists.error)}</span>}
 
       <div className="kb-ml-field">
         <label htmlFor="ml-name" className="kb-ml-label">List name</label>
@@ -215,7 +215,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
             onChange={(e) => ed.setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); ed.commit(); } }} /></span>
           <button type="button" onClick={ed.commit} disabled={t.full || !ed.draft.trim()}>Add</button>
         </div>
-        <span id="ml-help" className={t.full || ed.msg ? "kb-warn" : "muted"} style={{ fontSize: 12 }} role="status">
+        <span id="ml-help" className={t.full || ed.msg ? "kb-warn" : "muted"} style={{ fontSize: 13 }} role="status">
           {t.full ? `This list is full: ${MAX_TICKERS} tickers is the most ${NAME} can scan in time. Remove one to add another.`
             : ed.msg ?? "Separate with commas or spaces, or paste a whole list. Each ticker is checked as you add it."}
         </span>
@@ -226,7 +226,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
           {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} />)}
         </ul>
       ) : <span className="muted kb-ml-empty">No tickers yet. Add at least {MIN_ONLY} to trade only this list.</span>}
-      <span className="num muted" aria-live="polite" style={{ fontSize: 13 }}>
+      <span className="num muted" aria-live="polite" style={{ fontSize: 14 }}>
         {!t.total ? "Nothing added yet" : `${t.accepted.length} accepted${t.refused.length ? ` · ${t.refused.length} refused` : ""}${t.checking.length ? ` · ${t.checking.length} checking` : ""}`}
       </span>
       {short > 0 && (
@@ -240,20 +240,20 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
         <button type="button" className={canSave ? "primary" : undefined} disabled={!canSave} onClick={() => void ed.saveList()}>
           {ed.save.kind === "saving" ? "Saving…" : ed.same ? "Saved" : ed.cur ? "Save changes" : "Save list"}
         </button>
-        <span className={`swap ${ed.save.kind === "error" ? "loss" : "muted"}`} style={{ flex: "1 1 200px", fontSize: 13 }} role={ed.save.kind === "error" ? "alert" : undefined}>{saveNote}</span>
+        <span className={`swap ${ed.save.kind === "error" ? "loss" : "muted"}`} style={{ flex: "1 1 200px", fontSize: 14 }} role={ed.save.kind === "error" ? "alert" : undefined}>{saveNote}</span>
         {ed.cur && !ed.deleteMissing() && ed.del.kind !== "confirm" && ed.del.kind !== "busy" && (
-          <button type="button" className="linkbtn" style={{ fontSize: 13 }} onClick={ed.askDelete}>Delete list</button>
+          <button type="button" className="linkbtn" style={{ fontSize: 14 }} onClick={ed.askDelete}>Delete list</button>
         )}
         {ed.cur && (ed.del.kind === "confirm" || ed.del.kind === "busy") && (
-          <span className="kb-row" style={{ gap: 8, fontSize: 13 }}>
+          <span className="kb-row" style={{ gap: 8, fontSize: 14 }}>
             <span>Delete “{ed.cur.name}”? Applied settings keep their copy.</span>
             <button type="button" onClick={() => void ed.deleteList()} disabled={ed.del.kind === "busy"}>{ed.del.kind === "busy" ? "Deleting…" : "Delete"}</button>
             <button type="button" className="linkbtn" onClick={ed.cancelDelete}>Keep it</button>
           </span>
         )}
       </div>
-      {ed.cur && ed.deleteMissing() && <span className="muted" style={{ fontSize: 13 }}>Deleting a list needs a database update that isn't applied yet. The list stays saved.</span>}
-      {ed.del.kind === "error" && <span className="loss" role="alert" style={{ fontSize: 13 }}>{ed.del.text}</span>}
+      {ed.cur && ed.deleteMissing() && <span className="muted" style={{ fontSize: 14 }}>Deleting a list needs a database update that isn't applied yet. The list stays saved.</span>}
+      {ed.del.kind === "error" && <span className="loss" role="alert" style={{ fontSize: 14 }}>{ed.del.text}</span>}
 
       <div className="kb-ml-lock">
         <span style={{ flex: "none", marginTop: 1 }}><LockIcon /></span>
@@ -280,7 +280,7 @@ function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; on
         <span className="sk" aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 999, flex: "none" }} />
         <span className="num kb-chip-sym muted">{i.symbol}</span>
         <span className="sk" aria-hidden="true" style={{ width: 74, height: 12, borderRadius: 6, flex: "none" }} />
-        <span className="muted" style={{ fontSize: 12 }}>checking</span>
+        <span className="muted" style={{ fontSize: 13 }}>checking</span>
       </li>
     );
   if (i.state === "accepted") {
@@ -301,7 +301,7 @@ function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; on
       {!slow && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--loss)" strokeWidth="2.2" aria-hidden="true" style={{ flex: "none" }}><circle cx="12" cy="12" r="8.5" /><path d="M6 18 L18 6" /></svg>}
       <span className="num kb-chip-sym">{i.symbol}</span>
       <span className="kb-chip-why" title={why}>{slow ? "Still checking" : i.state === "error" ? `Not checked · ${why}` : `Refused · ${why}`}</span>
-      {(slow || i.state === "error") && <button type="button" className="linkbtn" style={{ fontSize: 12 }} onClick={onRetry} aria-label={`Check ${i.symbol} again`}>Retry</button>}
+      {(slow || i.state === "error") && <button type="button" className="linkbtn" style={{ fontSize: 13 }} onClick={onRetry} aria-label={`Check ${i.symbol} again`}>Retry</button>}
       {remove}
     </li>
   );
@@ -320,9 +320,9 @@ export function ThisListCard({ ed, est, nextOpen }: { ed: ListEditor; est: Estim
     <section className="card kb-card" aria-labelledby="rs-h">
       <h2 id="rs-h" className="kb-h2">This list</h2>
       <div className="kb-impact">
-        <span className="muted" style={{ fontSize: 12 }}>Trades a month</span>
+        <span className="muted" style={{ fontSize: 13 }}>Trades a month</span>
         <span className={`num swap ${measured ? "" : "muted"}`} style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>{big}</span>
-        <span className="swap muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{note}</span>
+        <span className="swap muted" style={{ fontSize: 14, lineHeight: 1.5 }}>{note}</span>
       </div>
       <dl className="num kb-ml-dl">
         <dt>Accepted</dt><dd className="swap">{t.accepted.length}</dd>
@@ -333,7 +333,7 @@ export function ThisListCard({ ed, est, nextOpen }: { ed: ListEditor; est: Estim
     </section>
     <section className="card kb-card" aria-labelledby="ap-h">
       <h2 id="ap-h" className="kb-h2">When you apply</h2>
-      <ul className="muted" style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8, fontSize: 13, lineHeight: 1.5 }}>
+      <ul className="muted" style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 8, fontSize: 14, lineHeight: 1.5 }}>
         <li>Starts at the next open, likely {nextOpen}. Open trades keep their rules.</li>
         <li>The list is stored as it is now. Later edits to a saved list do not change what is running.</li>
         <li>Your report starts a new chapter and the change is logged as a trial.</li>

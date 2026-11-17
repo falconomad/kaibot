@@ -63,7 +63,7 @@ function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp
       <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
         {Object.entries(f).map(([k, v]) => <Fragment key={k}><span>{k}</span><span className="v">{String(v)}</span></Fragment>)}
         {!Object.keys(f).length && !replay && <span className="muted" style={{ gridColumn: "1 / -1" }}>No rule inputs were stored for this trade.</span>}
-        {replay && <span className="muted" style={{ gridColumn: "1 / -1", fontSize: 12 }}>Replay trades store prices and the exit only. Live trades also store every feature the rules used (z-score, residual, turnover, news check, quality score).</span>}
+        {replay && <span className="muted" style={{ gridColumn: "1 / -1", fontSize: 13 }}>Replay trades store prices and the exit only. Live trades also store every feature the rules used (z-score, residual, turnover, news check, quality score).</span>}
       </div>
     );
   }
@@ -72,8 +72,8 @@ function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp
     const rows = Object.entries(d.gate.checks as Record<string, { state: string; actual: unknown; limit: unknown }>);
     return (
       <>
-        <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>{d.gate.qty} shares; the size was limited by <span title={d.gate.binding ? `code: ${d.gate.binding}` : undefined}>{bindingText(d.gate.binding)}</span>.</p>
-        <p className="muted num" style={{ marginTop: 0, fontSize: 12 }}>policy {d.gate.policy_hash} · code version {d.gate.code_sha}</p>
+        <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>{d.gate.qty} shares; the size was limited by <span title={d.gate.binding ? `code: ${d.gate.binding}` : undefined}>{bindingText(d.gate.binding)}</span>.</p>
+        <p className="muted num" style={{ marginTop: 0, fontSize: 13 }}>policy {d.gate.policy_hash} · code version {d.gate.code_sha}</p>
         <table className="list" tabIndex={0} aria-label="Gate checks"><thead><tr><th>Check</th><th>Result</th><th className="r">Actual</th><th className="r">Limit</th></tr></thead>
           <tbody>{rows.map(([k, v]) => (
             <tr key={k}><td title={`code: ${k}`}>{checkText(k)}</td>
@@ -119,7 +119,7 @@ export function TradeDetailPage() {
       <Link to="/positions" className="back">← Positions</Link>
       <section className="card">
         <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "baseline" }}>
-          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 14 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}</span></span></span>
+          <span style={{ display: "flex", alignItems: "center", gap: 14 }}><StockBadge symbol={t.symbol} size={52} /><span style={{ display: "flex", flexDirection: "column" }}><h1 style={{ margin: 0, fontSize: 28, fontWeight: 700, letterSpacing: "-0.02em" }}>{companyName(t.symbol)}</h1><span className="muted" style={{ fontSize: 15 }}>{t.symbol} · <span title={`code: ${t.strategy}`}>{ruleName(t.strategy)}</span> · {t.exit_ts ? "closed" : "open"}</span></span></span>
           <span className={`num ${tone(t.pnl_usd)}`} style={{ fontSize: 18 }}>{signedMoney(t.pnl_usd)} · {R(t.pnl_usd, t.risk_usd)}</span>
         </div>
         <p className="muted num" style={{ margin: "4px 0 0" }}>
@@ -129,7 +129,7 @@ export function TradeDetailPage() {
       <section className="card" aria-label="This trade">
         <div className="kv" style={{ gridTemplateColumns: "1fr auto" }}>
           <span>Why it closed</span><span className="v" title={t.exit_reason ? `code: ${t.exit_reason}` : undefined}>{exitText(t.exit_reason)}{t.exit_ts ? ` · ${timeEt(t.exit_ts)} ET` : ""}</span>
-          <span>Rule</span><span className="v"><RuleName code={t.strategy} exp={exp} limits />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 13, fontWeight: 400 }}>It {RULES[t.strategy].what}</div>}</span>
+          <span>Rule</span><span className="v"><RuleName code={t.strategy} exp={exp} limits />{RULES[t.strategy] && <div className="muted" style={{ fontSize: 14, fontWeight: 400 }}>It {RULES[t.strategy].what}</div>}</span>
           <span>Stop · target</span><span className="v num">{px(t.stop_px)} · {px(t.target_px)}</span>
           <span>Risk (1R)</span><span className="v">{money(t.risk_usd)}</span>
         </div>

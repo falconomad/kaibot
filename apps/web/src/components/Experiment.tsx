@@ -43,7 +43,7 @@ export function ExperimentSheetBody({ e, md }: { e: Experiment; md?: ReturnType<
       )}
       {st?.retired && <p className="exp-ended" role="status">{retiredText(ruleName(e.strategy), parseRetired(st.note ?? "").fellPct, parseRetired(st.note ?? "").session)}</p>}
       {!st?.retired && st?.note && <p className="exp-note" role="status" title={`engine: ${st.note}`}>{noDecisionText(st.note)}</p>}
-      <p className="muted" style={{ fontSize: 14 }}>There is no trade-by-trade control: {NAME} decides on its own within these limits.</p>
+      <p className="muted" style={{ fontSize: 15 }}>There is no trade-by-trade control: {NAME} decides on its own within these limits.</p>
     </>
   );
 }
@@ -77,7 +77,7 @@ export function ExperimentCard({ beats }: { beats: Heartbeat[] | undefined }) {
               {e && <ExperimentBadge e={e} />}
               {st?.retired && <span className="tag downgrade">Experiment ended</span>}
             </div>
-            {v && <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>{v.tip}</p>}
+            {v && <p className="muted" style={{ margin: "6px 0 0", fontSize: 14 }}>{v.tip}</p>}
             {v && (v.cap || v.stop) && (
               <div className="kv" style={{ marginTop: 8 }}>
                 {v.cap && <><span>Most it may hold</span><span /><span className="v">{v.cap}</span></>}
