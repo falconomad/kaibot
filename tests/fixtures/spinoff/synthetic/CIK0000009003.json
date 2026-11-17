@@ -1,0 +1,31 @@
+{
+ "cik": "0000009003",
+ "name": "QUILL HOLDINGS CORP",
+ "tickers": [
+  "ZZQ"
+ ],
+ "formerNames": [],
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "9999999003-26-000004"
+   ],
+   "filingDate": [
+    "2026-03-12"
+   ],
+   "acceptanceDateTime": [
+    "2026-03-11T22:15:00.000Z"
+   ],
+   "form": [
+    "8-K"
+   ],
+   "items": [
+    "8.01"
+   ],
+   "primaryDocument": [
+    "zzq-20260311.htm"
+   ]
+  },
+  "files": []
+ }
+}

@@ -1,0 +1,42 @@
+{
+ "0": {
+  "cik_str": 9001,
+  "ticker": "ZZP",
+  "title": "Zeta Parent Corp"
+ },
+ "1": {
+  "cik_str": 9002,
+  "ticker": "ZZN",
+  "title": "Zeta NewCo Inc."
+ },
+ "2": {
+  "cik_str": 9003,
+  "ticker": "ZZQ",
+  "title": "Quill Holdings Corp"
+ },
+ "3": {
+  "cik_str": 9004,
+  "ticker": "ZZO",
+  "title": "Otter Systems Corp"
+ },
+ "4": {
+  "cik_str": 9005,
+  "ticker": "ZZC",
+  "title": "Carver Climate Corp"
+ },
+ "5": {
+  "cik_str": 9006,
+  "ticker": "ZZX",
+  "title": "Xylo Industries Inc"
+ },
+ "6": {
+  "cik_str": 9007,
+  "ticker": "ZZY",
+  "title": "Yarrow Labs Inc"
+ },
+ "7": {
+  "cik_str": 9008,
+  "ticker": "ZZM",
+  "title": "Mute Materials Co"
+ }
+}
