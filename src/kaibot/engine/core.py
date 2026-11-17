@@ -873,12 +873,15 @@ class Engine:
                     # #252 follow-up: no `close_position` (it carries no client id). The symbol's open orders (its
                     # stops) are cancelled; once none is left the sleeves' shares are sold with a client id that is
                     # journalled first (`md_exit_intent`), so a crash after the call is matched at start-up
-                    have = float((self.broker.positions().get(sym) or {}).get("qty") or 0)
-                    if have <= 0:  # nothing at the venue to sell (as close_position answered before)
+                    # QA-Ops (#275 on #282): the flatten's one read of the venue's positions (above) when it worked;
+                    # its own name, so the next symbol still finds the whole map
+                    venue_qty = (have.get(sym, 0.0) if have is not None
+                                 else float((self.broker.positions().get(sym) or {}).get("qty") or 0))
+                    if venue_qty <= 0:  # nothing at the venue to sell (as close_position answered before)
                         log.warning("flatten (%s): %s is in the ledger but not held at the broker", reason, sym)
                         continue
-                    if sum(q for _, q in keys) > have:  # never more than the venue holds
-                        left_q, capped = have, []
+                    if sum(q for _, q in keys) > venue_qty:  # never more than the venue holds
+                        left_q, capped = venue_qty, []
                         for k, q in keys:
                             capped.append((k, min(q, left_q)))
                             left_q -= capped[-1][1]
