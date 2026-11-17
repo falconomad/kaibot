@@ -70,11 +70,13 @@ def frozen_since(starts: list[dict], current_fp: str, strategy: str | None = Non
     if not now or now == fpr.UNKNOWN:
         return None
     since = None
-    for s in sorted(starts, key=lambda s: _ts(s.get("ts")) or datetime.min.replace(tzinfo=UTC)):
-        if fpr.for_strategy(s.get("fingerprint"), strategy) == now:
-            since = since or (_ts(s.get("ts")) or datetime.min.replace(tzinfo=UTC))
-        else:
-            since = None
+    # QA-Ops: a start without a readable time cannot be placed in the stretch. It used to sort first and, on the
+    # current code, set `since` to datetime.min, which pandas cannot hold: the report failed with NotImplementedError
+    # ("date not yet supported ... outside the range"). It is left out; the timed starts decide.
+    timed = [(t, s) for s in starts if (t := _ts(s.get("ts"))) is not None]
+    for t, s in sorted(timed, key=lambda x: x[0]):
+        same = fpr.for_strategy(s.get("fingerprint"), strategy) == now
+        since = (since or t) if same else None
     return since
 
 

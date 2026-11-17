@@ -191,3 +191,20 @@ def test_a_late_adoption_does_not_lift_the_drift_halt_while_another_difference_s
     assert a.eng.ledger.book(a.rid).sleeves[(MD, "BN")].qty == 20  # adopted
     assert a.eng.kill == "drift"  # but not lifted
     assert not [e for e in a.store.tables["event"] if e["type"] == "halt_cleared"]
+
+
+def test_a_flatten_of_two_multi_day_symbols_sells_both(tmp_path, monkeypatch):
+    """QA-Ops (#275 on #282): the flatten reads the venue's positions once for every symbol (#275) and #282's sale
+    path read them again into the same name; the second symbol then failed (`float` has no `.get`) and the flatten
+    stopped. Both sleeves are sold, each once."""
+    a = Held(tmp_path, monkeypatch, Feed({}))
+    a.hold()
+    px = float(a.eng.market.last_close("A") or 100.0)
+    a.broker.pos["A"] = {"qty": 10, "avg_entry_price": px}
+    a.eng._book("fill", {"run_id": a.rid, "strategy": MD, "symbol": "A", "side": "buy", "qty": 10, "px": px,
+                         "fees": 0.0, "coid": f"kb{a.rid}-{MD}-A-20260803-target-1", "session": DAY1})
+    a.ticks(a.open2, 0, 2)
+    failed = {}
+    a.eng._flatten_md("book_drawdown", failed, a.eng.monotonic())
+    sold = sorted(o["symbol"] for o in a.broker.orders.values() if o["side"] == "sell" and o["type"] == "market")
+    assert failed == {} and sold == ["A", "B"]
