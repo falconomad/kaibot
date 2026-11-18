@@ -15,6 +15,12 @@ pruned. Before each reservation the gateway reads the spend of the days BEFORE t
 and hands `llm_reserve` the monthly cap min(monthly hard, lifetime cap - spend before this month). The reservation's
 row lock then holds both caps at once, so no new table, column or function is needed. A ledger that cannot be read
 refuses the call (fail closed).
+
+#319: the lifetime cap is one cap across every AI dollar: the engine's LLM ledger and the dashboard's stock summaries
+(`kaibot.summary_call`, #312). With migration 0026 the gateway reads both with `kaibot.ai_spend` and reserves with
+`kaibot.llm_reserve_lifetime`, which checks the combined total again inside the same row lock that
+`kb_summary_reserve` takes, so the two sides cannot overspend it together. Without 0026 it reads the two tables and
+cuts the monthly cap by the summaries' spend (checked at the read, not under the lock).
 """
 
 from __future__ import annotations
@@ -112,6 +118,11 @@ class AnthropicClient:
         return self._c.messages.create(**kwargs)
 
 
+def _missing(e: Exception) -> bool:
+    """A database function that does not exist yet (PostgREST PGRST202 / 404; KeyError in the fakes)."""
+    return isinstance(e, KeyError) or "PGRST202" in str(e) or "-> 404" in str(e)
+
+
 def _et_today() -> date:
     from zoneinfo import ZoneInfo
 
@@ -129,19 +140,41 @@ class Gateway:
         return self.client is not None
 
     def lifetime(self) -> dict:
-        """#309: {'before_month', 'lifetime', 'monthly_cap'} from `kaibot.budget_day` (every day ever spent).
-        `monthly_cap` = min(monthly hard, lifetime cap - spend before this month): handed to llm_reserve and
-        llm_budget_state as their monthly cap, it also holds the lifetime cap. Raises when the ledger cannot be read
-        in full; callers fail closed."""
+        """#309 / #319: {'before_month', 'summaries', 'lifetime', 'monthly_cap', 'via'}: every AI dollar ever spent, the
+        engine's LLM calls (`kaibot.budget_day`) and the dashboard's stock summaries (`kaibot.summary_call`, settled
+        calls at their cost, open ones at their reservation). `monthly_cap` = min(monthly hard, lifetime cap - LLM
+        spend before this month - summaries): handed to the reservation and llm_budget_state as their monthly cap.
+        Read with `kaibot.ai_spend` (migration 0026); on a database without it, from the two tables. Raises when the
+        ledgers cannot be read in full; callers fail closed."""
+        try:
+            sp = self.store.rpc("ai_spend", {})
+            before, summ, llm = (float(sp["llm_before_month"]), float(sp["summaries"]), float(sp["llm"]))
+            via = "ai_spend"
+        except Exception as e:
+            if not _missing(e):
+                raise
+            before, llm = self._llm_ledger()
+            summ, via = self._summary_ledger(), "tables"
+        cap = max(0.0, min(self.cfg.monthly_hard_usd, self.cfg.lifetime_hard_usd - before - summ))
+        return {"before_month": round(before, 6), "summaries": round(summ, 6), "lifetime": round(llm + summ, 6),
+                "monthly_cap": round(cap, 6), "via": via}
+
+    def _llm_ledger(self) -> tuple[float, float]:
         rows = self.store.select("budget_day", {"select": "day,spent_usd", "spent_usd": "gt.0",
                                                 "order": "day.asc", "limit": str(LEDGER_MAX_ROWS)})
         if not isinstance(rows, list) or len(rows) >= LEDGER_MAX_ROWS:
             raise ValueError("budget ledger unreadable or too long to read in one page")
         m0 = self.today().replace(day=1).isoformat()
         before = sum(float(r.get("spent_usd") or 0) for r in rows if str(r.get("day")) < m0)
-        total = sum(float(r.get("spent_usd") or 0) for r in rows)
-        cap = max(0.0, min(self.cfg.monthly_hard_usd, self.cfg.lifetime_hard_usd - before))
-        return {"before_month": round(before, 6), "lifetime": round(total, 6), "monthly_cap": round(cap, 6)}
+        return before, sum(float(r.get("spent_usd") or 0) for r in rows)
+
+    def _summary_ledger(self) -> float:
+        rows = self.store.select("summary_call", {"select": "actual_usd,reserved_usd", "order": "id.asc",
+                                                  "limit": str(LEDGER_MAX_ROWS)})
+        if not isinstance(rows, list) or len(rows) >= LEDGER_MAX_ROWS:
+            raise ValueError("summary ledger unreadable or too long to read in one page")
+        return sum(float(r["actual_usd"] if r.get("actual_usd") is not None else (r.get("reserved_usd") or 0))
+                   for r in rows)
 
     def state(self) -> dict:
         """{'day', 'month', 'state': ok|rules_only|no_entries, 'alert', 'lifetime', 'lifetime_cap'} from Postgres.
@@ -152,7 +185,8 @@ class Gateway:
                                                      "p_monthly_hard": life["monthly_cap"],
                                                      "p_monthly_alert": self.cfg.monthly_alert_usd})
             if isinstance(st, dict):
-                st = {**st, "lifetime": life["lifetime"], "lifetime_cap": self.cfg.lifetime_hard_usd}
+                st = {**st, "lifetime": life["lifetime"], "lifetime_summaries": life["summaries"],
+                      "lifetime_cap": self.cfg.lifetime_hard_usd}
                 if life["lifetime"] >= self.cfg.lifetime_hard_usd:
                     st["state"] = "no_entries"
             return st
@@ -186,7 +220,8 @@ class Gateway:
         worst = round(worst * 1.1 + 1e-5, 5)
         cap = self.cfg.daily_soft_usd if daily_soft_usd is None else min(self.cfg.daily_soft_usd, float(daily_soft_usd))
         try:
-            monthly = self.lifetime()["monthly_cap"]  # #309: the lifetime cap rides on the monthly one
+            life = self.lifetime()  # #309 / #319: the lifetime cap (LLM + summaries) rides on the monthly one
+            monthly = life["monthly_cap"]
         except Exception:
             log.exception("budget ledger unreadable: no call")
             why["reason"] = "reserve_failed"
@@ -196,10 +231,13 @@ class Gateway:
             why["reason"] = "refused"
             return None
         try:
-            call_id = self.store.rpc("llm_reserve", {"p_model": model, "p_purpose": purpose, "p_reserved": worst,
-                                                     "p_daily_soft": cap,
-                                                     "p_monthly_hard": monthly,
-                                                     "p_ttl_s": self.cfg.reservation_ttl_s})
+            args = {"p_model": model, "p_purpose": purpose, "p_reserved": worst, "p_daily_soft": cap,
+                    "p_monthly_hard": monthly, "p_ttl_s": self.cfg.reservation_ttl_s}
+            if life["via"] == "ai_spend":  # 0026: the lifetime cap is checked again inside the reservation's lock
+                call_id = self.store.rpc("llm_reserve_lifetime",
+                                         {**args, "p_lifetime_hard": self.cfg.lifetime_hard_usd})
+            else:
+                call_id = self.store.rpc("llm_reserve", args)
         except Exception:
             log.exception("reservation failed: no call")
             why["reason"] = "reserve_failed"
