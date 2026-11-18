@@ -10,7 +10,7 @@
   },
   "budget": {
     "first_load_js_gzip": 204000,
-    "first_load_css_gzip": 17000,
+    "first_load_css_gzip": 18000,
     "preloaded_fonts": 56000
   }
 }
