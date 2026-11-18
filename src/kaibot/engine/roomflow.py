@@ -29,6 +29,7 @@ from kaibot.replay.sim import buy_px, first_exit_trail, sell_px
 log = logging.getLogger("kaibot.room")
 MAX_WAIT_MIN = 10  # two 5-minute cycles
 STATE_EVERY_MIN = 5
+STATE_STALE_MIN = 15  # #323: no budget state newer than this (a read hung or failing): rules_only, fail closed
 
 
 @dataclass
@@ -53,19 +54,57 @@ class RoomFlow:
         self.e, self.room = engine, room
         self.pack_fn = pack_fn or default_pack
         self.ex = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="room")
+        # #323: the budget state's own worker, so hung room sessions never queue it (and it never waits on them)
+        self.state_ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="room-budget")
         self.jobs: dict[str, Job] = {}
         self.sessions: list[dict] = []  # today's room candidates, for the day-end counterfactual
-        self._state, self._state_m = "ok", -99
+        # #323: the budget state is read in the worker pool, never on the engine's main loop; per session
+        self._state, self._state_m = "rules_only", -99  # nothing known yet: fail closed
+        self._state_got: int | None = None  # session minute the last result taken was READ at (its submit)
+        self._state_asked: int | None = None  # session minute the read in flight was submitted at
+        self._state_day = None
+        self._state_fut = None
 
     # ---------- budget ----------
     def mode(self, m: int) -> str:
-        """ok | rules_only | no_entries (read from Postgres at most every 5 minutes; fails closed to rules_only)."""
-        if m - self._state_m >= STATE_EVERY_MIN:
-            self._state = (self.room.gw.state() or {}).get("state", "rules_only")
+        """ok | rules_only | no_entries. #323: the state is read from Postgres in the room's worker pool (the
+        gateway's reads can take minutes on a bad network; the engine's loop never waits for them), at most one
+        read in flight and at most every STATE_EVERY_MIN minutes, again from the start of every session. This
+        returns the last result: rules_only until the session's first one, and when the last one is older than
+        STATE_STALE_MIN minutes (fail closed, as Gateway.state is). no_entries halts entries here, on the loop."""
+        day = getattr(getattr(self.e, "day", None), "day", None)
+        if day != self._state_day:  # a new session: its minutes start at 0 again
+            self._state_day, self._state_m, self._state_got, self._state = day, -99, None, "rules_only"
+            self._state_fut, self._state_asked = None, None  # a read still running from the last session is not taken
+        self._take_state(m)
+        if self._state_fut is None and m - self._state_m >= STATE_EVERY_MIN:
             self._state_m = m
-            if self._state == "no_entries":
-                self.e._halt_entries("llm_budget", "monthly LLM budget reached: no new entries")
+            try:
+                self._state_asked = m
+                self._state_fut = self.state_ex.submit(self.room.gw.state)
+            except Exception:
+                log.exception("budget state read not started")
+            self._take_state(m)  # an executor that runs at once (tests) answers now
+        # QA-Ops on #326: a result is as old as the read's start, and a minute before it (the session minute went
+        # back without a session change being seen) is not fresh either
+        if self._state_got is None or not 0 <= m - self._state_got <= STATE_STALE_MIN:
+            return "rules_only"
         return self._state
+
+    def _take_state(self, m: int) -> None:
+        fut = self._state_fut
+        if fut is None or not fut.done():
+            return
+        self._state_fut = None
+        try:
+            st = (fut.result() or {}).get("state", "rules_only")
+        except Exception:
+            log.exception("budget state read failed: rules only")
+            st = "rules_only"
+        self._state, self._state_got = st, (m if self._state_asked is None else self._state_asked)
+        self._state_asked = None
+        if st == "no_entries":
+            self.e._halt_entries("llm_budget", "monthly LLM budget reached: no new entries")
 
     # ---------- 1-2: submit ----------
     def submit(self, s: str, c, ref, stop, target, feats: dict, reasons: list, m: int, *, strategy: str) -> None:
