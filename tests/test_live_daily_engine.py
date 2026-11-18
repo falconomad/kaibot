@@ -774,3 +774,46 @@ def test_a_near_close_buy_booked_before_the_engine_dies_is_multi_day_for_the_wat
     assert float(a.broker.pos["B"]["qty"]) == qty
     assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
                 and o["type"] != "stop"]
+
+
+# ---------------------------------------------------------------- Product, 19 Nov 2026: no stop by design
+
+
+def _bought_b(tmp_path, monkeypatch, store_refuses: bool = False):
+    a = DailyAccount(tmp_path, monkeypatch)
+    if store_refuses:  # production before migration 0028: the check constraint refuses the new value
+        real = a.store.upsert
+
+        def upsert(table, row, on_conflict):
+            if table == "ledger_position" and row.get("stop_state") == "none_by_design":
+                raise RuntimeError('POST ledger_position -> 400: {"code":"23514","message":"new row for relation '
+                                   '\\"ledger_position\\" violates check constraint '
+                                   '\\"ledger_position_stop_state_check\\""}')
+            return real(table, row, on_conflict)
+
+        a.store.upsert = upsert
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, 390)
+    a.after_close(a.open2)
+    rows = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert len(rows) == 1 and float(rows[0]["qty"]) > 0
+    return a, rows[0]
+
+
+def test_a_sleeve_of_a_rule_without_a_stop_is_written_as_none_by_design(tmp_path, monkeypatch):
+    """The momentum rules exit by their target list (no stop in either pre-registration): their rows say
+    `none_by_design`, not `missing`, so the dashboard's alarm only counts sleeves that should have a broker stop."""
+    a, row = _bought_b(tmp_path, monkeypatch)
+    assert row["stop_state"] == "none_by_design" and row["stop_px"] is None
+    assert a.eng._stop_state("dip_reversal", False) == "missing"  # an intraday sleeve without its stop: an alarm
+    assert a.eng._stop_state(MD, True) == "resting"
+
+
+def test_before_migration_0028_the_engine_writes_missing_and_says_so_once(tmp_path, monkeypatch):
+    """Until 0028 is applied the database refuses `none_by_design`: the row is written as before (`missing`), never
+    lost (the fail-safes read these rows), and one event says why."""
+    a, row = _bought_b(tmp_path, monkeypatch, store_refuses=True)
+    assert row["stop_state"] == "missing"
+    ev = [e for e in a.store.tables["event"] if e["type"] == "stop_state_fallback"]
+    assert len(ev) == 1 and "0028" in ev[0]["payload"]["action"]

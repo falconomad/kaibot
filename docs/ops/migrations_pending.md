@@ -26,6 +26,7 @@ Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all ap
 - 0025: **applied by Product on 18 Nov 2026, 21:2x UTC (after the close)** (step 12 below; PR #315, #309).
 - 0026: **applied by Product on 18 Nov 2026, after 0025** (step 13 below; #319, PR #322). Checked: `kaibot.ai_spend()` = {total 0, cap 150}; `llm_reserve_lifetime` not executable by authenticated; `kb_llm_budget` not by anon.
 - 0027: **pending** (step 14 below; #324). After 0026.
+- 0028: **pending** (step 15 below; PR #339). After 0020. Needs the stakeholder's go (a production migration).
 
 ## Apply in this order
 
@@ -48,6 +49,7 @@ run it again. Do not reorder them.
 | 12 | `migrations/0025_llm_budget_caps.sql` (whole file; PR #315 for #309). Any time, also while the engine runs: dashboard read only | `public.kb_llm_budget` (0009) shows the Stage 1 LLM caps: $1/day, $20/month alert, $25/month hard (were written in as $3 / $150 / $190), and adds `lifetime_usd` and `caps.lifetime_hard` ($150, the sum of `kaibot.budget_day`). The engine does not need it: `agents/gateway.Gateway` holds the caps itself through the existing `kaibot.llm_reserve`. Fields the dashboard reads keep their names | No: one `create or replace function`, then `revoke` and `grant` |
 | 13 | `migrations/0026_ai_lifetime_cap.sql` (whole file; PR for #319). After 0023 and 0025. Any time, also while the engine runs | One $150 lifetime cap across every AI dollar: the engine's LLM ledger (`kaibot.budget_day` + open `llm_call` reservations) and the stock summaries (`kaibot.summary_call`). New `kaibot.ai_lifetime_spent`, `kaibot.ai_spend` (the engine's read) and `kaibot.llm_reserve_lifetime` (the engine's reservation with the cap checked inside today's `budget_day` row lock), service role only. `kb_summary_reserve` takes the same row lock and refuses `lifetime_cap`; `kb_summary_spend` and `kb_llm_budget` show the combined `lifetime_usd`. An engine without the #319 code keeps working (it calls `llm_reserve`, unchanged) | No: `create or replace function`, `revoke` and `grant` only. Its functions write only inside a reservation (`insert into kaibot.budget_day ... on conflict do nothing`, the `state` update 0008 already makes) |
 | 14 | `migrations/0027_summary_over_reservation.sql` (whole file; PR for #324). After 0026. Any time, also while the engine runs: dashboard only, additive | A stock-summary call settled above its reservation is flagged: generated column `kaibot.summary_call.over_reservation` (`actual_usd > reserved_usd`), counted in `kb_summary_spend().over_reservation_calls`. The true cost is still recorded as it is | No: `alter table ... add column if not exists` (a generated column, computed from each row), `create or replace function`, `revoke` and `grant` |
+| 15 | `migrations/0028_stop_none_by_design.sql` (whole file; PR #339). After 0020. Any time, also while the engine runs: additive | `ledger_position.stop_state` also allows `none_by_design` (a sleeve of a rule whose pre-registration has no stop: the momentum rules exit by their target list), and `kb_book` gives each position `stop_state` and `exit` ("target_list" or "broker_stop"), so the dashboard's stop alarm counts only sleeves that should have a broker stop. The engine writes `none_by_design` only once the database takes it (until then it writes `missing`, as now). The dead-man never reads `stop_state` | **Yes**: `alter table ... drop constraint if exists` (the check constraint, re-added at once with one more value; no row changes), then `create or replace function`, `revoke` and `grant` |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -92,6 +94,9 @@ select (kaibot.ai_spend()->>'total')::numeric = kaibot.ai_lifetime_spent(300);  
 select has_function_privilege('authenticated', 'kaibot.llm_reserve_lifetime(text, text, numeric, numeric, numeric, numeric, integer)', 'execute'); -- false
 -- step 14 (0027): calls settled above their reservation (normally 0)
 select count(*) from kaibot.summary_call where over_reservation;                                   -- 0
+-- step 15 (0028): the new stop state is allowed and kb_book names each position's exit kind
+select pg_get_constraintdef(oid) like '%none_by_design%' from pg_constraint where conname = 'ledger_position_stop_state_check'; -- true
+select prosrc like '%''exit''%' from pg_proc where proname = 'kb_book';                                -- true
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false
