@@ -221,3 +221,44 @@ and changes nothing else.
 3. **Trials.** As Amendment 6's item 4. A configuration an earlier finished report counted, made before this data
    correction, logs `n_trials` 0 on its first corrected run (`scripts/momentum_core.n_trials_of`; reports record
    `data_corrections`).
+
+## Amendment 8 (18 Nov 2026, backend-quant, issue #333, before the second live paper session): near-close market orders on Alpaca paper
+
+Written on the evening of 18 Nov 2026, after the rule's first live paper session and before its second. It changes
+the **orders** that carry the fills, not the fill model, the costs, the rule or its sizing. No research number is
+affected (item 3). The one live result that led to it is the fill record of 18 Nov: Alpaca paper filled 4 of 30
+`cls` market buys in full and 3 in part, and 23 expired with nothing filled. About 16% of the $95,000 book was
+invested against a plan of about 90%.
+
+1. **Why.** Alpaca's paper venue does not run a closing auction. Its documentation says paper orders are "matched
+   against the best available current market price (NBBO)" and "receive partial fills for a random size 10% of
+   the time". It says nothing about auctions (docs.alpaca.markets, "Paper Trading"; `cls` orders "execute only in
+   the market closing auction", and the unfilled ones "will be cancelled", "Placing Orders"). Alpaca's staff
+   confirm that "paper trading treats these simply like market orders placed at the close. They will not fill at
+   the actual end of day auction price", and that such an order "may expire before filling completely"
+   (forum.alpaca.markets, 24 Jun 2026). Our fills were stamped 15:59:55-15:59:58 ET and the expiries 16:00:09-16:02:26
+   ET. A paper `cls` order therefore has about five seconds to fill. The paper record would not measure the rule
+   as section 4 prices it.
+2. **The change.** On the live paper path the daily orders are **DAY market orders, whole shares, sent from 15:50
+   to 15:57 ET**. On an early-close day the window is the close minus 10 to the close minus 3 minutes
+   (`ExecutionPolicy("near_close")`, `engine/live_daily.py`). Before, they were `cls` orders sent from 09:31. The
+   plan is the same: sales, then resizes, then buys best first, journalled before any order, every order the
+   difference between the plan's target and the shares held. Nothing outside the plan's targets is ever sent.
+   A remainder that still expires at the close is **not sent again** that session or later. A buy waits for the
+   rule's next decision, as before; a sale is sent again at the next session, as section 4 says. Each expired
+   remainder is journalled once and reported as `multi_day_unfilled`, so the dashboard shows it as not filled.
+3. **Fill model, costs and Gate B unchanged.** Section 4 stands: BASE fills at the close of T+1 at half a spread
+   plus the model's impact (cost model v1), with fees. The research runner (`engine/daily.run_daily`, decision 15:
+   one core) sends the same near-close market orders at 15:50. SimBroker (`near_close`) fills them at the closing
+   print at cost model v1, with the cash checked at the print (Amendment 3), exactly as it filled the `cls`
+   orders. A test asserts that the fills (session, symbol, side, shares, price) and the daily equity are
+   identical, to the last bit, with `cls` orders and with near-close orders, for this rule and for
+   trend_momentum (Amendment 10 there). No trial row, report or Gate B mark changes, and no new configuration is added (`n_trials` unchanged).
+   The stress fill (`opg` at the open, research only) is unchanged.
+4. **Known deviation, live against research.** A paper market order sent between 15:50 and 15:57 fills at the
+   quote of that moment, not at the official close. Paper prices it on IEX-fed quotes, with no impact and no
+   queue. The research run prices it at the close with modelled spread and impact. The price move over the last
+   3-10 minutes averages zero and is not modelled. Gate C (live against research tracking) counts it as a known
+   deviation of the venue, like Alpaca paper's random partial fills.
+5. **Not for real money.** This amendment is for Alpaca paper only. Before any real-money decision the execution
+   is reviewed again: a live account's `cls` order does reach the closing auction.

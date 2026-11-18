@@ -7,7 +7,7 @@ the spun shares are sold at the next closing auction. Without the record, nothin
 from __future__ import annotations
 
 from test_failsafe_drills import DAY1, DAY2, MD, QTY
-from test_live_daily_engine import DailyAccount
+from test_live_daily_engine import SEND, DailyAccount
 
 from kaibot.engine import live_daily as ld
 from kaibot.engine.corp_guard import RecentActions
@@ -59,7 +59,7 @@ def test_a_spin_off_is_adopted_at_the_cost_basis_and_sold_at_the_next_close(tmp_
     a = Held(tmp_path, monkeypatch, Feed(SPIN))
     a.hold()
     a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)  # Alpaca, before DAY2's open
-    a.ticks(a.open2, 0, 2)  # the session start, then 09:31: the send step
+    a.ticks(a.open2, 0, 2)  # the session start: the adoption
     b = a.eng.ledger.book(a.rid)
     cost = QTY * a.b_px
     assert b.sleeves[(MD, "B")].qty == QTY and abs(b.sleeves[(MD, "B")].cost - 0.75 * cost) < 1e-6
@@ -69,10 +69,11 @@ def test_a_spin_off_is_adopted_at_the_cost_basis_and_sold_at_the_next_close(tmp_
     (sp,) = [x for *_, x in a.eng.journal.entries(kinds=("spinoff",))]
     assert sp["new_symbol"] == "BN" and sp["ref"] == "alpaca-ca:s1"
     assert "spin_off_adopted" in _kinds(a)
-    sells = [o for o in a.cls_orders() if o["symbol"] == "BN" and o["side"] == "sell"]
-    assert len(sells) == 1 and float(sells[0]["qty"]) == 20  # the spun shares go at DAY2's closing auction
-    assert not [o for o in a.cls_orders() if o["symbol"] == "B" and o["side"] == "sell"]  # the parent is kept
-    a.ticks(a.open2, 2, 30)
+    a.ticks(a.open2, 2, SEND + 2)  # 15:50: the send step (issue #333)
+    sells = [o for o in a.md_orders() if o["symbol"] == "BN" and o["side"] == "sell"]
+    assert len(sells) == 1 and float(sells[0]["qty"]) == 20  # the spun shares go at DAY2's close
+    assert not [o for o in a.md_orders() if o["symbol"] == "B" and o["side"] == "sell"]  # the parent is kept
+    a.ticks(a.open2, SEND + 2, 390)
     assert a.eng.kill is None  # no drift halt
     assert len([x for *_, x in a.eng.journal.entries(kinds=("spinoff",))]) == 1  # booked once
 

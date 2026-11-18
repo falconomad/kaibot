@@ -2,8 +2,13 @@
 the time is passed in, nothing is sent from here; the order manager (engine/orders.py) sends what this builds.
 
 Styles, with Alpaca's rules (docs/research/engine_v3/notes_engine_architecture.md section 4):
-- `close`: the closing auction (`cls`), the base for daily rules. Whole shares (fractional orders are DAY only).
-  Submitted before 15:50 ET, or from 19:00 ET for the next session's close; refused in between.
+- `close`: the closing auction (`cls`). Whole shares (fractional orders are DAY only). Submitted before 15:50 ET,
+  or from 19:00 ET for the next session's close; refused in between.
+- `near_close`: a DAY market order in the session's last ten minutes (from the close minus 10 minutes, 15:50 ET on
+  a normal day, until the close), whole shares; refused at any other time. The daily rules' style since issue #333:
+  Alpaca paper does not run an auction, it works a `cls` order as a market order in the last seconds before 16:00
+  and lets the rest expire (on 18 Nov 2026, 23 of 30 got nothing). The research venue fills it at the closing
+  print at cost model v1, as it did the `cls` order (broker/sim.SimBroker `near_close`; prereg amendments).
 - `marketable_limit`: a DAY limit order at the ask plus `offset_bp` (a buy) or the bid less it (a sell), whole
   shares, only from 09:45 ET (the opening is the most expensive time to trade) until the close; cancelled by
   `timed_out` after `timeout_s` if it has not filled.
@@ -29,7 +34,15 @@ from kaibot.broker.protocol import OrderRequest
 NY = ZoneInfo("America/New_York")
 CLS_UNTIL, CLS_FROM = time(15, 50), time(19, 0)
 MLIMIT_FROM, MLIMIT_UNTIL = time(9, 45), time(16, 0)
-STYLES = ("close", "marketable_limit", "limit", "bracket", "open")
+NEAR_CLOSE_MIN = 10  # near_close: DAY market orders from the close minus 10 minutes until the close
+REGULAR_CLOSE = time(16, 0)
+STYLES = ("close", "near_close", "marketable_limit", "limit", "bracket", "open")
+
+
+def minus(t: time, minutes: int) -> time:
+    """`t` less `minutes` (wall time, same day)."""
+    m = t.hour * 60 + t.minute - minutes
+    return time(m // 60, m % 60, t.second)
 
 
 class ExecutionRefused(ValueError):
@@ -42,6 +55,7 @@ class ExecutionPolicy:
     offset_bp: float = 5.0  # marketable limit: ask + 0.05% (the approved v2 design, audit D1)
     timeout_s: float = 120.0  # marketable limit: cancelled after 2 minutes
     research_open: bool = False  # the stress fill model only (opg at the open); never live
+    close: time = REGULAR_CLOSE  # near_close: the session's close (ET), earlier on an early-close day
 
     def __post_init__(self) -> None:
         if self.style not in STYLES:
@@ -60,6 +74,12 @@ class ExecutionPolicy:
             if CLS_UNTIL <= t < CLS_FROM:
                 raise ExecutionRefused(f"{symbol}: closing-auction orders go in before 15:50 or after 19:00 ET")
             return OrderRequest(symbol, side, q, "market", "cls", coid)
+        if self.style == "near_close":
+            start = minus(self.close, NEAR_CLOSE_MIN)
+            if not (start <= t < self.close):
+                raise ExecutionRefused(f"{symbol}: near-close orders go in from {start:%H:%M} until the close "
+                                       f"({self.close:%H:%M} ET)")
+            return OrderRequest(symbol, side, q, "market", "day", coid)
         if self.style == "open":
             return OrderRequest(symbol, side, q, "market", "opg", coid)
         if self.style == "marketable_limit":

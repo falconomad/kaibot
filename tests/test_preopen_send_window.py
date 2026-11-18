@@ -39,12 +39,12 @@ def test_a_review_that_never_finishes_cannot_hold_the_sales_past_the_send_window
     a.ticks(a.open1, 30, 390)
     a.after_close(a.open1)
     a.eng.daily.review = StuckReview()
-    cut = 375 - int(ld.REVIEW_WAIT_UNTIL_S // 60)  # 15:45 is minute 375; the cut is 5 minutes earlier
+    cut = 387 - int(ld.REVIEW_WAIT_UNTIL_S // 60)  # 15:57 (#333) is minute 387; the cut is 5 minutes earlier
     a.ticks(a.open2, 0, cut - 1)
-    assert not [o for o in a.cls_orders() if o["side"] == "sell"]  # it waits for the review while there is time
+    assert not [o for o in a.md_orders() if o["side"] == "sell"]  # it waits for the review while there is time
     assert not a.eng.journal.entries(kinds=("md_review",))
     a.ticks(a.open2, cut - 1, cut + 1)
-    (sale,) = [o for o in a.cls_orders() if o["side"] == "sell"]
+    (sale,) = [o for o in a.md_orders() if o["side"] == "sell"]
     assert sale["symbol"] == "B" and float(sale["qty"]) == 40
     (rev,) = [b for *_, b in a.eng.journal.entries(kinds=("md_review",))]
     assert rev["status"] == "timeout" and rev["strategy"] == MD and rev["vetoed"] == []
@@ -52,10 +52,10 @@ def test_a_review_that_never_finishes_cannot_hold_the_sales_past_the_send_window
     assert send["review"]["status"] == "timeout" and [t[0] for t in send["targets"]] == ["B"]
     a.ticks(a.open2, cut + 1, 390)
     a.after_close(a.open2)
-    assert "B" not in a.broker.pos and len([o for o in a.cls_orders() if o["side"] == "sell"]) == 1
+    assert "B" not in a.broker.pos and len([o for o in a.md_orders() if o["side"] == "sell"]) == 1
 
 
 def test_the_window_left_counts_to_the_send_windows_end(tmp_path, monkeypatch):
     a = DailyAccount(tmp_path, monkeypatch)
-    t = a.open1 + timedelta(hours=6, minutes=5)  # 15:35 ET
-    assert a.eng.daily._window_left(t) == 600.0
+    t = a.open1 + timedelta(hours=6, minutes=5)  # 15:35 ET; the window ends at 15:57 (#333)
+    assert a.eng.daily._window_left(t) == 1320.0

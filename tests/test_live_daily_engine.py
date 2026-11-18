@@ -1,11 +1,11 @@
 """Issue #206: the live daily path inside the engine (engine/core.py + engine/live_daily.py), on the simulated venue
 of the S80 drills (test_failsafe_drills.Account: DAY1, DAY2).
 
-A multi-day rule that wants B decides after DAY1's close; on DAY2 the engine sends a `cls` buy at 09:31 through the
-order manager; the close-minus-5 flatten (intraday sleeves only) leaves it alone; it fills at the closing print and
-the fill is booked once to the engine's ledger as a multi-day sleeve; the account guard, the drift check and the
-reconciliation all know it. A restart between the order and the fill books it exactly once. With KAIBOT_MULTIDAY off
-the engine has no daily path and refuses one.
+A multi-day rule that wants B decides after DAY1's close; on DAY2 the engine sends a near-close DAY market buy at
+15:50 through the order manager (issue #333); it fills at the next minute's bar; the close-minus-5 flatten (intraday
+sleeves only) leaves the holding alone; the fill is booked once to the engine's ledger as a multi-day sleeve; the
+account guard, the drift check and the reconciliation all know it. A restart between the order and the fill books it
+exactly once. With KAIBOT_MULTIDAY off the engine has no daily path and refuses one.
 """
 
 from __future__ import annotations
@@ -14,8 +14,9 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 import numpy as np
+import pandas as pd
 import pytest
-from test_failsafe_drills import DAY1, DAY2, MD, Account, frames
+from test_failsafe_drills import DAY1, DAY2, MD, Account, beat, frames
 
 from kaibot.engine import live_daily as ld
 from kaibot.engine.core import Engine
@@ -27,6 +28,7 @@ from kaibot.strategies import registry
 from kaibot.strategies.base import TargetList
 
 POL = load_profiles()["balanced"]
+SEND = 379  # the tick whose clock reads 15:50:07: the near-close send window opens (issue #333)
 
 
 @dataclass(frozen=True)
@@ -85,8 +87,11 @@ class DailyAccount(Account):
         eng.daily = ld.for_engine(eng, self.load, rules=[self.rule])
         return eng
 
-    def cls_orders(self):
-        return [o for o in self.broker.orders.values() if o["time_in_force"] == "cls"]
+    def md_orders(self):
+        """The daily path's orders at the venue (near-close DAY market orders since #333)."""
+        return [o for o in self.broker.orders.values()
+                if str(o.get("client_order_id")).startswith(f"kb{self.rid}-{MD}-")
+                and (o["type"], o["time_in_force"]) == ("market", "day")]
 
 
 def test_the_engine_sends_the_daily_decision_at_the_next_session_and_books_its_fill_once(tmp_path, monkeypatch):
@@ -95,14 +100,16 @@ def test_the_engine_sends_the_daily_decision_at_the_next_session_and_books_its_f
     a.after_close(a.open1)
     dec = [b for *_, b in a.eng.journal.entries(kinds=("md_decision",))]
     assert [(b["session"], b["fill_session"], b["target"]["weights"]) for b in dec] == [(DAY1, DAY2, [["B", 1.0]])]
-    assert a.cls_orders() == []  # nothing is sent on the evening of the decision
-    a.ticks(a.open2, 0, 2)  # 09:31: the send step
-    (o,) = a.cls_orders()
+    assert a.md_orders() == []  # nothing is sent on the evening of the decision
+    a.ticks(a.open2, 0, SEND)
+    assert a.md_orders() == []  # nothing before 15:50 (issue #333)
+    a.ticks(a.open2, SEND, SEND + 1)  # 15:50: the send step
+    (o,) = a.md_orders()
     assert o["symbol"] == "B" and o["side"] == "buy" and float(o["qty"]).is_integer() and float(o["qty"]) >= 1
     assert o["client_order_id"].startswith(f"kb{a.rid}-{MD}-B-20260804-buy-")
     qty = float(o["qty"])
-    a.ticks(a.open2, 2, 390)  # the 15:55 flatten is intraday only: the order rests, nothing is sold
-    assert a.eng.day.flattened and a.cls_orders()[0]["status"] in ("new", "accepted", "filled")
+    a.ticks(a.open2, SEND + 1, 390)  # the 15:55 flatten is intraday only: the multi-day buy is not sold
+    assert a.eng.day.flattened and a.md_orders()[0]["status"] == "filled"
     assert not [x for x in a.broker.orders.values() if x["symbol"] == "B" and x["side"] == "sell"]
     assert a.eng.account_clean and a.eng.kill is None  # the guard and the drift check know the order
     a.after_close(a.open2)
@@ -114,7 +121,7 @@ def test_the_engine_sends_the_daily_decision_at_the_next_session_and_books_its_f
     for _ in range(3):  # later ticks book nothing again and send nothing
         a.eng.tick()
     assert len([x for *_, x in a.eng.journal.entries(kinds=("fill",)) if x.get("symbol") == "B"]) == 1
-    assert len(a.cls_orders()) == 1
+    assert len(a.md_orders()) == 1
     kinds = [e["type"] for e in a.store.tables["event"]]
     assert "multi_day_decision" in kinds and "multi_day_orders" in kinds and "multi_day_fill" in kinds
     assert "multi_day_waiting" in kinds  # DAY2's evening view is not there: no decision (fail closed)
@@ -125,13 +132,13 @@ def test_a_restart_between_the_order_and_the_fill_books_the_fill_once(tmp_path, 
     a = DailyAccount(tmp_path, monkeypatch)
     a.ticks(a.open1, 0, 390)
     a.after_close(a.open1)
-    a.ticks(a.open2, 0, 120)
-    (o,) = a.cls_orders()
-    eng = a.restart()  # killed mid-session, the closing-auction order resting at the venue
+    a.ticks(a.open2, 0, SEND + 1)
+    (o,) = a.md_orders()
+    eng = a.restart()  # killed right after the send, the near-close order not filled yet
     assert eng.daily is not None and "B" in eng.daily.working_symbols()
     assert eng.account_clean  # the resting order is the engine's own, not "unknown"
-    a.ticks(a.open2, 120, 390)
-    assert len(a.cls_orders()) == 1  # not sent again
+    a.ticks(a.open2, SEND + 1, 390)
+    assert len(a.md_orders()) == 1  # not sent again
     a.after_close(a.open2)
     fills = [x for *_, x in eng.journal.entries(kinds=("fill",)) if x.get("symbol") == "B"]
     assert len(fills) == 1 and eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == float(o["qty"])
@@ -180,7 +187,7 @@ def test_the_book_end_closes_the_multi_day_book_and_leaves_the_intraday_run_alon
     assert a.eng._status(4)["multi_day"]["book"] == "ended"
     a.ticks(a.open2, 4, 390)
     a.after_close(a.open2)
-    assert a.cls_orders() == []  # the decision of DAY1 is not sent: the book is closed for this run
+    assert a.md_orders() == []  # the decision of DAY1 is not sent: the book is closed for this run
     assert len([b for *_, b in a.eng.journal.entries(kinds=("md_book_end",))]) == 1  # once
     eng = a.restart()
     assert eng.daily.account.book_ended() and eng._book_peak(a.rid) == peak  # both survive a restart
@@ -200,11 +207,11 @@ def test_the_heartbeat_says_plainly_when_the_daily_store_was_not_refreshed(tmp_p
     a.ticks(a.open1, 0, 390)
     st = a.after_close(a.open1) or a.eng.tick()
     assert "daily store" in st["multi_day"]["rules"][MD]["waiting"]
-    a.ticks(a.open2, 0, 2)
+    a.ticks(a.open2, 0, SEND + 2)
     st = a.eng._status(1)
     assert st["multi_day"]["note"].startswith(f"{MD}: no decision today: daily store not refreshed")
     kinds = [e["type"] for e in a.store.tables["event"]]
-    assert "multi_day_no_decision" in kinds and a.cls_orders() == []
+    assert "multi_day_no_decision" in kinds and a.md_orders() == []
 
 
 def test_the_heartbeat_says_plainly_when_the_daily_prices_failed_the_check(tmp_path, monkeypatch):
@@ -215,11 +222,11 @@ def test_the_heartbeat_says_plainly_when_the_daily_prices_failed_the_check(tmp_p
     st = a.after_close(a.open1) or a.eng.tick()
     assert st["multi_day"]["rules"][MD]["waiting"] == why
     assert not list(a.eng.journal.entries(kinds=("md_decision",)))
-    a.ticks(a.open2, 0, 2)
+    a.ticks(a.open2, 0, SEND + 2)
     st = a.eng._status(1)
     assert st["multi_day"]["note"] == f"{MD}: no decision today: daily prices failed the check ({why})"
     ev = [e for e in a.store.tables["event"] if e["type"] == "multi_day_no_decision"]
-    assert ev and a.cls_orders() == []
+    assert ev and a.md_orders() == []
 
 
 # ---------------------------------------------------------------- QA-Ops review of #207: venue conflicts
@@ -260,15 +267,15 @@ def test_a_watchdog_stop_placed_while_the_engine_hung_is_adopted_and_cancelled_b
     a.after_close(a.open1)
     wd = a.broker.submit(OrderRequest("B", "sell", 40, "stop", "gtc", "kbwd-trend_momentum-B-20260803210000-wdstop",
                                       stop_price=round(px * 0.9, 2)))
-    a.ticks(a.open2, 0, 3)
+    a.ticks(a.open2, 0, SEND + 3)
     assert a.broker.orders[wd["id"]]["status"] == "canceled"
     assert any(b["coid"] == wd["client_order_id"] for *_, b in a.eng.journal.entries(kinds=("stop_adopted",)))
-    (sale,) = [o for o in a.cls_orders() if o["side"] == "sell"]
+    (sale,) = [o for o in a.md_orders() if o["side"] == "sell"]
     assert float(sale["qty"]) == 40
-    a.ticks(a.open2, 3, 390)
+    a.ticks(a.open2, SEND + 3, 390)
     a.after_close(a.open2)
     assert "B" not in a.broker.pos and (MD, "B") not in a.eng.ledger.book(a.rid).sleeves
-    assert len([o for o in a.cls_orders() if o["side"] == "sell"]) == 1 and a.eng.kill is None
+    assert len([o for o in a.md_orders() if o["side"] == "sell"]) == 1 and a.eng.kill is None
 
 
 def test_the_intraday_rule_leaves_a_multi_day_stock_alone(tmp_path, monkeypatch):
@@ -330,22 +337,24 @@ def test_multi_day_buys_wait_while_shorting_is_on(tmp_path, monkeypatch):
     a.broker.shorting_enabled = True
     a.ticks(a.open1, 0, 390)
     a.after_close(a.open1)
-    a.ticks(a.open2, 0, 5)
-    assert a.cls_orders() == []
+    a.ticks(a.open2, 0, SEND + 2)
+    assert a.md_orders() == []
     assert "multi_day_shorting_on" in [e["type"] for e in a.store.tables["event"]]
     a.broker.shorting_enabled = False
     a.eng.daily._shorting_day = None  # (read again at the next session; here: at once)
-    a.ticks(a.open2, 5, 7)
-    assert [o["side"] for o in a.cls_orders()] == ["buy"]
+    a.ticks(a.open2, SEND + 2, SEND + 4)
+    assert [o["side"] for o in a.md_orders()] == ["buy"]
 
 
-def test_on_an_early_close_the_send_window_ends_15_minutes_before_the_close():
+def test_on_an_early_close_the_send_window_is_the_close_less_10_to_less_3_minutes():
     from datetime import date, time
 
     lv = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
                       prev_session=lambda d: d, session_close=lambda d: time(13, 0) if d.day == 27 else time(16, 0))
-    assert lv.send_until(date(2026, 11, 27)) == time(12, 45)  # the day after Thanksgiving
-    assert lv.send_until(date(2026, 11, 25)) == time(15, 45)  # a normal day: 15:45 (cls refused from 15:50)
+    early, normal = date(2026, 11, 27), date(2026, 11, 25)  # the day after Thanksgiving; a normal day
+    assert (lv.send_from(early), lv.send_until(early)) == (time(12, 50), time(12, 57))
+    assert (lv.send_from(normal), lv.send_until(normal)) == (time(15, 50), time(15, 57))  # issue #333
+    assert lv.policy_for(early).close == time(13, 0) and lv.policy_for(normal).style == "near_close"
     assert ld.calendar_close({"close": "13:00"}) == time(13, 0) and ld.calendar_close(None) is None
 
 
@@ -434,8 +443,8 @@ def test_the_send_window_reads_the_calendar_once_per_session_not_per_tick():
     lv = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
                       prev_session=lambda d: d, session_close=close)
     d = date(2026, 11, 27)
-    assert lv.send_until(d) == time(15, 45)  # unreadable: the normal window (Alpaca refuses later orders anyway)
-    assert [lv.send_until(d) for _ in range(5)] == [time(12, 45)] * 5
+    assert lv.send_until(d) == time(15, 57)  # unreadable: the normal window
+    assert [lv.send_until(d) for _ in range(5)] == [time(12, 57)] * 5
     assert calls == [d, d]
 
 
@@ -591,7 +600,7 @@ def test_a_failed_check_keeps_the_positions_and_sells_nothing(tmp_path, monkeypa
     a.after_close(a.open1)
     assert not list(a.eng.journal.entries(kinds=("md_decision",)))
     a.ticks(a.open2, 0, 390)
-    assert a.cls_orders() == []
+    assert a.md_orders() == []
     assert not [o for o in a.broker.orders.values() if o["symbol"] == "B"]  # no sale, no buy, at any time in force
     assert float(a.broker.pos["B"]["qty"]) == 40 and a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == 40
     sends = [b for *_, b in a.eng.journal.entries(kinds=("md_send",))]
@@ -612,7 +621,7 @@ def test_a_check_that_fails_after_the_decision_sends_nothing_new(tmp_path, monke
     a.failed_check = f"1 bad bar in 1 key: ZZZ {DAY1} bad_price"
     a.restart()
     a.ticks(a.open2, 0, 390)
-    assert a.cls_orders() == [] and not [o for o in a.broker.orders.values() if o["symbol"] == "B"]
+    assert a.md_orders() == [] and not [o for o in a.broker.orders.values() if o["symbol"] == "B"]
     kinds = [e["type"] for e in a.store.tables["event"]]
     assert "multi_day_error" not in kinds and "multi_day_waiting" in kinds
 
@@ -672,8 +681,8 @@ def test_a_stock_that_is_not_held_is_left_out_and_the_rule_decides(tmp_path, mon
     assert len(list(a.eng.journal.entries(kinds=("md_decision",)))) == 1
     ev = [e for e in a.store.tables["event"] if e["type"] == "multi_day_view_dropped"]
     assert len(ev) == 1 and ev[0]["payload"]["dropped"] == {"ZZZ": why}
-    a.ticks(a.open2, 0, 2)
-    assert [o["symbol"] for o in a.cls_orders()] == ["B"]
+    a.ticks(a.open2, 0, SEND + 2)
+    assert [o["symbol"] for o in a.md_orders()] == ["B"]
     note = a.eng._status(1)["multi_day"]["note"]
     assert note == f"{MD}: decided without ZZZ: daily prices failed the check ({why})"
 
@@ -703,3 +712,65 @@ def test_a_daily_step_failing_every_tick_is_one_event_until_it_recovers(tmp_path
     broken["on"] = True
     a.ticks(a.open2, 22, 25)
     assert len(errors()) == 2
+
+
+# ---------------------------------------------------------------- #333 (QA-Ops second key): the fail-safes at 15:5x
+
+
+def _killed_after_the_near_close_fill(tmp_path, monkeypatch) -> tuple[DailyAccount, float]:
+    """DAY2: the near-close buy of B goes out at 15:50, fills, is booked at 15:51, and the engine dies at 15:52, before
+    the fail-safes' flatten window (watchdog 15:55, dead-man 15:56). B was not held at DAY1's close."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, SEND + 2)  # 15:50 send, 15:51 the fill booked
+    (o,) = a.md_orders()
+    assert o["status"] == "filled" and a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == float(o["qty"])
+    return a, float(o["qty"])
+
+
+def test_a_near_close_buy_booked_before_the_engine_dies_is_multi_day_for_the_dead_man(tmp_path, monkeypatch):
+    """#333: the dead-man reads the last session's ledger_position rows. Without today's rows the 15:50 buy of B would
+    be intraday shares to it, and it would sell them (here: DELETE /v2/positions, no multi-day share known)."""
+    from pg_harness import DeadmanDb
+
+    a, qty = _killed_after_the_near_close_fill(tmp_path, monkeypatch)
+    rows = [r for r in a.store.tables.get("ledger_position", []) if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [(r["strategy"], float(r["qty"]), r["priced"]) for r in rows] == [(MD, qty, False)]
+    db = DeadmanDb(tmp_path)
+    try:
+        db.beat(a.clock())
+        db.run(a.rid)
+        for s in sorted({str(r["session"]) for r in a.store.tables.get("ledger_position", [])}):
+            db.ledger(a.rid, s, [(r["strategy"], r["symbol"], r["qty"], r["stop_px"])
+                                 for r in a.store.tables["ledger_position"] if str(r["session"]) == s])
+        said = []
+        for k in range(SEND + 2, 390):  # 15:52 ... 15:59, once a minute (pg_cron)
+            a.clock.t = a.open2 + timedelta(minutes=k, seconds=2)
+            said.append(db.check(a.clock()))
+            db.pump(a.broker)
+            a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+        assert said[0] == "engine alive" and any(x.startswith("acted") for x in said)
+        assert float(a.broker.pos["B"]["qty"]) == qty  # kept: the multi-day buy is not sold as intraday shares
+        assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
+                    and o["type"] != "stop"]
+    finally:
+        db.stop()
+
+
+def test_a_near_close_buy_booked_before_the_engine_dies_is_multi_day_for_the_watchdog(tmp_path, monkeypatch):
+    """#333: the on-laptop watchdog reads the engine's journal: the booked 15:50 buy is a multi-day sleeve, and its
+    15:55 flatten (intraday shares only) leaves it alone."""
+    from kaibot.engine.watchdog import Watchdog, book_reader
+
+    a, qty = _killed_after_the_near_close_fill(tmp_path, monkeypatch)
+    beat(a.store, a.clock())
+    wd = Watchdog(a.broker, a.store, now=a.clock, book=book_reader(a.jpath, a.store))
+    for k in range(SEND + 2, 390):
+        a.clock.t = a.open2 + timedelta(minutes=k, seconds=30)
+        wd.step()
+        a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+    assert wd.flattened_on is not None  # the flatten ran
+    assert float(a.broker.pos["B"]["qty"]) == qty
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
+                and o["type"] != "stop"]

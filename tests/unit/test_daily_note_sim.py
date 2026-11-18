@@ -34,11 +34,12 @@ class NoteHarness(Harness):
         for i in range(I0, I1 + 1):
             day = d.day(i)
             self.account.recon.check("session_start")
-            for minute in (31, 32, 33, 36, 40, 45, 50, 59):
-                self.clock.set(_at(day, time(9, minute)))
+            self.clock.set(_at(day, time(9, 30)))
+            self.broker.advance(_at(day, time(9, 30)))
+            for minute in (49, 50, 51, 52, 53, 55, 56, 57, 58):  # #333: near-close orders, 15:50-15:57 ET
+                self.clock.set(_at(day, time(15, minute)))
                 self.live.sync()
                 self.live.send(day)
-            self.broker.advance(_at(day, time(9, 30)))
             self.clock.set(_at(day, time(15, 59)))
             self.broker.advance(_at(day, time(15, 59)))
             self.clock.set(_at(day, time(16, 30)))

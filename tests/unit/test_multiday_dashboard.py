@@ -68,7 +68,7 @@ def test_the_sell_readings_agree_with_the_rules_own_sell_decisions_and_change_no
 
 
 def test_the_events_and_the_heartbeat_carry_what_the_dashboard_reads(tmp_path, monkeypatch):
-    from test_live_daily_engine import MD, DailyAccount
+    from test_live_daily_engine import MD, SEND, DailyAccount
 
     a = DailyAccount(tmp_path, monkeypatch)
     a.ticks(a.open1, 0, 390)
@@ -77,13 +77,13 @@ def test_the_events_and_the_heartbeat_carry_what_the_dashboard_reads(tmp_path, m
     dec = ev["multi_day_decision"]
     assert dec["strategy"] == MD and dec["decides"] and dec["decided_at"] and dec["held"] == {}
     assert dec["buy_candidates"] == ["B"] and dec["sectors"] == {"B": None} and dec["sell_when"] == {}
-    a.ticks(a.open2, 0, 2)  # 09:31: the plan is sized and sent
+    a.ticks(a.open2, 0, SEND + 2)  # 15:50: the plan is sized and sent (issue #333)
     plans = [e["payload"] for e in a.store.tables["event"] if e["type"] == "multi_day_plan"]
     assert [x["note"] for x in plans if x["session"] != dec["fill_session"]] == ["no decision"]  # DAY1: none yet
     (p,) = [x for x in plans if x["session"] == dec["fill_session"]]
     (t,) = p["targets"]
     assert p["session"] == dec["fill_session"] and t[0] == "B" and t[1] == 0.0 and t[2] >= 1 and t[3] == "buy"
-    a.ticks(a.open2, 2, 390)
+    a.ticks(a.open2, SEND + 2, 390)
     a.after_close(a.open2)
     st = a.eng._daily_status({"state": "market_closed"})
     line = st["multi_day"].get("book_line")

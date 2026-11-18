@@ -41,6 +41,28 @@ def test_closing_auction_orders_are_whole_share_cls_before_1550_or_from_1900():
         p.request("A", "buy", 1.5, et(DAY, "10:00"), "c4")
 
 
+def test_near_close_orders_are_whole_share_day_market_orders_in_the_last_ten_minutes():
+    """Issue #333: Alpaca paper works a `cls` order as a market order in the last seconds before 16:00, and the rest
+    expires. The daily path sends a DAY market order from 15:50 instead (close minus 10 minutes, early closes
+    included), and nothing before it or from the close on."""
+    from datetime import time
+
+    p = ExecutionPolicy("near_close")
+    r = p.request("A", "buy", 10, et(DAY, "15:50"), "c1")
+    assert (r.type, r.time_in_force, r.qty, r.limit_price) == ("market", "day", 10, None)
+    assert p.request("A", "sell", 3, et(DAY, "15:59"), "c2").side == "sell"
+    for t in ("09:31", "15:49", "16:00", "19:00"):
+        with pytest.raises(ExecutionRefused, match="15:50"):
+            p.request("A", "buy", 10, et(DAY, t), "c3")
+    with pytest.raises(ExecutionRefused, match="whole shares"):
+        p.request("A", "buy", 1.5, et(DAY, "15:51"), "c4")
+    early = ExecutionPolicy("near_close", close=time(13, 0))  # an early close: 12:50 until 13:00
+    assert early.request("A", "buy", 1, et(DAY, "12:50"), "c5").time_in_force == "day"
+    for t in ("12:49", "13:00", "15:50"):
+        with pytest.raises(ExecutionRefused, match="12:50"):
+            early.request("A", "buy", 1, et(DAY, t), "c6")
+
+
 def test_marketable_limits_start_at_0945_and_cross_the_spread_by_the_offset():
     p = ExecutionPolicy("marketable_limit")
     with pytest.raises(ExecutionRefused, match="09:45"):
@@ -259,7 +281,7 @@ def test_the_daily_runner_keeps_a_protective_stop_on_every_position_and_reconcil
         ProtectiveStops.ensure = real
     assert not run_.refused and run_.fills and len(seen) > 200 and all(seen)
     assert any(r.purpose == "stop" for r in run_.om.orders.values())
-    assert all(o["time_in_force"] in ("cls", "gtc") for o in run_.broker.orders.values())
+    assert all(o["time_in_force"] in ("day", "gtc") for o in run_.broker.orders.values())  # near-close (#333)
 
 
 # ---------------------------------------------------------------- dividends at the ex-date (live)
@@ -545,3 +567,31 @@ def test_179_review_a_resize_up_is_capped_at_the_venue_position_and_skipped_when
     b.positions = real
     ps.ensure({K: 40.0}, {K: 90.0}, clock(), DAY)
     assert int(ps.stops_of(K)[0].qty) == 40
+
+
+def test_a_fill_the_order_shows_before_its_activity_is_never_bought_again_also_after_a_restart():
+    """#333 (QA-Ops second key): near-close orders fill inside the send window, and the send step runs the loop again
+    on later ticks while anything is left to do. Alpaca's order can read `filled` before its FILL activity is
+    listed: the order is no longer working and its shares are not booked yet, so `target - held - working` would
+    buy them a second time. The loop waits until the fill is booked (a restart folds the same state)."""
+    from kaibot.engine.journal import Journal
+    from kaibot.engine.orders import OrderManager
+
+    b, clock = venue()
+    journal = Journal(now=clock)
+    om, _, booked = manager(b, clock, journal)
+    clock.set(et(DAY, "15:50", 7))
+    pol, want = ExecutionPolicy("near_close"), [Target("rule", "A", 30, "buy")]
+    (first,) = reconcile_targets(om, pol, want, {}, now=clock(), session=DAY).sent
+    run(b, clock, 380, 380)  # the DAY market order fills at the 15:50 bar
+    real, b.activities = b.activities, lambda *a, **k: []  # the activity is not listed yet
+    om.sync()
+    assert om.get(first.coid).state is St.FILLED and not booked and om.unbooked("A", "rule", DAY) == 30
+    res = reconcile_targets(om, pol, want, {}, now=clock(), session=DAY)
+    assert not res.sent and "not booked yet" in res.skipped[0][1] and len(b.orders) == 1
+    again = OrderManager(b, journal, clock)  # a restart folds the journal: the same wait
+    assert not reconcile_targets(again, pol, want, {}, now=clock(), session=DAY).sent and len(b.orders) == 1
+    b.activities = real
+    om.sync()
+    assert sum(f.qty for f in booked) == 30 and om.unbooked("A") == 0
+    assert not reconcile_targets(om, pol, want, {K: 30.0}, now=clock(), session=DAY).sent and len(b.orders) == 1

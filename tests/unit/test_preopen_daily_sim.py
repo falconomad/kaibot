@@ -5,7 +5,8 @@ spend. What it shows:
 - a review that allows everything sends the SAME orders and gets the SAME fills as the research runner (the review
   is only a filter: with nothing vetoed nothing changes);
 - a veto drops that buy on every session and is journalled with its reason (`md_review`, `md_send.review`, events);
-- the review runs before the 09:31 send window and its record precedes the send in the journal;
+- the review runs before the session (it ends at 09:31; the send window is 15:50-15:57 since #333) and its record
+  precedes the send in the journal;
 - the counterfactual (the rules' plan alone) is measured through SimBroker, not a private simulator: both arms are
   full SimBroker runs of the same core;
 - the journalled reviews are stored candidate lists the offline evals read back (contract violations: none).
@@ -53,11 +54,12 @@ class ReviewHarness(Harness):
             self.account.recon.check("session_start")
             self.clock.set(_at(day, time(8, 45)))
             self.live.preopen()  # the engine's closed-market tick before the open
-            for minute in (31, 32, 33, 36, 40, 45, 50, 59):
-                self.clock.set(_at(day, time(9, minute)))
+            self.clock.set(_at(day, time(9, 30)))
+            self.broker.advance(_at(day, time(9, 30)))
+            for minute in (49, 50, 51, 52, 53, 55, 56, 57, 58):  # the near-close send window (#333)
+                self.clock.set(_at(day, time(15, minute)))
                 self.live.sync()
                 self.live.send(day)
-            self.broker.advance(_at(day, time(9, 30)))
             self.clock.set(_at(day, time(15, 59)))
             self.broker.advance(_at(day, time(15, 59)))
             self.clock.set(_at(day, time(16, 30)))
@@ -209,7 +211,8 @@ class _Hang:
 
 class LateHarness(ReviewHarness):
     """Sessions before `switch` as the engine runs them with an allowing review. From `switch` on, the engine is
-    (re)started at 15:44 ET, in the last minute before the send window closes, and the review never answers."""
+    (re)started at 15:55 ET, in the last minutes before the send window closes (15:57), and the review never
+    answers."""
 
     def __init__(self, *a, switch: int, hang, **kw):
         self.switch, self.hang = switch, hang
@@ -224,16 +227,17 @@ class LateHarness(ReviewHarness):
             if i < self.switch:
                 self.clock.set(_at(day, time(8, 45)))
                 self.live.preopen()
-                ticks = [time(9, m) for m in (31, 32, 33, 36, 40, 45, 50, 59)]
+                ticks = [time(15, m) for m in (49, 50, 51, 52, 53, 55, 56, 57, 58)]
             else:
                 self.live.review = PreopenDesk(self.hang, offline_gateway(), env=ON_ENV, needs_key=False,
                                                clock=lambda: self.clock().timestamp())
-                ticks = [time(15, 44, 7), time(15, 45, 7)]  # one tick a minute: the last one inside the window
+                ticks = [time(15, 55, 7), time(15, 56, 7)]  # one tick a minute: the last one inside the window
+            self.clock.set(_at(day, time(9, 30)))
+            self.broker.advance(_at(day, time(9, 30)))
             for t in ticks:
                 self.clock.set(_at(day, t))
                 self.live.sync()
                 self.live.send(day)
-            self.broker.advance(_at(day, time(9, 30)))
             self.clock.set(_at(day, time(15, 59)))
             self.broker.advance(_at(day, time(15, 59)))
             self.clock.set(_at(day, time(16, 30)))

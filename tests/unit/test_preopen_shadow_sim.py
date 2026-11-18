@@ -138,14 +138,14 @@ def test_a_restart_does_not_review_twice(data, tmp_path):
     h = ShadowHarness(data, S, ld.live_builder(S, lim), tmp_path, shadow=shadow(rev))
     day = data.day(I0)
     h.live.after_close(data.day(I0 - 1))
-    h.clock.set(_at(day, time(9, 31)))
+    h.clock.set(_at(day, time(15, 50)))  # #333: the send window is 15:50-15:57 ET
     h.live.send(day)
     h.live.sync()
     n = rev.calls
     h.restart()  # the same desk object survives here; a new engine would also find the journal entry
     h.live.shadow = ps.ShadowDesk(rev, offline_gateway(), inline=True, needs_key=False)
-    for minute in (32, 40):
-        h.clock.set(_at(day, time(9, minute)))
+    for minute in (51, 55):
+        h.clock.set(_at(day, time(15, minute)))
         h.live.send(day)
         h.live.sync()
     assert rev.calls == n and len(bodies(h, ps.KIND)) == 1

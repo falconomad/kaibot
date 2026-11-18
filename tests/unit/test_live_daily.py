@@ -2,10 +2,11 @@
 
 Parity: on the committed fixture (tests/fixtures/daily_momentum) the live path, driven session by session on
 `SimBroker` exactly as the engine drives it (decide after the close from the view of that evening, journal; next
-session 09:31: size, journal, send `cls` orders through the order manager; the closing print; book the fills from
-the account activities), sends the SAME orders and gets the SAME fills as `engine/daily.run_daily` on the same
-sessions, at the pre-registered limits and at the live book's limits of #205. The window (sessions 280-399) has no
-corporate action on a stock (live, splits and dividends are the engine's S77 path, booked from Alpaca's activities).
+session 15:50: size, journal, send near-close DAY market orders through the order manager (issue #333); the closing
+print; book the fills from the account activities), sends the SAME orders and gets the SAME fills as
+`engine/daily.run_daily` on the same sessions, at the pre-registered limits and at the live book's limits of #205.
+The window (sessions 280-399) has no corporate action on a stock (live, splits and dividends are the engine's S77
+path, booked from Alpaca's activities).
 
 Restart safety: the same run with the process killed and rebuilt from the journal between the decision and the send,
 in the middle of a send (before and after the venue got the order), between the send and the fill, and between the
@@ -105,7 +106,7 @@ class Harness:
         self.clock = SimClock(_at(data.day(I0 - 1), time(16, 30)))
         costs = AuctionImpactCosts(sigma=lambda sym, day: data.sigma_at(data.index_of(day), data.col(sym)), mult=1.0)
         self.broker = SimBroker(data.bar_history(), self.clock, costs=costs, cash=EQ0, calendar=data.calendar(),
-                                cash_at="fill")
+                                cash_at="fill", near_close=ld.SEND_FROM)
         self.broker.wash_check, self.broker.shorting_enabled = True, False  # as Alpaca, shorting off
         self.path = tmp_path / "journal.sqlite"
         self.journal = Journal(self.path, now=self.clock)
@@ -143,15 +144,20 @@ class Harness:
             day = d.day(i)
             self.maybe("after_decision", i)
             self.account.recon.check("session_start")
-            for minute in (31, 32, 33, 36, 40, 45, 50, 59):  # the engine's ticks (each step safe to repeat)
+            self.clock.set(_at(day, time(9, 30)))
+            self.broker.advance(_at(day, time(9, 30)))
+            for minute in (31, 45):  # the morning's ticks: nothing goes out before 15:50 (issue #333)
                 self.clock.set(_at(day, time(9, minute)))
+                self.live.sync()
+                self.live.send(day)
+            for minute in (49, 50, 51, 52, 53, 55, 56, 57, 58):  # the engine's ticks (each step safe to repeat)
+                self.clock.set(_at(day, time(15, minute)))
                 self.live.sync()
                 try:
                     self.live.send(day)
                 except Crash:
                     self.restart()
             self.maybe("after_send", i)
-            self.broker.advance(_at(day, time(9, 30)))
             self.clock.set(_at(day, time(15, 59)))
             self.broker.advance(_at(day, time(15, 59)))
             self.maybe("before_booking", i)
@@ -207,7 +213,9 @@ def test_the_live_path_reproduces_the_research_runner_order_by_order_and_fill_by
     h.run()
     want, got = venue_orders(ref.broker), venue_orders(h.broker)
     assert len(want) > 20 and got == want
-    assert all(o[4] == "cls" and o[3].is_integer() for o in got)  # closing-auction day orders, whole shares
+    assert all(o[4] == "day" and o[3].is_integer() for o in got)  # near-close day market orders, whole shares
+    assert {datetime.fromisoformat(o["submitted_at"]).astimezone(NY).time() for o in h.broker.orders.values()} <= \
+        {time(15, m) for m in range(50, 57)}
     assert venue_fills(h.broker) == venue_fills(ref.broker) and len(venue_fills(h.broker)) > 20
     # the ledger the engine folds from the journal holds what the venue holds, cash to the cent
     led = Ledger.fold(h.journal.entries(kinds=LEDGER_KINDS)).book(RID)
@@ -344,8 +352,41 @@ def test_a_rule_with_a_prereg_stop_is_refused_and_the_momentum_preregs_have_none
         ld.PREREG_STOP_ATR["trend_momentum"] = None
 
 
-def test_the_send_window_ends_before_alpacas_cls_cutoff():
-    assert time(15, 50) >= ld.SEND_UNTIL and time(9, 30) < ld.SEND_FROM
+def test_the_send_window_is_the_last_ten_minutes_less_three_and_sends_day_market_orders():
+    """Issue #333: near-close DAY market orders from 15:50 to 15:57 ET (three minutes for paper to fill them before
+    16:00); the pre-open review still ends at 09:31."""
+    window = (ld.SEND_FROM, ld.SEND_UNTIL, ld.PREOPEN_UNTIL)
+    assert window == (time(15, 50), time(15, 57), time(9, 31))
+    p = ld.LiveDaily(None, Journal(), lambda: datetime.now(UTC), [], None, None, next_session=lambda d: d,
+                     prev_session=lambda d: d).policy_for(datetime(2026, 11, 19).date())
+    assert p.style == "near_close" and p.close == time(16, 0)
+
+
+def test_an_expired_remainder_is_one_multi_day_unfilled_event_even_across_a_restart(data, tmp_path):
+    """Issue #333, question 4: what the venue let expire at 16:00 (nothing filled, or part of the order) is
+    journalled once by client id (`md_unfilled`) and reported as `multi_day_unfilled`, so the dashboard can show
+    "not filled". It is never sent again: the plan's targets are the only orders (a buy waits for the next
+    decision)."""
+    s = mom.VERSIONS["trend_momentum"]
+    lim = momentum_limits(s, POL, 100.0)
+    h = Harness(data, s, ld.live_builder(s, lim), tmp_path)
+    h.broker.script.hold(None, bars=None)  # the first order never fills
+    h.broker.script.fills(None, [1.0])  # the second fills one share at the print, the rest expires
+    h.run()
+    ev = [b for k, b in h.events if k == "multi_day_unfilled"]
+    first = sorted((o for o in h.broker.orders.values()), key=lambda o: int(o["id"][1:]))[:2]
+    assert [o["status"] for o in first] == ["expired", "expired"] and float(first[1]["filled_qty"]) == 1.0
+    assert [(b["symbol"], b["side"], b["qty"], b["filled"], b["left"], b["status"]) for b in ev] == [
+        (o["symbol"], o["side"], float(o["qty"]), float(o["filled_qty"]), float(o["qty"]) - float(o["filled_qty"]),
+         "expired") for o in first]
+    assert all(b["strategy"] == s.name and b["session"] == ev[0]["session"] and b["coid"] for b in ev)
+    assert len([b for *_, b in h.journal.entries(kinds=("md_unfilled",))]) == 2
+    sent = {(o["symbol"], o["side"]) for o in h.broker.orders.values() if o["submitted_at"][:10] == ev[0]["session"]}
+    assert len([o for o in h.broker.orders.values() if (o["symbol"], o["side"]) == (ev[0]["symbol"], "buy")
+                and o["submitted_at"][:10] == ev[0]["session"]]) == 1 and sent  # not sent again that session
+    h.restart()
+    h.live.sync(force=True)
+    assert len([k for k, _ in h.events if k == "multi_day_unfilled"]) == 2  # once, also after a restart
 
 
 def _stamped_store(tmp_path, cut=(), before=None, edit=None):

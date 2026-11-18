@@ -1393,6 +1393,7 @@ class Engine:
         d.last_m = m
         self._sync_orders()
         self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
+        self._md_positions_after_fills(d.day)  # #333: near-close fills land before the fail-safes' flatten window
         self._recheck_reconcile(m)
         self._late_actions(m)  # #266: a split or spin-off Alpaca credits after the session start
         self._check_drift()
@@ -1404,7 +1405,7 @@ class Engine:
         self._manage_stops(m)
         if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
             self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
-        self._daily_step("send", lambda: self.daily.send(d.day))  # #206: closing-auction orders, 09:31-15:45 ET
+        self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
@@ -1492,6 +1493,9 @@ class Engine:
             self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),
                                                 "action": "update config/macro_calendar.yaml"}, self._rid())
             self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
+        # #333: the daily path's near-close orders can fill while the engine is down (a restart inside 15:50-16:00):
+        # their fills are booked before the account check and the reconciliation compare the ledger with the venue
+        self._daily_step("sync", lambda: self.daily.sync(force=True))
         self.check_account()
         self._startup_reconcile("session_start")  # S78: run again, never reset
         # #133 (decision 15 section 11): a multi-day rule with a Gate B verdict (an experiment that failed it) is
@@ -1539,7 +1543,32 @@ class Engine:
         if self.daily is not None and {k: s.qty for k, s in b.sleeves.items()} != shares0:
             self._write_positions(b, today)
 
-    def _write_positions(self, b, today: date) -> None:
+    def _md_positions_after_fills(self, today: date) -> None:
+        """#333 (QA-Ops second key): the near-close orders fill from 15:50 ET, before the fail-safes' flatten window
+        (watchdog 15:55, dead-man 15:56-16:00). The dead-man (migration 0019/0022) counts as multi-day only the
+        shares in the last session's `ledger_position` rows; without today's rows a buy that filled at 15:5x would
+        be taken for intraday shares and sold if the engine then went silent. So once daily-path fills are booked,
+        today's rows are written from the ledger as it stands (the close overwrites them). Never raises."""
+        if not getattr(self, "_md_filled", False) or self.daily is None or self.run is None:
+            return
+        self._md_filled = False
+        b = self.ledger.book(self._rid())
+        if b is None:
+            return
+        try:
+            self._write_positions(b, today, why="daily-path fills booked")
+            held = {k for k, sl in b.sleeves.items() if sl.qty > 1e-9}
+            for r in self.store.select("ledger_position", {"run_id": f"eq.{b.run_id}", "session": f"eq.{today}"}):
+                if (r["strategy"], r["symbol"]) not in held and float(r.get("qty") or 0) != 0:  # sold since
+                    self.store.upsert("ledger_position", {**r, "qty": 0.0, "priced": False},
+                                      "run_id,session,strategy,symbol")
+        except Exception as e:  # the next booked fill writes them again; the close writes them in any case
+            self._md_filled = True
+            log.exception("ledger_position rows after the daily fills not written")
+            self.store.event("multi_day_error", {"step": "positions_after_fills",
+                                                 "error": f"{type(e).__name__}: {e}"[:200]}, self._rid())
+
+    def _write_positions(self, b, today: date, why: str = "corporate action at the open") -> None:
         """#266: the share count changed at this open (a split, spin-off, symbol change or cash merger booked). The
         fail-safes (the dead-man of migration 0019 and the watchdog's store view) read the last session's
         `ledger_position` rows, so today's rows are written now, from the ledger as it stands: they never act on
@@ -1558,7 +1587,7 @@ class Engine:
                 "opened_session": sl.opened, "dividends": round(sl.dividends, 2),
                 "stop_px": round(ms, 2) if ms is not None else None,
                 "stop_state": "resting" if ms is not None else "missing"}, "run_id,session,strategy,symbol")
-        self.store.event("positions_rewritten", {"session": str(today), "why": "corporate action at the open",
+        self.store.event("positions_rewritten", {"session": str(today), "why": why,
                                                  "sleeves": len(b.sleeves)}, b.run_id)
 
     LATE_RETRY_MIN = 5  # a difference that stays: the venue's record is read again at most every 5 minutes
