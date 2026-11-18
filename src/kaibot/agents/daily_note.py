@@ -141,15 +141,45 @@ def plain(f: Mapping) -> str:
 
 
 _NUM = re.compile(r"(?<![\w.])-?\$?\d[\d,]*(?:\.\d+)?%?")
+# QA-Ops on #318: numbers written as words are numbers too ("five shares", "a thousand dollars")
+_UNITS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+          "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_ORDINALS = {"third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8, "ninth": 9, "tenth": 10,
+             "eleventh": 11, "twelfth": 12}  # "first" and "second" are left to plain prose
+_WORD_VALUES = {**{w: i for i, w in enumerate(_UNITS)}, **_TENS, **_ORDINALS}
+_SCALES = ("hundred", "thousand", "million", "billion", "trillion", "dozen")  # never a count the facts give in words
+_WORD = re.compile(r"\b(" + "|".join(sorted(_TENS, key=len, reverse=True)) + r")-(" + "|".join(_UNITS[1:10])
+                   + r")\b|\b(" + "|".join(sorted([*_WORD_VALUES, *_SCALES], key=len, reverse=True)) + r")\b",
+                   re.IGNORECASE)
 
 
 def _numbers(text: str) -> set[str]:
-    return {m.strip("$%").replace(",", "") for m in _NUM.findall(text)}
+    out = {m.strip("$%").replace(",", "") for m in _NUM.findall(text)}
+    for tens, unit, word in _WORD.findall(text):
+        if tens:
+            out.add(str(_TENS[tens.lower()] + _UNITS.index(unit.lower())))
+        elif word.lower() in _SCALES:
+            out.add(word.lower())  # never allowed: the facts hold no number in words
+        else:
+            out.add(str(_WORD_VALUES[word.lower()]))
+    return out
+
+
+def _counts(x) -> set[int]:
+    """The length of every list in the facts: the counts a writer may state ("holds 2 stocks"). A mapping's own size
+    is a count of fields, not of anything kaibo did, so only its values count (the number of rules is added apart)."""
+    if isinstance(x, Mapping):
+        return {n for v in x.values() for n in _counts(v)}
+    if isinstance(x, list | tuple):
+        return {len(x)} | {n for v in x for n in _counts(v)}
+    return set()
 
 
 def allowed_numbers(f: Mapping) -> set[str]:
-    """Every number of the facts in the forms a writer may use (as is, whole, two decimals), plus small counts."""
-    out = {str(i) for i in range(0, 13)}
+    """Every number of the facts in the forms a writer may use (as is, whole, two decimals), plus zero and the
+    counts of the facts' own lists (QA-Ops on #318: not any small number, which let "bought 7 shares" through)."""
+    out = {"0", str(len(f.get("rules") or {}))} | {str(n) for n in _counts(f)}
     for tok in re.findall(r"-?\d+(?:\.\d+)?", json.dumps(f, default=str)):
         v = float(tok)
         out |= {tok, f"{v:.2f}", f"{v:.0f}", f"{v:g}"}
@@ -159,9 +189,11 @@ def allowed_numbers(f: Mapping) -> set[str]:
 
 
 def unknown_numbers(text: str, f: Mapping) -> list[str]:
-    """Numbers in the paragraph that are not in the facts (the facts-only check)."""
+    """Numbers in the paragraph that are not in the facts (the facts-only check). Trailing zeros are dropped only
+    after a decimal point ("55.50" is 55.5; QA-Ops on #318: "50,000" is not 5)."""
     ok = allowed_numbers(f)
-    return sorted(n for n in _numbers(text) if n not in ok and n.rstrip("0").rstrip(".") not in ok)
+    return sorted(n for n in _numbers(text)
+                  if n not in ok and not ("." in n and n.rstrip("0").rstrip(".") in ok))
 
 
 # ---------------------------------------------------------------- the writer

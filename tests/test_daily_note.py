@@ -167,3 +167,23 @@ def test_the_desk_writes_once_after_1700_et():
     assert dn.NoteDesk(g, inline=True).tick(done) == []  # a restart finds it in the journal
     no_plan = Live(datetime(2026, 11, 21, 22, 5, tzinfo=UTC), ENTRIES)  # no session that day
     assert dn.NoteDesk(g, inline=True).tick(no_plan) == []
+
+
+@pytest.mark.parametrize("text", [
+    "Today kaibo bought 7 AAA.",                          # a small count the facts do not have
+    "Equity at the last close was $50,000.",              # a round number ("50000" is not 5)
+    "It sold 80 BBB and is up 10%.",                      # trailing zeros of whole numbers
+    "Today kaibo bought five AAA.",                       # a number in words
+    "It bought twenty-one AAA for a thousand dollars.",   # compound and scale words
+    "AAA ranked fifth.",                                  # an ordinal
+])
+def test_invented_numbers_are_caught_in_every_form(text):
+    """QA-Ops on #318: each of these passed the facts-only check before."""
+    assert dn.unknown_numbers(text, F()) != []
+    _, _, g = gw({"paragraph": GOOD + " " + text})
+    assert dn.write(D, F(), g)["source"] == "template"
+
+
+def test_numbers_the_facts_hold_pass_in_any_form():
+    ok = "It bought twelve AAA, sold eight BBB at $55.50, holds two stocks and AAA ranked third; $100,512 in all."
+    assert dn.unknown_numbers(ok, F()) == []
