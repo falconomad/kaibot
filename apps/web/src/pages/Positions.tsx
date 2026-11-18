@@ -251,7 +251,8 @@ function NextClose({ orders }: { orders: (ReturnType<typeof parsePlan>[number]["
         const what = o.sharesTarget === 0 ? `Sell all ${o.sharesNow}` : d > 0 ? `${o.sharesNow ? "Add" : "Buy"} ${d}` : `Sell ${-d}`;
         return (
           <li key={`${o.rule}-${o.symbol}`}>
-            <b>{o.symbol}</b><span className="muted">{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</span>
+            <StockBadge symbol={o.symbol} size={36} />
+            <span className="nc-mid"><b>{o.symbol}</b><span className="muted">{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</span></span>
             <span className={`nc-state ${o.state}`}>{STATE_TEXT[o.state]}{o.state === "working" && o.sharesNow > 0 && o.sharesTarget > o.sharesNow ? ` · ${o.sharesNow} of ${o.sharesTarget} held` : ""}</span>
           </li>
         );

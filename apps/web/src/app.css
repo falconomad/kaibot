@@ -830,12 +830,13 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
   letter-spacing: .02em; color: var(--warn-text); background: var(--warn-tint); border: 1px solid var(--warn-line); }
 .next-close { display: flex; flex-direction: column; gap: 8px; }
 .nc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.nc-list li { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto; gap: 4px 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); }
+.nc-list li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.nc-mid { display: flex; flex-direction: column; gap: 2px; }
 .nc-list li:first-child { border-top: 0; }
 .nc-list li > * { min-width: 0; overflow-wrap: anywhere; }
 .nc-state { font-size: var(--t-sm); color: var(--text-2); text-align: right; }
 .nc-state.filled { color: var(--gain); } .nc-state.refused, .nc-state.canceled { color: var(--loss); }
-@media (max-width: 420px) { .nc-list li { grid-template-columns: minmax(0, 1fr) auto; } .nc-list li > .muted { grid-column: 1 / -1; grid-row: 2; } }
+@media (max-width: 420px) { .nc-state { max-width: 9em; } }
 .sheet-sub { margin: 16px 0 6px; font-size: var(--t-md); font-weight: 600; }
 .sell-when { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); color: var(--text-2); }
 .sell-when li.met { color: var(--warn-text); }
