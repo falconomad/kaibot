@@ -14,6 +14,7 @@ import { Sheet } from "../components/Sheet";
 import { Accordion } from "../components/Accordion";
 import { Skeleton } from "../components/Skeleton";
 import { api } from "../lib/api";
+import { STALE } from "../lib/poll";
 import {
   CAUTION, HOURS, MIN_FOCUS, PRESETS, boldnessSteps, cautionOn, clampBody, diffConfig, dollars, focusSet, hoursShape, hoursWindow,
   levelDefaults, matchBoldness, matchPreset, nextOpenEt, openLabel, presetBody, setBoldness, setCaution, toggleTheme, validateBody,
@@ -31,6 +32,8 @@ export function Strategy() {
   const { run, overview } = useRunCtx();
   const q = useQuery({ queryKey: ["config", run.id], queryFn: () => api.getConfig(run.id), enabled: run.kind === "paper", staleTime: 60_000,
     refetchOnWindowFocus: false });
+  // the pot marked to market (the shell's kb_book query, cached), so sizing reads the same figure as Home
+  const book = useQuery({ queryKey: ["book", run.id], queryFn: () => api.book(run.id), enabled: run.kind === "paper", staleTime: STALE.daily });
   if (run.kind !== "paper")
     return (
       <section className="card">
@@ -48,7 +51,7 @@ export function Strategy() {
           {NAME} keeps trading on its level's defaults meanwhile.</p>
       </section>
     );
-  const pot = livePot(run, overview).pot;
+  const pot = livePot(run, overview, book.data).pot;
   return <Editor key={run.id} runId={run.id} resp={q.data} pot={Number.isFinite(pot) ? pot : run.amount_usd} />;
 }
 

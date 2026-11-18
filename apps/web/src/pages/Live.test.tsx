@@ -28,7 +28,7 @@ describe("Live (Home) page states", () => {
     expect(t).toContain("Holding nothing");
     expect(t).toContain("Nothing held right now.");
     expect(t).toContain("$10,000.00");
-    expect(t).toContain("Engine offline: nothing new trades");
+    expect(t).toContain("Engine offline · no new trades until it is back"); // never connected: always the warning
     expect(glitches(html)).toEqual([]);
   });
 

@@ -2,15 +2,15 @@
   "about": "The size budget of the first load (#297). `npm run build` ends with scripts/size_budget.mjs, which fails when a number below is passed; the web CI job runs that build. Bytes. JavaScript and CSS are gzipped (level 9), fonts are the woff2 files as they are.",
   "rule": "JavaScript and CSS: the measured number plus 3%, rounded up to a whole kB (gzip differs by about 0.2% between zlib versions, and small fixes should not trip it). Fonts: the four preloaded weights and nothing more. To raise a budget: measure again, write the new number and date under `measured`, and say why in the PR.",
   "measured": {
-    "on": "2026-11-17",
-    "at": "main 11b78a7 plus PR for #297, built with the CI job's placeholder env, Node 22",
-    "first_load_js_gzip": 190724,
-    "first_load_css_gzip": 16386,
+    "on": "2026-11-18",
+    "at": "main 51aba17 plus the PR for the stakeholder's night report (marked pot, stop alarm by exit kind, engine asleep), built with the CI job's placeholder env",
+    "first_load_js_gzip": 197841,
+    "first_load_css_gzip": 16618,
     "preloaded_fonts": 55760
   },
   "budget": {
-    "first_load_js_gzip": 197000,
-    "first_load_css_gzip": 17000,
+    "first_load_js_gzip": 204000,
+    "first_load_css_gzip": 18000,
     "preloaded_fonts": 56000
   }
 }

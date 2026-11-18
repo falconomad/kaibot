@@ -27,9 +27,10 @@ describe("Home status rows", () => {
     expect(text(html)).toContain("Engine halted entries for today · 1 more");
   });
   it("the engine offline is an amber row; a missing safety stop of the book is a red row", () => {
-    const b = parseBook({ ...RAW_BOOK }, 1);
+    // ZZZQ under an intraday rule: a position that should carry a broker stop (trend_momentum has none by design)
+    const b = parseBook({ ...RAW_BOOK, positions: RAW_BOOK.positions.map((p) => (p.symbol === "ZZZQ" ? { ...p, rule: "orb" } : p)) }, 1);
     const html = inRouter(<HomeStatus run={run} overview={ov()} engineLive={false} book={b} risk={{ severity: "ok", items: [] }} />);
-    expect(html).toMatch(/class="status-row warn"[^>]*><span class="status-text">Engine offline: nothing new trades/);
+    expect(html).toMatch(/class="status-row warn"[^>]*><span class="status-text">Engine offline · no new trades until it is back/);
     expect(html).toMatch(/class="status-row breach"[^>]*>.*1 stock has no safety stop/);
   });
   it("a replay says so; nothing else when all is well", () => {

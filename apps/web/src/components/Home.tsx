@@ -41,9 +41,11 @@ export const allRed = (risk: { items: string[]; red?: string[] }) =>
 
 /** The rows above the pot, in order: a halt or breach, the engine off, a broken safety check of the multi-day book,
  *  then the experiment (or the test phase when no experiment runs). Never hidden; only their explanations are. */
-export function HomeStatus({ run, overview, risk, engineLive, book }: {
+export function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
   run: Run; overview: Overview; risk: { severity: "ok" | "warn" | "breach"; items: string[]; red?: string[] } | undefined;
   engineLive: boolean; book: Book | undefined;
+  /** The header chip's state (Shell.engineChip): asleep outside market hours is a calm row, not the warning. */
+  engine?: { asleep: boolean; note: string };
 }) {
   const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
   const exps = experimentsFrom(engineDetail(overview.heartbeat)).filter((e) => e.experiment);
@@ -65,11 +67,20 @@ export function HomeStatus({ run, overview, risk, engineLive, book }: {
       </StatusRow>,
     );
   }
-  if (active && !engineLive)
+  if (active && !engineLive && engine?.asleep)
     rows.push(
-      <StatusRow key="off" tone="warn" title="The engine isn't running" text="Engine offline: nothing new trades">
-        <p>Nothing trades until you start it on your Mac: open Terminal in the <code className="num">{REPO_DIR}</code> folder and run <code className="num">./scripts/run_engine.sh</code>.</p>
-        <p className="muted">Open trades keep their stop-loss at Alpaca meanwhile.</p>
+      <StatusRow key="off" tone="neutral" title="The engine is asleep" text={engine.note}>
+        <p>The market is closed, so nothing would trade now anyway. The Mac that runs the engine is off on purpose at night: it shuts down
+          at 22:20 CET and starts again on weekdays at 13:45 CET, before the market opens at 15:30 CET.</p>
+        <p className="muted">The stocks held overnight stay as they are. The multi-day rule sells only at a close, by its own list.</p>
+      </StatusRow>,
+    );
+  else if (active && !engineLive)
+    rows.push(
+      <StatusRow key="off" tone="warn" title="The engine isn't running" text={engine?.note || "Engine offline · no new trades until it is back"}>
+        <p>The market is open, but nothing new trades until the engine runs again. Start it on your Mac: open Terminal in
+          the <code className="num">{REPO_DIR}</code> folder and run <code className="num">./scripts/run_engine.sh</code>.</p>
+        <p className="muted">Stocks already held stay held. Stops already at the broker stay there.</p>
       </StatusRow>,
     );
   if (unprotected.length || offBooks)

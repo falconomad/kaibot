@@ -9,7 +9,8 @@
 // Not in the contract, so not shown (the boards' fallbacks): sell-condition readings, the next close's planned
 // orders, the book's own peak (so the distance to the stop line), a price during the day (the pot is "at the last
 // close"). Every field is untrusted jsonb and read through the parsers below.
-import type { Daily } from "./api";
+import type { Daily, LedgerPos, Overview, Run } from "./api";
+import { needsStop } from "./exits";
 import type { Curve } from "./model";
 
 export interface BookPosition {
@@ -21,10 +22,14 @@ export interface BookPosition {
   stop: { price: number; state: "resting" | "missing" | "re-arming" } | null;
   /** #229 (0020): the rule's sell readings at its last decision, and the sector its daily view uses (raw, read by lib/multiday). */
   sellWhen?: unknown; sector?: unknown;
+  /** How the rule exits, when the source says so ("stop", "target_list"); lib/exits.ts decides otherwise. */
+  exit?: string | null;
 }
 export interface Book {
   runId: number; session: string | null; ts: string | null;
-  cash: number | null; invested: number | null; equity: number | null; startEquity: number | null; prevClose: number | null;
+  cash: number | null; invested: number | null; equity: number | null;
+  /** ledger_day.close_equity (the reported figure, the same as kb_equity_series' close_equity); `equity` is the venue's. */
+  equityReported: number | null; startEquity: number | null; prevClose: number | null;
   dividends: number;
   gross: number | null; overnight: number | null;
   byRule: { rule: string; value: number; share: number }[];
@@ -53,7 +58,7 @@ export function parseBook(raw: unknown, runId = 0): Book {
     if (qty <= 0) return [];
     const s = obj(o.stop), sp = num(s?.price), st = STOP_STATES.find((k) => k === s?.state);
     return [{ rule, symbol, qty, avgCost: avg, mark, priced: num(o.last) !== null, opened: str(o.opened_session, 10),
-      dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null, sellWhen: o.sell_when, sector: o.sector }];
+      dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null, sellWhen: o.sell_when, sector: o.sector, exit: str(o.exit) }];
   });
   const diffs = Object.entries(obj(rec?.positions) ?? {}).slice(0, 50).map(([symbol, v]) => {
     const d = obj(v);
@@ -61,7 +66,7 @@ export function parseBook(raw: unknown, runId = 0): Book {
   });
   return {
     runId: num(r.run_id) ?? runId, session: str(r.session, 10), ts: str(m?.ts),
-    cash: num(m?.cash), invested: num(m?.invested), equity: num(m?.equity), startEquity: num(m?.start_equity),
+    cash: num(m?.cash), invested: num(m?.invested), equity: num(m?.equity), equityReported: num(m?.equity_reported), startEquity: num(m?.start_equity),
     prevClose: num(m?.prev_close_equity), dividends: num(m?.dividends_to_date) ?? 0,
     gross: num(x?.gross), overnight: num(x?.overnight),
     byRule: (Array.isArray(x?.by_rule) ? x.by_rule : []).flatMap((b) => {
@@ -115,12 +120,17 @@ export function holdingView(p: BookPosition, b: Pick<Book, "equity" | "session">
 
 // ---------------------------------------------------------------- the book's checks (board 11 status strip)
 
+/** Stops count only for positions meant to carry one (lib/exits.ts): a rule that sells by its target list has none by
+ *  design (`byDesign`), and is never "missing" a stop. `n` is every holding, `needed` those that need a stop. */
 export function bookChecks(b: Book) {
   const n = b.positions.length;
-  const resting = b.positions.filter((p) => p.stop?.state === "resting").length;
-  const missing = b.positions.filter((p) => !p.stop || p.stop.state === "missing").map((p) => p.symbol);
-  const rearming = b.positions.filter((p) => p.stop?.state === "re-arming").map((p) => p.symbol);
-  return { n, resting, missing, rearming, reconciled: b.reconciled };
+  // a stop that rests (or is being placed again) counts wherever it is; a rule without one by design is never "missing"
+  const guarded = b.positions.filter((p) => needsStop(p.rule, p.exit) || (p.stop && p.stop.state !== "missing"));
+  const byDesign = b.positions.filter((p) => !guarded.includes(p)).map((p) => p.symbol);
+  const resting = guarded.filter((p) => p.stop?.state === "resting").length;
+  const missing = guarded.filter((p) => !p.stop || p.stop.state === "missing").map((p) => p.symbol);
+  const rearming = guarded.filter((p) => p.stop?.state === "re-arming").map((p) => p.symbol);
+  return { n, needed: guarded.length, resting, missing, rearming, byDesign, reconciled: b.reconciled };
 }
 
 /** Group by rule, biggest first inside each rule; rules by their value. */
@@ -151,4 +161,56 @@ export function nextDecision(state: string | null | undefined, todayEt: string, 
   const t = nextOpen ? Date.parse(nextOpen) : NaN;
   if (!Number.isFinite(t)) return null;
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(t));
+}
+
+// ---------------------------------------------------------------- the pot now (Home hero, header meters, chart's end)
+
+const etDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(d);
+const sessionDay = (s: string) =>
+  new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(s + "T00:00:00Z"));
+
+export interface PotNow {
+  pot: number; dayPnl: number; dayPct: number;
+  /** "today", or "on Wed, Nov 18" when the change shown is the last session's (before the next session starts). */
+  dayLabel: string; today: boolean;
+  /** The intraday ledger's positions (today's only). */
+  positions: Record<string, LedgerPos>;
+  /** "book": the marked multi-day book (ledger_day); "realised": closed trades and the intraday ledger only. */
+  source: "book" | "realised";
+}
+
+/** Stakeholder, 18 Nov 2026: the pot is the marked book, never the sum of closed trades. With a ledger_day row the pot is
+ *  its close_equity (kb_book mtm.equity_reported); the day's change is close_equity less the previous session's
+ *  close_equity (kb_equity_series), or less the session's start equity on day one. During the next session, until its
+ *  close, the live mark is today's minute ledger (kb_overview `ledger`: the whole run, the book included, at the latest
+ *  prices), and today is it less the last close. The minute ledger is not used once the session's close is booked: its
+ *  last row is from before the near-close fills (18 Nov: 95,000 in cash at 15:59 ET, the 7 buys filled at the close).
+ *  Without a ledger_day row: the realised figures (closed P&L, the minute ledger), as before. */
+export function potNow(run: Pick<Run, "amount_usd">, o: Pick<Overview, "daily" | "ledger"> | undefined, book?: Book | null,
+  series?: SeriesPoint[] | null, now = new Date()): PotNow {
+  const today = etDay(now);
+  const daily = o?.daily ?? [];
+  const before = run.amount_usd + daily.filter((d) => d.session < today).reduce((a, d) => a + d.pnl, 0);
+  const closedAll = run.amount_usd + daily.reduce((a, d) => a + d.pnl, 0);
+  const l = o?.ledger;
+  const fresh = !!l && etDay(new Date(l.ts)) === today;
+  const positions = fresh ? l!.positions : {};
+  const ledgerPot = fresh ? Math.min(l!.equity_venue, l!.equity_shadow) : closedAll;
+  const close = book?.session ? book.equityReported ?? book.equity : null;
+  if (close === null || close === undefined || !book?.session) {
+    const dayStart = fresh ? before : ledgerPot;
+    const d = ledgerPot - dayStart;
+    return { pot: ledgerPot, dayPnl: d, dayPct: dayStart ? (d / dayStart) * 100 : 0, dayLabel: "today", today: true, positions, source: "realised" };
+  }
+  if (book.session < today && fresh) {
+    // in the session: the engine's minute ledger is the whole run marked live (its start equity is the last ledger
+    // close, multi-day sleeves at the latest price: engine/core.py equity_now), so today = it less the last close
+    const d = ledgerPot - close;
+    return { pot: ledgerPot, dayPnl: d, dayPct: close ? (d / close) * 100 : 0, dayLabel: "today", today: true, positions, source: "book" };
+  }
+  const prior = (series ?? []).filter((p) => p.session < book.session!).at(-1)?.closeEquity ?? book.prevClose ?? run.amount_usd;
+  const d = close - prior;
+  const isToday = book.session >= today;
+  return { pot: close, dayPnl: d, dayPct: prior ? (d / prior) * 100 : 0, dayLabel: isToday ? "today" : `on ${sessionDay(book.session)}`,
+    today: isToday, positions, source: "book" };
 }

@@ -185,7 +185,8 @@ export function Health() {
 
       <h2 className="section-h">Safety checks</h2>
       <ul className="rows">
-        <CheckRow ok={chip.live} name="Engine" line={engine ? `${String(d.state ?? "—")} · ${String(d.host ?? "").slice(0, 16) || "host unknown"}` : "never connected"}>
+        <CheckRow ok={chip.live || chip.asleep} name="Engine" line={!engine ? "never connected" : chip.asleep ? `${chip.text} · ${chip.sub}`
+          : `${String(d.state ?? "—")} · ${String(d.host ?? "").slice(0, 16) || "host unknown"}`}>
           <p>{PROC.engine.what}.</p>
           <div className="kv"><span>State</span><span /><span className="v">{String(d.state ?? "—")}</span>
             <span>Last heartbeat</span><span /><span className="v">{beatTs ? ageText(ageS(beatTs)) : "never"}</span>

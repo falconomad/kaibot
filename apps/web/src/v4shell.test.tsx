@@ -30,8 +30,11 @@ describe("v4 shell", () => {
     const halt = tabbar(shell(paperRun(), { halts_today: [{ kind: "drift", reason: "x", ts: fresh() }] }));
     expect(halt).toContain('class="tab-dot breach"');
     expect(halt).toContain('aria-label="Engine: a halt is in force"');
-    const off = tabbar(shell(paperRun(), { heartbeat: [{ process: "engine", ts: "2026-01-01T00:00:00Z", detail: { state: "trading" } }] }));
-    expect(off).toContain('class="tab-dot offline"');
+    const dead = { heartbeat: [{ process: "engine", ts: "2026-01-01T00:00:00Z", detail: { state: "trading" } }] };
+    vi.useFakeTimers({ now: new Date("2026-11-19T15:00:00Z"), toFake: ["Date"] }); // Thu 10:00 ET: market hours
+    try { expect(tabbar(shell(paperRun(), dead))).toContain('class="tab-dot offline"'); } finally { vi.useRealTimers(); }
+    vi.useFakeTimers({ now: new Date("2026-11-18T22:35:00Z"), toFake: ["Date"] }); // Wed 23:35 CET: the Mac's night
+    try { expect(tabbar(shell(paperRun(), dead))).not.toContain("tab-dot"); } finally { vi.useRealTimers(); }
     expect(tabbar(shell(paperRun(), {}))).not.toContain("tab-dot");
   });
   it("Paper is always in the header; the level and the run picker are desktop-only there", () => {
