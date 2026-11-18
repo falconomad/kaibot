@@ -117,6 +117,15 @@ PREREG_STOP_ATR: dict[str, float | None] = {"trend_momentum": None, "mom_12_1_ba
                                             "mom_12_1_band_nofilter": None}
 
 
+def exit_kind(rule: str) -> str:
+    """How a rule's positions leave (Product, 18 Nov 2026, for the dashboard's stop alarm): "target_list" when its
+    pre-registration has no protective stop (the position is sold when it drops out of the rule's target list, so a
+    missing broker stop is expected), "broker_stop" when it has one (a missing stop is a real alarm). An unknown rule
+    is "broker_stop" (fail closed: its sleeve is shown as wanting a stop)."""
+    base = rule.split("~", 1)[0]
+    return "target_list" if base in PREREG_STOP_ATR and PREREG_STOP_ATR[base] is None else "broker_stop"
+
+
 class DataNotReady(RuntimeError):
     """The daily store does not hold the decision's session yet (or not as available at this time)."""
 
@@ -1288,14 +1297,15 @@ class LiveDaily:
         for r in self.rules:
             ret = self.retirement(r.name)
             if ret is not None:
-                rules[r.name] = {"retired": True, "note": retired_note(ret), "reenable": reenable_value(ret)}
+                rules[r.name] = {"retired": True, "note": retired_note(ret), "reenable": reenable_value(ret),
+                                 "exit": exit_kind(r.name)}
                 notes.append(retired_note(ret))
                 continue
             last = None
             for b in self._entries("md_decision"):
                 if b.get("strategy") == r.name:
                     last = b.get("session")
-            row: dict = {"last_decision": last}
+            row: dict = {"last_decision": last, "exit": exit_kind(r.name)}
             miss = self._missed.get(r.name)
             if miss is not None and (today is None or miss[0] == str(today)):
                 row["note"] = miss[1]
@@ -1322,7 +1332,8 @@ class LiveDaily:
                 except Exception:
                     log.exception("shadow review status unreadable")
             rules[r.name] = row
-        out: dict = {"book": "ended" if ended else "open", "rules": rules}
+        out: dict = {"book": "ended" if ended else "open", "rules": rules,
+                     "exits": {name: row["exit"] for name, row in rules.items()}}  # rule -> exit kind (dashboard)
         if self.review is not None:
             out["preopen_review"] = "on" if self.review.enabled else "off"
         if self.shadow is not None:
@@ -1365,7 +1376,7 @@ class LiveDaily:
 
 __all__ = ["LiveDaily", "Rule", "StoreLoader", "DataNotReady", "StoreFailedCheck", "live_limits", "live_builder",
            "with_session",
-           "as_of", "target_to_json", "target_from_json", "SEND_FROM", "SEND_UNTIL", "PREOPEN_UNTIL",
+           "as_of", "target_to_json", "target_from_json", "SEND_FROM", "SEND_UNTIL", "PREOPEN_UNTIL", "exit_kind",
            "PREREG_STOP_ATR"]
 
 

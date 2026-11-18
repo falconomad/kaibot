@@ -572,3 +572,25 @@ def test_the_store_loader_refuses_a_store_with_a_bars_file_it_cannot_read(tmp_pa
         loader(day, late)
     f.write_bytes(good)
     assert loader(day, late).dates[-1].astype(object) == day
+
+
+def test_the_heartbeat_names_each_rules_exit_kind_for_the_dashboard(data, tmp_path):
+    """Product, 18 Nov 2026: the dashboard counted the momentum positions as "no safety stop". Their exit is the
+    target list (no stop in either pre-registration), so each rule's heartbeat row says so: `exit` is "target_list"
+    for a rule without a pre-registered stop and "broker_stop" for one with it, and only "broker_stop" sleeves can be
+    unprotected. A retired rule's row carries it too."""
+    assert ld.exit_kind("trend_momentum") == ld.exit_kind("mom_12_1_band~nofilter") == "target_list"
+    ld.PREREG_STOP_ATR["trend_momentum"] = 3.0
+    try:
+        assert ld.exit_kind("trend_momentum") == "broker_stop"
+    finally:
+        ld.PREREG_STOP_ATR["trend_momentum"] = None
+    assert ld.exit_kind("unknown_rule") == "broker_stop"  # fail closed: an unknown rule's sleeve wants a stop
+    s = mom.VERSIONS["trend_momentum"]
+    h = Harness(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path)
+    st = h.live.status()
+    assert st["rules"][s.name]["exit"] == "target_list" and st["exits"] == {s.name: "target_list"}
+    h.journal.append("md_retired", {"rule": s.name, "run_id": RID, "session": str(data.day(I0)), "drawdown_pct": 30.0,
+                                    "end_pct": 27.0, "peak": EQ0, "retirement_id": "x"})
+    row = h.live.status()["rules"][s.name]
+    assert row.get("retired") and row["exit"] == "target_list"
