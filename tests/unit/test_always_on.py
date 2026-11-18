@@ -553,3 +553,192 @@ def test_wrapper_stop_is_a_clean_ctrl_c(wrapper):
         out, _ = p.communicate(timeout=30)
         assert p.returncode == 0, out
         assert "got-int" in (tmp / "ran").read_text() and "stopped (on request)" in out
+
+
+# ---------------------------------------------------------------- the ticker-check worker beside the engine
+# scripts/run_ticker_checks.py (M5 S68, #96) answers the dashboard's ticker checks. The service runs it beside the
+# engine, restarts it when it dies, stops it with the engine, and never lets it change the engine's exit code.
+FAKE_WORKER = """#!/bin/bash
+# stand-in for .venv/bin/python: "-c" is the import check, "-m certifi" fails, the alarm pinger is off, anything
+# else is the worker
+case "$1" in -c) exit "${{FAKE_IMPORT:-0}}";; -m) exit 1;; scripts/healthcheck.py) exit 0;; esac
+echo "worker $$ $*" >> {tmp}/worker.calls
+trap 'echo worker-term >> {tmp}/worker.calls; exit 0' TERM
+[ -n "${{FAKE_WORKER_EXIT:-}}" ] && exit "$FAKE_WORKER_EXIT"
+while :; do sleep 0.2; done
+"""
+
+
+def engine_for(tmp, seconds, code=0):
+    return (f"#!/bin/bash\ntrap 'echo got-int >> {tmp}/ran; exit 0' INT\necho up >> {tmp}/ran\n"
+            f"for _ in $(seq {seconds * 5}); do sleep 0.2; done\nexit {code}\n")
+
+
+@pytest.fixture
+def checks(wrapper):
+    r, env, tmp = wrapper
+    (r / ".venv/bin").mkdir(parents=True)
+    (r / ".venv/bin/python").write_text(FAKE_WORKER.format(tmp=tmp))
+    (r / ".venv/bin/python").chmod(0o755)
+    return r, {**env, "KAIBOT_CHECKS_START_DELAY": "0"}, tmp
+
+
+def worker_starts(tmp):
+    f = tmp / "worker.calls"
+    return [ln for ln in f.read_text().splitlines() if ln.startswith("worker ")] if f.exists() else []
+
+
+def gone(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True).stdout.strip() \
+        .startswith("Z")
+
+
+def test_the_worker_runs_beside_the_engine_and_stops_with_it(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 4))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, env)
+    assert x.returncode == 0 and "ticker-check worker on" in x.stdout
+    (start,) = worker_starts(tmp)
+    assert start.endswith("-u scripts/run_ticker_checks.py --env " + env["KAIBOT_ENV_FILE"])
+    assert gone(int(start.split()[1])) and "worker-term" in (tmp / "worker.calls").read_text()
+    assert not (r / "data/live/ticker_checks.pid").exists()
+    log = (tmp / "logs/ticker_checks.log").read_text()
+    assert "ticker-check worker started" in log and "stopped with the engine" in log
+
+
+def test_the_worker_is_restarted_when_it_dies_and_never_fails_the_engine(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 9))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "FAKE_WORKER_EXIT": "3"})
+    assert x.returncode == 0 and "engine exited cleanly" in x.stdout  # the engine's code, not the worker's
+    assert len(worker_starts(tmp)) >= 2  # restarted after 5 s, then 10 s
+    assert "worker exited with code 3: starting it again in 5 s" in (tmp / "logs/ticker_checks.log").read_text()
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1, code=4))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "FAKE_WORKER_EXIT": "0"})
+    assert x.returncode == 1 and "exited with code 4" in x.stdout
+
+
+def test_a_worker_that_cannot_start_leaves_the_engine_alone(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 2))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "FAKE_IMPORT": "1"})  # .venv without the deps
+    assert x.returncode == 0 and (tmp / "ran").read_text().split() == ["up"] and worker_starts(tmp) == []
+    assert (tmp / "logs/ticker_checks.log").read_text().count("cannot start the ticker-check worker yet") == 1
+
+
+def test_a_stop_reaches_the_worker_too(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 60))
+    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, env=env, stdout=subprocess.PIPE,
+                         text=True)
+    try:
+        for _ in range(100):
+            if worker_starts(tmp) and (r / "data/live/ticker_checks.pid").exists():
+                break
+            time.sleep(0.1)
+        pid = int((r / "data/live/ticker_checks.pid").read_text())
+        p.send_signal(__import__("signal").SIGINT)
+        out, _ = p.communicate(timeout=40)
+    finally:
+        p.kill()
+    assert p.returncode == 0 and "stopped (on request)" in out
+    assert gone(pid) and "worker-term" in (tmp / "worker.calls").read_text()
+
+
+def test_a_worker_left_by_a_killed_service_run_is_stopped_first(checks):
+    r, env, tmp = checks
+    (r / "data/live").mkdir(parents=True)
+    orphan = subprocess.Popen(["bash", "-c", "exec -a 'python scripts/run_ticker_checks.py' sleep 30"])
+    try:
+        (r / "data/live/ticker_checks.pid").write_text(str(orphan.pid))
+        (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 2))
+        sh(["bash", "scripts/service_run.sh", "engine"], r, env, check=True)
+        assert orphan.wait(timeout=5) != 0  # killed, so two workers never answer the same rows
+        assert len(worker_starts(tmp)) == 1
+    finally:
+        orphan.kill()
+
+
+def test_the_worker_can_be_turned_off(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_TICKER_CHECKS": "0"}, check=True)
+    assert "ticker-check worker" not in x.stdout and worker_starts(tmp) == []
+
+
+def test_the_worker_log_is_rotated(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    (tmp / "logs").mkdir()
+    (tmp / "logs/ticker_checks.log").write_bytes(b"x" * 10_000_001)
+    sh(["bash", "scripts/service_run.sh", "engine"], r, env, check=True)
+    assert (tmp / "logs/ticker_checks.log").stat().st_size < 10_000 and (tmp / "logs/ticker_checks.log.1.gz").exists()
+
+
+@pytest.fixture
+def fake_docker(tmp_path):
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "docker").write_text(
+        f'#!/bin/bash\necho "$@" >> {tmp_path}/docker.calls\n'
+        'case "$1" in\n'
+        '  ps) printf "c1\\tkaibot-ticker-checks\\t\\n";;\n'
+        f'  run) trap "echo container-term >> {tmp_path}/docker.calls; exit 0" TERM; while :; do sleep 0.2; done;;\n'
+        'esac\nexit 0\n')
+    (bin_ / "docker").chmod(0o755)
+    return bin_
+
+
+def test_in_docker_mode_without_a_venv_the_worker_runs_in_the_engine_image(wrapper, fake_docker):
+    r, env, tmp = wrapper
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 4))
+    env = {**env, "KAIBOT_SERVICE_MODE": "docker", "KAIBOT_CHECKS_START_DELAY": "0",
+           "PATH": f"{fake_docker}:{env['PATH']}"}
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, env)
+    assert x.returncode == 0, x.stdout
+    calls = (tmp / "docker.calls").read_text().splitlines()
+    (run,) = [c for c in calls if c.startswith("run ")]
+    assert run.startswith("run --rm --init --name kaibot-ticker-checks ")
+    assert f"-v {env['KAIBOT_ENV_FILE']}:/secrets/.env:ro" in run and run.endswith(
+        "kaibot-engine python -u scripts/run_ticker_checks.py --env /secrets/.env")
+    assert "scripts/run_ticker_checks.py:/app/scripts/run_ticker_checks.py:ro" in run
+    assert "container-term" in calls and "rm -f kaibot-ticker-checks" in calls
+
+
+def test_the_worker_container_is_not_an_engine(tmp_path, fake_docker):
+    """engine_guard.sh must not see the worker's container (kaibot-engine image) as a second engine."""
+    x = sh(["bash", str(SCRIPTS / "engine_guard.sh"), "--list"], tmp_path,
+           {"PATH": f"{fake_docker}:{os.environ['PATH']}"})
+    assert x.returncode == 0 and x.stdout == ""
+
+
+def test_service_status_says_whether_the_worker_runs(tmp_path):
+    r = tmp_path / "kaibot"
+    (r / "scripts").mkdir(parents=True)
+    shutil.copy(SCRIPTS / "service.sh", r / "scripts")
+    (r / "scripts/engine_guard.sh").write_text("#!/bin/bash\nexit 0\n")
+    (r / "scripts/release.sh").write_text("#!/bin/bash\necho 'release: main'\n")
+    (r / "scripts/engine_guard.sh").chmod(0o755)
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "launchctl").write_text('#!/bin/bash\nprintf "\\tstate = running\\n\\tpid = 42\\n"\n')
+    (bin_ / "launchctl").chmod(0o755)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "ticker_checks.log").write_text('{"symbol": "NBIS", "status": "accepted"}\n')
+    (logs / "engine.log").write_text("engine up\n")
+    env = {"HOME": str(tmp_path), "KAIBOT_LOG_DIR": str(logs), "PATH": f"{bin_}:{os.environ['PATH']}"}
+    x = sh(["bash", "scripts/service.sh", "status"], r, env, check=True)
+    assert "ticker checks: not running" in x.stdout
+    (r / "data/live").mkdir(parents=True)
+    w = subprocess.Popen(["bash", "-c", "exec -a 'python -u scripts/run_ticker_checks.py' sleep 30"])
+    try:
+        (r / "data/live/ticker_checks.pid").write_text(str(w.pid))
+        x = sh(["bash", "scripts/service.sh", "status"], r, env, check=True)
+    finally:
+        w.kill()
+    assert f"ticker checks: running (pid {w.pid}" in x.stdout and '"NBIS"' in x.stdout
