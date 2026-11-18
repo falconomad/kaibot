@@ -1,8 +1,12 @@
 """Sample each company logo's colours for its tile (dev-only; `npm run logo-colors`). Stakeholder, 17 Nov 2026.
 
 Reads src/data/symbols.json, downloads each logo once into a temporary folder, and writes src/data/logo_colors.json:
-for each symbol {"bg", "fg", "pad", "sampled"}. The images are third-party: they are read here, at build time only,
-and deleted; only the colours are committed. The browser never samples anything.
+for each symbol {"bg", "fg", "pad", "sampled", "from"}. `from` is the URL of the image sampled: the first source the app
+shows (AllInvestView's https://cdn.tickerlogos.com/{domain} when the symbol has a domain, stakeholder 18 Nov 2026, else
+our Finnhub logo; the next one when that fails). The app uses a colour only for that very image (StockBadge.tsx);
+for any other image the browser samples the tickerlogos logo itself, with the same rule as `colours()` below
+(src/lib/logos.ts, tileFromPixels). The images are third-party: they are read here, at build time only,
+and deleted; only the colours are committed.
 
 - The logo has a solid background (its edge is opaque and even): the tile takes that colour. White or near-white
   stays a soft white tile with 12% padding; any other colour goes full-bleed (padding 0), as the logo was drawn.
@@ -75,23 +79,31 @@ def main() -> int:
     old = json.loads(OUT.read_text()) if OUT.exists() else {}
     out, ok = {}, 0
     for sym, m in sorted(meta.items()):
-        url = m.get("logo")
-        try:
-            if not url:
-                raise ValueError("no logo")
-            req = urllib.request.Request(url, headers={"User-Agent": "logo-colors (build script)"})
-            with urllib.request.urlopen(req, timeout=20) as r:
-                data = r.read()
-        except Exception as e:  # not fetched: keep an earlier sample, else "pending" (a soft white tile in the app)
-            out[sym] = old.get(sym) if old.get(sym, {}).get("sampled") else {"bg": None, "pad": PAD, "sampled": False}
-            print(f"{sym}: not fetched ({type(e).__name__}: {str(e)[:80]})", file=sys.stderr)
-            continue
-        try:
-            out[sym] = {**colours(data), "sampled": True}
+        cdn = f"https://cdn.tickerlogos.com/{m['domain']}" if m.get("domain") else None
+        got, unreadable, why = None, False, "no logo"
+        for url in (u for u in (cdn, m.get("logo")) if u):  # in the app's order: the next source when one fails
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "logo-colors (build script)"})
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    data = r.read()
+            except Exception as e:  # noqa: BLE001
+                why = f"{type(e).__name__}: {str(e)[:80]}"
+                continue
+            try:
+                got = {**colours(data), "sampled": True, "from": url}
+                break
+            except Exception as e:  # noqa: BLE001  fetched but unreadable
+                why = f"unreadable {type(e).__name__}: {str(e)[:80]}"
+                unreadable = unreadable or url == m.get("logo")  # only our own logo is skipped by the app
+        if got:
+            out[sym] = got
             ok += 1
-        except Exception as e:  # fetched but unreadable: the app shows the initials tile
+        elif unreadable:  # the app skips our logo and shows the next source, or the initials
             out[sym] = {"bg": None, "pad": PAD, "sampled": False, "unreadable": True}
-            print(f"{sym}: unreadable ({type(e).__name__}: {str(e)[:80]})", file=sys.stderr)
+        else:  # not fetched: keep an earlier sample, else "pending" (a soft white tile in the app)
+            out[sym] = old.get(sym) if old.get(sym, {}).get("sampled") else {"bg": None, "pad": PAD, "sampled": False}
+        if not got:
+            print(f"{sym}: not sampled ({why})", file=sys.stderr)
     OUT.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
     print(f"wrote {OUT.relative_to(WEB)}: {ok} of {len(meta)} logos sampled")
     return 0
