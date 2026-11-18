@@ -201,6 +201,9 @@ def daily_store_state() -> dict:
 def report_conflicts(eng: Engine, replicator: Replicator) -> None:
     """Rows Supabase refused as duplicates that are not the engine's (B2 of the #117 review): replication went on;
     each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local)."""
+    for f in replicator.take_fallbacks():  # QA-Ops on #339: migration 0028 not applied yet (rows say "missing")
+        with contextlib.suppress(Exception):
+            eng.store.event("stop_state_fallback", {k: f[k] for k in ("seq", "error", "action")}, eng._rid())
     for c in replicator.take_conflicts():
         with contextlib.suppress(Exception):
             detail = {k: c[k] for k in ("seq", "table", "key", "reason")}

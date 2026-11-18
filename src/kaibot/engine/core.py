@@ -2669,7 +2669,9 @@ class Engine:
     def _position_row(self, row: dict) -> None:
         """Upsert one `ledger_position` row. Until migration 0028 is applied the database refuses "none_by_design"
         (its check constraint): the row is then written as "missing", as before, and never lost (the fail-safes read
-        these rows); one `stop_state_fallback` event says so, and this process keeps writing "missing"."""
+        these rows); one `stop_state_fallback` event says so, and this process keeps writing "missing". In production
+        `ledger_position` is a local table of the JournalStore: the refusal reaches the replicator, which sends the
+        row as "missing" and reports it the same way (QA-Ops on #339, `journal.Replicator`)."""
         key = "run_id,session,strategy,symbol"
         if row.get("stop_state") == "none_by_design":
             if not getattr(self, "_nbd_refused", False):
