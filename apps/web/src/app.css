@@ -336,6 +336,9 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 .kb-tcard-open { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; height: auto; min-height: 104px; padding: 14px;
   border: 0; border-radius: inherit; background: transparent; color: inherit; text-align: left; font-weight: 400; }
 .kb-tcard-open:hover:not(:disabled) { filter: none; }
+/* On a phone the theme cards and the saved lists sit in a sideways scroller, which cuts off anything drawn outside it:
+   their focus ring is drawn just inside the card instead (#327). */
+.kb-tcard-open:focus-visible, .kb-tcheck:focus-visible, .kb-lcard:focus-visible { outline-offset: -2px; }
 .kb-tcheck { position: absolute; top: 2px; right: 2px; width: 44px; min-height: 44px; height: 44px; padding: 0; border: 0; background: transparent;
   display: flex; align-items: center; justify-content: center; }
 .kb-tcheck > span { width: 24px; height: 24px; border-radius: 999px; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800;
@@ -344,7 +347,9 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 .kb-peek-sub { margin: 0 0 12px !important; font-size: var(--t-sm); }
 .kb-peek { list-style: none; margin: 0 0 18px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; }
 .kb-peek li { min-width: 0; padding: 8px 0; animation: kb-rise .32s var(--ease) both; }
-.kb-peek li.off { opacity: .5; }
+/* A stock you never trade: its tile is dimmed and its ticker is grey; the words keep their contrast (#327). */
+.kb-peek li.off .badge { opacity: .5; }
+.kb-peek li.off b { color: var(--slate); }
 .kb-peek .stockcell-text .muted { max-width: 100%; }
 .kb-peek-btn { width: 100%; position: sticky; bottom: 0; background: var(--surface); }
 .kb-peek-btn.primary { background: var(--sea); }
@@ -500,6 +505,7 @@ dialog.kb-sheet::backdrop { background: var(--scrim); }
 .kb-chip-x { flex: none; width: 44px; min-height: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--slate);
   display: flex; align-items: center; justify-content: center; }
 .kb-chip.no .kb-chip-x { color: var(--loss); }
+.kb-chip .linkbtn { min-width: 44px; }
 .kb-ml-empty { font-size: 14px; line-height: 1.5; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--rule-strong); }
 .kb-ml-warn { display: flex; gap: 10px; padding: 12px 14px; border-radius: 14px; background: var(--warn-tint); border: 1px solid var(--warn-line); color: var(--warn);
   font-size: 14px; line-height: 1.5; }
@@ -609,6 +615,8 @@ a.back { display: inline-flex; align-items: center; min-height: 44px; align-self
 button.exp-btn { height: auto; min-height: 44px; padding: 0; border: 0; background: transparent; font: inherit; text-align: left; cursor: help; display: inline-flex; align-items: center; max-width: 100%; }
 button.exp-btn:hover:not(:disabled) { filter: none; } button.exp-btn:active:not(:disabled) { transform: none; }
 .exp-btn > .tag { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
+/* The same label as words in an accordion's title (Go / no-go, #327): it wraps there too. */
+.acc-title .exp-tag { white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .exp-btn:hover > .tag { filter: brightness(1.12); }
 table.list td .exp { display: flex; max-width: 100%; }
 /* a scrolling table can be reached and scrolled with the keyboard (audit #12): tables carry tabindex="0" */
@@ -856,5 +864,5 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .ss-news { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .ss-news li { display: flex; flex-direction: column; gap: 2px; }
 .ss-sk { display: flex; flex-direction: column; gap: 8px; }
-.kb-chip-info { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.kb-chip-info { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 /* end stock summaries */

@@ -199,7 +199,7 @@ export function TopHoldings({ rows, max, top = 3 }: { rows: HoldingRowData[]; ma
         <ul className="hold-rows">
           {rows.slice(0, top).map((r) => (
             <li key={r.key}>
-              <button type="button" className="hold-row" onClick={() => nav(r.to)} aria-label={`${r.symbol}: ${money(r.value)}${r.gain !== null ? `, ${signedMoney(r.gain)}` : ""}`}>
+              <button type="button" className="hold-row" onClick={() => nav(r.to)}>
                 <StockBadge symbol={r.symbol} size={40} />
                 <span className="hold-mid"><b>{r.symbol}</b>
                   {r.bar ? <PriceBar {...r.bar} /> : r.sub ? <span className="muted">{r.sub}</span> : null}</span>

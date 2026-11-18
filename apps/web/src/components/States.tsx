@@ -4,7 +4,7 @@
 import type { ReactNode } from "react";
 import { EXPERIMENT_LABEL, STATUS_TAG, TEST_PHASE, RETIRED_TEXT, ruleName, ruleStatus, ruleStatusText } from "../lib/explain";
 import { Skeleton } from "./Skeleton";
-import type { Experiment } from "../lib/experiment";
+import { experimentView, type Experiment } from "../lib/experiment";
 import { ExperimentBadge } from "./Experiment";
 
 export const Loading = Skeleton;
@@ -44,14 +44,16 @@ export function Code({ text, code }: { text: string; code: string | null | undef
 
 /** A rule's plain name, with "retired, systems test only" (or "test only") as a tag when it applies. A rule the engine
  *  runs as a paper experiment (#210) carries the experiment badge instead (with its cap and stop line if `limits`). */
-export function RuleName({ code, tag = true, exp, limits }: { code: string; tag?: boolean; exp?: Experiment | null; limits?: boolean }) {
+/** `plain`: the experiment's label as words, not as the badge that opens a sheet. For a name that already sits inside a
+ *  control (an accordion's summary): a button inside a control cannot be reached by keyboard or screen reader (#327). */
+export function RuleName({ code, tag = true, exp, limits, plain }: { code: string; tag?: boolean; exp?: Experiment | null; limits?: boolean; plain?: boolean }) {
   const st = ruleStatus(code), txt = ruleStatusText(code);
   // An experiment keeps its badge without the heartbeat's label row (market closed, older engine), only without limits.
   const e = exp ?? (st === "experiment" ? { strategy: code, label: EXPERIMENT_LABEL, evidence: "failed_gate_b", experiment: true,
     realMoney: false, level: null, capPct: null, retirePct: null } : null);
   return (
     <span title={`code: ${code}`}>{ruleName(code)}
-      {tag && e && <> <ExperimentBadge e={e} limits={limits} /></>}
+      {tag && e && (plain ? <> <span className="tag exp-tag">{experimentView(e).text}</span></> : <> <ExperimentBadge e={e} limits={limits} /></>)}
       {tag && !e && txt && st && <> <span className={`tag ${STATUS_TAG[st]}`}>{st === "retired" ? RETIRED_TEXT : txt}</span></>}
     </span>
   );

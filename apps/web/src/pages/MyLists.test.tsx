@@ -116,8 +116,8 @@ describe("the My lists card", () => {
     expect(text(html)).toContain("PLTR Waiting for the checker");
     expect(html).toContain('aria-label="PLTR, waiting for the checker"');
     expect(text(html)).not.toContain("Still checking");
-    expect(html).toContain('aria-label="Check PLTR again"');
-    expect(html).toContain('aria-label="Check SNOW again"');
+    expect(html).toContain('aria-label="Retry the check of PLTR"');   // the name holds the word on the button (#327)
+    expect(html).toContain('aria-label="Retry the check of SNOW"');
     expect(text(html)).toContain("Not checked · We could not check SNOW right now.");
   });
 
@@ -135,9 +135,9 @@ describe("the My lists card", () => {
 describe("stock summaries behind a chip", () => {
   it("an accepted chip opens its summary; refused and checking chips do not offer one", () => {
     const h = card(fakeEd([ok("NBIS"), { symbol: "ZZZZ", state: "refused", reason: "not listed" }, { symbol: "CRWV", state: "checking" }]));
-    expect(h).toContain('aria-label="About NBIS"');
-    expect(h).toMatch(/class="kb-chip-info" aria-haspopup="dialog"/);
-    expect(h).not.toContain("About ZZZZ");
-    expect(h).not.toContain("About CRWV");
+    // Named by the words on it, then what it does (#327); open or closed is said by aria-expanded.
+    expect(h).toMatch(/class="kb-chip-info" aria-haspopup="dialog" aria-expanded="false"/);
+    expect(h.match(/, about this stock/g)).toHaveLength(1);
+    expect(h.match(/class="kb-chip-info"/g)).toHaveLength(1);
   });
 });

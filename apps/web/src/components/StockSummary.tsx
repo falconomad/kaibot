@@ -15,11 +15,16 @@ export function StockSummary({ symbol }: { symbol: string }) {
   const q = useQuery({ queryKey: ["stockSummary", symbol], queryFn: () => api.stockSummary(symbol), staleTime: 30 * 60_000,
     refetchOnWindowFocus: false, retry: false });
   const s = q.data;
+  // What a screen reader is told as the card changes (#327): one short, polite line. The card's own text is read in
+  // place; the skeleton is decoration.
+  const said = q.isPending ? `Loading the summary for ${symbol}` : q.isError ? `The summary for ${symbol} couldn't load.`
+    : !s ? `No summary for ${symbol} yet.` : `The summary for ${symbol} is shown.`;
   return (
-    <section className="ss" aria-labelledby={id}>
+    <section className="ss" aria-labelledby={id} aria-busy={q.isPending}>
       <h3 id={id} className="ss-h">In plain words</h3>
+      <span className="sr-only" role="status">{said}</span>
       {q.isPending ? (
-        <div className="ss-sk" role="status" aria-busy="true" aria-label="Loading the summary">
+        <div className="ss-sk" aria-hidden="true">
           <span className="sk" style={{ height: 15, borderRadius: 6 }} /><span className="sk" style={{ height: 15, width: "70%", borderRadius: 6 }} />
         </div>
       ) : q.isError ? (
