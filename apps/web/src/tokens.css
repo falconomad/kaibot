@@ -3,6 +3,9 @@
 /* Tests are not shipped: keep their words from being picked up as utility classes. */
 @source not "./**/*.test.ts";
 @source not "./**/*.test.tsx";
+/* Nor are the dev scripts and the size budget (#297): their comments are not class names. */
+@source not "../scripts";
+@source not "../size-budget.json";
 /* Outfit (brand system v1, #265): SIL Open Font License 1.1, (c) 2021 The Outfit Project Authors; licence in public/
    fonts/OFL.txt. Self-hosted, latin subset, four weights; Inter is the fallback. */
 /* While Outfit loads (a slow connection), text is set in Arial resized to Outfit's measures, so the swap moves nothing.

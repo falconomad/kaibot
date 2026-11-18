@@ -15,5 +15,5 @@ def test_reserve_settle_and_daily_soft_cap():
 
 
 def test_monthly_hard_stop_means_no_entries():
-    g = BudgetGateway(PRICES, spent_month=190.0)
+    g = BudgetGateway(PRICES, spent_month=25.0)  # #309: $25 a month (was $190)
     assert g.reserve("haiku", 1000, 100) is None and g.state() is BudgetState.NO_ENTRIES

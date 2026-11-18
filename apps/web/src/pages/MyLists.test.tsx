@@ -111,8 +111,11 @@ describe("the My lists card", () => {
     expect(text(noDel)).toContain("Deleting a list needs a database update that isn't applied yet. The list stays saved.");
   });
 
-  it("a ticker still pending after 30 s offers a retry; an errored check too", () => {
+  it("a ticker still pending after about 10 s says so honestly and offers a retry; an errored check too", () => {
     const html = card(fakeEd([{ symbol: "PLTR", state: "slow" }, { symbol: "SNOW", state: "error", reason: "We could not check SNOW right now. Try again later." }]));
+    expect(text(html)).toContain("PLTR Waiting for the checker");
+    expect(html).toContain('aria-label="PLTR, waiting for the checker"');
+    expect(text(html)).not.toContain("Still checking");
     expect(html).toContain('aria-label="Check PLTR again"');
     expect(html).toContain('aria-label="Check SNOW again"');
     expect(text(html)).toContain("Not checked · We could not check SNOW right now.");
@@ -126,5 +129,15 @@ describe("the My lists card", () => {
     expect(t).toContain("Trades a month not measured yet");
     expect(t).toContain("NBIS is new to kaibo");
     expect(t).toMatch(/Accepted 2 Refused, never traded 1 New to kaibo 1 Room left 37 of 40/);
+  });
+});
+
+describe("stock summaries behind a chip", () => {
+  it("an accepted chip opens its summary; refused and checking chips do not offer one", () => {
+    const h = card(fakeEd([ok("NBIS"), { symbol: "ZZZZ", state: "refused", reason: "not listed" }, { symbol: "CRWV", state: "checking" }]));
+    expect(h).toContain('aria-label="About NBIS"');
+    expect(h).toMatch(/class="kb-chip-info" aria-haspopup="dialog"/);
+    expect(h).not.toContain("About ZZZZ");
+    expect(h).not.toContain("About CRWV");
   });
 });

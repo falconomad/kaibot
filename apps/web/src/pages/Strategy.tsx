@@ -20,7 +20,7 @@ import {
   type Bounds, type ConfigBody, type ConfigResp,
 } from "../lib/config";
 import { estShort, estimateTrades, paceText } from "../lib/estimator";
-import { applyBlockers, dropCustomUnlessOnly, isMissingFunction, listWords, withoutCustom, POLL_MS, type TickerCheck } from "../lib/tickers";
+import { applyBlockers, checkGate, dropCustomUnlessOnly, isMissingFunction, listWords, withoutCustom, POLL_MS, type TickerCheck } from "../lib/tickers";
 import { MyListsCard, ThisListCard, useListEditor, type ListInfo } from "./MyLists";
 import { DayBar, EST, LOCKED, NeverTraded, StrategyProvider, useCtx, useStrategy, usd0, type Ctx, type StrategyState } from "./StrategyShared";
 import { NAME } from "../brand/brand";
@@ -77,10 +77,12 @@ const errText = (e: unknown) => {
   return x?.code === "22023" ? `The server refused this setting: ${x.message}` : `Couldn't reach the server: ${x?.message ?? String(e)}`;
 };
 
-/** kb_check_ticker for the pre-apply guard: waits out a short `pending` (the answer is cached for the day). */
+/** kb_check_ticker for the pre-apply guard: waits out a short `pending` (the answer is cached for the day). A pending
+ * ticker is checked by the Vercel function first (null when it can't answer here; then the Mac worker may). */
 async function recheck(symbol: string): Promise<TickerCheck | null> {
   for (let i = 0; i < 5; i++) {
-    const c = await api.checkTicker(symbol);
+    let c = await api.checkTicker(symbol);
+    if (c?.status === "pending" && i === 0) c = (await checkGate(() => api.runTickerCheck(symbol)).catch(() => null)) ?? c;
     if (c?.status !== "pending") return c ?? null;
     await new Promise((r) => setTimeout(r, POLL_MS));
   }

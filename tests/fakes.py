@@ -117,15 +117,43 @@ class FakeStore:
         self.tables: dict[str, list[dict]] = {}
         self.ids = itertools.count(1)
         self.beats: dict = {}
-        self.llm = {"day": 0.0, "month": 0.0, "open": {}}  # mirrors kaibot.llm_reserve / llm_settle
+        # mirrors kaibot.llm_reserve / llm_settle; "before": spend of the months before this one (#309: the lifetime
+        # total is the sum of kaibot.budget_day, which `select("budget_day", ...)` returns below)
+        # #319: "summaries": the stock summaries' spend (kaibot.summary_call); `pre_0026 = True` is a database
+        # without migration 0026 (kaibot.ai_spend and kaibot.llm_reserve_lifetime missing)
+        self.llm = {"day": 0.0, "month": 0.0, "open": {}, "before": 0.0, "summaries": 0.0}
+        self.pre_0026 = False
         self.lease: dict | None = None  # the single kaibot.engine_lease row
         self.lease_now = lambda: datetime.now(UTC)
         self.lease_fail = False
         self.lease_calls = 0
         self._lease_lock = threading.Lock()
 
+    def _ai_spend(self):  # mirrors kaibot.ai_spend (0026), from the same rows select() serves
+        from zoneinfo import ZoneInfo
+
+        m0 = datetime.now(ZoneInfo("America/New_York")).date().replace(day=1).isoformat()
+        days = self.select("budget_day", {})
+        llm = sum(float(r["spent_usd"]) for r in days)
+        before = sum(float(r["spent_usd"]) for r in days if str(r["day"]) < m0)
+        summ = sum(float(r["actual_usd"] if r.get("actual_usd") is not None else r["reserved_usd"])
+                   for r in self.select("summary_call", {}))
+        open_llm = sum(self.llm["open"].values())
+        return {"llm": llm, "llm_before_month": before, "summaries": summ, "llm_open": open_llm,
+                "total": llm + summ + open_llm}
+
     def rpc(self, fn, args):
         b = self.llm
+        if fn in ("ai_spend", "llm_reserve_lifetime") and self.pre_0026:
+            raise KeyError(fn)  # as PostgREST's PGRST202 for a function the database does not have
+        if fn == "ai_spend":
+            return self._ai_spend()
+        if fn == "llm_reserve_lifetime":
+            cap = min(float(args["p_lifetime_hard"]), 150.0)
+            if self._ai_spend()["total"] + float(args["p_reserved"]) > cap:
+                return None
+            # the class's own rpc: a test may wrap self.rpc in a lock (the row lock), held already here
+            return FakeStore.rpc(self, "llm_reserve", {k: v for k, v in args.items() if k != "p_lifetime_hard"})
         if fn == "llm_reserve":
             open_res = sum(b["open"].values())
             r = float(args["p_reserved"])
@@ -224,6 +252,16 @@ class FakeStore:
                 r.update(values)
 
     def select(self, table, params):
+        if table == "summary_call" and table not in self.tables:  # #319: the summaries' spend as one settled row
+            v = self.llm.get("summaries", 0.0)
+            return [{"day": "2000-01-01", "actual_usd": v, "reserved_usd": v}] if v > 0 else []
+        if table == "budget_day" and table not in self.tables:  # #309: the ledger as kaibot.budget_day keeps it
+            from zoneinfo import ZoneInfo
+
+            today = datetime.now(ZoneInfo("America/New_York")).date()
+            rows = [{"day": "2000-01-01", "spent_usd": self.llm.get("before", 0.0)},
+                    {"day": today.isoformat(), "spent_usd": self.llm["month"]}]
+            return [r for r in rows if r["spent_usd"] > 0]
         rows = list(self.tables.get(table, []))
         for k, v in params.items():
             if k in ("order", "limit", "select"):

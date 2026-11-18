@@ -21,6 +21,12 @@ describe("type and the font swap", () => {
     expect(tokens).toMatch(/@font-face \{ font-family: "Outfit Fallback"; src: local\("Arial"\)[^}]*size-adjust: 101\.43%; ascent-override: 98\.59%; descent-override: 25\.63%; line-gap-override: 0%; \}/);
     expect(tokens).toContain('--font-ui: "Outfit", "Outfit Fallback", "Inter",');
   });
+  it("no other host holds up the first paint: Inter's stylesheet never blocks, and the data API and the logo host are connected early (#297)", () => {
+    expect(indexHtml.match(/<link[^>]*rel="stylesheet"[^>]*>/g)).toEqual([
+      `<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />`]);
+    expect(indexHtml.match(/<link rel="preconnect"[^>]*>/g)).toEqual([
+      '<link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />', '<link rel="preconnect" href="https://cdn.tickerlogos.com" crossorigin />']);
+  });
   it("letter spacing per type step: hero -0.035em, title -0.03em, heading -0.01em, caps +0.08em", () => {
     expect(css).toMatch(/\.home-hero \.hero \{[^}]*letter-spacing: -0\.035em/);
     expect(css).toMatch(/\.page-title \{[^}]*letter-spacing: -0\.03em/);

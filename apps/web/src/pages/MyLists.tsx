@@ -6,12 +6,14 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { RadioGroup } from "../components/ConfigControls";
+import { Sheet } from "../components/Sheet";
 import { StockBadge, companyName } from "../components/StockBadge";
+import { StockSummary } from "../components/StockSummary";
 import { api } from "../lib/api";
 import type { ConfigBody } from "../lib/config";
 import { estShort, type Estimate } from "../lib/estimator";
 import {
-  DB_UPDATE, MAX_NAME, MAX_TICKERS, MIN_ONLY, NOT_A_TICKER, POLL_LIMIT_MS, POLL_MS, addable, isMissingFunction, itemFromCheck,
+  DB_UPDATE, MAX_NAME, MAX_TICKERS, MIN_ONLY, NOT_A_TICKER, POLL_LIMIT_MS, POLL_MS, addable, isMissingFunction, itemFromCheck, checkGate,
   itemFromSaved, itemsFromBody, listWords, looksLikeTicker, needsCheck, onlyShort, parseTickers, rpcErrorText, saveBlocker, tally, withList,
   type Item, type SavedList,
 } from "../lib/tickers";
@@ -55,16 +57,23 @@ export function useListEditor(body: ConfigBody, edit: (b: ConfigBody) => void, u
   const settle = (symbol: string, next: Item) =>
     alive.current && setItems((xs) => xs.map((x) => (x.symbol === symbol && (x.state === "checking" || x.state === "slow") ? next : x)));
 
-  // Check every ticker that needs it: ask again every 2 s while pending, for at most 30 s, then say "still checking".
+  // Check every ticker that needs it: kb_check_ticker (owner-only; today's answer or a pending row), then, while
+  // pending, the checker on Vercel. With no answer yet, ask kb_check_ticker again every 2 s (the Mac worker may answer);
+  // after about 10 s say "Waiting for the checker", with Retry. At most 5 tickers are checked at once.
   async function check(symbol: string) {
-    const t0 = Date.now();
     try {
+      let c = await checkGate(async () => {
+        const first = await api.checkTicker(symbol);
+        if (first?.status !== "pending" || !alive.current) return first;
+        return (await api.runTickerCheck(symbol).catch(() => null)) ?? first;
+      });
+      const t0 = Date.now();
       for (;;) {
-        const c = await api.checkTicker(symbol);
         if (!alive.current) return;
         if (c?.status !== "pending") { settle(symbol, itemFromCheck({ ...c, symbol })); return; }
         if (Date.now() - t0 >= POLL_LIMIT_MS) { settle(symbol, { symbol, state: "slow" }); return; }
         await sleep(POLL_MS);
+        c = await api.checkTicker(symbol);
       }
     } catch (e) {
       settle(symbol, { symbol, state: "error", reason: isMissingFunction(e) ? DB_UPDATE : rpcErrorText(e) });
@@ -178,6 +187,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
     : ed.same ? "Saved lists stay here for next time."
     : blocker ?? (t.refused.length ? `Saves the ${t.accepted.length} accepted. Refused tickers are left out.` : `Saves ${plural(t.accepted.length, "ticker")}.`);
   const outside = mode === "prefer" && t.fresh.length > 0;
+  const [about, setAbout] = useState<string | null>(null);
   return (
     <section aria-labelledby="ml-h" className="kb-ml">
       <div className="kb-ml-head">
@@ -223,7 +233,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
 
       {ed.items.length > 0 ? (
         <ul className="kb-chips" aria-label="Tickers in this list">
-          {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} />)}
+          {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} onInfo={() => setAbout(i.symbol)} />)}
         </ul>
       ) : <span className="muted kb-ml-empty">No tickers yet. Add at least {MIN_ONLY} to trade only this list.</span>}
       <span className="num muted" aria-live="polite" style={{ fontSize: 14 }}>
@@ -255,6 +265,10 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
       {ed.cur && ed.deleteMissing() && <span className="muted" style={{ fontSize: 14 }}>Deleting a list needs a database update that isn't applied yet. The list stays saved.</span>}
       {ed.del.kind === "error" && <span className="loss" role="alert" style={{ fontSize: 14 }}>{ed.del.text}</span>}
 
+      <Sheet open={about !== null} onClose={() => setAbout(null)} title={about ?? ""}>
+        {about && <>{companyName(about) !== about && <p className="muted" style={{ marginTop: 0 }}>{companyName(about)}</p>}<StockSummary symbol={about} /></>}
+      </Sheet>
+
       <div className="kb-ml-lock">
         <span style={{ flex: "none", marginTop: 1 }}><LockIcon /></span>
         <span><b style={{ color: "var(--ink)", fontWeight: 600 }}>Safety filters always on.</b> Every ticker must be tradable at the broker, trade enough each day, have a tight spread, cost $5 or more and have enough history. These cannot be switched off.</span>
@@ -270,7 +284,7 @@ function LCard({ name, meta }: { name: string; meta: string }) {
   </>);
 }
 
-function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; onRetry: () => void }) {
+function Chip({ item: i, onDrop, onRetry, onInfo }: { item: Item; onDrop: () => void; onRetry: () => void; onInfo?: () => void }) {
   const remove = (
     <button type="button" className="kb-chip-x" aria-label={`Remove ${i.symbol}`} onClick={onDrop}><XIcon /></button>
   );
@@ -287,20 +301,22 @@ function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; on
     const nm = i.name || (companyName(i.symbol) !== i.symbol ? companyName(i.symbol) : "");
     return (
       <li className="kb-chip ok" aria-label={`${i.symbol}${nm ? `, ${nm}` : ""}, accepted`}>
-        <StockBadge symbol={i.symbol} size={36} />
-        <span className="num kb-chip-sym">{i.symbol}</span>
-        {nm && <span className="kb-chip-name muted">{nm}</span>}
+        <button type="button" className="kb-chip-info" aria-haspopup="dialog" aria-label={`About ${i.symbol}`} onClick={onInfo}>
+          <StockBadge symbol={i.symbol} size={36} />
+          <span className="num kb-chip-sym">{i.symbol}</span>
+          {nm && <span className="kb-chip-name muted">{nm}</span>}
+        </button>
         {remove}
       </li>
     );
   }
   const slow = i.state === "slow";
-  const why = slow ? "still checking. Try again in a minute." : i.reason ?? "";
+  const why = slow ? "No checker has answered yet. Try again in a minute." : i.reason ?? "";
   return (
-    <li className={`kb-chip ${slow ? "slow" : "no"}`} aria-label={slow ? `${i.symbol}, still checking` : `${i.symbol}, refused: ${why}`}>
+    <li className={`kb-chip ${slow ? "slow" : "no"}`} aria-label={slow ? `${i.symbol}, waiting for the checker` : `${i.symbol}, refused: ${why}`}>
       {!slow && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--loss)" strokeWidth="2.2" aria-hidden="true" style={{ flex: "none" }}><circle cx="12" cy="12" r="8.5" /><path d="M6 18 L18 6" /></svg>}
       <span className="num kb-chip-sym">{i.symbol}</span>
-      <span className="kb-chip-why" title={why}>{slow ? "Still checking" : i.state === "error" ? `Not checked · ${why}` : `Refused · ${why}`}</span>
+      <span className="kb-chip-why" title={why}>{slow ? "Waiting for the checker" : i.state === "error" ? `Not checked · ${why}` : `Refused · ${why}`}</span>
       {(slow || i.state === "error") && <button type="button" className="linkbtn" style={{ fontSize: 13 }} onClick={onRetry} aria-label={`Check ${i.symbol} again`}>Retry</button>}
       {remove}
     </li>

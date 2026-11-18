@@ -13,6 +13,18 @@ import { preloadRoute } from "../routes";
 import { anchorFor, useGlow } from "../lib/glow";
 import { BRAND, NAME } from "../brand/brand";
 import { Logo } from "./Logo";
+import { CREDIT_URL } from "../lib/logos";
+
+/** Required attribution for the company logos (AllInvestView's free ticker-logo CDN, stakeholder 18 Nov 2026): one
+ *  visible, plain link on every screen that shows logos, phones included. Never hidden, never rel nofollow, sponsored
+ *  or ugc. The site sends no referrer (vercel.json), and this link follows that policy like every other link. */
+export function LogoCredit() {
+  return (
+    <p className="credit">
+      Logos by <a href={CREDIT_URL} target="_blank" rel="noopener">AllInvestView</a><span className="sr-only"> (opens in a new tab)</span>
+    </p>
+  );
+}
 
 /** Warm a lazy route's chunk when the pointer or keyboard focus reaches its nav link. */
 const warm = (to: string) => ({ onPointerEnter: () => { preloadRoute(to); }, onFocus: () => { preloadRoute(to); } });
@@ -237,6 +249,7 @@ export function Shell() {
           </main>
         </div>
       )}
+      <LogoCredit />
       <TabBar dot={red.length ? "breach" : dot} />
       <div className="foot">Paper trading only · simulated money · times ET (CET in brackets) · <Link to="/start">New run</Link> · <a href="#" onClick={(e) => { e.preventDefault(); supa.auth.signOut(); }}>Sign out</a></div>
     </div>

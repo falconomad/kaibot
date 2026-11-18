@@ -1,5 +1,6 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "functions": { "api/summary.ts": { "maxDuration": 30 }, "api/check-ticker.ts": { "maxDuration": 20 }, "api/logo-domain.ts": { "maxDuration": 10 } },
   "headers": [{ "source": "/(.*)", "headers": [
     { "key": "X-Frame-Options", "value": "DENY" },
     { "key": "Referrer-Policy", "value": "no-referrer" },

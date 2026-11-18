@@ -117,8 +117,8 @@ def test_no_key_skips_the_sessions_buys_with_no_budget_read_and_sales_go_ahead()
 
 
 @pytest.mark.parametrize("day, month, status", [
-    (3.0, 0.0, "budget"),  # daily budget used: amber "No new buys on <day>"
-    (4.0, 190.0, "no_entries"),  # monthly cap: red
+    (1.0, 0.0, "budget"),  # daily budget used ($1, #309): amber "No new buys on <day>"
+    (2.0, 25.0, "no_entries"),  # monthly cap ($25, #309): red
 ])
 def test_exhausted_budget_skips_the_sessions_buys_and_sales_go_ahead(day, month, status):
     store = FakeStore()
