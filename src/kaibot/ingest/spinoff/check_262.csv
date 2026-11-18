@@ -1,0 +1,16 @@
+parent,ex_date,cik,alpaca_close_factor,note
+EXC,2022-02-02,0001109357,0.712,factor as stated in issue 262
+T,2022-04-11,0000732717,0.764,factor as stated in issue 262
+GE,2023-01-04,0000040545,0.778,factor as stated in issue 262
+DHR,2023-10-02,0000313616,0.872,factor as stated in issue 262
+MMM,2024-04-01,0000066740,0.802,factor as stated in issue 262
+GE,2024-04-02,0000040545,0.798,factor as stated in issue 262
+LEN,2025-01-21,0000920760,0.916,factor as stated in issue 262
+HON,2025-10-30,0000773840,0.942,factor as stated in issue 262
+DD,2025-11-03,0001666700,,issue 262 gives the one-day fall (-58%) not a factor
+CMCSA,2026-01-05,0001166691,0.937,factor as stated in issue 262
+BDX,2026-02-10,0000010795,,issue 262 gives the one-day fall (-21%) not a factor
+APTV,2026-04-01,0001521332,,issue 262 gives the one-day fall (-15%) not a factor
+FDX,2026-06-01,0001048911,,issue 262 gives the one-day fall (-19%) not a factor
+HON,2026-06-29,0000773840,,no factor in issue 262
+SPGI,2026-07-01,0000064040,0.946,factor as stated in issue 262

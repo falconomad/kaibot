@@ -1,0 +1,37 @@
+{
+ "cik": "0000009006",
+ "name": "XYLO INDUSTRIES INC",
+ "tickers": [
+  "ZZX"
+ ],
+ "formerNames": [],
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "9999999006-26-000012",
+    "9999999006-26-000008"
+   ],
+   "filingDate": [
+    "2026-04-20",
+    "2026-03-30"
+   ],
+   "acceptanceDateTime": [
+    "2026-04-20T20:30:00.000Z",
+    "2026-03-30T20:30:00.000Z"
+   ],
+   "form": [
+    "8-K",
+    "8-K"
+   ],
+   "items": [
+    "8.01",
+    "7.01"
+   ],
+   "primaryDocument": [
+    "zzx-20260420.htm",
+    "zzx-20260330.htm"
+   ]
+  },
+  "files": []
+ }
+}
