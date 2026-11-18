@@ -75,7 +75,8 @@ def test_the_live_prompt_is_untouched_and_the_review_stays_off_by_default():
     plan = {("trend_momentum", "A"): 5}
     reviewed, out, shown = preopen.review(D, [], plan, {}, StubReviewer(), env={})
     assert (reviewed, out.status, shown) == (plan, "off", [])
-    assert CFG.limits["preopen"] == {"max_tokens": 4000, "timeout_s": 90, "daily_usd": 1.0}  # #309: $1 a day
+    # #309: $1 a day; #306: max_tokens 6000 so a full list's answer is not cut
+    assert CFG.limits["preopen"] == {"max_tokens": 6000, "timeout_s": 90, "daily_usd": 1.0}
 
 
 # ---------------------------------------------------------------- the cheaper packs: same data, fewer tokens
@@ -114,11 +115,13 @@ def test_cheaper_packs_never_cost_more_input_than_today():
 
 def test_a_pack_over_60000_characters_is_reported_as_cut_off():
     assert not pc.cut_off("today", *pc.scenario(10, 8))
-    assert pc.cut_off("today", *pc.scenario(30, 8))  # the live render cuts the JSON mid-list
-    assert not pc.lossless("today", *pc.scenario(30, 8))
-    fits = [pc.largest_list_that_fits(p, 8) for p in pc.PACKS]
-    assert fits == sorted(fits) and fits[0] < fits[-1] <= preopen.MAX_CANDIDATES
-    assert pc.measure(pc.variant("today"), [pc.scenario(30, 8)], CFG)["cut_off"] == 1
+    # #306: the live pack caps the news per candidate instead of cutting the JSON mid-list
+    assert not pc.cut_off("today", *pc.scenario(30, 8)) and not pc.cut_off("today", *pc.scenario(50, 8))
+    assert pc.cut_off("compact", *pc.scenario(50, 8))  # the variants keep the old cut, comparable with #304
+    assert not pc.lossless("today", *pc.scenario(30, 8))  # fewer stories shown than the full pack
+    assert pc.largest_list_that_fits("today", 8) == preopen.MAX_CANDIDATES
+    assert pc.largest_list_that_fits("compact", 8) <= pc.largest_list_that_fits("hoisted", 8)
+    assert pc.measure(pc.variant("today"), [pc.scenario(30, 8)], CFG)["cut_off"] == 0
 
 
 # ---------------------------------------------------------------- quality: what the eval set can and cannot show
