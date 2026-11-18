@@ -324,8 +324,27 @@ class _Entries:
         return [r for r in self.rows if kinds is None or r[2] in kinds]
 
 
-def book_from_journal(journal, run_id: int | None = None) -> BookView:
-    """The ledger's sleeves of `run_id` (default: the last run the journal opened) with their stops."""
+def pending_from_journal(journal, today) -> dict[tuple[str, str], float]:
+    """Follow-up of #333: shares TODAY's (ET date) daily-path buys may have added that the ledger has not booked: an
+    open order's whole rest (the engine may have died before it filled), a finished order's reported fills not yet
+    booked. Orders of earlier sessions are DAY orders that have expired: never counted. Protective stops and sales
+    are not buys."""
+    from kaibot.engine.orders import OM_KINDS, OrderManager
+
+    om = OrderManager(None, _Entries(journal.entries(kinds=OM_KINDS)), lambda: None)  # a fold only: nothing is sent
+    out: dict[tuple[str, str], float] = {}
+    for r in om.orders.values():
+        if r.session != str(today) or r.side != "buy" or r.purpose in ("stop", "entry") or not parse_coid(r.coid):
+            continue
+        left = (r.qty - r.booked) if r.open else (r.cum - r.booked)
+        if left > EPS:
+            out[(r.strategy, r.symbol)] = out.get((r.strategy, r.symbol), 0.0) + left
+    return out
+
+
+def book_from_journal(journal, run_id: int | None = None, today=None) -> BookView:
+    """The ledger's sleeves of `run_id` (default: the last run the journal opened) with their stops; with `today`
+    (the ET date), plus the shares today's daily-path buys may have added unbooked (`pending_from_journal`)."""
     from kaibot.engine.ledger import LEDGER_KINDS, Ledger
 
     rows = journal.entries(kinds=LEDGER_KINDS)
@@ -337,8 +356,10 @@ def book_from_journal(journal, run_id: int | None = None) -> BookView:
     if b is None:
         return BookView([], "journal", run_id)
     stops = stops_from_journal(journal)
-    return BookView([SleeveView(s.strategy, s.symbol, float(s.qty), stops.get(k)) for k, s in b.sleeves.items()
-                     if s.qty > EPS], "journal", run_id)
+    qty = {k: float(s.qty) for k, s in b.sleeves.items() if s.qty > EPS}
+    for k, q in (pending_from_journal(journal, today) if today is not None else {}).items():
+        qty[k] = qty.get(k, 0.0) + q
+    return BookView([SleeveView(k[0], k[1], q, stops.get(k)) for k, q in qty.items()], "journal", run_id)
 
 
 def book_from_store(store) -> BookView:
