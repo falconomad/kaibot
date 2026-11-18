@@ -21,6 +21,9 @@ Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all ap
   (md5), neither runs for anon or authenticated, one pg_cron job unchanged. `deadman_split_like(80, 40)` = 2,
   `(50, 40)` = null; `(4, 40)` = 0.125, not 0.1: 1/8 comes before 1/10 in the ratio order and 40 x 1/8 = 5 is within
   the one-share tolerance. Harmless (the stop is capped at the 4 shares held); the comment's expected value was off.
+- 0023: **applied in production** (Product's note on #315, 18 Nov 2026; step 10 below).
+- 0024: **applied in production** (Product's note on #315, 18 Nov 2026; step 11 below; #321).
+- 0025: **pending** (step 12 below; PR #315, #309).
 
 ## Apply in this order
 
@@ -40,6 +43,7 @@ run it again. Do not reorder them.
 | 9 | `migrations/0022_deadman_exdate.sql` (whole file; PR for #291). Outside 09:30-16:00 ET (the dead-man acts in market hours). After 0019 | The off-box dead-man on an ex-date with the engine down since before the open: a broker count that is the book's times a split's ratio is kept as multi-day (nothing of it sold at 15:56), a reverse split's stops cover at most the broker's shares, a re-created stop on a split or renamed holding covers the kept shares at the emergency price (never the book's old-basis stop), and a renamed holding (a gone multi-day symbol's exact shares in an unexplained position) is kept. One helper `kaibot.deadman_split_like`; `deadman_act` re-created with 0019's body plus the #291 lines | No: `create or replace function` and `revoke` only (the function's `net.http_*` calls are 0019's, run only when the dead-man acts) |
 | 10 | `migrations/0023_stock_summary.sql` (whole file; the stock-summaries PR). Any time, also while the engine runs: dashboard only, additive | Stock summaries for the dashboard: tables `kaibot.summary_call` (each model call's reservation and real cost) and `kaibot.stock_summary` (one card per stock and ET day), and the owner-only definer functions `kb_stock_summary`, `kb_summary_facts`, `kb_summary_reserve`, `kb_summary_settle`, `kb_summary_spend` that `apps/web/api/summary.ts` calls with the owner's session. The caps ($0.30 a day, $5 a month, $0.02 a call, 2 calls per symbol and day) are in the SQL. No engine table or function changes | No: `create table if not exists`, `create or replace function`, `revoke` and `grant` only |
 | 11 | `migrations/0024_kb_ticker_check_answer.sql` (whole file; the ticker check on Vercel). Any time, also while the engine runs: dashboard only, independent of 0023 | One owner-only SECURITY DEFINER function `kb_ticker_check_answer`: `apps/web/api/check-ticker.ts` writes a 'My lists' check's answer into today's `pending` or `error` row of `kaibot.ticker_check` (validated; never overwrites an answer). Until it is applied the function answers "database update not applied" and the row waits for the Mac worker | No: one `create or replace function`, then revoke/grant |
+| 12 | `migrations/0025_llm_budget_caps.sql` (whole file; PR #315 for #309). Any time, also while the engine runs: dashboard read only | `public.kb_llm_budget` (0009) shows the Stage 1 LLM caps: $1/day, $20/month alert, $25/month hard (were written in as $3 / $150 / $190), and adds `lifetime_usd` and `caps.lifetime_hard` ($150, the sum of `kaibot.budget_day`). The engine does not need it: `agents/gateway.Gateway` holds the caps itself through the existing `kaibot.llm_reserve`. Fields the dashboard reads keep their names | No: one `create or replace function`, then `revoke` and `grant` |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -77,6 +81,8 @@ select prosrc like '%deadman_split_like%' from pg_proc where proname = 'deadman_
 -- step 11 (0024): the answer function is owner-only and not for anon
 select p.prosecdef, has_function_privilege('anon', p.oid, 'execute'), has_function_privilege('authenticated', p.oid, 'execute')
   from pg_proc p where p.proname = 'kb_ticker_check_answer';                                   -- true | false | true
+-- step 12 (0025): the dashboard shows the Stage 1 caps and the lifetime total
+select prosrc like '%lifetime_hard%' and prosrc like '%llm_budget_state(1.0,%' from pg_proc where proname = 'kb_llm_budget'; -- true
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false

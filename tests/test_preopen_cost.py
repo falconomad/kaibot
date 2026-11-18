@@ -75,7 +75,7 @@ def test_the_live_prompt_is_untouched_and_the_review_stays_off_by_default():
     plan = {("trend_momentum", "A"): 5}
     reviewed, out, shown = preopen.review(D, [], plan, {}, StubReviewer(), env={})
     assert (reviewed, out.status, shown) == (plan, "off", [])
-    assert CFG.limits["preopen"] == {"max_tokens": 4000, "timeout_s": 90, "daily_usd": 3.0}
+    assert CFG.limits["preopen"] == {"max_tokens": 4000, "timeout_s": 90, "daily_usd": 1.0}  # #309: $1 a day
 
 
 # ---------------------------------------------------------------- the cheaper packs: same data, fewer tokens
@@ -201,14 +201,14 @@ def test_one_review_and_21_sessions_against_the_budget_in_agents_budget():
     assert isinstance(b, BudgetGateway)
     # the caps of agents/budget.py are the configured ones: nothing is loosened here
     assert (b.daily_soft_usd, b.monthly_alert_usd, b.monthly_hard_usd) == (
-        CFG.daily_soft_usd, CFG.monthly_alert_usd, CFG.monthly_hard_usd) == (3.0, 150.0, 190.0)
+        CFG.daily_soft_usd, CFG.monthly_alert_usd, CFG.monthly_hard_usd) == (1.0, 20.0, 25.0)  # #309
     m = pc.measure(pc.variant("today"), [pc.scenario(20, 8)], CFG)
     ab = pc.against_budget(m["usd_plain"], m["reserved_usd"], b)
     assert pc.SESSIONS == 21 and ab["usd_month"] == pytest.approx(21 * m["usd_plain"])
-    assert ab["share_of_daily_cap"] == pytest.approx(m["usd_plain"] / 3.0)
-    assert ab["share_of_monthly_hard_cap"] == pytest.approx(ab["usd_month"] / 190.0)
-    assert ab["share_of_daily_cap"] < 0.05 and ab["share_of_monthly_hard_cap"] < 0.01
-    assert ab["reservations_inside_daily_cap"] == int(3.0 // m["reserved_usd"]) >= 1
+    assert ab["share_of_daily_cap"] == pytest.approx(m["usd_plain"] / 1.0)
+    assert ab["share_of_monthly_hard_cap"] == pytest.approx(ab["usd_month"] / 25.0)
+    assert ab["share_of_daily_cap"] < 0.05 and ab["share_of_monthly_hard_cap"] < 0.05  # #309: about 4 % of $25
+    assert ab["reservations_inside_daily_cap"] == int(1.0 // m["reserved_usd"]) >= 1
     # agents/budget.py itself accepts the worst case of the largest review and counts 21 of them under the cap
     k = pc.calls_for(pc.variant("today"), *pc.scenario(20, 8), CFG)[0]
     for _ in range(pc.SESSIONS):

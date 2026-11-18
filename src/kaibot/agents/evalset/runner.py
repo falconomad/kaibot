@@ -44,6 +44,10 @@ class OfflineBudget:
             return {"day": self.spent, "month": self.spent, "state": "ok", "alert": False}
         raise KeyError(fn)
 
+    def select(self, table: str, params: dict) -> list[dict]:
+        """#309: the gateway reads the lifetime ledger (`budget_day`); offline nothing was spent before."""
+        return []
+
 
 def offline_gateway(client=None) -> Gateway:
     return Gateway(OfflineBudget(), client or StubModel())
