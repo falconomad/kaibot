@@ -40,7 +40,7 @@ describe("the tile", () => {
     TILES.TESTA = { bg: "#C8102E", pad: 0, sampled: true, from: "https://example.com/a.png" };
     (symbols as Record<string, unknown>).TESTA = { name: "Test A", logo: "https://example.com/a.png", industry: null };
     const html = renderToStaticMarkup(<StockBadge symbol="TESTA" size={36} />);
-    expect(html).toMatch(/^<span class="badge logo" style="width:39px;height:39px;flex:none;--tile-bg:#C8102E;--tile-pad:0%"><img src="https:\/\/example.com\/a.png" alt="" width="39" height="39"/);
+    expect(html).toMatch(/^<span class="badge logo" style="width:39px;height:39px;flex:none;--tile-bg:#C8102E;--tile-pad:0%" aria-hidden="true"><img src="https:\/\/example.com\/a.png" alt="" width="39" height="39"/);
     expect(html).not.toContain('class="loaded"');
     expect(css).toMatch(/\.badge\.logo img \{[^}]*opacity: 0; transition: opacity/);
     delete TILES.TESTA; delete (symbols as Record<string, unknown>).TESTA;

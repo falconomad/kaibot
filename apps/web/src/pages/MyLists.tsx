@@ -5,6 +5,7 @@
 // Server text (reasons, names) is always rendered as plain text.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
+import { useAnnounce } from "../lib/a11y";
 import { RadioGroup } from "../components/ConfigControls";
 import { Sheet } from "../components/Sheet";
 import { StockBadge, companyName } from "../components/StockBadge";
@@ -188,6 +189,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
     : blocker ?? (t.refused.length ? `Saves the ${t.accepted.length} accepted. Refused tickers are left out.` : `Saves ${plural(t.accepted.length, "ticker")}.`);
   const outside = mode === "prefer" && t.fresh.length > 0;
   const [about, setAbout] = useState<string | null>(null);
+  const said = useAnnounce(ed.items, checkWords);
   return (
     <section aria-labelledby="ml-h" className="kb-ml">
       <div className="kb-ml-head">
@@ -233,10 +235,12 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
 
       {ed.items.length > 0 ? (
         <ul className="kb-chips" aria-label="Tickers in this list">
-          {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} onInfo={() => setAbout(i.symbol)} />)}
+          {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} onInfo={() => setAbout(i.symbol)} open={about === i.symbol} />)}
         </ul>
       ) : <span className="muted kb-ml-empty">No tickers yet. Add at least {MIN_ONLY} to trade only this list.</span>}
-      <span className="num muted" aria-live="polite" style={{ fontSize: 14 }}>
+      {/* Each check and its answer is said once, politely (#327); the tally below is for the eye. */}
+      <span id="ml-said" className="sr-only" role="status">{said}</span>
+      <span className="num muted" style={{ fontSize: 14 }}>
         {!t.total ? "Nothing added yet" : `${t.accepted.length} accepted${t.refused.length ? ` · ${t.refused.length} refused` : ""}${t.checking.length ? ` · ${t.checking.length} checking` : ""}`}
       </span>
       {short > 0 && (
@@ -284,13 +288,24 @@ function LCard({ name, meta }: { name: string; meta: string }) {
   </>);
 }
 
-function Chip({ item: i, onDrop, onRetry, onInfo }: { item: Item; onDrop: () => void; onRetry: () => void; onInfo?: () => void }) {
+/** What is said when tickers are added or a check is answered (#327). */
+function checkWords(changed: Item[]): string {
+  const started = changed.filter((i) => i.state === "checking").map((i) => i.symbol);
+  const answers = changed.filter((i) => i.state !== "checking").map((i) =>
+    i.state === "accepted" ? `${i.symbol} accepted.`
+    : i.state === "slow" ? `${i.symbol}: no checker has answered yet. Try again in a minute.`
+    : i.state === "error" ? `${i.symbol} not checked: ${i.reason ?? ""}`.trim()
+    : `${i.symbol} refused: ${i.reason ?? ""}`.trim());
+  return [...(started.length ? [`Checking ${listWords(started)}.`] : []), ...answers].join(" ");
+}
+
+function Chip({ item: i, onDrop, onRetry, onInfo, open = false }: { item: Item; onDrop: () => void; onRetry: () => void; onInfo?: () => void; open?: boolean }) {
   const remove = (
     <button type="button" className="kb-chip-x" aria-label={`Remove ${i.symbol}`} onClick={onDrop}><XIcon /></button>
   );
   if (i.state === "checking")
     return (
-      <li className="kb-chip checking" role="status" aria-label={`${i.symbol}, checking`}>
+      <li className="kb-chip checking" aria-label={`${i.symbol}, checking`}>
         <span className="sk" aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 999, flex: "none" }} />
         <span className="num kb-chip-sym muted">{i.symbol}</span>
         <span className="sk" aria-hidden="true" style={{ width: 74, height: 12, borderRadius: 6, flex: "none" }} />
@@ -301,10 +316,12 @@ function Chip({ item: i, onDrop, onRetry, onInfo }: { item: Item; onDrop: () => 
     const nm = i.name || (companyName(i.symbol) !== i.symbol ? companyName(i.symbol) : "");
     return (
       <li className="kb-chip ok" aria-label={`${i.symbol}${nm ? `, ${nm}` : ""}, accepted`}>
-        <button type="button" className="kb-chip-info" aria-haspopup="dialog" aria-label={`About ${i.symbol}`} onClick={onInfo}>
+        {/* Named by the words on it (ticker, company), then what it does: the name must contain the visible text. */}
+        <button type="button" className="kb-chip-info" aria-haspopup="dialog" aria-expanded={open} onClick={onInfo}>
           <StockBadge symbol={i.symbol} size={36} />
           <span className="num kb-chip-sym">{i.symbol}</span>
           {nm && <span className="kb-chip-name muted">{nm}</span>}
+          <span className="sr-only">, about this stock</span>
         </button>
         {remove}
       </li>
@@ -317,7 +334,7 @@ function Chip({ item: i, onDrop, onRetry, onInfo }: { item: Item; onDrop: () => 
       {!slow && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--loss)" strokeWidth="2.2" aria-hidden="true" style={{ flex: "none" }}><circle cx="12" cy="12" r="8.5" /><path d="M6 18 L18 6" /></svg>}
       <span className="num kb-chip-sym">{i.symbol}</span>
       <span className="kb-chip-why" title={why}>{slow ? "Waiting for the checker" : i.state === "error" ? `Not checked · ${why}` : `Refused · ${why}`}</span>
-      {(slow || i.state === "error") && <button type="button" className="linkbtn" style={{ fontSize: 13 }} onClick={onRetry} aria-label={`Check ${i.symbol} again`}>Retry</button>}
+      {(slow || i.state === "error") && <button type="button" className="linkbtn" style={{ fontSize: 13 }} onClick={onRetry} aria-label={`Retry the check of ${i.symbol}`}>Retry</button>}
       {remove}
     </li>
   );

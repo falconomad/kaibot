@@ -223,7 +223,8 @@ export function Shell() {
             {list.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
           </select>
         )}
-        <Link to="/health" className="chip engine-chip" aria-label={`Engine: ${chip.text}`} title={chip.sub}>
+        <Link to="/health" className="chip engine-chip" title={chip.sub}>
+          <span className="sr-only">Engine: </span>
           <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
             style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
           <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>

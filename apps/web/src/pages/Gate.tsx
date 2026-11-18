@@ -91,7 +91,7 @@ export function Gate() {
       <V3Verdicts exps={exps} />
       {latest && (strategies.length
         ? strategies.map(([k, st]) => (
-          <Accordion key={k} title={<RuleName code={k} exp={findExperiment(k, exps)} />} hint={gateStatusText(st.status).label}>
+          <Accordion key={k} title={<RuleName code={k} exp={findExperiment(k, exps)} plain />} hint={gateStatusText(st.status).label}>
             <StrategyCard name={k} st={st} exp={findExperiment(k, exps)} />
           </Accordion>))
         : <section className="card"><Empty>The latest report judged no strategy: none traded on the current code yet.</Empty></section>)}

@@ -316,10 +316,12 @@ function FocusCard({ body, edit, ctx, toFine, source, setSource, ed }: { body: C
           const live = c.syms.filter((s) => !body.focus.exclude.includes(s)).length;
           return (
             <div key={c.key ?? "_all"} className={`kb-tcard ${c.on ? "on" : ""}`}>
-              <button type="button" className="kb-tcard-open" aria-haspopup="dialog" aria-label={`${c.name}: see its ${live} stocks`} onClick={() => setPeek(c.key ?? "_all")}>
+              {/* Named by the words on it (#327), then what it does; open or closed is said by aria-expanded. */}
+              <button type="button" className="kb-tcard-open" aria-haspopup="dialog" aria-expanded={peek === (c.key ?? "_all")} onClick={() => setPeek(c.key ?? "_all")}>
                 <span aria-hidden="true" className="kb-faces">{(c.key ? c.syms : ["AAPL", "JPM", "XOM"]).slice(0, 3).map((s) => <StockBadge key={s} symbol={s} size={36} />)}</span>
                 <span className="kb-tname">{c.name}</span>
                 <span className="num kb-tmeta">{live} stocks · ≈ {Math.round(themeRate(c.syms, body, b) * 10) / 10}/mo</span>
+                <span className="sr-only">, see its stocks</span>
               </button>
               <button type="button" className="kb-tcheck" aria-pressed={c.on} aria-label={c.on ? `Remove ${c.name} from focus` : `Add ${c.name} to focus`} onClick={() => edit(toggleTheme(body, c.key))}>
                 <span aria-hidden="true">{c.on ? "✓" : "+"}</span>

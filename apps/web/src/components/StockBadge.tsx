@@ -12,7 +12,7 @@ export type TileColours = { bg: string | null; fg?: string; pad: number; sampled
 /** Not sampled yet: a soft white tile, as most logos are drawn on. */
 const PENDING = { bg: "var(--grey-50)", pad: 12 };
 export const TILES = tiles as Record<string, TileColours>;
-const TINTS = ["#1E3A5F", "#3A2E1A", "#1F3A2C", "#3B1E2A", "#2A2540", "#1C3540", "#3A2A22", "#26323F", "#2F2440", "#3A2228"];
+export const TINTS = ["#1E3A5F", "#3A2E1A", "#1F3A2C", "#3B1E2A", "#2A2540", "#1C3540", "#3A2A22", "#26323F", "#2F2440", "#3A2228"];
 
 export const companyName = (s: string) => META[s]?.name ?? s;
 
@@ -62,8 +62,12 @@ function tint(s: string) {
 export const TILE_SCALE = 1.08;
 const scaled = (n: number) => Math.round(n * TILE_SCALE);
 
-export function StockBadge({ symbol, size: base = 40 }: { symbol: string; size?: number }) {
+/** For screen readers (#327) a tile is decoration: it sits beside its ticker, so it is hidden and the ticker is read once,
+ *  from the text. `label`: the tile stands alone as the only label (no ticker in text beside it), so it is an image
+ *  named by its ticker. */
+export function StockBadge({ symbol, size: base = 40, label = false }: { symbol: string; size?: number; label?: boolean }) {
   const size = scaled(base);
+  const sr = label ? { role: "img" as const, "aria-label": symbol } : { "aria-hidden": true as const };
   const found = useLogoDomain(symbol);
   const [failed, setFailed] = useState<string[]>([]);  // sources that did not load, so the next one is tried
   const [loaded, setLoaded] = useState(false);
@@ -71,7 +75,7 @@ export function StockBadge({ symbol, size: base = 40 }: { symbol: string; size?:
   const box = { width: size, height: size, flex: "none" as const };
   // Still looking the domain up: the soft white tile, laid out at its size, and no image yet (no flash of another logo).
   if (!found)
-    return <span className="badge logo" style={{ ...box, "--tile-bg": PENDING.bg, "--tile-pad": `${PENDING.pad}%` } as CSSProperties} aria-hidden="true" />;
+    return <span className="badge logo" style={{ ...box, "--tile-bg": PENDING.bg, "--tile-pad": `${PENDING.pad}%` } as CSSProperties} {...sr} />;
   const domain = found.domain;
   const src = logoSources(symbol, domain).find((s) => !failed.includes(s));
   const cdn = !!src && !!domain && src.startsWith(TICKERLOGOS);
@@ -82,7 +86,7 @@ export function StockBadge({ symbol, size: base = 40 }: { symbol: string; size?:
   const tile = own ?? (cdn ? cachedTile(domain) : undefined) ?? PENDING;
   if (src)
     return (
-      <span className="badge logo" style={{ ...box, "--tile-bg": tile.bg, "--tile-pad": `${tile.pad}%` } as CSSProperties}>
+      <span className="badge logo" style={{ ...box, "--tile-bg": tile.bg, "--tile-pad": `${tile.pad}%` } as CSSProperties} {...sr}>
         <img key={src} src={src} alt="" width={size} height={size} loading="lazy" decoding="async" referrerPolicy="no-referrer"
           crossOrigin={cdn ? "anonymous" : undefined} className={loaded ? "loaded" : undefined}
           onLoad={(e: SyntheticEvent<HTMLImageElement>) => { setLoaded(true); if (cdn && !own && !cachedTile(domain)) scheduleSample(domain!, e.currentTarget, () => resampled((n) => n + 1)); }}
@@ -95,8 +99,8 @@ export function StockBadge({ symbol, size: base = 40 }: { symbol: string; size?:
   const fit = (n: number) => Math.min(Math.round(size * 0.3), Math.floor((size * 0.84) / (n * 0.72)));
   const n = Math.min(letters.length, fit(4) >= 12 ? 4 : 3);
   return (
-    <span className="badge" style={{ ...box, background: tint(symbol), fontSize: Math.max(12, fit(n)) }} aria-hidden="true">
-      {letters.slice(0, n)}
+    <span className="badge" style={{ ...box, background: tint(symbol), fontSize: Math.max(12, fit(n)) }} {...sr}>
+      {label ? <span aria-hidden="true">{letters.slice(0, n)}</span> : letters.slice(0, n)}
     </span>
   );
 }
