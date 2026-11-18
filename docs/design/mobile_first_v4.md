@@ -265,6 +265,10 @@ Dark first: the app has one theme and v4 keeps it. Names are roles, not colours,
 | `--ease` | `cubic-bezier(.2, .7, .2, 1)` | Everything entering |
 | `--ease-out` | `cubic-bezier(.4, 0, 1, 1)` | Everything leaving |
 
+- **No data motion loops** (decided in #307, 18 Nov 2026; the same rule as `brand/brand_system_v1.md` section 4).
+  Chart draws, point pops and number ticks play once. Two loading and status signals may loop, and both stop with
+  reduced motion: skeletons breathe with opacity (`kb-breathe`, 1.6 s) and the live dot pulses (`kb-pulse`, 2 s).
+  Nothing else loops.
 - **Tab change:** content cross-fades in 200 ms with a 4 px rise. No stagger. Top bar and tab bar do not move. (Today:
   550 ms plus up to 300 ms stagger.)
 - **Push to a detail page:** new page slides in 24 px from the right and fades, 240 ms; back reverses it.
@@ -277,10 +281,12 @@ Dark first: the app has one theme and v4 keeps it. Names are roles, not colours,
   would suggest it does not. A one-line "Updated 5 s ago" sits under Home's details.
 - **Chart range:** the line morphs to the new range in 300 ms (keep one chart instance; stop re-creating it per range).
 - **Skeletons:** keep the shaped skeletons. Each skeleton has the height of the content it stands for, so nothing jumps.
+  They breathe with opacity (1 to 0.55 and back, 1.6 s, `kb-breathe`). No shimmer: it animates `background-position`,
+  which repaints every frame.
   Space for the halt row is reserved while the overview loads (fixes audit #9).
 - **Accordions:** content fades in 200 ms; the row's chevron turns 90°. Use `grid-template-rows: 0fr → 1fr` for height.
 - **Only `transform` and `opacity` animate.** No `width`, `height`, `box-shadow` or `background-position` animations.
-- **Reduced motion:** every duration becomes 0, the pulse stops, sheets and pages appear in place, the number tint stays
+- **Reduced motion:** every duration becomes 0, the pulse stops, skeletons stand still, sheets and pages appear in place, the number tint stays
   (colour is not motion). The existing global rule already does this; keep it and its test.
 
 ## Desktop: targeted changes only

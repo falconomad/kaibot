@@ -9,12 +9,12 @@ Written by `gen/tokens.py`. WCAG 2 contrast ratios. Text needs 4.5:1; large text
 | Text on the page | `#F4F5F7` | `#0A0B0D` | 18.05:1 | 4.5:1 |
 | Text on a card | `#F4F5F7` | `#131519` | 16.75:1 | 4.5:1 |
 | Text on a raised surface | `#F4F5F7` | `#1B1E23` | 15.32:1 | 4.5:1 |
-| Second-level text on the page | `#B2B8C1` | `#0A0B0D` | 9.86:1 | 4.5:1 |
-| Second-level text on a card | `#B2B8C1` | `#131519` | 9.16:1 | 4.5:1 |
-| Second-level text on a raised surface | `#B2B8C1` | `#1B1E23` | 8.37:1 | 4.5:1 |
-| Third-level text on the page | `#989FAB` | `#0A0B0D` | 7.39:1 | 4.5:1 |
-| Third-level text on a card | `#989FAB` | `#131519` | 6.86:1 | 4.5:1 |
-| Third-level text on a raised surface | `#989FAB` | `#1B1E23` | 6.27:1 | 4.5:1 |
+| Second-level text on the page | `#C0C5CD` | `#0A0B0D` | 11.35:1 | 4.5:1 |
+| Second-level text on a card | `#C0C5CD` | `#131519` | 10.54:1 | 4.5:1 |
+| Second-level text on a raised surface | `#C0C5CD` | `#1B1E23` | 9.64:1 | 4.5:1 |
+| Third-level text on the page | `#A7ADB8` | `#0A0B0D` | 8.73:1 | 4.5:1 |
+| Third-level text on a card | `#A7ADB8` | `#131519` | 8.11:1 | 4.5:1 |
+| Third-level text on a raised surface | `#A7ADB8` | `#1B1E23` | 7.41:1 | 4.5:1 |
 | Link and accent text on the page | `#7FB4F9` | `#0A0B0D` | 9.19:1 | 4.5:1 |
 | Link and accent text on a card | `#7FB4F9` | `#131519` | 8.53:1 | 4.5:1 |
 | Accent text on its tint | `#7FB4F9` | `#0F1F39` | 7.68:1 | 4.5:1 |
@@ -52,7 +52,7 @@ Written by `gen/tokens.py`. WCAG 2 contrast ratios. Text needs 4.5:1; large text
 | Chart: gain mark on a card | `#10A66E` | `#131519` | 5.83:1 | 3:1 |
 | Chart: loss mark on a card | `#BC262F` | `#131519` | 3.01:1 | 3:1 |
 | Tab bar: active label | `#F4F5F7` | `#0A0B0D` | 18.05:1 | 4.5:1 |
-| Tab bar: resting label | `#989FAB` | `#0A0B0D` | 7.39:1 | 4.5:1 |
+| Tab bar: resting label | `#A7ADB8` | `#0A0B0D` | 8.73:1 | 4.5:1 |
 | Tab bar: active mark | `#4F95F0` | `#0A0B0D` | 6.46:1 | 3:1 |
 
 ## Light theme
