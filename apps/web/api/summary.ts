@@ -19,6 +19,10 @@ declare const process: { env: Record<string, string | undefined> };
 export const MODEL = "claude-haiku-5-5"; // config/llm.yaml models.triage: the cheap model
 export const PRICE = { input: 0.10, output: 0.50 }; // USD per million tokens (config/llm.yaml prices, checked 11 Nov 2026)
 export const MAX_TOKENS = 400;
+// #324: the reservation is an honest upper bound. It is at most the SQL's per-call limit (0023), and max_tokens is
+// sized from it, so the over-estimated input plus every output token costs at most what was reserved. A call whose
+// input alone would not leave MIN_TOKENS of output inside the limit is not made.
+export const MAX_RESERVED = 0.02, MIN_TOKENS = 150;
 export const MAX_ABOUT = 260, MAX_GIST = 220, MAX_HEADLINE = 300, MAX_TEXT = 1200, MAX_NEWS = 3, NEWS_DAYS = 7;
 const SYMBOL = /^[A-Z]{1,5}([.][A-Z])?$/;
 const ANTHROPIC = "https://api.anthropic.com/v1/messages";
@@ -182,10 +186,23 @@ export function prompt(f: Facts): string {
     news: f.news.map((n) => ({ id: n.id, headline: n.headline, summary: n.summary })) });
 }
 
-/** The call's worst case, reserved before it is made: input over-estimated at 3 characters a token, all output used. */
+/** The prompt's input tokens, over-estimated at 3 characters a token (real English is nearer 4). */
+export function inputEstimate(f: Facts): number {
+  return Math.ceil((SYSTEM.length + prompt(f).length + JSON.stringify(TOOL).length) / 3) + 50;
+}
+
+/** The call's worst case, reserved before it is made: input over-estimated, all output used, 10 % margin. */
 export function worstCase(f: Facts): number {
-  const est = Math.ceil((SYSTEM.length + prompt(f).length + JSON.stringify(TOOL).length) / 3) + 50;
+  const est = inputEstimate(f);
   return Math.round(((est * PRICE.input + MAX_TOKENS * PRICE.output) / 1e6 * 1.1 + 1e-5) * 1e6) / 1e6;
+}
+
+/** #324: what to reserve and the max_tokens that keeps (input + all output) inside it; null: no call. */
+export function budgetFor(est: number): { reserved: number; maxTokens: number } | null {
+  const worst = Math.round(((est * PRICE.input + MAX_TOKENS * PRICE.output) / 1e6 * 1.1 + 1e-5) * 1e6) / 1e6;
+  const reserved = Math.min(worst, MAX_RESERVED);
+  const maxTokens = Math.min(MAX_TOKENS, Math.floor(((reserved * 1e6) - est * PRICE.input) / PRICE.output));
+  return maxTokens >= MIN_TOKENS ? { reserved, maxTokens } : null;
 }
 export const costOf = (inp: number, out: number) => (inp * PRICE.input + out * PRICE.output) / 1e6;
 
@@ -291,10 +308,10 @@ function rpcClient(url: string, key: string, auth: string, f: Fetch) {
 const forbidden = (e: unknown) => e instanceof RpcError && (e.code === "42501" || e.status === 401 || e.status === 403);
 const missingFn = (e: unknown) => e instanceof RpcError && (e.code === "PGRST202" || e.code === "42883");
 
-async function askModel(f: Facts, key: string, fetchFn: Fetch) {
+async function askModel(f: Facts, key: string, fetchFn: Fetch, maxTokens: number = MAX_TOKENS) {
   const r = await fetchFn(ANTHROPIC, { method: "POST", signal: AbortSignal.timeout(15_000),
     headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system: SYSTEM, messages: [{ role: "user", content: prompt(f) }],
+    body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: SYSTEM, messages: [{ role: "user", content: prompt(f) }],
       tools: [TOOL], tool_choice: { type: "tool", name: TOOL.name } }) });
   const body = obj(await r.json().catch(() => null));
   const u = obj(body?.usage);
@@ -331,7 +348,9 @@ export async function handle(req: Request, env: Env, fetchFn: Fetch = fetch, now
     console.error("summary: facts failed", (e as Error).message);
     return json({ error: "the facts could not be read" }, 502);
   }
-  const worst = worstCase(facts);
+  const plan = budgetFor(inputEstimate(facts));
+  if (!plan) return json({ status: "plain", reason: "too_large", summary: compose(facts, null) }); // no call made
+  const worst = plan.reserved;
   const res = obj(await rpc("kb_summary_reserve", { p_symbol: symbol, p_model: MODEL, p_reserved: worst }).catch(() => null));
   if (!res?.ok) {
     const reason = String(res?.reason ?? "reserve_failed");
@@ -340,10 +359,12 @@ export async function handle(req: Request, env: Env, fetchFn: Fetch = fetch, now
   }
   const callId = res.call_id;
   let answer: Awaited<ReturnType<typeof askModel>>;
-  try { answer = await askModel(facts, apiKey, fetchFn); } catch (e) {
+  try { answer = await askModel(facts, apiKey, fetchFn, plan.maxTokens); } catch (e) {
     answer = { usage: { input: 0, output: 0 }, draft: null, error: `anthropic: ${(e as Error).name}` };
   }
   const cost = answer.error && !answer.usage.input ? worst : costOf(answer.usage.input, answer.usage.output);
+  // #324: the true cost is recorded as it is; the database flags it (summary_call.over_reservation)
+  if (cost > worst) console.warn("summary: cost above its reservation", symbol, cost, worst);
   const settle = (card: ReturnType<typeof compose> | null, error: string | null) => rpc("kb_summary_settle", {
     p_call: callId, p_actual: Math.round(cost * 1e6) / 1e6, p_in: answer.usage.input, p_out: answer.usage.output, p_error: error,
     p_text: card?.text ?? null, p_body: card?.body ?? null, p_sources: card?.sources ?? null, p_ai: card?.ai ?? false });

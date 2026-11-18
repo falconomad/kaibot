@@ -1,7 +1,7 @@
 // The /api/summary serverless function (api/summary.ts) with fetch stubbed: no network, no keys. Covers the cache hit,
 // the budget refusal, validation of the model's draft, preview deployments without a key, and owner-only access.
-import { describe, expect, it } from "vitest";
-import { checkDraft, compose, gather, handle, newsFrom, parseDraft, worstCase, MODEL, type Facts } from "../api/summary";
+import { describe, expect, it, vi } from "vitest";
+import { budgetFor, checkDraft, compose, gather, handle, inputEstimate, newsFrom, parseDraft, worstCase, MAX_RESERVED, MAX_TOKENS, MODEL, PRICE, type Facts } from "../api/summary";
 
 const NOW = new Date("2026-11-18T20:00:00Z"); // 15:00 ET
 const ENV = { VITE_SUPABASE_URL: "https://db.example.co", VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", ANTHROPIC_API_KEY: "sk-test-not-real" };
@@ -14,7 +14,7 @@ const GOOD = { about: "Apple Inc is a US technology company listed on NASDAQ.", 
 type Call = { url: string; body: Record<string, unknown> | null; headers: Record<string, string> };
 /** A stub for fetch: Supabase RPCs by function name, the Anthropic Messages API, anything else 404. */
 function stub(o: { card?: unknown; reserve?: unknown; draft?: unknown; anthropicStatus?: number; settle?: (b: Record<string, unknown>) => unknown;
-  rpcError?: { status: number; code: string }; throwModel?: boolean } = {}) {
+  rpcError?: { status: number; code: string }; throwModel?: boolean; usage?: { input_tokens: number; output_tokens: number } } = {}) {
   const calls: Call[] = [];
   const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input), body = init?.body ? JSON.parse(String(init.body)) : null;
@@ -30,7 +30,7 @@ function stub(o: { card?: unknown; reserve?: unknown; draft?: unknown; anthropic
     }
     if (url.startsWith("https://api.anthropic.com/")) {
       if (o.throwModel) throw new DOMException("timed out", "TimeoutError");
-      return res({ content: [{ type: "tool_use", name: "stock_summary", input: o.draft ?? GOOD }], usage: { input_tokens: 900, output_tokens: 120 } }, o.anthropicStatus ?? 200);
+      return res({ content: [{ type: "tool_use", name: "stock_summary", input: o.draft ?? GOOD }], usage: o.usage ?? { input_tokens: 900, output_tokens: 120 } }, o.anthropicStatus ?? 200);
     }
     return res({}, 404);
   }) as typeof fetch;
@@ -225,5 +225,45 @@ describe("deployment", () => {
     expect(re.test("/api/summary")).toBe(false);
     expect(re.test("/positions/7")).toBe(true);
     expect(v.functions["api/summary.ts"]).toBeTruthy();
+  });
+});
+
+describe("/api/summary: the reservation is an honest upper bound (#324)", () => {
+  const bound = (est: number, maxTokens: number) => (est * PRICE.input + maxTokens * PRICE.output) / 1e6;
+  it("sends max_tokens sized from the reservation: input (over-estimated) plus all output fits it", async () => {
+    const s = stub();
+    await run(s);
+    const reserved = s.to("kb_summary_reserve")[0].body!.p_reserved as number;
+    const sent = s.to("anthropic")[0].body!;
+    const f = await gather("AAPL", DB_FACTS, {}, stub().f, NOW);
+    expect(sent.max_tokens).toBe(budgetFor(inputEstimate(f))!.maxTokens);
+    expect(sent.max_tokens as number).toBeLessThanOrEqual(MAX_TOKENS);
+    expect(bound(inputEstimate(f), sent.max_tokens as number)).toBeLessThanOrEqual(reserved);
+  });
+  it("a reservation is never above the SQL's per-call limit: max_tokens shrinks instead", () => {
+    for (const est of [100, 2_000, 50_000, 150_000, 190_000, 199_000]) {
+      const b = budgetFor(est)!;
+      expect(b.reserved).toBeLessThanOrEqual(MAX_RESERVED);
+      expect(bound(est, b.maxTokens)).toBeLessThanOrEqual(b.reserved);
+    }
+    expect(budgetFor(199_000)!.maxTokens).toBeLessThan(MAX_TOKENS); // $0.0199 of input leaves 200 tokens
+    expect(budgetFor(210_000)).toBeNull(); // the input alone would not fit: no call at all
+  });
+  it("real facts, even at their longest, are far below the per-call limit", async () => {
+    const s = stub();
+    const long = { ...DB_FACTS, news: Array.from({ length: 3 }, (_, i) => ({ ...DB_FACTS.news[0], headline: "x".repeat(300) + i })) };
+    const f = await gather("AAPL", long, {}, s.f, NOW);
+    expect(budgetFor(inputEstimate(f))).not.toBeNull(); // real facts are far below the limit
+  });
+  it("records the true cost when it comes out above the reservation, and says so", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const s = stub({ usage: { input_tokens: 40_000, output_tokens: 300 } }); // the input was far denser than estimated
+    await run(s);
+    const reserved = s.to("kb_summary_reserve")[0].body!.p_reserved as number;
+    const st = s.to("kb_summary_settle")[0].body!;
+    expect(st.p_actual).toBeCloseTo((40_000 * 0.10 + 300 * 0.50) / 1e6, 9); // the true cost, not the reservation
+    expect(st.p_actual as number).toBeGreaterThan(reserved);
+    expect(warn.mock.calls.some((c) => String(c[0]).includes("above its reservation"))).toBe(true);
+    warn.mockRestore();
   });
 });
