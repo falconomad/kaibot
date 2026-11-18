@@ -78,12 +78,13 @@ def test_the_reservation_gets_the_monthly_cap_cut_by_the_lifetime_left():
     st.llm["before"] = 140.0  # $140 spent in earlier months: $10 left in all
     seen = spy(st)
     assert gw(st).call("triage", HAIKU, "s", "u", TOOL, 300, 10) is not None
-    res = [a for fn, a in seen if fn == "llm_reserve"]
+    res = [a for fn, a in seen if fn in ("llm_reserve", "llm_reserve_lifetime")]
     assert res and res[0]["p_monthly_hard"] == pytest.approx(10.0) and res[0]["p_daily_soft"] == 1.0
     st2 = FakeStore()
     seen2 = spy(st2)
     gw(st2).call("triage", HAIKU, "s", "u", TOOL, 300, 10)
-    assert [a for fn, a in seen2 if fn == "llm_reserve"][0]["p_monthly_hard"] == 25.0  # far from the lifetime cap
+    res2 = [a for fn, a in seen2 if fn in ("llm_reserve", "llm_reserve_lifetime")]
+    assert res2[0]["p_monthly_hard"] == 25.0  # far from the lifetime cap
 
 
 def test_no_call_once_the_lifetime_cap_is_reached():
@@ -134,6 +135,7 @@ def test_an_unreadable_ledger_refuses_the_call_and_reads_rules_only():
 
 def test_a_ledger_read_that_may_be_cut_is_refused():
     st = FakeStore()
+    st.pre_0026 = True  # #319: the table read (with migration 0026 the database sums it)
     st.tables["budget_day"] = [{"day": f"2000-01-{i % 28 + 1:02d}", "spent_usd": 0.01} for i in range(1000)]
     report: dict = {}
     assert gw(st).call("triage", HAIKU, "s", "u", TOOL, 300, 10, report=report) is None
@@ -142,9 +144,11 @@ def test_a_ledger_read_that_may_be_cut_is_refused():
 
 def test_the_month_split_uses_the_et_day():
     st = FakeStore()
+    st.pre_0026 = True  # #319: the gateway's own split (with migration 0026 the database splits by its ET day)
     st.tables["budget_day"] = [{"day": "2026-10-31", "spent_usd": 100.0}, {"day": "2026-11-02", "spent_usd": 3.0}]
     life = Gateway(st, None, CFG, today=lambda: date(2026, 11, 18)).lifetime()
-    assert life == {"before_month": 100.0, "lifetime": 103.0, "monthly_cap": 25.0}
+    assert {k: life[k] for k in ("before_month", "lifetime", "monthly_cap")} == {
+        "before_month": 100.0, "lifetime": 103.0, "monthly_cap": 25.0}
     life = Gateway(st, None, CFG, today=lambda: date(2026, 12, 1)).lifetime()
     assert life["before_month"] == 103.0 and life["monthly_cap"] == 25.0
     st.tables["budget_day"].append({"day": "2026-11-20", "spent_usd": 40.0})

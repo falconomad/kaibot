@@ -189,7 +189,7 @@ def test_reservation_is_capped_by_the_preopen_cap():
     real = store.rpc
     store.rpc = lambda fn, args: (seen.append((fn, args)), real(fn, args))[1]
     reviewed, out, _ = run(gw)
-    reserve = [a for fn, a in seen if fn == "llm_reserve"]
+    reserve = [a for fn, a in seen if fn in ("llm_reserve", "llm_reserve_lifetime")]
     assert reserve and reserve[0]["p_daily_soft"] == 0.5
     assert out.status == "budget" and "refused" in out.error and reviewed == NO_INCREASE and llm.calls == []
 
@@ -211,7 +211,7 @@ def test_a_gateway_cap_can_only_tighten():
     real = store.rpc
     store.rpc = lambda fn, args: (seen.append(args), real(fn, args))[1]
     gw.call("preopen", CFG.models["room"], "s", "u", tool, 100, 5, daily_soft_usd=CFG.daily_soft_usd * 10)
-    assert seen[0]["p_daily_soft"] == CFG.daily_soft_usd
+    assert [a for a in seen if "p_daily_soft" in a][0]["p_daily_soft"] == CFG.daily_soft_usd
 
 
 def test_missing_preopen_limits_fail_closed():

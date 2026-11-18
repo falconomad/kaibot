@@ -24,6 +24,7 @@ Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all ap
 - 0023: **applied in production** (Product's note on #315, 18 Nov 2026; step 10 below).
 - 0024: **applied in production** (Product's note on #315, 18 Nov 2026; step 11 below; #321).
 - 0025: **pending** (step 12 below; PR #315, #309).
+- 0026: **pending** (step 13 below; #319). After 0025.
 
 ## Apply in this order
 
@@ -44,6 +45,7 @@ run it again. Do not reorder them.
 | 10 | `migrations/0023_stock_summary.sql` (whole file; the stock-summaries PR). Any time, also while the engine runs: dashboard only, additive | Stock summaries for the dashboard: tables `kaibot.summary_call` (each model call's reservation and real cost) and `kaibot.stock_summary` (one card per stock and ET day), and the owner-only definer functions `kb_stock_summary`, `kb_summary_facts`, `kb_summary_reserve`, `kb_summary_settle`, `kb_summary_spend` that `apps/web/api/summary.ts` calls with the owner's session. The caps ($0.30 a day, $5 a month, $0.02 a call, 2 calls per symbol and day) are in the SQL. No engine table or function changes | No: `create table if not exists`, `create or replace function`, `revoke` and `grant` only |
 | 11 | `migrations/0024_kb_ticker_check_answer.sql` (whole file; the ticker check on Vercel). Any time, also while the engine runs: dashboard only, independent of 0023 | One owner-only SECURITY DEFINER function `kb_ticker_check_answer`: `apps/web/api/check-ticker.ts` writes a 'My lists' check's answer into today's `pending` or `error` row of `kaibot.ticker_check` (validated; never overwrites an answer). Until it is applied the function answers "database update not applied" and the row waits for the Mac worker | No: one `create or replace function`, then revoke/grant |
 | 12 | `migrations/0025_llm_budget_caps.sql` (whole file; PR #315 for #309). Any time, also while the engine runs: dashboard read only | `public.kb_llm_budget` (0009) shows the Stage 1 LLM caps: $1/day, $20/month alert, $25/month hard (were written in as $3 / $150 / $190), and adds `lifetime_usd` and `caps.lifetime_hard` ($150, the sum of `kaibot.budget_day`). The engine does not need it: `agents/gateway.Gateway` holds the caps itself through the existing `kaibot.llm_reserve`. Fields the dashboard reads keep their names | No: one `create or replace function`, then `revoke` and `grant` |
+| 13 | `migrations/0026_ai_lifetime_cap.sql` (whole file; PR for #319). After 0023 and 0025. Any time, also while the engine runs | One $150 lifetime cap across every AI dollar: the engine's LLM ledger (`kaibot.budget_day` + open `llm_call` reservations) and the stock summaries (`kaibot.summary_call`). New `kaibot.ai_lifetime_spent`, `kaibot.ai_spend` (the engine's read) and `kaibot.llm_reserve_lifetime` (the engine's reservation with the cap checked inside today's `budget_day` row lock), service role only. `kb_summary_reserve` takes the same row lock and refuses `lifetime_cap`; `kb_summary_spend` and `kb_llm_budget` show the combined `lifetime_usd`. An engine without the #319 code keeps working (it calls `llm_reserve`, unchanged) | No: `create or replace function`, `revoke` and `grant` only. Its functions write only inside a reservation (`insert into kaibot.budget_day ... on conflict do nothing`, the `state` update 0008 already makes) |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -83,6 +85,9 @@ select p.prosecdef, has_function_privilege('anon', p.oid, 'execute'), has_functi
   from pg_proc p where p.proname = 'kb_ticker_check_answer';                                   -- true | false | true
 -- step 12 (0025): the dashboard shows the Stage 1 caps and the lifetime total
 select prosrc like '%lifetime_hard%' and prosrc like '%llm_budget_state(1.0,%' from pg_proc where proname = 'kb_llm_budget'; -- true
+-- step 13 (0026): one lifetime total for both ledgers, engine functions service role only
+select (kaibot.ai_spend()->>'total')::numeric = kaibot.ai_lifetime_spent(300);                       -- true
+select has_function_privilege('authenticated', 'kaibot.llm_reserve_lifetime(text, text, numeric, numeric, numeric, numeric, integer)', 'execute'); -- false
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false
