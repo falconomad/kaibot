@@ -111,3 +111,28 @@ def test_reads_at_most_every_five_minutes():
     for m in range(0, STATE_EVERY_MIN * 3):
         settle(rf, m)
     assert gw.calls == 3
+
+
+def test_a_slow_read_is_as_old_as_its_start_not_its_answer():
+    """QA-Ops on #326: a read that started at minute 0 and answers at minute 14 says what the budget was at minute 0;
+    it must count as stale from minute 16, not from minute 30."""
+    gw = Gw("ok", block=threading.Event())
+    rf = flow(gw)
+    assert rf.mode(0) == "rules_only"  # the read starts at minute 0 and hangs
+    gw.block.set()
+    for _ in range(200):  # it answers; it is taken at minute 14
+        if rf._state_fut is not None and rf._state_fut.done():
+            break
+        time.sleep(0.005)
+    gw.block = threading.Event()  # every later read hangs
+    assert rf.mode(14) == "ok"  # 14 minutes old: still inside STATE_STALE_MIN
+    assert rf.mode(STATE_STALE_MIN + 1) == "rules_only"  # 16 minutes after the read started: fail closed
+    gw.block.set()
+
+
+def test_a_minute_before_the_last_result_is_rules_only():
+    """QA-Ops on #326: if the session minute goes backwards (a session change the day check missed), the last
+    result is not taken as fresh."""
+    rf = flow(Gw("ok"))
+    assert settle(rf, 300) == "ok"
+    assert rf.mode(10) == "rules_only"

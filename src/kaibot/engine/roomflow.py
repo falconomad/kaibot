@@ -60,7 +60,8 @@ class RoomFlow:
         self.sessions: list[dict] = []  # today's room candidates, for the day-end counterfactual
         # #323: the budget state is read in the worker pool, never on the engine's main loop; per session
         self._state, self._state_m = "rules_only", -99  # nothing known yet: fail closed
-        self._state_got: int | None = None  # session minute of the last result taken
+        self._state_got: int | None = None  # session minute the last result taken was READ at (its submit)
+        self._state_asked: int | None = None  # session minute the read in flight was submitted at
         self._state_day = None
         self._state_fut = None
 
@@ -74,16 +75,19 @@ class RoomFlow:
         day = getattr(getattr(self.e, "day", None), "day", None)
         if day != self._state_day:  # a new session: its minutes start at 0 again
             self._state_day, self._state_m, self._state_got, self._state = day, -99, None, "rules_only"
-            self._state_fut = None  # a read still running from the last session is not taken
+            self._state_fut, self._state_asked = None, None  # a read still running from the last session is not taken
         self._take_state(m)
         if self._state_fut is None and m - self._state_m >= STATE_EVERY_MIN:
             self._state_m = m
             try:
+                self._state_asked = m
                 self._state_fut = self.state_ex.submit(self.room.gw.state)
             except Exception:
                 log.exception("budget state read not started")
             self._take_state(m)  # an executor that runs at once (tests) answers now
-        if self._state_got is None or m - self._state_got > STATE_STALE_MIN:
+        # QA-Ops on #326: a result is as old as the read's start, and a minute before it (the session minute went
+        # back without a session change being seen) is not fresh either
+        if self._state_got is None or not 0 <= m - self._state_got <= STATE_STALE_MIN:
             return "rules_only"
         return self._state
 
@@ -97,7 +101,8 @@ class RoomFlow:
         except Exception:
             log.exception("budget state read failed: rules only")
             st = "rules_only"
-        self._state, self._state_got = st, m
+        self._state, self._state_got = st, (m if self._state_asked is None else self._state_asked)
+        self._state_asked = None
         if st == "no_entries":
             self.e._halt_entries("llm_budget", "monthly LLM budget reached: no new entries")
 
