@@ -143,11 +143,12 @@ export function Live() {
   const marked = (series.data ?? []).filter((p) => p.marked);
   const c = marked.length ? mtmCurve(run.amount_usd, series.data!, daily) : curve(run.amount_usd, daily);
   // Product, 16 Nov 2026: the line ends at the hero figure. Today's live pot (paper, ledger from today) is the last
-  // point, marked live; the S&P 500 line holds its last close there.
-  const liveNow = run.kind === "paper" ? livePot(run, overview) : null;
+  // point, marked live; the S&P 500 line holds its last close there. Stakeholder, 18 Nov 2026: the hero and the line
+  // are the marked book (kb_book close_equity, the same series), never the sum of closed trades.
+  const liveNow = run.kind === "paper" ? livePot(run, overview, useBookData, series.data) : null;
   const todayEt = etToday();
   const tail = c.at(-1);
-  if (liveNow && overview.ledger && etToday(new Date(overview.ledger.ts)) === todayEt) {
+  if (liveNow && overview.ledger && etToday(new Date(overview.ledger.ts)) === todayEt && useBookData?.session !== todayEt) {
     const point = { session: todayEt, pot: liveNow.pot, spy: tail?.spy ?? run.amount_usd, live: true };
     if (tail?.session === todayEt) c[c.length - 1] = { ...tail, pot: liveNow.pot, live: true };
     else c.push(point);
@@ -160,7 +161,8 @@ export function Live() {
   const pot = live?.pot ?? c.at(-1)?.pot ?? run.amount_usd;
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
-  const vsSpy = s.netUsd - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
+  // the pot's gain (marked) against SPY's from the same start
+  const vsSpy = (live ? pot - run.amount_usd : s.netUsd) - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
   const beatTs = overview.heartbeat.find((h) => h.process === "engine")?.ts;
   // Stakeholder, 16 Nov 2026: while a newer run is scheduled, an ended run's pot must not read as the current one.
   const ended = run.kind === "paper" && !["scheduled", "running", "paused"].includes(run.status);
@@ -175,7 +177,7 @@ export function Live() {
   return (
     <>
       {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
-      <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} book={book} />
+      <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} />
       <StartBanner state={startState(run, overview)} />
 
       <div className="home-band">
@@ -185,7 +187,7 @@ export function Live() {
           <div className="hero num"><Tick value={pot}>{money(pot)}</Tick></div>
           <div className="num home-change">
             <Tick value={allTime} className={tone(allTime)}>{signedMoney(allTime)} all time</Tick>
-            {live && <Tick value={live.dayPnl} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} today</Tick>}
+            {live && <Tick value={live.dayPnl} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
             <span className="muted desk-only">{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500 by {money(Math.abs(vsSpy))}</span>
           </div>
         </section>

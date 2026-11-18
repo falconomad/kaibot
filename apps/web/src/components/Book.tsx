@@ -11,10 +11,13 @@ export const sectorOf = (symbol: string) => (sectors as Record<string, { industr
 
 export function BookChecks({ b }: { b: Book }) {
   const c = bookChecks(b);
+  // Stakeholder, 18 Nov 2026: a rule that sells by its target list (lib/exits.ts) has no per-stock stop by design.
+  const design = c.byDesign.length ? ` · ${c.byDesign.length} sold by the rule's list instead` : "";
   const stops = c.n === 0 ? { ok: true, text: "None needed yet" }
-    : c.missing.length ? { ok: false, text: `${c.resting} of ${c.n} in place · ${c.missing.join(", ")} missing` }
-    : c.rearming.length ? { ok: true, text: `${c.resting} of ${c.n} in place · ${c.rearming.join(", ")} being placed again` }
-    : { ok: true, text: `${c.n} of ${c.n} in place` };
+    : c.needed === 0 ? { ok: true, text: "None by design: the rule sells by its list at a close; the book has its stop line" }
+    : c.missing.length ? { ok: false, text: `${c.resting} of ${c.needed} in place · ${c.missing.join(", ")} missing${design}` }
+    : c.rearming.length ? { ok: true, text: `${c.resting} of ${c.needed} in place · ${c.rearming.join(", ")} being placed again${design}` }
+    : { ok: true, text: `${c.resting} of ${c.needed} in place${design}` };
   const rec = c.reconciled;
   const books = !rec ? { ok: true, text: "Checked at the first close" }
     : rec.ok ? { ok: true, text: "Match the broker" }
