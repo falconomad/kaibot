@@ -477,6 +477,7 @@ dialog.kb-sheet::backdrop { background: var(--scrim); }
 .kb-lcard[aria-checked=true] .kb-lcard-meta { color: var(--sea-ink); }
 .kb-lcard[aria-checked=true] .kb-radio { border-color: var(--sea); background: var(--sea); box-shadow: inset 0 0 0 3px var(--sea-tint); }
 .kb-ml-field { display: flex; flex-direction: column; gap: 6px; }
+.kb-ml-field > .kb-search { flex: none; } /* in a column, 220px basis became 220px of height (18 Nov) */
 .kb-ml-label { font-size: 13px; font-weight: 600; color: var(--slate); }
 .kb-ml-addrow { flex-wrap: nowrap; gap: 8px; }
 .kb-ml-addrow > .kb-search { flex: 1 1 220px; }
