@@ -10,6 +10,7 @@ import { Accordion } from "../components/Accordion";
 import { STALE } from "../lib/poll";
 import { Skeleton } from "../components/Skeleton";
 import { StockBadge, companyName } from "../components/StockBadge";
+import { StockSummary } from "../components/StockSummary";
 import { experimentsOf } from "../components/Experiment";
 import { useRunCtx } from "../components/Shell";
 import { type Experiment, findExperiment } from "../lib/experiment";
@@ -135,6 +136,7 @@ export function TradeDetailPage() {
         </div>
         <Ladder t={t} />
       </section>
+      <StockSummary symbol={t.symbol} />
       {TABS.map(([k, l]) => (
         <Accordion key={k} id={`trade-${k}`} title={l} open={initial === k && params.has("tab")}>
           <Tab id={k} d={d} exp={exp} />
