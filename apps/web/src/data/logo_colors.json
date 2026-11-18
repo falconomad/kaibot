@@ -1,246 +1,295 @@
 {
  "AAPL": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AAPL.png",
   "pad": 0,
   "sampled": true
  },
  "ABBV": {
   "bg": "#00003A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ABBV.png",
   "pad": 0,
   "sampled": true
  },
  "ADBE": {
   "bg": "#ED1C24",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ADBE.png",
   "pad": 0,
   "sampled": true
  },
  "AMD": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMD.png",
   "pad": 0,
   "sampled": true
  },
  "AMT": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959033886.png",
   "pad": 0,
   "sampled": true
  },
  "AMZN": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AMZN.png",
   "pad": 0,
   "sampled": true
  },
  "AVGO": {
   "bg": "#CC092F",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/AVGO.png",
   "pad": 0,
   "sampled": true
  },
  "BA": {
   "bg": "#0065B3",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BA.png",
   "pad": 0,
   "sampled": true
  },
  "BAC": {
   "bg": "#157FC4",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BAC.png",
   "pad": 0,
   "sampled": true
  },
  "BKNG": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/BKNG.png",
   "pad": 0,
   "sampled": true
  },
  "CAT": {
   "bg": "#08090D",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CAT.png",
   "pad": 0,
   "sampled": true
  },
  "COP": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/COP.png",
   "pad": 0,
   "sampled": true
  },
  "COST": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/COST.png",
   "pad": 0,
   "sampled": true
  },
  "CRM": {
   "bg": "#009CDB",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CRM.png",
   "pad": 0,
   "sampled": true
  },
  "CSCO": {
   "bg": "#1BA0D7",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/950800186156.png",
   "pad": 0,
   "sampled": true
  },
  "CVX": {
   "bg": "#F4F5F7",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/CVX.png",
   "pad": 12,
   "sampled": true
  },
  "DE": {
   "bg": "#FCE24C",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DE.png",
   "pad": 0,
   "sampled": true
  },
  "DIS": {
   "bg": "#187BE0",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DIS.png",
   "pad": 0,
   "sampled": true
  },
  "DUK": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/DUK.png",
   "pad": 0,
   "sampled": true
  },
  "GE": {
   "bg": "#3B73B9",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GE.png",
   "pad": 0,
   "sampled": true
  },
  "GOOGL": {
   "bg": "#F4F5F7",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GOOG.png",
   "pad": 12,
   "sampled": true
  },
  "GS": {
   "bg": "#64A8F0",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GS.png",
   "pad": 0,
   "sampled": true
  },
  "HD": {
   "bg": "#F6821F",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/HD.png",
   "pad": 0,
   "sampled": true
  },
  "HON": {
   "bg": "#DE1E34",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942965692746.png",
   "pad": 0,
   "sampled": true
  },
  "INTC": {
   "bg": "#0071C5",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/INTC.png",
   "pad": 0,
   "sampled": true
  },
  "JNJ": {
   "bg": "#E92431",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/JNJ.png",
   "pad": 0,
   "sampled": true
  },
  "JPM": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/JPM.png",
   "pad": 0,
   "sampled": true
  },
  "KO": {
   "bg": "#ED1C24",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/KO.png",
   "pad": 0,
   "sampled": true
  },
  "LIN": {
   "bg": "#005590",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/950838588696.png",
   "pad": 0,
   "sampled": true
  },
  "LLY": {
   "bg": "#ED1D24",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LLY.png",
   "pad": 0,
   "sampled": true
  },
  "LOW": {
   "bg": "#004990",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/LOW.png",
   "pad": 0,
   "sampled": true
  },
  "MA": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MA.png",
   "pad": 0,
   "sampled": true
  },
  "MCD": {
   "bg": "#BD0017",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MCD.png",
   "pad": 0,
   "sampled": true
  },
  "META": {
   "bg": "#F4F5F7",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/FB.png",
   "pad": 12,
   "sampled": true
  },
  "MRK": {
   "bg": "#009394",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MRK.png",
   "pad": 0,
   "sampled": true
  },
  "MS": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MS.png",
   "pad": 0,
   "sampled": true
  },
  "MSFT": {
   "bg": "#F4F5F7",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/MSFT.png",
   "pad": 12,
   "sampled": true
  },
  "NEE": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NEE.png",
   "pad": 0,
   "sampled": true
  },
  "NFLX": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NFLX.png",
   "pad": 0,
   "sampled": true
  },
  "NKE": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/NKE.png",
   "pad": 0,
   "sampled": true
  },
  "NVDA": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959144056.png",
   "pad": 0,
   "sampled": true
  },
  "ORCL": {
   "bg": "#F80000",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/ORCL.png",
   "pad": 0,
   "sampled": true
  },
  "PEP": {
   "bg": "#28458E",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PEP.png",
   "pad": 0,
   "sampled": true
  },
  "PFE": {
   "bg": "#F4F5F7",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PFE.png",
   "pad": 12,
   "sampled": true
  },
  "PG": {
   "bg": "#003CAE",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/PG.png",
   "pad": 0,
   "sampled": true
  },
  "PLD": {
   "bg": "#054D53",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959032636.png",
   "pad": 0,
   "sampled": true
  },
  "QCOM": {
   "bg": "#3253DC",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/QCOM.png",
   "pad": 0,
   "sampled": true
  },
  "RTX": {
   "bg": "#E31937",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/RTX.png",
   "pad": 0,
   "sampled": true
  },
  "SBUX": {
   "bg": "#14171A",
+  "from": "https://static9.finnhub.io/file/publicdatany/finnhubimage/stock_logo/942959080056.png",
   "pad": 0,
   "sampled": true
  },
@@ -251,46 +300,55 @@
  },
  "TMO": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TMO.png",
   "pad": 0,
   "sampled": true
  },
  "TMUS": {
   "bg": "#ED008C",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TMUS.png",
   "pad": 0,
   "sampled": true
  },
  "TSLA": {
   "bg": "#E82127",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TSLA.png",
   "pad": 0,
   "sampled": true
  },
  "TXN": {
   "bg": "#14171A",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/TXN.png",
   "pad": 0,
   "sampled": true
  },
  "UNH": {
   "bg": "#1A4687",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/UNH.png",
   "pad": 0,
   "sampled": true
  },
  "UPS": {
   "bg": "#330000",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/UPS.png",
   "pad": 0,
   "sampled": true
  },
  "V": {
   "bg": "#22275E",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/V.png",
   "pad": 0,
   "sampled": true
  },
  "WFC": {
   "bg": "#E61B27",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/WFC.png",
   "pad": 0,
   "sampled": true
  },
  "WMT": {
   "bg": "#007DC3",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/WMT.png",
   "pad": 0,
   "sampled": true
  },
@@ -351,6 +409,7 @@
  },
  "XOM": {
   "bg": "#ED1B2D",
+  "from": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/960001797516.png",
   "pad": 0,
   "sampled": true
  }

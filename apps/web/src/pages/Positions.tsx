@@ -101,7 +101,7 @@ export function Positions() {
               {open.map((o) => (
                 <li key={`${o.kind}-${o.symbol}-${o.kind === "book" ? o.p.rule : ""}`}>
                   <button type="button" className="row" aria-haspopup="dialog" onClick={() => setSheet(o)}>
-                    <StockBadge symbol={o.symbol} size={40} />
+                    <StockBadge symbol={o.symbol} size={44} />
                     <span className="row-mid">
                       <b>{o.symbol}</b>
                       <span className="muted">{o.kind === "day"
@@ -135,7 +135,7 @@ export function Positions() {
               {closed.data.rows.map((t) => (
                 <li key={t.id}>
                   <button type="button" className="row" aria-haspopup="dialog" onClick={() => setSheet(t)}>
-                    <StockBadge symbol={t.symbol} size={40} />
+                    <StockBadge symbol={t.symbol} size={44} />
                     <span className="row-mid"><b>{t.symbol}</b>
                       <span className="muted">{ruleName(t.strategy)} · {t.exit_ts ? exitText(t.exit_reason) : "open"} · {dateEt(t.entry_ts)}</span>
                       {findExperiment(t.strategy, exps) && <span className="row-tag">Experiment: failed the ten-year test</span>}</span>
@@ -251,7 +251,7 @@ function NextClose({ orders }: { orders: (ReturnType<typeof parsePlan>[number]["
         const what = o.sharesTarget === 0 ? `Sell all ${o.sharesNow}` : d > 0 ? `${o.sharesNow ? "Add" : "Buy"} ${d}` : `Sell ${-d}`;
         return (
           <li key={`${o.rule}-${o.symbol}`}>
-            <StockBadge symbol={o.symbol} size={36} />
+            <StockBadge symbol={o.symbol} size={40} />
             <span className="nc-mid"><b>{o.symbol}</b><span className="muted">{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</span></span>
             <span className={`nc-state ${o.state}`}>{STATE_TEXT[o.state]}{o.state === "working" && o.sharesNow > 0 && o.sharesTarget > o.sharesNow ? ` · ${o.sharesNow} of ${o.sharesTarget} held` : ""}</span>
           </li>
@@ -268,7 +268,7 @@ function SoldList({ sold }: { sold: Sold[] }) {
       <li><h2 className="day-head">Sold from the multi-day book</h2></li>
       {sold.map((x) => (
         <li key={`${x.rule}-${x.symbol}-${x.closed}`}><div className="row">
-          <StockBadge symbol={x.symbol} size={40} />
+          <StockBadge symbol={x.symbol} size={44} />
           <span className="row-mid"><b>{x.symbol}</b>
             <span className="muted">{reasonText(x.reason)} · {day(x.closed)}{x.days !== null ? ` · held ${x.days} days` : ""}</span></span>
           <span className="row-end num"><b className={tone(x.pnl)}>{x.pnl === null ? "—" : signedMoney(x.pnl)}</b><span className="muted">{x.qty} sh</span></span>

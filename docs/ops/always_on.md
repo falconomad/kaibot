@@ -35,7 +35,7 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
 | Agent (`~/Library/LaunchAgents`) | When | What |
 |---|---|---|
 | `com.kaibot.engine` | at login, every weekday at 15:00 Mac time, and about a minute after a crash | `scripts/service_run.sh engine` → `scripts/run_engine.sh` (Docker or Python, chosen at install). The engine itself waits for the broker's session (holidays and early closes come from Alpaca's calendar), so starting early is harmless. It keeps running overnight and over the weekend; `caffeinate` keeps the Mac awake while it runs. |
-| `com.kaibot.daily` | 03:15 Tuesday-Saturday (after each US session is complete) | rotate logs, back up local files, refresh the daily bar store (`scripts/fetch_daily.sh`; skip with `KAIBOT_DAILY_FETCH=0` in the plist) |
+| `com.kaibot.daily` | 03:15 Tuesday-Saturday (after each US session is complete) | rotate logs, back up local files, refresh the daily bar store (`scripts/fetch_daily.sh`; skip with `KAIBOT_DAILY_FETCH=0` in the `.env` or the plist; only 0 or 1 counts) |
 
 Never two engines: the service checks for an engine started by hand (`engine_guard.sh`), keeps a pid lock
 (`data/live/service.pid`), and the engine's database lease refuses a second engine on any machine. If you start one

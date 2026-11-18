@@ -25,7 +25,7 @@ describe("type and the font swap", () => {
     expect(indexHtml.match(/<link[^>]*rel="stylesheet"[^>]*>/g)).toEqual([
       `<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />`]);
     expect(indexHtml.match(/<link rel="preconnect"[^>]*>/g)).toEqual([
-      '<link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />', '<link rel="preconnect" href="https://static2.finnhub.io" />']);
+      '<link rel="preconnect" href="%VITE_SUPABASE_URL%" crossorigin />', '<link rel="preconnect" href="https://cdn.tickerlogos.com" crossorigin />']);
   });
   it("letter spacing per type step: hero -0.035em, title -0.03em, heading -0.01em, caps +0.08em", () => {
     expect(css).toMatch(/\.home-hero \.hero \{[^}]*letter-spacing: -0\.035em/);

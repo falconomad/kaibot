@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import css from "./app.css?raw";
 import symbols from "./data/symbols.json";
 import { fmpLogo, logoSources, StockBadge, SystemTile, TILES } from "./components/StockBadge";
+import { lookupDomain } from "./lib/logos";
 import { Tape } from "./pages/Tape";
 import { ctxFor, paperRun, render } from "./pages/testkit";
 
@@ -34,8 +35,9 @@ describe("the tile", () => {
       if (t.sampled) expect(t.bg, s).toMatch(/^#[0-9A-F]{6}$/);
     }
   });
-  it("a sampled logo sits on its own colour (full-bleed when it has a solid brand background); the image is reserved and fades in", () => {
-    TILES.TESTA = { bg: "#C8102E", pad: 0, sampled: true };
+  it("a sampled logo sits on its own colour (full-bleed when it has a solid brand background); the image is reserved and fades in", async () => {
+    await lookupDomain("TESTA", async () => new Response("", { status: 404 }));   // no tickerlogos domain: our own logo
+    TILES.TESTA = { bg: "#C8102E", pad: 0, sampled: true, from: "https://example.com/a.png" };
     (symbols as Record<string, unknown>).TESTA = { name: "Test A", logo: "https://example.com/a.png", industry: null };
     const html = renderToStaticMarkup(<StockBadge symbol="TESTA" size={36} />);
     expect(html).toMatch(/^<span class="badge logo" style="width:39px;height:39px;flex:none;--tile-bg:#C8102E;--tile-pad:0%"><img src="https:\/\/example.com\/a.png" alt="" width="39" height="39"/);
@@ -43,20 +45,17 @@ describe("the tile", () => {
     expect(css).toMatch(/\.badge\.logo img \{[^}]*opacity: 0; transition: opacity/);
     delete TILES.TESTA; delete (symbols as Record<string, unknown>).TESTA;
   });
-  it("not sampled yet: a soft white tile; unreadable or not in our list: FMP's logo; no source: the initials", () => {
+  it("not sampled yet: a soft white tile; unreadable: the next source; no source: the initials", () => {
     const was = TILES.AAPL;
     TILES.AAPL = { bg: null, pad: 12, sampled: false };
     try {
       expect(renderToStaticMarkup(<StockBadge symbol="AAPL" />)).toMatch(/--tile-bg:var\(--grey-50\);--tile-pad:12%/);
       TILES.AAPL = { ...was, unreadable: true, sampled: false };
-      expect(renderToStaticMarkup(<StockBadge symbol="AAPL" size={48} />)).toContain('src="https://financialmodelingprep.com/image-stock/AAPL.png"');
+      expect(logoSources("AAPL", null)).toEqual([fmpLogo("AAPL")]);                                       // our unreadable logo is skipped
     } finally { TILES.AAPL = was; }
-    expect(logoSources("AAPL")).toEqual([expect.stringContaining("finnhub"), fmpLogo("AAPL")]);   // ours first, FMP if it fails
-    const nbis = renderToStaticMarkup(<StockBadge symbol="NBIS" size={40} />);
-    expect(nbis).toContain('src="https://financialmodelingprep.com/image-stock/NBIS.png"');
-    expect(nbis).toMatch(/--tile-bg:var\(--grey-50\)/);                                                 // never another logo's colour
-    expect(logoSources("BRK.B")).toEqual([fmpLogo("BRK.B")]);
-    expect(logoSources("1234")).toEqual([]);                                                              // not a ticker: no request
+    expect(logoSources("AAPL", "apple.com")).toEqual(["https://cdn.tickerlogos.com/apple.com", expect.stringContaining("finnhub"), fmpLogo("AAPL")]);
+    expect(logoSources("BRK.B", null)).toEqual([fmpLogo("BRK.B")]);
+    expect(logoSources("1234", null)).toEqual([]);                                                        // not a ticker: no request
     expect(renderToStaticMarkup(<StockBadge symbol="1234" size={48} />)).toContain(">1234</span>");
     expect(renderToStaticMarkup(<StockBadge symbol="1234" size={36} />)).toContain(">123</span>");
     expect(renderToStaticMarkup(<SystemTile><i /></SystemTile>)).toBe('<span class="badge sys" style="width:39px;height:39px;flex:none" aria-hidden="true"><i></i></span>');

@@ -252,3 +252,24 @@ and changes nothing else.
 3. **Trials.** As Amendment 7's item 4. A configuration an earlier finished report counted, made before this data
    correction, logs `n_trials` 0 on its first corrected run (`scripts/momentum_core.n_trials_of`; reports record
    `data_corrections`).
+
+## Amendment 9 (18 Nov 2026, agents-ai for Product, issue #310, before the shadow review's first run): an AI observer that cannot act
+
+Written before the shadow review has run on any session; none of its verdicts had been seen. It adds no rule, no
+parameter and no input, and changes nothing in sections 2-7 or in Amendments 1-8. The rule has no AI in it, and it
+keeps none.
+
+1. **An observer only.** With `KAIBOT_PREOPEN=shadow` (off by default) the pre-open review
+   (`agents/preopen_shadow.py`) is handed a copy of each session's plan after the rule and the builder made it
+   (`md_send`, journalled before any order). It records what it would say about each buy (allow, downgrade or
+   veto, with its reasons) in the journal (`md_review_shadow`) and the dashboard's feed. Nothing on the trading
+   path reads a shadow record: it cannot change a decision, a target, a size, an order, a stop or an exit of
+   trend_momentum. A test runs the live daily path on SimBroker with the shadow on (also a reviewer that vetoes
+   every buy) and off, and finds the decisions, the targets, the orders and the fills byte for byte the same
+   (`tests/unit/test_preopen_shadow_sim.py`).
+2. **No effect on the record of this rule.** The rule's trades, P&L, Gate B marks and trial rows are what the rule
+   alone did. The shadow review's model calls are paid from the LLM budget (#309) and are not a cost of the rule.
+3. **Comparison is descriptive.** `agents/shadow_compare.py` sets each verdict beside the actual outcome of that
+   buy. It informs a later, separate decision; letting any review act on trend_momentum's orders would need a new
+   pre-registration (or an amendment written before its first run) and the stakeholder's approval.
+4. **Trials.** None: no configuration of the rule changes.

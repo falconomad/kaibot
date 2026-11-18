@@ -110,3 +110,14 @@ class TriageScore(BaseModel):
     materiality: float = Field(ge=0.0, le=1.0, description="0 = irrelevant to the stock today, 1 = thesis-changing")
     direction: Literal["negative", "neutral", "positive"]
     summary: str = Field(max_length=200)
+
+
+class DailyNote(BaseModel):
+    """#311: the plain-words daily report, one short paragraph after the close. It describes the engine's own records
+    of the day and decides nothing: no field of it is read by any trading step (and it has no price, size, stop or
+    exit field; room.FORBIDDEN_FIELDS is checked)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    paragraph: str = Field(min_length=20, max_length=900,
+                           description="what kaibo did today and why, in plain words, from the facts given only")

@@ -25,6 +25,7 @@ What the numbers are, exactly:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 from dataclasses import dataclass
@@ -34,7 +35,16 @@ from kaibot.agents.budget import BudgetGateway, ModelPrice
 from kaibot.agents.contracts import PreopenVerdicts
 from kaibot.agents.evalset.preopen import ON_ENV, StubReviewer, evaluate, load_lists
 from kaibot.agents.gateway import LLMConfig, Price, cost_of, estimate_tokens
-from kaibot.agents.preopen import PREOPEN_TOOL, SYSTEM, ReviewCandidate, candidates, preopen_limits, render
+from kaibot.agents.preopen import (
+    PREOPEN_TOOL,
+    SYSTEM,
+    PromptTooLong,
+    ReviewCandidate,
+    candidates,
+    fit,
+    preopen_limits,
+    render,
+)
 from kaibot.agents.room import _clean_deep, _escape
 from kaibot.strategies.base import TargetList
 
@@ -52,11 +62,13 @@ def _wrap(data: dict, indent: int | None) -> str:
 
 
 def render_pack(pack: str, session: date, cands: list[ReviewCandidate]) -> str:
-    """The DATA block of a variant. "today" is `preopen.render` itself. "compact" is the same JSON without
-    indentation. "hoisted" is compact, names the session once, groups the candidates by rule so a rule's reasons
-    are written once, and leaves out `strategy` and `symbol` (both are in the candidate id)."""
+    """The DATA block of a variant. "today" is what `preopen.review` sends: `preopen.fit` (the same cap on news
+    items per candidate, the highest that fits, #306) and then `preopen.render`; it is never cut. "compact" is the
+    same JSON without indentation. "hoisted" is compact, names the session once, groups the candidates by rule so
+    a rule's reasons are written once, and leaves out `strategy` and `symbol` (both are in the candidate id). The
+    two variants keep the old cut at 60 000 characters, so their numbers stay comparable with #304."""
     if pack == "today":
-        return render(session, cands)
+        return render(session, fit(session, cands)[0])
     shown = [_clean_deep(c.shown(), 300) for c in cands]
     if pack == "compact":
         return _wrap({"session": session.isoformat(), "candidates": shown}, None)
@@ -96,11 +108,13 @@ def lossless(pack: str, session: date, cands: list[ReviewCandidate]) -> bool:
 
 
 def cut_off(pack: str, session: date, cands: list[ReviewCandidate]) -> bool:
-    """True when the pack is longer than the 60 000 characters `preopen.render` keeps: the JSON is cut mid-list,
-    the model cannot answer for the candidates it never saw, and the live review would fail closed (no buys)."""
+    """True when the pack is longer than the 60 000 characters kept: the JSON is cut mid-list, the model cannot
+    answer for the candidates it never saw, and the live review would fail closed (no buys). Since #306 "today"
+    is never cut (the news per candidate is capped instead); it is True for it only when even no news does not fit
+    (`preopen.PromptTooLong`: the review then fails closed without a call)."""
     try:
         return len(decode_pack(pack, render_pack(pack, session, cands))["candidates"]) != len(cands)
-    except (ValueError, KeyError, IndexError):
+    except (PromptTooLong, ValueError, KeyError, IndexError):
         return True
 
 
@@ -173,8 +187,12 @@ def _answer_tokens(session: date, cands: list[ReviewCandidate]) -> tuple[int, in
 
 
 def size_call(model: str, pack: str, session: date, cands: list[ReviewCandidate], max_tokens: int) -> Call:
-    """The gateway's own input estimate for this prompt, split into the fixed part and the pack."""
+    """The gateway's own input estimate for this prompt, split into the fixed part and the pack. For "today" the
+    answer is sized on the candidates as shown (after `preopen.fit`)."""
     tool = json.dumps(PREOPEN_TOOL)
+    if pack == "today":
+        with contextlib.suppress(PromptTooLong):  # too long even with no news: sized as it is (no call is made)
+            cands = fit(session, cands)[0]
     user = f"{render_pack(pack, session, cands)}\n\n{ASK}"
     total, fixed = estimate_tokens(SYSTEM, user, tool), estimate_tokens(SYSTEM, tool)
     out, out_long = _answer_tokens(session, cands)
@@ -354,7 +372,7 @@ def report(cfg: LLMConfig | None = None) -> str:
 
     sets = [("eval set (mean of the lists with a call)", [(s, c) for _, s, c in ev], None)]
     sets += [(f"synthetic sizing, {n} buys x {m} news each (not the eval set)", [scenario(n, m)], earnings)
-             for n, m in ((10, 0), (10, 8), (20, 8), (30, 8))]
+             for n, m in ((10, 0), (10, 8), (20, 8), (30, 8), (50, 8))]
     for title, reviews, flagged in sets:
         lines += ["", f"### Variants on: {title}", "",
                   "| variant | calls | input / review | pack / candidate | output / review (stub; long) | "
@@ -376,7 +394,8 @@ def report(cfg: LLMConfig | None = None) -> str:
                 f"{_usd(m['usd_cache_read'])} | {_usd(m['usd_plain_long'])} | {_usd(ab['usd_month'])} | "
                 f"{ab['share_of_monthly_hard_cap']:.3%} | {_usd(m['reserved_usd'])} | "
                 f"{(m['usd_plain'] / base - 1) if base else 0:+.0%} | {'YES' if m['cut_off'] else 'no'} |")
-    lines += ["", "### Largest synthetic list whose pack is not cut off at 60 000 characters", "",
+    lines += ["", "### Largest synthetic list whose pack is not cut off at 60 000 characters (today: news capped, "
+              "#306)", "",
               "| pack | 4 news each | 8 news each |", "|---|---|---|"]
     lines += [f"| {p} | {largest_list_that_fits(p, 4)} | {largest_list_that_fits(p, 8)} |" for p in PACKS]
     lines += ["", "### Eval-set quality (preopen_v1, stub policy on what each prompt shows)", "",

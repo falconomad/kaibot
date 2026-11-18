@@ -204,6 +204,9 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
 .levels button:hover { transform: translateY(-2px); filter: none; }
 .levels button[aria-pressed=true] { border-color: var(--sea); }
 .foot { font-size: 13px; color: var(--stale); padding: 14px 24px 18px; text-align: center; }
+/* the logos' attribution (AllInvestView, required): one muted line on every screen, phones included, never hidden */
+.credit { margin: 0; padding: 0 24px; font-size: var(--t-cap); color: var(--stale); text-align: center; }
+.credit a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .skeleton { color: var(--stale); }
 
 /* risk strip: red on breach, amber on a warning */
@@ -248,6 +251,8 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
   .tab-dot { position: absolute; top: -2px; right: -4px; width: 9px; height: 9px; border-radius: 999px; border: 2px solid var(--bg); }
   .tab-dot.breach { background: var(--down); } .tab-dot.offline { background: var(--amber); }
   .foot { display: none; }
+  .shell .body > main { padding-bottom: 8px; }
+  .credit { padding: 0 16px calc(88px + env(safe-area-inset-bottom)); }
   button.full-sm, .full-sm { flex: 1 1 100%; width: 100%; }
 }
 .posrow { transition: background-color .2s var(--ease); color: var(--ink); }
