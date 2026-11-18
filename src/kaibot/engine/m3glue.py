@@ -7,6 +7,7 @@
 
 - `make_preopen(gateway, desk)`: the pre-open review of the daily path (#131), or None when it is off (the default:
   KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on are both needed). Its evidence is the desk's news of the last 72 hours.
+- `make_daily_note(store)`: the daily report in plain words (#311), or None when off (KAIBOT_DAILY_NOTE=on).
 - `make_preopen_shadow(store, desk)`: the SHADOW review (#310), an observer that records verdicts and changes
   nothing, or None when it is off (the default: KAIBOT_PREOPEN=shadow switches it on; KAIBOT_ROOM is not read).
 
@@ -175,3 +176,18 @@ def make_preopen_shadow(store, desk, env: Mapping[str, str] | None = None, gatew
         gateway = shadow_from_env(store, dict(env))
     return preopen_shadow.ShadowDesk(preopen.GatewayReviewer(gateway), gateway,
                                      evidence_fn=make_preopen_evidence(desk))
+
+
+def make_daily_note(store, env: Mapping[str, str] | None = None, gateway=None):
+    """#311: the daily report in plain words (agents/daily_note.NoteDesk), or None when it is off (the default:
+    KAIBOT_DAILY_NOTE=on switches it on). Without ANTHROPIC_API_KEY it writes the code's template paragraph."""
+    from kaibot.agents import daily_note
+
+    env = os.environ if env is None else env
+    if not daily_note.enabled(env):
+        return None
+    if gateway is None:
+        from kaibot.agents.gateway import note_from_env
+
+        gateway = note_from_env(store, dict(env))
+    return daily_note.NoteDesk(gateway)

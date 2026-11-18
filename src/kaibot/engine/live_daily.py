@@ -40,6 +40,11 @@ worker thread) and goes on; `sync` journals a finished record (`md_review_shadow
 Nothing on this path reads a shadow record back, and no step waits for it: the targets, the orders and the fills are
 the same with it on or off (tests/unit/test_preopen_shadow_sim.py). Its errors only log.
 
+Daily note (#311, OFF by default: `note` is None unless KAIBOT_DAILY_NOTE=on). After 17:00 ET `sync` hands the
+day's records (plan, orders, fills, holdings, book) to agents/daily_note.NoteDesk, which writes one plain-words
+paragraph in a worker thread; `sync` journals it (`daily_note`) with its event, `status` shows the latest. Nothing on
+this path reads it back.
+
 Restart safety: a restart between the decision and the send finds `md_decision` and sends from it (the rule is not
 asked again); a restart in the middle of a send finds `md_send` without `md_sent` and runs the target loop again
 on the SAME journalled targets (the open orders cover them, so nothing is sent twice; client ids are deterministic
@@ -422,7 +427,7 @@ class LiveDaily:
                  known_order_ids: Callable[[], set[str]] = set,
                  session_close: Callable[[date], time | None] = lambda d: None,
                  store=None, reenable: str | None = None, ca=None, review=None,
-                 shadow=None) -> None:
+                 shadow=None, note=None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps). `ca`: the live-safety exclusion of
         announced corporate actions (engine/corp_guard.CorporateActionGuard; #266, Amendment 6); None: none."""
@@ -459,6 +464,7 @@ class LiveDaily:
         self._preopen_ok = False
         self.review = review  # #131: agents/preopen_daily.PreopenDesk, or None (off: nothing below changes)
         self.shadow = shadow  # #310: agents/preopen_shadow.ShadowDesk, or None. An observer: never read back
+        self.note = note  # #311: agents/daily_note.NoteDesk, or None. Writes the day's plain-words report; never read
 
     # ---------------------------------------------------------------- state
     @property
@@ -641,6 +647,7 @@ class LiveDaily:
         while it has open orders; before the closing auction (15:59 ET) at most every POLL_EVERY (a `cls` order
         does not change until the auction), from then on at every call."""
         self._shadow_collect()  # #310: an observer's finished records (never read back by this path)
+        self._note_step()  # #311: the day's plain-words report, after 17:00 ET (never read back by this path)
         om = self._manager()
         if om is None or not (om.live or force):
             return
@@ -992,6 +999,21 @@ class LiveDaily:
         except Exception:
             log.exception("shadow pre-open record not journalled (no effect on the plan or the orders)")
 
+    def _note_step(self) -> None:
+        """#311: start the day's plain-words report once and journal it (`daily_note`) with its event. Never raises."""
+        if self.note is None:
+            return
+        try:
+            from kaibot.agents.daily_note import EVENT, KIND, event_body
+
+            for rec in self.note.tick(self):
+                if any(b.get("session") == rec.get("session") for b in self._entries(KIND)):
+                    continue
+                self.journal.append(KIND, rec)
+                self.event(EVENT, event_body(rec))
+        except Exception:
+            log.exception("daily note not journalled (no effect on trading)")
+
     def preopen(self) -> list[str]:
         """#131: from 08:30 ET until the send window opens, start the review of each rule's plan for today's
         session and journal finished reviews. Nothing at all when the review is off. Returns the rules started."""
@@ -1259,6 +1281,15 @@ class LiveDaily:
             out["preopen_review"] = "on" if self.review.enabled else "off"
         if self.shadow is not None:
             out["preopen_review_shadow"] = "on"
+        if self.note is not None:  # #311: the latest plain-words report
+            try:
+                from kaibot.agents.daily_note import KIND
+                from kaibot.agents.daily_note import status_block as note_block
+
+                written = self._entries(KIND)
+                out["daily_note"] = note_block(written[-1] if written else None)
+            except Exception:
+                log.exception("daily note status unreadable")
         if any(v.get("retired") for v in rules.values()):
             out["retired"] = sorted(k for k, v in rules.items() if v.get("retired"))
         ca_notes = self._ca_notes(today)
@@ -1377,7 +1408,7 @@ def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Call
 
 def for_engine(engine, load: Callable[[date, datetime], DailyData],
                rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None,
-               review=None, shadow=None) -> LiveDaily:
+               review=None, shadow=None, note=None) -> LiveDaily:
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
@@ -1404,7 +1435,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
                      store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review,
-                     shadow=shadow)
+                     shadow=shadow, note=note)
 
 
 def calendar_close(cal: dict | None) -> time | None:
