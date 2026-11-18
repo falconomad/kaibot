@@ -38,6 +38,7 @@ def with_room(tmp_path, llm, executor=None, level="balanced"):
     room = Room(Gateway(store, llm, CFG))
     eng.roomflow = RoomFlow(eng, room, pack_fn=lambda e, s, etf, t, f: PACK)
     eng.roomflow.ex = executor or SyncExecutor()
+    eng.roomflow.state_ex = SyncExecutor()  # #323: the budget state's worker, answered at once in these tests
     return eng, broker, clock, store, open_utc
 
 

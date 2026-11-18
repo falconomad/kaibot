@@ -396,7 +396,7 @@ def test_logged_runs_from_before_an_amendment_stay_attributable_to_the_rule():
 
 
 def test_orders_are_whole_share_near_close_market_orders_sent_at_1550(fx):
-    """Issue #333 (Amendment 9 / 8): the daily path sends DAY market orders at 15:50 ET, as the live path does
+    """Issue #333 (Amendment 10 / 8): the daily path sends DAY market orders at 15:50 ET, as the live path does
     (Alpaca paper fills a `cls` order only in the last seconds before 16:00); SimBroker fills them at the closing
     print (the 15:59 bar), at cost model v1. The venue still refuses a `cls` order after 15:50."""
     m, data, i0, i1 = fx

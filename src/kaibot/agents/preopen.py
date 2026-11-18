@@ -32,6 +32,7 @@ decided. Switching it on is the stakeholder's decision.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import math
@@ -84,6 +85,7 @@ class ReviewCandidate:
     reasons: tuple[str, ...] = ()
     features: dict = field(default_factory=dict)
     evidence: tuple[dict, ...] = ()  # news items shown with their ids (EVIDENCE_FIELDS); verdicts may cite only these
+    hidden: int = 0  # #306: items left out so the whole list fits the prompt (`fit`); `news_7d` still counts them
 
     def shown(self) -> dict:
         """The reviewer's view of the candidate (JSON-safe, no shares or prices)."""
@@ -92,6 +94,8 @@ class ReviewCandidate:
                "reasons": list(self.reasons), "features": dict(self.features)}
         if self.evidence:
             out["evidence"] = [dict(e) for e in self.evidence]
+        if self.hidden:
+            out["evidence_not_shown"] = self.hidden
         return out
 
 
@@ -250,11 +254,59 @@ PREOPEN_TOOL = tool_for("submit_preopen_review", PreopenVerdicts,
                         "One verdict (allow, downgrade or veto) per candidate for the session.")
 
 
+PROMPT_MAX_CHARS = 60_000  # the DATA block's limit (about 20 000 tokens by the gateway's estimate)
+
+
+class PromptTooLong(ValueError):
+    """The candidate list does not fit PROMPT_MAX_CHARS even with no news shown: the review fails closed."""
+
+
+def _block(session: date, cands: list[ReviewCandidate], indent: int | None) -> str:
+    data = {"session": session.isoformat(), "candidates": [_clean_deep(c.shown(), 300) for c in cands]}
+    seps = None if indent else (",", ":")
+    return "<data>\n" + _escape(json.dumps(data, default=str, indent=indent, separators=seps)) + "\n</data>"
+
+
 def render(session: date, cands: list[ReviewCandidate]) -> str:
     """The DATA block: the session and each candidate's shown view (no shares, prices or positions), sanitised and
-    escaped like the intraday room's pack, so no text in it can close the block."""
-    data = {"session": session.isoformat(), "candidates": [_clean_deep(c.shown(), 300) for c in cands]}
-    return "<data>\n" + _escape(json.dumps(data, default=str, indent=1))[:60_000] + "\n</data>"
+    escaped like the intraday room's pack, so no text in it can close the block. Indented JSON while it fits
+    PROMPT_MAX_CHARS (every list that fitted before #306 is sent byte for byte as before), else the same JSON
+    without indentation. It is never cut (#306: a cut list made the review fail closed): a block that still does
+    not fit raises PromptTooLong. `fit` trims the evidence first so that it does fit."""
+    for indent in (1, None):
+        out = _block(session, cands, indent)
+        if len(out) <= PROMPT_MAX_CHARS + len("<data>\n\n</data>"):
+            return out
+    raise PromptTooLong(f"{len(cands)} candidates need {len(out)} characters, more than {PROMPT_MAX_CHARS}")
+
+
+def fits(session: date, cands: list[ReviewCandidate]) -> bool:
+    try:
+        render(session, cands)
+        return True
+    except PromptTooLong:
+        return False
+
+
+def with_evidence_cap(cands: list[ReviewCandidate], cap: int) -> list[ReviewCandidate]:
+    """Every candidate with at most `cap` news items (the first ones: the desk's order, ticker scope first)."""
+    return [c if len(c.evidence) <= cap else
+            dataclasses.replace(c, evidence=c.evidence[:cap], hidden=c.hidden + len(c.evidence) - cap)
+            for c in cands]
+
+
+def fit(session: date, cands: list[ReviewCandidate]) -> tuple[list[ReviewCandidate], int]:
+    """#306: the candidates as the reviewer is shown them, so the whole list fits PROMPT_MAX_CHARS without a cut.
+    The same per-candidate cap on news items for every candidate, from MAX_EVIDENCE down to 0, the highest that
+    fits; nothing else is dropped (no candidate, reason or feature). Returns (candidates, cap). The reviewer, the
+    evidence check (`check_answer`: only shown ids may be cited) and the record all use the returned list.
+    Raises PromptTooLong when the list does not fit even with no news."""
+    most = max((len(c.evidence) for c in cands), default=0)
+    for cap in range(min(most, MAX_EVIDENCE), -1, -1):
+        shown = with_evidence_cap(cands, cap)
+        if fits(session, shown):
+            return shown, cap
+    raise PromptTooLong(f"{len(cands)} candidates do not fit {PROMPT_MAX_CHARS} characters even with no news")
 
 
 @dataclass(frozen=True)
@@ -352,6 +404,14 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
     elif len(cands) > MAX_CANDIDATES:
         out.status, out.error = "invalid", f"{len(cands)} candidates, more than {MAX_CANDIDATES}"
     else:
+        try:  # #306: the news shown per candidate is capped so the whole list fits; never a cut prompt
+            cands, cap = fit(session, cands)
+            if any(c.hidden for c in cands):
+                log.info("pre-open review for %s: %d candidates, at most %d news items each so the list fits",
+                         session.isoformat(), len(cands), cap)
+        except PromptTooLong as e:
+            out.status, out.error = "invalid", str(e)[:200]
+    if out.status == "done" and cands and len(cands) <= MAX_CANDIDATES:
         t0 = clock()
         answer = None
         # A real deadline: the call runs in a worker and is abandoned at total_s, so a hung reviewer cannot hold

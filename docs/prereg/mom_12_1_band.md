@@ -253,7 +253,7 @@ invested against a plan of about 90%.
    print at cost model v1, with the cash checked at the print (Amendment 3), exactly as it filled the `cls`
    orders. A test asserts that the fills (session, symbol, side, shares, price) and the daily equity are
    identical, to the last bit, with `cls` orders and with near-close orders, for this rule and for
-   trend_momentum (Amendment 9 there). No trial row, report or Gate B mark changes, and no new configuration is added (`n_trials` unchanged).
+   trend_momentum (Amendment 10 there). No trial row, report or Gate B mark changes, and no new configuration is added (`n_trials` unchanged).
    The stress fill (`opg` at the open, research only) is unchanged.
 4. **Known deviation, live against research.** A paper market order sent between 15:50 and 15:57 fills at the
    quote of that moment, not at the official close. Paper prices it on IEX-fed quotes, with no impact and no

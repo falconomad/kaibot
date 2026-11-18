@@ -75,7 +75,8 @@ def test_the_live_prompt_is_untouched_and_the_review_stays_off_by_default():
     plan = {("trend_momentum", "A"): 5}
     reviewed, out, shown = preopen.review(D, [], plan, {}, StubReviewer(), env={})
     assert (reviewed, out.status, shown) == (plan, "off", [])
-    assert CFG.limits["preopen"] == {"max_tokens": 4000, "timeout_s": 90, "daily_usd": 3.0}
+    # #309: $1 a day; #306: max_tokens 6000 so a full list's answer is not cut
+    assert CFG.limits["preopen"] == {"max_tokens": 6000, "timeout_s": 90, "daily_usd": 1.0}
 
 
 # ---------------------------------------------------------------- the cheaper packs: same data, fewer tokens
@@ -114,11 +115,13 @@ def test_cheaper_packs_never_cost_more_input_than_today():
 
 def test_a_pack_over_60000_characters_is_reported_as_cut_off():
     assert not pc.cut_off("today", *pc.scenario(10, 8))
-    assert pc.cut_off("today", *pc.scenario(30, 8))  # the live render cuts the JSON mid-list
-    assert not pc.lossless("today", *pc.scenario(30, 8))
-    fits = [pc.largest_list_that_fits(p, 8) for p in pc.PACKS]
-    assert fits == sorted(fits) and fits[0] < fits[-1] <= preopen.MAX_CANDIDATES
-    assert pc.measure(pc.variant("today"), [pc.scenario(30, 8)], CFG)["cut_off"] == 1
+    # #306: the live pack caps the news per candidate instead of cutting the JSON mid-list
+    assert not pc.cut_off("today", *pc.scenario(30, 8)) and not pc.cut_off("today", *pc.scenario(50, 8))
+    assert pc.cut_off("compact", *pc.scenario(50, 8))  # the variants keep the old cut, comparable with #304
+    assert not pc.lossless("today", *pc.scenario(30, 8))  # fewer stories shown than the full pack
+    assert pc.largest_list_that_fits("today", 8) == preopen.MAX_CANDIDATES
+    assert pc.largest_list_that_fits("compact", 8) <= pc.largest_list_that_fits("hoisted", 8)
+    assert pc.measure(pc.variant("today"), [pc.scenario(30, 8)], CFG)["cut_off"] == 0
 
 
 # ---------------------------------------------------------------- quality: what the eval set can and cannot show
@@ -201,14 +204,14 @@ def test_one_review_and_21_sessions_against_the_budget_in_agents_budget():
     assert isinstance(b, BudgetGateway)
     # the caps of agents/budget.py are the configured ones: nothing is loosened here
     assert (b.daily_soft_usd, b.monthly_alert_usd, b.monthly_hard_usd) == (
-        CFG.daily_soft_usd, CFG.monthly_alert_usd, CFG.monthly_hard_usd) == (3.0, 150.0, 190.0)
+        CFG.daily_soft_usd, CFG.monthly_alert_usd, CFG.monthly_hard_usd) == (1.0, 20.0, 25.0)  # #309
     m = pc.measure(pc.variant("today"), [pc.scenario(20, 8)], CFG)
     ab = pc.against_budget(m["usd_plain"], m["reserved_usd"], b)
     assert pc.SESSIONS == 21 and ab["usd_month"] == pytest.approx(21 * m["usd_plain"])
-    assert ab["share_of_daily_cap"] == pytest.approx(m["usd_plain"] / 3.0)
-    assert ab["share_of_monthly_hard_cap"] == pytest.approx(ab["usd_month"] / 190.0)
-    assert ab["share_of_daily_cap"] < 0.05 and ab["share_of_monthly_hard_cap"] < 0.01
-    assert ab["reservations_inside_daily_cap"] == int(3.0 // m["reserved_usd"]) >= 1
+    assert ab["share_of_daily_cap"] == pytest.approx(m["usd_plain"] / 1.0)
+    assert ab["share_of_monthly_hard_cap"] == pytest.approx(ab["usd_month"] / 25.0)
+    assert ab["share_of_daily_cap"] < 0.05 and ab["share_of_monthly_hard_cap"] < 0.05  # #309: about 4 % of $25
+    assert ab["reservations_inside_daily_cap"] == int(1.0 // m["reserved_usd"]) >= 1
     # agents/budget.py itself accepts the worst case of the largest review and counts 21 of them under the cap
     k = pc.calls_for(pc.variant("today"), *pc.scenario(20, 8), CFG)[0]
     for _ in range(pc.SESSIONS):
