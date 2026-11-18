@@ -670,6 +670,35 @@ def test_the_worker_can_be_turned_off(checks):
     assert "ticker-check worker" not in x.stdout and worker_starts(tmp) == []
 
 
+def test_the_switch_is_read_from_the_env_file_too(checks):
+    """KAIBOT_TICKER_CHECKS=0 in the .env (the settings file every other setting is read from) turns the worker off,
+    although install_service.sh writes only KAIBOT_ENV_FILE, KAIBOT_LOG_DIR and KAIBOT_SERVICE_MODE into the plist.
+    The service's own environment, when set, wins (as the engine's config reads its settings)."""
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    env_file = tmp / "service.env"
+    env_file.write_text("ALPACA_KEY=x\nKAIBOT_TICKER_CHECKS=0  # the worker off\n")
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_ENV_FILE": str(env_file)}, check=True)
+    assert "ticker-check worker on" not in x.stdout and worker_starts(tmp) == []
+    env_file.write_text('KAIBOT_TICKER_CHECKS="0"\n')
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r,
+           {**env, "KAIBOT_ENV_FILE": str(env_file), "KAIBOT_TICKER_CHECKS": "1"}, check=True)
+    assert "ticker-check worker on" in x.stdout  # the process environment wins over the file
+
+
+@pytest.mark.parametrize("value", ["yes", "off", "", "2"])
+def test_a_switch_value_that_is_not_0_or_1_keeps_the_default_and_says_so(checks, value):
+    """Only an explicit 0 or 1 counts. Anything else used to turn the worker off (the test was `= 1`); now it keeps
+    the default (on) and the log says the value was not understood."""
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_TICKER_CHECKS": value}, check=True)
+    assert "ticker-check worker on" in x.stdout
+    if value:
+        assert "KAIBOT_TICKER_CHECKS" in x.stdout and "not 0 or 1" in x.stdout
+
+
 def test_the_worker_log_is_rotated(checks):
     r, env, tmp = checks
     (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
