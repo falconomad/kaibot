@@ -1568,8 +1568,15 @@ class Engine:
         engine died (nobody books it) is multi-day shares to the dead-man too. Raises (the caller reports it)."""
         if self.daily is None or self.run is None:
             return
-        self._md_rows(today, "daily-path buys about to be sent",
-                      {(strategy, sym): float(q) for sym, q in planned.items()})
+        # QA-Ops on #342: the plan is kept for the session, so a rewrite after another sleeve's fill (`_md_rows`
+        # without a plan) never drops a planned buy the target loop sends on a later tick (the send hook runs once
+        # per rule and session). The close forgets it (`_close_ledger`).
+        day, kept = getattr(self, "_md_plan", (None, {}))
+        plan = dict(kept) if day == today else {}
+        for sym, q in planned.items():
+            plan[(strategy, sym)] = max(plan.get((strategy, sym), 0.0), float(q))
+        self._md_plan = (today, plan)
+        self._md_rows(today, "daily-path buys about to be sent", plan)
 
     def _md_pending(self, today: date) -> dict[tuple[str, str], float]:
         """Shares today's daily-path buys may still add to their sleeves: an open order's unfilled rest, a finished
@@ -1592,6 +1599,9 @@ class Engine:
         b = self.ledger.book(self._rid())
         if b is None:
             return
+        if planned is None:  # QA-Ops on #342: the session's planned buys (`_md_positions_planned`) still count
+            day, kept = getattr(self, "_md_plan", (None, {}))
+            planned = kept if day == today else None
         want = {k: sl.qty for k, sl in b.sleeves.items() if sl.qty > 1e-9}
         for k, q in self._md_pending(today).items():
             want[k] = want.get(k, 0.0) + q
@@ -2637,6 +2647,7 @@ class Engine:
         with the broker, and write the day's mark-to-market rows (ledger_day, ledger_position)."""
         prices = {price_key(p.strategy, p.symbol): self._close_price(p) for p in self.pos.values()
                   if p.status == "open" and p.fill is not None}
+        self._md_plan = (None, {})  # QA-Ops on #342: the day's rows below replace the planned buys
         md = self._md_sleeves()
         for (strategy, sym) in md:  # S80: multi-day sleeves are marked at the close too (unpriced: last mark)
             px = self._md_price(sym)

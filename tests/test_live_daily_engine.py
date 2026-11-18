@@ -872,3 +872,64 @@ def test_a_planned_buy_that_never_fills_is_zeroed_at_the_close(tmp_path, monkeyp
     today = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
     assert [float(r["qty"]) for r in today] == [0.0] and "B" not in a.broker.pos
     assert [e for e in a.store.tables["event"] if e["type"] == "multi_day_unfilled"]
+
+
+def test_a_buy_the_target_loop_sends_on_a_later_tick_still_has_its_row_for_the_dead_man(tmp_path, monkeypatch):
+    """QA-Ops on #342: the send hook runs once per rule and session. When the first tick skips a buy (here a wash-
+    trade wait) and another sleeve's fill rewrites today's rows before the next tick, the planned buy keeps its row:
+    the dead-man keeps the fill that lands after the engine died at the second tick. The close forgets the plan."""
+    from pg_harness import DeadmanDb
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    g, calls = a.eng.daily.gate, []
+    real_allows = g.allows
+
+    def allows(symbol, side, purpose="target", qty=None):
+        calls.append(symbol)
+        if len(calls) == 1:
+            return f"an open sell market or stop order in {symbol} (Alpaca refuses a wash trade): waiting"
+        return real_allows(symbol, side, purpose, qty)
+
+    g.allows = allows
+    a.ticks(a.open2, 0, SEND + 1)  # 15:50: B is planned, then skipped by the loop
+    assert a.md_orders() == []
+    a.eng._md_filled = True  # another sleeve's daily fill was booked: today's rows are written again
+    a.ticks(a.open2, SEND + 1, SEND + 2)  # 15:51: B goes out, and the engine dies right after this tick
+    (o,) = a.md_orders()
+    qty = float(o["qty"])
+    rows = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [float(r["qty"]) for r in rows] == [qty]
+    a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=SEND + 2)))
+    assert o["status"] == "filled" and (MD, "B") not in a.eng.ledger.book(a.rid).sleeves  # filled, not booked
+    db = DeadmanDb(tmp_path)
+    try:
+        db.beat(a.clock())
+        db.run(a.rid)
+        for s in sorted({str(r["session"]) for r in a.store.tables.get("ledger_position", [])}):
+            db.ledger(a.rid, s, [(r["strategy"], r["symbol"], r["qty"], r["stop_px"])
+                                 for r in a.store.tables["ledger_position"] if str(r["session"]) == s])
+        said = []
+        for k in range(SEND + 2, 390):
+            a.clock.t = a.open2 + timedelta(minutes=k, seconds=2)
+            said.append(db.check(a.clock()))
+            db.pump(a.broker)
+            a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+        assert any(x.startswith("acted") for x in said)
+        assert float(a.broker.pos["B"]["qty"]) == qty  # kept as multi-day
+        assert not [x for x in a.broker.orders.values() if x["symbol"] == "B" and x["side"] == "sell"
+                    and x["type"] != "stop"]
+    finally:
+        db.stop()
+
+
+def test_the_close_forgets_the_planned_buys(tmp_path, monkeypatch):
+    """QA-Ops on #342: a planned buy the venue let expire is zeroed by the close, and a rewrite after the close
+    (a late fill booked) does not bring its row back."""
+    a, qty, rows = _killed_right_after_the_send(tmp_path, monkeypatch, fill=False)
+    a.ticks(a.open2, SEND + 1, 390)
+    a.after_close(a.open2)
+    a.eng._md_rows(date.fromisoformat(DAY2), "a late fill booked")
+    today = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [float(r["qty"]) for r in today] == [0.0] and "B" not in a.broker.pos
