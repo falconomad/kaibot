@@ -287,3 +287,13 @@ def from_env(store, env: dict) -> Gateway:
     on = (env.get("KAIBOT_ROOM") or "").lower() in ("1", "on", "true", "yes")
     client = AnthropicClient(key) if key and on else None
     return Gateway(store, client)
+
+
+def shadow_from_env(store, env: dict) -> Gateway:
+    """#310: the gateway of the SHADOW pre-open review. A real client only if ANTHROPIC_API_KEY is set and
+    KAIBOT_PREOPEN=shadow; it never reads KAIBOT_ROOM (the room stays off). Same Postgres ledger and caps as every
+    other call, so the shadow review is refused over the daily, monthly and lifetime caps like anything else."""
+    key = env.get("ANTHROPIC_API_KEY") or ""
+    on = (env.get("KAIBOT_PREOPEN") or "").strip().lower() == "shadow"
+    client = AnthropicClient(key) if key and on else None
+    return Gateway(store, client)

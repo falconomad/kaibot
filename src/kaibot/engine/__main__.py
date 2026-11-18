@@ -38,7 +38,7 @@ from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
 from kaibot.engine.journal import BootstrapError, IdentityError, Journal, JournalStore, Replicator, journal_path
 from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
-from kaibot.engine.m3glue import LockedDesk, make_pack_fn, make_preopen, make_rules_extra
+from kaibot.engine.m3glue import LockedDesk, make_pack_fn, make_preopen, make_preopen_shadow, make_rules_extra
 from kaibot.engine.market import LiveMarket
 from kaibot.engine.store import Store
 from kaibot.news import NewsDesk
@@ -98,7 +98,8 @@ def build(settings: Settings) -> Engine:
                   calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
                   pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
                   ex_dividends=ExDateDividends(data),  # S78: dividends accrued at the ex-date (#118)
-                  daily=daily_path(data, review=make_preopen(gw, locked)),  # #131: review None unless switched on
+                  daily=daily_path(data, review=make_preopen(gw, locked),  # #131: review None unless switched on
+                                   shadow=make_preopen_shadow(remote, locked)),  # #310: None unless shadow
                   # #266: spin-offs and symbol changes of held multi-day positions, adopted from Alpaca's record
                   # (only used with the daily path: KAIBOT_MULTIDAY=on)
                   recent_actions=RecentActions(get=bounded_data_get(data)))
@@ -119,7 +120,7 @@ def bounded_data_get(data):
     return lambda path, params: http.call("GET", f"{DATA_URL}{path}", params)
 
 
-def daily_path(data=None, review=None):
+def daily_path(data=None, review=None, shadow=None):
     """#206: the live daily path's factory, only with KAIBOT_MULTIDAY=on and a multi-day rule enabled in
     config/profiles.yaml (`multi_day.rules`); None otherwise, and then nothing of it is imported. The daily view is
     read from the daily store under KAIBOT_DAILY_DATA (default <repo>/data, the folder holding daily/, which
@@ -149,7 +150,10 @@ def daily_path(data=None, review=None):
     if review is not None:
         log.warning("pre-open review of the daily path: ON (KAIBOT_PREOPEN_REVIEW=on, %s)",
                     "LLM key set" if review.gateway.enabled else "no ANTHROPIC_API_KEY: no daily buys until it is set")
-    return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review)
+    if shadow is not None:
+        log.warning("pre-open review in SHADOW mode (KAIBOT_PREOPEN=shadow): observer only, no effect on orders (%s)",
+                    "LLM key set" if shadow.gateway.enabled else "no ANTHROPIC_API_KEY: every session is skipped")
+    return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review, shadow=shadow)
 
 
 EXIT_JOURNAL = 4
