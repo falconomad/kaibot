@@ -8,9 +8,12 @@
 -- #319 code keeps calling kaibot.llm_reserve (unchanged); with it, the engine reads kaibot.ai_spend and reserves
 -- through kaibot.llm_reserve_lifetime (and falls back to the two tables while this migration is not applied).
 --
--- One lock for both sides: today's kaibot.budget_day row, which kaibot.llm_reserve already locks (0008). Both
--- reservation paths take it before they read the total, so an engine call and a summary call cannot both fit the
--- last dollars. Lock order: kb_summary_reserve takes its advisory lock, then the row; the engine takes only the row.
+-- One lock for both sides: the transaction advisory lock hashtext('kaibot.ai_lifetime'), then today's
+-- kaibot.budget_day row, which kaibot.llm_reserve already locks (0008). Both reservation paths take them before
+-- they read the total, so an engine call and a summary call cannot both fit the last dollars. The advisory lock is
+-- the one that does not depend on the day (QA-Ops on #322: two calls either side of midnight ET lock two different
+-- budget_day rows). Lock order: kb_summary_reserve takes its summary lock, then the AI lock, then the row; the
+-- engine takes the AI lock, then the row; an engine without the #319 code takes only the row. No cycle.
 --
 -- Check after applying (read-only):
 --   select kaibot.ai_spend();                    -- service role: {"llm": .., "summaries": .., "total": ..}
@@ -50,6 +53,7 @@ declare
   d date := (now() at time zone 'America/New_York')::date;
   cap numeric := least(greatest(coalesce(p_lifetime_hard, 0), 0), 150.0);
 begin
+  perform pg_advisory_xact_lock(hashtext('kaibot.ai_lifetime'));      -- the summaries take it too, any day
   insert into kaibot.budget_day (day) values (d) on conflict (day) do nothing;
   perform 1 from kaibot.budget_day where day = d for update;           -- the lock llm_reserve and the summaries take
   if kaibot.ai_lifetime_spent(p_ttl_s) + coalesce(p_reserved, 0) > cap then
@@ -76,6 +80,7 @@ begin
   if p_reserved is null or p_reserved <= 0 or p_reserved > 0.02 then
     return jsonb_build_object('ok', false, 'reason', 'too_large'); end if;
   perform pg_advisory_xact_lock(hashtext('kaibot.summary_budget'));   -- serialises every summary reservation
+  perform pg_advisory_xact_lock(hashtext('kaibot.ai_lifetime'));      -- and against the engine's, on any day
   insert into kaibot.budget_day (day) values (d) on conflict (day) do nothing;
   perform 1 from kaibot.budget_day where day = d for update;          -- and against the engine's (#319)
   if exists (select 1 from kaibot.stock_summary where symbol = s and day = d) then

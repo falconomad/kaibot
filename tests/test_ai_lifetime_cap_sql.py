@@ -132,3 +132,31 @@ def test_the_engine_functions_are_service_role_only(fn, role):
     r = psql(f"select {fn};", uid=None, role=role, check=False)
     assert r.returncode and "permission denied" in r.stderr
     assert psql(f"select {fn};", uid=None, role="service_role", check=False).returncode == 0
+
+
+@pytest.mark.parametrize("call", ["engine", "summary"])
+def test_both_reservations_wait_for_the_one_ai_lock_on_any_day(call):
+    """QA-Ops on #322: today's budget_day row is a different row on either side of midnight ET, so both paths also
+    take one advisory lock that does not depend on the day. While another session holds it, neither reserves."""
+    import time
+
+    holder = subprocess.Popen(["psql", *shlex.split(PG), "-tA", "-q", "-v", "ON_ERROR_STOP=1"],
+                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    holder.stdin.write("begin; select pg_advisory_xact_lock(hashtext('kaibot.ai_lifetime')); select 'held';\n")
+    holder.stdin.flush()
+    try:
+        while (line := holder.stdout.readline()) and line.strip() != "held":  # the lock's void row comes first
+            pass
+        assert line.strip() == "held", holder.stderr.read()
+        sql = ("select kaibot.llm_reserve_lifetime('m', 't', 0.01, 1.0, 25.0, 150.0, 300);" if call == "engine" else
+               "select public.kb_summary_reserve('AAPL', 'm', 0.001);")
+        t0 = time.monotonic()
+        r = psql(f"set lock_timeout = '700ms';\n{sql}", uid=None if call == "engine" else OWNER, check=False)
+        assert r.returncode and "lock timeout" in r.stderr and time.monotonic() - t0 >= 0.6
+        assert one("count(*) from kaibot.llm_call", uid=None) == "0"
+        assert one("count(*) from kaibot.summary_call", uid=None) == "0"
+    finally:
+        holder.stdin.write("commit;\n")
+        holder.stdin.close()
+        holder.wait(timeout=10)
+    assert psql(sql, uid=None if call == "engine" else OWNER, check=False).returncode == 0  # free again: it reserves
