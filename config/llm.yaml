@@ -25,5 +25,7 @@ limits:
   proposer: {max_tokens: 700, timeout_s: 15}
   critic: {max_tokens: 700, timeout_s: 15}
   judge: {max_tokens: 500, timeout_s: 15}
-  preopen: {max_tokens: 4000, timeout_s: 90, daily_usd: 1.0}  # #186: one call per session; cap = budget.daily_soft_usd
+  # #186: one call per session; cap = budget.daily_soft_usd. #306: max_tokens 6000 (was 4000) so the answer for
+  # a full list (50 candidates, every reason at the contract's 200 characters) is not cut; worst case still ~$0.12
+  preopen: {max_tokens: 6000, timeout_s: 90, daily_usd: 1.0}
   room_total_s: 45
