@@ -14,6 +14,16 @@ const TINTS = ["#1E3A5F", "#3A2E1A", "#1F3A2C", "#3B1E2A", "#2A2540", "#1C3540",
 
 export const companyName = (s: string) => META[s]?.name ?? s;
 
+/** A second logo source for every ticker (stakeholder, 18 Nov 2026): Financial Modeling Prep's public logo images, no
+ *  key. Used when our list has no logo (custom-list tickers such as NBIS, the funds) or its logo fails to load. */
+export const fmpLogo = (s: string) => `https://financialmodelingprep.com/image-stock/${encodeURIComponent(s.toUpperCase())}.png`;
+export function logoSources(symbol: string): string[] {
+  const own = META[symbol]?.logo;
+  const unreadable = TILES[symbol]?.unreadable;
+  const fmp = /^[A-Z]{1,5}([.][A-Z])?$/.test(symbol) ? fmpLogo(symbol) : null;
+  return [own && !unreadable ? own : null, fmp].filter((x): x is string => !!x);
+}
+
 function tint(s: string) {
   let h = 0;
   for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -29,17 +39,19 @@ const scaled = (n: number) => Math.round(n * TILE_SCALE);
 
 export function StockBadge({ symbol, size: base = 40 }: { symbol: string; size?: number }) {
   const size = scaled(base);
-  const [failed, setFailed] = useState(false);
+  const [step, setStep] = useState(0);  // which source is showing: our list's logo, then FMP's, then the initials
   const [loaded, setLoaded] = useState(false);
-  const logo = META[symbol]?.logo;
+  const sources = logoSources(symbol);
+  const src = sources[step];
   const t = TILES[symbol];
-  const tile = t?.sampled && t.bg ? { bg: t.bg, pad: t.pad } : t?.unreadable ? null : PENDING;
+  // A sampled colour belongs to our own logo; FMP's logo, or one not sampled yet, sits on the soft white tile.
+  const tile = src && src === META[symbol]?.logo && t?.sampled && t.bg ? { bg: t.bg, pad: t.pad } : PENDING;
   const box = { width: size, height: size, flex: "none" as const };
-  if (logo && tile && !failed)
+  if (src)
     return (
       <span className="badge logo" style={{ ...box, "--tile-bg": tile.bg, "--tile-pad": `${tile.pad}%` } as CSSProperties}>
-        <img src={logo} alt="" width={size} height={size} loading="lazy" decoding="async" referrerPolicy="no-referrer" className={loaded ? "loaded" : undefined}
-          onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+        <img key={src} src={src} alt="" width={size} height={size} loading="lazy" decoding="async" referrerPolicy="no-referrer" className={loaded ? "loaded" : undefined}
+          onLoad={() => setLoaded(true)} onError={() => { setLoaded(false); setStep((n) => n + 1); }} />
       </span>
     );
   // The initials fit inside the tile's curve (about 84% of its width, a bold capital about 0.72 of the size wide), at the
