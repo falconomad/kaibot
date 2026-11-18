@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Day-to-day control of the always-on engine (issue #121; install first with ./scripts/install_service.sh).
-#   ./scripts/service.sh status    is it running, which release, last log lines
+#   ./scripts/service.sh status    is it running (engine and ticker-check worker), which release, last log lines
 #   ./scripts/service.sh stop      stop cleanly for today (starts again next weekday 15:00 or at login)
 #   ./scripts/service.sh start     start now
 #   ./scripts/service.sh restart   stop cleanly, then start (e.g. after ./scripts/release.sh)
@@ -24,7 +24,13 @@ case "${1:-status}" in
     loaded
     if running; then echo "engine service: running (pid $(launchctl print "$JOB" | awk '/^\tpid =/ {print $3}'))"
     else echo "engine service: not running$( [ -f data/HOLD ] && echo ' (on hold: ./scripts/service.sh unhold)')"; fi
-    echo "engines on this machine: $(./scripts/engine_guard.sh --list | tr '\n' ' ')"
+    # the ticker-check worker beside the engine (scripts/service_run.sh; answers the dashboard's ticker checks)
+    CPID="$(cat data/live/ticker_checks.pid 2>/dev/null)"
+    if [ -n "$CPID" ] && ps -p "$CPID" -o command= 2>/dev/null | grep -q run_ticker_checks; then
+      echo "ticker checks: running (pid $CPID, log $LOG_DIR/ticker_checks.log)"
+    else echo "ticker checks: not running$(running && echo " (starting or waiting: see $LOG_DIR/ticker_checks.log)")"; fi
+    [ -s "$LOG_DIR/ticker_checks.log" ] && echo "  last: $(tail -n 1 "$LOG_DIR/ticker_checks.log" | cut -c1-160)"
+    echo "engines on this machine:$(./scripts/engine_guard.sh --list | tr '\n' ' ')"
     bash scripts/release.sh --show | sed -n '1,3p'
     echo "--- last lines of $LOG_DIR/engine.log"; tail -n 8 "$LOG_DIR/engine.log" 2>/dev/null ;;
   stop) loaded; stop ;;
