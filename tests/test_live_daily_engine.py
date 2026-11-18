@@ -817,3 +817,31 @@ def test_before_migration_0028_the_engine_writes_missing_and_says_so_once(tmp_pa
     assert row["stop_state"] == "missing"
     ev = [e for e in a.store.tables["event"] if e["type"] == "stop_state_fallback"]
     assert len(ev) == 1 and "0028" in ev[0]["payload"]["action"]
+
+
+def test_the_book_line_after_the_close_never_breaches_ends_or_sells(tmp_path, monkeypatch):
+    """QA-Ops on #339: the line at the close marks may be past the book end (27% for Hunter, 21% here), yet the check
+    after the close journals no breach, ends nothing and sends nothing, also when it runs again a minute later or
+    after a restart. And a book that already ended is not sold with the market closed."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, 390)
+    a.after_close(a.open2)
+    assert "B" in a.broker.pos
+    n_orders = len(a.broker.orders)
+    for i in range(2):
+        eng = a.eng if i == 0 else a.restart()
+        eng._book_pnl = lambda live=True: -5_000.0  # half the pot gone at the close marks
+        eng.book_line = None
+        for _ in range(3):
+            eng._book_line_marked()
+            a.clock.t = a.clock.t + timedelta(minutes=2)
+        line = eng._daily_status({"state": "market_closed"})["multi_day"]["book_line"]
+        assert line["drawdown_pct"] > line["end_pct"] and line["ended"] is False
+        kinds = {k for _, _, k, _ in eng.journal.entries(kinds=("md_book_breach", "md_book_end"))}
+        assert kinds == set()
+        assert len(a.broker.orders) == n_orders and "B" in a.broker.pos
+    monkeypatch.setattr(type(a.eng.daily.account), "book_ended", lambda self: True)
+    a.eng._book_line_marked()
+    assert len(a.broker.orders) == n_orders and "B" in a.broker.pos  # an ended book: not sold with the market closed
