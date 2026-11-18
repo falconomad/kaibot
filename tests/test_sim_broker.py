@@ -381,6 +381,47 @@ def test_cash_at_fill_cuts_a_closing_auction_buy_to_the_cash_at_the_print():
     assert float(b.account()["cash"]) >= 0
 
 
+def _near_close_venue(start: str = "15:52", **kw):
+    from datetime import time
+
+    edits = {389: {"o": 100.0, "c": 101.0, "h": 101.05}}  # the closing print is not the last bar's open
+    frames = {"A": pd.concat([flat(DAY, edits=edits), flat(NEXT)], ignore_index=True)}
+    return venue(frames, start=et(DAY, start, 7), near_close=time(15, 50), **kw)
+
+
+def test_a_near_close_market_order_fills_at_the_closing_print_priced_as_a_cls_order():
+    """Issue #333: on the daily venue (`near_close`), a DAY market order sent from 15:50 ET fills at the session's
+    closing print (the 15:59 bar's close), at the same modelled price as a `cls` order of the same size; a market
+    order sent earlier, and every order on a venue without `near_close`, keeps the minute-bar rule."""
+    near, nclock = _near_close_venue(costs=COSTS_V1)
+    auction, aclock = venue({"A": pd.concat([flat(DAY, edits={389: {"o": 100.0, "c": 101.0, "h": 101.05}}),
+                                             flat(NEXT)], ignore_index=True)}, start=et(DAY, "15:40", 7),
+                            costs=COSTS_V1)
+    o = near.submit(OrderRequest("A", "buy", 10, "market", "day"))
+    c = auction.submit(OrderRequest("A", "buy", 10, "market", "cls"))
+    run(near, nclock, 382, 388)
+    assert o["status"] == "new"  # nothing before the closing print
+    run(near, nclock, 389, 389)
+    run(auction, aclock, 370, 389)
+    assert o["status"] == c["status"] == "filled"
+    assert float(o["filled_avg_price"]) == pytest.approx(float(c["filled_avg_price"]), abs=1e-12)
+    assert float(o["filled_avg_price"]) > 101.0  # the close plus the half spread, not the 15:59 bar's open
+    plain, pclock = _near_close_venue("15:40", costs=None)
+    early = plain.submit(OrderRequest("A", "buy", 10, "market", "day"))
+    run(plain, pclock, 370, 370)
+    assert early["status"] == "filled" and float(early["filled_avg_price"]) == 100.0  # minute-bar rule
+
+
+def test_a_near_close_buy_is_checked_against_the_cash_at_the_print_and_cut_to_fit():
+    """Amendment 3 (never more than the cash) on the daily venue: a near-close market buy is checked at the print,
+    after the print's earlier sales, and cut to the whole shares that fit there, exactly as a `cls` buy."""
+    b, clock = _near_close_venue(cash=10_000.0, cash_at="fill")
+    o = b.submit(OrderRequest("A", "buy", 1000, "market", "day"))  # accepted: checked at the print, not now
+    run(b, clock, 382, 389)
+    assert o["status"] == "canceled" and float(o["filled_qty"]) == 99.0  # 99 x 101 fits, 100 x 101 does not
+    assert float(b.account()["cash"]) >= 0
+
+
 # ================================================================ scripting
 def test_script_reject_then_normal():
     b, clock = venue()

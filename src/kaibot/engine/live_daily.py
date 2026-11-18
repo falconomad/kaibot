@@ -9,9 +9,10 @@ Nothing here is a second implementation of the rule or of its sizing. What it re
     the decision             engine/daily.decide_after_close -> strategies/momentum (the frozen rule)
     the sizing               engine/daily.plan_session -> risk/portfolio.PortfolioBuilder (ranked fill, 3% cash
                              reserve, 40% sector cap at most), at the live book's limits (`live_limits`)
-    the orders               engine/targets.reconcile_targets -> engine/execution.ExecutionPolicy("close") (`cls`
-                             day orders, whole shares, before 15:50 ET) -> engine/orders.OrderManager (deterministic
-                             client ids, intent journalled before the call, unknown orders looked up by client id)
+    the orders               engine/targets.reconcile_targets -> engine/execution.ExecutionPolicy("near_close")
+                             (DAY market orders, whole shares, 15:50-15:57 ET; issue #333) ->
+                             engine/orders.OrderManager (deterministic client ids, intent journalled before the
+                             call, unknown orders looked up by client id)
     the fills                OrderManager(run_id=...): every FILL activity of its orders becomes the ledger's own
                              `fill` entry in one journal append; the engine folds it into its ledger (`book_fill`)
     reconciliation, stops    the engine's Reconciler (engine/reconcile.py) and ProtectiveStops (engine/protect.py:
@@ -22,12 +23,22 @@ The steps, per session (times ET):
     after the close of k     `after_close`: once the daily store holds session k (its bars carry `available_ts`,
                              20:15 ET; nothing is read before it) each enabled rule decides for the next session
                              and the target list is journalled (`md_decision`), once per (rule, session)
-    session i, 09:31-15:45   `send`: the target list decided after k (i's previous session) is sized by the
+    session i, 15:50-15:57   `send`: the target list decided after k (i's previous session) is sized by the
                              portfolio builder against the ledger (equity at the last close, cash) and the targets
                              are journalled (`md_send`) BEFORE any order; the target loop sends the difference as
-                             `cls` orders; `md_sent` closes the step. Sales go out even when entries are blocked;
-                             buys need `entry_block() is None` and a clean reconciliation
-    every tick               `sync`: the order manager books the venue's fills (the closing auction's at 16:00)
+                             near-close DAY market orders; `md_sent` closes the step. Sales go out even when entries
+                             are blocked; buys need `entry_block() is None` and a clean reconciliation. On an early
+                             close the window is the close minus 10 to the close minus 3 minutes
+    every tick               `sync`: the order manager books the venue's fills; a remainder the venue let expire at
+                             the close is journalled once (`md_unfilled`) and reported (`multi_day_unfilled`)
+
+Why not the closing auction (issue #333): Alpaca paper does not run one. It works a `cls` order as a market order in
+the last seconds before 16:00 and lets the rest expire ("Paper trading treats these simply like market orders placed
+at the close"); on 18 Nov 2026 23 of 30 `cls` buys got nothing. A DAY market order from 15:50 gives paper minutes to
+fill, and a partial fill's remainder is worked again while the order is marketable. The research venue fills it at
+the closing print at cost model v1, as it did the `cls` order (SimBroker `near_close`), so the fills of the ten-year
+runs do not change (Amendment 9 of trend_momentum, Amendment 8 of mom_12_1_band). A remainder that still expires is
+never sent again: a buy waits for the rule's next decision, a sale is sent again at the next session.
 
 Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
 every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the
@@ -66,7 +77,7 @@ import pandas as pd
 
 from kaibot.broker.protocol import Broker
 from kaibot.engine.daily import CASH_RESERVE, DailyData, decide_after_close, momentum_limits, plan_session
-from kaibot.engine.execution import NY, ExecutionPolicy
+from kaibot.engine.execution import NEAR_CLOSE_MIN, NY, REGULAR_CLOSE, ExecutionPolicy, minus
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
 from kaibot.engine.targets import Target, reconcile_targets
@@ -77,9 +88,12 @@ from kaibot.strategies.momentum import RESIZE_BUFFER
 
 log = logging.getLogger("kaibot.engine.daily")
 
-SEND_FROM, SEND_UNTIL = time(9, 31), time(15, 45)  # Alpaca refuses `cls` orders 15:50-19:00: five minutes' margin
-DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel", "md_review")
-PREOPEN_FROM = time(8, 30)  # #131: the pre-open review starts here, before the 09:31 send window
+# Issue #333: near-close DAY market orders, from the close minus 10 minutes; the last three minutes are left for
+# the venue to fill them (and to work a partial fill's remainder) before the close.
+SEND_FROM, SEND_UNTIL = minus(REGULAR_CLOSE, NEAR_CLOSE_MIN), minus(REGULAR_CLOSE, 3)  # 15:50 / 15:57 ET
+SEND_LAST_MIN = 3
+DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel", "md_review", "md_unfilled")
+PREOPEN_FROM, PREOPEN_UNTIL = time(8, 30), time(9, 31)  # #131: the pre-open review runs before the session
 REVIEW_WAIT_UNTIL_S = 300.0  # the send stops waiting for a running review 5 minutes before the window ends
 # Product call on #207 (13 Nov 2026): a rule whose book reached its run end stays RETIRED across runs and restarts,
 # until the stakeholder re-enables it explicitly: KAIBOT_REENABLE=<rule>:<retirement date>, read once at start-up.
@@ -433,7 +447,7 @@ class LiveDaily:
         self._store_cache: dict[str, dict | None] = {}
         self.shorting: bool | None = None  # the paper account's shorting_enabled, read at start-up and each session
         self._shorting_day: date | None = None
-        self.policy = ExecutionPolicy("close")
+        self._unfilled: set[str] | None = None  # client ids already reported as expired remainders (md_unfilled)
         self.gate = _Gate(account)
         self.om: OrderManager | None = None
         self.stops: ProtectiveStops | None = None
@@ -625,6 +639,7 @@ class LiveDaily:
         sleeves = {(r.name, s): q for r in self.rules for s, (q, _) in self.account.held(r.name).items()}
         self.stops.startup(sleeves, str(self.now().astimezone(NY).date()))
         self._read_shorting()
+        self._report_unfilled(om)  # #333: an expiry the last run saw but did not report (or from before #333)
         self._prune()
         self._cancel_due()  # a halt or a full flatten journalled before the restart still holds today
 
@@ -644,8 +659,28 @@ class LiveDaily:
             return
         self._synced = now
         om.sync()
+        self._report_unfilled(om)
         self._prune()
         self._cancel_due()  # an order that was unconfirmed when the halt came is cancelled once it is confirmed
+
+    def _report_unfilled(self, om: OrderManager) -> None:
+        """Issue #333, question 4: an order of this path (not a protective stop) the venue let expire with shares
+        left is journalled once by client id (`md_unfilled`) and reported as `multi_day_unfilled`, once its fills
+        are booked (the venue's filled quantity is in the ledger). Nothing is sent again for it here."""
+        if self._unfilled is None:
+            self._unfilled = {str(b.get("coid")) for b in self._entries("md_unfilled")}
+        for r in om.orders.values():
+            if r.purpose == "stop" or r.state is not St.EXPIRED or r.coid in self._unfilled:
+                continue
+            if r.booked + 1e-9 < r.cum or r.booked + 1e-9 >= r.qty:
+                continue  # a fill still to book, or nothing left
+            body = {"run_id": om.run_id, "strategy": r.strategy, "symbol": r.symbol, "side": r.side,
+                    "qty": float(r.qty), "filled": float(r.booked), "left": float(r.qty - r.booked), "coid": r.coid,
+                    "session": r.session, "status": str(r.state), "purpose": r.purpose, "type": r.type,
+                    "tif": r.tif}
+            self.journal.append("md_unfilled", body)
+            self._unfilled.add(r.coid)
+            self.event("multi_day_unfilled", {k: v for k, v in body.items() if k != "run_id"})
 
     # ---------------------------------------------------------------- halts and full flattens (QA-Ops, #207 review)
     def cancel_working(self, sides: Sequence[str], reason: str) -> list[str]:
@@ -783,9 +818,8 @@ class LiveDaily:
             self._data = {k: self.load(k, now)}  # one evening's view at a time
         return self._data[k]
 
-    def send_until(self, day: date) -> time:
-        """15:45 ET, or on an early-close day the close minus 15 minutes (QA-Ops review of #207; Alpaca refuses
-        `cls` orders from 15:50 on normal days, so 15:45 is never passed)."""
+    def _close(self, day: date) -> time | None:
+        """The session's close from the calendar (None: unreadable, or a normal 16:00 close not given)."""
         if day in self._closes:  # one calendar read per session (QA-Ops second key: not one per tick)
             close = self._closes[day]
         else:
@@ -795,14 +829,25 @@ class LiveDaily:
                 close = None  # unreadable: 15:45, read again at the next call
             else:
                 self._closes = {day: close}
-        if close is None:
-            return SEND_UNTIL
-        early = (datetime.combine(day, close) - timedelta(minutes=15)).time()
-        return min(SEND_UNTIL, early)
+        return close
+
+    def policy_for(self, day: date) -> ExecutionPolicy:
+        """The session's execution style: near-close DAY market orders (issue #333), against its close."""
+        close = self._close(day)
+        return ExecutionPolicy("near_close", close=min(close or REGULAR_CLOSE, REGULAR_CLOSE))
+
+    def send_from(self, day: date) -> time:
+        """15:50 ET, or on an early-close day the close minus 10 minutes (issue #333)."""
+        return minus(self.policy_for(day).close, NEAR_CLOSE_MIN)
+
+    def send_until(self, day: date) -> time:
+        """15:57 ET, or on an early-close day the close minus 3 minutes (issue #333: the last minutes are the
+        venue's, to fill the orders before the close)."""
+        return minus(self.policy_for(day).close, SEND_LAST_MIN)
 
     def in_window(self, now: datetime) -> bool:
         et = now.astimezone(NY)
-        return SEND_FROM <= et.time() < self.send_until(et.date())
+        return self.send_from(et.date()) <= et.time() < self.send_until(et.date())
 
     def _read_shorting(self, day: date | None = None) -> None:
         """QA-Ops review of #207: multi-day buys need shorting OFF at the paper account (a late stop must never open a
@@ -874,8 +919,9 @@ class LiveDaily:
                 self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
                                                  "why": "open orders unreadable"})
                 continue
-            res = reconcile_targets(om, self.policy, targets, held_now, now=self.now(), session=str(session),
-                                    run=rid, reconciler=self.gate, stops=self.stops, sells_first=False)
+            res = reconcile_targets(om, self.policy_for(session), targets, held_now, now=self.now(),
+                                    session=str(session), run=rid, reconciler=self.gate, stops=self.stops,
+                                    sells_first=False)
             sent = [{"coid": x.coid, "symbol": x.symbol, "side": x.side, "qty": x.qty, "state": str(x.state),
                      "reason": x.reason} for x in res.sent]
             skipped = [[k[1], why[:160]] for k, why in res.skipped]
@@ -897,7 +943,7 @@ class LiveDaily:
 
     # ---------------------------------------------------------------- the pre-open review (#131, off by default)
     def _window_left(self, now: datetime) -> float:
-        """Seconds left in today's send window (15:45 ET, or the early close minus 15 minutes)."""
+        """Seconds left in today's send window (15:57 ET, or the early close minus 3 minutes)."""
         et = now.astimezone(NY)
         end = datetime.combine(et.date(), self.send_until(et.date()), tzinfo=NY)
         return (end - et).total_seconds()
@@ -953,13 +999,13 @@ class LiveDaily:
         return reviewed_plan(r.name, planned, held, rec)[0]
 
     def preopen(self) -> list[str]:
-        """#131: from 08:30 ET until the send window opens, start the review of each rule's plan for today's
+        """#131: from 08:30 ET until 09:31 ET, start the review of each rule's plan for today's
         session and journal finished reviews. Nothing at all when the review is off. Returns the rules started."""
         if self.review is None or not self.review.enabled:
             return []
         now = self.now()
         et = now.astimezone(NY)
-        if not (PREOPEN_FROM <= et.time() < SEND_FROM):
+        if not (PREOPEN_FROM <= et.time() < PREOPEN_UNTIL):
             return []
         rid = self.account.run_id()
         if rid is None or self.account.book_ended() or self._manager() is None:
@@ -1237,7 +1283,8 @@ class LiveDaily:
 
 __all__ = ["LiveDaily", "Rule", "StoreLoader", "DataNotReady", "StoreFailedCheck", "live_limits", "live_builder",
            "with_session",
-           "as_of", "target_to_json", "target_from_json", "SEND_FROM", "SEND_UNTIL", "PREREG_STOP_ATR"]
+           "as_of", "target_to_json", "target_from_json", "SEND_FROM", "SEND_UNTIL", "PREOPEN_UNTIL",
+           "PREREG_STOP_ATR"]
 
 
 # ---------------------------------------------------------------- the engine's side

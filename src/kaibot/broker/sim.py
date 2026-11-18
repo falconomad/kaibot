@@ -14,6 +14,9 @@ Fill rules. One `advance(t)` trades the bar that starts at `t`:
 - bracket and OTO legs are `held` until the entry is COMPLETELY filled; from that bar on they work, and the stop
   is checked before the target (the stop wins a tie);
 - `opg` orders fill at the session's first print and `cls` orders at its last, at half a spread;
+- with `near_close` (the daily venue, issue #333), a DAY market order submitted at or after that ET time is a
+  closing-print order too: it fills at the session's last print exactly as a `cls` order (same price, same cost
+  model, same cash check). Daily bars have no price between 15:50 and the close but the close;
 - a minute without trades is the session's last close carried forward with zero volume (as
   replay.data.from_frame); before a symbol's first print of the session nothing fills.
 
@@ -163,7 +166,8 @@ class SimBroker(BrokerBase):
 
     def __init__(self, bars: BarHistory, clock: Callable[[], datetime], *, costs: ShadowCosts | None = COSTS_V1,
                  cash: float | None = 100_000.0, calendar: Mapping[str, tuple[str, str]] | None = None,
-                 cash_at: str = "submit", replace_new_id: bool = False, replaced_leg: str = "nested"):
+                 cash_at: str = "submit", replace_new_id: bool = False, replaced_leg: str = "nested",
+                 near_close: time | None = None):
         """`costs=None` fills at raw bar prices; `cash=None` keeps no cash book (the account then reports no
         buying power); `calendar` {date: (open, close)} in ET, by default every date with bars, 09:30-16:00.
 
@@ -172,7 +176,12 @@ class SimBroker(BrokerBase):
         auction buy is checked at its print, after the print's earlier fills (sales first, as sent); a buy
         that does not fit is cut to the whole shares that fit at the print's price, re-priced for that quantity
         (the rest is cancelled), so the cash book never goes below zero. Every other buy is still checked at
-        submission (review of #164)."""
+        submission (review of #164).
+
+        `near_close` (ET wall time, issue #333; None: off): a DAY market order submitted at or after it is worked as
+        a closing-print order (see the module's fill rules), and with cash_at="fill" its buy is checked at the
+        print. Scripted partial fills (`script.fills`) give such an order its first part at the print; the rest
+        expires at the close, as Alpaca paper's random partial fills of a late order do."""
         if cash_at not in ("submit", "fill"):
             raise ValueError("cash_at is submit or fill")
         if replaced_leg not in ("nested", "detached"):
@@ -190,6 +199,7 @@ class SimBroker(BrokerBase):
         self._fill_ts: list[datetime] = []  # transaction time of each row of `fills`
         self._gone: dict[str, dict] = {}  # legs a nested replace took out of their parent's list
         self.cash_at = cash_at
+        self.near_close = near_close
         self.bars, self.clk = bars, clock
         self.costs = costs
         self.cash = cash
@@ -435,7 +445,8 @@ class SimBroker(BrokerBase):
             if r.qty > free + 1e-9:
                 raise BrokerError(403, f"insufficient qty available for order (requested: {r.qty:g}, "
                                        f"available: {free:g})")
-        elif self.cash is not None and (self.cash_at == "submit" or r.time_in_force not in ("cls", "opg")):
+        elif self.cash is not None and (self.cash_at == "submit" or not (
+                r.time_in_force in ("cls", "opg") or self._near(r.type, r.time_in_force, now))):
             px = r.limit_price or r.stop_price or self.bars.last_close(r.symbol, now)
             if px is not None and r.qty * px > self.cash + 1e-9:
                 raise BrokerError(403, "insufficient buying power")
@@ -462,6 +473,11 @@ class SimBroker(BrokerBase):
                     if (side == "buy" and limit >= theirs) or (side == "sell" and limit <= theirs):
                         return x
         return None
+
+    def _near(self, kind: str, tif: str | None, submitted: datetime) -> bool:
+        """A DAY market order the daily venue works at the closing print (`near_close`, issue #333)."""
+        return (self.near_close is not None and kind == "market" and tif == "day"
+                and submitted.astimezone(NY).time() >= self.near_close)
 
     def _free_shares(self, symbol: str) -> float:
         """Shares of the position that no working sell order or leg holds."""
@@ -650,19 +666,28 @@ class SimBroker(BrokerBase):
             plan = None
         side, left = o["side"], float(o["qty"]) - float(o.get("filled_qty") or 0)
         tif = o.get("time_in_force")
-        if tif in ("cls", "opg"):
-            at = None if sess is None else sess[1] - timedelta(minutes=1) if tif == "cls" else sess[0]
+        near = self._near(o["type"], tif, _minute(o.get("submitted_at"), t))
+        if tif in ("cls", "opg") or near:
+            closing = tif == "cls" or near
+            at = None if sess is None else sess[1] - timedelta(minutes=1) if closing else sess[0]
             if at is not None and t == at:
-                price = bar.c if tif == "cls" else bar.o
+                price = bar.c if closing else bar.o
+                part = None
+                if near and plan is not None and plan.kind == "fills":  # scripted: one part, the rest expires
+                    part = min(plan.parts.pop(0), left) if plan.parts else 0.0
+                    if part <= 0:
+                        return
+                    left = part
                 px = self._auction(side, price, left, o["symbol"], bar, t)
-                if side == "buy" and self.cash is not None and self.cash_at == "fill" and px * left > self.cash:
+                cut = side == "buy" and self.cash is not None and self.cash_at == "fill" and px * left > self.cash
+                if cut:
                     left = float(math.floor(self.cash / px))  # cut to the whole shares that fit at the print
                     if left < 1:
                         self._end(o, "canceled")
                         return
                     px = self._auction(side, price, left, o["symbol"], bar, t)
                 self._fill(o, o, left, px, t)
-                if o["status"] == "partially_filled":
+                if o["status"] == "partially_filled" and (part is None or cut):
                     self._end(o, "canceled")  # the rest of a cut auction order does not trade
         elif o["type"] == "market":
             qty = left

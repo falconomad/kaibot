@@ -12,12 +12,14 @@ One session `i` (times ET; the one `SimClock` drives the strategy, the venue and
                     on its decision day, returns a `TargetList` (keep / buy candidates / sells with reasons)
     08:00 of i      the venue applies the session's corporate actions (split: shares x ratio; the ledger also
                     books the cash dividend of the previous close's shares)
-    09:00 of i      the portfolio builder (`risk/portfolio.py`, configured per rule by `momentum_builder`) turns
+    09:30           the venue trades the session's opening print
+    15:50 of i      the portfolio builder (`risk/portfolio.py`, configured per rule by `momentum_builder`) turns
                     the target list into whole-share targets (equity marked at the close of i - 1), the runner
-                    sends the difference to the venue as `cls` day orders (closing auction; Alpaca accepts them
-                    before 15:50 ET and SimBroker enforces that, whole shares only); a sale that found no bar
-                    earlier is sent again every session until it fills
-    09:30 / 15:59   the venue trades the session's opening print and its closing print; `cls` orders fill at the
+                    sends the difference to the venue as near-close DAY market orders (issue #333: the live path's
+                    orders, `ExecutionPolicy("near_close")`, whole shares); a sale that found no bar earlier is
+                    sent again every session until it fills. `execution="close"` sends `cls` day orders at 09:00
+                    instead (the closing auction, before 15:50 ET, as before #333; the same fills)
+    15:59           the closing print: the near-close orders (SimBroker `near_close`) and `cls` orders fill at the
                     official close at cost model v1 (half a spread plus impact, as the pre-registrations price it:
                     `broker.sim.AuctionImpactCosts`); the stress fill uses `opg` orders at the open
     16:30 of i      fills are booked to the ledger; a held company whose bars stop is closed at its terminal
@@ -56,7 +58,7 @@ import pandas as pd
 from kaibot.broker.shadow_costs import half_spread
 from kaibot.broker.sim import NY, AuctionImpactCosts, SimBroker
 from kaibot.engine.clock import SimClock
-from kaibot.engine.execution import ExecutionPolicy
+from kaibot.engine.execution import NEAR_CLOSE_MIN, REGULAR_CLOSE, ExecutionPolicy, minus
 from kaibot.engine.journal import Journal, canon
 from kaibot.engine.ledger import Book as LedgerBook
 from kaibot.engine.ledger import Ledger, price_key
@@ -77,6 +79,7 @@ ATR14, ATR14_MIN, GAP_ATR = 14, 10, 3.0  # the harness's entry also needs a 14-s
 SIGMA_FALLBACK = 0.02 / math.sqrt(390)  # the cost model's 1-minute sigma without 20 returns
 CASH_RESERVE = 0.03  # Amendment 3 of both pre-registrations: buys are sized against cash minus 3% of equity
 AFTER_CLOSE, CORP_ACTIONS, SEND = time(16, 30), time(8, 0), time(9, 0)
+NEAR_CLOSE = minus(REGULAR_CLOSE, NEAR_CLOSE_MIN)  # 15:50 ET: the near-close orders go out (issue #333)
 OPEN_BAR, CLOSE_BAR = time(9, 30), time(15, 59)
 FILLS = {"base": ("close", 1.0), "stress": ("open", 2.0)}  # where orders fill, spread / impact factor
 
@@ -601,7 +604,7 @@ def _venue_actions(broker: SimBroker, symbol: str, *, split: float = 1.0, delist
 def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, fill: str = "base",
               cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
               on_session: Callable[[int], None] | None = None, protect_atr: float | None = None,
-              builder: PortfolioBuilder | None = None) -> DailyRun:
+              builder: PortfolioBuilder | None = None, execution: str = "near_close") -> DailyRun:
     """One continuous account of one multi-day strategy over sessions i0..i1, starting flat: the strategy decides
     after each close, the portfolio builder sizes (`momentum_builder`: the pre-registered sizing at the rule's own
     limits), the target loop (engine/targets.py) sends
@@ -615,23 +618,30 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     What is still held after i1 is valued at its last mark less the cost model's sale (the harness's
     `end_of_data`), so every dollar of the equity curve is in a trade row.
     `builder`: the portfolio builder to size with (default `momentum_builder`: the pre-registered sizing); the live
-    path's parity test passes the live book's builder (`engine/live_daily.live_builder`)."""
+    path's parity test passes the live book's builder (`engine/live_daily.live_builder`).
+    `execution` (base fill only): "near_close" (default, the live path's orders since issue #333: DAY market
+    orders at 15:50 ET, filled at the closing print) or "close" (`cls` orders sent at 09:00). Both give the same
+    fills, costs and equity; only the orders' type and send time differ."""
+    if execution not in ("near_close", "close"):
+        raise ValueError("execution is near_close or close")
     if i0 < 1 or i1 >= len(data.dates) or i0 > i1:
         raise ValueError("sessions i0..i1 must lie inside the data, with i0 >= 1")
     where, factor = FILLS[fill]
     mult = cost * factor
     tif = "cls" if where == "close" else "opg"
+    near = tif == "cls" and execution == "near_close"
     costs = AuctionImpactCosts(sigma=lambda sym, day: data.sigma_at(data.index_of(day), data.col(sym)), mult=mult)
     clock = SimClock(_at(data.day(i0 - 1), AFTER_CLOSE) - timedelta(minutes=1))
     broker = SimBroker(data.bar_history(), clock, costs=costs, cash=equity0, calendar=data.calendar(),
-                       cash_at="fill")
+                       cash_at="fill", near_close=NEAR_CLOSE if near else None)
     journal = Journal(now=clock)
     led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal)
     om = OrderManager(broker, journal, clock)
     builder = builder or momentum_builder(strategy, pol, exposure_pct)
     run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om)
-    policy = ExecutionPolicy("close" if tif == "cls" else "open", research_open=tif == "opg")
-    at_close = ExecutionPolicy("close")
+    policy = ExecutionPolicy("near_close" if near else "close" if tif == "cls" else "open",
+                             research_open=tif == "opg")
+    at_close = ExecutionPolicy("near_close" if near else "close")
     stops = ProtectiveStops(om) if protect_atr else None
     recon = Reconciler(lambda: {"ledger_qty": led.pos,
                                 "broker_positions": broker.positions(), "om": om, "ledger_cash": led.cash,
@@ -698,8 +708,13 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                                       "reason": "cash_in_lieu"})
                     if not broker.pos[s]["qty"]:
                         broker.pos.pop(s)
-        # -- 09:00: size the target list, send the difference as closing-auction (or opening) orders
-        clock.set(_at(d, SEND))
+        # -- 09:00 (cls, opg) or after the opening print at 15:50 (near-close): size the target list, send the
+        # difference as closing-auction, opening or near-close orders
+        if near:
+            broker.advance(_at(d, OPEN_BAR))
+            clock.set(_at(d, NEAR_CLOSE))
+        else:
+            clock.set(_at(d, SEND))
         sent: dict[str, tuple[str, str, object]] = {}
         eq = led.equity
         tl = run.targets.get(i)
@@ -722,8 +737,9 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         sold = {t.symbol for t in targets if t.shares == 0}
         send(i, [Target(name, s, 0, "split_dispute", {"why": "split_dispute"}) for s in forced if s not in sold],
              at_close)  # at the close, always
-        # -- the session: opening print, closing print
-        broker.advance(_at(d, OPEN_BAR))
+        # -- the session: opening print (already traded for near-close orders), closing print
+        if not near:
+            broker.advance(_at(d, OPEN_BAR))
         clock.set(_at(d, CLOSE_BAR))
         broker.advance(_at(d, CLOSE_BAR))
         # -- after the close: book the fills, terminal closes, marks
@@ -736,7 +752,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             kind, s, why = sent.get(f.coid, ("sell", f.symbol, "sell"))
             j = data.col(s)
             qty, px = f.qty, f.px
-            at = "close" if r.tif == "cls" else "open"
+            at = "close" if r.tif == "cls" or (near and (r.type, r.tif) == ("market", "day")) else "open"
             mid = float(data.raw_c[i, j] if at == "close" else data.raw_o[i, j])
             ref = float(data.px[i - 1, j]) / data.split_at(i, j)
             reason = why if kind != "resize" else "resize"

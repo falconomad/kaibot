@@ -1404,7 +1404,7 @@ class Engine:
         self._manage_stops(m)
         if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
             self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
-        self._daily_step("send", lambda: self.daily.send(d.day))  # #206: closing-auction orders, 09:31-15:45 ET
+        self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
@@ -1492,6 +1492,9 @@ class Engine:
             self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),
                                                 "action": "update config/macro_calendar.yaml"}, self._rid())
             self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
+        # #333: the daily path's near-close orders can fill while the engine is down (a restart inside 15:50-16:00):
+        # their fills are booked before the account check and the reconciliation compare the ledger with the venue
+        self._daily_step("sync", lambda: self.daily.sync(force=True))
         self.check_account()
         self._startup_reconcile("session_start")  # S78: run again, never reset
         # #133 (decision 15 section 11): a multi-day rule with a Gate B verdict (an experiment that failed it) is

@@ -395,13 +395,17 @@ def test_logged_runs_from_before_an_amendment_stay_attributable_to_the_rule():
 # ---------------------------------------------------------------- 3. the venue's closing-auction rules
 
 
-def test_orders_are_whole_share_closing_auction_orders_sent_before_1550(fx):
+def test_orders_are_whole_share_near_close_market_orders_sent_at_1550(fx):
+    """Issue #333 (Amendment 9 / 8): the daily path sends DAY market orders at 15:50 ET, as the live path does
+    (Alpaca paper fills a `cls` order only in the last seconds before 16:00); SimBroker fills them at the closing
+    print (the 15:59 bar), at cost model v1. The venue still refuses a `cls` order after 15:50."""
     m, data, i0, i1 = fx
     run = run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, i1)
     orders = list(run.broker.orders.values())
-    assert orders and all(o["time_in_force"] == "cls" and float(o["qty"]).is_integer() for o in orders)
+    assert orders and all((o["type"], o["time_in_force"]) == ("market", "day") and float(o["qty"]).is_integer()
+                          for o in orders)
     sent = {datetime.fromisoformat(o["submitted_at"]).astimezone(NY).time() for o in orders}
-    assert sent == {datetime(2024, 1, 1, 9, 0).time()}
+    assert sent == {datetime(2024, 1, 1, 15, 50).time()}
     for f in run.broker.fills:  # filled at the closing print (the 15:59 bar)
         assert datetime.fromisoformat(f["transaction_time"]).astimezone(NY).strftime("%H:%M") == "15:59"
     bk = run.broker
@@ -410,6 +414,23 @@ def test_orders_are_whole_share_closing_auction_orders_sent_before_1550(fx):
         bk.check(OrderRequest("P00", "buy", 1, "market", "cls"), late)
     with pytest.raises(BrokerError, match="DAY"):
         bk.check(OrderRequest("P00", "buy", 1.5, "market", "cls"), late.replace(hour=9))
+
+
+@pytest.mark.parametrize("version", ["trend_momentum", "mom_12_1_band"])
+def test_near_close_orders_change_no_fill_no_cost_and_no_equity_against_the_closing_auction(fx, version):
+    """Issue #333: the execution change is not a change of the fill model. With `cls` orders sent at 09:00 and with
+    near-close market orders sent at 15:50, the research runner books the same fills (session, symbol, side,
+    shares, price to the last bit: the close at cost model v1) and the same equity every day, so no Gate B
+    number moves. Only the order type and the send time differ."""
+    m, data, i0, i1 = fx
+    s = mom.VERSIONS[version]
+    near = run_daily(s, data, POL, i0, i1)
+    cls = run_daily(s, data, POL, i0, i1, execution="close")
+    assert len(near.fills) > 20 and near.fills == cls.fills and near.orders == cls.orders
+    assert [r["end"] for r in near.book.daily] == [r["end"] for r in cls.book.daily]
+    assert {o["time_in_force"] for o in cls.broker.orders.values()} == {"cls"}
+    assert {o["time_in_force"] for o in near.broker.orders.values()} == {"day"}
+    assert near.ledger.overdrafts == cls.ledger.overdrafts == [] and near.cash_gap < 1e-6
 
 
 # ---------------------------------------------------------------- 4. live: refused

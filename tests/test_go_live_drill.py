@@ -2,7 +2,7 @@
 with KAIBOT_MULTIDAY=on, one decision evening and its fill session, end to end on the simulated venue (SimBroker
 with a cash book and cost model v1, so every sale is charged a fee):
 
-    decision after the close -> the session's plan (`md_send`) -> 09:31 send -> 16:00 closing-auction fills
+    decision after the close -> the session's plan (`md_send`) -> 15:50 near-close send (#333) -> the fills
     -> the order manager books them -> reconciliation
 
 with what goes live together:
@@ -34,6 +34,7 @@ import pytest
 from fakes import Clock, FakeData, FakeStore
 from test_engine import synth_frames
 from test_failsafe_drills import DAY1, DAY2, MD, TwoDays
+from test_live_daily_engine import SEND
 
 from kaibot.broker.sim import COSTS_V1
 from kaibot.engine import live_daily as ld
@@ -220,14 +221,17 @@ class Drill:
         self.clock.t = self.open1 + timedelta(hours=11)  # 20:30 ET, after the nightly refresh's 20:15 stamp
         self.eng.tick()  # the decision for DAY2, on the store read through the gate
 
-    def cls(self):
-        return [o for o in self.broker.orders.values() if o["time_in_force"] == "cls"]
+    def md(self):
+        """The daily path's orders at the venue (near-close DAY market orders since #333)."""
+        return [o for o in self.broker.orders.values()
+                if str(o.get("client_order_id")).startswith(f"kb{self.rid}-{MD}-")
+                and (o["type"], o["time_in_force"]) == ("market", "day")]
 
 
 def run_session(tmp_path, monkeypatch, kill: str | None = None) -> Drill:
     d = Drill(tmp_path, monkeypatch)
     d.hold_earlier()
-    if kill == "plan_send":  # dies at 09:31 after the venue took 3 orders, before the engine heard back
+    if kill == "plan_send":  # dies at 15:50 after the venue took 3 orders, before the engine heard back
         real, n = d.broker.submit, [0]
 
         def submit(req):
@@ -239,15 +243,15 @@ def run_session(tmp_path, monkeypatch, kill: str | None = None) -> Drill:
 
         d.broker.submit = submit
         with pytest.raises(Killed):
-            d.tick_to(d.open2, 0, 2)
+            d.tick_to(d.open2, 0, SEND + 1)
         d.broker.submit = real
-        assert len(d.cls()) == 3 and [b for *_, b in d.eng.journal.entries(kinds=("md_send",))]
+        assert len(d.md()) == 3 and [b for *_, b in d.eng.journal.entries(kinds=("md_send",))]
         d.restart()
-        d.tick_to(d.open2, 2, 390)
+        d.tick_to(d.open2, SEND + 1, 390)
     elif kill == "send_fills":
-        d.tick_to(d.open2, 0, 120)
+        d.tick_to(d.open2, 0, SEND + 1)
         d.restart()
-        d.tick_to(d.open2, 120, 390)
+        d.tick_to(d.open2, SEND + 1, 390)
     else:
         d.tick_to(d.open2, 0, 390)
     d.after_close(d.open2)
@@ -257,7 +261,7 @@ def run_session(tmp_path, monkeypatch, kill: str | None = None) -> Drill:
 
 
 def orders_of(d: Drill) -> list[tuple]:
-    return sorted((o["symbol"], o["side"], float(o["qty"]), o["status"]) for o in d.cls())
+    return sorted((o["symbol"], o["side"], float(o["qty"]), o["status"]) for o in d.md())
 
 
 @pytest.fixture(scope="module")
@@ -273,7 +277,7 @@ def runs(tmp_path_factory):
 @pytest.mark.parametrize("kind", [None, "plan_send", "send_fills"])
 def test_every_order_once_only_held_shares_sold_and_all_filled(runs, kind):
     d = runs[kind]
-    o = d.cls()
+    o = d.md()
     coids = [x["client_order_id"] for x in o]
     assert len(coids) == len(set(coids))
     syms = [(x["symbol"], x["side"]) for x in o]

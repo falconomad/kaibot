@@ -6,7 +6,7 @@ venue of the #206 tests, with a fake Alpaca corporate-actions feed."""
 from __future__ import annotations
 
 from test_failsafe_drills import DAY2, MD
-from test_live_daily_engine import DailyAccount
+from test_live_daily_engine import SEND, DailyAccount
 
 from kaibot.engine import live_daily as ld
 from kaibot.engine.corp_guard import CorporateActionGuard
@@ -45,15 +45,15 @@ def test_an_announced_spin_off_skips_the_buy_and_journals_why(tmp_path, monkeypa
     a = GuardedAccount(tmp_path, monkeypatch, Feed(SPIN_B))
     a.ticks(a.open1, 0, 390)
     a.after_close(a.open1)
-    a.ticks(a.open2, 0, 2)  # 09:31: the send step
-    assert a.cls_orders() == []  # B is not bought
+    a.ticks(a.open2, 0, SEND + 2)  # 15:50: the send step (issue #333)
+    assert a.md_orders() == []  # B is not bought
     (send,) = _sends(a)
     assert send["session"] == DAY2 and send["targets"] == []
     assert send["ca_skipped"] == [["B", "spin-off", "2026-08-20", "skipped: corporate action on 2026-08-20"]]
     (ev,) = [e for e in a.store.tables["event"] if e["type"] == "multi_day_ca_skip"]
     assert "skipped: corporate action on 2026-08-20" in str(ev)
-    a.ticks(a.open2, 2, 390)
-    assert a.cls_orders() == []  # and never later in the session
+    a.ticks(a.open2, SEND + 2, 390)
+    assert a.md_orders() == []  # and never later in the session
 
 
 def test_no_announcement_buys_as_before(tmp_path, monkeypatch):
@@ -61,8 +61,8 @@ def test_no_announcement_buys_as_before(tmp_path, monkeypatch):
     a = GuardedAccount(tmp_path, monkeypatch, feed)
     a.ticks(a.open1, 0, 390)
     a.after_close(a.open1)
-    a.ticks(a.open2, 0, 2)
-    (o,) = a.cls_orders()
+    a.ticks(a.open2, 0, SEND + 2)
+    (o,) = a.md_orders()
     assert o["symbol"] == "B" and o["side"] == "buy"
     assert "ca_skipped" not in _sends(a)[0]
     assert feed.calls >= 1
@@ -72,8 +72,8 @@ def test_a_failed_read_buys_nothing_and_says_why_on_the_heartbeat(tmp_path, monk
     a = GuardedAccount(tmp_path, monkeypatch, Feed(fail=True))
     a.ticks(a.open1, 0, 390)
     a.after_close(a.open1)
-    a.ticks(a.open2, 0, 2)
-    assert a.cls_orders() == []
+    a.ticks(a.open2, 0, SEND + 2)
+    assert a.md_orders() == []
     (send,) = _sends(a)
     assert send["targets"] == [] and "corporate-actions read failed" in send["ca_unread"]
     note = a.eng.daily.status(a.open2.date())["note"]
@@ -88,8 +88,7 @@ def test_a_held_stock_with_an_announcement_is_kept_and_named_on_the_heartbeat(tm
     st = a.eng.daily.status(a.open2.date())
     assert "B: spin-off on 2026-08-20 — the engine does not handle this yet, check before then" in st["note"]
     a.ticks(a.open2, 0, 390)
-    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
-                and o["time_in_force"] == "cls"]  # not sold because of the guard
+    assert not [o for o in a.md_orders() if o["symbol"] == "B" and o["side"] == "sell"]  # not sold (the guard)
     assert a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == 40
 
 
