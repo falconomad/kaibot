@@ -111,8 +111,11 @@ describe("the My lists card", () => {
     expect(text(noDel)).toContain("Deleting a list needs a database update that isn't applied yet. The list stays saved.");
   });
 
-  it("a ticker still pending after 30 s offers a retry; an errored check too", () => {
+  it("a ticker still pending after about 10 s says so honestly and offers a retry; an errored check too", () => {
     const html = card(fakeEd([{ symbol: "PLTR", state: "slow" }, { symbol: "SNOW", state: "error", reason: "We could not check SNOW right now. Try again later." }]));
+    expect(text(html)).toContain("PLTR Waiting for the checker");
+    expect(html).toContain('aria-label="PLTR, waiting for the checker"');
+    expect(text(html)).not.toContain("Still checking");
     expect(html).toContain('aria-label="Check PLTR again"');
     expect(html).toContain('aria-label="Check SNOW again"');
     expect(text(html)).toContain("Not checked · We could not check SNOW right now.");

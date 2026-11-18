@@ -12,9 +12,41 @@ export const MAX_TICKERS = 40;
 export const MIN_ONLY = 5;
 /** Longest list name the server takes. */
 export const MAX_NAME = 40;
-/** kb_check_ticker answers `pending` while the worker checks: ask again every 2 s, for at most 30 s. */
+/** kb_check_ticker answers `pending` until a checker answers: the Vercel function (api/check-ticker.ts, called right
+ * after it) or the Mac worker. Ask again every 2 s; after about 10 s with no answer say "Waiting for the checker". */
 export const POLL_MS = 2_000;
-export const POLL_LIMIT_MS = 30_000;
+export const POLL_LIMIT_MS = 10_000;
+/** At most this many tickers are checked at once (each check is 2 to 3 reads of the free Alpaca and Finnhub tiers). */
+export const CHECK_PARALLEL = 5;
+
+/** Run at most `n` jobs at once; the others wait their turn in order. A failed job frees its slot too. */
+export function limiter(n: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return <T,>(job: () => Promise<T>): Promise<T> => new Promise<T>((resolve, reject) => {
+    const go = () => {
+      active++;
+      job().then(resolve, reject).finally(() => { active--; waiting.shift()?.(); });
+    };
+    if (active < n) go(); else waiting.push(go);
+  });
+}
+
+/** The one gate for the whole page (My lists and the pre-apply re-check share it). */
+export const checkGate = limiter(CHECK_PARALLEL);
+
+const STATUSES: CheckStatus[] = ["accepted", "refused", "pending", "error"];
+/** The answer of POST /api/check-ticker ({status, check}): the ticker's check, or null when the checker isn't there
+ * (local dev's SPA answer, not deployed, an HTTP error, a shape it doesn't know). Null is never a verdict: the
+ * caller keeps asking kb_check_ticker, which the Mac worker may still answer. */
+export function checkerAnswer(httpStatus: number, contentType: string | null, body: unknown): TickerCheck | null {
+  if (httpStatus < 200 || httpStatus >= 300 || !(contentType ?? "").includes("application/json")) return null;
+  const c = body && typeof body === "object" ? (body as { check?: unknown }).check : null;
+  if (!c || typeof c !== "object") return null;
+  const x = c as TickerCheck;
+  if (typeof x.symbol !== "string" || !STATUSES.includes(x.status)) return null;
+  return { ...x, reason: typeof x.reason === "string" ? x.reason : null };
+}
 
 export type CheckStatus = "accepted" | "refused" | "pending" | "error";
 /** One answer of kb_check_ticker. */
@@ -22,7 +54,7 @@ export interface TickerCheck {
   symbol: string; status: CheckStatus; reason: string | null; etf?: string | null; in_catalogue?: boolean;
   name?: string | null; industry?: string | null; checked_on?: string | null;
 }
-/** One ticker in the list editor. `checking` = waiting for the server; `slow` = still pending after 30 s. */
+/** One ticker in the list editor. `checking` = waiting for the server; `slow` = no checker answered within ~10 s. */
 export type ItemState = "checking" | "slow" | "accepted" | "refused" | "error";
 export interface Item { symbol: string; state: ItemState; reason?: string | null; etf?: string | null; inCatalogue?: boolean; name?: string | null }
 

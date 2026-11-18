@@ -5,7 +5,7 @@ import themesJson from "../data/themes.json";
 import { clampBody, diffConfig, focusSet, levelDefaults, normalizeBounds, validateBody, type ConfigBody, type Themes } from "./config";
 import { estShort, estimateTrades, type EstimatorData } from "./estimator";
 import {
-  DB_UPDATE, MAX_TICKERS, NOT_A_TICKER, addable, applyBlockers, dropCustomUnlessOnly, isMissingFunction, itemFromCheck, itemFromSaved, itemsFromBody,
+  CHECK_PARALLEL, DB_UPDATE, MAX_TICKERS, NOT_A_TICKER, POLL_LIMIT_MS, addable, checkerAnswer, limiter, applyBlockers, dropCustomUnlessOnly, isMissingFunction, itemFromCheck, itemFromSaved, itemsFromBody,
   listWords, looksLikeTicker, needsCheck, onlyShort, parseTickers, rpcErrorText, saveBlocker, tally, withList, withoutCustom, type Item,
 } from "./tickers";
 
@@ -215,5 +215,45 @@ describe("RPC errors", () => {
     expect(listWords(["NBIS", "CRWV"])).toBe("NBIS and CRWV");
     expect(listWords(["NBIS", "CRWV", "FSLY"])).toBe("NBIS, CRWV and FSLY");
     expect(listWords(FRESH)).toBe("NBIS, CRWV, FSLY and 2 more");
+  });
+});
+
+describe("the checker on Vercel (/api/check-ticker)", () => {
+  const ans = (check: unknown, status = "checked") => ({ status, check });
+  it("reads a verdict, and treats anything else as 'not here' (null): the database poll carries on", () => {
+    expect(checkerAnswer(200, "application/json", ans({ symbol: "NBIS", status: "accepted", etf: "SPY", reason: null })))
+      .toMatchObject({ symbol: "NBIS", status: "accepted", etf: "SPY" });
+    expect(checkerAnswer(200, "application/json; charset=utf-8", ans({ symbol: "ZZZT", status: "refused", reason: "We could not find ZZZT at the broker. Check the spelling." }, "answered"))?.status).toBe("refused");
+    // pending (keys not set here, or a failed read): the row waits for the Mac worker
+    expect(checkerAnswer(200, "application/json", ans({ symbol: "NBIS", status: "pending" }, "unavailable"))?.status).toBe("pending");
+    expect(checkerAnswer(200, "text/html", "<!doctype html>")).toBeNull(); // local dev: the SPA answers /api/*
+    for (const st of [401, 403, 404, 405, 500, 502]) expect(checkerAnswer(st, "application/json", ans({ symbol: "NBIS", status: "accepted" }))).toBeNull();
+    for (const bad of [null, {}, ans(null), ans({ symbol: "NBIS", status: "maybe" }), ans({ status: "accepted" }), ans("NBIS")])
+      expect(checkerAnswer(200, "application/json", bad)).toBeNull();
+  });
+  it("'Waiting for the checker' comes after about 10 s, not 30", () => {
+    expect(POLL_LIMIT_MS).toBe(10_000);
+  });
+  it("checks at most 5 tickers at once", async () => {
+    expect(CHECK_PARALLEL).toBe(5);
+    const gate = limiter(CHECK_PARALLEL);
+    let now = 0, peak = 0;
+    const done: number[] = [];
+    const release: (() => void)[] = [];
+    const jobs = Array.from({ length: 12 }, (_, i) => gate(() => new Promise<number>((r) => {
+      now++; peak = Math.max(peak, now);
+      release.push(() => { now--; done.push(i); r(i); });
+    })));
+    for (let k = 0; k < 12; k++) {
+      await new Promise((r) => setTimeout(r, 0));
+      expect(now).toBeLessThanOrEqual(5);
+      release.shift()?.();
+    }
+    expect(await Promise.all(jobs)).toEqual([...Array(12).keys()]);
+    expect(peak).toBe(5);
+    // a failing job frees its slot too
+    const g2 = limiter(1);
+    await expect(g2(() => Promise.reject(new Error("x")))).rejects.toThrow("x");
+    expect(await g2(async () => 7)).toBe(7);
   });
 });
