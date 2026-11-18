@@ -134,6 +134,42 @@ def test_the_daily_job_refreshes_the_store_twice_and_backs_up_once(tmp_path):
     assert (r / "logs" / "fetch_daily.log").read_text().count("stored SPY") == 2
 
 
+def daily_repo(tmp_path):
+    r = tmp_path / "kaibot"
+    (r / "scripts").mkdir(parents=True)
+    shutil.copy(SCRIPTS / "service_run.sh", r / "scripts")
+    for n, body in (("backup_local.sh", f"echo backup >> {tmp_path}/calls"),
+                    ("fetch_daily.sh", f"echo fetch >> {tmp_path}/calls; echo stored SPY")):
+        (r / "scripts" / n).write_text(f"#!/bin/bash\n{body}\n")
+        (r / "scripts" / n).chmod(0o755)
+    env = {"HOME": str(tmp_path), "KAIBOT_LOG_DIR": str(tmp_path / "logs"), "KAIBOT_ENV_FILE": str(tmp_path / "x"),
+           "PATH": os.environ["PATH"]}
+    return r, env
+
+
+def fetches(tmp_path):
+    f = tmp_path / "calls"
+    return f.read_text().split().count("fetch") if f.exists() else 0
+
+
+def test_the_daily_fetch_switch_is_read_from_the_env_file_too(tmp_path):
+    """KAIBOT_DAILY_FETCH reads like KAIBOT_TICKER_CHECKS: the .env too (the plist does not carry it), and the
+    service's own environment wins over the file."""
+    r, env = daily_repo(tmp_path)
+    (tmp_path / "x").write_text("KAIBOT_DAILY_FETCH=0  # no refresh tonight\n")
+    sh(["bash", "scripts/service_run.sh", "daily"], r, env, check=True)
+    assert fetches(tmp_path) == 0
+    sh(["bash", "scripts/service_run.sh", "daily"], r, {**env, "KAIBOT_DAILY_FETCH": "1"}, check=True)
+    assert fetches(tmp_path) == 1
+
+
+@pytest.mark.parametrize("value", ["yes", "off", "2"])
+def test_a_daily_fetch_value_that_is_not_0_or_1_keeps_the_refresh_and_says_so(tmp_path, value):
+    r, env = daily_repo(tmp_path)
+    x = sh(["bash", "scripts/service_run.sh", "daily"], r, {**env, "KAIBOT_DAILY_FETCH": value}, check=True)
+    assert fetches(tmp_path) == 1 and "KAIBOT_DAILY_FETCH" in x.stdout and "not 0 or 1" in x.stdout
+
+
 def test_plists_never_contain_secrets(plists):
     _, _, texts = plists
     assert all("do-not-copy-me" not in t for t in texts.values())

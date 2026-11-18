@@ -5,9 +5,9 @@
 #   service_run.sh daily    nightly job: rotate logs, back up local files, refresh the daily bar store (a second run
 #                           the same day only refreshes the store)
 # Settings (written into the plist by install_service.sh): KAIBOT_SERVICE_MODE (docker|python), KAIBOT_ENV_FILE,
-# KAIBOT_LOG_DIR. KAIBOT_TICKER_CHECKS=0 turns the worker off, read from the service's environment or the .env
-# (`switch`: an explicit 0 or 1). Exit codes for launchd (KeepAlive restarts only after a non-zero exit; the worker
-# never changes them):
+# KAIBOT_LOG_DIR. KAIBOT_TICKER_CHECKS=0 turns the worker off and KAIBOT_DAILY_FETCH=0 skips the nightly bar refresh,
+# each read from the service's environment or the .env (`switch`: an explicit 0 or 1). Exit codes for launchd
+# (KeepAlive restarts only after a non-zero exit; the worker never changes them):
 #   0  clean stop (service.sh stop, logout) or on hold (data/HOLD): launchd leaves it stopped
 #   1  failed, refused or waiting for something (Docker, another engine): launchd tries again after 60 s
 set -uo pipefail
@@ -235,7 +235,7 @@ run_daily() {
     ./scripts/backup_local.sh || failed+=(backup)
     rm -f data/live/daily_job.*; : > "$done_mark"
   fi
-  if [ "${KAIBOT_DAILY_FETCH:-1}" = 1 ]; then
+  if switch KAIBOT_DAILY_FETCH 1; then  # the service's environment or the .env; an explicit 0 or 1
     # #206: the multi-day rule decides on these bars (docs/ops/paper_start.md); resumable, skips what it has
     say "daily job: refresh the daily bar store (scripts/fetch_daily.sh; log logs/fetch_daily.log)"
     { echo "== $(date '+%Y-%m-%d %H:%M:%S %Z')"; ./scripts/fetch_daily.sh </dev/null; } >>logs/fetch_daily.log 2>&1 ||
