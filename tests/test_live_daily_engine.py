@@ -14,8 +14,9 @@ from dataclasses import dataclass, replace
 from datetime import date, timedelta
 
 import numpy as np
+import pandas as pd
 import pytest
-from test_failsafe_drills import DAY1, DAY2, MD, Account, frames
+from test_failsafe_drills import DAY1, DAY2, MD, Account, beat, frames
 
 from kaibot.engine import live_daily as ld
 from kaibot.engine.core import Engine
@@ -711,3 +712,65 @@ def test_a_daily_step_failing_every_tick_is_one_event_until_it_recovers(tmp_path
     broken["on"] = True
     a.ticks(a.open2, 22, 25)
     assert len(errors()) == 2
+
+
+# ---------------------------------------------------------------- #333 (QA-Ops second key): the fail-safes at 15:5x
+
+
+def _killed_after_the_near_close_fill(tmp_path, monkeypatch) -> tuple[DailyAccount, float]:
+    """DAY2: the near-close buy of B goes out at 15:50, fills, is booked at 15:51, and the engine dies at 15:52, before
+    the fail-safes' flatten window (watchdog 15:55, dead-man 15:56). B was not held at DAY1's close."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, SEND + 2)  # 15:50 send, 15:51 the fill booked
+    (o,) = a.md_orders()
+    assert o["status"] == "filled" and a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == float(o["qty"])
+    return a, float(o["qty"])
+
+
+def test_a_near_close_buy_booked_before_the_engine_dies_is_multi_day_for_the_dead_man(tmp_path, monkeypatch):
+    """#333: the dead-man reads the last session's ledger_position rows. Without today's rows the 15:50 buy of B would
+    be intraday shares to it, and it would sell them (here: DELETE /v2/positions, no multi-day share known)."""
+    from pg_harness import DeadmanDb
+
+    a, qty = _killed_after_the_near_close_fill(tmp_path, monkeypatch)
+    rows = [r for r in a.store.tables.get("ledger_position", []) if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [(r["strategy"], float(r["qty"]), r["priced"]) for r in rows] == [(MD, qty, False)]
+    db = DeadmanDb(tmp_path)
+    try:
+        db.beat(a.clock())
+        db.run(a.rid)
+        for s in sorted({str(r["session"]) for r in a.store.tables.get("ledger_position", [])}):
+            db.ledger(a.rid, s, [(r["strategy"], r["symbol"], r["qty"], r["stop_px"])
+                                 for r in a.store.tables["ledger_position"] if str(r["session"]) == s])
+        said = []
+        for k in range(SEND + 2, 390):  # 15:52 ... 15:59, once a minute (pg_cron)
+            a.clock.t = a.open2 + timedelta(minutes=k, seconds=2)
+            said.append(db.check(a.clock()))
+            db.pump(a.broker)
+            a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+        assert said[0] == "engine alive" and any(x.startswith("acted") for x in said)
+        assert float(a.broker.pos["B"]["qty"]) == qty  # kept: the multi-day buy is not sold as intraday shares
+        assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
+                    and o["type"] != "stop"]
+    finally:
+        db.stop()
+
+
+def test_a_near_close_buy_booked_before_the_engine_dies_is_multi_day_for_the_watchdog(tmp_path, monkeypatch):
+    """#333: the on-laptop watchdog reads the engine's journal: the booked 15:50 buy is a multi-day sleeve, and its
+    15:55 flatten (intraday shares only) leaves it alone."""
+    from kaibot.engine.watchdog import Watchdog, book_reader
+
+    a, qty = _killed_after_the_near_close_fill(tmp_path, monkeypatch)
+    beat(a.store, a.clock())
+    wd = Watchdog(a.broker, a.store, now=a.clock, book=book_reader(a.jpath, a.store))
+    for k in range(SEND + 2, 390):
+        a.clock.t = a.open2 + timedelta(minutes=k, seconds=30)
+        wd.step()
+        a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+    assert wd.flattened_on is not None  # the flatten ran
+    assert float(a.broker.pos["B"]["qty"]) == qty
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
+                and o["type"] != "stop"]

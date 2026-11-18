@@ -1323,6 +1323,7 @@ class EngineAccount:
     def book_fill(self, body: dict) -> None:
         self.e._md_realized(body)  # today's realised P&L of a sale (before the fold changes the sleeve)
         self.e.ledger.apply("fill", body)
+        self.e._md_filled = True  # #333 (QA-Ops): today's ledger_position rows are written for the fail-safes
 
     def entry_block(self) -> str | None:
         return self.e.entry_block()

@@ -5,7 +5,8 @@ Self-healing and idempotent: a missed fill, a restart or a manual trade is corre
 it twice sends nothing new, because the first run's orders are working when the second one looks. A working order
 that no longer fits the target is cancelled first and the difference is sent at the next run, once the cancel is
 confirmed (never two orders racing for one sleeve). An order is not sent when the order manager has an
-unconfirmed order in the symbol, when reconciliation refuses it (engine/reconcile.py: an open difference refuses
+unconfirmed order in the symbol, when a finished order's fill is not booked yet (#333: its shares are neither
+held nor working), when reconciliation refuses it (engine/reconcile.py: an open difference refuses
 buys, never a sale that only reduces exposure), or when the
 execution style refuses it (window, fractional shares): each such key is reported with the reason. A sale first
 frees the shares a protective stop holds (engine/protect.py) and goes out once they are free.
@@ -77,6 +78,9 @@ def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequen
     if sells_first:
         todo.sort(key=lambda x: x[1] > 0)  # stable: the caller's order within sales and within purchases
     for t, diff in todo:
+        if om.unbooked(t.symbol, t.strategy, session) > 1e-9:  # #333 (QA-Ops): filled at the venue, not booked yet
+            res.skipped.append((t.key, "a fill the venue reported is not booked yet: waiting"))
+            continue
         working = [r for r in om.working(symbol=t.symbol, strategy=t.strategy) if r.purpose != "stop"]
         if any(r.state in UNCONFIRMED for r in working):  # never cancel or add to an order nobody has confirmed
             res.skipped.append((t.key, om.blocked(t.symbol) or "unconfirmed order"))

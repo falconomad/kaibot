@@ -179,6 +179,9 @@ class OrderManager:
         self.aliases: dict[str, str] = {}  # a client id a replace gave the order -> its record's coid (#197)
         self.seen: set[str] = set()  # activity ids booked
         self.foreign: dict[str, dict] = {}  # activity id -> a fill on an order this manager does not know
+        # #333 (QA-Ops): finished orders whose fills the venue reported (`cum`) but whose FILL activities are not all
+        # booked yet. Such an order is no longer working and its shares are not yet held: the target loop must wait
+        self.settling: dict[str, OrderRecord] = {}
         self.last_fill: datetime | None = None
         self.errors: list[tuple[str, str]] = []  # (coid, what failed) of the last calls, for the caller's events
         for _, _t, kind, body in journal.entries(kinds=OM_KINDS):
@@ -226,6 +229,7 @@ class OrderManager:
                 self.aliases[cid] = r.coid
                 base = _base(cid)  # counted with the intents: a later attempt never reuses it
                 self.bases[base] = self.bases.get(base, 0) + 1
+            self._settle(r)
         elif kind in ("om_fill", "fill") and b.get("activity"):
             self.seen.add(b["activity"])
             r = self.orders.get(b.get("coid") or "")
@@ -233,9 +237,22 @@ class OrderManager:
                 q = float(b["qty"])
                 r.booked += q
                 r.value += q * float(b["px"])
+                self._settle(r)
             if b.get("ts"):
                 t = _ts(b["ts"])
                 self.last_fill = t if self.last_fill is None else max(self.last_fill, t)
+
+    def _settle(self, r: OrderRecord) -> None:
+        if not r.open and r.cum > r.booked + 1e-9:
+            self.settling[r.coid] = r
+        else:
+            self.settling.pop(r.coid, None)
+
+    def unbooked(self, symbol: str, strategy: str | None = None, session: str | None = None) -> float:
+        """#333 (QA-Ops): shares finished orders of the sleeve filled at the venue that are not booked yet (the order's
+        status can show the fill before the account activities do)."""
+        return sum(r.cum - r.booked for r in list(self.settling.values()) if r.symbol == symbol
+                   and (strategy is None or r.strategy == strategy) and (session is None or r.session == session))
 
     def _append(self, kind: str, body: dict) -> None:
         body = {k: v for k, v in body.items() if v is not None}

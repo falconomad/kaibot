@@ -567,3 +567,31 @@ def test_179_review_a_resize_up_is_capped_at_the_venue_position_and_skipped_when
     b.positions = real
     ps.ensure({K: 40.0}, {K: 90.0}, clock(), DAY)
     assert int(ps.stops_of(K)[0].qty) == 40
+
+
+def test_a_fill_the_order_shows_before_its_activity_is_never_bought_again_also_after_a_restart():
+    """#333 (QA-Ops second key): near-close orders fill inside the send window, and the send step runs the loop again
+    on later ticks while anything is left to do. Alpaca's order can read `filled` before its FILL activity is
+    listed: the order is no longer working and its shares are not booked yet, so `target - held - working` would
+    buy them a second time. The loop waits until the fill is booked (a restart folds the same state)."""
+    from kaibot.engine.journal import Journal
+    from kaibot.engine.orders import OrderManager
+
+    b, clock = venue()
+    journal = Journal(now=clock)
+    om, _, booked = manager(b, clock, journal)
+    clock.set(et(DAY, "15:50", 7))
+    pol, want = ExecutionPolicy("near_close"), [Target("rule", "A", 30, "buy")]
+    (first,) = reconcile_targets(om, pol, want, {}, now=clock(), session=DAY).sent
+    run(b, clock, 380, 380)  # the DAY market order fills at the 15:50 bar
+    real, b.activities = b.activities, lambda *a, **k: []  # the activity is not listed yet
+    om.sync()
+    assert om.get(first.coid).state is St.FILLED and not booked and om.unbooked("A", "rule", DAY) == 30
+    res = reconcile_targets(om, pol, want, {}, now=clock(), session=DAY)
+    assert not res.sent and "not booked yet" in res.skipped[0][1] and len(b.orders) == 1
+    again = OrderManager(b, journal, clock)  # a restart folds the journal: the same wait
+    assert not reconcile_targets(again, pol, want, {}, now=clock(), session=DAY).sent and len(b.orders) == 1
+    b.activities = real
+    om.sync()
+    assert sum(f.qty for f in booked) == 30 and om.unbooked("A") == 0
+    assert not reconcile_targets(om, pol, want, {K: 30.0}, now=clock(), session=DAY).sent and len(b.orders) == 1
