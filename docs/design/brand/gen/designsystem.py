@@ -1,4 +1,5 @@
-"""kaibo design system, brand v1 (issue #296): one reference page built from the files Design already keeps.
+"""kaibo design system, brand v1 (issue #296; Product's decisions of #307 applied): one reference page built from the
+files Design already keeps.
 
     python docs/design/brand/gen/designsystem.py            # writes ../design_system_v1.html and ../design_system_v1.md
     python docs/design/brand/gen/designsystem.py --shots    # also ../proof/design-system-{phone,desktop}.png (Playwright)
@@ -6,6 +7,7 @@
 Nothing is typed in here that another file already holds: colours are read from ../tokens_v1.css, ratios from
 ../contrast_v1.md, the logo from ../../logo/concepts/1-rising-k/. Type, spacing, radii, sizes and motion are the values
 of brand_system_v1.md (sections 3, 4, 5, 8) and mobile_first_v4.md ("Tokens", "Motion"); each is named where it is used.
+The type steps are read from tokens.TYPE.
 Outfit is embedded from apps/web/public/fonts (SIL Open Font License 1.1) when that folder is there; the page falls
 back to the system font without it. Nothing here is imported by the app.
 """
@@ -29,6 +31,7 @@ REPO = BRAND.parents[2]
 LOGO = BRAND.parent / "logo" / "concepts" / "1-rising-k"
 FONTS = REPO / "apps" / "web" / "public" / "fonts"
 ISSUE = 296
+DECIDED = 307      # Product's decisions on the three points #302 left open
 
 
 # ---------- read the source files ----------
@@ -89,7 +92,7 @@ STALE_WHAT = {(d[0], d[1]) for d in DRIFT}
 # The narrowest passes in the file (within 10% of the line), so nobody makes them smaller by accident.
 NARROW = sorted(((m, r) for m in C for r in C[m] if r[3] >= r[4] and r[3] < r[4] * 1.1), key=lambda x: x[1][3] / x[1][4])
 
-# Company tiles: the ten tints of the initials tile, as built in apps/web/src/components/StockBadge.tsx (read-only here).
+# Company tiles: the ten tints of the initials tile, as built (and signed off in #307) in apps/web/src/components/StockBadge.tsx (read-only here).
 TILE_TINTS = ["#1E3A5F", "#3A2E1A", "#1F3A2C", "#3B1E2A", "#2A2540", "#1C3540", "#3A2A22", "#26323F", "#2F2440", "#3A2228"]
 TILE_SCALE = 1.08
 # Pairs this page stands on that contrast_v1.md has no row for. Measured here with gen/colour.py; not part of that file.
@@ -113,14 +116,18 @@ ROLES = [  # token, what it is for (brand_system_v1.md, sections 1, 2 and 5)
     ("warn-text", "Amber as text"), ("ai", "Agent"), ("ai-tint", "Agent note"), ("exp-bg", "Experiment: surface"), ("exp-line", "Experiment: dashed edge"),
     ("exp-hatch", "Experiment: hatch"), ("s-pot", "Chart: pot line"), ("s-spy", "Chart: benchmark, dotted"), ("s-up", "Chart: gain mark"), ("s-down", "Chart: loss mark"),
 ]
-TYPE = [  # brand_system_v1.md section 3
-    ("Hero", "--t-hero", "44 (60 desktop) / 700", "-0.035em", "the pot", "font-size:var(--t-hero);font-weight:700;letter-spacing:-.035em;line-height:1.02", "$5,021.40"),
-    ("Title", "--t-xl", "28 / 700", "-0.03em", "page title, sheet figure", "font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1.15", "Positions"),
-    ("Heading", "--t-lg", "20 / 600", "-0.01em", "sheet title", "font-size:20px;font-weight:600;letter-spacing:-.01em", "What the engine holds"),
-    ("Body", "--t-md", "16 / 400 or 600", "0", "rows, buttons", "font-size:16px", "The engine checked in a minute ago."),
-    ("Small", "--t-sm", "14 / 400 or 500", "0", "second lines, status rows", "font-size:14px;color:var(--slate)", "Bought at the close on Monday"),
-    ("Caption", "--t-cap", "12 / 600", "+0.02em (caps +0.08em)", "labels, PAPER pill", "font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--stale)", "Today"),
-]
+_TYPE_DEMO = {  # how each step is drawn on the page, and its sample words
+    "--t-hero": ("font-size:var(--t-hero);font-weight:700;letter-spacing:-.035em;line-height:1.02", "$5,021.40"),
+    "--t-xl": ("font-size:var(--t-xl);font-weight:700;letter-spacing:-.03em;line-height:1.15", "Positions"),
+    "--t-lg": ("font-size:var(--t-lg);font-weight:600;letter-spacing:-.01em", "What the engine holds"),
+    "--t-md": ("font-size:var(--t-md)", "The engine checked in a minute ago."),
+    "--t-sm": ("font-size:var(--t-sm);color:var(--slate)", "Bought at the close on Monday"),
+    "--t-cap": ("font-size:var(--t-cap);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--stale)", "Today"),
+}
+# brand_system_v1.md section 3; the sizes come from gen/tokens.py (17 / 15 / 13 since #307)
+TYPE = [(n, tok, f"{px}{f' ({desk} desktop)' if desk else ''} / {wt}", trk, use, *_TYPE_DEMO[tok]) for n, tok, px, desk, wt, trk, use in tokens.TYPE]
+TYPE_VARS = "".join(f"{tok}:{px}px;" for _, tok, px, *_ in tokens.TYPE)
+TYPE_DESK = "".join(f"{tok}:{desk}px;" for _, tok, _px, desk, *_ in tokens.TYPE if desk)
 SPACE = [4, 8, 12, 16, 24, 32]                                       # brand_system_v1.md section 4
 RADII = [("8", "tag"), ("12", "input"), ("16", "row"), ("24", "card, sheet"), ("pill", "buttons, chips")]   # section 4
 SIZES = [("44", "tap target, minimum"), ("48", "tab bar item"), ("64", "list row"), ("52", "primary button"), ("48", "form field"), ("22", "tag")]
@@ -133,8 +140,11 @@ MOTION = [  # brand_system_v1.md section 4 and 8, tokens_v1.css, mobile_first_v4
     ("Tab change", "Content cross-fades in 200 ms with a 4 px rise. The top bar and the tab bar do not move."),
     ("The glow", "Drifts with a transform only: 900 ms from sign-in to Home, 600 ms between tabs, the house easing."),
     ("The logo", "Once per app load, under a second: the stem rises, the leg sets, the arm draws, the point appears with one soft pulse."),
-    ("What may move", "Only <code>transform</code> and <code>opacity</code>. Nothing loops."),
-    ("Reduce motion", "No draw, no pop, no pulse; values just change; the glow jumps; the finished logo shows at once."),
+    ("What may move", "Only <code>transform</code> and <code>opacity</code>."),
+    ("No data motion loops", "Anything that shows data plays once: a chart draws once, a point pops once, a number ticks once. Nothing else loops except the two signals below."),
+    ("Loop: skeletons breathe", "Opacity 1 to 0.55 and back every 1.6 s (<code>kb-breathe</code>). No shimmer: it animates <code>background-position</code>, which repaints every frame."),
+    ("Loop: the live dot pulses", "A ring grows from the dot and fades every 2 s (<code>kb-pulse</code>), only while the engine is live."),
+    ("Reduce motion", "No draw, no pop, no pulse; values just change; the glow jumps; the finished logo shows at once. Both loops stop: skeletons stand still and the live dot shows without its ring."),
 ]
 MOTION = [(a, b.replace("{d-draw}", T["shape"]["d-draw"]).replace("{d-point}", T["shape"]["d-point"]).replace("{ease-pop}", T["shape"]["ease-pop"])) for a, b in MOTION]
 
@@ -161,12 +171,12 @@ STATES = [
      "rule", "Once per app load the mark draws itself in under a second. With reduce motion it shows finished.",
      "follows", "None. The mark is the same on every screen.",
      "follows", "None. The mark is never recoloured to carry a state."),
-    ("Company tile", "built", "A squircle with the company's logo on its own colour. Drawn 8% larger than the size it is given.",
-     "built", "The tile is laid out at its size first, on its colour (soft white until sampled); the logo fades in over 200 ms.",
-     "built", "No logo: the ticker's initials on one of ten dark tints, never under 12 px.",
-     "built", "The logo failed to load: the initials tile. A row with no company (a halt): a neutral tile with a red icon."),
-    ("Skeleton", "rule", "Raised-surface bars, row-shaped, 8 px corners, a shimmer from <code>--surface-2</code> to <code>--rule</code>. No blue.",
-     "rule", "It is the loading state. With reduce motion the bars stand still.",
+    ("Company tile", "rule", "A squircle with the company's logo on a colour sampled from that logo; grey 50 when none was sampled. Drawn 8% larger than the size it is given.",
+     "rule", "The tile is laid out at its size first, on its colour (grey 50 until sampled); the logo fades in over 200 ms.",
+     "rule", "No logo: the ticker's initials on one of ten dark tints, never under 12 px.",
+     "rule", "The logo failed to load: the initials tile. A row with no company (a halt): a neutral tile with a red icon."),
+    ("Skeleton", "rule", "Raised-surface bars (<code>--surface-2</code>), row-shaped, 8 px corners, an opacity breathe: 1 to 0.55 and back every 1.6 s. No blue.",
+     "rule", "It is the loading state. It may loop, because it carries no data. With reduce motion the bars stand still.",
      "follows", "Never left running: the empty sentence takes its place.",
      "follows", "Never left running: the error message takes its place."),
 ]
@@ -204,20 +214,14 @@ def findings() -> list:
 
 # Where the live app differs from this page (apps/web read on main, 17 Nov 2026). For a Frontend follow-up story.
 DIFFS = [
-    ("Type steps", "Body 16, small 14, caption 12 (<code>brand_system_v1.md</code> section 3).",
-     "<code>--t-md: 17px; --t-sm: 15px; --t-cap: 13px</code> (<code>v4tokens.css</code>, #294: \"text one step larger\").",
-     "The stakeholder asked for the larger text. Design should move this page to 17 / 15 / 13 once Product confirms; no Frontend change."),
     ("Primary button height", "52 px (<code>--btn</code>).", "<code>button</code> has <code>min-height: 44px</code>; only the sheet's action uses <code>--btn</code>.", "Frontend: primary buttons to 52 px."),
     ("Card corners on phones", "24 px at every width.", "<code>.card</code> drops to 20 px under 760 px; rows and sheets stay 24 (<code>--r-card</code>).", "Frontend: use <code>--r-card</code>."),
     ("Card padding on desktop", "24 px.", "22 px.", "Frontend: 24 px (<code>--sp-6</code>)."),
     ("Form fields", "12 px corners, page-colour fill.", "14 px corners, <code>--surface</code> fill; <code>--r-input</code> is defined and unused.", "Frontend: use <code>--r-input</code> and <code>--paper</code>."),
-    ("Skeleton", "A shimmer from <code>--surface-2</code> to <code>--rule</code>, 8 px corners.",
-     "Bars of <code>--surface-2</code> whose opacity breathes every 1.6 s; corners from 10 to 24 px and pills.",
-     "Decide one. The app's comment gives its reason (the old shimmer repainted every frame); a shimmer moved by <code>transform</code>, as on this page, does not."),
-    ("Loops", "\"Nothing loops\" (section 4).", "The engine chip's dot pulses every 2 s (<code>kb-pulse … infinite</code>), which <code>mobile_first_v4.md</code> asks for; skeletons breathe without end.",
-     "Design must settle the two documents first (a skeleton's shimmer repeats on this page too); then Frontend follows."),
+    ("Skeleton corners", "8 px corners on every bar.", "Corners from 10 to 24 px and pills. The opacity breathe itself matches (<code>kb-breathe</code>, 1.6 s).",
+     "Frontend: 8 px, or Design widens the rule. Not urgent."),
     ("Tags", "22 px pill.", "<code>.tag</code> is 13 px text with 3 px padding and no set height.", "Frontend: set the height."),
-    ("Table headers", "12 px / 600, <code>--slate</code>.", "13 px / 500, <code>--stale</code>.", "Frontend, with the type-step decision above."),
+    ("Table headers", "13 px / 600, <code>--slate</code> (the caption step).", "13 px / 500, <code>--stale</code>.", "Frontend: weight 600 and <code>--slate</code>. The size already matches."),
     ("Meters", "8 px track.", "<code>.meter .bar</code> is 4 px and <code>.prog</code> is 6 px.", "Frontend: 8 px."),
     ("Dashed edges", "Dashed means provisional. Section 1 names only the experiment and the benchmark line.",
      "Also the ticker chip while it is checked and unverified evidence (both provisional), and the empty My lists note (not provisional).",
@@ -225,8 +229,8 @@ DIFFS = [
     ("A colour outside the tokens", "Every colour is a token.", "The caret of <code>select.chip</code> is drawn in <code>#A1A8B3</code>, the old v3 grey.", "Frontend: <code>--slate</code>."),
     ("Header", "56 px, wordmark 21 px tall (section 5).", "64 px on phones, 72 px on desktop; wordmark 26 and 28 px (stakeholder, 16 Nov 2026: the header was too small).",
      "No Frontend change. Design should update section 5."),
-    ("Company tile", "No design document existed; this page writes it down as built.",
-     "Ten tints as hex values in <code>StockBadge.tsx</code>; sizes 32, 36, 40 and 52, each drawn 8% larger.", "Design signs the tile off (or changes it); then the tints can become tokens."),
+    ("Company tile tints", "Signed off as built (#307); the rule is in <code>brand_system_v1.md</code>, section 5.",
+     "The tile matches. Its ten initials tints are hex values in <code>StockBadge.tsx</code>, not tokens.", "Design names ten tint tokens in <code>tokens_v1.css</code>; then Frontend points the tile at them."),
 ]
 
 
@@ -365,7 +369,7 @@ CSS = """
 :root{
   /* Not colours, so not in tokens_v1.css: brand_system_v1.md sections 3 and 4, mobile_first_v4.md "Tokens" and "Motion". */
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-6:24px;--sp-8:32px;
-  --t-hero:44px;--t-xl:28px;--t-lg:20px;--t-md:16px;--t-sm:14px;--t-cap:12px;
+  TYPEVARS
   --r-tag:8px;--r-input:12px;--r-row:16px;--r-card:24px;--r-pill:999px;
   --tap:44px;--tab-item:48px;--row:64px;--btn:52px;
   --d-fast:120ms;--d-base:200ms;--d-sheet:320ms;--d-sheet-out:240ms;
@@ -373,7 +377,7 @@ CSS = """
   --glow-from:var(--sea-tint);
 }
 :root[data-theme="light"]{--glow-from:var(--blue-100)}
-@media (min-width:761px){:root{--t-hero:60px}}
+@media (min-width:761px){:root{TYPEDESK}}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);font:400 var(--t-md)/1.5 var(--font-ui);-webkit-font-smoothing:antialiased;
@@ -482,9 +486,12 @@ nav.toc{display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-4);font-size:var(--
 .glyph{display:block;width:76%;height:76%;border-radius:999px;background:conic-gradient(from 210deg,#0A0B0D 0 62%,transparent 0);
   -webkit-mask:radial-gradient(circle,transparent 34%,#000 35%);mask:radial-gradient(circle,transparent 34%,#000 35%)}
 .glyph.in{animation:fade var(--d-base) var(--ease) both}
-.sk{position:relative;display:block;overflow:hidden;background:var(--surface-2);flex:none;max-width:100%}
-.sk::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--rule),transparent);transform:translateX(-100%);animation:shimmer 1.6s linear infinite}
-.still .sk::after{animation:none;transform:none;opacity:0}
+/* the two loops the rule allows (brand_system_v1.md section 4, #307), named as in apps/web/src/app.css; both stop with reduce motion */
+.sk{display:block;background:var(--surface-2);flex:none;max-width:100%;animation:kb-breathe 1.6s ease-in-out infinite}
+.still .sk{animation:none}
+.live-dot{position:relative;display:inline-block;flex:none;width:var(--point);height:var(--point);border-radius:999px;background:var(--live)}
+.live-dot::after{content:"";position:absolute;inset:0;border-radius:inherit;background:inherit;animation:kb-pulse 2s var(--ease) infinite}
+.still .live-dot::after{display:none}
 .srow{display:flex;align-items:center;gap:var(--sp-3);min-height:56px;padding:var(--sp-3) var(--sp-4);border-radius:var(--r-row);border:1px solid var(--rule);background:var(--surface);
   font-size:var(--t-sm);font-weight:500}
 .srow svg{flex:none}
@@ -506,7 +513,8 @@ nav.toc{display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-4);font-size:var(--
 .on-light{background:#F4F5F7;border:1px solid var(--rule);border-radius:var(--r-row);padding:var(--sp-4);display:flex;align-items:center;gap:var(--sp-6);flex-wrap:wrap}
 .on-dark{background:#0A0B0D;border:1px solid var(--rule);border-radius:var(--r-row);padding:var(--sp-4);display:flex;align-items:center;gap:var(--sp-6);flex-wrap:wrap}
 /* motion */
-@keyframes shimmer{to{transform:translateX(100%)}}
+@keyframes kb-breathe{0%,100%{opacity:1}50%{opacity:.55}}
+@keyframes kb-pulse{0%{transform:scale(1);opacity:.55}70%,100%{transform:scale(2.4);opacity:0}}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
 @keyframes draw{from{transform:scaleX(0)}to{transform:none}}
@@ -514,6 +522,7 @@ nav.toc{display:flex;flex-wrap:wrap;gap:var(--sp-1) var(--sp-4);font-size:var(--
 @keyframes pulse{from{opacity:.6;transform:none}to{opacity:0;transform:scale(2.4)}}
 @keyframes wipe{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
 .mo{display:flex;flex-wrap:wrap;gap:var(--sp-6);align-items:center;min-height:72px}
+.mo.loops .sk{flex:1 1 120px;max-width:220px}
 .mo .m-rise{padding:var(--sp-3) var(--sp-4);border-radius:var(--r-row);background:var(--surface-2);border:1px solid var(--rule);font-size:var(--t-sm)}
 .mo .m-line{position:relative;width:140px;height:10px}
 .mo .m-line i{position:absolute;left:0;top:4px;width:130px;height:2px;border-radius:2px;background:var(--s-pot);transform-origin:left}
@@ -545,7 +554,7 @@ ul.plain b{color:var(--ink);font-weight:600}
 .diff p{color:var(--slate)}
 @media (min-width:761px){.diff{grid-template-columns:180px repeat(3,minmax(0,1fr))}}
 footer{font-size:var(--t-sm);color:var(--slate);display:flex;flex-direction:column;gap:var(--sp-2)}
-@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.sk::after{opacity:0}.mo .m-line u{opacity:0}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.live-dot::after{display:none}.mo .m-line u{opacity:0}}
 """
 
 JS = """
@@ -586,7 +595,7 @@ def build_html() -> str:
            .replace("NOISE", "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' "
                     "baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' "
                     "height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")")
-           .replace("CLEAR", "0"))
+           .replace("CLEAR", "0").replace("TYPEVARS", TYPE_VARS).replace("TYPEDESK", TYPE_DESK))
     ramp = lambda pre: '<div class="ramp">' + "".join(  # noqa: E731
         f'<span style="background:{v};color:{"#0A0B0D" if colour.lum(v) > .3 else "#F4F5F7"}">{k.split("-")[1]}</span>' for k, v in T["scale"].items() if k.startswith(pre)) + "</div>"
     sw = "".join(f'<div><i style="background:var(--{t})"></i><div><b>--{t}</b><span>{d[t]} dark</span><span>{li[t]} light</span><span>{use}</span></div></div>' for t, use in ROLES)
@@ -622,8 +631,8 @@ def build_html() -> str:
       <code>tokens_v1.css</code>, every ratio from <code>contrast_v1.md</code>, and the logo from Design's own files. Sample names and numbers are invented.</p>
     <nav class="toc" aria-label="On this page"><a href="#colour">Colour</a><a href="#type">Type</a><a href="#shape">Spacing and shape</a><a href="#glow">The glow</a>
       <a href="#components">Components</a><a href="#logo">Logo</a><a href="#tile">Company tile</a><a href="#motion">Motion</a><a href="#contrast">Contrast</a><a href="#app">The app today</a></nav>
-    <p class="note">Two things on this page wait for a decision: the type steps (the app is one step larger since #294) and the company tile, which was built before it was designed.
-      Both are under <a href="#app">The app today</a>.</p>
+    <p class="note">Decided by Product on 18 Nov 2026 (#{DECIDED}): the type steps are 17 / 15 / 13; the company tile is signed off as built; and the motion rule is
+      "no data motion loops", with two loops allowed (skeletons breathe, the live dot pulses). This page shows all three.</p>
   </div>
 
   <section id="colour">
@@ -638,7 +647,7 @@ def build_html() -> str:
   <section id="type">
     <h2>Type</h2>
     <p class="lead">Outfit for everything, numbers too, with tabular figures on. Weights: 400 text, 500 status rows, 600 headings and buttons, 700 the hero figure and titles.
-      Nothing below 12 px. Body text gets <code>word-spacing: 0.06em</code>.</p>
+      Body, small and caption are 17 / 15 / 13 (one step larger since #294, confirmed in #{DECIDED}). Nothing below 12 px. Body text gets <code>word-spacing: 0.06em</code>.</p>
     <div class="card">{typ}</div>
   </section>
 
@@ -671,7 +680,8 @@ def build_html() -> str:
     <h2>Components</h2>
     <p class="lead">Each one in its four states. Narrow the window to phone width (under 761 px) and the same page shows the phone layout. The label on each state says where it comes from:
       <span class="src rule">rule</span> is written in a design document, <span class="src built">as built</span> is how the app does it today with no written rule,
-      <span class="src follows">follows</span> is this page applying a written rule to a case no document names. The last two need Design's sign-off.</p>
+      <span class="src follows">follows</span> is this page applying a written rule to a case no document names. The last two need Design's sign-off.
+      The company tile was "as built" until it was signed off in #{DECIDED}; its rule is now in <code>brand_system_v1.md</code>, section 5.</p>
     {comps}
     <div class="comp"><h3>Status rows, tags and a form field</h3>
       <div class="two">
@@ -710,23 +720,31 @@ def build_html() -> str:
 
   <section id="tile">
     <h2>Company tile</h2>
-    <p class="lead">Wherever a stock is named: a squircle (a superellipse, n = 5, the curve of an app icon) with the company's logo on its own colour, or the ticker's initials.
-      A hairline, white at 8%, follows the same curve so the tile keeps its edge on the glow.</p>
+    <p class="lead">Wherever a stock is named: a squircle (a superellipse, n = 5, the curve of an app icon) with the company's logo on a colour sampled from that logo
+      (grey 50 when none was sampled), or the ticker's initials. A hairline, white at 8%, follows the same curve so the tile keeps its edge on the glow.
+      Signed off as built (#{DECIDED}); the rule is in <code>brand_system_v1.md</code>, section 5.</p>
     <div class="card"><div class="stack">
       <div class="tiles">{tile("logo", 32)}{tile("logo", 36)}{tile("logo", 40)}{tile("logo", 52)}{tile("init", 32, "KBO", 0)}{tile("init", 36, "DEMO", 5)}{tile("init", 40, "KBO", 7)}{tile("init", 52, "DEMO", 9)}{tile("halt", 36)}</div>
       <span class="sm">Sizes given: 32 (stacked faces on a theme card), 36 (rows, lists, tables), 40 (position and activity rows), 52 (a holding's own page). Each is drawn 8% larger
-        (35, 39, 43, 56 px; stakeholder, 17 Nov 2026). The logo keeps the padding sampled for it (12% until sampled). Initials: three or four letters, bold, never under 12 px, on one of ten dark tints
+        (35, 39, 43, 56 px; #293, stakeholder, 17 Nov 2026). The logo keeps the padding sampled for it (12% until sampled). Initials: three or four letters, bold, never under 12 px, on one of ten dark tints
         picked by the ticker. The round mark here stands in for a company's logo; no real logo is used on this page.</span>
     </div></div>
   </section>
 
   <section id="motion">
     <h2>Motion</h2>
-    <p class="lead">The logo's load animation as a family: things rise, lines draw, the point pops.</p>
+    <p class="lead">The logo's load animation as a family: things rise, lines draw, the point pops. No data motion loops: what shows data plays once.
+      Two signals may loop, because they say "loading" or "live" and carry no data; both stop with reduce motion.</p>
     <div class="card"><div class="stack">
       <div class="mo" data-replay><span class="m-rise">A row rises</span><span class="m-line"><i></i><u></u><b></b></span><span class="sm">a line draws, the point pops and pulses once</span></div>
       <button type="button" class="btn sec sm-btn" data-replay-btn>Play again</button>
     </div></div>
+    <div class="two">
+      <div class="card"><div class="stack" style="align-items:stretch"><span class="cap">The two loops</span>
+        <div class="mo loops" role="img" aria-label="A skeleton bar breathing and the live dot pulsing">{sk("100%", 20)}<span class="live-dot"></span><span class="sm">a skeleton breathes, 1.6 s; the live dot pulses, 2 s</span></div></div></div>
+      <div class="card"><div class="stack" style="align-items:stretch"><span class="cap">With reduce motion</span>
+        <div class="mo loops still" role="img" aria-label="A still skeleton bar and the live dot without its ring">{sk("100%", 20)}<span class="live-dot"></span><span class="sm">both stand still</span></div></div></div>
+    </div>
     <div class="card"><table class="tbl kv"><tbody>{motion}</tbody></table></div>
   </section>
 
@@ -742,13 +760,13 @@ def build_html() -> str:
 
   <section id="app">
     <h2>The app today</h2>
-    <p class="lead">Where <code>apps/web</code> on main (17 Nov 2026) differs from this page, for one Frontend follow-up story. Nothing in the app was changed. The colours, the font,
+    <p class="lead">Where <code>apps/web</code> on main (read 17 Nov 2026; the type steps, the skeleton and the loops checked again on 18 Nov for #{DECIDED}) differs from this page, for one Frontend follow-up story. Nothing in the app was changed. The colours, the font,
       the focus ring, the tab bar, the filter chips, the experiment's lab note and the glow already match.</p>
     <div class="diffs">{diffs}</div>
     <div class="card"><h3 style="margin-bottom:12px">For Design, not Frontend</h3><ul class="plain">
       <li><b>The logo has no written clear-space rule and no smallest size.</b> This page shows the margin the files carry. A sentence in <code>logo_concepts.md</code> would settle it.</li>
       <li><b>Spacing steps.</b> <code>brand_system_v1.md</code> lists 4, 8, 12, 16, 24, 32 and says they are the v4 steps; <code>mobile_first_v4.md</code> and the app also have 20 and 48. This page shows the brand list.</li>
-      <li><b>Button, tab and chip states marked "follows" or "as built"</b> on this page have no rule in any document yet.</li>
+      <li><b>Card, button, tab, chip, logo and skeleton states marked "follows" or "as built"</b> on this page have no rule in any document yet.</li>
     </ul></div>
   </section>
 
@@ -786,8 +804,8 @@ Issue #{ISSUE}. The one reference for how the app looks and moves. It replaces t
   sizes and motion from [`mobile_first_v4.md`](../mobile_first_v4.md), the logo from [`../logo/`](../logo/).
 - Written by `gen/designsystem.py`. Run it again after any of those files change; do not edit this file by hand.
 
-Two things wait for a decision: the type steps (the app is one step larger since #294) and the company tile, which
-was built before it was designed. Both are under "The app today".
+Decided by Product on 18 Nov 2026 (#{DECIDED}): the type steps are 17 / 15 / 13; the company tile is signed off as built;
+the motion rule is "no data motion loops", with two loops allowed (skeletons breathe, the live dot pulses).
 
 ![The page at desktop width](proof/design-system-desktop.png)
 
@@ -800,7 +818,8 @@ Dark is the theme the app runs; light is defined and off. A gain or a loss alway
 |---|---|---|---|"""]
     out += [f"| `--{t}` | `{d[t]}` | `{li[t]}` | {use} |" for t, use in ROLES]
     out += ["", "## Type", "",
-            "Outfit for everything, numbers too, with tabular figures on. Weights 400, 500, 600, 700. Nothing below 12 px.", "",
+            "Outfit for everything, numbers too, with tabular figures on. Weights 400, 500, 600, 700. Nothing below 12 px.",
+            f"Body, small and caption are 17 / 15 / 13: one step larger since #294, confirmed in #{DECIDED}.", "",
             "| Step | Token | Size / weight | Tracking | For |", "|---|---|---|---|---|"]
     out += [f"| {n} | `{tok}` | {size} | {trk} | {use} |" for n, tok, size, trk, use, _, _ in TYPE]
     out += ["", "## Spacing, shape, sizes", "",
@@ -815,7 +834,8 @@ Dark is the theme the app runs; light is defined and off. A gain or a loss alway
             "", "## Components and their states", "",
             "Shown at phone and desktop width on the page. Where a cell comes from: **rule** is written in a design document;",
             "**as built** is how the app does it today with no written rule; **follows** is this page applying a written rule to a",
-            "case no document names. The last two need Design's sign-off.", "",
+            "case no document names. The last two need Design's sign-off. The company tile was \"as built\" until it was signed",
+            f"off in #{DECIDED}; its rule is in `brand_system_v1.md`, section 5.", "",
             "| Component | Default | Loading | Empty | Error |", "|---|---|---|---|---|"]
     for name, *c in STATES:
         out.append(f"| **{name}** | " + " | ".join(f"{strip(c[2 * i + 1])} *({SRC[c[2 * i]]})*" for i in range(4)) + " |")
@@ -827,10 +847,11 @@ Dark is the theme the app runs; light is defined and off. A gain or a loss alway
             "wide and the letters 88 tall, so about one stem (`logo/gen/build.py`, `pad=14`). Keep text, edges and other marks outside",
             "it. No document states a clear-space rule or a smallest size in words yet (a finding for Design).",
             "", "## Company tile", "",
-            "A squircle (superellipse, n = 5) with the company's logo on its own colour, or the ticker's initials; a hairline, white",
-            "at 8%, on the same curve. Sizes given: 32, 36, 40 and 52; each is drawn 8% larger (35, 39, 43, 56 px; stakeholder,",
-            "17 Nov 2026). Initials: three or four letters, bold, never under 12 px, on one of ten dark tints. Written down here",
-            "as built in `apps/web/src/components/StockBadge.tsx`; there was no design document.",
+            "A squircle (superellipse, n = 5) with the company's logo on a colour sampled from that logo (grey 50 when none was",
+            "sampled), or the ticker's initials; a hairline, white at 8%, on the same curve. Sizes given: 32, 36, 40 and 52; each is",
+            "drawn 8% larger (35, 39, 43, 56 px; #293, stakeholder, 17 Nov 2026). Initials: three or four letters, bold, never under",
+            f"12 px, on one of ten dark tints. Signed off as built (#{DECIDED}; `apps/web/src/components/StockBadge.tsx`); the rule is in",
+            "`brand_system_v1.md`, section 5.",
             "", "## Motion", "", "| | |", "|---|---|"]
     out += [f"| **{a}** | {strip(b)} |" for a, b in MOTION]
     out += ["", "## Contrast: findings", "",
@@ -841,14 +862,15 @@ Dark is the theme the app runs; light is defined and off. A gain or a loss alway
     out += [f"| {w} | `{fg}` | `{bg}` | {r:.2f}:1 | {n:g}:1 |" for w, fg, bg, r, n in EXTRA_ROWS]
     out += [f"| {w} ({m}), `--{tok}` as it is now | `{new}` | `{bg}` | {now:.2f}:1 | {need:g}:1 |" for m, w, tok, old, new, bg, was, now, need in DRIFT]
     out += ["", "## The app today", "",
-            "Where `apps/web` on main (17 Nov 2026) differs from this page, for one Frontend follow-up story. Nothing in the app was",
+            f"Where `apps/web` on main (read 17 Nov 2026; the type steps, the skeleton and the loops checked again on 18 Nov for #{DECIDED})",
+            "differs from this page, for one Frontend follow-up story. Nothing in the app was",
             "changed. The colours, the font, the focus ring, the tab bar, the filter chips, the experiment's lab note and the glow",
             "already match.", "", "| What | This page | The app today | Next step |", "|---|---|---|---|"]
     out += [f"| {n} | {strip(a)} | {strip(b)} | {strip(c)} |" for n, a, b, c in DIFFS]
     out += ["", "For Design, not Frontend:", "",
             "- The logo has no written clear-space rule and no smallest size.",
             "- Spacing steps: `brand_system_v1.md` lists 4, 8, 12, 16, 24, 32; `mobile_first_v4.md` and the app also have 20 and 48.",
-            "- The states marked \"follows\" or \"as built\" have no rule in any document yet.",
+            "- The card, button, tab, chip, logo and skeleton states marked \"follows\" or \"as built\" have no rule in any document yet.",
             "", "## Limits", "",
             "- Drawn and checked in Chromium at 390 and 1280 px. Not tried on a real phone or in Safari.",
             "- The comparison with the app is from reading `apps/web/src` (tokens.css, v4tokens.css, app.css, the components), not from",

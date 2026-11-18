@@ -31,8 +31,8 @@ runs from the logo's white to its black and keeps their faint blue cast (hue abo
 | Card, sheet | `--surface` | `#131519` | `#FFFFFF` | |
 | Raised, pressed | `--surface-2` | `#1B1E23` | `#E4E6EA` | |
 | Text | `--ink` | `#F4F5F7` | `#0A0B0D` | 18.1 / 18.1 on the page |
-| Second-level text | `--slate` | `#B2B8C1` | `#40454F` | 9.9 / 8.8 |
-| Third-level text | `--stale` | `#989FAB` | `#5D646F` | 7.4 / 5.5 |
+| Second-level text | `--slate` | `#C0C5CD` | `#40454F` | 11.4 / 8.8 |
+| Third-level text | `--stale` | `#A7ADB8` | `#5D646F` | 8.7 / 5.5 |
 | Hairline (decoration) | `--rule` | `#262A31` | `#CDD1D9` | not relied on |
 | Border of a control | `--control` (new) | `#808692` | `#5D646F` | 5.0 / 5.5 (needs 3) |
 | Primary action | `--sea` + `--on-sea` (new) | `#4F95F0`, label `#0A0B0D` | `#2F6FDE`, label `#FFFFFF` | label 6.5 / 4.7 |
@@ -40,6 +40,10 @@ runs from the logo's white to its black and keeps their faint blue cast (hue abo
 | Focus ring | `--focus` (new) | `#7FB4F9`, 2 px, 2 px offset | `#2F6FDE` | 9.2 / 4.3 (needs 3) |
 | Selection | `--selection` (new) | `#174189` under `#F4F5F7` | `#B4D4FE` under `#0A0B0D` | 8.9 / 12.9 |
 | The live point | `--live` (new) | `#4F95F0` | `#2F6FDE` | 6.5 / 4.3 (needs 3) |
+
+On dark, `--slate` and `--stale` are not steps of the grey scale. They were made brighter on 17 Nov 2026 (#294) and sit
+between steps 200 and 300, and 300 and 400. `gen/tokens.py` holds them as fixed values (#307); the grey scale above is
+unchanged. On light they are still grey 700 and grey 600.
 
 Blue is kept for four things only: the logo, the one primary action on a screen, links and focus, and the live
 point. It no longer carries "information".
@@ -54,7 +58,7 @@ Same lightness family as the blue so none shouts louder than the brand, hues spa
 | Loss | `--loss` | `#FF716D` | `#BC262F` | 7.4 / 5.6 | ▼ and a minus sign |
 | Paper, caution | `--warn` | `#F7B746` | `#F7B746` fill, text `#835B05` | PAPER label 11.1 on amber | the word, a shield icon |
 | Halt, breach | `--loss-tint` + `--loss-line` (new) | row `#371715`, edge `#AD4B48` | `#FFE9E6`, `#D14E4D` | text 14.9, edge 3.6 / 3.9 | red dot, plain words, first on the screen |
-| Information | neutral: `--surface-2`, `--slate` | | | 8.4 | words |
+| Information | neutral: `--surface-2`, `--slate` | | | 9.6 | words |
 | Agent | `--ai` | `#C9B7FD` | `#6844AA` | 10.2 / 7.0 on a card | the word "Agent" |
 
 Gain and loss as text measure ΔE 7.7 apart for red-green colour-blind readers, inside the "only with a second
@@ -103,7 +107,7 @@ Authors), free to self-host and embed. It was chosen because its shapes are the 
   `font-variant-numeric: tabular-nums` must be on wherever money, shares or percentages appear (set on `body`).
 - Inter stays as the fallback: `"Outfit", "Inter", system-ui, sans-serif`.
 - Outfit's lower case is a little smaller than Inter's (x-height 0.48 against 0.55) and its word space is tight. So:
-  no text below 12 px, and `word-spacing: 0.06em` on body text.
+  no text below 12 px (the smallest step in use is 13), and `word-spacing: 0.06em` on body text.
 - Weights: 400 text, 500 status rows, 600 headings and buttons, 700 the hero figure and titles. Self-host four
   `woff2` files, latin subset, `font-display: swap`.
 
@@ -112,11 +116,15 @@ Authors), free to self-host and embed. It was chosen because its shapes are the 
 | Hero | `--t-hero` | 44 (60 desktop) / 700 | -0.035em | the pot |
 | Title | `--t-xl` | 28 / 700 | -0.03em | page title, sheet figure |
 | Heading | `--t-lg` | 20 / 600 | -0.01em | sheet title |
-| Body | `--t-md` | 16 / 400 or 600 | 0 | rows, buttons |
-| Small | `--t-sm` | 14 / 400 or 500 | 0 | second lines, status rows |
-| Caption | `--t-cap` | 12 / 600 | +0.02em (caps +0.08em) | labels, PAPER pill |
+| Body | `--t-md` | 17 / 400 or 600 | 0 | rows, buttons |
+| Small | `--t-sm` | 15 / 400 or 500 | 0 | second lines, status rows |
+| Caption | `--t-cap` | 13 / 600 | +0.02em (caps +0.08em) | labels, PAPER pill |
 
-The scale is the v4 scale, unchanged. Specimen: [`type_specimen.png`](type_specimen.png).
+Body, small and caption are one step larger than the v4 scale (16 / 14 / 12). The stakeholder asked for larger text on
+17 Nov 2026 (#294) and Product confirmed 17 / 15 / 13 as the intent (#307). Hero, title and heading are the v4 values.
+The app already has these sizes (`apps/web/src/v4tokens.css`); `gen/tokens.py` holds the table as `TYPE`.
+Specimen: [`type_specimen.png`](type_specimen.png) (drawn for #265, so it still shows 16 / 14 / 12 for the last three
+steps).
 
 ## 4. Shape, icons, motion
 
@@ -135,8 +143,18 @@ All from the logo's stem (15 units wide, 88 tall), its round ends and its point 
   for the experiment.
 - **Motion**, the logo's load animation as a family: things rise (sheets, rows: 320 ms in, 240 ms out), lines draw
   (`--d-draw` 300 ms, chart line on first load), the point pops (`--d-point` 180 ms, `--ease-pop`) and pulses once
-  when a new value arrives. Ease `cubic-bezier(.2, .7, .2, 1)`. Nothing loops. With "reduce motion" on: no draw, no
-  pop, no pulse; values just change.
+  when a new value arrives. Ease `cubic-bezier(.2, .7, .2, 1)`. Only `transform` and `opacity` animate.
+- **No data motion loops** (decided in #307; this replaces "nothing loops"). Anything that shows data plays once:
+  a chart draws once, a point pops once, a number ticks once. Two signals may loop, because they say "loading" or
+  "live" and carry no data:
+  - **Skeletons breathe.** The bar's opacity goes from 1 to 0.55 and back every 1.6 s (`kb-breathe`, ease-in-out).
+    No shimmer: a shimmer animates `background-position`, which repaints every frame.
+  - **The live dot pulses.** A ring grows from the dot and fades every 2 s (`kb-pulse`, `transform` and `opacity` on
+    a pseudo-element), only while the engine is live.
+
+  Nothing else loops. A new looping animation needs a design decision first.
+- **Reduce motion**: no draw, no pop, no pulse; values just change. Both loops stop: skeleton bars stand still at full
+  opacity and the live dot shows without its ring.
 
 ## 5. Components
 
@@ -150,13 +168,14 @@ See [`proof/components-dark-light.png`](proof/components-dark-light.png).
 | Disabled | 45% opacity, plus the reason in words nearby. |
 | Chip (filter) | Pill, 44 px, `--control` border. Selected: ink fill, page-colour label. Not blue, so filters do not compete with the action. |
 | Tag | 22 px pill, tint and text of its meaning. Gain and loss tags carry ▲ ▼. Experiment tag: dashed neutral with flask. |
-| Bottom tab bar | Resting: `--stale` icon and label (7.4:1). Active: ink icon and label plus the 6 px blue point above. Two cues, neither colour alone. |
+| Bottom tab bar | Resting: `--stale` icon and label (8.7:1). Active: ink icon and label plus the 6 px blue point above. Two cues, neither colour alone. |
 | Header | The wordmark (21 px tall) replaces mark plus text; PAPER pill; engine chip with the point. Height unchanged (56 + 1). |
 | Status rows | Halt: red tint, red edge, red dot. Caution: amber tint, amber edge, shield. Experiment: lab note (section 1). Order: halt, caution, experiment. |
 | Sheet | `--surface`, 24 px top corners, grab handle, `--rule-strong` top edge. One primary button at the bottom. |
 | Meter | 8 px track `--surface-2`, blue fill, round ends. The stop-to-target track ends in loss and gain colours with the point for "now". Amber then red fill when a limit is near or hit, with words. |
-| Skeleton | `--surface-2` to `--rule` shimmer, row-shaped, 8 px radius. No blue. |
-| Tables that remain | 12 px / 600 `--slate` headers, `--rule` row lines, right-aligned tabular figures, no zebra. |
+| Skeleton | `--surface-2` bars with an opacity breathe (1 to 0.55 and back, 1.6 s, `kb-breathe`), row-shaped, 8 px radius. No blue. Still with reduce motion. See section 4. |
+| Company tile | Signed off as built (#307; the stakeholder saw it live). A squircle (superellipse, n = 5) with a hairline, white at 8%, on the same curve. The company's logo stands on a tile colour sampled from the logo; grey 50 (`#F4F5F7`) when no colour was sampled or until it is. Every size is drawn 8% larger than it is given (#293): 32, 36 and 40 px call sites draw at 35, 39 and 43; 52 draws at 56. The tile is laid out first, then the logo fades in over 200 ms. No logo, or the logo failed: the ticker's initials (three or four letters, bold, never under 12 px) on one of ten dark tints picked by the ticker. A row with no company (a halt): a neutral tile with a red icon. Built in `apps/web/src/components/StockBadge.tsx`. |
+| Tables that remain | 13 px / 600 `--slate` headers (the caption step), `--rule` row lines, right-aligned tabular figures, no zebra. |
 | Forms | 48 px, 12 px radius, `--control` border, page-colour fill. Error: `--loss` border and a message in words. |
 | Focus | 2 px `--focus` ring, 2 px offset, on every control, on both themes. |
 

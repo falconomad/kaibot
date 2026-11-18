@@ -5,6 +5,11 @@
 Everything starts from three colours read from the Rising k logo files (docs/design/logo/concepts/1-rising-k):
 the blue of the arm and the point, the white of the stem, and the black the logo uses on light backgrounds.
 Scales are built in OKLCH (even steps of lightness, one hue), then named by role for a dark and a light theme.
+
+Two dark roles are set by hand and are not steps of the grey scale: second- and third-level text (`--slate`, `--stale`)
+were made brighter on 17 Nov 2026 (#294, stakeholder: larger, clearer text). The type steps follow the same request
+(#307: 17 / 15 / 13). They are kept here as TYPE so the design-system page reads them from one place; they are not
+written to tokens_v1.css, which holds colour and the logo's shape only.
 """
 from __future__ import annotations
 
@@ -70,6 +75,24 @@ NEUTRAL = {0: 1.0, 50: W_L, 100: 0.925, 200: 0.86, 300: 0.78, 400: 0.70, 500: 0.
 BLUES = {k: blue(v) for k, v in BLUE.items()}
 GREYS = {k: ("#FFFFFF" if k == 0 else neutral(v)) for k, v in NEUTRAL.items()}
 
+# Dark-theme text below the first level, as the app has had it since #294. They sit between grey steps (200/300 and
+# 300/400), so they are fixed values, not scale steps: the grey scale itself is unchanged.
+SLATE_DARK = "#C0C5CD"
+STALE_DARK = "#A7ADB8"
+
+# Type steps (brand_system_v1.md section 3). Body, small and caption are one step larger since #294; Product confirmed
+# 17 / 15 / 13 as the intent in #307. The app's own values are in apps/web/src/v4tokens.css (--t-md, --t-sm, --t-cap).
+# (step, token, px, px on desktop or None, weights, tracking, used for)
+TYPE = [
+    ("Hero", "--t-hero", 44, 60, "700", "-0.035em", "the pot"),
+    ("Title", "--t-xl", 28, None, "700", "-0.03em", "page title, sheet figure"),
+    ("Heading", "--t-lg", 20, None, "600", "-0.01em", "sheet title"),
+    ("Body", "--t-md", 17, None, "400 or 600", "0", "rows, buttons"),
+    ("Small", "--t-sm", 15, None, "400 or 500", "0", "second lines, status rows"),
+    ("Caption", "--t-cap", 13, None, "600", "+0.02em (caps +0.08em)", "labels, PAPER pill"),
+]
+TYPE_PX = {tok: px for _, tok, px, *_ in TYPE}
+
 # Meaning colours: one hue each, set at the same lightness steps as the blue so they sit beside it.
 HUES = {"gain": (160, 0.165), "loss": (24, 0.185), "amber": (78, 0.145), "agent": (296, 0.105)}
 
@@ -84,7 +107,7 @@ def theme(mode: str) -> dict:
     if mode == "dark":
         t = {
             "paper": g[950], "surface": g[900], "surface-2": g[850], "rule": g[800], "rule-strong": g[700],
-            "ink": g[50], "slate": g[300], "stale": g[400],
+            "ink": g[50], "slate": SLATE_DARK, "stale": STALE_DARK,
             "sea": b[400], "sea-ink": b[300], "sea-tint": b[900], "sea-line": b[700], "on-sea": g[950],
             "gain": tone("gain", 0.80), "gain-tint": tone("gain", 0.26, 0.30), "gain-line": tone("gain", 0.42, 0.55),
             "loss": tone("loss", 0.72), "loss-tint": tone("loss", 0.25, 0.28), "loss-line": tone("loss", 0.54, 0.70),
