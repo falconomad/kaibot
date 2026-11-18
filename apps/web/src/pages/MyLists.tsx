@@ -13,7 +13,7 @@ import { api } from "../lib/api";
 import type { ConfigBody } from "../lib/config";
 import { estShort, type Estimate } from "../lib/estimator";
 import {
-  DB_UPDATE, MAX_NAME, MAX_TICKERS, MIN_ONLY, NOT_A_TICKER, POLL_LIMIT_MS, POLL_MS, addable, isMissingFunction, itemFromCheck,
+  DB_UPDATE, MAX_NAME, MAX_TICKERS, MIN_ONLY, NOT_A_TICKER, POLL_LIMIT_MS, POLL_MS, addable, isMissingFunction, itemFromCheck, checkGate,
   itemFromSaved, itemsFromBody, listWords, looksLikeTicker, needsCheck, onlyShort, parseTickers, rpcErrorText, saveBlocker, tally, withList,
   type Item, type SavedList,
 } from "../lib/tickers";
@@ -57,16 +57,23 @@ export function useListEditor(body: ConfigBody, edit: (b: ConfigBody) => void, u
   const settle = (symbol: string, next: Item) =>
     alive.current && setItems((xs) => xs.map((x) => (x.symbol === symbol && (x.state === "checking" || x.state === "slow") ? next : x)));
 
-  // Check every ticker that needs it: ask again every 2 s while pending, for at most 30 s, then say "still checking".
+  // Check every ticker that needs it: kb_check_ticker (owner-only; today's answer or a pending row), then, while
+  // pending, the checker on Vercel. With no answer yet, ask kb_check_ticker again every 2 s (the Mac worker may answer);
+  // after about 10 s say "Waiting for the checker", with Retry. At most 5 tickers are checked at once.
   async function check(symbol: string) {
-    const t0 = Date.now();
     try {
+      let c = await checkGate(async () => {
+        const first = await api.checkTicker(symbol);
+        if (first?.status !== "pending" || !alive.current) return first;
+        return (await api.runTickerCheck(symbol).catch(() => null)) ?? first;
+      });
+      const t0 = Date.now();
       for (;;) {
-        const c = await api.checkTicker(symbol);
         if (!alive.current) return;
         if (c?.status !== "pending") { settle(symbol, itemFromCheck({ ...c, symbol })); return; }
         if (Date.now() - t0 >= POLL_LIMIT_MS) { settle(symbol, { symbol, state: "slow" }); return; }
         await sleep(POLL_MS);
+        c = await api.checkTicker(symbol);
       }
     } catch (e) {
       settle(symbol, { symbol, state: "error", reason: isMissingFunction(e) ? DB_UPDATE : rpcErrorText(e) });
@@ -304,12 +311,12 @@ function Chip({ item: i, onDrop, onRetry, onInfo }: { item: Item; onDrop: () => 
     );
   }
   const slow = i.state === "slow";
-  const why = slow ? "still checking. Try again in a minute." : i.reason ?? "";
+  const why = slow ? "No checker has answered yet. Try again in a minute." : i.reason ?? "";
   return (
-    <li className={`kb-chip ${slow ? "slow" : "no"}`} aria-label={slow ? `${i.symbol}, still checking` : `${i.symbol}, refused: ${why}`}>
+    <li className={`kb-chip ${slow ? "slow" : "no"}`} aria-label={slow ? `${i.symbol}, waiting for the checker` : `${i.symbol}, refused: ${why}`}>
       {!slow && <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--loss)" strokeWidth="2.2" aria-hidden="true" style={{ flex: "none" }}><circle cx="12" cy="12" r="8.5" /><path d="M6 18 L18 6" /></svg>}
       <span className="num kb-chip-sym">{i.symbol}</span>
-      <span className="kb-chip-why" title={why}>{slow ? "Still checking" : i.state === "error" ? `Not checked · ${why}` : `Refused · ${why}`}</span>
+      <span className="kb-chip-why" title={why}>{slow ? "Waiting for the checker" : i.state === "error" ? `Not checked · ${why}` : `Refused · ${why}`}</span>
       {(slow || i.state === "error") && <button type="button" className="linkbtn" style={{ fontSize: 13 }} onClick={onRetry} aria-label={`Check ${i.symbol} again`}>Retry</button>}
       {remove}
     </li>

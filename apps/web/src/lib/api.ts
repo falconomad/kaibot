@@ -3,7 +3,7 @@ import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
 import { parseSummary } from "./summary";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
-import type { TickerCheck, TickerLists } from "./tickers";
+import { checkerAnswer, type TickerCheck, type TickerLists } from "./tickers";
 export { coerce };
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
@@ -209,6 +209,17 @@ export const api = {
   // S68/S69 custom ticker lists (contract "Custom ticker lists"). kb_delete_ticker_list may not exist in the database
   // yet (migrations_pending step 1): callers read that with tickers.isMissingFunction and say so in plain words.
   checkTicker: (symbol: string) => rpc<TickerCheck>("kb_check_ticker", { p_symbol: symbol }),
+  /** The check answered on Vercel (api/check-ticker.ts; migration 0024): reads Alpaca paper (GET only), writes the
+   *  answer with the owner-only kb_ticker_check_answer and returns it. Null when it can't answer here (no keys, local
+   *  dev, not deployed): the row stays pending for the Mac worker and the caller keeps polling kb_check_ticker. */
+  runTickerCheck: async (symbol: string): Promise<TickerCheck | null> => {
+    const token = (await supa.auth.getSession()).data.session?.access_token;
+    if (!token) return null;
+    const r = await fetch("/api/check-ticker", { method: "POST", signal: AbortSignal.timeout(25_000),
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ symbol }) });
+    const type = r.headers.get("content-type");
+    return checkerAnswer(r.status, type, (type ?? "").includes("application/json") ? await r.json().catch(() => null) : null);
+  },
   tickerLists: async () => {
     const r = await rpc<TickerLists | null>("kb_ticker_lists");
     return { max_tickers: Number(r?.max_tickers ?? 40), max_lists: Number(r?.max_lists ?? 20), min_only: Number(r?.min_only ?? 5),
