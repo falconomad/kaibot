@@ -43,8 +43,12 @@ describe("one holding and the book's checks", () => {
     expect(daysHeld(null, "2027-01-01")).toBeNull();
     expect(daysHeld("2027-01-02", "2027-01-01")).toBeNull();
   });
-  it("stops: in place, missing, being placed again", () =>
-    expect(bookChecks(b)).toMatchObject({ n: 4, resting: 2, missing: ["ZZZQ"], rearming: ["COST"] }));
+  it("stops: in place, being placed again; none by design for a rule that sells by its list (ZZZQ, trend_momentum)", () =>
+    expect(bookChecks(b)).toMatchObject({ n: 4, needed: 3, resting: 2, missing: [], rearming: ["COST"], byDesign: ["ZZZQ"] }));
+  it("stops: missing for a rule that should carry one", () => {
+    const o = parseBook({ ...RAW_BOOK, positions: RAW_BOOK.positions.map((p) => (p.symbol === "ZZZQ" ? { ...p, rule: "orb" } : p)) });
+    expect(bookChecks(o)).toMatchObject({ n: 4, needed: 4, resting: 2, missing: ["ZZZQ"], rearming: ["COST"], byDesign: [] });
+  });
   it("groups by rule, biggest first", () => {
     const g = byRule(b);
     expect(g.map((x) => x.rule)).toEqual(["trend_momentum", "mom_12_1_band"]);

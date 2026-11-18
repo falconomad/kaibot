@@ -27,13 +27,14 @@ const book = (raw: unknown) => ({ key: ["book", 1], data: parseBook(raw, 1) });
 
 describe("Positions (v4, Holdings folded in)", () => {
   it("open: the day's positions and the multi-day book as rows, biggest first, with invested and share of the pot", () => {
-    const html = render(<Positions />, { ctx: ctxFor(run, { overview: ov() }), seeds: [book(RAW_BOOK)] });
+    // the pot is the marked book's close_equity (equity_reported), here set to the run's 10,070
+    const html = render(<Positions />, { ctx: ctxFor(run, { overview: ov() }), seeds: [book({ ...RAW_BOOK, mtm: { ...RAW_BOOK.mtm, equity_reported: 10070 } })] });
     const t = text(html);
     expect(t).toContain("Positions 5 open · $5,121.70 invested · 51% of the pot");
     expect(t).toContain("NVDA 10 shares · in at $200.00 $2,070.00 +$70.00");
     expect(t).toContain("AAPL Trend momentum · 4 shares · 51 days");
     expect(t).toContain("Trend momentum is an experiment: it failed the ten-year test");
-    expect(t).toContain("2 of 4 in place · ZZZQ missing"); // the book's safety strip
+    expect(t).toContain("2 of 3 in place · COST being placed again · 1 sold by the rule's list instead"); // the strip: ZZZQ (trend_momentum) has no stop by design
     expect(html).not.toContain("<table");
     expect((html.match(/class="row"/g) ?? []).length).toBe(5);
     expect(glitches(html)).toEqual([]);

@@ -59,7 +59,7 @@ export function Positions() {
   const today = etToday();
   const tonight = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today).flatMap((pl) => pl.orders.map((o) => ({ ...o, rule: pl.rule, fillsAt: pl.fillsAt })));
   const current = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today);
-  const live = run.kind === "paper" ? livePot(run, overview) : null;
+  const live = run.kind === "paper" ? livePot(run, overview, b) : null;
   const open: Open[] = [
     ...Object.entries(live?.positions ?? {}).map(([symbol, p]): Open => {
       const now = p.last ?? p.fill ?? 0;
