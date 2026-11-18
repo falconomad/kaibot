@@ -117,7 +117,9 @@ class FakeStore:
         self.tables: dict[str, list[dict]] = {}
         self.ids = itertools.count(1)
         self.beats: dict = {}
-        self.llm = {"day": 0.0, "month": 0.0, "open": {}}  # mirrors kaibot.llm_reserve / llm_settle
+        # mirrors kaibot.llm_reserve / llm_settle; "before": spend of the months before this one (#309: the lifetime
+        # total is the sum of kaibot.budget_day, which `select("budget_day", ...)` returns below)
+        self.llm = {"day": 0.0, "month": 0.0, "open": {}, "before": 0.0}
         self.lease: dict | None = None  # the single kaibot.engine_lease row
         self.lease_now = lambda: datetime.now(UTC)
         self.lease_fail = False
@@ -224,6 +226,13 @@ class FakeStore:
                 r.update(values)
 
     def select(self, table, params):
+        if table == "budget_day" and table not in self.tables:  # #309: the ledger as kaibot.budget_day keeps it
+            from zoneinfo import ZoneInfo
+
+            today = datetime.now(ZoneInfo("America/New_York")).date()
+            rows = [{"day": "2000-01-01", "spent_usd": self.llm.get("before", 0.0)},
+                    {"day": today.isoformat(), "spent_usd": self.llm["month"]}]
+            return [r for r in rows if r["spent_usd"] > 0]
         rows = list(self.tables.get(table, []))
         for k, v in params.items():
             if k in ("order", "limit", "select"):
