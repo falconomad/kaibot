@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
+import { parseSummary } from "./summary";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
 import type { TickerCheck, TickerLists } from "./tickers";
 export { coerce };
@@ -222,6 +223,26 @@ export const api = {
   multidayPlan: async (run: number) => optional(() => rpc<unknown>("kb_multiday_plan", { p_run: run })),
   bookClosed: async (run: number, limit = 50) => optional(() => rpc<unknown>("kb_book_closed", { p_run: run, p_limit: limit })),
   equitySeries: async (run: number) => parseSeries(await rpc<unknown>("kb_equity_series", { p_run: run, p_from: null, p_to: null })),
+  /** Stock summaries (migration 0023): the card from /api/summary, which writes today's on the first view (owner only,
+   *  inside its own caps). Where the function is not deployed (local dev) the stored card is read with the RPC.
+   *  Null: no card yet, or summaries unavailable here. */
+  stockSummary: async (symbol: string) => {
+    const token = (await supa.auth.getSession()).data.session?.access_token;
+    if (token) {
+      const r = await fetch(`/api/summary?symbol=${encodeURIComponent(symbol)}`, { headers: { Authorization: `Bearer ${token}` } });
+      const isJson = (r.headers.get("content-type") ?? "").includes("application/json");
+      if (r.ok && isJson) return parseSummary(((await r.json()) as { summary?: unknown })?.summary ?? null);
+      if (r.status === 401 || r.status === 403) throw Object.assign(new Error("not authorised"), { code: "42501" });
+      // no function here (local dev serves index.html; an old deployment 404s): read the stored card instead
+      if (isJson && r.status !== 404 && r.status !== 405) throw new Error(`The summary could not be loaded (HTTP ${r.status}).`);
+    }
+    return parseSummary(await optional(() => rpc<unknown>("kb_stock_summary", { p_symbol: symbol })));
+  },
+  summarySpend: async () => {
+    const r = await optional(() => rpc<Record<string, unknown> | null>("kb_summary_spend"));
+    return r ? { day_usd: Number(r.day_usd ?? 0), month_usd: Number(r.month_usd ?? 0), day_cap: Number(r.day_cap ?? 0.3),
+      month_cap: Number(r.month_cap ?? 5), cards_today: Number(r.cards_today ?? 0) } : null;
+  },
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),
 };

@@ -6,7 +6,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { RadioGroup } from "../components/ConfigControls";
+import { Sheet } from "../components/Sheet";
 import { StockBadge, companyName } from "../components/StockBadge";
+import { StockSummary } from "../components/StockSummary";
 import { api } from "../lib/api";
 import type { ConfigBody } from "../lib/config";
 import { estShort, type Estimate } from "../lib/estimator";
@@ -178,6 +180,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
     : ed.same ? "Saved lists stay here for next time."
     : blocker ?? (t.refused.length ? `Saves the ${t.accepted.length} accepted. Refused tickers are left out.` : `Saves ${plural(t.accepted.length, "ticker")}.`);
   const outside = mode === "prefer" && t.fresh.length > 0;
+  const [about, setAbout] = useState<string | null>(null);
   return (
     <section aria-labelledby="ml-h" className="kb-ml">
       <div className="kb-ml-head">
@@ -223,7 +226,7 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
 
       {ed.items.length > 0 ? (
         <ul className="kb-chips" aria-label="Tickers in this list">
-          {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} />)}
+          {ed.items.map((i) => <Chip key={i.symbol} item={i} onDrop={() => ed.drop(i.symbol)} onRetry={() => ed.retry(i.symbol)} onInfo={() => setAbout(i.symbol)} />)}
         </ul>
       ) : <span className="muted kb-ml-empty">No tickers yet. Add at least {MIN_ONLY} to trade only this list.</span>}
       <span className="num muted" aria-live="polite" style={{ fontSize: 14 }}>
@@ -255,6 +258,10 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
       {ed.cur && ed.deleteMissing() && <span className="muted" style={{ fontSize: 14 }}>Deleting a list needs a database update that isn't applied yet. The list stays saved.</span>}
       {ed.del.kind === "error" && <span className="loss" role="alert" style={{ fontSize: 14 }}>{ed.del.text}</span>}
 
+      <Sheet open={about !== null} onClose={() => setAbout(null)} title={about ?? ""}>
+        {about && <>{companyName(about) !== about && <p className="muted" style={{ marginTop: 0 }}>{companyName(about)}</p>}<StockSummary symbol={about} /></>}
+      </Sheet>
+
       <div className="kb-ml-lock">
         <span style={{ flex: "none", marginTop: 1 }}><LockIcon /></span>
         <span><b style={{ color: "var(--ink)", fontWeight: 600 }}>Safety filters always on.</b> Every ticker must be tradable at the broker, trade enough each day, have a tight spread, cost $5 or more and have enough history. These cannot be switched off.</span>
@@ -270,7 +277,7 @@ function LCard({ name, meta }: { name: string; meta: string }) {
   </>);
 }
 
-function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; onRetry: () => void }) {
+function Chip({ item: i, onDrop, onRetry, onInfo }: { item: Item; onDrop: () => void; onRetry: () => void; onInfo?: () => void }) {
   const remove = (
     <button type="button" className="kb-chip-x" aria-label={`Remove ${i.symbol}`} onClick={onDrop}><XIcon /></button>
   );
@@ -287,9 +294,11 @@ function Chip({ item: i, onDrop, onRetry }: { item: Item; onDrop: () => void; on
     const nm = i.name || (companyName(i.symbol) !== i.symbol ? companyName(i.symbol) : "");
     return (
       <li className="kb-chip ok" aria-label={`${i.symbol}${nm ? `, ${nm}` : ""}, accepted`}>
-        <StockBadge symbol={i.symbol} size={36} />
-        <span className="num kb-chip-sym">{i.symbol}</span>
-        {nm && <span className="kb-chip-name muted">{nm}</span>}
+        <button type="button" className="kb-chip-info" aria-haspopup="dialog" aria-label={`About ${i.symbol}`} onClick={onInfo}>
+          <StockBadge symbol={i.symbol} size={36} />
+          <span className="num kb-chip-sym">{i.symbol}</span>
+          {nm && <span className="kb-chip-name muted">{nm}</span>}
+        </button>
         {remove}
       </li>
     );

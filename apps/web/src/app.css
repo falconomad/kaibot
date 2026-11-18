@@ -840,3 +840,15 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .sell-when { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); color: var(--text-2); }
 .sell-when li.met { color: var(--warn-text); }
 .row-tags { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: flex-start; } .row-tags > .row-tag, .row-tags > .row-plan { margin-top: 4px; }
+
+/* stock summaries (kb_stock_summary, migration 0023): type 17 / 15 / 13, no motion but the skeleton's breathe */
+.ss { margin: 16px 0 12px; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 16px; background: var(--surface-2); display: flex; flex-direction: column; gap: 8px; }
+.ss-h { margin: 0; font-size: var(--t-md); font-weight: 600; color: var(--ink); }
+.ss-body { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--ink); overflow-wrap: anywhere; }
+.ss-body.muted { color: var(--slate); }
+.ss-meta { margin: 0; font-size: var(--t-cap); line-height: 1.4; color: var(--slate); }
+.ss-news { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ss-news li { display: flex; flex-direction: column; gap: 2px; }
+.ss-sk { display: flex; flex-direction: column; gap: 8px; }
+.kb-chip-info { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 44px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+/* end stock summaries */

@@ -128,3 +128,13 @@ describe("the My lists card", () => {
     expect(t).toMatch(/Accepted 2 Refused, never traded 1 New to kaibo 1 Room left 37 of 40/);
   });
 });
+
+describe("stock summaries behind a chip", () => {
+  it("an accepted chip opens its summary; refused and checking chips do not offer one", () => {
+    const h = card(fakeEd([ok("NBIS"), { symbol: "ZZZZ", state: "refused", reason: "not listed" }, { symbol: "CRWV", state: "checking" }]));
+    expect(h).toContain('aria-label="About NBIS"');
+    expect(h).toMatch(/class="kb-chip-info" aria-haspopup="dialog"/);
+    expect(h).not.toContain("About ZZZZ");
+    expect(h).not.toContain("About CRWV");
+  });
+});

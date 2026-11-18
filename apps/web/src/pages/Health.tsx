@@ -66,12 +66,15 @@ const usd = (v: number) => `$${v.toFixed(v < 10 ? 3 : 2)}`;
 /** S32/S36: today's LLM spend against the caps. */
 function LlmBudgetCard() {
   const q = useQuery({ queryKey: ["llm_budget"], queryFn: api.llmBudget, ...poll(30_000) });
+  // Stock summaries (0023): their own caps, spent by the dashboard's /api/summary. Null until 0023 is applied.
+  const sq = useQuery({ queryKey: ["summary_spend"], queryFn: api.summarySpend, retry: false, ...poll(60_000) });
   if (q.isPending) return <section className="card"><h2>LLM budget</h2><p className="skeleton" role="status">Loading…</p></section>;
   if (q.isError) return <section className="card"><h2>LLM budget</h2><ErrorState compact what="The LLM budget" error={q.error} retry={() => q.refetch()} /></section>;
   const b = q.data, t = budgetText(b), [cls, label] = STATE_TAG[b.state] ?? STATE_TAG.ok;
   const bar = (frac: number) => <div className="prog bar-row" aria-hidden="true"><i style={{ width: `${Math.min(100, frac * 100)}%`,
     background: frac >= 1 ? "var(--fail)" : frac >= 0.8 ? "var(--warn)" : undefined }} /></div>;
   const purposes = Object.entries(b.by_purpose);
+  const ss = sq.data;
   return (
     <section className="card" aria-labelledby="llm-h">
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -83,6 +86,7 @@ function LlmBudgetCard() {
         <span>This month</span><span /><span className="v">{usd(b.month_usd)} / ${b.caps.monthly_hard}</span>{bar(b.month_usd / b.caps.monthly_hard)}
         <span>Calls today</span><span /><span className="v">{b.calls_today}{b.open_reserved_usd > 0 ? ` · ${usd(b.open_reserved_usd)} reserved` : ""}</span>
         {purposes.length > 0 && (<><span>By purpose</span><span /><span className="v">{purposes.map(([k, v]) => `${k} ${usd(v)}`).join(" · ")}</span></>)}
+        {ss && (<><span>Stock summaries</span><span /><span className="v">{usd(ss.day_usd)} / ${ss.day_cap.toFixed(2)} today · {usd(ss.month_usd)} / ${ss.month_cap.toFixed(2)} this month · {ss.cards_today} written today</span></>)}
       </div>
       <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Above ${b.caps.daily_soft} a day the rules decide alone; ${b.caps.monthly_alert} a month raises an alert;
         at ${b.caps.monthly_hard} no new entries. Each call reserves its worst case first, so the caps can't be overshot.</p>

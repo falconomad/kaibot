@@ -14,6 +14,7 @@ import { livePot, useRunCtx } from "../components/Shell";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { StockBadge, companyName } from "../components/StockBadge";
+import { StockSummary } from "../components/StockSummary";
 import { useBook } from "../components/useBook";
 import { onTabKeys, tabProps } from "../lib/a11y";
 import { api, type Trade } from "../lib/api";
@@ -198,6 +199,7 @@ function DaySheet({ o, exps }: { o: Extract<Open, { kind: "day" }>; exps: Experi
         {p.fill !== null && <><span>If it hits the stop</span><span /><span className="v loss">{signedMoney((p.stop - p.fill) * p.qty)}</span></>}
       </div>
       <p className="muted" style={{ fontSize: 15 }}>{NAME} manages each trade itself; the stop and target rest at the broker.</p>
+      <StockSummary symbol={o.symbol} />
       <Link to={`/positions/${p.trade_id}`} className="btn sheet-cta">Full trade details</Link>
     </>
   );
@@ -233,6 +235,7 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
         );
       })()}
       {RULES[p.rule] && <p className="muted" style={{ fontSize: 15 }}>The rule {RULES[p.rule].what}. Prices are at the last close.</p>}
+      <StockSummary symbol={o.symbol} />
     </>
   );
 }
@@ -286,6 +289,7 @@ function ClosedSheet({ t, exp }: { t: Trade; exp: Experiment | null }) {
         <span>Why it closed</span><span /><span className="v">{exitText(t.exit_reason)}</span>
         {t.verdict && <><span>Agent room</span><span /><span className="v">{t.verdict}</span></>}
       </div>
+      <StockSummary symbol={t.symbol} />
       <Link to={`/positions/${t.id}`} className="btn sheet-cta">Full trade details</Link>
     </>
   );
