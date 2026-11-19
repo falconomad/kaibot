@@ -42,8 +42,9 @@ export function chartCaption(sessions: number, investedShare: number | null): st
 /** `compact` (v4 Home): no table button on phones and the SVG's own axis text is hidden there (the chart stretches);
  *  an HTML scale (top and bottom value, first and last day) stands in. The legend shows at every width.
  *  `base`: where each line's change is measured from (the run's start for All, the range's first point otherwise). */
-export function PotChart({ data, start, markers = [], compact = false, base, caption = null }: { data: Curve[]; start: number; markers?: ChartMarker[];
-  compact?: boolean; base?: { pot: number; spy: number }; caption?: string | null }) {
+export function PotChart({ data, start, markers = [], compact = false, base, caption = null, quiet = false }: { data: Curve[]; start: number; markers?: ChartMarker[];
+  compact?: boolean; base?: { pot: number; spy: number }; caption?: string | null;
+  /** Live prices move the last point every 10 s: it follows without the pop, which that often would be a loop. */ quiet?: boolean }) {
   const [hover, setHover] = useState<number | null>(null);
   const [draw] = useState(() => !drawn && data.length > 1);
   useEffect(() => { if (draw) drawn = true; }, [draw]);
@@ -52,7 +53,7 @@ export function PotChart({ data, start, markers = [], compact = false, base, cap
   const prevPot = useRef(lastPot);
   const [pops, setPops] = useState(0);
   useEffect(() => {
-    if (lastPot !== undefined && prevPot.current !== undefined && lastPot !== prevPot.current) setPops((n) => n + 1);
+    if (!quiet && lastPot !== undefined && prevPot.current !== undefined && lastPot !== prevPot.current) setPops((n) => n + 1);
     prevPot.current = lastPot;
   }, [lastPot]);
   const [table, setTable] = useState(false);

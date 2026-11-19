@@ -14,6 +14,8 @@ import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
 import { CA_REASON, caNotes, onDay } from "../lib/corpactions";
 import { exitKinds } from "../lib/engineevents";
+import { type LiveBook, markOf } from "../lib/marks";
+import { DayChange } from "./Marks";
 import { Tick } from "./Tick";
 import { NAME, REPO_DIR } from "../brand/brand";
 
@@ -179,27 +181,35 @@ export function NewRunRow({ next, overview, onShow }: { next: Run; overview: Ove
 // ---------------------------------------------------------------- top holdings
 
 export interface HoldingRowData { key: string; symbol: string; value: number; gain: number | null; to: string;
-  bar: { stop: number; now: number; target: number } | null; sub: string | null }
+  bar: { stop: number; now: number; target: number } | null; sub: string | null;
+  /** Today's change against the previous close, in percent: only while the prices are live (lib/marks.ts). */
+  day?: number | null;
+  /** A multi-day holding (its figures can be live); a day position's come from the engine's ledger. */
+  book?: boolean }
 
 type IntradayPos = { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number };
 
-/** Intraday positions (the ledger) and the multi-day book's stocks, biggest first. */
-export function holdingRows(positions: Record<string, IntradayPos>, book: Book | undefined): HoldingRowData[] {
-  const rows: HoldingRowData[] = Object.entries(positions).map(([s, p]) => {
-    const now = p.last ?? p.fill;
-    return { key: `d-${s}`, symbol: s, value: p.qty * (now ?? 0), gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null,
+/** Intraday positions (the ledger) and the multi-day book's stocks, biggest first. With `live` (lib/marks.liveBook) a
+ *  book row's value and gain are at the price now and it carries today's change; without it they are at the close
+ *  mark. The order is by the value at the booked close either way, so rows do not swap places as prices move. */
+export function holdingRows(positions: Record<string, IntradayPos>, book: Book | undefined, live?: LiveBook | null): HoldingRowData[] {
+  const rows: [number, HoldingRowData][] = Object.entries(positions).map(([s, p]) => {
+    const now = p.last ?? p.fill, value = p.qty * (now ?? 0);
+    return [value, { key: `d-${s}`, symbol: s, value, gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null,
       to: `/positions/${p.trade_id}`, bar: now !== null && p.target > p.stop ? { stop: p.stop, now, target: p.target } : null,
-      sub: p.status === "pending" ? "filling" : null };
+      sub: p.status === "pending" ? "filling" : null }];
   });
   for (const p of book?.positions ?? []) {
-    const v = holdingView(p, book!);
-    rows.push({ key: `m-${p.rule}-${p.symbol}`, symbol: p.symbol, value: v.value, gain: v.gain, to: "/positions", bar: null,
-      sub: `${ruleName(p.rule)}${v.days !== null ? ` · ${v.days} d` : ""}` });
+    const v = holdingView(p, book!, markOf(live, p.symbol));
+    rows.push([p.qty * p.mark, { key: `m-${p.rule}-${p.symbol}`, symbol: p.symbol, value: v.value, gain: v.gain, to: "/positions", bar: null,
+      sub: `${ruleName(p.rule)}${v.days !== null ? ` · ${v.days} d` : ""}`, day: v.dayPct, book: true }]);
   }
-  return rows.sort((a, b) => b.value - a.value);
+  return rows.sort((a, b) => b[0] - a[0]).map((r) => r[1]);
 }
 
-export function TopHoldings({ rows, max, top = 3 }: { rows: HoldingRowData[]; max: number | null; top?: number }) {
+export function TopHoldings({ rows, max, top = 3, waiting = false, from }: { rows: HoldingRowData[]; max: number | null; top?: number;
+  /** The first live prices are on their way: keep the place of each book row's "today" line. */ waiting?: boolean;
+  /** Where the book rows' figures come from ("live" or "close"), for Tick: a change of source does not tint. */ from?: string }) {
   const nav = useNavigate();
   return (
     <section aria-labelledby="hold-top-h" className="home-holdings">
@@ -215,8 +225,9 @@ export function TopHoldings({ rows, max, top = 3 }: { rows: HoldingRowData[]; ma
                 <StockBadge symbol={r.symbol} size={40} />
                 <span className="hold-mid"><b>{r.symbol}</b>
                   {r.bar ? <PriceBar {...r.bar} /> : r.sub ? <span className="muted">{r.sub}</span> : null}</span>
-                <span className="hold-end num"><b><Tick value={r.value}>{money(r.value)}</Tick></b>
-                  {r.gain !== null && <Tick value={r.gain} className={r.gain > 0 ? "gain" : r.gain < 0 ? "loss" : "flat"}>{signedMoney(r.gain)}</Tick>}</span>
+                <span className="hold-end num"><b><Tick value={r.value} from={from}>{money(r.value)}</Tick></b>
+                  {r.gain !== null && <Tick value={r.gain} from={from} className={r.gain > 0 ? "gain" : r.gain < 0 ? "loss" : "flat"}>{signedMoney(r.gain)}</Tick>}
+                  <DayChange pct={r.day} waiting={waiting && r.book} /></span>
               </button>
             </li>
           ))}

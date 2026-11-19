@@ -49,4 +49,22 @@ describe("the mobile check does not depend on when it runs", () => {
     expect(check).toMatch(/def stress_notes\(/);
     expect(check).toMatch(/\n {4}stress_notes\(browser, dist, metrics, fails\)/);
   });
+
+  it("the stress run covers the live state (19 Nov 2026): the market open, /api/marks answered by the mock, long figures", () => {
+    // the mock answers as api/marks.ts does, at the check's own instant, and only when asked to be live
+    expect(mock).toMatch(/def marks\(self\) -> dict \| None:/);
+    expect(mock).toMatch(/"available": True, "as_of": mock_data\.iso\(self\.now - dt\.timedelta\(seconds=4\)\), "positions": rows/);
+    for (const field of ['"symbol"', '"qty"', '"price"', '"prev_close"']) expect(mock).toContain(field);
+    // prices far from the close for the biggest holdings: six-digit values and gains, three-digit changes today
+    expect(mock).toMatch(/LIVE = \{"PLTRWW": 9\.7, "WMT": 0\.31, "CRM": 1\.0/);
+    // the check serves it, runs with the market open at all three phone widths, and is part of --stress
+    expect(check).toMatch(/if p == "\/api\/marks" and marks and marks\(\):/);
+    expect(check).toMatch(/def stress_live\(/);
+    expect(check).toMatch(/for w, h in PHONES:\n {8}for name, path, live in \[\("home", "\/", True\), \("positions", "\/positions", True\), \("home-fallback", "\/", False\)\]:\n {12}ctx = context\(browser, OPEN,/);
+    expect(check).toMatch(/StressMock\("running", OPEN, live=live\)/);
+    expect(check).toMatch(/\n {4}stress_live\(browser, dist, metrics, fails\)/);
+    // what it fails on: the line off one line or off the screen, a figure wider than its column, a row without today
+    expect(check).toMatch(/st\["lines"\] != 1 or st\["over"\] or st\["size"\] != "13px" or st\["wide"\] or st\["heroOver"\] or st\["moving"\]/);
+    expect(check).toMatch(/st\["days"\] != want/);
+  });
 });

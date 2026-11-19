@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
 import { parseSummary } from "./summary";
+import { type Marks, parseMarks } from "./marks";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
 import { checkerAnswer, type TickerCheck, type TickerLists } from "./tickers";
 export { coerce };
@@ -238,6 +239,18 @@ export const api = {
   multidayPlan: async (run: number) => optional(() => rpc<unknown>("kb_multiday_plan", { p_run: run })),
   bookClosed: async (run: number, limit = 50) => optional(() => rpc<unknown>("kb_book_closed", { p_run: run, p_limit: limit })),
   equitySeries: async (run: number) => parseSeries(await rpc<unknown>("kb_equity_series", { p_run: run, p_from: null, p_to: null })),
+  /** Live marks (api/marks.ts): what the paper account holds and each stock's price now, read from Alpaca paper (GET
+   *  only) for the owner, at most once in 10 s. Null when the function cannot answer here (no keys on a preview, local
+   *  dev, not deployed, not the owner): the page then keeps the engine's minute ledger and the close marks
+   *  (lib/marks.ts). A request that fails throws, so the last answer stays until it is 30 s old. */
+  marks: async (): Promise<Marks | null> => {
+    const token = (await supa.auth.getSession()).data.session?.access_token;
+    if (!token) return null;
+    const r = await fetch("/api/marks", { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) });
+    const at = Date.now();
+    if (!r.ok || !(r.headers.get("content-type") ?? "").includes("application/json")) return null;
+    return parseMarks(await r.json().catch(() => null), at, r.headers.get("date"));
+  },
   /** Stock summaries (migration 0023): the card from /api/summary, which writes today's on the first view (owner only,
    *  inside its own caps). Where the function is not deployed (local dev) the stored card is read with the RPC.
    *  Null: no card yet, or summaries unavailable here. */

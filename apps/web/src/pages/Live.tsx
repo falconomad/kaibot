@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Meter, engineChip, livePot, useRunCtx } from "../components/Shell";
+import { Meter, engineChip, useRunCtx } from "../components/Shell";
 import { PotChart, RANGES, type RangeKey, chartCaption, rangesFor } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
@@ -22,6 +22,8 @@ import { DailyNoteCard } from "../components/DailyNote";
 import { engineDetail } from "../components/Experiment";
 import { dailyNote, showNote } from "../lib/engineevents";
 import { multiDayFrom } from "../lib/experiment";
+import { FreshLine, useMarks } from "../components/Marks";
+import { potLive } from "../lib/marks";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -136,6 +138,9 @@ export function Live() {
   // #130: the pot line marked to market (kb_equity_series) once the ledger has closes; before that, realised results.
   const { series, book: bookQ } = useBook(run);
   const useBookData = bookQ.data;
+  // Stakeholder, 19 Nov 2026: between two closes the book is marked at the paper account's prices (lib/marks.ts),
+  // asked for every 10 s while the market is open. The book itself keeps its 5-minute cache.
+  const mk = useMarks(run, overview);
   const lv = run.level ? LEVELS[run.level] : null;
   const [rangePick, setRange] = useState<RangeKey>("ALL");
   // #311: the daily note's event comes with kb_health's events. Home does not fetch them for it (the first load stays
@@ -150,11 +155,13 @@ export function Live() {
   const c = marked.length ? mtmCurve(run.amount_usd, series.data!, daily) : curve(run.amount_usd, daily);
   // Product, 16 Nov 2026: the line ends at the hero figure. Today's live pot (paper, ledger from today) is the last
   // point, marked live; the S&P 500 line holds its last close there. Stakeholder, 18 Nov 2026: the hero and the line
-  // are the marked book (kb_book close_equity, the same series), never the sum of closed trades.
-  const liveNow = run.kind === "paper" ? livePot(run, overview, useBookData, series.data) : null;
+  // are the marked book (kb_book close_equity, the same series), never the sum of closed trades. 19 Nov 2026: live
+  // prices when the account holds exactly the book, else the engine's minute ledger (potLive); the earlier points
+  // stay the booked closes.
+  const liveNow = run.kind === "paper" ? potLive(run, overview, useBookData, series.data, mk.marks) : null;
   const todayEt = etToday();
   const tail = c.at(-1);
-  if (liveNow && overview.ledger && etToday(new Date(overview.ledger.ts)) === todayEt && useBookData?.session !== todayEt) {
+  if (liveNow?.fresh && liveNow.fresh.kind !== "close") {
     const point = { session: todayEt, pot: liveNow.pot, spy: tail?.spy ?? run.amount_usd, live: true };
     if (tail?.session === todayEt) c[c.length - 1] = { ...tail, pot: liveNow.pot, live: true };
     else c.push(point);
@@ -179,11 +186,12 @@ export function Live() {
     && ["scheduled", "running", "paused"].includes(r.status)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null : null;
 
   const book = useBookData;
-  const rows = holdingRows(live?.positions ?? {}, book);
+  const rows = holdingRows(live?.positions ?? {}, book, live?.live);
   const noteNow = run.kind === "paper" && !ended
     ? dailyNote(multiDayFrom(engineDetail(overview.heartbeat)), (healthCache.data?.events ?? []).filter((e) => e.run_id === null || e.run_id === run.id)) : null;
   const note = noteNow && showNote(noteNow) ? noteNow : null;
   const allTime = pot - run.amount_usd;
+  const src = live?.fresh?.kind ?? "none";
   const chartStart = range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd;
   // fewer than 5 closes: say why the line barely moves (the share of the pot in stocks at the last close)
   const caption = run.kind === "paper" ? chartCaption(c.filter((p) => !p.live).length,
@@ -199,12 +207,14 @@ export function Live() {
         <section aria-labelledby="pot-h" className="home-hero">
           <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer?.status === "scheduled" ? "Last run (ended)"
             : ended ? "Paper pot · run ended" : "Paper pot"}</h1>
-          <div className="hero num"><Tick value={pot}>{money(pot)}</Tick></div>
+          {/* `from`: a change of source (live prices, the engine's row, a close) is not a move of the market: no tint */}
+          <div className="hero num"><Tick value={pot} from={src}>{money(pot)}</Tick></div>
           <div className="num home-change">
-            <Tick value={allTime} className={tone(allTime)}>{signedMoney(allTime)} all time</Tick>
-            {live && <Tick value={live.dayPnl} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
+            <Tick value={allTime} from={src} className={tone(allTime)}>{signedMoney(allTime)} all time</Tick>
+            {live && <Tick value={live.dayPnl} from={src} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
             <span className="muted desk-only">{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500 by {money(Math.abs(vsSpy))}</span>
           </div>
+          <FreshLine fresh={live?.fresh ?? null} />
         </section>
         {lv && meters && run.kind === "paper" && (
           <div className="desk-only meters home-meters" aria-label="Limits">
@@ -215,7 +225,7 @@ export function Live() {
       </div>
 
       <section aria-label="Pot over time" className="home-chart">
-        <PotChart data={shown} start={chartStart} compact caption={caption}
+        <PotChart data={shown} start={chartStart} compact caption={caption} quiet={!!live?.live}
           base={range === "ALL" || !shown.length ? { pot: run.amount_usd, spy: run.amount_usd } : { pot: shown[0].pot, spy: shown[0].spy }}
           markers={(chapters.data ?? []).filter((c) => c.version > 0 && c.from).map((c) => ({ session: c.from.slice(0, 10), label: `v${c.version}` }))} />
         {ranges.length > 1 && <div className="range" role="group" aria-label="Chart range">
@@ -223,7 +233,7 @@ export function Live() {
         </div>}
       </section>
 
-      {run.kind === "paper" && <TopHoldings rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} />}
+      {run.kind === "paper" && <TopHoldings from={live?.live ? "live" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} />}
       {note && <DailyNoteCard note={note} />}
       {run.kind === "replay" && (
         <section className="card" aria-labelledby="last-h">

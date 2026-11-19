@@ -26,6 +26,10 @@ at 12:40 in New York) or CLOSED (17:30 the same day), so a run gives the same an
 
 --stress also puts the daily note (#311) at its worst on Home after the close: a long note, a long template fallback
 with its reason, and text with nowhere to break (a link, a ticker list), on the card and in its sheet.
+
+--stress also measures the live state (stakeholder, 19 Nov 2026), with the market open: /api/marks is answered from the
+stress mock, so Home and Positions mark the crowded book at live prices. The freshness line ("Live · prices 4 s ago"),
+six-digit values and gains, each row's change today and the position sheet must fit at 375, 390 and 430 px.
 """
 # ruff: noqa: E501  (the browser scripts in this file are JavaScript inside strings; a few lines run past 120)
 from __future__ import annotations
@@ -86,6 +90,11 @@ def serve(mock, dist: pathlib.Path, now: dt.datetime):
             return route.fulfill(status=200, content_type="application/json", body=body)
         if url.startswith(audit.APP):
             p = url[len(audit.APP):].split("?")[0].split("#")[0]
+            marks = getattr(mock, "marks", None)
+            if p == "/api/marks" and marks and marks():
+                # the live marks function (api/marks.ts), answered from the mock; any other mock serves the page
+                # below instead, as a deployment without the function does, and the app falls back
+                return route.fulfill(status=200, content_type="application/json", headers={"cache-control": "no-store"}, body=json.dumps(marks()))
             f = dist / p.lstrip("/")
             if not (p != "/" and f.is_file()):
                 f = dist / "index.html"
@@ -464,6 +473,65 @@ def stress_notes(browser, dist: pathlib.Path, metrics: str, fails: list[str]) ->
     ctx.close()
 
 
+# The live state on a page: the freshness line (its text, and that it fits its box and the screen), how many rows carry
+# a change today, and the longest figure in a row's end column.
+LIVE_JS = """() => { const f = document.querySelector('.fresh'); const r = f ? f.getBoundingClientRect() : null;
+  const ends = [...document.querySelectorAll('.hold-end, .row-end')];
+  const wide = ends.filter((e) => e.scrollWidth > e.clientWidth + 1 || [...e.children].some((k) => k.getBoundingClientRect().left < e.parentElement.getBoundingClientRect().left)).length;
+  return { line: f ? f.textContent : null, live: !!f && f.classList.contains('live'), lines: f ? Math.round(r.height / parseFloat(getComputedStyle(f).lineHeight)) : 0,
+    over: !!f && (f.scrollWidth > f.clientWidth + 1 || r.right > innerWidth || r.left < 0), size: f ? getComputedStyle(f).fontSize : null,
+    days: document.querySelectorAll('.hold-end .day, .row-end .day').length, wide,
+    longest: ends.flatMap((e) => [...e.children].map((k) => k.textContent.trim())).sort((a, b) => b.length - a.length)[0] || '',
+    hero: (document.querySelector('.hero') || {}).textContent || null,
+    heroOver: !!document.querySelector('.hero') && document.querySelector('.hero').scrollWidth > document.querySelector('.hero').clientWidth + 1,
+    moving: document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations === Infinity
+      && a.effect.target && a.effect.target.closest('.home-hero, .hold-rows, .rows, .pos-head')).length }; }"""
+
+
+def stress_live(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> None:
+    """The live state (stakeholder, 19 Nov 2026), with the market open (OPEN) and the crowded book held at the broker:
+    Home, Positions and the position sheet at 375, 390 and 430 px. /api/marks is answered by the stress mock, with
+    prices far from the close for the biggest holdings. Each: no overflow, no tap target under 44 px, no row whose
+    parts overlap, the freshness line on one line inside the screen, a change today on every row, and nothing that
+    loops. Once per width also the fallback (the function not answering): the engine's line, and no row says today."""
+    import stress_mock
+    for w, h in PHONES:
+        for name, path, live in [("home", "/", True), ("positions", "/positions", True), ("home-fallback", "/", False)]:
+            ctx = context(browser, OPEN, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+            ctx.add_init_script(audit.INIT)
+            ctx.add_init_script(signed_in(OPEN))
+            ctx.route("**/*", serve(stress_mock.StressMock("running", OPEN, live=live), dist, OPEN))
+            pg = ctx.new_page()
+            pg.goto(audit.APP + path, wait_until="load")
+            pg.wait_for_selector("main > *")
+            pg.wait_for_timeout(1800)
+            check(pg, f"stress-live-{name}", w, metrics, fails)
+            bad = pg.evaluate(MISALIGN)
+            st = pg.evaluate(LIVE_JS)
+            print(f"stress live {name} {w}: {st}, misaligned {bad}")
+            if bad:
+                fails.append(f"stress-live-{name}@{w}: {bad}")
+            if st["lines"] != 1 or st["over"] or st["size"] != "13px" or st["wide"] or st["heroOver"] or st["moving"]:
+                fails.append(f"stress-live-{name}@{w}: the freshness line or a row's figures do not fit, or something loops: {st}")
+            want = 3 if name == "home" else 27 if name == "positions" else 0
+            if live and (not st["live"] or not (st["line"] or "").startswith("Live · prices ") or st["days"] != want or len(st["longest"]) < 12):
+                fails.append(f"stress-live-{name}@{w}: not live, or a row has no change today, or no long figure was measured: {st}")
+            if not live and (st["live"] or not re.fullmatch(r"Updated .+ by the engine", st["line"] or "") or st["days"]):
+                fails.append(f"stress-live-{name}@{w}: the fallback does not say the engine's figure is shown, or a row says today: {st}")
+            if name == "positions":
+                pg.locator(".rows .row").first.click()
+                pg.wait_for_selector("[role=dialog]")
+                pg.wait_for_timeout(500)
+                sheet = pg.evaluate("(() => { const d = document.querySelector('[role=dialog] .sheet, [role=dialog]'); const r = d.getBoundingClientRect(); "
+                                    "return { over: d.scrollWidth > d.clientWidth + 1, right: Math.round(r.right), w: innerWidth, "
+                                    "now: d.textContent.includes('Price now'), today: /Today[^A-Za-z]*%/.test(d.textContent), live: d.textContent.includes('Prices are live') }; })()")
+                bad = pg.evaluate(MISALIGN)
+                print(f"stress live sheet {w}: {sheet}, misaligned {bad}")
+                if sheet["over"] or sheet["right"] > sheet["w"] or bad or not (sheet["now"] and sheet["today"] and sheet["live"]):
+                    fails.append(f"stress-live-sheet@{w}: {sheet} {bad}")
+            ctx.close()
+
+
 def stress(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> None:
     """--stress: the first real holdings, crowded (scripts/stress_mock.py): Home's top holdings, Positions, the position
     sheet and the book card with 28 multi-day positions, at 375, 390 and 430 px. Fails on overflow, a tap target under
@@ -535,6 +603,7 @@ def stress(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> None:
                 check(pg, "stress-sold", w, metrics, fails)
             ctx.close()
     stress_notes(browser, dist, metrics, fails)
+    stress_live(browser, dist, metrics, fails)
 
 
 def main(a) -> int:
