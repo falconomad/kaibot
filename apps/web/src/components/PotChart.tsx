@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Curve } from "../lib/model";
 import { day, money } from "../lib/fmt";
+import { NAME } from "../brand/brand";
 
 // Pot vs SPY scaled to the same start. One y-axis (both are dollars). Brand system v1 (#265): the pot's line is the
 // brand blue and ends in the live point; the benchmark is neutral grey, told apart by its dots and its label.
@@ -15,8 +16,34 @@ export const resetChartDraw = () => { drawn = false; };
 /** Optional chapter boundaries (M5 S48): a dashed rule at the first session on or after each `session`. */
 export interface ChartMarker { session: string; label: string }
 
-/** `compact` (v4 Home): no legend or table button; on phones also no axis labels (CSS), the line only. */
-export function PotChart({ data, start, markers = [], compact = false }: { data: Curve[]; start: number; markers?: ChartMarker[]; compact?: boolean }) {
+/** The chart's ranges: [key, sessions kept (0: all), label]. */
+export const RANGES = [["1W", 5, "1W"], ["1M", 21, "1M"], ["3M", 63, "3M"], ["ALL", 0, "All"]] as const;
+export type RangeKey = (typeof RANGES)[number][0];
+/** Stakeholder, 19 Nov 2026: with 3 sessions every range drew the same line. Only ranges that show less than All. */
+export const rangesFor = (points: number): RangeKey[] => RANGES.filter(([, keep]) => keep === 0 || points > keep + 1).map(([k]) => k);
+
+/** The change from `from` to `to` in percent, precise enough that a tiny move is not "0.0%" (−2.74 on 95,000: −0.003%). */
+export function changePct(to: number, from: number): string {
+  if (!from) return "";
+  const p = ((to - from) / from) * 100, a = Math.abs(p);
+  if (a < 0.0005) return "0.0%";
+  const dp = a < 0.01 ? 3 : a < 1 ? 2 : 1;
+  return `${p > 0 ? "+" : "−"}${a.toFixed(dp)}%`;
+}
+
+/** While there are fewer than 5 sessions, why the line barely moves: "3 days so far · 16% invested, the rest in cash". */
+export function chartCaption(sessions: number, investedShare: number | null): string | null {
+  if (sessions >= 5 || sessions < 1) return null;
+  const days = `${sessions} day${sessions === 1 ? "" : "s"} so far`;
+  return investedShare !== null && Number.isFinite(investedShare) && investedShare >= 0
+    ? `${days} · ${Math.round(investedShare * 100)}% invested${investedShare < 0.995 ? ", the rest in cash" : ""}` : days;
+}
+
+/** `compact` (v4 Home): no table button on phones and the SVG's own axis text is hidden there (the chart stretches);
+ *  an HTML scale (top and bottom value, first and last day) stands in. The legend shows at every width.
+ *  `base`: where each line's change is measured from (the run's start for All, the range's first point otherwise). */
+export function PotChart({ data, start, markers = [], compact = false, base, caption = null }: { data: Curve[]; start: number; markers?: ChartMarker[];
+  compact?: boolean; base?: { pot: number; spy: number }; caption?: string | null }) {
   const [hover, setHover] = useState<number | null>(null);
   const [draw] = useState(() => !drawn && data.length > 1);
   useEffect(() => { if (draw) drawn = true; }, [draw]);
@@ -42,12 +69,15 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
     const line = (k: "pot" | "spy") => data.map((d, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(d[k]).toFixed(1)}`).join("");
     const pot = line("pot");
     const area = data.length ? `${pot}L${x(data.length - 1).toFixed(1)},${H - M.b}L${x(0).toFixed(1)},${H - M.b}Z` : "";
-    return { x, y, ticks, pot, spy: line("spy"), area, step };
+    // the fill fades out within 32 units below the line's highest point: a flat line is a line, never a block
+    const top = data.length ? Math.min(...data.map((d) => y(d.pot))) : M.t;
+    return { x, y, ticks, pot, spy: line("spy"), area, step, fillTop: top, lo, hi };
   }, [data, start]);
 
   // Fewer than two points draw no line: say what will appear instead of an empty frame.
   if (data.length < 2) return <div className="chart-empty"><b>No history yet</b><span className="muted">The line starts at the first close and runs next to the S&amp;P 500 from the same start.</span></div>;
   const last = data[data.length - 1];
+  const from = base ?? { pot: start, spy: start };
   const h = hover !== null ? data[hover] : null;
 
   function move(e: React.PointerEvent) {
@@ -62,12 +92,13 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
 
   return (
     <div className={compact ? "potchart compact" : "potchart"}>
-      <div className="legend" style={{ marginBottom: 6 }}>
-        <span><i className="sw" style={{ borderColor: "var(--s-pot)" }} />Pot, after costs</span>
-        <span><i className="sw" style={{ borderColor: "var(--s-spy)", borderTopStyle: "dotted" }} />SPY, same start</span>
+      <div className="legend chart-legend">
+        <span title="after costs"><i className="sw pot" aria-hidden="true" />{NAME} <b className="num">{whole(last.pot)}</b> <span className="num">{changePct(last.pot, from.pot)}</span></span>
+        <span><i className="sw spy" aria-hidden="true" />SPY, same start <b className="num">{whole(last.spy)}</b> <span className="num">{changePct(last.spy, from.spy)}</span></span>
         <span className="spacer" />
-        <button style={{ minHeight: 44, fontSize: 14, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
+        <button className="chart-table-btn" style={{ minHeight: 44, fontSize: 15, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
       </div>
+      {caption && <p className="chart-caption">{caption}</p>}
       {table ? (
         <div style={{ maxHeight: 260, overflow: "auto" }}>
           <table className="list" tabIndex={0} aria-label="Pot and SPY by session"><thead><tr><th>Session</th><th className="r">Pot</th><th className="r">SPY, same start</th></tr></thead>
@@ -98,8 +129,8 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
             <text className="axis" x={M.l} y={H - 6} fontSize="12" fill="var(--slate)">{day(data[0].session)}</text>
             <text className="axis" x={W - M.r} y={H - 6} fontSize="12" fill="var(--slate)" textAnchor="end">{last.live ? "now" : day(last.session)}</text>
             <defs>
-              <linearGradient id="kb-potfill" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.28" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />
+              <linearGradient id="kb-potfill" gradientUnits="userSpaceOnUse" x1="0" y1={g.fillTop.toFixed(1)} x2="0" y2={(g.fillTop + 32).toFixed(1)}>
+                <stop offset="0" stopColor="var(--s-pot)" stopOpacity="0.14" /><stop offset="1" stopColor="var(--s-pot)" stopOpacity="0" />
               </linearGradient>
             </defs>
             {draw && <clipPath id="kb-potdraw"><rect className="chart-draw" x={0} y={0} width={W} height={H} /></clipPath>}
@@ -122,10 +153,17 @@ export function PotChart({ data, start, markers = [], compact = false }: { data:
               </g>
             )}
           </svg>
+          {compact && g.ticks.length > 0 && (
+            <div className="chart-scale" aria-hidden="true">
+              <span className="num" style={{ top: `${(g.y(g.ticks.at(-1)!) / H) * 100}%` }}>{tick(g.ticks.at(-1)!, g.step)}</span>
+              {g.ticks.length > 1 && <span className="num" style={{ top: `${(g.y(g.ticks[0]) / H) * 100}%` }}>{tick(g.ticks[0], g.step)}</span>}
+            </div>
+          )}
           {/* Phones stretch the compact chart to fit (preserveAspectRatio none), which would draw a circle as an oval:
               there the live point is a dot laid over the chart at the line's end, in percent of the chart's box. */}
           {compact && <span key={`d${pops}`} className={`chart-point${pops ? " point-pop" : ""}`} aria-hidden="true"
             style={{ left: `${(g.x(data.length - 1) / W) * 100}%`, top: `${(g.y(last.pot) / H) * 100}%` }} />}
+          {compact && <div className="chart-days" aria-hidden="true"><span>{day(data[0].session)}</span><span>{last.live ? "now" : day(last.session)}</span></div>}
           {h && hover !== null && (
             <div className="tip" style={{ left: `${(g.x(hover) / W) * 100}%`, top: 0, transform: `translateX(${hover > data.length / 2 ? "-105%" : "5%"})` }}>
               <div className="muted">{day(h.session)}</div>

@@ -112,8 +112,10 @@ export interface RoomAB {
 export type BudgetState = "ok" | "rules_only" | "no_entries";
 export interface LlmBudget {
   day: string; day_usd: number; month_usd: number; state: BudgetState; alert: boolean;
-  caps: { daily_soft: number; monthly_alert: number; monthly_hard: number };
+  caps: { daily_soft: number; monthly_alert: number; monthly_hard: number; /** 0025/0026: the $150 cap on every AI dollar */ lifetime_hard?: number };
   calls_today: number; open_reserved_usd: number; by_purpose: Record<string, number>;
+  /** 0026: every AI dollar so far, both ledgers (engine calls and stock summaries), and the summaries' part. */
+  lifetime_usd?: number; lifetime_summaries_usd?: number;
 }
 const numValues = (o: Record<string, unknown> | null | undefined) =>
   Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, Number(v)]));
@@ -149,6 +151,8 @@ async function optional<T>(call: () => Promise<T>): Promise<T | null> {
 
 // Postgres numerics arrive as strings; coerce the fields we do maths on.
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+/** A number the RPC may not send yet (an older migration): null unless it is a finite number. */
+const optNum = (v: unknown) => { const n = v === null || v === undefined || v === "" ? NaN : Number(v); return Number.isFinite(n) ? n : null; };
 function fixTrade(t: Trade): Trade {
   return { ...t, qty: Number(t.qty), entry_px: Number(t.entry_px), exit_px: num(t.exit_px), stop_px: num(t.stop_px),
     target_px: num(t.target_px), risk_usd: num(t.risk_usd), pnl_usd: num(t.pnl_usd) };
@@ -252,7 +256,9 @@ export const api = {
   summarySpend: async () => {
     const r = await optional(() => rpc<Record<string, unknown> | null>("kb_summary_spend"));
     return r ? { day_usd: Number(r.day_usd ?? 0), month_usd: Number(r.month_usd ?? 0), day_cap: Number(r.day_cap ?? 0.3),
-      month_cap: Number(r.month_cap ?? 5), cards_today: Number(r.cards_today ?? 0) } : null;
+      month_cap: Number(r.month_cap ?? 5), cards_today: Number(r.cards_today ?? 0),
+      // 0026/0027: the combined lifetime total and its cap, and the calls that settled above their reservation
+      lifetime_usd: optNum(r.lifetime_usd), lifetime_cap: optNum(r.lifetime_cap), over_reservation_calls: optNum(r.over_reservation_calls) } : null;
   },
   newRun: (amount: number, level: Level) =>
     rpc<{ queued: boolean }>("kb_new_run", { p_amount: amount, p_level: level, p_idem: crypto.randomUUID() }),

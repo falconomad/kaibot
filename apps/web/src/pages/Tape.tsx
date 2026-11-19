@@ -13,7 +13,7 @@ import { fmtR, haltText } from "../lib/derive";
 import { roomOutcome } from "../lib/roomview";
 import { causeText, exitText, explainSignal, ruleName } from "../lib/explain";
 import { type Experiment, experimentView, findExperiment, haltTone } from "../lib/experiment";
-import { dateEt, money, px, signedMoney, timeEt } from "../lib/fmt";
+import { dateEt, day, money, px, signedMoney, timeEt } from "../lib/fmt";
 import { ExperimentSheetBody, experimentsOf } from "../components/Experiment";
 import { StatusRow } from "../components/Home";
 import { Sheet } from "../components/Sheet";
@@ -21,13 +21,15 @@ import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { NAME } from "../brand/brand";
 import { type CaEvent, caEvents } from "../lib/corpactions";
+import { type Unfilled, unfilledDetail, unfilledFrom, unfilledLine, unfilledNext, unfilledText } from "../lib/engineevents";
 import { StockBadge, SystemTile } from "../components/StockBadge";
 
 const PAGE = 100;
 type Filter = "all" | "fills" | "skipped" | "room" | "alerts";
 const FILTERS: [Filter, string][] = [["all", "All"], ["fills", "Buys & sells"], ["skipped", "Skipped"], ["room", "Agent room"], ["alerts", "Alerts"]];
 type Signal = Extract<TapeItem, { kind: "signal" }>;
-type Row = { kind: "item"; it: TapeItem; ts: string } | { kind: "halt"; h: Halt; ts: string } | { kind: "ca"; c: CaEvent; ts: string };
+type Row = { kind: "item"; it: TapeItem; ts: string } | { kind: "halt"; h: Halt; ts: string } | { kind: "ca"; c: CaEvent; ts: string }
+  | { kind: "unf"; u: Unfilled; ts: string };
 const tone = (v: number | null | undefined) => (!v ? "flat" : v > 0 ? "gain" : "loss");
 
 const taken = (it: Signal) => it.mode === "live" && !!it.approved && !it.veto && (it.qty ?? 0) > 0;
@@ -81,6 +83,9 @@ export function Tape() {
     .filter((c) => filter === "all" || (filter === "skipped" ? c.type === "multi_day_ca_skip" : filter === "alerts" ? c.tone !== "note"
       : filter === "fills" ? c.type === "spin_off_adopted" : false))
     .map((c) => ({ kind: "ca", c, ts: c.ts }));
+  // #333: an order of the multi-day rule the venue let expire at the close with shares left (kb_health's events)
+  const unfRows: Row[] = filter === "all" || filter === "fills"
+    ? unfilledFrom(health.data?.events, run.id).map((u) => ({ kind: "unf", u, ts: u.ts })) : [];
   const all = q.data?.pages.flat() ?? [];
   const halts: Row[] = (overview?.halts_today ?? []).map((h) => ({ kind: "halt", h, ts: h.ts }));
   const items: Row[] = all.filter((it) => testOnly || !(it.kind === "signal" && it.mode === "shadow"))
@@ -88,7 +93,7 @@ export function Tape() {
       : filter === "skipped" ? it.kind === "signal" && it.mode === "live" && !taken(it)
       : filter === "room" ? it.kind === "signal" && !!it.room : false))
     .map((it) => ({ kind: "item", it, ts: it.ts }));
-  const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...caRows, ...items]
+  const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...caRows, ...unfRows, ...items]
     .sort((a, b) => b.ts.localeCompare(a.ts));
   const expShown = exps.find((e) => e.experiment && rows.some((r) => r.kind === "item" && findExperiment(r.it.strategy, [e]))) ?? null;
   const shadowN = all.filter((it) => it.kind === "signal" && it.mode === "shadow").length;
@@ -120,7 +125,7 @@ export function Tape() {
             lastDay = d;
             const v = r.kind === "halt"
               ? { icon: "halt", head: haltText(r.h), line: `${haltTone(r.h.kind) === "breach" ? "Limit or safety halt" : "Note"} · ${timeEt(r.ts)}`, value: "", valueTone: "" }
-              : r.kind === "ca" ? caView(r.c) : rowView(r.it);
+              : r.kind === "ca" ? caView(r.c) : r.kind === "unf" ? unfView(r.u) : rowView(r.it);
             const exp = r.kind === "item" ? findExperiment(r.it.strategy, exps) : null;
             return (
               <li key={`${r.kind}-${r.ts}-${i}`}>
@@ -128,7 +133,7 @@ export function Tape() {
                 <button type="button" className={`row ${(r.kind === "halt" && haltTone(r.h.kind) === "breach") || (r.kind === "ca" && r.c.tone === "alert") ? "alert" : ""}`} aria-haspopup="dialog" onClick={() => setOpen(r)}>
                   {/* the company's tile when the row is about a stock; a neutral icon tile otherwise, so the column lines up */}
                   {(() => {
-                    const sym = r.kind === "item" ? r.it.symbol : r.kind === "ca" ? r.c.symbol : null;
+                    const sym = r.kind === "item" ? r.it.symbol : r.kind === "ca" ? r.c.symbol : r.kind === "unf" ? r.u.symbol : null;
                     return sym ? <StockBadge symbol={sym} size={36} />
                       : <SystemTile size={36} tone={v.icon}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d={ICON[v.icon]} /></svg></SystemTile>;
                   })()}
@@ -142,8 +147,8 @@ export function Tape() {
         </ul>
       )}
       {q.hasNextPage && <p><button disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>{q.isFetchingNextPage ? "Loading…" : "Older"}</button></p>}
-      <Sheet open={open !== null} onClose={() => setOpen(null)} title={open ? (open.kind === "halt" ? "Halt" : open.kind === "ca" ? caView(open.c).head : rowView(open.it).head) : ""}>
-        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : open.kind === "ca" ? <CaSheet c={open.c} />
+      <Sheet open={open !== null} onClose={() => setOpen(null)} title={open ? (open.kind === "halt" ? "Halt" : open.kind === "ca" ? caView(open.c).head : open.kind === "unf" ? unfilledText(open.u) : rowView(open.it).head) : ""}>
+        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : open.kind === "ca" ? <CaSheet c={open.c} /> : open.kind === "unf" ? <UnfilledSheet u={open.u} />
           : <ItemSheet it={open.it} exp={findExperiment(open.it.strategy, exps)} />)}
       </Sheet>
     </>
@@ -153,6 +158,21 @@ export function Tape() {
 /** A corporate-action event as a row: its words come from lib/corpactions. */
 function caView(c: CaEvent) {
   return { icon: c.icon, head: c.head, line: `${c.line} · ${timeEt(c.ts)}`, value: "", valueTone: "" };
+}
+
+/** #333: not filled at the close. */
+function unfView(u: Unfilled) {
+  return { icon: "skipped", head: u.symbol, line: `${unfilledLine(u)} · ${timeEt(u.ts)}`, value: "", valueTone: "" };
+}
+
+function UnfilledSheet({ u }: { u: Unfilled }) {
+  return (
+    <>
+      <p>{unfilledDetail(u)}</p>
+      <p className="muted">{unfilledNext(u)} A near-close order that is not filled by 16:00 ET expires.</p>
+      <p className="muted" style={{ fontSize: 15 }}>{ruleName(u.rule)}{u.session ? ` · close of ${day(u.session)}` : ""} · reported {dateEt(u.ts)} {timeEt(u.ts)} ET</p>
+    </>
+  );
 }
 
 function CaSheet({ c }: { c: CaEvent }) {

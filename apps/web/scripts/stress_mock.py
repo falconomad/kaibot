@@ -63,3 +63,31 @@ class StressMock(mock_data.Mock):
                      "avg_cost": 100 + i, "exit_px": 104 + i * 1.5, "pnl_usd": round((4 + i * 0.5) * (5 + i), 2), "dividends": 0.4,
                      "days_held": 9 + i, "reason": ["rank", "trend", "gap", None][i % 4]} for i, s in enumerate(["INTC", "BRK.B", "SUPERLONGER", "CSCO"])]
         return super().rpc(fn, a)
+
+    # engine follow-ups (19 Nov 2026): the daily note, the shadow pre-open review and an order not filled at the close
+    NOTE = ("kaibo sold NFLX and SUPERLONG at the close because they left the top of the trend list, and bought 28 shares of TSLA; "
+            "12 shares of TSLA were not filled and expired at the close. It holds 28 stocks, about 60 percent of the pot, and "
+            "the rest is cash. Nothing else changed.")
+
+    def heartbeat(self):
+        beats = super().heartbeat()
+        for b in beats:
+            md = (b.get("detail") or {}).get("multi_day")
+            if b["process"] == "engine" and md is not None:
+                md["exits"] = {"trend_momentum": "target_list"}
+                md["daily_note"] = {"session": self.session, "text": self.NOTE, "source": "model"}
+                md["rules"]["trend_momentum"]["exit"] = "target_list"
+                md["rules"]["trend_momentum"]["review_shadow"] = {
+                    "mode": "shadow", "session": str(self.today), "status": "done", "would_veto": ["SUPERLONGER"], "would_downgrade": ["BRK.B", "TSLA"],
+                    "reasons": {"SUPERLONGER": "veto: news: a very long reason about guidance being cut twice in one quarter, with more words than fit",
+                                "BRK.B": "downgrade: event: earnings tomorrow", "TSLA": "downgrade: liquidity: thin pre-market"},
+                    "cost_usd": 0.0042, "note": "shadow review (observer, no effect): would veto SUPERLONGER, halve BRK.B, TSLA"}
+        return beats
+
+    def health(self):
+        h = super().health()
+        h["events"] = [{"type": "multi_day_unfilled", "ts": mock_data.iso(self.now), "run_id": 1,
+                        "payload": {"strategy": "trend_momentum", "symbol": "TSLA", "side": "buy", "qty": 28, "filled": 16, "left": 12,
+                                    "coid": "md-3", "session": str(self.today), "status": "expired", "purpose": "entry", "type": "market", "tif": "day"}},
+                       *h["events"]]
+        return h

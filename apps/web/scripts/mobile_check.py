@@ -355,7 +355,8 @@ MISALIGN = r"""() => {
   for (const row of document.querySelectorAll('.row, .hold-row, .kv')) {
     const r = row.getBoundingClientRect();
     if (!r.width) continue;
-    const kids = [...row.children].filter((k) => k.getBoundingClientRect().width > 0);
+    // screen-reader-only text is a 1 px box by design: it never overlaps anything a person sees
+    const kids = [...row.children].filter((k) => k.getBoundingClientRect().width > 0 && !k.matches('.sr-only'));
     for (const k of kids) { const b = k.getBoundingClientRect(); if (b.right > r.right + 1 || b.left < r.left - 1) out.push(`${row.className}: ${k.className || k.tagName} sticks out`); }
     if (row.matches('.row, .hold-row')) for (let i = 1; i < kids.length; i++) {
       const x = kids[i - 1].getBoundingClientRect(), y = kids[i].getBoundingClientRect();
@@ -372,7 +373,7 @@ def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics:
     44 px, a row whose parts overlap or stick out, a position with 0 shares shown as held, or text contrast."""
     import stress_mock
     for w, h in PHONES:
-        for name, path in [("home", "/"), ("positions", "/positions")]:
+        for name, path in [("home", "/"), ("positions", "/positions"), ("engine", "/health")]:
             ctx = browser.new_context(viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
             ctx.add_init_script(audit.INIT)
             ctx.add_init_script(session)
@@ -406,6 +407,23 @@ def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics:
                 print(f"stress sheet {w}: {sheet}, misaligned {bad}")
                 if sheet["over"] or sheet["right"] > sheet["w"] or bad:
                     fails.append(f"stress-sheet@{w}: {sheet} {bad}")
+            if name == "home":
+                # the daily note (#311): one small card, its text cut to three lines, the full text in a sheet
+                note = pg.evaluate("(() => { const c = document.querySelector('.note-card'); if (!c) return null; const t = c.querySelector('.note-text'); "
+                                   "return { h: Math.round(t.getBoundingClientRect().height), over: c.scrollWidth > c.clientWidth + 1 }; })()")
+                print(f"stress note {w}: {note}")
+                if not note or note["over"] or note["h"] > 80:
+                    fails.append(f"stress-note@{w}: the daily note card is missing, overflows or is not cut short: {note}")
+            if name == "engine":
+                # the shadow pre-open review (#310): one row labelled observer; its reasons open in a sheet that fits
+                pg.get_by_role("button", name=re.compile("Pre-open reviewer")).click()
+                pg.wait_for_selector("[role=dialog]")
+                pg.wait_for_timeout(500)
+                sheet = pg.evaluate("(() => { const d = document.querySelector('[role=dialog]'); const r = d.getBoundingClientRect(); "
+                                    "return { over: d.scrollWidth > d.clientWidth + 1, right: Math.round(r.right), w: innerWidth, observer: d.textContent.includes('observer · no effect on trades') }; })()")
+                print(f"stress shadow sheet {w}: {sheet}")
+                if sheet["over"] or sheet["right"] > sheet["w"] or not sheet["observer"]:
+                    fails.append(f"stress-shadow@{w}: {sheet}")
             if name == "positions":
                 pg.keyboard.press("Escape")
                 pg.wait_for_timeout(400)

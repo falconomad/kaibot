@@ -27,6 +27,8 @@ import { NAME } from "../brand/brand";
 import { type Plan, type Sold, STATE_TEXT, bookLine, buyText, lineText, parsePlan, parseSold, reasonText, rowTag, sectorText, sellWhen } from "../lib/multiday";
 import { poll } from "../lib/poll";
 import { etToday } from "../lib/derive";
+import { type Unfilled, exitKinds, unfilledFrom, unfilledLine } from "../lib/engineevents";
+import { multiDayFrom } from "../lib/experiment";
 
 const PAGE = 50;
 type IntradayPos = { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number };
@@ -54,11 +56,17 @@ export function Positions() {
   const plans: Plan[] = parsePlan(planQ.data);
   const soldQ = useQuery({ queryKey: ["md-sold", run.id], queryFn: () => api.bookClosed(run.id), enabled: paper && tab === "closed", retry: false });
   const sold: Sold[] = parseSold(soldQ.data);
+  // #333: orders the venue let expire at the close (kb_health's events; the same query as Activity's and Engine's)
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: paper, retry: false, ...poll(60_000) });
   const line = bookLine((engineDetail(overview?.heartbeat) as { multi_day?: unknown } | null)?.multi_day, run.id);
   // Only a plan whose fill session is today or later: an old plan is history, not "tonight".
   const today = etToday();
   const tonight = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today).flatMap((pl) => pl.orders.map((o) => ({ ...o, rule: pl.rule, fillsAt: pl.fillsAt })));
   const current = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today);
+  const unfilled = unfilledFrom(health.data?.events, run.id).filter((u) => u.session === today);
+  const matchU = (rule: string, symbol: string, at: string | null) => unfilled.find((u) => u.rule === rule && u.symbol === symbol && (!at || u.session === at)) ?? null;
+  const unmatched = unfilled.filter((u) => !tonight.some((o) => o.rule === u.rule && o.symbol === u.symbol && (!o.fillsAt || o.fillsAt === u.session)));
+  const exits = exitKinds(multiDayFrom(engineDetail(overview?.heartbeat)));
   const live = run.kind === "paper" ? livePot(run, overview, b) : null;
   const open: Open[] = [
     ...Object.entries(live?.positions ?? {}).map(([symbol, p]): Open => {
@@ -94,7 +102,7 @@ export function Positions() {
               <ExperimentSheetBody e={expHeld} />
             </StatusRow>
           )}
-          {b?.session && b.positions.length > 0 && <BookChecks b={b} />}
+          {b?.session && b.positions.length > 0 && <BookChecks b={b} exits={exits} />}
           {book.isError && <ErrorState compact what="The multi-day book" error={book.error} retry={() => book.refetch()} />}
           {open.length ? (
             <ul className="rows" aria-label="Open now">
@@ -123,7 +131,8 @@ export function Positions() {
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
           )}
           {/* below the list: the plan arrives after the rows, and must not push them down */}
-          {tonight.length > 0 && <NextClose orders={tonight} />}
+          {(tonight.length > 0 || unmatched.length > 0) && <NextClose orders={tonight.map((o) => ({ ...o, unfilled: matchU(o.rule, o.symbol, o.fillsAt) }))}
+            extra={unmatched} today={today} />}
         </>
       )}
 
@@ -241,8 +250,9 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
 }
 
 /** #229 item 2: what the multi-day rule sends at the next close, and where each order stands. */
-function NextClose({ orders }: { orders: (ReturnType<typeof parsePlan>[number]["orders"][number] & { rule: string; fillsAt: string | null })[] }) {
-  const at = orders.find((o) => o.fillsAt)?.fillsAt ?? null;
+function NextClose({ orders, extra = [], today }: { orders: (ReturnType<typeof parsePlan>[number]["orders"][number] & { rule: string; fillsAt: string | null; unfilled?: Unfilled | null })[];
+  /** #333: today's orders not filled at the close that the plan no longer lists */ extra?: Unfilled[]; today?: string }) {
+  const at = orders.find((o) => o.fillsAt)?.fillsAt ?? (extra.length ? today ?? null : null);
   return (
     <section className="card next-close" aria-labelledby="nc-h">
       <h2 id="nc-h" className="section-h" style={{ margin: 0 }}>At the {at ? `close of ${day(at)}` : "next close"}</h2>
@@ -252,11 +262,19 @@ function NextClose({ orders }: { orders: (ReturnType<typeof parsePlan>[number]["
         return (
           <li key={`${o.rule}-${o.symbol}`}>
             <StockBadge symbol={o.symbol} size={40} />
-            <span className="nc-mid"><b>{o.symbol}</b><span className="muted">{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</span></span>
-            <span className={`nc-state ${o.state}`}>{STATE_TEXT[o.state]}{o.state === "working" && o.sharesNow > 0 && o.sharesTarget > o.sharesNow ? ` · ${o.sharesNow} of ${o.sharesTarget} held` : ""}</span>
+            <span className="nc-mid"><b>{o.symbol}</b><span className="muted">{o.unfilled ? unfilledLine(o.unfilled)
+              : <>{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</>}</span></span>
+            {o.unfilled ? <span className="nc-state canceled">not filled</span>
+              : <span className={`nc-state ${o.state}`}>{STATE_TEXT[o.state]}{o.state === "working" && o.sharesNow > 0 && o.sharesTarget > o.sharesNow ? ` · ${o.sharesNow} of ${o.sharesTarget} held` : ""}</span>}
           </li>
         );
-      })}</ul>
+      })}{extra.map((u) => (
+        <li key={`u-${u.rule}-${u.symbol}-${u.ts}`}>
+          <StockBadge symbol={u.symbol} size={40} />
+          <span className="nc-mid"><b>{u.symbol}</b><span className="muted">{unfilledLine(u)}</span></span>
+          <span className="nc-state canceled">not filled</span>
+        </li>
+      ))}</ul>
     </section>
   );
 }

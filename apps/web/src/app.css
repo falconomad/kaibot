@@ -715,7 +715,8 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .home-details-body { display: flex; flex-direction: column; gap: 18px; padding: 0 20px 20px; animation: kb-fade var(--d-base) var(--ease) both; }
 .home-details-body h3 { margin: 0 0 8px; font-size: var(--t-md); }
 @media (max-width: 760px) {
-  .potchart.compact .legend, .potchart.compact .axis, .potchart.compact circle.fade-late { display: none; }
+  .potchart.compact .chart-table-btn, .potchart.compact .axis, .potchart.compact circle.fade-late { display: none; }
+  .potchart.compact .chart-scale, .potchart.compact .chart-days { display: flex; }
   .potchart.compact .chart svg { height: 170px; }
   .home-chart .range { justify-content: space-between; } .home-chart .range button { flex: 1; }
   .home-band { gap: 12px; }
@@ -866,3 +867,28 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .ss-sk { display: flex; flex-direction: column; gap: 8px; }
 .kb-chip-info { display: inline-flex; align-items: center; gap: 8px; min-width: 44px; min-height: 44px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 /* end stock summaries */
+
+/* ---------- engine follow-ups (19 Nov 2026): the daily note on Home, the shadow review on Engine ---------- */
+.note-btn { display: flex; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; height: auto; padding: 14px 16px; border: 1px solid var(--line);
+  border-radius: var(--r-card); background: var(--surface); color: var(--text); text-align: left; font-weight: 400; }
+.note-btn:hover:not(:disabled) { background: var(--surface-2); filter: none; }
+.note-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 12px; }
+.note-head b { font-size: var(--t-md); font-weight: 600; }
+.note-src { font-size: var(--t-cap); color: var(--text-2); }
+.note-src.model { color: var(--accent-text); }
+.note-text { font-size: var(--t-sm); line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.note-full { font-size: var(--t-md); line-height: 1.5; overflow-wrap: anywhere; }
+.observer-tag { align-self: flex-start; margin-top: 4px; padding: 2px 8px; border-radius: var(--r-tag); background: var(--surface-2); color: var(--text-2);
+  font-size: var(--t-cap); font-weight: 600; }
+.shadow-list { list-style: none; margin: 0 0 12px; padding: 0; } .shadow-list li { margin-bottom: 10px; overflow-wrap: anywhere; }
+
+/* ---------- Home chart (stakeholder, 19 Nov 2026): a legend with end values, a minimal scale on phones, a caption ---------- */
+.chart-legend { gap: 4px 18px; margin-bottom: 6px; font-size: var(--t-sm); color: var(--text-2); }
+.chart-legend b { color: var(--text); font-weight: 600; }
+.legend .sw.pot { border-top: 2.5px solid var(--s-pot); }
+.legend .sw.spy { border-top: 3px dotted var(--s-spy); }
+.chart-caption { margin: 0 0 6px; font-size: var(--t-cap); color: var(--text-2); }
+.chart-scale { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 11%; pointer-events: none; }
+.chart-scale span { position: absolute; right: 0; transform: translateY(-50%); font-size: var(--t-cap); color: var(--text-2); }
+.chart-days { display: none; justify-content: space-between; margin-top: 4px; font-size: var(--t-cap); color: var(--text-2); }
