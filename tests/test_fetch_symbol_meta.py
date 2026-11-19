@@ -239,3 +239,86 @@ def test_write_with_search_fills_then_writes_once_in_the_same_layout(tmp_path):
     assert out["AAPL"]["domain"] == "apple.com" and out["SPY"]["domain"] == "ssga.com"
     assert dest.read_text() == mod.render(out)
     assert list(out["DIS"]) == ["name", "logo", "industry", "domain"]
+
+
+# --- a lookup that dies below HttpError keeps null and the run goes on (#383) ----------------------------------------
+# These three are not turned into HttpError by kaibot.common.http: a body cut short and a TLS EOF are raised by
+# r.read() (neither is a URLError, TimeoutError or ConnectionError, so `get` does not retry or wrap them), and a very
+# deeply nested body makes json.loads raise RecursionError, which is not the ValueError `get_json` wraps. Each one
+# goes through the real search_logo with a fake opener, so the test fails where the script would really fail.
+
+
+class _BrokenRead(_FakeResponse):
+    def __init__(self, exc: BaseException):
+        super().__init__(b"")
+        self._exc = exc
+
+    def read(self, n: int = -1) -> bytes:
+        raise self._exc
+
+
+def _incomplete_read() -> _FakeResponse:
+    import http.client
+
+    return _BrokenRead(http.client.IncompleteRead(b'{"results": [', 512))
+
+
+def _tls_eof() -> _FakeResponse:
+    import ssl
+
+    return _BrokenRead(ssl.SSLEOFError(8, "EOF occurred in violation of protocol (_ssl.c:2427)"))
+
+
+def _nested_json() -> _FakeResponse:
+    return _FakeResponse(b"[" * 200_000)  # 200 kB, under search_logo's max_bytes: it is the parse that gives up
+
+
+def _search_failing_for(bad_sym: str, broken, asked: list[str]):
+    """search_logo itself (kaibot.common.http underneath), answering from the fixtures except for `bad_sym`."""
+    from kaibot.common.ratelimit import Budget, BudgetSpec
+
+    budget = Budget("test_allinvestview", BudgetSpec())  # this test's own, unlimited: no waiting, no shared state
+
+    def opener(req, timeout):
+        sym = req.full_url.rsplit("=", 1)[1]
+        asked.append(sym)
+        return broken() if sym == bad_sym else _FakeResponse((AIV / f"{sym}.json").read_bytes())
+
+    return lambda sym: mod.search_logo(sym, opener=opener, budget=budget)
+
+
+@pytest.mark.parametrize("broken, logged", [
+    (_incomplete_read, "IncompleteRead"),  # the connection is cut in the middle of the body
+    (_tls_eof, "SSLEOFError"),             # the TLS session ends during the read
+    (_nested_json, "RecursionError"),      # a body nested too deeply to parse
+], ids=["incomplete-read", "tls-eof", "nested-json"])
+def test_a_lookup_that_dies_below_http_error_keeps_null_and_the_file_is_still_written(tmp_path, capsys, broken,
+                                                                                      logged):
+    dest = tmp_path / "symbols.json"
+    existing = {s: {**EXISTING[s], "domain": None} for s in ("AAPL", "DIS", "SPY")}
+    dest.write_text(json.dumps(existing, indent=1) + "\n")
+    fresh = {s: dict(FRESH[s]) for s in ("AAPL", "DIS", "SPY")}
+    asked: list[str] = []
+    out = mod.write_symbols(dest, fresh, _search_failing_for("DIS", broken, asked), sleep=lambda s: None)
+    assert asked == ["AAPL", "DIS", "SPY"]  # one try for DIS, then the run carries on to SPY
+    assert out["DIS"]["domain"] is None  # the failed lookup keeps null
+    assert out["AAPL"]["domain"] == "apple.com" and out["SPY"]["domain"] == "ssga.com"
+    written = json.loads(dest.read_text())
+    assert written == out and dest.read_text() == mod.render(out)  # the file is written, in the usual layout
+    assert written["DIS"]["logo"] == "https://new/DIS.png"  # with this run's Finnhub refresh, for the failed row too
+    assert written["AAPL"]["name"] == "Apple Inc." and written["AAPL"]["industry"] == "Technology"
+    err = capsys.readouterr().err
+    assert f"DIS: search failed ({logged}" in err and "domain stays null" in err  # says what was caught
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt(), SystemExit(1), TypeError("a bug in the script"),
+                                 ValueError("refusing non-HTTPS URL")], ids=lambda e: type(e).__name__)
+def test_a_stop_request_or_a_programming_error_is_not_swallowed(exc):
+    """Only the failures of a lookup are kept as null: Ctrl-C, an exit and a bug still stop the run, loudly."""
+    rows = {s: {"name": s, "logo": None, "industry": None, "domain": None} for s in ("AAPL", "DIS")}
+
+    def search(sym: str) -> dict:
+        raise exc
+
+    with pytest.raises(type(exc)):
+        mod.fill_domains(rows, search, sleep=lambda s: None)
