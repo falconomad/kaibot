@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0028 applied; 0029 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0028 applied; 0029 and 0030 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -28,6 +28,7 @@ Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0028 applie
 - 0027: **applied by Product on 18 Nov 2026, about 22:45 UTC** (step 14 below; PR #325).
 - 0028: **applied by Product on 19 Nov 2026, 00:3x UTC (after the close; stakeholder: "merge everything now")** (step 15 below; PR #339). The constraint was named ledger_position_stop_state_check, as expected.
 - 0029: **pending** (step 16 below; dashboard read only, any time).
+- 0030: **pending** (step 17 below; the dead-man, outside 09:30-16:00 ET).
 
 ## Apply in this order
 
@@ -52,6 +53,7 @@ run it again. Do not reorder them.
 | 14 | `migrations/0027_summary_over_reservation.sql` (whole file; PR for #324). After 0026. Any time, also while the engine runs: dashboard only, additive | A stock-summary call settled above its reservation is flagged: generated column `kaibot.summary_call.over_reservation` (`actual_usd > reserved_usd`), counted in `kb_summary_spend().over_reservation_calls`. The true cost is still recorded as it is | No: `alter table ... add column if not exists` (a generated column, computed from each row), `create or replace function`, `revoke` and `grant` |
 | 15 | `migrations/0028_stop_none_by_design.sql` (whole file; PR #339). After 0020. Any time, also while the engine runs: additive | `ledger_position.stop_state` also allows `none_by_design` (a sleeve of a rule whose pre-registration has no stop: the momentum rules exit by their target list), and `kb_book` gives each position `stop_state` and `exit` ("target_list" or "broker_stop"), so the dashboard's stop alarm counts only sleeves that should have a broker stop. The engine writes `none_by_design` only once the database takes it (until then it writes `missing`, as now). The dead-man never reads `stop_state` | **Yes**: `alter table ... drop constraint if exists` (the check constraint, re-added at once with one more value; no row changes), then `create or replace function`, `revoke` and `grant` |
 | 16 | `migrations/0029_kb_health_engine_followup_events.sql` (whole file; the PR for kb_health's follow-up events). After 0021. Any time, also while the engine runs: dashboard read only | `kb_health` also returns `multi_day_unfilled` (an order the venue let expire at the close with shares left, #333/#337), `daily_note` (#311/#318) and `multi_day_review_shadow` (the pre-open reviewer's observer verdicts, #310/#317), which the dashboard reads since #349. 0021's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
+| 17 | `migrations/0030_deadman_planned_row_not_gone.sql` (whole file; the PR for #344). After 0022. **Outside 09:30-16:00 ET** (the dead-man acts in market hours); independent of 0029 | The dead-man's #291 rename rule leaves out rows opened in their own session (a planned buy written before the 15:50 send that never filled), so an unexplained position with exactly the planned shares is sold in the flatten window instead of kept with an emergency stop. `deadman_act` is 0022's body plus that one line; the watchdog (`failsafe.plan`) follows the same rule | No: one `create or replace function`, then 0022's revokes for it (the function's `net.http_*` calls are 0019's, run only when the dead-man acts) |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -102,6 +104,10 @@ select prosrc like '%''exit''%' from pg_proc where proname = 'kb_book';         
 -- step 16 (0029): kb_health returns the unfilled orders, the daily note and the shadow verdicts
 select prosrc like '%multi_day_unfilled%' and prosrc like '%''daily_note''%' and prosrc like '%multi_day_review_shadow%'
   from pg_proc where proname = 'kb_health';                                                          -- true
+-- step 17 (0030): the rename rule skips rows opened in their own session; one dead-man job, unchanged
+select prosrc like '%opened_session < lp.session%' and prosrc like '%deadman_split_like%'
+  from pg_proc where proname = 'deadman_act';                                                        -- true
+select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';    -- kaibot_deadman | * 13-21 * * 1-5
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false
