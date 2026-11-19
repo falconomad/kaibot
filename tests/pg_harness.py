@@ -38,7 +38,7 @@ create table kaibot.halt (id bigint generated always as identity primary key, ru
   default now(), kind text not null, reason text not null, session date);
 create table kaibot.ledger_position (run_id bigint not null, session date not null, strategy text not null,
   symbol text not null, qty numeric(14,4) not null, stop_px numeric(14,4), stop_state text not null default 'resting',
-  primary key (run_id, session, strategy, symbol));
+  opened_session date, primary key (run_id, session, strategy, symbol));
 create schema net;
 create table net.calls (id bigserial primary key, method text, url text, params jsonb, body jsonb,
   done boolean not null default false);
@@ -139,11 +139,13 @@ class DeadmanDb:
         self.sql(f"insert into kaibot.run values ({rid}, '{status}') on conflict (id) do update set status = "
                  "excluded.status")
 
-    def ledger(self, rid: int, session: str, rows: list[tuple[str, str, float, float | None]]) -> None:
-        for strategy, symbol, qty, stop in rows:
-            self.sql(f"insert into kaibot.ledger_position (run_id, session, strategy, symbol, qty, stop_px) values "
-                     f"({rid}, '{session}', '{strategy}', '{symbol}', {qty}, "
-                     f"{'null' if stop is None else stop})")
+    def ledger(self, rid: int, session: str, rows: list[tuple]) -> None:
+        """Rows (strategy, symbol, qty, stop_px[, opened_session]), as the engine writes kaibot.ledger_position."""
+        for strategy, symbol, qty, stop, *rest in rows:
+            opened = rest[0] if rest else None
+            self.sql(f"insert into kaibot.ledger_position (run_id, session, strategy, symbol, qty, stop_px, "
+                     f"opened_session) values ({rid}, '{session}', '{strategy}', '{symbol}', {qty}, "
+                     f"{'null' if stop is None else stop}, {'null' if opened is None else repr(str(opened))})")
 
     def check(self, now, force: bool = False, flatten: bool | None = None) -> str:
         f = "null" if flatten is None else str(flatten).lower()
