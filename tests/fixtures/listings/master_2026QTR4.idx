@@ -1,0 +1,15 @@
+Description:           Master Index of EDGAR Dissemination Feed
+Last Data Received:    November 19, 2026
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+Cloud HTTP:            https://www.sec.gov/Archives/
+
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|File Name
+--------------------------------------------------------------------------------
+9990001|Anthropic, PBC|S-1|2026-10-09|edgar/data/9990001/0009990001-26-000001.txt
+9990001|Anthropic, PBC|S-1/A|2026-11-02|edgar/data/9990001/0009990001-26-000002.txt
+9990001|Anthropic, PBC|8-A12B|2026-11-16|edgar/data/9990001/0009990001-26-000003.txt
+9990001|Anthropic, PBC|424B4|2026-11-19|edgar/data/9990001/0009990001-26-000004.txt

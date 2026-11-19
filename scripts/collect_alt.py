@@ -1,12 +1,14 @@
 """Nightly alt-data collection (run after 18:30 ET, outside market hours). Resumable and idempotent.
 
-python scripts/collect_alt.py --env ~/Projects/kaibot-secrets/.env [--source finra|form4|gdelt|all] [--date YYYY-MM-DD]
+python scripts/collect_alt.py --env ~/Projects/kaibot-secrets/.env [--source finra|form4|gdelt|listings|all]
+                              [--date YYYY-MM-DD]
 
 Without --date it re-checks recent days (FINRA: last 5 trade dates; Form 4: filings of the last 3 days;
-GDELT: yesterday and today, UTC), so a missed night is caught up automatically. Only SEC_USER_AGENT is read
-from the env file; no key is printed. Writes data/alt/<source>/date=YYYY-MM-DD/part-*.parquet
-(see docs/ops/alt_data.md).
-Exit code 1 if any source failed outright.
+GDELT: yesterday and today, UTC; listings: the EDGAR daily indexes of the last 7 days, 120 on its first run), so a
+missed night is caught up automatically. SEC_USER_AGENT is read from the env file, and for `listings` also the
+Alpaca PAPER keys (one read-only request for the asset list, a few for first daily bars); no key is printed.
+Writes data/alt/<source>/date=YYYY-MM-DD/part-*.parquet (see docs/ops/alt_data.md; listings: docs/ops/listings.md).
+Exit code 1 if any source failed outright, or if one of the inputs of `listings` failed (the others are stored).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.engine.config import load_env_file  # noqa: E402
-from kaibot.ingest.alt import finra, form4, gdelt, store  # noqa: E402
+from kaibot.ingest.alt import finra, form4, gdelt, listings, store  # noqa: E402
 
 log = logging.getLogger("collect_alt")
 
@@ -53,7 +55,18 @@ def run_gdelt(data: Path, day: date | None, now: datetime) -> int:
         return sum(gdelt.collect(data, d, now=now) for d in days)
 
 
-RUNNERS = {"finra": run_finra, "form4": run_form4, "gdelt": run_gdelt}
+def run_listings(data: Path, day: date | None, now: datetime) -> int:
+    """New-listing watch (S102, #376): a shadow collector, the engine never reads it. With --date only the EDGAR
+    daily index of that day is read again."""
+    env = os.environ
+    creds = listings.Creds(env.get("ALPACA_API_KEY", ""), env.get("ALPACA_SECRET") or env.get("ALPACA_API_SECRET", ""),
+                           env.get("SEC_USER_AGENT", ""))
+    with store.source_lock(data, listings.SOURCE):
+        return listings.collect(data, creds, now=now, day=day, notice_urls=NOTICE_URLS)
+
+
+NOTICE_URLS: list[str] = []  # --listing-notice: Nasdaq Trader notice pages to read once (older than the feed)
+RUNNERS = {"finra": run_finra, "form4": run_form4, "gdelt": run_gdelt, "listings": run_listings}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,7 +75,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--source", default="all", choices=[*RUNNERS, "all"])
     ap.add_argument("--date", type=date.fromisoformat, help="collect just this date (YYYY-MM-DD)")
     ap.add_argument("--data", default=os.environ.get("KAIBOT_DATA_DIR") or str(ROOT / "data"))
+    ap.add_argument("--listing-notice", action="append", default=[], metavar="URL",
+                    help="listings: also read this Nasdaq Trader notice page (https://www.nasdaqtrader.com/...)")
     a = ap.parse_args(argv)
+    bad = [u for u in a.listing_notice if not u.startswith(listings.NOTICE_HOSTS)]
+    if bad:
+        ap.error(f"--listing-notice takes Nasdaq Trader pages only, not {bad[0][:60]!r}")
+    NOTICE_URLS[:] = a.listing_notice
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if not Path(a.env).expanduser().exists():
         ap.error(f"env file not found: {a.env}")
@@ -74,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             n = RUNNERS[name](data, a.date, now)
             log.info("%s: %d rows written", name, n)
-        except SystemExit as e:
+        except (SystemExit, listings.InputsFailed) as e:
             log.error("%s: %s", name, e)
             failed += 1
         except Exception:  # one source failing must not stop the others

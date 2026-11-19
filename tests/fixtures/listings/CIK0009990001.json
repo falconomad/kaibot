@@ -1,0 +1,55 @@
+{
+ "cik": "0009990001",
+ "entityType": "operating",
+ "sic": "7372",
+ "sicDescription": "Services-Prepackaged Software",
+ "name": "Anthropic, PBC",
+ "tickers": [
+  "ANT"
+ ],
+ "exchanges": [
+  "Nasdaq"
+ ],
+ "formerNames": [],
+ "filings": {
+  "recent": {
+   "accessionNumber": [
+    "0009990001-26-000004",
+    "0009990001-26-000003",
+    "0009990001-26-000002",
+    "0009990001-26-000001"
+   ],
+   "filingDate": [
+    "2026-11-19",
+    "2026-11-16",
+    "2026-11-02",
+    "2026-10-09"
+   ],
+   "acceptanceDateTime": [
+    "2026-11-19T11:30:15.000Z",
+    "2026-11-16T13:15:42.000Z",
+    "2026-11-02T21:02:11.000Z",
+    "2026-10-09T20:31:07.000Z"
+   ],
+   "form": [
+    "424B4",
+    "8-A12B",
+    "S-1/A",
+    "S-1"
+   ],
+   "items": [
+    "",
+    "",
+    "",
+    ""
+   ],
+   "primaryDocument": [
+    "d424b4.htm",
+    "d8a12b.htm",
+    "ds1a.htm",
+    "ds1.htm"
+   ]
+  },
+  "files": []
+ }
+}

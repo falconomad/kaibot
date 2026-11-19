@@ -1,0 +1,27 @@
+{
+ "0": {
+  "cik_str": 9990002,
+  "ticker": "SPCX",
+  "title": "Space Exploration Technologies Corp"
+ },
+ "1": {
+  "cik_str": 9990001,
+  "ticker": "ANT",
+  "title": "Anthropic, PBC"
+ },
+ "2": {
+  "cik_str": 9990007,
+  "ticker": "ORBT",
+  "title": "Orbit Acquisition Corp II"
+ },
+ "3": {
+  "cik_str": 9990007,
+  "ticker": "ORBTU",
+  "title": "Orbit Acquisition Corp II"
+ },
+ "4": {
+  "cik_str": 9990009,
+  "ticker": "LFOC",
+  "title": "Listed Follow On Corp"
+ }
+}

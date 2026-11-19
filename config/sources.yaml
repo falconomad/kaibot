@@ -9,6 +9,10 @@ market_data:
                      note: "requests count against alpaca; two per symbol; scripts/fetch_daily.sh runs at 120/min, 40/min while the engine runs; research store data/daily, never in the live path"}
   alpaca_corporate_actions: {use: splits_and_dividends, auth: key, endpoint: "/v1/corporate-actions, 1000 rows a page",
                      note: "requests count against alpaca; a few dozen per run of scripts/fetch_daily.sh; free-plan access and history depth are confirmed by the first run (docs/ops/daily_bars.md)"}
+  alpaca_assets:    {use: new_listing_watch_shadow, auth: key, endpoint: "paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",
+                     note: "requests count against alpaca_trading (the paper trading host); one a night from scripts/collect_alt.py --source listings; read-only; shadow store data/alt/listings, never in the live path (docs/ops/listings.md)"}
+  alpaca_first_bar: {use: new_listing_watch_shadow, auth: key, endpoint: "/v2/stocks/{symbol}/bars timeframe=1Day adjustment=raw feed=sip limit=10, end >= 20 min old",
+                     note: "requests count against alpaca; at most 40 a night, one per symbol that looks like a new listing, until its first bar is stored (15 nights at most)"}
   finnhub:          {use: fallback_quotes, auth: key, limit: "60/min, 30/s burst; WS 50 symbols; no candles on free", budget_per_min: 45}
   massive:          {use: nightly_universe, auth: key, limit: "5/min, EOD grouped daily bars", budget_per_min: 4}
   tiingo:           {use: third_fallback, auth: key, limit: "50/hr, 1000/day", budget_per_hour: 40}
@@ -27,6 +31,11 @@ fundamentals_filings:
   sec_spinoff_8k:   {use: research_spinoff_ratios_shadow, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files), www.sec.gov/Archives/edgar/data/{cik}/{accession}/ (8-K documents, index.json), www.sec.gov/files/company_tickers.json",
                      note: "requests count against sec_edgar; scripts/fetch_spinoffs.sh: at most about 100 per spin-off on the first run (1-3 for the parent's filing list, then up to 25 8-Ks of 1-5 documents each), none for a spin-off already read; research store data/spinoffs, shadow only, never in the live path (docs/ops/spinoff_ratios.md)"}
   sec_edgar_atom:   {use: 8k_and_form4_stream, poll_seconds: 30, note: "requests count against sec_edgar"}
+  sec_listings:     {use: new_listing_watch_shadow, endpoint: "www.sec.gov/Archives/edgar/daily-index/YYYY/QTRn/master.YYYYMMDD.idx, /full-index/YYYY/QTRn/master.idx, data.sec.gov/submissions/CIK##########.json, www.sec.gov/Archives/edgar/data/{cik}/{accession}.txt (first 200 kB), www.sec.gov/files/company_tickers.json",
+                     note: "requests count against sec_edgar; nightly (scripts/collect_alt.py --source listings): 1-2 daily indexes, then one per company with a fresh 8-A12B or 424B4 and one per new prospectus, about 20-100 in all, a few hundred on the first run (120 days of indexes); history (scripts/fetch_listings.py): one per quarter, about 45 since 2016; shadow / research stores data/alt/listings and data/listings, never in the live path (docs/ops/listings.md)"}
+  nasdaq_trader:    {use: new_listing_watch_shadow, schedule: nightly, limit: "static files and one news feed; no published limit", min_seconds_between_requests: 1,
+                     endpoint: "www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt, /otherlisted.txt, /rss.aspx?feed=currentheadlines&categorylist=48 (Data Technical News), /TraderNews.aspx?id=... (a notice page, at most 5 a night)",
+                     note: "3 requests a night plus one per new listing notice; URLs and layouts not verified from the build sandbox (host blocked there): the first run on the Mac confirms them (docs/ops/listings.md)"}
   finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET", limit: "static CDN files", min_seconds_between_requests: 1}
   fred:             {use: regime, auth: key, limit: "120 req/min per key", budget_per_min: 30}
   fred_vixcls:      {use: regime, schedule: daily, note: "VIX via FRED (Cboe CSV unreachable from our network, 10 Nov 2026); requests count against fred"}
