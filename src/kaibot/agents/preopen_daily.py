@@ -9,7 +9,7 @@ line as before). Per (rule, session):
                         gateway, cut off at `preopen.TOTAL_S`), so the engine's loop never waits on it
     every later tick    `collect`: a finished review becomes the journal's `md_review` entry (both arms of every
                         candidate, the verdicts, the cost) and a `multi_day_review` event (the dashboard's feed)
-    09:31 send window   `LiveDaily.send` re-plans, applies the journalled verdicts with `reviewed_plan` and
+    15:50 send window   `LiveDaily.send` re-plans, applies the journalled verdicts with `reviewed_plan` and
                         journals `md_send` with a `review` block. A veto drops that buy, a downgrade halves the
                         increase; sales, trims and unchanged positions are never touched. A growing key the review
                         did not see is vetoed (fail closed). With no `md_review` yet the send waits for it (the

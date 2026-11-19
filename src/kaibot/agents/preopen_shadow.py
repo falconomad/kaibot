@@ -8,15 +8,16 @@ buys in it (`preopen.review`, one model call through the budget gateway) in a wo
 verdicts (allow / downgrade / veto, with the reviewer's reasons). It returns nothing to the daily path: the reviewed
 plan `preopen.review` computes is thrown away here, and nothing on the daily path reads a shadow record back.
 
-    send step (09:31 ET)   `engine/live_daily.LiveDaily.send` journals `md_send`, then hands a deep copy of it to
+    send step (15:50 ET)   `engine/live_daily.LiveDaily.send` journals `md_send`, then hands a deep copy of it to
                            `observe` (a worker thread; the send goes on at once, its orders are not waited for)
     every later tick       `collect`: a finished review becomes the journal's `md_review_shadow` entry and the
                            `multi_day_review_shadow` event (the dashboard's feed); `status_block` is the heartbeat's
                            `multi_day.rules[<rule>].review_shadow`
 
-When: on the plan of the session's send step, before the closing-auction orders fill (16:00 ET). Not at 08:30: the
-plan would have to be built a second time before the open, and that read of the announced corporate actions could
-leave a cached answer the send step then reuses; an observer must not be able to touch the plan's inputs.
+When: on the plan of the session's send step (15:50-15:57 ET, #337), before its near-close orders fill. Not at
+08:30: the plan would have to be built a second time before the open, and that read of the announced corporate
+actions could leave a cached answer the send step then reuses; an observer must not be able to touch the plan's
+inputs.
 
 Failures only log. A missing key, a refused or exhausted budget (the daily cap: the gateway refuses, and the review
 is skipped), a timeout or a broken answer is recorded with its status ("skipped" is not a decision of anyone).

@@ -1,9 +1,9 @@
 """Pre-open review of a daily rule's candidate list (issue #131, M7·S91). Off by default.
 
 Where it sits: after the portfolio builder has turned the day's `TargetList`s into whole-share targets for the next
-session, and before the orders are queued (from 08:30 ET, before the daily path's 09:31 send window; wired in
+session, and before the orders are queued (from 08:30 ET, before the daily path's 15:50 send window; wired in
 `agents/preopen_daily.py` and `engine/live_daily.LiveDaily.preopen`). The review costs the daily rule no latency:
-the orders wait for the auction anyway.
+the orders wait for the 15:50 send window anyway.
 
 What it may do, and nothing else:
 - It reviews only increases: a (strategy, symbol) whose rules target is above the current position (a new buy or
