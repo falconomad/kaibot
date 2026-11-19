@@ -22,6 +22,24 @@ AlpacaData.news(symbols, start, end)        Benzinga via Alpaca, 50/page, shared
   headlines go in as JSON inside `<news_data>`; the system prompt says the block is data, never instructions.
   Budget refused, timeout or invalid output -> `triage` stays null and is not retried (the rules-only veto applies).
 
+## Collection (`src/kaibot/ingest/news_poll.py`, 19 Nov 2026)
+Before this, only the room's pack, the live pre-open review and the shadow review polled the desk, on demand; with
+those off or not yet run `news_item` stayed empty. Now one daemon thread in the engine process (the engine stays the
+only writer) polls every 5 minutes on weekdays 04:00-20:00 ET and every 30 minutes otherwise:
+- **scope:** today's planned buys of the daily path (latest `md_decision` with fill session >= today), the book, and
+  the market's symbols (seed universe, custom tickers, sector ETFs, SPY). With the room on (every new cluster is a
+  Haiku triage) only planned buys and the book.
+- **lookback:** 72 h for a symbol polled the first time (so a buy decided at 20:15 ET has its news well before the
+  send step's review), then the time since the last good poll plus 10 minutes.
+- **health:** heartbeat `news` {state starting|ok|empty|failing, last_poll, last_ok, last_item, symbols, planned,
+  planned_polled, calls_today, fetched_today, added_today}; events `news_feed_unhealthy` (every request of a poll
+  failed, or no story for 2 h on a weekday 09:30-16:00 ET) and `news_feed_ok`. `--check` reads SPY's news once.
+- **switch:** `KAIBOT_NEWS_POLL=off` (default on).
+- **store (QA-Ops, #355):** writes go in batches of 10 stories, one desk-lock hold each, on a one-try 5 s copy of
+  the store behind a breaker (the first network/5xx error ends the poll's writes). A poll whose store failed keeps its
+  fetch watermark (asked again next time; the desk skips stored stories), counts as `failing` and backs off 5, 10,
+  20 ... 60 min (heartbeat `news.retry_at`).
+
 ## Point-in-time reads
 `clusters_for(symbol, as_of, hours=24)` and `evidence_pack(...)` use only clusters with `first_seen <= as_of` and
 items with `available_ts <= as_of`; tickers and `n_outlets` are recomputed from those items, and a triage whose

@@ -48,6 +48,7 @@ from kaibot.engine.m3glue import (
 )
 from kaibot.engine.market import LiveMarket
 from kaibot.engine.store import Store
+from kaibot.ingest import news_poll
 from kaibot.news import NewsDesk
 from kaibot.news import configure as configure_news
 from kaibot.risk.profiles import load_profiles, load_strategies
@@ -101,7 +102,7 @@ def build(settings: Settings) -> Engine:
         log.exception("news window reload failed: starting empty")
     configure_news(desk)
     locked = LockedDesk(desk)
-    return Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
+    eng = Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
                   calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
                   pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
                   ex_dividends=ExDateDividends(data),  # S78: dividends accrued at the ex-date (#118)
@@ -111,6 +112,10 @@ def build(settings: Settings) -> Engine:
                   # #266: spin-offs and symbol changes of held multi-day positions, adopted from Alpaca's record
                   # (only used with the daily path: KAIBOT_MULTIDAY=on)
                   recent_actions=RecentActions(get=bounded_data_get(data)))
+    # Data (19 Nov 2026): news on a schedule, so news_item fills without the room (ingest/news_poll.py). Started in
+    # main() after the lease; never with --check. KAIBOT_NEWS_POLL=off: None
+    eng.news_poller = news_poll.for_engine(eng, desk, data, locked.lock)
+    return eng
 
 
 def bounded_data_get(data):
@@ -214,6 +219,15 @@ def report_conflicts(eng: Engine, replicator: Replicator) -> None:
                              returning=False)
 
 
+def report_news(eng: Engine, poller) -> None:
+    """The news poller's health changes (news_feed_unhealthy / news_feed_ok), written from the main thread."""
+    if poller is None:
+        return
+    for kind, detail in poller.take_events():
+        with contextlib.suppress(Exception):
+            eng.store.event(kind, detail, eng._rid())
+
+
 def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> None:
     """Take the cross-machine lease, then start the engine. Without the lease nothing else happens: no order
     adoption, no start event, no heartbeat. Exits with code 3 and a message that says what to do. With the lease,
@@ -311,6 +325,12 @@ def main() -> None:
 
         step("journal", journal_state)
         step("multi_day", lambda: multi_day_state(remote))
+        def news_state():  # read-only: one request, nothing stored
+            now = datetime.now(UTC)
+            n = len(eng.market.data.news(["SPY"], now - pd.Timedelta(hours=72), now, max_pages=1))
+            return {"spy_stories_72h": n, "poller": "on" if getattr(eng, "news_poller", None) else "off"}
+
+        step("alpaca_news", news_state)
         step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
         print(json.dumps(report, indent=1, default=str))
         ok = not any(isinstance(v, str) and v.startswith("FAILED") for v in report.values())
@@ -327,6 +347,10 @@ def main() -> None:
     # Supabase unreachable: asked again at the first pass that reaches it.
     log.info("replica schema: %s", replicator.detect() or "not known yet (Supabase unreachable)")
     replicator.start()
+    news = getattr(eng, "news_poller", None)
+    if news is not None:
+        news.start()
+        log.info("news poller: on (every %.0f s now; heartbeat `news`)", news.every_s())
     status: dict = {"state": "starting"}
     last_minute = None
     log.info("engine up (code %s). Ctrl-C to stop; broker-held stops stay in place.", eng.code)
@@ -363,12 +387,17 @@ def main() -> None:
                 with contextlib.suppress(Exception):
                     eng.store.event("engine_error", {"error": msg}, eng._rid())
         report_conflicts(eng, replicator)
+        report_news(eng, news)
         status = {**status, "replication": replicator.status()} if isinstance(status, dict) else status
+        if news is not None and isinstance(status, dict):
+            status = {**status, "news": news.status()}
         beat(status)
         for _ in range(10):
             if stop["now"]:
                 break
             time.sleep(1)
+    if news is not None:
+        news.stop()
     if stop.get("lease_lost"):
         # Another engine is in charge: write nothing. Its heartbeat and lease are not ours, and an event from
         # here would fork the hash-chained event log it is now appending to. Its `engine_lease_takeover` event
