@@ -33,6 +33,8 @@ fundamentals_filings:
   gdelt_pacing:     {min_seconds_between_requests: 6, note: "GDELT returns 429 when called faster (one every 5 s); enforced on gdelt_doc"}
 news:
   alpaca_news_ws:   {use: primary_stream, auth: key, note: "Benzinga feed; verify free status + latency day 1"}
+  alpaca_news_rest: {use: engine_news_poller, auth: key, endpoint: "/v1beta1/news (50 symbols and 50 stories a request)",
+                     note: "requests count against alpaca; src/kaibot/ingest/news_poll.py inside the engine: every 5 min weekdays 04:00-20:00 ET, 30 min otherwise; about 2-3 requests a poll for ~75 symbols (about 600 a weekday, 150 a weekend day); free plan confirmed 19 Nov 2026; KAIBOT_NEWS_POLL=off stops it"}
   finnhub_news:     {use: secondary, budget_per_min: 10}
   pr_newswire_rss:  {use: primary_source, poll_seconds: 60}
   globenewswire_rss: {use: primary_source, poll_seconds: 60}
