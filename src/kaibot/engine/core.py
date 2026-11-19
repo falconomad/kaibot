@@ -34,6 +34,7 @@ import math
 import subprocess
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -1548,27 +1549,72 @@ class Engine:
         (watchdog 15:55, dead-man 15:56-16:00). The dead-man (migration 0019/0022) counts as multi-day only the
         shares in the last session's `ledger_position` rows; without today's rows a buy that filled at 15:5x would
         be taken for intraday shares and sold if the engine then went silent. So once daily-path fills are booked,
-        today's rows are written from the ledger as it stands (the close overwrites them). Never raises."""
+        today's rows are written from the ledger as it stands, plus the shares today's daily buys may still add
+        (`_md_rows`; the close overwrites them). Never raises."""
         if not getattr(self, "_md_filled", False) or self.daily is None or self.run is None:
             return
         self._md_filled = False
-        b = self.ledger.book(self._rid())
-        if b is None:
-            return
         try:
-            self._write_positions(b, today, why="daily-path fills booked")
-            held = {k for k, sl in b.sleeves.items() if sl.qty > 1e-9}
-            for r in self.store.select("ledger_position", {"run_id": f"eq.{b.run_id}", "session": f"eq.{today}"}):
-                if (r["strategy"], r["symbol"]) not in held and float(r.get("qty") or 0) != 0:  # sold since
-                    self.store.upsert("ledger_position", {**r, "qty": 0.0, "priced": False},
-                                      "run_id,session,strategy,symbol")
+            self._md_rows(today, "daily-path fills booked")
         except Exception as e:  # the next booked fill writes them again; the close writes them in any case
             self._md_filled = True
             log.exception("ledger_position rows after the daily fills not written")
             self.store.event("multi_day_error", {"step": "positions_after_fills",
                                                  "error": f"{type(e).__name__}: {e}"[:200]}, self._rid())
 
-    def _write_positions(self, b, today: date, why: str = "corporate action at the open") -> None:
+    def _md_positions_planned(self, today: date, strategy: str, planned: Mapping[str, int]) -> None:
+        """Follow-up of #333 (the window QA-Ops left open on #337): called by the daily path just before its buys go
+        out. Today's rows are written with each planned buy at its target shares, so a fill that lands after the
+        engine died (nobody books it) is multi-day shares to the dead-man too. Raises (the caller reports it)."""
+        if self.daily is None or self.run is None:
+            return
+        # QA-Ops on #342: the plan is kept for the session, so a rewrite after another sleeve's fill (`_md_rows`
+        # without a plan) never drops a planned buy the target loop sends on a later tick (the send hook runs once
+        # per rule and session). The close forgets it (`_close_ledger`).
+        day, kept = getattr(self, "_md_plan", (None, {}))
+        plan = dict(kept) if day == today else {}
+        for sym, q in planned.items():
+            plan[(strategy, sym)] = max(plan.get((strategy, sym), 0.0), float(q))
+        self._md_plan = (today, plan)
+        self._md_rows(today, "daily-path buys about to be sent", plan)
+
+    def _md_pending(self, today: date) -> dict[tuple[str, str], float]:
+        """Shares today's daily-path buys may still add to their sleeves: an open order's unfilled rest, a finished
+        order's fills the ledger has not booked yet (`OrderManager.settling`)."""
+        om = getattr(self.daily, "om", None)
+        out: dict[tuple[str, str], float] = {}
+        for r in list(om.orders.values()) if om is not None else []:
+            if r.session != str(today) or r.side != "buy" or r.purpose == "stop":
+                continue
+            left = (r.qty - r.booked) if r.open else (r.cum - r.booked)
+            if left > 1e-9:
+                out[(r.strategy, r.symbol)] = out.get((r.strategy, r.symbol), 0.0) + left
+        return out
+
+    def _md_rows(self, today: date, why: str, planned: Mapping[tuple[str, str], float] | None = None) -> None:
+        """Today's ledger_position rows for the fail-safes, mid-session: each sleeve at its booked shares plus what
+        today's daily buys may still add, at least a planned buy's target; a planned buy of a stock not held yet
+        gets its own unpriced row. A row of today for a sleeve with no such shares is zeroed. The fail-safes never
+        keep more than the broker holds, and the close overwrites every row of the day."""
+        b = self.ledger.book(self._rid())
+        if b is None:
+            return
+        if planned is None:  # QA-Ops on #342: the session's planned buys (`_md_positions_planned`) still count
+            day, kept = getattr(self, "_md_plan", (None, {}))
+            planned = kept if day == today else None
+        want = {k: sl.qty for k, sl in b.sleeves.items() if sl.qty > 1e-9}
+        for k, q in self._md_pending(today).items():
+            want[k] = want.get(k, 0.0) + q
+        for k, q in (planned or {}).items():
+            want[k] = max(want.get(k, 0.0), float(q))
+        self._write_positions(b, today, why=why, qty=want)
+        for r in self.store.select("ledger_position", {"run_id": f"eq.{b.run_id}", "session": f"eq.{today}"}):
+            if (r["strategy"], r["symbol"]) not in want and float(r.get("qty") or 0) != 0:  # sold since
+                self.store.upsert("ledger_position", {**r, "qty": 0.0, "priced": False},
+                                  "run_id,session,strategy,symbol")
+
+    def _write_positions(self, b, today: date, why: str = "corporate action at the open",
+                         qty: Mapping[tuple[str, str], float] | None = None) -> None:
         """#266: the share count changed at this open (a split, spin-off, symbol change or cash merger booked). The
         fail-safes (the dead-man of migration 0019 and the watchdog's store view) read the last session's
         `ledger_position` rows, so today's rows are written now, from the ledger as it stands: they never act on
@@ -1576,15 +1622,22 @@ class Engine:
         md_stops = self._md_stops() if self._md_sleeves() else {}
         from kaibot.engine.failsafe import clean
 
-        for (strategy, sym), sl in b.sleeves.items():
-            if sl.qty <= 1e-9:
+        rows = {k: sl.qty for k, sl in b.sleeves.items()} if qty is None else dict(qty)
+        for (strategy, sym), q in rows.items():
+            if q <= 1e-9:
                 continue
+            sl = b.sleeves.get((strategy, sym))
             ms = md_stops.get((clean(strategy), clean(sym)))
-            mark = sl.mark if sl.mark is not None else sl.avg_cost
+            if sl is not None and sl.qty > 1e-9:
+                cost, mark, opened, divs = sl.avg_cost, sl.mark if sl.mark is not None else sl.avg_cost, sl.opened, \
+                    sl.dividends
+            else:  # follow-up of #333: a planned buy not held yet, at its last price (unpriced)
+                px = self._md_price(sym) or 0.0
+                cost, mark, opened, divs = px, px, str(today), 0.0
             self.store.upsert("ledger_position", {
-                "run_id": b.run_id, "session": str(today), "strategy": strategy, "symbol": sym, "qty": sl.qty,
-                "avg_cost": round(sl.avg_cost, 4), "mark": round(mark, 4), "priced": False,
-                "opened_session": sl.opened, "dividends": round(sl.dividends, 2),
+                "run_id": b.run_id, "session": str(today), "strategy": strategy, "symbol": sym, "qty": q,
+                "avg_cost": round(cost, 4), "mark": round(mark, 4), "priced": False,
+                "opened_session": opened, "dividends": round(divs, 2),
                 "stop_px": round(ms, 2) if ms is not None else None,
                 "stop_state": "resting" if ms is not None else "missing"}, "run_id,session,strategy,symbol")
         self.store.event("positions_rewritten", {"session": str(today), "why": why,
@@ -2594,6 +2647,7 @@ class Engine:
         with the broker, and write the day's mark-to-market rows (ledger_day, ledger_position)."""
         prices = {price_key(p.strategy, p.symbol): self._close_price(p) for p in self.pos.values()
                   if p.status == "open" and p.fill is not None}
+        self._md_plan = (None, {})  # QA-Ops on #342: the day's rows below replace the planned buys
         md = self._md_sleeves()
         for (strategy, sym) in md:  # S80: multi-day sleeves are marked at the close too (unpriced: last mark)
             px = self._md_price(sym)

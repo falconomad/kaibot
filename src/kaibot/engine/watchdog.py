@@ -314,13 +314,14 @@ def failsafe_coid(strategy: str, symbol: str, now: datetime, purpose: str = "wds
     return f"kbwd-{failsafe.clean(strategy)[:40]}-{failsafe.clean(symbol)[:12]}-{t}-{purpose}"
 
 
-def book_reader(journal_path, store):
-    """The book for the fail-safes: the engine's local journal (read-only), else the ledger rows in Supabase."""
+def book_reader(journal_path, store, now=lambda: datetime.now(UTC)):
+    """The book for the fail-safes: the engine's local journal (read-only), with today's daily-path buys the engine
+    may have died before booking (follow-up of #333), else the ledger rows in Supabase."""
     ro = failsafe.ReadOnlyJournal(journal_path)
 
     def read() -> failsafe.BookView:
         try:
-            return failsafe.book_from_journal(ro)
+            return failsafe.book_from_journal(ro, today=now().astimezone(NY).date())
         except Exception:
             log.exception("local journal unreadable: reading the ledger rows in Supabase")
         return failsafe.book_from_store(store)

@@ -774,3 +774,162 @@ def test_a_near_close_buy_booked_before_the_engine_dies_is_multi_day_for_the_wat
     assert float(a.broker.pos["B"]["qty"]) == qty
     assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
                 and o["type"] != "stop"]
+
+
+# ---------------------------------------------------------------- follow-up of #333: a fill after the engine died
+
+
+def _killed_right_after_the_send(tmp_path, monkeypatch, fill: bool = True):
+    """DAY2: the engine sends the near-close buy of B at 15:50 and dies at once. The venue fills it in the 15:50
+    minute (`fill`); nobody books it. Returns the account, the order's shares and today's ledger_position rows as
+    they were when the venue got the first order."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    seen: dict = {}
+    real = a.broker.submit
+
+    def submit(req):
+        seen.setdefault("rows", [dict(r) for r in a.store.tables.get("ledger_position", [])
+                                 if str(r["session"]) == DAY2])
+        return real(req)
+
+    a.broker.submit = submit
+    if not fill:
+        a.broker.script.hold("B", bars=None)
+    a.ticks(a.open2, 0, SEND + 1)  # the 15:50 tick sends; the engine dies right after it
+    a.broker.submit = real
+    (o,) = a.md_orders()
+    assert o["status"] in ("new", "accepted")
+    if fill:
+        a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=SEND + 1)))  # the 15:50 bar fills it
+        assert o["status"] == "filled" and (MD, "B") not in a.eng.ledger.book(a.rid).sleeves  # not booked
+    return a, float(o["qty"]), seen["rows"]
+
+
+def test_todays_rows_carry_the_planned_buy_before_the_venue_gets_the_order(tmp_path, monkeypatch):
+    """Follow-up of #333: just before the send, today's ledger_position rows hold each planned buy at its target
+    shares (unpriced), so the fail-safes count a fill that lands after the engine died as multi-day shares."""
+    a, qty, rows = _killed_right_after_the_send(tmp_path, monkeypatch)
+    assert [(r["strategy"], r["symbol"], float(r["qty"]), r["priced"], r["opened_session"]) for r in rows] == [
+        (MD, "B", qty, False, DAY2)]
+    ev = [e["payload"] for e in a.store.tables["event"] if e["type"] == "positions_rewritten"]
+    assert any(p["why"] == "daily-path buys about to be sent" for p in ev)
+
+
+def test_a_near_close_fill_after_the_engine_died_is_kept_by_the_dead_man(tmp_path, monkeypatch):
+    """The window QA-Ops left open on #337: the buy fills after the engine's last tick. The dead-man (migrations
+    0019/0022, run in a local Postgres) reads today's rows, which already carry B: B is kept, not sold as intraday."""
+    from pg_harness import DeadmanDb
+
+    a, qty, _ = _killed_right_after_the_send(tmp_path, monkeypatch)
+    db = DeadmanDb(tmp_path)
+    try:
+        db.beat(a.clock())
+        db.run(a.rid)
+        for s in sorted({str(r["session"]) for r in a.store.tables.get("ledger_position", [])}):
+            db.ledger(a.rid, s, [(r["strategy"], r["symbol"], r["qty"], r["stop_px"])
+                                 for r in a.store.tables["ledger_position"] if str(r["session"]) == s])
+        said = []
+        for k in range(SEND + 1, 390):  # 15:51 ... 15:59, once a minute (pg_cron)
+            a.clock.t = a.open2 + timedelta(minutes=k, seconds=2)
+            said.append(db.check(a.clock()))
+            db.pump(a.broker)
+            a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+        assert any(x.startswith("acted") for x in said)
+        assert float(a.broker.pos["B"]["qty"]) == qty  # kept as multi-day
+        assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
+                    and o["type"] != "stop"]
+    finally:
+        db.stop()
+
+
+def test_a_near_close_fill_after_the_engine_died_is_kept_by_the_watchdog(tmp_path, monkeypatch):
+    """The watchdog reads the engine's journal first: the daily path's buy intent of today (journalled before the
+    venue call) counts as multi-day shares, so its 15:55 flatten leaves the unbooked fill alone."""
+    from kaibot.engine.watchdog import Watchdog, book_reader
+
+    a, qty, _ = _killed_right_after_the_send(tmp_path, monkeypatch)
+    beat(a.store, a.clock())
+    wd = Watchdog(a.broker, a.store, now=a.clock, book=book_reader(a.jpath, a.store, now=a.clock))
+    for k in range(SEND + 1, 390):
+        a.clock.t = a.open2 + timedelta(minutes=k, seconds=30)
+        wd.step()
+        a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+    assert wd.flattened_on is not None
+    assert float(a.broker.pos["B"]["qty"]) == qty
+    assert not [o for o in a.broker.orders.values() if o["symbol"] == "B" and o["side"] == "sell"
+                and o["type"] != "stop"]
+
+
+def test_a_planned_buy_that_never_fills_is_zeroed_at_the_close(tmp_path, monkeypatch):
+    """Engine alive: the planned row of a buy the venue let expire is zeroed by the close's rows (nothing is held),
+    and the fail-safes never see shares the broker does not hold (they cap at the broker's count anyway)."""
+    a, qty, rows = _killed_right_after_the_send(tmp_path, monkeypatch, fill=False)
+    assert [float(r["qty"]) for r in rows] == [qty]
+    a.ticks(a.open2, SEND + 1, 390)
+    a.after_close(a.open2)
+    today = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [float(r["qty"]) for r in today] == [0.0] and "B" not in a.broker.pos
+    assert [e for e in a.store.tables["event"] if e["type"] == "multi_day_unfilled"]
+
+
+def test_a_buy_the_target_loop_sends_on_a_later_tick_still_has_its_row_for_the_dead_man(tmp_path, monkeypatch):
+    """QA-Ops on #342: the send hook runs once per rule and session. When the first tick skips a buy (here a wash-
+    trade wait) and another sleeve's fill rewrites today's rows before the next tick, the planned buy keeps its row:
+    the dead-man keeps the fill that lands after the engine died at the second tick. The close forgets the plan."""
+    from pg_harness import DeadmanDb
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    g, calls = a.eng.daily.gate, []
+    real_allows = g.allows
+
+    def allows(symbol, side, purpose="target", qty=None):
+        calls.append(symbol)
+        if len(calls) == 1:
+            return f"an open sell market or stop order in {symbol} (Alpaca refuses a wash trade): waiting"
+        return real_allows(symbol, side, purpose, qty)
+
+    g.allows = allows
+    a.ticks(a.open2, 0, SEND + 1)  # 15:50: B is planned, then skipped by the loop
+    assert a.md_orders() == []
+    a.eng._md_filled = True  # another sleeve's daily fill was booked: today's rows are written again
+    a.ticks(a.open2, SEND + 1, SEND + 2)  # 15:51: B goes out, and the engine dies right after this tick
+    (o,) = a.md_orders()
+    qty = float(o["qty"])
+    rows = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [float(r["qty"]) for r in rows] == [qty]
+    a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=SEND + 2)))
+    assert o["status"] == "filled" and (MD, "B") not in a.eng.ledger.book(a.rid).sleeves  # filled, not booked
+    db = DeadmanDb(tmp_path)
+    try:
+        db.beat(a.clock())
+        db.run(a.rid)
+        for s in sorted({str(r["session"]) for r in a.store.tables.get("ledger_position", [])}):
+            db.ledger(a.rid, s, [(r["strategy"], r["symbol"], r["qty"], r["stop_px"])
+                                 for r in a.store.tables["ledger_position"] if str(r["session"]) == s])
+        said = []
+        for k in range(SEND + 2, 390):
+            a.clock.t = a.open2 + timedelta(minutes=k, seconds=2)
+            said.append(db.check(a.clock()))
+            db.pump(a.broker)
+            a.broker.advance(pd.Timestamp(a.open2 + timedelta(minutes=k + 1)))
+        assert any(x.startswith("acted") for x in said)
+        assert float(a.broker.pos["B"]["qty"]) == qty  # kept as multi-day
+        assert not [x for x in a.broker.orders.values() if x["symbol"] == "B" and x["side"] == "sell"
+                    and x["type"] != "stop"]
+    finally:
+        db.stop()
+
+
+def test_the_close_forgets_the_planned_buys(tmp_path, monkeypatch):
+    """QA-Ops on #342: a planned buy the venue let expire is zeroed by the close, and a rewrite after the close
+    (a late fill booked) does not bring its row back."""
+    a, qty, rows = _killed_right_after_the_send(tmp_path, monkeypatch, fill=False)
+    a.ticks(a.open2, SEND + 1, 390)
+    a.after_close(a.open2)
+    a.eng._md_rows(date.fromisoformat(DAY2), "a late fill booked")
+    today = [r for r in a.store.tables["ledger_position"] if str(r["session"]) == DAY2 and r["symbol"] == "B"]
+    assert [float(r["qty"]) for r in today] == [0.0] and "B" not in a.broker.pos
