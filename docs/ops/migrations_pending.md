@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all applied; nothing pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0028 applied; 0029 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -27,6 +27,7 @@ Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all ap
 - 0026: **applied by Product on 18 Nov 2026, after 0025** (step 13 below; #319, PR #322). Checked: `kaibot.ai_spend()` = {total 0, cap 150}; `llm_reserve_lifetime` not executable by authenticated; `kb_llm_budget` not by anon.
 - 0027: **applied by Product on 18 Nov 2026, about 22:45 UTC** (step 14 below; PR #325).
 - 0028: **applied by Product on 19 Nov 2026, 00:3x UTC (after the close; stakeholder: "merge everything now")** (step 15 below; PR #339). The constraint was named ledger_position_stop_state_check, as expected.
+- 0029: **pending** (step 16 below; dashboard read only, any time).
 
 ## Apply in this order
 
@@ -50,6 +51,7 @@ run it again. Do not reorder them.
 | 13 | `migrations/0026_ai_lifetime_cap.sql` (whole file; PR for #319). After 0023 and 0025. Any time, also while the engine runs | One $150 lifetime cap across every AI dollar: the engine's LLM ledger (`kaibot.budget_day` + open `llm_call` reservations) and the stock summaries (`kaibot.summary_call`). New `kaibot.ai_lifetime_spent`, `kaibot.ai_spend` (the engine's read) and `kaibot.llm_reserve_lifetime` (the engine's reservation with the cap checked inside today's `budget_day` row lock), service role only. `kb_summary_reserve` takes the same row lock and refuses `lifetime_cap`; `kb_summary_spend` and `kb_llm_budget` show the combined `lifetime_usd`. An engine without the #319 code keeps working (it calls `llm_reserve`, unchanged) | No: `create or replace function`, `revoke` and `grant` only. Its functions write only inside a reservation (`insert into kaibot.budget_day ... on conflict do nothing`, the `state` update 0008 already makes) |
 | 14 | `migrations/0027_summary_over_reservation.sql` (whole file; PR for #324). After 0026. Any time, also while the engine runs: dashboard only, additive | A stock-summary call settled above its reservation is flagged: generated column `kaibot.summary_call.over_reservation` (`actual_usd > reserved_usd`), counted in `kb_summary_spend().over_reservation_calls`. The true cost is still recorded as it is | No: `alter table ... add column if not exists` (a generated column, computed from each row), `create or replace function`, `revoke` and `grant` |
 | 15 | `migrations/0028_stop_none_by_design.sql` (whole file; PR #339). After 0020. Any time, also while the engine runs: additive | `ledger_position.stop_state` also allows `none_by_design` (a sleeve of a rule whose pre-registration has no stop: the momentum rules exit by their target list), and `kb_book` gives each position `stop_state` and `exit` ("target_list" or "broker_stop"), so the dashboard's stop alarm counts only sleeves that should have a broker stop. The engine writes `none_by_design` only once the database takes it (until then it writes `missing`, as now). The dead-man never reads `stop_state` | **Yes**: `alter table ... drop constraint if exists` (the check constraint, re-added at once with one more value; no row changes), then `create or replace function`, `revoke` and `grant` |
+| 16 | `migrations/0029_kb_health_engine_followup_events.sql` (whole file; the PR for kb_health's follow-up events). After 0021. Any time, also while the engine runs: dashboard read only | `kb_health` also returns `multi_day_unfilled` (an order the venue let expire at the close with shares left, #333/#337), `daily_note` (#311/#318) and `multi_day_review_shadow` (the pre-open reviewer's observer verdicts, #310/#317), which the dashboard reads since #349. 0021's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -97,6 +99,9 @@ select count(*) from kaibot.summary_call where over_reservation;                
 -- step 15 (0028): the new stop state is allowed and kb_book names each position's exit kind
 select pg_get_constraintdef(oid) like '%none_by_design%' from pg_constraint where conname = 'ledger_position_stop_state_check'; -- true
 select prosrc like '%''exit''%' from pg_proc where proname = 'kb_book';                                -- true
+-- step 16 (0029): kb_health returns the unfilled orders, the daily note and the shadow verdicts
+select prosrc like '%multi_day_unfilled%' and prosrc like '%''daily_note''%' and prosrc like '%multi_day_review_shadow%'
+  from pg_proc where proname = 'kb_health';                                                          -- true
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false
