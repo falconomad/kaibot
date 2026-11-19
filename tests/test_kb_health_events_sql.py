@@ -46,10 +46,11 @@ def test_0029_is_0021_with_only_the_three_types_added():
     assert "grant execute on function public.kb_health() to authenticated;" in tail_new
 
 
-def test_0029_is_the_latest_definition_of_kb_health():
+def test_0029_is_superseded_only_by_0031():
+    """0031 (the news poller's events) re-creates kb_health; its own test checks it against this file."""
     later = sorted(p.name for p in (ROOT / "migrations").glob("*.sql")
                    if p.name > M29.name and "kb_health" in p.read_text())
-    assert later == []
+    assert later == ["0031_kb_health_news_feed_events.sql"]
 
 
 def test_0029_has_no_destructive_statement():
@@ -58,8 +59,10 @@ def test_0029_has_no_destructive_statement():
 
 
 def test_the_dashboard_reads_no_event_type_kb_health_leaves_out():
-    """Every event type apps/web/src matches on (`type === "..."`, Health.tsx's EV labels) is in the list."""
-    listed, read = set(_types(_sql(M29))), set()
+    """Every event type apps/web/src matches on (`type === "..."`, Health.tsx's EV labels) is in the list of the
+    latest kb_health (0031 since #354)."""
+    latest = ROOT / "migrations" / "0031_kb_health_news_feed_events.sql"
+    listed, read = set(_types(_sql(latest))), set()
     for f in (ROOT / "apps" / "web" / "src").rglob("*.ts*"):
         if ".test." in f.name:
             continue
