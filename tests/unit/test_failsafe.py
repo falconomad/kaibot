@@ -122,3 +122,32 @@ def test_the_watchdog_reads_the_position_again_before_a_new_stop():
     out = {}
     wd.protect(out, [])
     assert v.sent == [] and out["stops"] == []
+
+
+def test_the_journal_book_counts_todays_daily_buys_that_may_have_filled(tmp_path):
+    """Follow-up of #333: the watchdog's journal book adds, per multi-day sleeve, the shares of TODAY's daily-path
+    buys the ledger has not booked (open orders: what is left; finished ones: what the venue reported filled). An
+    order of an earlier session is a DAY order that has expired: never counted."""
+    from datetime import date
+
+    from kaibot.engine.failsafe import book_from_journal
+    from kaibot.engine.journal import Journal
+
+    j = Journal(tmp_path / "j.sqlite")
+    j.append("run", {"run_id": 7, "amount": 10_000.0})
+    j.append("fill", {"run_id": 7, "strategy": "trend_momentum", "symbol": "A", "side": "buy", "qty": 5, "px": 10.0,
+                      "fees": 0.0, "coid": "kb7-trend_momentum-A-20260803-buy-1", "activity": "a1",
+                      "session": "2026-08-03"})
+    for coid, sym, qty, session, state, cum in (
+            ("kb7-trend_momentum-A-20260804-resize-1", "A", 3, "2026-08-04", "accepted", 0),
+            ("kb7-trend_momentum-B-20260804-buy-1", "B", 10, "2026-08-04", "filled", 10),
+            ("kb7-trend_momentum-C-20260804-buy-1", "C", 4, "2026-08-04", "expired", 0),
+            ("kb7-trend_momentum-D-20260803-buy-1", "D", 6, "2026-08-03", "accepted", 0),
+            ("kb7-trend_momentum-E-20260804-sell-1", "E", 2, "2026-08-04", "accepted", 0)):
+        j.append("om_intent", {"coid": coid, "strategy": "trend_momentum", "symbol": sym,
+                               "side": "sell" if sym == "E" else "buy", "qty": qty, "type": "market", "tif": "day",
+                               "purpose": coid.split("-")[3], "session": session})
+        j.append("om_state", {"coid": coid, "state": state, "order_id": f"o-{sym}", "cum": cum})
+    got = {s.symbol: s.qty for s in book_from_journal(j, today=date(2026, 8, 4)).sleeves}
+    assert got == {"A": 8.0, "B": 10.0}  # A: 5 held + 3 working; B: filled, not booked; C, D, E: nothing
+    assert {s.symbol: s.qty for s in book_from_journal(j).sleeves} == {"A": 5.0}  # without a day: the ledger only

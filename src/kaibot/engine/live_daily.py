@@ -148,6 +148,9 @@ class Account(Protocol):
 
     def book_fill(self, body: dict) -> None: ...  # fold a `fill` entry the order manager journalled
 
+    # optional (follow-up of #333): `before_send(strategy, session, planned)` with planned = {symbol: target shares}
+    # of the buys about to go out; the engine writes today's ledger_position rows for the fail-safes with them
+
     def entry_block(self) -> str | None: ...  # why no position may be opened now (None: it may)
 
     def allows(self, symbol: str, side: str, purpose: str, qty: float | None) -> str | None: ...  # reconciliation
@@ -469,6 +472,7 @@ class LiveDaily:
         self.shorting: bool | None = None  # the paper account's shorting_enabled, read at start-up and each session
         self._shorting_day: date | None = None
         self._unfilled: set[str] | None = None  # client ids already reported as expired remainders (md_unfilled)
+        self._presend: set[tuple[str, str]] = set()  # (rule, session) whose planned buys the fail-safes were given
         self.gate = _Gate(account)
         self.om: OrderManager | None = None
         self.stops: ProtectiveStops | None = None
@@ -687,6 +691,27 @@ class LiveDaily:
         self._report_unfilled(om)
         self._prune()
         self._cancel_due()  # an order that was unconfirmed when the halt came is cancelled once it is confirmed
+
+    def _before_send(self, rule: str, session: date, targets: Sequence[Target],
+                     held: Mapping[tuple[str, str], float]) -> None:
+        """Follow-up of #333: just before the first orders of (rule, session) go out, the account (the engine) is
+        given each planned buy at its target shares, so today's ledger_position rows carry them before the venue
+        can fill anything: a fill that lands after the engine died is then multi-day shares to the dead-man, not
+        intraday shares it sells. Once per (rule, session) per process (a restart writes them again: idempotent).
+        A failure is an event, and the orders still go out (the fail-safes then sell such a fill: a round trip,
+        never an unprotected position)."""
+        planned = {t.symbol: int(t.shares) for t in targets
+                   if t.shares > float(held.get((rule, t.symbol), 0.0)) + 1e-9}
+        hook = getattr(self.account, "before_send", None)
+        if not planned or hook is None or (rule, str(session)) in self._presend:
+            return
+        try:
+            hook(rule, session, planned)
+            self._presend.add((rule, str(session)))
+        except Exception as e:
+            log.exception("planned buys not written for the fail-safes")
+            self.event("multi_day_error", {"step": "before_send", "strategy": rule,
+                                           "error": f"{type(e).__name__}: {e}"[:200]})
 
     def _report_unfilled(self, om: OrderManager) -> None:
         """Issue #333, question 4: an order of this path (not a protective stop) the venue let expire with shares
@@ -945,6 +970,7 @@ class LiveDaily:
                 self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
                                                  "why": "open orders unreadable"})
                 continue
+            self._before_send(r.name, session, targets, held_now)
             res = reconcile_targets(om, self.policy_for(session), targets, held_now, now=self.now(),
                                     session=str(session), run=rid, reconciler=self.gate, stops=self.stops,
                                     sells_first=False)
@@ -1417,6 +1443,9 @@ class EngineAccount:
         self.e._md_realized(body)  # today's realised P&L of a sale (before the fold changes the sleeve)
         self.e.ledger.apply("fill", body)
         self.e._md_filled = True  # #333 (QA-Ops): today's ledger_position rows are written for the fail-safes
+
+    def before_send(self, strategy: str, session: date, planned: Mapping[str, int]) -> None:
+        self.e._md_positions_planned(session, strategy, planned)  # follow-up of #333: rows before the venue call
 
     def entry_block(self) -> str | None:
         return self.e.entry_block()
