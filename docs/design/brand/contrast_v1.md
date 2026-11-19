@@ -48,7 +48,7 @@ Written by `gen/tokens.py`. WCAG 2 contrast ratios. Text needs 4.5:1; large text
 | Input and control border on a card | `#808692` | `#131519` | 5.00:1 | 3:1 |
 | Input and control border on the page | `#808692` | `#0A0B0D` | 5.38:1 | 3:1 |
 | Chart: pot line on a card | `#4F95F0` | `#131519` | 6.00:1 | 3:1 |
-| Chart: benchmark line on a card | `#808692` | `#131519` | 5.00:1 | 3:1 |
+| Chart: benchmark line on a card | `#9E65A1` | `#131519` | 4.20:1 | 3:1 |
 | Chart: gain mark on a card | `#10A66E` | `#131519` | 5.83:1 | 3:1 |
 | Chart: loss mark on a card | `#BC262F` | `#131519` | 3.01:1 | 3:1 |
 | Tab bar: active label | `#F4F5F7` | `#0A0B0D` | 18.05:1 | 4.5:1 |
@@ -101,7 +101,7 @@ Written by `gen/tokens.py`. WCAG 2 contrast ratios. Text needs 4.5:1; large text
 | Input and control border on a card | `#5D646F` | `#FFFFFF` | 5.97:1 | 3:1 |
 | Input and control border on the page | `#5D646F` | `#F4F5F7` | 5.47:1 | 3:1 |
 | Chart: pot line on a card | `#2F6FDE` | `#FFFFFF` | 4.72:1 | 3:1 |
-| Chart: benchmark line on a card | `#5D646F` | `#FFFFFF` | 5.97:1 | 3:1 |
+| Chart: benchmark line on a card | `#A168A4` | `#FFFFFF` | 4.17:1 | 3:1 |
 | Chart: gain mark on a card | `#039F68` | `#FFFFFF` | 3.41:1 | 3:1 |
 | Chart: loss mark on a card | `#A7021D` | `#FFFFFF` | 7.87:1 | 3:1 |
 | Tab bar: active label | `#0A0B0D` | `#F4F5F7` | 18.05:1 | 4.5:1 |

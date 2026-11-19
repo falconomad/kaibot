@@ -96,6 +96,18 @@ TYPE_PX = {tok: px for _, tok, px, *_ in TYPE}
 # Meaning colours: one hue each, set at the same lightness steps as the blue so they sit beside it.
 HUES = {"gain": (160, 0.165), "loss": (24, 0.185), "amber": (78, 0.145), "agent": (296, 0.105)}
 
+# The benchmark line (S&P 500) on the pot chart, #350. It was a neutral grey (grey 500 dark, grey 600 light): below the
+# dataviz validator's chroma floor (0.10), and 14.2 from the pot line in dark with full colour vision (floor 15). It is
+# now a quiet mauve, the one hue family nothing else in the system uses (not blue: brand; not violet: agent; not amber:
+# warning; not green or red: gain and loss). Chroma sits just above the floor so the line stays calm. Lightness is set
+# per theme inside the validator's band. The measured numbers are in brand_system_v1.md, section 2.
+BENCH_H, BENCH_C = 325, 0.11
+BENCH_L = {"dark": 0.59, "light": 0.60}
+
+
+def bench(mode: str) -> str:
+    return from_oklch(BENCH_L[mode], BENCH_C, BENCH_H)
+
 
 def tone(name: str, L: float, k=1.0) -> str:
     h, c = HUES[name]
@@ -115,7 +127,7 @@ def theme(mode: str) -> dict:
             "ai": tone("agent", 0.82), "ai-tint": tone("agent", 0.25, 0.32), "ai-line": tone("agent", 0.42, 0.60),
             "exp-bg": g[850], "exp-line": g[500], "exp-hatch": g[700], "exp-text": g[50], "control": g[500],
             "focus": b[300], "selection": b[700], "live": b[400],
-            "s-pot": b[400], "s-spy": g[500], "s-grid": g[800], "s-up": tone("gain", 0.64), "s-down": tone("loss", 0.52),
+            "s-pot": b[400], "s-spy": bench("dark"), "s-grid": g[800], "s-up": tone("gain", 0.64), "s-down": tone("loss", 0.52),
             "scrim": "rgba(0, 0, 0, .6)", "bar-bg": "rgba(10, 11, 13, .86)", "elev-sheet": "0 -12px 40px rgba(0, 0, 0, .55)",
         }
     else:
@@ -129,7 +141,7 @@ def theme(mode: str) -> dict:
             "ai": tone("agent", 0.48, 1.5), "ai-tint": tone("agent", 0.95, 0.25), "ai-line": tone("agent", 0.80, 0.55),
             "exp-bg": g[100], "exp-line": g[600], "exp-hatch": g[300], "exp-text": g[950], "control": g[600],
             "focus": b[500], "selection": b[200], "live": b[500],
-            "s-pot": b[500], "s-spy": g[600], "s-grid": g[200], "s-up": tone("gain", 0.62, 0.9), "s-down": tone("loss", 0.46),
+            "s-pot": b[500], "s-spy": bench("light"), "s-grid": g[200], "s-up": tone("gain", 0.62, 0.9), "s-down": tone("loss", 0.46),
             "scrim": "rgba(10, 11, 13, .45)", "bar-bg": "rgba(244, 245, 247, .88)", "elev-sheet": "0 -12px 40px rgba(10, 11, 13, .18)",
         }
     t["pass"], t["fail"] = t["gain"], t["loss"]

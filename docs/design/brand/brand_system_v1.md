@@ -82,8 +82,13 @@ benchmark line. Not blue (brand), not violet (agent), not amber (it is not a war
 
 - Pot line: brand blue, 2.5 px, round joins, with a soft blue fade under it. It ends in **the live point**: a 5 px
   blue dot with one faint ring, the same point as in the logo.
-- Benchmark (S&P 500): neutral `#808692`, 1.5 px, dotted with round caps. It was orange, which competed with amber.
-  It is identified by its dash and its label, not its colour.
+- Benchmark (S&P 500): a quiet mauve, `--s-spy` `#9E65A1` (dark), `#A168A4` (light), 1.5 px, dotted with round caps.
+  It was orange, which competed with amber, and then a neutral grey (`#808692`, `#5D646F`), which did not pass the
+  colour check on its own (#350, table below). Mauve is the one hue family with no other meaning in the system: not
+  blue (brand), not violet (agent), not amber (warning), not green or red (gain and loss). Its chroma sits just above
+  the validator's floor, so it stays the quieter of the two lines. Width, dots and the label are unchanged, so the
+  line is still never told apart by colour alone.
+- The pot line's token `--s-pot` keeps the brand blue (`#4F95F0` dark, `#2F6FDE` light). It passes as it is.
 - Gain and loss fills and bars use their own chart colours, since the text colours are too light to be marks:
   `--s-up` `#10A66E`, `--s-down` `#BC262F` (dark); `#039F68`, `#A7021D` (light).
 
@@ -95,7 +100,37 @@ colour-blindness types (Machado) and reports the worst pair:
 | Dark | `#4F95F0` `#10A66E` `#BC262F` | `#131519` | ΔE 11.8 (deutan), target 8 | 22.1, floor 15 | all 3:1 or more | pass |
 | Light | `#2F6FDE` `#039F68` `#A7021D` | `#FFFFFF` | ΔE 15.3 | 25.6 | all 3:1 or more | pass |
 
-Not measured: the benchmark grey is below the validator's colour floor on purpose, so it was left out of the run.
+### The two lines of the pot chart (#350)
+
+The same validator on the pair `--s-pot`, `--s-spy` (adjacent pairs, the mode for lines), once per surface: card
+`--surface`, page `--paper`, raised `--surface-2`. Distances are OKLab x 100 between the two lines. The validator
+gates on protanopia and deuteranopia (target 8) and on full colour vision (floor 15); tritanopia is reported.
+
+| Theme | Token | Value | Chroma (floor 0.10) | Full colour (floor 15) | Protan / deutan (target 8) | Tritan | Contrast card / page / raised (3:1) | Result on each surface |
+|---|---|---|---|---|---|---|---|---|
+| Dark, before | `--s-spy` | `#808692` | 0.019, fails | 14.2, fails | 14.2 / 14.2 | 11.4 | 5.00 / 5.38 / 4.57 | fails on all three |
+| Dark, after | `--s-spy` | `#9E65A1` | 0.110 | 17.2 | 14.7 / 12.0 | 20.1 | 4.20 / 4.53 / 3.84 | passes on all three |
+| Light, before | `--s-spy` | `#5D646F` | 0.020, fails | 17.4 | 17.8 / 17.8 | 11.6 | 5.97 / 5.47 / 4.78 | fails on all three |
+| Light, after | `--s-spy` | `#A168A4` | 0.110 | 17.1 | 10.1 / 14.5 | 16.7 | 4.17 / 3.83 / 3.34 | passes on all three |
+
+`--s-pot` is unchanged in every row: `#4F95F0` (dark; chroma 0.153, contrast 6.00 / 6.46 / 5.48) and `#2F6FDE`
+(light; chroma 0.182, contrast 4.72 / 4.33 / 3.78). Both colours are inside the lightness band in both themes.
+
+What the change costs, so nobody is surprised: the grey was further from the blue for red-green colour-blind readers
+in the light theme (17.8, now 10.1) and slightly further in dark (14.2, now 12.0); both stay above the target of 8.
+Contrast against the card falls from 5.00 to 4.20 in dark. In return the line has a colour of its own, full-colour
+readers get 17.2 instead of 14.2 in dark, and tritan readers get 20.1 instead of 11.4.
+
+With the gain and loss marks added (`--pairs all`, four marks), the set still passes: dark worst pair 11.0 colour-blind
+(mauve and the gain mark, deutan) and 17.2 full colour; light 9.8 and 17.1. Two hues that were tried and dropped: an
+olive (26 from the blue, but 1 to 6 from the loss mark for deutan readers) and a bronze (it is the old orange again).
+
+One thing to know: in the light theme the mauve is 14.4 from the agent violet (`--ai` `#6844AA`), which the chart uses
+for the dashed chapter rules. Those are vertical, labelled rules, not a series, and the light theme is not switched
+on; if it is, check the two together on the chart first. In dark the distance is 23.6.
+
+Proof sheet, the chart as each kind of colour vision sees it, before and after: `proof/chart-series-350.png`
+(`python docs/design/brand/gen/chart_series.py --shot`).
 
 ## 3. Type
 
@@ -194,7 +229,7 @@ Changing `tokens.css` to the values in `tokens_v1.css` recolours most of the app
    `--d-draw`, `--d-point`, `--ease-pop`. Control borders move from `--rule` to `--control`; focus outlines from
    `--sea` to `--focus`.
 5. **Font**: self-host Outfit, set `--font-ui` and `--font-num`, add `tabular-nums` and the word spacing.
-6. **Tab bar** active point; **chart** benchmark dash, `--s-spy` neutral, end point; the point in the engine chip.
+6. **Tab bar** active point; **chart** benchmark dash, `--s-spy` (neutral in #265, mauve since #350), end point; the point in the engine chip.
 7. **Light theme**: a `data-theme` switch and `color-scheme`. In light, amber text uses `--warn-text`, not `--warn`.
 
 **Run & settings** keeps its old layout. Only colours, type and tokens reach it; items 1, 3 and 5 apply there, no
