@@ -25,8 +25,8 @@ Owner: backend-quant. Last checked against main on 17 Nov 2026 (0001-0022 all ap
 - 0024: **applied in production** (Product's note on #315, 18 Nov 2026; step 11 below; #321).
 - 0025: **applied by Product on 18 Nov 2026, 21:2x UTC (after the close)** (step 12 below; PR #315, #309).
 - 0026: **applied by Product on 18 Nov 2026, after 0025** (step 13 below; #319, PR #322). Checked: `kaibot.ai_spend()` = {total 0, cap 150}; `llm_reserve_lifetime` not executable by authenticated; `kb_llm_budget` not by anon.
-- 0027: **pending** (step 14 below; #324). After 0026.
-- 0028: **pending** (step 15 below; PR #339). After 0020. Needs the stakeholder's go (a production migration).
+- 0027: **applied by Product on 18 Nov 2026, about 22:45 UTC** (step 14 below; PR #325).
+- 0028: **applied by Product on 19 Nov 2026, 00:3x UTC (after the close; stakeholder: "merge everything now")** (step 15 below; PR #339). The constraint was named ledger_position_stop_state_check, as expected.
 
 ## Apply in this order
 
