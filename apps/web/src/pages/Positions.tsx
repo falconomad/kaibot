@@ -28,6 +28,7 @@ import { type Plan, type Sold, STATE_TEXT, bookLine, buyText, lineText, parsePla
 import { poll } from "../lib/poll";
 import { etToday } from "../lib/derive";
 import { type Unfilled, exitKinds, unfilledFrom, unfilledLine } from "../lib/engineevents";
+import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
 
 const PAGE = 50;
@@ -79,13 +80,15 @@ export function Positions() {
   const pot = live?.pot ?? null;
   const expHeld = exps.find((e) => e.experiment && open.some((o) => o.kind === "book" && findExperiment(o.p.rule, [e])));
   const showClosed = tab === "closed" || run.kind === "replay";
+  const countKnown = run.kind !== "paper" || book.isSuccess || open.length > 0;
 
   return (
     <>
       <section aria-labelledby="pos-h" className="pos-head">
         <h1 id="pos-h" className="page-title">Positions</h1>
-        <p className="muted num" style={{ margin: 0 }}>{open.length} open{open.length ? ` · ${money(invested)} invested` : ""}
-          {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</p>
+        {/* #359: no count while the book loads or failed (a "0 open" there reads as data); a space keeps the line's height */}
+        <p className="muted num" style={{ margin: 0 }}>{countKnown ? <>{open.length} open{open.length ? ` · ${money(invested)} invested` : ""}
+          {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</> : "\u00a0"}</p>
         {line && <p className={`muted num ${line.ended ? "loss" : ""}`} style={{ margin: 0 }} title={`peak ${money(line.peak)}, now ${money(line.equity)}`}>Multi-day book: {lineText(line)}</p>}
         {run.kind === "paper" && (
           <div className="seg" role="tablist" aria-label="Show" onKeyDown={onTabKeys}>
@@ -127,7 +130,7 @@ export function Positions() {
                 </li>
               ))}
             </ul>
-          ) : book.isPending && run.kind === "paper" ? <Skeleton /> : (
+          ) : book.isPending && run.kind === "paper" ? <Skeleton /> : book.isError ? null : (
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
           )}
           {/* below the list: the plan arrives after the rows, and must not push them down */}
@@ -164,7 +167,7 @@ export function Positions() {
 
       <Sheet open={sheet !== null} onClose={() => setSheet(null)} title={sheet?.symbol ?? ""}>
         {sheet && ("id" in sheet ? <ClosedSheet t={sheet} exp={findExperiment(sheet.strategy, exps)} />
-          : sheet.kind === "day" ? <DaySheet o={sheet} exps={exps} /> : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} />)}
+          : sheet.kind === "day" ? <DaySheet o={sheet} exps={exps} /> : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} exits={exits} />)}
       </Sheet>
     </>
   );
@@ -215,9 +218,12 @@ function DaySheet({ o, exps }: { o: Extract<Open, { kind: "day" }>; exps: Experi
 }
 
 /** A multi-day holding (the former Holdings page's detail). */
-function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book; exp: Experiment | null }) {
+export function BookSheet({ o, b, exp, exits }: { o: Extract<Open, { kind: "book" }>; b: Book; exp: Experiment | null; exits?: Record<string, string> }) {
   const { p } = o;
   const v = holdingView(p, b);
+  // #359: a rule that sells by its target list has no stop by design (lib/exits.exitOf, as the book strip says), so a
+  // missing stop there is not a problem and nothing is placed again.
+  const byList = !p.stop && exitOf(p, exits) === "target_list";
   return (
     <>
       <p className="muted" style={{ marginTop: 0 }}>{companyName(o.symbol)} · {p.qty} shares · {ruleName(p.rule)}</p>
@@ -229,9 +235,9 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
         <span>Price at the close</span><span /><span className="v">{px(p.mark)}{p.priced ? "" : " (last known)"}</span>
         <span>Size, of the pot</span><span /><span className="v">{v.share !== null ? `${(v.share * 100).toFixed(1)}%` : "—"}</span>
         <span>Sector</span><span /><span className="v">{sectorText(p.sector) ?? sectorOf(p.symbol) ?? "not known"}</span>
-        <span>Safety stop at the broker</span><span /><span className={`v ${p.stop ? "" : "loss"}`}>{p.stop
+        <span>Safety stop at the broker</span><span /><span className={`v ${p.stop || byList ? "" : "loss"}`}>{p.stop
           ? `${px(p.stop.price)} · ${p.stop.state === "resting" ? "in place" : p.stop.state === "re-arming" ? "being placed again" : "missing"}${v.stopBelowPct !== null ? ` · ${v.stopBelowPct.toFixed(1)}% below` : ""}`
-          : `none: ${NAME} places it again`}</span>
+          : byList ? "none by design: the rule sells by its list at a close" : `none: ${NAME} places it again`}</span>
         {p.dividends > 0 && <><span>Dividends</span><span /><span className="v">{money(p.dividends)}</span></>}
       </div>
       {(() => {
