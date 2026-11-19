@@ -24,7 +24,14 @@ symbols are polled.
 Point-in-time: the desk stamps every row's available_ts with its own clock at ingest, never the provider's time.
 
 The fetch runs outside the desk's lock (`LockedDesk.lock`), the insert inside it, so the tick's pump-risk read and
-the reviews never wait on the network. Requests go through AlpacaData.news, under the shared `alpaca` budget of
+the reviews never wait on the network. QA-Ops (#355): the insert goes in batches of INGEST_BATCH stories, one lock
+hold each, on a one-try short-timeout copy of the store (`Store.quick`) behind a breaker: after the first
+network/5xx error of a poll every further write of that poll fails at once, so a slow or down Supabase holds the lock
+for about one timeout, not ~87 s per story (the main loop's pump-risk read waits on the same lock). A poll whose store
+failed does not move the fetch watermark (the next one asks again; the desk skips what it already has) and backs off
+(5, 10, 20 ... at most 60 minutes), as does a poll whose every request failed.
+
+Requests go through AlpacaData.news, under the shared `alpaca` budget of
 config/sources.yaml (150/min): about 2-3 requests a poll for ~75 symbols, roughly 600 a weekday.
 
 Health: `status()` is the heartbeat's `news` block (state starting | ok | empty | failing, last poll, last item,
@@ -38,6 +45,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -54,6 +62,43 @@ ACTIVE = (time(4, 0), time(20, 0))  # ET, weekdays: pre-market to after-hours
 EMPTY_AFTER = timedelta(hours=2)
 EMPTY_WINDOW = (time(9, 30), time(16, 0))  # ET, weekdays: a liquid universe without a story for 2 h is a dead feed
 CHUNK = 50  # symbols per request (Alpaca's news endpoint)
+INGEST_BATCH = 10  # stories per lock hold (each is 1-3 Supabase calls); the lock is released between batches
+STORE_TIMEOUT_S = 5.0  # per Supabase call of the poller's writes (Store.quick: one try)
+MAX_BACKOFF_S = 3600.0
+_HTTP_CODE = re.compile(r" -> (\d{3})\b")
+
+
+class _StoreDown(RuntimeError):
+    pass
+
+
+class _GuardedStore:
+    """The desk's store for one poll's writes: one try with a short timeout, and a breaker. The first error that
+    is not a 4xx answer (Supabase up, the row refused, e.g. the unique index) trips it; then every call fails at
+    once. 4xx answers are passed on and do not trip it."""
+
+    def __init__(self, store, timeout_s: float = STORE_TIMEOUT_S) -> None:
+        quick = getattr(store, "quick", None)
+        self._s = quick(timeout_s) if callable(quick) else store
+        self.error: str | None = None
+
+    def __getattr__(self, name):
+        attr = getattr(self._s, name)
+        if not callable(attr):
+            return attr
+
+        def call(*a, **kw):
+            if self.error is not None:
+                raise _StoreDown(self.error)
+            try:
+                return attr(*a, **kw)
+            except Exception as e:
+                m = _HTTP_CODE.search(str(e))
+                if not (m and m.group(1).startswith("4")):
+                    self.error = f"{type(e).__name__}: {e}"[:160]
+                raise
+
+        return call
 
 
 def enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -94,6 +139,8 @@ class NewsPoller:
         self._events: list[tuple[str, dict]] = []
         self._started: datetime | None = None
         self._last_poll = self._last_ok = self._last_item = None
+        self._through: datetime | None = None  # the end of the last poll whose fetch and store both worked
+        self._backoff_n, self._next_at = 0, None
         self._day: date | None = None
         self._counts = {"calls": 0, "fetched": 0, "added": 0}
         self._planned_polled = False
@@ -108,7 +155,27 @@ class NewsPoller:
 
     def due(self) -> bool:
         now = self.clock()
+        if self._next_at is not None:
+            return now >= self._next_at
         return self._last_poll is None or (now - self._last_poll).total_seconds() >= self.every_s(now)
+
+    def _ingest(self, raw: list[dict]) -> tuple[int, str | None]:
+        """Store `raw` in batches, one lock hold each. Returns (added, store error or None)."""
+        added = 0
+        guard = _GuardedStore(self.desk.store)
+        for i in range(0, len(raw), INGEST_BATCH):
+            if i:
+                self._stop.wait(0.05)  # let a waiting reader (the tick's pump-risk check) take the lock
+            with self.lock:
+                orig, self.desk.store = self.desk.store, guard
+                try:
+                    out = self.desk.ingest(raw[i:i + INGEST_BATCH])
+                finally:
+                    self.desk.store = orig
+            added += int(out.get("added") or 0)
+            if guard.error is not None:
+                return added, guard.error
+        return added, None
 
     # ---------------- one poll ----------------
     def _fetch(self, symbols: list[str], start: datetime, end: datetime, raw: list, errors: list) -> int:
@@ -133,6 +200,8 @@ class NewsPoller:
         errors: list[str] = []
         raw: list[dict] = []
         calls = ok = added = 0
+        store_error: str | None = None
+        known_before = set(self._known)
         try:
             sc = self.scope_fn()
             self._scope = sc
@@ -152,16 +221,17 @@ class NewsPoller:
             if new:
                 ok += self._fetch(new, now - BACKFILL, now, raw, errors)
             if old:
-                since = max(now - BACKFILL, (self._last_ok or now - BACKFILL) - OVERLAP)
+                since = max(now - BACKFILL, (self._through or now - BACKFILL) - OVERLAP)
                 ok += self._fetch(old, since, now, raw, errors)
             calls = self._counts["calls"] - before
             if raw:
                 try:
-                    with self.lock:
-                        out = self.desk.ingest(raw)
-                    added = int(out.get("added") or 0)
+                    added, store_error = self._ingest(raw)
                 except Exception as e:
-                    errors.append(f"store: {type(e).__name__}: {e}"[:160])
+                    store_error = f"{type(e).__name__}: {e}"[:160]
+                if store_error is not None:
+                    errors.append(f"store: {store_error}")
+                    self._known = known_before  # not stored: a new symbol keeps its backfill for the next poll
             with self._mu:
                 self._n = {"symbols": len(syms), "planned": len(sc.planned)}
                 self._planned_polled = sc.planned <= self._known
@@ -172,9 +242,17 @@ class NewsPoller:
             self._counts["added"] += added
             if ok:
                 self._last_ok = now
+            if ok and calls == ok and store_error is None:
+                self._through = now
             if fetched:
                 self._last_item = now
-            failing = sc is None or (calls > 0 and ok == 0)
+            failing = sc is None or (calls > 0 and ok == 0) or store_error is not None
+            if failing:
+                self._backoff_n += 1
+                wait = min(MAX_BACKOFF_S, self.every_s(now) * 2 ** (self._backoff_n - 1))
+                self._next_at = now + timedelta(seconds=wait)
+            else:
+                self._backoff_n, self._next_at = 0, None
             self._error = "; ".join(errors)[:300] or None
             if failing:
                 self._state = "failing"
@@ -224,7 +302,8 @@ class NewsPoller:
                     "symbols": self._n["symbols"], "planned": self._n["planned"],
                     "planned_polled": self._planned_polled, "day": str(self._day) if self._day else None,
                     "calls_today": self._counts["calls"], "fetched_today": self._counts["fetched"],
-                    "added_today": self._counts["added"], "every_s": self.every_s()}
+                    "added_today": self._counts["added"], "every_s": self.every_s(),
+                    "retry_at": _iso(self._next_at)}
 
     def take_events(self) -> list[tuple[str, dict]]:
         with self._mu:

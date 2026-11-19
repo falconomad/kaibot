@@ -35,6 +35,10 @@ only writer) polls every 5 minutes on weekdays 04:00-20:00 ET and every 30 minut
   planned_polled, calls_today, fetched_today, added_today}; events `news_feed_unhealthy` (every request of a poll
   failed, or no story for 2 h on a weekday 09:30-16:00 ET) and `news_feed_ok`. `--check` reads SPY's news once.
 - **switch:** `KAIBOT_NEWS_POLL=off` (default on).
+- **store (QA-Ops, #355):** writes go in batches of 10 stories, one desk-lock hold each, on a one-try 5 s copy of
+  the store behind a breaker (the first network/5xx error ends the poll's writes). A poll whose store failed keeps its
+  fetch watermark (asked again next time; the desk skips stored stories), counts as `failing` and backs off 5, 10,
+  20 ... 60 min (heartbeat `news.retry_at`).
 
 ## Point-in-time reads
 `clusters_for(symbol, as_of, hours=24)` and `evidence_pack(...)` use only clusters with `first_seen <= as_of` and

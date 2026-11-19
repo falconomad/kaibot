@@ -299,3 +299,112 @@ def test_for_engine_honours_the_switch_and_the_main_loop_writes_its_events():
     M.report_news(e, p)
     M.report_news(e, None)
     assert [(r["type"], r["run_id"]) for r in e.store.tables["event"]] == [("news_feed_unhealthy", 7)]
+
+
+# ---------------- QA-Ops (#355): a slow or down Supabase never holds the desk lock for long ----------------
+class DownStore(FakeStore):
+    """Supabase unreachable: every call fails as Store._call does after its tries (a network error)."""
+
+    def __init__(self):
+        super().__init__()
+        self.down, self.calls, self.quick_timeout = True, 0, None
+
+    def quick(self, timeout=5.0):
+        self.quick_timeout = timeout
+        return self
+
+    def _maybe_fail(self):
+        self.calls += 1
+        if self.down:
+            from kaibot.engine.store import StoreError
+
+            raise StoreError("POST news_cluster: <urlopen error timed out>")
+
+    def select(self, table, params):
+        self._maybe_fail()
+        return super().select(table, params)
+
+    def insert(self, table, row, returning=True):
+        self._maybe_fail()
+        return super().insert(table, row, returning)
+
+    def update(self, table, match, values):
+        self._maybe_fail()
+        return super().update(table, match, values)
+
+
+class CountingLock:
+    def __init__(self):
+        self._l, self.holds = threading.Lock(), 0
+
+    def __enter__(self):
+        self._l.acquire()
+        self.holds += 1
+        return self
+
+    def __exit__(self, *exc):
+        self._l.release()
+
+    def locked(self):
+        return self._l.locked()
+
+
+def many(n):
+    return [art(f"ACME story number {i} about item {i * 7919}", at=T0 - timedelta(minutes=30 + i)) for i in range(n)]
+
+
+def test_store_writes_go_in_batches_with_the_lock_released_between_them():
+    lock = CountingLock()
+    clock = Clock(T0)
+    st = FakeStore()
+    desk = NewsDesk(st, clock=clock)
+    p = NP.NewsPoller(desk, FakeNews(many(35)), lambda: NP.Scope({"ACME"}, set(), set()), lock=lock, clock=clock)
+    out = p.poll_once()
+    assert out["added"] == 35 and len(items(st)) == 35
+    assert lock.holds == 4  # ceil(35 / INGEST_BATCH): never one hold for the whole backfill
+    assert desk.store is st  # the desk's own store is back after the poll
+
+
+def test_supabase_down_costs_one_failed_call_backs_off_and_loses_nothing():
+    clock = Clock(T0)
+    st = DownStore()
+    desk = NewsDesk(st, clock=clock)
+    src = FakeNews(many(40))
+    p = NP.NewsPoller(desk, src, lambda: NP.Scope({"ACME"}, set(), set()), clock=clock)
+    p.poll_once()
+    assert st.quick_timeout == NP.STORE_TIMEOUT_S  # one try, short timeout
+    assert st.calls == 1  # the breaker: not 40 stories x Store's 4 tries of 20 s under the lock
+    s = p.status()
+    assert s["state"] == "failing" and "store" in s["error"] and s["retry_at"] is not None
+    assert [k for k, _ in p.take_events()] == ["news_feed_unhealthy"]
+    clock.t += timedelta(minutes=5)
+    assert p.due()  # first retry after the normal 5 minutes
+    p.poll_once()
+    clock.t += timedelta(minutes=5)
+    assert not p.due()  # then 10 minutes
+    clock.t += timedelta(minutes=5)
+    st.down = False
+    assert p.due()
+    p.poll_once()
+    # the watermark did not move while the store was down: the 72 h backfill is asked again and all 40 are stored
+    assert src.calls[-1][1] == clock.t - timedelta(hours=72)
+    assert len(items(st)) == 40 and p.status()["state"] == "ok" and p.status()["retry_at"] is None
+    assert [k for k, _ in p.take_events()] == ["news_feed_ok"]
+
+
+def test_a_refused_row_does_not_trip_the_breaker():
+    clock = Clock(T0)
+
+    class Refuses(FakeStore):
+        def insert(self, table, row, returning=True):
+            if table == "news_item" and "number 3 " in row.get("headline", ""):
+                from kaibot.engine.store import StoreError
+
+                raise StoreError('POST news_item -> 409: {"code":"23505"}')
+            return super().insert(table, row, returning)
+
+    st = Refuses()
+    p = NP.NewsPoller(NewsDesk(st, clock=clock), FakeNews(many(12)), lambda: NP.Scope({"ACME"}, set(), set()),
+                      clock=clock)
+    out = p.poll_once()
+    assert out["added"] == 11 and p.status()["state"] == "ok"
