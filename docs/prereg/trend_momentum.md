@@ -390,3 +390,23 @@ below leaves a carried buy out; none sends more shares, and nothing is sized aga
 6. **Journal.** Each stock left out is in the session's `md_send` entry (`carry.skipped`) with its reason, and the
    `multi_day_carry` event is sent also when nothing is carried. A failure inside the carry-over carries nothing,
    is an event (`multi_day_error`, step `carry`) and never holds back the session's sales.
+
+## Amendment 13 (19 Nov 2026, backend-quant, the author's review of QA-Ops's key on issue #363, before the third live paper session): a carried buy must be in the rule's ranked universe at the previous close
+
+Written on 19 Nov 2026, with Amendments 11 and 12 and before the carry-over's first use. It only narrows Amendment
+11: it leaves a carried buy out, sends no more shares and sizes nothing. No research result is affected (item 3).
+
+1. **The gap.** Section 2's "Not buyable" row has three parts: a close below the 100-day average, a 15% move in the
+   window, and a stock outside the universe filter. Amendment 11 (item 2, "Not buyable") names the first two and
+   cites the row, and its code checked only those two. A stock that left the universe filter after the decision
+   would have been carried.
+2. **The rule.** A stock is carried only if, at the previous close, it is in the rule's ranked universe, as a
+   decision reads it: it passes the universe filter of section 2 (price >= $5, 20-day average dollar volume >= $50M,
+   point-in-time membership) and it has a score (choice 4; a stock without a score is never bought, Amendment 8). A
+   stock that does not is left out that session, with the reason `not buyable: universe` or `not buyable: no score`
+   in `md_send.carry.skipped`, and is tried again at the next session. Its place in the ranking is still not read
+   again: that is the next decision's (Amendment 11, item 2).
+3. **Research and Gate B unchanged.** This can only leave a carried buy out. On the research venue nothing is
+   carried (Amendment 11, item 4), and the same bit-identity test passes for both momentum rules. A test finds, on
+   the fixture, a session where one planned stock is in the ranked universe and another is outside the universe
+   filter: only the first is carried, for this rule and for mom_12_1_band (Amendment 11 there).

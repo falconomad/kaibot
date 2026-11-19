@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 
+import numpy as np
 import pandas as pd
 import test_outage_drill_multiday as drill
 from pg_harness import DeadmanDb
@@ -37,8 +38,9 @@ class DecidesOnce(Keeps):
     def decision_day(self, prev, fill) -> bool:
         return str(prev) == D0
 
-    def signals(self, v):  # the drill's 75 sessions are too short for the rule's averages: every name is buyable
-        return None, None, lambda j: None
+    def signals(self, v):  # the drill's 75 sessions are too short for the rule's averages: every name is scored,
+        n = len(v.symbols)  # in the universe and buyable (the carry-over reads all three: Amendment 13)
+        return np.zeros(n), np.ones(n, dtype=bool), lambda j: None
 
 
 def _to_d2(tmp_path, monkeypatch, calm: bool = True) -> Drill:

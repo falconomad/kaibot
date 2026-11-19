@@ -40,16 +40,16 @@ the closing print at cost model v1, as it did the `cls` order (SimBroker `near_c
 runs do not change (Amendment 10 of trend_momentum, Amendment 8 of mom_12_1_band). A remainder that still expires is
 not sent again that session; a sale is sent again at the next session, and so is a buy (below).
 
-Carry-over (issue #363; Amendments 11 and 12 of trend_momentum, 9 and 10 of mom_12_1_band). On a session that is not a
+Carry-over (issue #363; Amendments 11 to 13 of trend_momentum, 9 to 11 of mom_12_1_band). On a session that is not a
 decision's fill session, `send` plans again what the latest decision's buys still lack: the plan's own target shares
 (`md_send` of the fill session, of this run) less the shares held, through the same target loop, so never above the
 target. Left out, each with its reason in `md_send.carry.skipped` and the `multi_day_carry` event: while the market
-filter is off, a stock the rule could not buy now, one without a bar on the fill day, one whose last order the venue
-cancelled or refused, one that lost shares since the decision (by any path), one with a fill not booked yet, a split,
-an announced corporate action, the overnight cap, and whatever does not fit the cash less the reserve or the book's
-caps at the previous close (`_carry_room`: the paper account lends, so the engine checks). A failure in the carry-over
-carries nothing and never holds back the session's sales. No decision record for the session, no send of the
-decision, or no daily view of the previous close: nothing is carried that session.
+filter is off, a stock outside the rule's ranked universe or that it could not buy now, one without a bar on the fill
+day, one whose last order the venue cancelled or refused, one that lost shares since the decision (by any path), one
+with a fill not booked yet, a split, an announced corporate action, the overnight cap, and whatever does not fit the
+cash less the reserve or the book's caps at the previous close (`_carry_room`: the paper account lends, so the engine
+checks). A failure in the carry-over carries nothing and never holds back the session's sales. No decision record for
+the session, no send of the decision, or no daily view of the previous close: nothing is carried that session.
 
 Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
 every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the

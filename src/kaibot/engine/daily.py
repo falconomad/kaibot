@@ -392,7 +392,7 @@ def ended_buys(om: OrderManager, strategy: str, since: str, before: str, *,
 
 def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], held: Mapping[str, float],
                   data: DailyData, fill_i: int, k: int, ended: Mapping[str, str]) -> tuple[list[Target], dict]:
-    """#363 (trend_momentum.md Amendments 11 and 12, mom_12_1_band.md Amendments 9 and 10), shared by the research
+    """#363 (trend_momentum.md Amendments 11 to 13, mom_12_1_band.md Amendments 9 to 11), shared by the research
     runner and the live daily path. Between two decisions, each session sends again what the latest decision's buys
     still lack:
     `plan` is that decision's targets [(symbol, shares, purpose)] as sent on its fill session `fill_i`; `held` the
@@ -403,7 +403,9 @@ def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], hel
     - the stock had no bar on the fill day (section 4: such a buy is dropped);
     - its last order was cancelled or refused by the venue, or it was sold since (never sent again), or a fill of
       it is not booked yet (`ended_buys`);
-    - the rule could not buy it at k (below its 100-day average, a 15% move: section 2's "Not buyable");
+    - the rule could not buy it at k: it is outside the rule's ranked universe (section 2's universe filter: price,
+      liquidity, point-in-time membership; or no score), or below its 100-day average or with a 15% move
+      (trend_momentum's "Not buyable"). Its rank is not read again: that is the next decision's;
     - it split since the fill session (the plan's shares are on the old basis; the next decision sizes it again).
     Returns the carried targets and the note the send journals (`of`, `carried`, `skipped`, `risk_off`)."""
     want = [(sym, int(q)) for sym, q, p in plan if p in ("buy", "resize", CARRY)
@@ -416,7 +418,7 @@ def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], hel
         note["risk_off"] = True
         note["skipped"] = {sym: "market filter off" for sym, _ in want}
         return [], note
-    sell_if = strategy.signals(v)[2]
+    score, in_universe, sell_if = strategy.signals(v)
     out = []
     for sym, q in want:
         j = data._col.get(sym)
@@ -428,8 +430,9 @@ def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], hel
                f"order {state}" if state in NOT_CARRIED else
                "split since the decision" if any(data.split_at(t, j) != 1.0 for t in range(fill_i + 1, k + 1))
                else None)
-        if why is None:
-            reason = sell_if(j)
+        if why is None:  # the rule's own ranked universe at k: the universe filter, a score, its buy conditions
+            reason = ("universe" if not bool(in_universe[j]) else
+                      "no score" if not math.isfinite(float(score[j])) else sell_if(j))
             why = f"not buyable: {reason}" if reason is not None else None
         if why is not None:
             note["skipped"][sym] = why

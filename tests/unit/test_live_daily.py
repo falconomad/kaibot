@@ -1025,6 +1025,50 @@ def test_a_stock_the_rule_could_not_buy_at_the_last_close_is_not_carried(data):
     assert note["carried"] == [[good[0], 7, 0.0]] and note["risk_off"] is False
 
 
+@pytest.mark.parametrize("version", ["trend_momentum", "mom_12_1_band"])
+def test_a_stock_outside_the_rules_ranked_universe_at_the_last_close_is_not_carried(data, version):
+    """Backend-quant's review of #366 (trend_momentum Amendment 13, mom_12_1_band Amendment 11). Section 2 lets a rule
+    buy only a stock of its ranked universe: one that passes the universe filter (price, liquidity, point-in-time
+    membership) and has a score. A carried buy is a buy of its own session, so both are read at the previous close.
+    On 3bdcac9 and b1ada35 the carry-over read only trend_momentum's 100-day average and 15% move, and nothing at
+    all for mom_12_1_band (which has neither). Found on the fixture: a session where one stock is in the ranked
+    universe and another, with a bar on the fill day, is outside the universe filter; a stock without a score is
+    made by a strategy that hides one score."""
+    from kaibot.engine import daily
+
+    s = mom.VERSIONS[version]
+    for k in range(I0, I1):
+        v = data.view(k)
+        score, ok, sell_if = s.signals(v)
+        if getattr(s, "market_filter", False) and not daily.market_on(v.close(daily.SMA_MARKET)[:, v.spy]):
+            continue
+        cols = [int(j) for j in data.stocks if np.isfinite(data.raw_c[k - 1, j]) and sell_if(int(j)) is None]
+        good = [data.symbols[j] for j in cols if ok[j] and np.isfinite(score[j])]
+        outside = [data.symbols[j] for j in cols if not ok[j]]
+        if len(good) >= 2 and outside:
+            break
+    else:
+        pytest.fail("the fixture has no such session")
+    keep, hidden, out_of = good[0], good[1], outside[0]
+
+    class HidesOneScore:
+        market_filter = getattr(s, "market_filter", False)
+
+        def signals(self, view):
+            sc, okay, sell = s.signals(view)
+            sc = np.array(sc, dtype=float)
+            sc[data.col(hidden)] = np.nan
+            return sc, okay, sell
+
+    plan = [(keep, 7, "buy"), (out_of, 7, "buy"), (hidden, 7, "buy")]
+    out, note = daily.carry_targets(HidesOneScore(), s.name, plan, {}, data, k - 1, k, {})
+    assert [(t.symbol, t.shares, t.purpose) for t in out] == [(keep, 7, "carry")]
+    assert note["skipped"] == {out_of: "not buyable: universe", hidden: "not buyable: no score"}
+    assert note["carried"] == [[keep, 7, 0.0]]
+    out, note = daily.carry_targets(s, s.name, plan, {}, data, k - 1, k, {})  # the rule itself scores `hidden`
+    assert [t.symbol for t in out] == [keep, hidden] and note["skipped"] == {out_of: "not buyable: universe"}
+
+
 def test_a_carried_buy_must_still_fit_the_cash_and_the_books_caps_at_the_last_close(data, tmp_path):
     """A carried buy keeps the plan's shares, sized at the decision's prices against that day's cash, and the paper
     account lends rather than refuses. So at the previous close it must fit: the cash less the 3% reserve, the
