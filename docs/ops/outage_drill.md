@@ -70,3 +70,58 @@ How it is enforced today:
 - **Same machine, Docker via `run_engine.sh`**: the container name `kaibot-engine` is fixed, so a second `docker run --name kaibot-engine` fails.
 - **Same machine, anything else**: since S40, `run_engine.sh` calls `scripts/engine_guard.sh` before starting (not for `--check`, which never trades) and refuses if an engine already runs there: Docker, compose or Python. Before S40 there was no guard in Python mode or between compose and `run_engine.sh`.
 - **Different machines** (Mac and a cloud VM): the **engine lease** (issue #81, migration 0013). One row in Supabase is taken at start-up, renewed with every heartbeat and released on a clean stop. A second engine is refused while the lease is live and can take over 90 s after the holder dies. A restart on the same machine gets its own lease back at once, so the drill above is not slowed down. Messages and how to release a stuck lease: [run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine).
+
+## Three sessions down with multi-day positions
+
+What happens when the engine is off for three whole trading sessions while `trend_momentum` holds positions overnight.
+It is drilled in CI by `tests/test_outage_drill_multiday.py` on the simulated venue (SimBroker with cost model v1 and
+a cash book). The test runs the real engine with `KAIBOT_MULTIDAY=on`, the real watchdog, and the dead-man's SQL
+(migrations 0017, 0019 and 0022) in a throwaway local Postgres, never Supabase. It runs twice: with the laptop up
+(watchdog and dead-man) and with the laptop off (dead-man alone).
+
+The story: on Monday the rule holds B and C, with no stop, as registered. It decides after the close to buy D on
+Tuesday, and the engine dies that evening. Tuesday to Thursday the engine is down. On Wednesday C opens 15% lower.
+B climbs every day. On Friday at 09:00 the engine starts again.
+
+### Each session while the engine is down
+
+| | Watchdog (laptop, every 15 s) | Dead-man (Supabase, every minute) |
+|---|---|---|
+| When it acts | at the first poll after 09:30 (the heartbeat is older than 90 s) | once the heartbeat is over 3 minutes old and the market is open: it reads the account, then acts on the next run |
+| Protective stops | the first day: one GTC stop per position, whole shares, **10% below the last price** (the rule has no stop of its own), client id `kbwd-...` | the same (`kbdm-...`) if no stop rests yet. With the laptop up the watchdog's stop is already there, so it adds none. It never adds a second one |
+| Later days | the stop is still resting (GTC), so nothing new is sent | the same |
+| Buying | never. Kaibot buy orders still open are cancelled. The D buy decided on Monday is never sent, because sending is the engine's job | never, the same |
+| Close minus 5 / 4 minutes | sells intraday shares only. Multi-day shares are kept (`kept` in `watchdog_flatten`) | sells intraday shares only. Nothing multi-day is closed or sold |
+| Alarm | one `watchdog` halt row each session ("multi-day positions are kept"), plus `watchdog_protect` / `watchdog_flatten` events | one `deadman` halt row each session ("engine silent ..."), plus a `kaibot.deadman_pass` row per pass |
+
+### When the engine starts again
+- The account check is clean, there is no drift halt, and the reconciliation shows no difference before the send.
+- C's stop, which filled on Wednesday, is booked **once** to C's sleeve. B's resting fail-safe stop is taken over as
+  B's own (`stop_adopted`).
+- The rule decides from Thursday's close, the last one before the restart. The evenings it missed are not decided
+  after the fact, and nothing from Monday's decision is sent.
+- From 15:50 it cancels B's fail-safe stop (the rule has no stop), then sends each order once: C bought back, D
+  bought. A second crash at 15:53 and another restart send nothing again.
+- After the close the ledger equals the broker, shares and cash to the cent.
+
+### What is protected
+- Every multi-day position gets a broker-held stop in the first minute of the first session (about two
+  minutes with the laptop off: one dead-man run reads the account, the next acts). The stop then sits at Alpaca, so it keeps working even if the watchdog and Supabase both go down later.
+- A fall of more than 10% from that first price is sold by the stop, once, and booked once on restart.
+- Nothing is bought, and nothing multi-day is sold by the fail-safes themselves. Someone is told every session.
+
+### What is not protected
+- **Gaps.** A stop is not a price guarantee. When a stock opens below its stop, the stop fills at the open. In the
+  drill C fills about 15% down, not 10%.
+- **The stop never moves.** It stays 10% below the price on the first morning. A stock that rises for three days and
+  then falls gives back the whole rise plus 10% before the stop fills.
+- **The rule does not run.** No decisions, no sales the rule would have made, no rebalancing and no buys, for as long
+  as the engine is down. A decision evening missed while the engine is down is skipped, not caught up. Falls
+  smaller than 10% are simply held.
+- **Before the first stop.** If neither the watchdog nor the dead-man can reach Alpaca on the first morning (laptop off
+  and Supabase or its keys down), no stop is ever placed. `trend_momentum` has no stop of its own, so its positions
+  are then fully unprotected until one of them is back.
+- **After the restart** the fail-safe stops are cancelled at 15:50 by design. While the engine runs, the rule has no
+  stop (see [paper_start.md](paper_start.md)).
+- Known gap #344: on a day the engine dies right after a 15:50 buy that never fills, a position of exactly that many
+  shares that nothing else explains can be kept overnight (with an emergency stop) instead of sold.
