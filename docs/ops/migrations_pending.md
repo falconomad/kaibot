@@ -27,8 +27,8 @@ Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0028 applie
 - 0026: **applied by Product on 18 Nov 2026, after 0025** (step 13 below; #319, PR #322). Checked: `kaibot.ai_spend()` = {total 0, cap 150}; `llm_reserve_lifetime` not executable by authenticated; `kb_llm_budget` not by anon.
 - 0027: **applied by Product on 18 Nov 2026, about 22:45 UTC** (step 14 below; PR #325).
 - 0028: **applied by Product on 19 Nov 2026, 00:3x UTC (after the close; stakeholder: "merge everything now")** (step 15 below; PR #339). The constraint was named ledger_position_stop_state_check, as expected.
-- 0029: **pending** (step 16 below; dashboard read only, any time).
-- 0030: **pending** (step 17 below; the dead-man, outside 09:30-16:00 ET).
+- 0029: **applied by Product on 19 Nov 2026, 09:1x UTC** (step 16 below). Check: kb_health lists the three types.
+- 0030: **applied by Product on 19 Nov 2026, 09:2x UTC (04:2x ET)** (step 17 below). deadman_act md5 = 23e84f55be53bbf7a0286648907b71b8, the body in the file byte for byte (applied as 0022's body plus the one line, guarded by both md5s); security definer, search_path kaibot, pg_temp; not executable by authenticated; one cron job unchanged.
 
 ## Apply in this order
 
