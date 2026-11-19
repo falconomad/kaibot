@@ -664,7 +664,9 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .sheet-title { flex: 1; margin: 0; font-size: var(--t-lg); font-weight: 600; letter-spacing: -0.01em; }
 .sheet-x { flex: none; width: var(--tap); min-height: var(--tap); height: var(--tap); padding: 0; border: 0; border-radius: 999px; background: var(--surface-2);
   color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; }
-.sheet-body { padding: 4px 20px 24px; overflow-y: auto; font-size: var(--t-md); line-height: 1.5; }
+/* overflow-wrap: a sheet is one narrow column, and text from the engine (a link in a note's reason, a list of tickers
+   with no spaces) may have nowhere to break: it wraps inside the sheet and never makes it scroll sideways. */
+.sheet-body { padding: 4px 20px 24px; overflow-y: auto; font-size: var(--t-md); line-height: 1.5; overflow-wrap: break-word; }
 .sheet-body p { margin: 0 0 12px; }
 @media (min-width: 761px) { .sheet-root { align-items: center; } .sheet { border-radius: var(--r-card); border-bottom: 1px solid var(--line-strong); } }
 @media (prefers-reduced-motion: reduce) { .live-dot::after { display: none; } }
