@@ -13,6 +13,7 @@ import { ExperimentSheetBody, engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
 import { CA_REASON, caNotes, onDay } from "../lib/corpactions";
+import { exitKinds } from "../lib/engineevents";
 import { Tick } from "./Tick";
 import { NAME, REPO_DIR } from "../brand/brand";
 
@@ -51,7 +52,7 @@ export function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
   const exps = experimentsFrom(engineDetail(overview.heartbeat)).filter((e) => e.experiment);
   const md = multiDayFrom(engineDetail(overview.heartbeat));
   const retired = md?.rules.find((r) => r.retired) ?? null;
-  const checks = book && book.session ? bookChecks(book) : null;
+  const checks = book && book.session ? bookChecks(book, exitKinds(md)) : null;
   const unprotected = checks ? checks.missing : [];
   const offBooks = checks?.reconciled && !checks.reconciled.ok;
   const rows: ReactNode[] = [];

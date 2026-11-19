@@ -10,7 +10,7 @@
 // orders, the book's own peak (so the distance to the stop line), a price during the day (the pot is "at the last
 // close"). Every field is untrusted jsonb and read through the parsers below.
 import type { Daily, LedgerPos, Overview, Run } from "./api";
-import { needsStop } from "./exits";
+import { exitOf } from "./exits";
 import type { Curve } from "./model";
 
 export interface BookPosition {
@@ -22,8 +22,10 @@ export interface BookPosition {
   stop: { price: number; state: "resting" | "missing" | "re-arming" } | null;
   /** #229 (0020): the rule's sell readings at its last decision, and the sector its daily view uses (raw, read by lib/multiday). */
   sellWhen?: unknown; sector?: unknown;
-  /** How the rule exits, when the source says so ("stop", "target_list"); lib/exits.ts decides otherwise. */
+  /** How the rule exits, when the source says so (kb_book 0028: "target_list" | "broker_stop"); see lib/exits.exitOf. */
   exit?: string | null;
+  /** kb_book 0028: the row's stop_state as written ("resting" | "missing" | "re-arming" | "none_by_design"). */
+  stopState?: string | null;
 }
 export interface Book {
   runId: number; session: string | null; ts: string | null;
@@ -58,7 +60,8 @@ export function parseBook(raw: unknown, runId = 0): Book {
     if (qty <= 0) return [];
     const s = obj(o.stop), sp = num(s?.price), st = STOP_STATES.find((k) => k === s?.state);
     return [{ rule, symbol, qty, avgCost: avg, mark, priced: num(o.last) !== null, opened: str(o.opened_session, 10),
-      dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null, sellWhen: o.sell_when, sector: o.sector, exit: str(o.exit) }];
+      dividends: num(o.dividends) ?? 0, stop: sp !== null && st ? { price: sp, state: st } : null, sellWhen: o.sell_when, sector: o.sector, exit: str(o.exit),
+      stopState: str(o.stop_state, 20) ?? (s ? str(s.state, 20) : null) }];
   });
   const diffs = Object.entries(obj(rec?.positions) ?? {}).slice(0, 50).map(([symbol, v]) => {
     const d = obj(v);
@@ -120,12 +123,13 @@ export function holdingView(p: BookPosition, b: Pick<Book, "equity" | "session">
 
 // ---------------------------------------------------------------- the book's checks (board 11 status strip)
 
-/** Stops count only for positions meant to carry one (lib/exits.ts): a rule that sells by its target list has none by
- *  design (`byDesign`), and is never "missing" a stop. `n` is every holding, `needed` those that need a stop. */
-export function bookChecks(b: Book) {
+/** Stops count only for positions meant to carry one (lib/exits.exitOf): a rule that sells by its target list has none
+ *  by design (`byDesign`), and is never "missing" a stop. `n` is every holding, `needed` those that need a stop.
+ *  `kinds`: the heartbeat's rule -> exit kind (lib/engineevents.exitKinds), when the engine sends it. */
+export function bookChecks(b: Book, kinds: Record<string, string> = {}) {
   const n = b.positions.length;
   // a stop that rests (or is being placed again) counts wherever it is; a rule without one by design is never "missing"
-  const guarded = b.positions.filter((p) => needsStop(p.rule, p.exit) || (p.stop && p.stop.state !== "missing"));
+  const guarded = b.positions.filter((p) => exitOf(p, kinds) === "broker_stop" || (p.stop && p.stop.state !== "missing"));
   const byDesign = b.positions.filter((p) => !guarded.includes(p)).map((p) => p.symbol);
   const resting = guarded.filter((p) => p.stop?.state === "resting").length;
   const missing = guarded.filter((p) => !p.stop || p.stop.state === "missing").map((p) => p.symbol);

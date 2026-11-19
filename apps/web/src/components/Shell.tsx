@@ -9,6 +9,9 @@ import { ErrorState } from "./States";
 import { STALE, overviewPollMs, poll } from "../lib/poll";
 import { type Book, type SeriesPoint, bookChecks, potNow } from "../lib/book";
 import { engineClock } from "../lib/engineclock";
+import { exitKinds } from "../lib/engineevents";
+import { multiDayFrom } from "../lib/experiment";
+import { engineDetail } from "./Experiment";
 import { Sheet } from "./Sheet";
 import { preloadRoute } from "../routes";
 import { anchorFor, useGlow } from "../lib/glow";
@@ -209,7 +212,7 @@ export function Shell() {
   const dayPct = live ? (live.today ? live.dayPct : 0) : last ? (last.pnl / (nowPot - last.pnl)) * 100 : 0;
   const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
   const risk = active ? riskStatus(run, o, dayPct, dd) : { severity: "ok" as const, items: [] as string[], red: [] as string[] };
-  const checks = bookQ.data?.session ? bookChecks(bookQ.data) : null;
+  const checks = bookQ.data?.session ? bookChecks(bookQ.data, exitKinds(multiDayFrom(engineDetail(o?.heartbeat)))) : null;
   const red = [...risk.red, ...(run.kind === "paper" ? runEndedRed(run) : []),
     ...(checks?.missing.length ? [`${checks.missing.length} stock${checks.missing.length === 1 ? " has" : "s have"} no safety stop (${checks.missing.join(", ")})`] : []),
     ...(checks?.reconciled && !checks.reconciled.ok ? [`${NAME}'s books and the broker disagree`] : [])];

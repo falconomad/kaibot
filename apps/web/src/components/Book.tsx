@@ -9,9 +9,10 @@ export const sectorOf = (symbol: string) => (sectors as Record<string, { industr
 
 // ---------------------------------------------------------------- status strip (board 11 top, board 15 problems)
 
-export function BookChecks({ b }: { b: Book }) {
-  const c = bookChecks(b);
-  // Stakeholder, 18 Nov 2026: a rule that sells by its target list (lib/exits.ts) has no per-stock stop by design.
+/** `exits`: the heartbeat's rule -> exit kind (lib/engineevents.exitKinds), when the engine sends it. */
+export function BookChecks({ b, exits }: { b: Book; exits?: Record<string, string> }) {
+  const c = bookChecks(b, exits);
+  // Stakeholder, 18 Nov 2026: a rule that sells by its target list has no per-stock stop by design (lib/exits.exitOf).
   const design = c.byDesign.length ? ` · ${c.byDesign.length} sold by the rule's list instead` : "";
   const stops = c.n === 0 ? { ok: true, text: "None needed yet" }
     : c.needed === 0 ? { ok: true, text: "None by design: the rule sells by its list at a close; the book has its stop line" }

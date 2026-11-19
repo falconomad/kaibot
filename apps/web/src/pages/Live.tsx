@@ -18,6 +18,10 @@ import { HomeStatus, NewRunRow, TopHoldings, holdingRows } from "../components/H
 import { type StartState, startState } from "../lib/startstate";
 import { useBook } from "../components/useBook";
 import { mtmCurve } from "../lib/book";
+import { DailyNoteCard } from "../components/DailyNote";
+import { engineDetail } from "../components/Experiment";
+import { dailyNote, showNote } from "../lib/engineevents";
+import { multiDayFrom } from "../lib/experiment";
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -135,6 +139,9 @@ export function Live() {
   const useBookData = bookQ.data;
   const lv = run.level ? LEVELS[run.level] : null;
   const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
+  // #311: the daily note's event comes with kb_health's events. Home does not fetch them for it (the first load stays
+  // lean); it reads them when Engine or Activity already did, and the heartbeat's copy otherwise.
+  const healthCache = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: false });
   if (overviewError) return <ErrorState what="The run overview" error={overviewError} retry={retryOverview} />;
   if (trades.isError) return <ErrorState what="Trades" error={trades.error} retry={() => trades.refetch()} />;
   if (!overview || trades.isPending) return <Skeleton variant="dashboard" />;
@@ -171,6 +178,9 @@ export function Live() {
 
   const book = useBookData;
   const rows = holdingRows(live?.positions ?? {}, book);
+  const noteNow = run.kind === "paper" && !ended
+    ? dailyNote(multiDayFrom(engineDetail(overview.heartbeat)), (healthCache.data?.events ?? []).filter((e) => e.run_id === null || e.run_id === run.id)) : null;
+  const note = noteNow && showNote(noteNow) ? noteNow : null;
   const allTime = pot - run.amount_usd;
   const chartStart = range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd;
 
@@ -208,6 +218,7 @@ export function Live() {
       </section>
 
       {run.kind === "paper" && <TopHoldings rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} />}
+      {note && <DailyNoteCard note={note} />}
       {run.kind === "replay" && (
         <section className="card" aria-labelledby="last-h">
           <h2 id="last-h">{lastDay ? `Trades on ${day(lastDay.session)}, the last trading day` : "Trades"}</h2>

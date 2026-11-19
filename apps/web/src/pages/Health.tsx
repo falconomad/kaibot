@@ -12,12 +12,13 @@ import { commandText, ruleName } from "../lib/explain";
 import { Empty, ErrorState, RuleName } from "../components/States";
 import { poll } from "../lib/poll";
 import { budgetText } from "../lib/roomview";
-import { dateEt, timeBoth, timeEt } from "../lib/fmt";
+import { dateEt, day, timeBoth, timeEt } from "../lib/fmt";
 import { Skeleton } from "../components/Skeleton";
 import { ExperimentSheetBody, HaltTag, engineDetail, experimentsOf } from "../components/Experiment";
 import { findExperiment, multiDayFrom } from "../lib/experiment";
 import { NAME } from "../brand/brand";
 import { caEvent } from "../lib/corpactions";
+import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevents";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -57,6 +58,8 @@ const EV: Record<string, string> = {
   multi_day_reenabled: "Multi-day rule switched back on by you", multi_day_reenable_refused: "Switching a rule back on was refused",
   multi_day_no_decision: "Multi-day rule: no decision today", multi_day_waiting: "Multi-day rule waiting for the daily prices",
   multi_day_error: "Multi-day step failed (no orders sent)", multi_day_overnight_off: "Overnight holding is off: buys skipped",
+  multi_day_unfilled: "Order not filled: expired at the close", daily_note: "Daily note written",
+  multi_day_review_shadow: "Pre-open reviewer (observer, no effect on trades)",
 };
 
 
@@ -75,6 +78,12 @@ function LlmBudgetCard() {
     background: frac >= 1 ? "var(--fail)" : frac >= 0.8 ? "var(--warn)" : undefined }} /></div>;
   const purposes = Object.entries(b.by_purpose);
   const ss = sq.data;
+  // 0026/0027: one $150 cap on every AI dollar (the engine's calls and the stock summaries together), all time
+  const fin = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const life = fin(b.lifetime_usd) ?? fin(ss?.lifetime_usd);
+  const lifeCap = fin(b.caps.lifetime_hard) ?? fin(ss?.lifetime_cap) ?? 150;
+  const lifeSumm = fin(b.lifetime_summaries_usd);
+  const over = fin(ss?.over_reservation_calls) ?? 0;
   return (
     <section className="card" aria-labelledby="llm-h">
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -87,9 +96,11 @@ function LlmBudgetCard() {
         <span>Calls today</span><span /><span className="v">{b.calls_today}{b.open_reserved_usd > 0 ? ` · ${usd(b.open_reserved_usd)} reserved` : ""}</span>
         {purposes.length > 0 && (<><span>By purpose</span><span /><span className="v">{purposes.map(([k, v]) => `${k} ${usd(v)}`).join(" · ")}</span></>)}
         {ss && (<><span>Stock summaries</span><span /><span className="v">{usd(ss.day_usd)} / ${ss.day_cap.toFixed(2)} today · {usd(ss.month_usd)} / ${ss.month_cap.toFixed(2)} this month · {ss.cards_today} written today</span></>)}
+        {life !== null && (<><span>All time</span><span /><span className="v">{usd(life)} / ${lifeCap}{lifeSumm !== null && lifeSumm > 0 ? ` · ${usd(lifeSumm)} of it stock summaries` : ""}</span>{bar(life / lifeCap)}</>)}
+        {over > 0 && (<><span>Above reservation</span><span /><span className="v" style={{ color: "var(--warn-text)" }}>{over} summary call{over === 1 ? "" : "s"} cost more than {over === 1 ? "it" : "they"} reserved</span></>)}
       </div>
       <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Above ${b.caps.daily_soft} a day the rules decide alone; ${b.caps.monthly_alert} a month raises an alert;
-        at ${b.caps.monthly_hard} no new entries. Each call reserves its worst case first, so the caps can't be overshot.</p>
+        at ${b.caps.monthly_hard} no new entries{life !== null ? <>; at ${lifeCap} in all, no AI call at all</> : null}. Each call reserves its worst case first, so the caps can't be overshot.</p>
     </section>
   );
 }
@@ -164,6 +175,7 @@ export function Health() {
   const exps = experimentsOf(h.heartbeat).filter((e) => e.experiment);
   const md = multiDayFrom(engineDetail(h.heartbeat));
   const scan = scanSummary(engine?.detail?.scan, engine?.detail?.entries_today ?? 0);
+  const shadow = shadowReviews(md, h.events.filter((e) => e.run_id === null || e.run_id === run.id));
   return (
     <>
       <h1 className="page-title">Engine</h1>
@@ -212,6 +224,7 @@ export function Health() {
       <h2 className="section-h">Today</h2>
       <ul className="rows">
         <SheetRow head="Today's scan" line={scan.headline}><ScanCard beat={engine} /></SheetRow>
+        {shadow.length > 0 && <ShadowRow reviews={shadow} />}
         {exps.length > 0 && (
           <SheetRow head={ruleName(exps[0].strategy)} line={exps[0].label}><ExperimentSheetBody e={exps[0]} md={md} /></SheetRow>
         )}
@@ -280,6 +293,33 @@ function SheetRow({ head, line, children }: { head: string; line: string; childr
         <span className="row-mid"><b>{head}</b><span className="muted">{line}</span></span>
       </button>
       <Sheet open={open} onClose={() => setOpen(false)} title={head}>{children}</Sheet>
+    </li>
+  );
+}
+
+/** #310: the shadow pre-open reviewer. An observer only: what it would have said, never what happened. */
+function ShadowRow({ reviews }: { reviews: ShadowReview[] }) {
+  const [open, setOpen] = useState(false);
+  const first = reviews[0];
+  const when = (r: ShadowReview) => (r.session ? ` · ${day(r.session)}` : "");
+  return (
+    <li>
+      <button type="button" className="row" aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        <span className="row-mid"><b>Pre-open reviewer</b>
+          <span className="muted">{shadowLine(first)}{reviews.length > 1 ? ` · ${ruleName(first.rule)}` : ""}</span>
+          <span className="observer-tag">observer · no effect on trades</span></span>
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title="Pre-open reviewer">
+        <p><span className="observer-tag">observer · no effect on trades</span></p>
+        <p>Before the open an AI reviewer reads each multi-day plan and says what it would allow, halve or veto. It only
+          watches: the plan, the orders and the fills are the same with it on or off. Its record is kept to judge it later.</p>
+        <ul className="shadow-list">{reviews.map((r) => (
+          <li key={r.rule}><b>{ruleName(r.rule)}</b><span className="muted">{when(r)}</span><br />{shadowLine(r)}
+            {r.reasons.length > 0 && <ul className="sheet-list">{r.reasons.map((x) => (
+              <li key={x.symbol}><b>{x.symbol}</b> · {x.verdict === "veto" ? "would veto" : "would halve"}: {x.why}</li>))}</ul>}
+            {r.costUsd !== null && r.costUsd > 0 && <div className="muted" style={{ fontSize: 13 }}>AI cost {usd(r.costUsd)}</div>}
+          </li>))}</ul>
+      </Sheet>
     </li>
   );
 }
