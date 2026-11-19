@@ -106,7 +106,9 @@ Do not copy `data/live/engine_holder_id` to another machine: two machines with t
 2. Pulls the latest IEX 1-minute bars; syncs order and fill status from Alpaca.
 3. Marks to market; daily stop (flatten + halt) and run-drawdown end are checked.
 4. Trails stops once a trade is +1R (stop to breakeven, then 1.5 ATR below the highest close).
-5. 15:55 ET (5 minutes before an early close): sells everything.
+5. 15:55 ET (5 minutes before the close, so 12:55 on an early close): sells the intraday positions. Multi-day
+   positions (`KAIBOT_MULTIDAY=on`) are kept: their rule trades them from 15:50 to 15:57 ET with DAY market orders
+   (12:50-12:57 on an early close).
 6. Every 5-minute bar from 09:35 to 15:45: Variant A candidates (same code as the replay), news check,
    risk gate, then a bracket order (market buy + broker-held stop + 2R target).
 7. Writes signal, gate, order, fill, trade, ledger, daily result and a heartbeat to Supabase.

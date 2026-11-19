@@ -150,7 +150,7 @@ limit 1;` shows what it did. It never sells a multi-day position.
 
 | # | Assumption (audit `docs/research/engine_v3/code_audit.md` B1) | Status | Where and why |
 |---|---|---|---|
-| 1 | Flatten at close minus 5; no entries after | changed | S78 (#118): `flatten_all("time")` takes intraday sleeves only (`execution.flatten_at_close`); drilled here. "No entries after 15:45" stays for intraday entries; the multi-day path trades in the closing auction and asks `Engine.entry_block()` |
+| 1 | Flatten at close minus 5; no entries after | changed | S78 (#118): `flatten_all("time")` takes intraday sleeves only (`execution.flatten_at_close`); drilled here. "No entries after 15:45" stays for intraday entries; the multi-day path sends near-close DAY market orders from 15:50 to 15:57 ET (#337; before it, closing-auction orders) and asks `Engine.entry_block()` |
 | 2 | "Carried" positions sold at the next open | changed | `_finalize_day` and `_start_day` mark only intraday positions as carried; a multi-day sleeve is meant to be held |
 | 3 | Daily stop sells everything | changed | `flatten_all("daily_stop")` takes intraday sleeves only; entries blocked for the day (`Day.halted`, `entry_block`); multi-day sleeves keep their stops; the halt reason names them |
 | 4 | Equity = start + realised today + unrealised since the fill | changed | S77 counted held `Pos` from the last close mark; now the ledger's multi-day sleeves too, at the minute's price (bars, else the broker's `current_price`); a multi-day sale is realised against cost less the gain to the last mark (`_md_realized`). Overnight gaps are in the day's change |

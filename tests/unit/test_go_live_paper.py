@@ -100,7 +100,7 @@ def test_the_happy_path_in_order_with_a_plain_summary_and_no_secret_printed(repo
     assert SECRET not in out and "PK123" not in out
     for want in ("ALL GOOD", "Shorting:         off", "Multi-day:        on", "Overnight:        allowed",
                  "Balanced", "60.0%", "falls 21.0% from its peak", "Tuesday 17 Nov after the close",
-                 "Wednesday 18 Nov, in the closing auction", "./scripts/service.sh hold"):
+                 "Wednesday 18 Nov, sent from 15:50 New York", "./scripts/service.sh hold"):
         assert want in out, want
 
 
