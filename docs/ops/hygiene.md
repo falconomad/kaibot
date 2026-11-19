@@ -39,6 +39,10 @@ Baseline on 12 Nov 2026 (branch of #122, main @ the PR's base):
 | live must not import research | broken: 19 import chains (for example `strategies.orb`, `strategies.news_continuation`, `strategies.spy_momentum` -> `replay.data` / `replay.features`; `engine.shadow` -> `replay.sim`) |
 | research must not import live engine | broken: 1 (`replay.config_replay` -> `engine.userconfig`) |
 
+## Migration record (#361)
+
+`tests/test_migrations_pending_hygiene.py` (repo only, no database or network) fails when `docs/ops/migrations_pending.md` and `migrations/` disagree: file numbers must be unique and run 0001, 0002, ... without gaps; every file has exactly one `- NNNN: applied ...` or `- NNNN: pending ...` entry; the "Last checked against main on <date> (<set> applied; <set> pending)" summary matches the list (`none pending` when nothing is); every pending migration has a step, steps run 1, 2, ... and name real files, and an entry's "step N" is its own row; an applied migration's header has no `-- NOT APPLIED` line (a pending one no `-- APPLIED` line). So a new migration's PR adds its file, its list entry, its step and the summary together.
+
 ## Dead code
 
 Removed in #122 (no caller): `src/kaibot/engine/run.py`, `docker/` (superseded by the root `Dockerfile` and

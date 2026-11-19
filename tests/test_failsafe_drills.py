@@ -684,7 +684,7 @@ def test_migration_0019_lists_every_multi_day_rule_and_replaces_the_old_jobs():
     sql = (ROOT / "migrations" / "0019_deadman_overnight.sql").read_text()
     seeded = set(re.findall(r"^\s+\('([a-z0-9_]+)', 'multi_day'\)", sql, re.M))
     assert seeded == {s.name for s in registry.MULTI_DAY}
-    assert "NOT APPLIED" in sql and "paper-api.alpaca.markets" in sql and "api.alpaca.markets'" not in sql.replace(
+    assert "paper-api.alpaca.markets" in sql and "api.alpaca.markets'" not in sql.replace(
         "paper-api.alpaca.markets", "")
     for job in ("kaibot_deadman_edt", "kaibot_deadman_est", "kaibot_deadman_early_edt", "kaibot_deadman_early_est"):
         assert job in sql
