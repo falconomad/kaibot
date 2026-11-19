@@ -93,3 +93,31 @@ endpoint does cover, which is the sample above.
   research on another company (`RJF`, `BAC`, `CF`). A tag describes the headline, not the symbol attached to it.
 - The headlines were typed into the fixture from the tool's answers by the agent that drew them (the tool returns
   text to the session, not a file). Each line keeps the provider's `source_id` so it can be checked.
+
+## How the labels were made
+
+All 300 headlines were read one by one and labelled before `kaibot/news/tags.py` existed (the labels are their
+own commit, before the rules). The labeller was the same agent that drew the sample, not a second person, and it
+had seen each article's one-line summary while drawing. The labels use **the headline text alone**, because that
+is all the function sees. The labels are not edited after the rules are run; a label that looks wrong afterwards
+is listed as "label disputed" in the results below and stays as it is.
+
+The guide that was applied:
+
+| Tag | Yes | No |
+|---|---|---|
+| `results` | the headline reports a company's periodic financial results as released (quarter or year; a "trading update") | a date for future results, an earnings call, analysts reacting "following earnings", clinical-trial or study results, a quarterly production or market report |
+| `guidance_up` / `guidance_down` | the company raises / cuts its own forecast | guidance issued or updated with no direction in the headline |
+| `analyst_up` | an upgrade; a price target raised, including "adjusts ... to $X from $Y" with X above Y | "adjusts price target" with no direction or only the new figure; a new coverage ("initiates at Buy"); a rating maintained |
+| `analyst_down` | a downgrade; a price target cut, including "to $X from $Y" with X below Y | as above |
+| `deal` | the headline is about an acquisition, a merger or the sale of a business: announced, agreed, or its progress (delay, a regulator's step) | a minority stake or investment, a strategic review, a licence farm-out, a small tender for shares |
+| `offering` | new shares or debt being sold, an IPO included | a programme prospectus with no sale, a credit facility, a holder or insider selling existing shares |
+| `buyback` | the company buying back its shares, a routine disclosure of such purchases included | |
+| `management_change` | a named or titled person at manager level or above is appointed, hired, promoted or leaves; a succession or "leadership changes" | a board "reaffirming confidence", a former officer becoming an adviser elsewhere, a firm appointed as adviser |
+| `legal_regulatory` | a court, a regulator or an investigator acts on or about the company: a lawsuit, a ruling, an investigation (a law firm's too), an approval, a denial, a designation, a proposed rule, a filing for approval | a routine holdings notification, a layoff notice, a data breach, political criticism, being picked for a regulator's pilot |
+| `listing` | a new listing of a security on an exchange (an IPO, a depositary receipt, an ETF named with its exchange) or an index change | a ticker change, a ranking that is not an index |
+
+A tag describes the headline, not the symbol attached to it (see above). A headline may carry several tags.
+
+Counts of positives in the 300: `analyst_up` 32, `legal_regulatory` 19, `deal` 12, `analyst_down` 11,
+`results` 10, `management_change` 10, `offering` 4, `listing` 3, `buyback` 2, `guidance_up` 2, `guidance_down` 0.
