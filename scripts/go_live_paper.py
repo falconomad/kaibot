@@ -162,7 +162,7 @@ def summary(text: str, now: datetime | None = None, shorting: str = "off") -> li
         f"{exp.get('max_exposure_pct', cap)}% of the run (overnight cap {cap}%)",
         f"Stop line:        the rule is retired if its book falls {exp.get('retire_drawdown_pct')}% from its peak",
         f"Next decision:    {dec:%A %d %b} after the close (bars complete 20:15 New York), for {fill:%A}",
-        f"First buys:       {fill:%A %d %b}, in the closing auction (16:00 New York), if the rule picks any",
+        f"First buys:       {fill:%A %d %b}, sent from 15:50 New York (DAY market orders), if the rule picks any",
         f"Daily bars:       {daily}",
         "To stop:          ./scripts/service.sh hold     (Flatten and stop on the dashboard also sells everything)",
     ]

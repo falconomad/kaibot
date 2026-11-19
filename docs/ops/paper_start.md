@@ -46,8 +46,8 @@ to run again: every step checks first and changes only what is not yet as it sho
 6. Installs the always-on service (`./scripts/install_service.sh`). The engine then starts at every login (and at
    boot, if this user logs in automatically: System Settings, Users & Groups) and is restarted after a crash, and the daily bars are refreshed every night and at every login.
 7. Prints a short summary: shorting off, multi-day on, overnight allowed, your level and the rule's cap, the stop
-   line, the next decision evening (a Tuesday after the close) and the first possible buys (that Wednesday's
-   closing auction), and how to stop: `./scripts/service.sh hold`.
+   line, the next decision evening (a Tuesday after the close) and the first possible buys (that Wednesday, sent
+   from 15:50 New York), and how to stop: `./scripts/service.sh hold`.
 
 **The Mac switched off at the weekend is fine.** On Monday the engine starts by itself when you log in, and the
 daily-bar refresh also runs at login, so Friday's bars are in long before the rule needs them (it decides on Tuesday
@@ -152,18 +152,21 @@ rule would have sold is kept until the next week's decision.
 - After the close, once the bars are in the store: the rule decides for the next session. The decision is written to
   the engine's journal (`multi_day_decision` event). `trend_momentum` decides once a week (the first session from
   Wednesday on) and re-sizes every second week.
-- Next session, from 09:31 until 15:45: the engine sizes the decision against the run's equity at the last close
+- Next session, from 15:50 until 15:57: the engine sizes the decision against the run's equity at the last close
   (the portfolio builder: whole shares, 3% cash reserve, at most 40% in one sector, at most 30 names, within your
-  level's caps) and sends
-  **closing-auction (`cls`) orders** to Alpaca paper (`multi_day_orders` event). Alpaca does not accept them from
-  15:50, so the engine stops at 15:45. They fill at the 16:00 close. Each fill is booked once (`multi_day_fill`).
+  level's caps) and sends **DAY market orders** to Alpaca paper (`multi_day_orders` event). Since #337 it no longer
+  uses closing-auction (`cls`) orders: Alpaca paper runs no auction and let most of them expire unfilled. The
+  orders normally fill within a minute or two, before 16:00. Each fill is booked once (`multi_day_fill`). Shares an
+  order still had left at 16:00 expire and are reported (`multi_day_unfilled`): a buy's rest waits for the rule's
+  next decision, a sale's rest is sent again at the next session.
 - Sales always go out. Buys wait while entries are blocked (paused, daily stop, the book not matching Alpaca), but
-  only until 15:45. A buy still blocked then is dropped for that day, and the next weekly decision decides again.
+  only until 15:57. A buy still blocked then is dropped for that day, and the next weekly decision decides again.
 - If the daily stop fires, the engine cancels the rule's buy orders that have not filled yet. Its sales stay.
 - The 15:55 flatten of the intraday rule never sells `trend_momentum` positions.
 - The intraday rule leaves alone any stock `trend_momentum` holds or has an order in that day. Alpaca refuses an
   order while an opposite one is open in the same stock, and both books share one position per stock.
-- On an early-close day (for example the day after Thanksgiving) the orders go out until 15 minutes before the close.
+- On an early-close day (for example the day after Thanksgiving, 13:00 close) the orders go out from 10 minutes
+  until 3 minutes before the close (12:50-12:57).
 - No buys while Alpaca says shorting is on for the paper account (step 3). The engine says so
   (`multi_day_shorting_on` event).
 - An emergency stop that the watchdog placed while the engine was stuck is taken over and cancelled before the
@@ -199,11 +202,11 @@ Start at least 30 minutes before the open.
 - **The experiment label:** the engine writes it in every heartbeat (`detail.experiments`) and in each day's
   `session_start` event. The dashboard does not show the label yet. Frontend adds it (it reads
   `heartbeat.detail.experiments[].label` and `.evidence`). Until then, step 7's `--check` is the way to see it.
-- **Positions:** once the live daily path is merged, the rule decides after the close and buys or sells in the
-  closing auction (orders sent before 15:50 ET). Its positions show on the Live page under `trend_momentum`.
+- **Positions:** the rule decides after the close and buys or sells near the next session's close (DAY market
+  orders sent from 15:50 to 15:57 ET). Its positions show on the Live page under `trend_momentum`.
 - **No stop while the engine runs.** The rule as registered has no stop ("No fixed stop" in
-  `docs/prereg/trend_momentum.md`), so the engine places none and the position rows say the stop is `missing`. That is
-  expected. If the engine goes quiet, the watchdog (on the Mac) and, once 0019 is applied, the off-box dead-man put an
+  `docs/prereg/trend_momentum.md`), so the engine places none and the position rows say the stop is `none_by_design`
+  (`missing` before migration 0028). That is expected. If the engine goes quiet, the watchdog (on the Mac) and, once 0019 is applied, the off-box dead-man put an
   emergency stop 10% below the last price on each multi-day position (and cancel any of its buy orders not yet
   filled). Before 0019 the dead-man sells everything at 15:56 instead (step 3).
 
@@ -229,14 +232,14 @@ Start at least 30 minutes before the open.
   minute apart.
   The run whose book hit its end keeps its book closed: the rule trades again from the next run on (dashboard,
   new run), not in that run.
-- **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's closing-auction
-  orders that have not filled, then sells everything, the multi-day positions included. Do it before 15:50 New York
-  time if you can: after 15:50 the exchange may no longer let a closing-auction order be cancelled, so one sent that
-  day could still fill at 16:00. Check the Live page the next morning. Then remove `KAIBOT_MULTIDAY=on` from the
+- **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's orders that have
+  not filled, then sells everything, the multi-day positions included. Do it outside 15:50-16:00 New York time if you
+  can: in those minutes the rule's own orders are going out and filling, so one may fill before it can be
+  cancelled. Check the Live page the next morning. Then remove `KAIBOT_MULTIDAY=on` from the
   `.env` (or set it to `off`) and restart
   the engine. With the flag off the engine refuses to load the rule.
 - **Pause new buys only:** dashboard, **Pause entries**. Held positions are kept; the rule's sales still go out. A buy
-  order already sent that day is not cancelled by a pause and still fills at the close.
+  order already sent that day is not cancelled by a pause and still fills (normally within minutes of 15:50).
 - **Engine off for a while:** `./scripts/service.sh hold` (or Ctrl-C). With 0019 applied, the watchdog and the
   dead-man keep the multi-day positions (with an emergency stop each), and they sell only the intraday ones at the
   close. When the engine starts again it picks up where it left off: a decision already taken is not taken again, and
