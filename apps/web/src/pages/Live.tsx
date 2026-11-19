@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Meter, engineChip, livePot, useRunCtx } from "../components/Shell";
-import { PotChart } from "../components/PotChart";
+import { PotChart, RANGES, type RangeKey, chartCaption, rangesFor } from "../components/PotChart";
 import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { R, dateEt, day, money, pct, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
@@ -126,7 +126,6 @@ export function StartBanner({ state: s }: { state: StartState }) {
 }
 
 
-const RANGES = [["1W", 5, "1W"], ["1M", 21, "1M"], ["3M", 63, "3M"], ["ALL", 0, "All"]] as const;
 
 export function Live() {
   const { run, runs, overview, overviewError, retryOverview, meters, risk, pickRun } = useRunCtx();
@@ -138,7 +137,7 @@ export function Live() {
   const { series, book: bookQ } = useBook(run);
   const useBookData = bookQ.data;
   const lv = run.level ? LEVELS[run.level] : null;
-  const [range, setRange] = useState<(typeof RANGES)[number][0]>("ALL");
+  const [rangePick, setRange] = useState<RangeKey>("ALL");
   // #311: the daily note's event comes with kb_health's events. Home does not fetch them for it (the first load stays
   // lean); it reads them when Engine or Activity already did, and the heartbeat's copy otherwise.
   const healthCache = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: false });
@@ -160,6 +159,9 @@ export function Live() {
     if (tail?.session === todayEt) c[c.length - 1] = { ...tail, pot: liveNow.pot, live: true };
     else c.push(point);
   }
+  // Stakeholder, 19 Nov 2026: with few sessions every range drew the same line; only ranges that show less than All
+  const ranges = rangesFor(c.length);
+  const range = ranges.includes(rangePick) ? rangePick : "ALL";
   const keep = RANGES.find((r) => r[0] === range)![1];
   const shown = keep && c.length > keep ? c.slice(-keep - 1) : c;
   const s = stats(run.amount_usd, daily, trades.data.rows);
@@ -183,6 +185,9 @@ export function Live() {
   const note = noteNow && showNote(noteNow) ? noteNow : null;
   const allTime = pot - run.amount_usd;
   const chartStart = range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd;
+  // fewer than 5 closes: say why the line barely moves (the share of the pot in stocks at the last close)
+  const caption = run.kind === "paper" ? chartCaption(c.filter((p) => !p.live).length,
+    book?.session && book.invested !== null && book.equity ? book.invested / book.equity : null) : null;
 
   return (
     <>
@@ -210,11 +215,12 @@ export function Live() {
       </div>
 
       <section aria-label="Pot over time" className="home-chart">
-        <PotChart data={shown} start={chartStart} compact
+        <PotChart data={shown} start={chartStart} compact caption={caption}
+          base={range === "ALL" || !shown.length ? { pot: run.amount_usd, spy: run.amount_usd } : { pot: shown[0].pot, spy: shown[0].spy }}
           markers={(chapters.data ?? []).filter((c) => c.version > 0 && c.from).map((c) => ({ session: c.from.slice(0, 10), label: `v${c.version}` }))} />
-        <div className="range" role="group" aria-label="Chart range">
-          {RANGES.map(([k, , label]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{label}</button>)}
-        </div>
+        {ranges.length > 1 && <div className="range" role="group" aria-label="Chart range">
+          {RANGES.filter(([k]) => ranges.includes(k)).map(([k, , label]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{label}</button>)}
+        </div>}
       </section>
 
       {run.kind === "paper" && <TopHoldings rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} />}

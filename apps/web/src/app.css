@@ -715,7 +715,8 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .home-details-body { display: flex; flex-direction: column; gap: 18px; padding: 0 20px 20px; animation: kb-fade var(--d-base) var(--ease) both; }
 .home-details-body h3 { margin: 0 0 8px; font-size: var(--t-md); }
 @media (max-width: 760px) {
-  .potchart.compact .legend, .potchart.compact .axis, .potchart.compact circle.fade-late { display: none; }
+  .potchart.compact .chart-table-btn, .potchart.compact .axis, .potchart.compact circle.fade-late { display: none; }
+  .potchart.compact .chart-scale, .potchart.compact .chart-days { display: flex; }
   .potchart.compact .chart svg { height: 170px; }
   .home-chart .range { justify-content: space-between; } .home-chart .range button { flex: 1; }
   .home-band { gap: 12px; }
@@ -881,3 +882,13 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .observer-tag { align-self: flex-start; margin-top: 4px; padding: 2px 8px; border-radius: var(--r-tag); background: var(--surface-2); color: var(--text-2);
   font-size: var(--t-cap); font-weight: 600; }
 .shadow-list { list-style: none; margin: 0 0 12px; padding: 0; } .shadow-list li { margin-bottom: 10px; overflow-wrap: anywhere; }
+
+/* ---------- Home chart (stakeholder, 19 Nov 2026): a legend with end values, a minimal scale on phones, a caption ---------- */
+.chart-legend { gap: 4px 18px; margin-bottom: 6px; font-size: var(--t-sm); color: var(--text-2); }
+.chart-legend b { color: var(--text); font-weight: 600; }
+.legend .sw.pot { border-top: 2.5px solid var(--s-pot); }
+.legend .sw.spy { border-top: 3px dotted var(--s-spy); }
+.chart-caption { margin: 0 0 6px; font-size: var(--t-cap); color: var(--text-2); }
+.chart-scale { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 11%; pointer-events: none; }
+.chart-scale span { position: absolute; right: 0; transform: translateY(-50%); font-size: var(--t-cap); color: var(--text-2); }
+.chart-days { display: none; justify-content: space-between; margin-top: 4px; font-size: var(--t-cap); color: var(--text-2); }
