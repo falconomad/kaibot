@@ -433,6 +433,23 @@ def test_near_close_orders_change_no_fill_no_cost_and_no_equity_against_the_clos
     assert near.ledger.overdrafts == cls.ledger.overdrafts == [] and near.cash_gap < 1e-6
 
 
+@pytest.mark.parametrize("version", ["trend_momentum", "mom_12_1_band"])
+def test_the_carry_over_never_fires_in_research_and_changes_no_fill_no_cost_and_no_equity(fx, version):
+    """#363: the research runner carries the latest decision's unfilled buys exactly as the live path does. On the
+    research venue a buy either fills whole at the closing print, is cut to the cash at the print (a cancelled rest,
+    never carried), or has no bar on its fill day (dropped, section 4): so nothing is ever carried, and the runs
+    with and without the carry-over book the same orders, fills (to the last bit) and daily equity. Gate B is
+    unchanged."""
+    m, data, i0, i1 = fx
+    s = mom.VERSIONS[version]
+    on = run_daily(s, data, POL, i0, i1)
+    off = run_daily(s, data, POL, i0, i1, carry=False)
+    assert len(on.fills) > 20 and on.fills == off.fills and on.orders == off.orders
+    assert [r["end"] for r in on.book.daily] == [r["end"] for r in off.book.daily]
+    assert not [o for o in on.broker.orders.values() if "-carry-" in str(o.get("client_order_id"))]
+    assert on.carried == [] and on.ledger.overdrafts == []
+
+
 # ---------------------------------------------------------------- 4. live: refused
 
 

@@ -365,8 +365,8 @@ def test_the_send_window_is_the_last_ten_minutes_less_three_and_sends_day_market
 def test_an_expired_remainder_is_one_multi_day_unfilled_event_even_across_a_restart(data, tmp_path):
     """Issue #333, question 4: what the venue let expire at 16:00 (nothing filled, or part of the order) is
     journalled once by client id (`md_unfilled`) and reported as `multi_day_unfilled`, so the dashboard can show
-    "not filled". It is never sent again: the plan's targets are the only orders (a buy waits for the next
-    decision)."""
+    "not filled". It is not sent again that session (#363: a buy's remainder is carried to the next sessions, see
+    test_an_expired_buy_is_carried_to_the_next_sessions_up_to_its_target_until_the_next_decision)."""
     s = mom.VERSIONS["trend_momentum"]
     lim = momentum_limits(s, POL, 100.0)
     h = Harness(data, s, ld.live_builder(s, lim), tmp_path)
@@ -594,3 +594,131 @@ def test_the_heartbeat_names_each_rules_exit_kind_for_the_dashboard(data, tmp_pa
                                     "end_pct": 27.0, "peak": EQ0, "retirement_id": "x"})
     row = h.live.status()["rules"][s.name]
     assert row.get("retired") and row["exit"] == "target_list"
+
+
+# ---------------------------------------------------------------- #363: the latest decision's buys carried over
+
+
+def _first_orders(h, n=2):
+    return sorted(h.broker.orders.values(), key=lambda o: int(o["id"][1:]))[:n]
+
+
+def _carry_run(data, tmp_path, *, hold=True, ca=None):
+    s = mom.VERSIONS["trend_momentum"]
+    h = Harness(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path)
+    if hold:
+        h.broker.script.hold(None, bars=None)  # the first order of the run expires unfilled
+        h.broker.script.fills(None, [1.0])  # the second fills one share, the rest expires
+    if ca is not None:
+        h.live.ca = ca
+    return s, h
+
+
+def test_an_expired_buy_is_carried_to_the_next_sessions_up_to_its_target_until_the_next_decision(data, tmp_path):
+    """#363 (trend_momentum Amendment 11, mom_12_1_band Amendment 9): what the venue let expire of the latest
+    decision's buys is sent again at the next session's near-close window, as target - held - open, never above the
+    decision's target, and journalled (`md_send.carry`, event `multi_day_carry`). The next decision ends it."""
+    s, h = _carry_run(data, tmp_path)
+    h.run()
+    x, y = _first_orders(h)
+    assert [x["status"], y["status"]] == ["expired", "expired"] and float(y["filled_qty"]) == 1.0
+    day = datetime.fromisoformat(x["submitted_at"]).astimezone(NY).date()
+    sends = {b["session"]: b for *_, b in h.journal.entries(kinds=("md_send",)) if b["strategy"] == s.name}
+    plan = {t[0]: t[1] for t in sends[str(day)]["targets"] if t[2] in ("buy", "resize")}
+    nxt = data.day(data.index_of(day) + 1)
+    carry = sends[str(nxt)]["carry"]
+    assert carry["of"] == str(day)
+    assert {c[0]: (c[1], c[2]) for c in carry["carried"]} == {x["symbol"]: (plan[x["symbol"]], 0.0),
+                                                                y["symbol"]: (plan[y["symbol"]], 1.0)}
+    sent = [o for o in h.broker.orders.values() if datetime.fromisoformat(o["submitted_at"]).astimezone(NY).date()
+            == nxt and o["symbol"] in (x["symbol"], y["symbol"])]
+    assert sorted((o["symbol"], float(o["qty"]), o["status"]) for o in sent) == sorted(
+        [(x["symbol"], float(plan[x["symbol"]]), "filled"), (y["symbol"], float(plan[y["symbol"]]) - 1, "filled")])
+    assert all("-carry-" in o["client_order_id"] for o in sent)
+    ev = [b for k, b in h.events if k == "multi_day_carry"]
+    assert ev and ev[0]["session"] == str(nxt) and {c[0] for c in ev[0]["carried"]} == {x["symbol"], y["symbol"]}
+    # never above the target, and nothing is carried once the sleeve is at its target or a new decision came
+    led = Ledger.fold(h.journal.entries(kinds=LEDGER_KINDS)).book(RID)
+    later = [o for o in h.broker.orders.values() if "-carry-" in o["client_order_id"]
+             and datetime.fromisoformat(o["submitted_at"]).astimezone(NY).date() > nxt]
+    assert not [o for o in later if o["symbol"] in (x["symbol"], y["symbol"])]
+    for sym in (x["symbol"], y["symbol"]):
+        bought = sum(float(f["qty"]) for f in h.broker.fills if f["symbol"] == sym and f["side"] == "buy"
+                     and datetime.fromisoformat(f["transaction_time"]).astimezone(NY).date() <= nxt)
+        assert bought == plan[sym]
+    assert led is not None
+    decided = [b for *_, b in h.journal.entries(kinds=("md_decision",)) if b["target"] is not None]
+    for b in sends.values():  # a carry only on sessions that are not a decision's fill session
+        if b.get("carry"):
+            assert b["session"] not in {d["fill_session"] for d in decided}
+
+
+def test_a_carry_waits_while_the_market_filter_is_off(data, tmp_path, monkeypatch):
+    """Section 2: new buys only while SPY closes above its 200-day average. A carried buy is a buy of that session,
+    so the filter is read at the previous close; while it is off nothing is carried (the plan is kept)."""
+    from kaibot.engine import daily
+
+    monkeypatch.setattr(daily, "market_on", lambda spy: False)  # the carry's own read (decisions read momentum's)
+    s, h = _carry_run(data, tmp_path)
+    h.run()
+    assert not [o for o in h.broker.orders.values() if "-carry-" in o["client_order_id"]]
+    notes = [b["carry"] for *_, b in h.journal.entries(kinds=("md_send",)) if b.get("carry")]
+    assert notes and all(n["risk_off"] and not n["carried"] for n in notes)
+
+
+def test_a_carry_skips_a_stock_with_an_announced_corporate_action(data, tmp_path):
+    """Amendment 6 (live-safety exclusion) applies to a carried buy as to any buy."""
+    from types import SimpleNamespace
+
+    hit: dict = {}
+
+    class CA:
+        def lookup(self, prev, session, symbols):
+            sym = hit.get("sym")
+            if sym is None or sym not in symbols:
+                return {}, None
+            return {sym.upper(): SimpleNamespace(action="spin-off", on="2099-01-01",
+                                                 skip_text=lambda: "skipped: corporate action on 2099-01-01")}, None
+
+    ca = CA()
+    s, h = _carry_run(data, tmp_path, ca=ca)
+    real = h.broker.submit
+
+    def submit(req):  # once the first (held, expiring) order is known, its stock gets an announcement
+        o = real(req)
+        hit.setdefault("sym", o["symbol"])
+        return o
+
+    h.broker.submit = submit
+    h.run()
+    x, y = _first_orders(h)
+    carried = [o for o in h.broker.orders.values() if "-carry-" in o["client_order_id"]]
+    assert x["symbol"] not in {o["symbol"] for o in carried} and y["symbol"] in {o["symbol"] for o in carried}
+
+
+def test_carry_targets_drop_what_the_pre_registration_drops(data):
+    """The shared core (engine/daily.carry_targets): a buy whose stock had no bar on the fill day is dropped
+    (section 4), an order the venue cancelled or refused is not sent again, a stock the rule could not buy now
+    (below its 100-day average, a 15% move) is skipped, nothing above the target, sales are never carried."""
+    from kaibot.engine import daily
+
+    s = mom.VERSIONS["trend_momentum"]
+    k = I0 + 10
+    ok = [sym for sym in data.symbols[:60] if np.isfinite(data.raw_c[k - 1, data.col(sym)])][:6]
+    a, b, c, d, e, f = ok
+    gap = replace(data, raw_c=data.raw_c.copy())
+    gap.raw_c[k - 1, gap.col(e)] = np.nan
+    plan = [(a, 10, "buy"), (b, 10, "buy"), (c, 10, "resize"), (d, 10, "buy"), (e, 10, "buy"), (f, 0, "sell")]
+    v = gap.view(k)
+    _, _, sell_if = s.signals(v)
+    out, note = daily.carry_targets(s, s.name, plan, {a: 4.0, c: 10.0}, gap, k - 1, k, {d: "canceled"})
+    want = {a: 10, b: 10} if sell_if(gap.col(a)) is None and sell_if(gap.col(b)) is None else None
+    got = {t.symbol: t.shares for t in out}
+    if want is not None:
+        assert got == want
+    assert all(t.purpose == "carry" for t in out)
+    assert note["skipped"][d] == "order canceled" and note["skipped"][e] == "no bar on the fill day"
+    assert c not in got and f not in got  # at its target; a sale
+    for sym, why in note["skipped"].items():
+        if why.startswith("not buyable"):
+            assert sell_if(gap.col(sym)) is not None

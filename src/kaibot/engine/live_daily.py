@@ -87,7 +87,15 @@ import numpy as np
 import pandas as pd
 
 from kaibot.broker.protocol import Broker
-from kaibot.engine.daily import CASH_RESERVE, DailyData, decide_after_close, momentum_limits, plan_session
+from kaibot.engine.daily import (
+    CASH_RESERVE,
+    DailyData,
+    carry_targets,
+    decide_after_close,
+    ended_buys,
+    momentum_limits,
+    plan_session,
+)
 from kaibot.engine.execution import NEAR_CLOSE_MIN, NY, REGULAR_CLOSE, ExecutionPolicy, minus
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
@@ -1182,7 +1190,19 @@ class LiveDaily:
                     "note": "no decision"}
         if tl is None:
             plan, targets = plan_session(r.builder, None, r.name, {}, pending, None, 0, 0.0, 0.0)
-            return self._planned(r, session, rid, prev, targets, None)
+            if dec is None:  # no decision was taken after the last close: nothing is carried on an old plan
+                return self._planned(r, session, rid, prev, targets, None)
+            carry, note = self._carry(r, session, prev, held, {t.symbol for t in targets})
+            if not carry:
+                return {**self._planned(r, session, rid, prev, targets, None), **({"carry": note} if note else {})}
+            targets = self._overnight_cut(r, session, targets + carry, held)
+            targets, ca = self._ca_cut(r.name, session, prev, targets, held)
+            kept = {t.symbol for t in targets}
+            note = {**note, "carried": [c for c in note["carried"] if c[0] in kept]}
+            for sym in sorted({t.symbol for t in carry} - kept):
+                note["skipped"][sym] = "corporate action or overnight cap"
+            self.event("multi_day_carry", {"strategy": r.name, "session": str(session), **note})
+            return {**self._planned(r, session, rid, prev, targets, None), **ca, "carry": note}
         try:
             data = self._view(prev, self.now())
         except DataNotReady as e:  # the evening's view went away (store moved): only the pending sales
@@ -1215,14 +1235,52 @@ class LiveDaily:
         if adopted:  # #266: shares a spin-off credited are sold at this closing auction, whatever the rule decided
             targets = [t for t in targets if t.symbol not in adopted]
             targets = [Target(r.name, s, 0, "sell", {"why": w}) for s, w in adopted.items()] + targets
-        if r.builder.limits.max_overnight_pct <= 0:  # allow_overnight false: nothing may be held over the close
-            cut = [t for t in targets if t.shares > float(held.get(t.symbol, (0.0, None))[0])]
-            if cut:
-                self.event("multi_day_overnight_off", {"strategy": r.name, "session": str(session),
-                                                       "not_bought": [t.symbol for t in cut][:30]})
-            targets = [t for t in targets if t not in cut]
+        targets = self._overnight_cut(r, session, targets, held)
         targets, ca = self._ca_cut(r.name, session, prev, targets, held)
         return {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca}
+
+    def _overnight_cut(self, r: Rule, session: date, targets: list[Target],
+                       held: Mapping[str, tuple[float, float | None]]) -> list[Target]:
+        """allow_overnight false: nothing may be held over the close, so no buy goes out."""
+        if r.builder.limits.max_overnight_pct > 0:
+            return targets
+        cut = [t for t in targets if t.shares > float(held.get(t.symbol, (0.0, None))[0])]
+        if cut:
+            self.event("multi_day_overnight_off", {"strategy": r.name, "session": str(session),
+                                                   "not_bought": [t.symbol for t in cut][:30]})
+        return [t for t in targets if t not in cut]
+
+    def _carry(self, r: Rule, session: date, prev: date, held: Mapping[str, tuple[float, float | None]],
+               busy: set[str]) -> tuple[list[Target], dict]:
+        """#363 (trend_momentum Amendment 11, mom_12_1_band Amendment 9): on a session that is not a decision's fill
+        session, the latest decision's buys that are still short of their targets (engine/daily.carry_targets, the
+        research runner's core). The plan is that decision's journalled send (`md_send` of its fill session: after
+        the review, the corporate-action guard and the overnight cap of that day). The evening's daily view gives
+        the market filter, the fill day's bar and the rule's buy conditions; without it nothing is carried."""
+        last = None
+        for b in self._entries("md_decision"):
+            if b.get("strategy") == r.name and b.get("target") is not None and b.get("fill_session") < str(session):
+                last = b
+        plan_send = self._send_entry(r.name, date.fromisoformat(last["fill_session"])) if last else None
+        if plan_send is None or self.om is None:
+            return [], {}
+        plan = [(s, int(q), p) for s, q, p, _ in plan_send["targets"] if s not in busy]
+        if not any(p in ("buy", "resize") and q > float(held.get(s, (0.0, None))[0]) for s, q, p in plan):
+            return [], {}
+        try:
+            data = self._view(prev, self.now())
+        except DataNotReady as e:
+            self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
+                                             "why": ("no carry-over: " + str(e))[:200]})
+            return [], {"of": last["fill_session"], "carried": [], "skipped": {}, "risk_off": False,
+                        "unread": str(e)[:200]}
+        plan = [x for x in plan if x[0] not in data.dropped]
+        fill = date.fromisoformat(last["fill_session"])
+        if fill not in set(data.dates.astype(object)):
+            return [], {}
+        ended = ended_buys(self.om, r.name, str(fill), str(session))
+        return carry_targets(r.strategy, r.name, plan, {s: q for s, (q, _) in held.items()}, data,
+                             data.index_of(fill), data.index_of(prev), ended)
 
     def _adopted(self, rule: str) -> dict[str, str]:
         f = getattr(self.account, "adopted", None)  # an Account without corporate actions adopts nothing

@@ -262,3 +262,45 @@ invested against a plan of about 90%.
    deviation of the venue, like Alpaca paper's random partial fills.
 5. **Not for real money.** This amendment is for Alpaca paper only. Before any real-money decision the execution
    is reviewed again: a live account's `cls` order does reach the closing auction.
+
+## Amendment 9 (19 Nov 2026, backend-quant, issue #363, before the third live paper session): the decision's unfilled buys are carried to the next sessions
+
+Written on 19 Nov 2026. On 18 Nov, Alpaca paper's closing-auction simulation left 23 of 30 buys of trend_momentum's
+first decision with nothing filled and 3 in part (Amendment 10 of trend_momentum, 8 of mom_12_1_band). The rule then
+bought nothing until its next decision (the first session of the next month), so the book sat at about 16% exposure against a plan of about 90%.
+No research result is affected (item 4). This amendment changes how the decision's own buys are executed, not the
+rule, its decision, its targets or its sizing.
+
+1. **Carry-over.** On every session that is not a decision's fill session, at the near-close window, the latest
+   decision's buys (and resize increases) that are still short of their targets are sent again. The order is the
+   plan's own target shares minus the shares held minus open orders. It is never above the target, and the plan is
+   never re-sized. The plan is the decision's journalled send of its fill session: after the pre-open review, the
+   corporate-action guard (Amendment 6 of trend_momentum) and the overnight cap of that day. The carry-over ends
+   with the next decision. A session with no decision taken after the last close carries nothing. Code:
+   `engine/daily.carry_targets` and `ended_buys`, shared by `engine/daily.run_daily` and
+   `engine/live_daily.LiveDaily._carry` (decision 15: one core).
+2. **What is not carried.**
+   - **The market filter.** No carry-over while SPY's close at the previous session is below its 200-day average.
+     Section 2 allows new buys only while the filter is on, and a carried buy is a buy of its own session. The
+     construction checks the filter on decision days only (section 2's decision day), because there every buy happens on a
+     decision day.
+   - **Not buyable.** No carry-over of a stock the rule could not buy at the previous close: below its 100-day
+     average, or a 15% move in the window (section 2's "Not buyable"). The ranking is not re-read: that is the
+     next decision's.
+   - **No bar.** No carry-over of a stock that had no bar on the decision's fill day. Section 4 drops such a buy.
+   - **Corporate actions.** No carry-over of a stock with an announced corporate action. Amendment 6's exclusion
+     applies to a carried buy as to any buy, on the live path only.
+   - **Order history.** No carry-over of a stock whose last order was cancelled or refused by the venue, that was
+     sold since the decision (for example the forced sale before a disputed split), or that split since then.
+3. **Journal.** Every carry-over is in the session's `md_send` entry, written before any order:
+   `carry: {of, carried: [[symbol, target, held]], skipped, risk_off}`. It is also an event, `multi_day_carry`.
+   Its orders carry the purpose `carry` in their client ids.
+4. **Research and Gate B unchanged.** On the research venue a buy fills whole at the closing print, is cut to the
+   cash at the print (the cancelled rest is never carried), or has no bar on its fill day (dropped). So the
+   carry-over never fires there. A test runs both momentum rules on the fixture with and without it: the orders,
+   the fills (session, symbol, side, shares and price, to the last bit) and the daily equity are identical, and
+   no carry order exists. This rule is also compared in that test with trend_momentum (Amendment 11 there). No trial row, report or Gate B mark
+   changes, and no configuration is added (`n_trials` unchanged).
+5. **Known deviation, live against research.** A carried buy fills at a later session's price than the decision's
+   fill day. That is a deviation of the venue (Alpaca paper's auction simulation), counted by Gate C as such, like
+   the near-close timing of Amendment 10 of trend_momentum (8 of mom_12_1_band). Paper only, as that amendment.
