@@ -1,0 +1,12 @@
+{
+ "query": "NBIS",
+ "count": 1,
+ "results": [
+  {
+   "symbol": "NBIS",
+   "name": "Nebius Group N.V.",
+   "website": "nebius.com",
+   "exchange": "XAMS"
+  }
+ ]
+}

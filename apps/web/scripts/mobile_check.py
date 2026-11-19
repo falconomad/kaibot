@@ -20,6 +20,16 @@ what a screen reader says. Wrong is the earlier name ("kaibot"), or today's name
 capitals by CSS: it is always lowercase, as the first word of a sentence too (stakeholder, 16 Nov 2026). Text inside
 <code> is a literal path or command and is not counted. --interact also checks the tab title, the logo in the header,
 and that the favicon, the home-screen icon and the manifest load.
+
+The clock: the check never reads the wall clock. Every page's clock, and the mock behind it, reads OPEN (a Thursday
+at 12:40 in New York) or CLOSED (17:30 the same day), so a run gives the same answer at any hour and on any day.
+
+--stress also puts the daily note (#311) at its worst on Home after the close: a long note, a long template fallback
+with its reason, and text with nowhere to break (a link, a ticker list), on the card and in its sheet.
+
+--stress also measures the live state (stakeholder, 19 Nov 2026), with the market open: /api/marks is answered from the
+stress mock, so Home and Positions mark the crowded book at live prices. The freshness line ("Live · prices 4 s ago"),
+six-digit values and gains, each row's change today and the position sheet must fit at 375, 390 and 430 px.
 """
 # ruff: noqa: E501  (the browser scripts in this file are JavaScript inside strings; a few lines run past 120)
 from __future__ import annotations
@@ -45,6 +55,24 @@ import mock_data  # noqa: E402
 PHONES = [(375, 812), (390, 844), (430, 932)]
 DESKTOP = [(1280, 800), (1440, 900)]
 
+# The check's clock. No result may depend on when the check runs: Home shows the daily note only outside market hours
+# and the engine's line changes at the open and the close, so a run at 14:00 New York failed where the same code passed
+# at 03:00. Every page's clock reads one of these two instants, and the mock is built at the same instant.
+OPEN = dt.datetime(2026, 11, 19, 17, 40, tzinfo=dt.UTC)    # a Thursday, 12:40 in New York: the market is open
+CLOSED = dt.datetime(2026, 11, 19, 22, 30, tzinfo=dt.UTC)  # the same day, 17:30 in New York: after the close
+
+
+def context(browser, at: dt.datetime, **kw):
+    """A browser context whose clock reads `at` and stays there (timers and animations keep running)."""
+    ctx = browser.new_context(**kw)
+    ctx.clock.set_fixed_time(at)
+    return ctx
+
+
+def signed_in(at: dt.datetime) -> str:
+    """The init script of a signed-in session for the mock project, issued at `at`."""
+    return "localStorage.setItem('sb-localhost-auth-token', JSON.stringify(" + json.dumps(mock_data.session_blob(at)) + "));"
+
 
 def serve(mock, dist: pathlib.Path, now: dt.datetime):
     def handler(route):
@@ -62,6 +90,11 @@ def serve(mock, dist: pathlib.Path, now: dt.datetime):
             return route.fulfill(status=200, content_type="application/json", body=body)
         if url.startswith(audit.APP):
             p = url[len(audit.APP):].split("?")[0].split("#")[0]
+            marks = getattr(mock, "marks", None)
+            if p == "/api/marks" and marks and marks():
+                # the live marks function (api/marks.ts), answered from the mock; any other mock serves the page
+                # below instead, as a deployment without the function does, and the app falls back
+                return route.fulfill(status=200, content_type="application/json", headers={"cache-control": "no-store"}, body=json.dumps(marks()))
             f = dist / p.lstrip("/")
             if not (p != "/" and f.is_file()):
                 f = dist / "index.html"
@@ -197,10 +230,10 @@ LOGO_MOTION = "document.getAnimations().filter(a => /^kb-logo-/.test(a.animation
 
 def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
     def page(reduced: bool = False):
-        ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True,
-                                  reduced_motion="reduce" if reduced else "no-preference")
+        ctx = context(browser, now, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True,
+                      reduced_motion="reduce" if reduced else "no-preference")
         ctx.add_init_script(session)
-        ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+        ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
         pg = ctx.new_page()
         pg.goto(audit.APP + "/", wait_until="load")
         pg.wait_for_selector("main > *")
@@ -310,9 +343,9 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     ctx.close()
     # Landing from the emailed sign-in link (/?from=signin, then signed in): the glow starts at sign-in's place and
     # drifts once to Home's, in 900 ms, and the marker leaves the address bar.
-    ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    ctx = context(browser, now, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
     ctx.add_init_script(session)
-    ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+    ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
     pg = ctx.new_page()
     pg.goto(audit.APP + "/?from=signin", wait_until="load")
     start_at = pg.evaluate("[document.body.dataset.glow, getComputedStyle(document.body, '::before').transform]")
@@ -334,9 +367,9 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         fails.append(f"reduced motion: {running} animations run, the logo moved {early}, or its mark is not whole ({paths} paths)")
     ctx.close()
     # 1280 px: the header is 72 px, the wordmark 28 px.
-    ctx = browser.new_context(viewport={"width": 1280, "height": 800})
+    ctx = context(browser, now, viewport={"width": 1280, "height": 800})
     ctx.add_init_script(session)
-    ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+    ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
     pg = ctx.new_page()
     pg.goto(audit.APP + "/", wait_until="load")
     pg.wait_for_selector("main > *")
@@ -367,17 +400,151 @@ MISALIGN = r"""() => {
 }"""
 
 
-def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics: str, fails: list[str]) -> None:
-    """--stress: the first real holdings, crowded (scripts/stress_mock.py): Home's top holdings, Positions, the position
-    sheet and the book card with 28 multi-day positions, at 375, 390 and 430 px. Fails on overflow, a tap target under
-    44 px, a row whose parts overlap or stick out, a position with 0 shares shown as held, or text contrast."""
+# The daily note's card on Home (#311), measured: its text's lines, whether it is cut, whether anything in it is wider
+# than its box (a word with nowhere to break is clipped, not wrapped), where the button sits and how tall it is.
+NOTE_JS = """() => { const c = document.querySelector('.note-card'); if (!c) return null;
+  const b = c.querySelector('.note-btn'), t = c.querySelector('.note-text'), r = b.getBoundingClientRect();
+  const wide = (e) => e.scrollWidth > e.clientWidth + 1;
+  return { lines: Math.round(t.getBoundingClientRect().height / parseFloat(getComputedStyle(t).lineHeight)), cut: t.scrollHeight > t.clientHeight + 1,
+    over: wide(c) || wide(b) || wide(t) || wide(c.querySelector('.note-head')), left: Math.round(r.left), right: Math.round(r.right),
+    tap: Math.round(r.height), w: innerWidth, head: c.querySelector('.note-head b').textContent }; }"""
+# The note's sheet: nothing in it wider than the sheet or past the screen's edge, and the whole paragraph in it.
+NOTE_SHEET_JS = """() => { const d = document.querySelector('[role=dialog]'), body = d.querySelector('.sheet-body'), r = d.getBoundingClientRect();
+  const out = [...body.querySelectorAll('*')].filter((e) => { const x = e.getBoundingClientRect(); return x.right > innerWidth + 1 || x.left < -1; }).length;
+  return { over: d.scrollWidth > d.clientWidth + 1 || body.scrollWidth > body.clientWidth + 1, out, right: Math.round(r.right), w: innerWidth,
+    full: (d.querySelector('.note-full')?.textContent || '').length, text: d.textContent }; }"""
+
+
+def note_bad(note: dict | None) -> bool:
+    """The card is missing, wider than its box, off the screen, under 44 px to tap, or its text runs past three lines."""
+    return (not note or note["over"] or note["lines"] > 3 or note["left"] < 0 or note["right"] > note["w"] or note["tap"] < 44)
+
+
+def stress_notes(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> None:
+    """The daily note at its worst (stress_mock.StressMock.notes), after the close, at 375, 390 and 430 px: a long note,
+    a long template fallback with its reason, and a note with a link and a ticker list that have nowhere to break.
+    Each: the card stays three lines, inside the screen and 44 px to tap; its sheet shows the whole paragraph and the
+    reason, and nothing in it is wider than the screen. And once, with the market open: no card (Home's rule)."""
+    import stress_mock
+    notes = stress_mock.StressMock.notes(stress_mock.StressMock("running", CLOSED).today)
+    for w, h in PHONES:
+        for name, n in notes.items():
+            ctx = context(browser, CLOSED, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+            ctx.add_init_script(audit.INIT)
+            ctx.add_init_script(signed_in(CLOSED))
+            ctx.route("**/*", serve(stress_mock.StressMock("running", CLOSED, note=n), dist, CLOSED))
+            pg = ctx.new_page()
+            # by way of Activity, as a person arrives: it loads the engine's events, where the note's reason is
+            pg.goto(audit.APP + "/activity", wait_until="load")
+            pg.wait_for_selector("main > *")
+            pg.wait_for_timeout(1200)
+            pg.click("nav.tabbar a[href='/']")
+            pg.wait_for_selector("main .pot, main .note-card, main section")
+            pg.wait_for_timeout(1500)
+            check(pg, f"stress-note-{name}", w, metrics, fails)
+            note = pg.evaluate(NOTE_JS)
+            print(f"stress note {name} {w}: {note}")
+            if note_bad(note) or not note["cut"]:
+                fails.append(f"stress-note-{name}@{w}: the daily note card is missing, overflows, is off the screen, under 44 px or not cut to three lines: {note}")
+                ctx.close()
+                continue
+            pg.click(".note-btn")
+            pg.wait_for_selector("[role=dialog]")
+            pg.wait_for_timeout(500)
+            sheet = pg.evaluate(NOTE_SHEET_JS)
+            text = sheet.pop("text")
+            why = n.get("why")
+            said = why is None or why[:60] in text
+            print(f"stress note sheet {name} {w}: {sheet}, reason shown {said}")
+            if sheet["over"] or sheet["out"] or sheet["right"] > sheet["w"] or sheet["full"] != len(n["text"]) or not said:
+                fails.append(f"stress-note-sheet-{name}@{w}: the sheet overflows, or does not show the whole note ({len(n['text'])} characters) and its reason: {sheet}, reason shown {said}")
+            ctx.close()
+    ctx = context(browser, OPEN, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    ctx.add_init_script(signed_in(OPEN))
+    ctx.route("**/*", serve(stress_mock.StressMock("running", OPEN), dist, OPEN))
+    pg = ctx.new_page()
+    pg.goto(audit.APP + "/", wait_until="load")
+    pg.wait_for_selector("main > *")
+    pg.wait_for_timeout(1500)
+    shown = pg.evaluate("!!document.querySelector('.note-card')")
+    print(f"stress note, market open 390: card shown {shown}")
+    if shown:
+        fails.append("stress-note@390: the daily note shows during market hours (it belongs after the close, until the next open)")
+    ctx.close()
+
+
+# The live state on a page: the freshness line (its text, and that it fits its box and the screen), how many rows carry
+# a change today, and the longest figure in a row's end column.
+LIVE_JS = """() => { const f = document.querySelector('.fresh'); const r = f ? f.getBoundingClientRect() : null;
+  const ends = [...document.querySelectorAll('.hold-end, .row-end')];
+  const wide = ends.filter((e) => e.scrollWidth > e.clientWidth + 1 || [...e.children].some((k) => k.getBoundingClientRect().left < e.parentElement.getBoundingClientRect().left)).length;
+  return { line: f ? f.textContent : null, live: !!f && f.classList.contains('live'), lines: f ? Math.round(r.height / parseFloat(getComputedStyle(f).lineHeight)) : 0,
+    over: !!f && (f.scrollWidth > f.clientWidth + 1 || r.right > innerWidth || r.left < 0), size: f ? getComputedStyle(f).fontSize : null,
+    days: document.querySelectorAll('.hold-end .day, .row-end .day').length, wide,
+    longest: ends.flatMap((e) => [...e.children].map((k) => k.textContent.trim())).sort((a, b) => b.length - a.length)[0] || '',
+    hero: (document.querySelector('.hero') || {}).textContent || null,
+    heroOver: !!document.querySelector('.hero') && document.querySelector('.hero').scrollWidth > document.querySelector('.hero').clientWidth + 1,
+    moving: document.getAnimations().filter((a) => a.effect && a.effect.getComputedTiming().iterations === Infinity
+      && a.effect.target && a.effect.target.closest('.home-hero, .hold-rows, .rows, .pos-head')).length }; }"""
+
+
+def stress_live(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> None:
+    """The live state (stakeholder, 19 Nov 2026), with the market open (OPEN) and the crowded book held at the broker:
+    Home, Positions and the position sheet at 375, 390 and 430 px. /api/marks is answered by the stress mock, with
+    prices far from the close for the biggest holdings. Each: no overflow, no tap target under 44 px, no row whose
+    parts overlap, the freshness line on one line inside the screen, a change today on every row, and nothing that
+    loops. Once per width also the fallback (the function not answering): the engine's line, and no row says today."""
     import stress_mock
     for w, h in PHONES:
+        for name, path, live in [("home", "/", True), ("positions", "/positions", True), ("home-fallback", "/", False)]:
+            ctx = context(browser, OPEN, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+            ctx.add_init_script(audit.INIT)
+            ctx.add_init_script(signed_in(OPEN))
+            ctx.route("**/*", serve(stress_mock.StressMock("running", OPEN, live=live), dist, OPEN))
+            pg = ctx.new_page()
+            pg.goto(audit.APP + path, wait_until="load")
+            pg.wait_for_selector("main > *")
+            pg.wait_for_timeout(1800)
+            check(pg, f"stress-live-{name}", w, metrics, fails)
+            bad = pg.evaluate(MISALIGN)
+            st = pg.evaluate(LIVE_JS)
+            print(f"stress live {name} {w}: {st}, misaligned {bad}")
+            if bad:
+                fails.append(f"stress-live-{name}@{w}: {bad}")
+            if st["lines"] != 1 or st["over"] or st["size"] != "13px" or st["wide"] or st["heroOver"] or st["moving"]:
+                fails.append(f"stress-live-{name}@{w}: the freshness line or a row's figures do not fit, or something loops: {st}")
+            want = 3 if name == "home" else 27 if name == "positions" else 0
+            if live and (not st["live"] or not (st["line"] or "").startswith("Live · prices ") or st["days"] != want or len(st["longest"]) < 12):
+                fails.append(f"stress-live-{name}@{w}: not live, or a row has no change today, or no long figure was measured: {st}")
+            if not live and (st["live"] or not re.fullmatch(r"Updated .+ by the engine", st["line"] or "") or st["days"]):
+                fails.append(f"stress-live-{name}@{w}: the fallback does not say the engine's figure is shown, or a row says today: {st}")
+            if name == "positions":
+                pg.locator(".rows .row").first.click()
+                pg.wait_for_selector("[role=dialog]")
+                pg.wait_for_timeout(500)
+                sheet = pg.evaluate("(() => { const d = document.querySelector('[role=dialog] .sheet, [role=dialog]'); const r = d.getBoundingClientRect(); "
+                                    "return { over: d.scrollWidth > d.clientWidth + 1, right: Math.round(r.right), w: innerWidth, "
+                                    "now: d.textContent.includes('Price now'), today: /Today[^A-Za-z]*%/.test(d.textContent), live: d.textContent.includes('Prices are live') }; })()")
+                bad = pg.evaluate(MISALIGN)
+                print(f"stress live sheet {w}: {sheet}, misaligned {bad}")
+                if sheet["over"] or sheet["right"] > sheet["w"] or bad or not (sheet["now"] and sheet["today"] and sheet["live"]):
+                    fails.append(f"stress-live-sheet@{w}: {sheet} {bad}")
+            ctx.close()
+
+
+def stress(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> None:
+    """--stress: the first real holdings, crowded (scripts/stress_mock.py): Home's top holdings, Positions, the position
+    sheet and the book card with 28 multi-day positions, at 375, 390 and 430 px. Fails on overflow, a tap target under
+    44 px, a row whose parts overlap or stick out, a position with 0 shares shown as held, or text contrast.
+    After the close (CLOSED): the plan is tonight's, the unfilled order is today's and Home shows the daily note."""
+    import stress_mock
+    now, session = CLOSED, signed_in(CLOSED)
+    for w, h in PHONES:
         for name, path in [("home", "/"), ("positions", "/positions"), ("engine", "/health")]:
-            ctx = browser.new_context(viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+            ctx = context(browser, now, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
             ctx.add_init_script(audit.INIT)
             ctx.add_init_script(session)
-            ctx.route("**/*", serve(stress_mock.StressMock("running"), dist, now))
+            ctx.route("**/*", serve(stress_mock.StressMock("running", now), dist, now))
             pg = ctx.new_page()
             pg.goto(audit.APP + path, wait_until="load")
             pg.wait_for_selector("main > *")
@@ -409,11 +576,10 @@ def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics:
                     fails.append(f"stress-sheet@{w}: {sheet} {bad}")
             if name == "home":
                 # the daily note (#311): one small card, its text cut to three lines, the full text in a sheet
-                note = pg.evaluate("(() => { const c = document.querySelector('.note-card'); if (!c) return null; const t = c.querySelector('.note-text'); "
-                                   "return { h: Math.round(t.getBoundingClientRect().height), over: c.scrollWidth > c.clientWidth + 1 }; })()")
+                note = pg.evaluate(NOTE_JS)
                 print(f"stress note {w}: {note}")
-                if not note or note["over"] or note["h"] > 80:
-                    fails.append(f"stress-note@{w}: the daily note card is missing, overflows or is not cut short: {note}")
+                if note_bad(note):
+                    fails.append(f"stress-note@{w}: the daily note card is missing, overflows, is off the screen, under 44 px or not cut to three lines: {note}")
             if name == "engine":
                 # the shadow pre-open review (#310): one row labelled observer; its reasons open in a sheet that fits
                 pg.get_by_role("button", name=re.compile("Pre-open reviewer")).click()
@@ -436,17 +602,18 @@ def stress(browser, dist: pathlib.Path, now: dt.datetime, session: str, metrics:
                     fails.append(f"stress-sold@{w}: {sold} sold rows, {bad}")
                 check(pg, "stress-sold", w, metrics, fails)
             ctx.close()
+    stress_notes(browser, dist, metrics, fails)
+    stress_live(browser, dist, metrics, fails)
 
 
 def main(a) -> int:
     dist = pathlib.Path(a.dist).resolve()
     metrics = (TOOLS / "metrics.js").read_text()
-    now = dt.datetime.now(dt.UTC)
+    now = OPEN  # never the wall clock: see OPEN and CLOSED above
     want = set(a.routes.split(",")) if a.routes else None
     routes = [r for r in audit.ROUTES if want is None or r[0] in want]
     sizes = [s for s in PHONES + DESKTOP if not a.widths or str(s[0]) in a.widths.split(",")]
-    blob = json.dumps(mock_data.session_blob(now))
-    session = "localStorage.setItem('sb-localhost-auth-token', JSON.stringify(" + blob + "));"
+    session = signed_in(now)
     fails: list[str] = []
     rows: list[dict] = []
     with sync_playwright() as pw:
@@ -454,12 +621,12 @@ def main(a) -> int:
         for w, h in sizes:
             for name, path, act in routes:
                 phone = w <= 430
-                ctx = browser.new_context(viewport={"width": w, "height": h}, is_mobile=phone, has_touch=phone,
-                                          color_scheme="dark")
+                ctx = context(browser, now, viewport={"width": w, "height": h}, is_mobile=phone, has_touch=phone,
+                              color_scheme="dark")
                 ctx.add_init_script(audit.INIT)
                 if act != "signed-out":
                     ctx.add_init_script(session)
-                ctx.route("**/*", serve(mock_data.Mock("running"), dist, now))
+                ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
                 page = ctx.new_page()
                 page.goto(audit.APP + path, wait_until="load")
                 try:
@@ -475,7 +642,7 @@ def main(a) -> int:
         if a.interact:
             interact(browser, dist, now, session, fails)
         if a.stress:
-            stress(browser, dist, now, session, metrics, fails)
+            stress(browser, dist, metrics, fails)
         browser.close()
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rows, indent=1))

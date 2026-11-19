@@ -1,0 +1,24 @@
+{
+ "query": "META",
+ "count": 3,
+ "results": [
+  {
+   "symbol": "METV",
+   "name": "Roundhill Ball Metaverse ETF",
+   "website": "roundhill.com",
+   "exchange": "NYSE ARCA"
+  },
+  {
+   "symbol": "META.TO",
+   "name": "Meta Platforms CDR",
+   "website": "meta.ca",
+   "exchange": "TSX"
+  },
+  {
+   "symbol": "meta",
+   "name": "Meta Platforms",
+   "website": "meta.com",
+   "exchange": "NASDAQ"
+  }
+ ]
+}

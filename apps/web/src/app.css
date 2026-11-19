@@ -664,7 +664,9 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .sheet-title { flex: 1; margin: 0; font-size: var(--t-lg); font-weight: 600; letter-spacing: -0.01em; }
 .sheet-x { flex: none; width: var(--tap); min-height: var(--tap); height: var(--tap); padding: 0; border: 0; border-radius: 999px; background: var(--surface-2);
   color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; }
-.sheet-body { padding: 4px 20px 24px; overflow-y: auto; font-size: var(--t-md); line-height: 1.5; }
+/* overflow-wrap: a sheet is one narrow column, and text from the engine (a link in a note's reason, a list of tickers
+   with no spaces) may have nowhere to break: it wraps inside the sheet and never makes it scroll sideways. */
+.sheet-body { padding: 4px 20px 24px; overflow-y: auto; font-size: var(--t-md); line-height: 1.5; overflow-wrap: break-word; }
 .sheet-body p { margin: 0 0 12px; }
 @media (min-width: 761px) { .sheet-root { align-items: center; } .sheet { border-radius: var(--r-card); border-bottom: 1px solid var(--line-strong); } }
 @media (prefers-reduced-motion: reduce) { .live-dot::after { display: none; } }
@@ -704,6 +706,11 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .hold-mid b { font-size: var(--t-md); } .hold-mid .muted { font-size: var(--t-cap); }
 .hold-end { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: var(--t-md); }
 .hold-end span { font-size: var(--t-sm); font-weight: 600; }
+/* live marks (19 Nov 2026): how fresh the figures are, in one small muted line, and a holding's change today */
+.fresh { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--t-cap); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.fresh.live::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--live); }
+.day { color: var(--text-2); white-space: nowrap; }
+.hold-end .day, .hold-end .day span, .row-end .day, .row-end .day span { font-size: var(--t-cap); font-weight: 500; }
 .pbar { position: relative; display: block; height: 4px; max-width: 180px; border-radius: 4px; background: linear-gradient(90deg, var(--loss-tint), var(--surface-2) 50%, var(--gain-tint)); }
 .pbar i { position: absolute; top: 50%; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 999px; background: var(--text); }
 .home-details { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); }

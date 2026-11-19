@@ -2,6 +2,9 @@
 // and what it held. Open: the day's positions (the ledger) and the multi-day book (kb_book, folded in from the old
 // Holdings page) as rows: name, one plain line, one number. Closed: the run's closed trades. A tap opens the position
 // sheet; the full trade page is one more tap. No table scrolls sideways.
+// Stakeholder, 19 Nov 2026: while the market is open and the paper account holds exactly the book, a multi-day holding's
+// value, gain and change today are at the account's price now (lib/marks.ts); otherwise at its close mark, and the
+// line under the count says which.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -10,7 +13,7 @@ import { ExperimentSheetBody, engineDetail, experimentsOf } from "../components/
 import { StatusRow } from "../components/Home";
 import { Tick } from "../components/Tick";
 import { Sheet } from "../components/Sheet";
-import { livePot, useRunCtx } from "../components/Shell";
+import { useRunCtx } from "../components/Shell";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
 import { StockBadge, companyName } from "../components/StockBadge";
@@ -18,26 +21,30 @@ import { StockSummary } from "../components/StockSummary";
 import { useBook } from "../components/useBook";
 import { onTabKeys, tabProps } from "../lib/a11y";
 import { api, type Trade } from "../lib/api";
-import { type Book, type BookPosition, holdingView } from "../lib/book";
+import { type Book, type BookPosition, type LiveMark, holdingView } from "../lib/book";
 import { RULES, exitText, ruleName } from "../lib/explain";
 import { type Experiment, experimentView, findExperiment } from "../lib/experiment";
-import { R, dateEt, day, money, px, signedMoney, timeEt } from "../lib/fmt";
+import { R, dateEt, day, money, pct, px, signedMoney, timeEt } from "../lib/fmt";
 import { sectorOf } from "../components/Book";
 import { NAME } from "../brand/brand";
 import { type Plan, type Sold, STATE_TEXT, bookLine, buyText, lineText, parsePlan, parseSold, reasonText, rowTag, sectorText, sellWhen } from "../lib/multiday";
 import { poll } from "../lib/poll";
 import { etToday } from "../lib/derive";
 import { type Unfilled, exitKinds, unfilledFrom, unfilledLine } from "../lib/engineevents";
+import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
+import { DayChange, FreshLine, useMarks } from "../components/Marks";
+import { markOf, potLive } from "../lib/marks";
 
 const PAGE = 50;
 type IntradayPos = { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number };
 const tone = (v: number | null | undefined) => (!v ? "flat" : v > 0 ? "gain" : "loss");
 const pctOf = (a: number, b: number) => (b ? `${a >= 0 ? "+" : "−"}${Math.abs((a / b) * 100).toFixed(1)}%` : "");
 
+/** `rank`: the value at the booked close, so rows keep their order while prices move. */
 type Open =
-  | { kind: "day"; symbol: string; p: IntradayPos; value: number; gain: number | null }
-  | { kind: "book"; symbol: string; p: BookPosition; value: number; gain: number };
+  | { kind: "day"; symbol: string; p: IntradayPos; value: number; gain: number | null; rank: number }
+  | { kind: "book"; symbol: string; p: BookPosition; value: number; gain: number; rank: number; day: number | null };
 
 export function Positions() {
   const { run, overview } = useRunCtx();
@@ -45,6 +52,7 @@ export function Positions() {
   const [page, setPage] = useState(0);
   const [sheet, setSheet] = useState<Open | Trade | null>(null);
   const { book } = useBook(run);
+  const mk = useMarks(run, overview);
   const closed = useQuery({ queryKey: ["trades", run.id, page], queryFn: () => api.trades(run.id, PAGE, page * PAGE), placeholderData: keepPreviousData,
     enabled: tab === "closed" || run.kind === "replay" });
   const exps = experimentsOf(overview?.heartbeat);
@@ -67,25 +75,35 @@ export function Positions() {
   const matchU = (rule: string, symbol: string, at: string | null) => unfilled.find((u) => u.rule === rule && u.symbol === symbol && (!at || u.session === at)) ?? null;
   const unmatched = unfilled.filter((u) => !tonight.some((o) => o.rule === u.rule && o.symbol === u.symbol && (!o.fillsAt || o.fillsAt === u.session)));
   const exits = exitKinds(multiDayFrom(engineDetail(overview?.heartbeat)));
-  const live = run.kind === "paper" ? livePot(run, overview, b) : null;
+  const live = run.kind === "paper" ? potLive(run, overview, b, undefined, mk.marks) : null;
   const open: Open[] = [
     ...Object.entries(live?.positions ?? {}).map(([symbol, p]): Open => {
       const now = p.last ?? p.fill ?? 0;
-      return { kind: "day", symbol, p, value: p.qty * now, gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null };
+      return { kind: "day", symbol, p, value: p.qty * now, rank: p.qty * now, gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null };
     }),
-    ...(b?.positions ?? []).map((p): Open => { const v = holdingView(p, b!); return { kind: "book", symbol: p.symbol, p, value: v.value, gain: v.gain }; }),
-  ].sort((x, y) => y.value - x.value);
+    ...(b?.positions ?? []).map((p): Open => {
+      const v = holdingView(p, b!, markOf(live?.live, p.symbol));
+      return { kind: "book", symbol: p.symbol, p, value: v.value, gain: v.gain, day: v.dayPct, rank: p.qty * p.mark };
+    }),
+  ].sort((x, y) => y.rank - x.rank);
+  // the rows' prices: live, or the close marks (never the engine's minute row: it has no price per stock)
+  const fresh = live?.live ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
+  // for Tick: a change of source (live prices or close marks) replaces a figure without the tint of a move
+  const from = live?.live ? "live" : "close";
   const invested = open.reduce((a, o) => a + o.value, 0);
   const pot = live?.pot ?? null;
   const expHeld = exps.find((e) => e.experiment && open.some((o) => o.kind === "book" && findExperiment(o.p.rule, [e])));
   const showClosed = tab === "closed" || run.kind === "replay";
+  const countKnown = run.kind !== "paper" || book.isSuccess || open.length > 0;
 
   return (
     <>
       <section aria-labelledby="pos-h" className="pos-head">
         <h1 id="pos-h" className="page-title">Positions</h1>
-        <p className="muted num" style={{ margin: 0 }}>{open.length} open{open.length ? ` · ${money(invested)} invested` : ""}
-          {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</p>
+        {/* #359: no count while the book loads or failed (a "0 open" there reads as data); a space keeps the line's height */}
+        <p className="muted num" style={{ margin: 0 }}>{countKnown ? <>{open.length} open{open.length ? <> · <Tick value={invested} from={from}>{money(invested)}</Tick> invested</> : ""}
+          {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</> : "\u00a0"}</p>
+        <FreshLine fresh={fresh} />
         {line && <p className={`muted num ${line.ended ? "loss" : ""}`} style={{ margin: 0 }} title={`peak ${money(line.peak)}, now ${money(line.equity)}`}>Multi-day book: {lineText(line)}</p>}
         {run.kind === "paper" && (
           <div className="seg" role="tablist" aria-label="Show" onKeyDown={onTabKeys}>
@@ -121,13 +139,14 @@ export function Positions() {
                         return x || t ? <span className="row-tags">{x && <span className="row-tag">Experiment: failed the ten-year test</span>}{t && <span className="row-plan">{t}</span>}</span> : null;
                       })()}
                     </span>
-                    <span className="row-end num"><b><Tick value={o.value}>{money(o.value)}</Tick></b>
-                      {o.gain !== null && <Tick value={o.gain} className={tone(o.gain)}>{signedMoney(o.gain)}</Tick>}</span>
+                    <span className="row-end num"><b><Tick value={o.value} from={from}>{money(o.value)}</Tick></b>
+                      {o.gain !== null && <Tick value={o.gain} from={from} className={tone(o.gain)}>{signedMoney(o.gain)}</Tick>}
+                      {o.kind === "book" && <DayChange pct={o.day} waiting={mk.waiting} />}</span>
                   </button>
                 </li>
               ))}
             </ul>
-          ) : book.isPending && run.kind === "paper" ? <Skeleton /> : (
+          ) : book.isPending && run.kind === "paper" ? <Skeleton /> : book.isError ? null : (
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
           )}
           {/* below the list: the plan arrives after the rows, and must not push them down */}
@@ -164,7 +183,8 @@ export function Positions() {
 
       <Sheet open={sheet !== null} onClose={() => setSheet(null)} title={sheet?.symbol ?? ""}>
         {sheet && ("id" in sheet ? <ClosedSheet t={sheet} exp={findExperiment(sheet.strategy, exps)} />
-          : sheet.kind === "day" ? <DaySheet o={sheet} exps={exps} /> : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} />)}
+          : sheet.kind === "day" ? <DaySheet o={sheet} exps={exps} />
+          : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} exits={exits} live={markOf(live?.live, sheet.symbol)} />)}
       </Sheet>
     </>
   );
@@ -185,8 +205,8 @@ function Bar({ stop, now, target }: { stop: number; now: number; target: number 
   );
 }
 
-function Figure({ value, gain, base }: { value: number; gain: number | null; base: number }) {
-  return <p className="sheet-figure num"><b>{money(value)}</b>{gain !== null && <span className={tone(gain)}> {signedMoney(gain)} · {pctOf(gain, base)}</span>}</p>;
+function Figure({ value, gain, base, from }: { value: number; gain: number | null; base: number; from?: string }) {
+  return <p className="sheet-figure num"><b><Tick value={value} from={from}>{money(value)}</Tick></b>{gain !== null && <> <Tick value={gain} from={from} className={tone(gain)}>{signedMoney(gain)} · {pctOf(gain, base)}</Tick></>}</p>;
 }
 
 /** A day position: where the price is between stop and target, what it costs if the stop is hit, the rule. */
@@ -214,24 +234,31 @@ function DaySheet({ o, exps }: { o: Extract<Open, { kind: "day" }>; exps: Experi
   );
 }
 
-/** A multi-day holding (the former Holdings page's detail). */
-function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book; exp: Experiment | null }) {
+/** A multi-day holding (the former Holdings page's detail). With `live` (the paper account's price now, lib/marks.ts)
+ *  every figure is at that price and the day's change is shown; without it, at the close mark. */
+export function BookSheet({ o, b, exp, exits, live }: { o: Pick<Extract<Open, { kind: "book" }>, "symbol" | "p">; b: Book; exp: Experiment | null;
+  exits?: Record<string, string>; live?: LiveMark | null }) {
   const { p } = o;
-  const v = holdingView(p, b);
+  const v = holdingView(p, b, live);
+  // #359: a rule that sells by its target list has no stop by design (lib/exits.exitOf, as the book strip says), so a
+  // missing stop there is not a problem and nothing is placed again.
+  const byList = !p.stop && exitOf(p, exits) === "target_list";
   return (
     <>
       <p className="muted" style={{ marginTop: 0 }}>{companyName(o.symbol)} · {p.qty} shares · {ruleName(p.rule)}</p>
-      <Figure value={v.value} gain={v.gain} base={p.qty * p.avgCost} />
+      <Figure value={v.value} gain={v.gain} base={p.qty * p.avgCost} from={live ? "live" : "close"} />
       {exp && <ExperimentInfo e={exp} />}
       <div className="kv">
         <span>Held</span><span /><span className="v">{v.days !== null ? `${v.days} days` : "—"}{p.opened ? ` · since ${day(p.opened)}` : ""}</span>
         <span>Bought at</span><span /><span className="v">{px(p.avgCost)} a share</span>
-        <span>Price at the close</span><span /><span className="v">{px(p.mark)}{p.priced ? "" : " (last known)"}</span>
+        {live ? <><span>Price now</span><span /><span className="v num"><Tick value={v.price}>{px(v.price)}</Tick></span>
+          {v.day !== null && v.dayPct !== null && <><span>Today</span><span /><span className={`v num ${tone(v.day)}`}><Tick value={v.day}>{signedMoney(v.day)} · {pct(v.dayPct)}</Tick></span></>}</>
+          : <><span>Price at the close</span><span /><span className="v">{px(p.mark)}{p.priced ? "" : " (last known)"}</span></>}
         <span>Size, of the pot</span><span /><span className="v">{v.share !== null ? `${(v.share * 100).toFixed(1)}%` : "—"}</span>
         <span>Sector</span><span /><span className="v">{sectorText(p.sector) ?? sectorOf(p.symbol) ?? "not known"}</span>
-        <span>Safety stop at the broker</span><span /><span className={`v ${p.stop ? "" : "loss"}`}>{p.stop
+        <span>Safety stop at the broker</span><span /><span className={`v ${p.stop || byList ? "" : "loss"}`}>{p.stop
           ? `${px(p.stop.price)} · ${p.stop.state === "resting" ? "in place" : p.stop.state === "re-arming" ? "being placed again" : "missing"}${v.stopBelowPct !== null ? ` · ${v.stopBelowPct.toFixed(1)}% below` : ""}`
-          : `none: ${NAME} places it again`}</span>
+          : byList ? "none by design: the rule sells by its list at a close" : `none: ${NAME} places it again`}</span>
         {p.dividends > 0 && <><span>Dividends</span><span /><span className="v">{money(p.dividends)}</span></>}
       </div>
       {(() => {
@@ -243,7 +270,7 @@ function BookSheet({ o, b, exp }: { o: Extract<Open, { kind: "book" }>; b: Book;
           </>
         );
       })()}
-      {RULES[p.rule] && <p className="muted" style={{ fontSize: 15 }}>The rule {RULES[p.rule].what}. Prices are at the last close.</p>}
+      {RULES[p.rule] && <p className="muted" style={{ fontSize: 15 }}>The rule {RULES[p.rule].what}. {live ? "Prices are live, from the paper account." : "Prices are at the last close."}</p>}
       <StockSummary symbol={o.symbol} />
     </>
   );

@@ -17,6 +17,9 @@ market_data:
                      cache: "data/databento (Parquet, per symbol; cached symbols never re-requested)",
                      ledger: "data/databento/ledger.jsonl (estimated spend of every confirmed download; total never past credit_usd)", budget_per_min: 20,
                      note: "historical validation only, never in the live path; scripts/fetch_databento.py is dry-run unless --confirm; bbo-1m spread calibration of cost model v2: scripts/fetch_spread_calibration.py plan / report (offline)"}
+  allinvestview_logo_search: {use: dashboard_logo_domains, auth: none, endpoint: "https://www.allinvestview.com/api/logo-search/?q=SYMBOL",
+                     limit: "60 req/min per IP", budget_per_min: 45,
+                     note: "ticker -> company website for the cdn.tickerlogos.com logos (#330, #331); only scripts/fetch_symbol_meta.py --fill-domains, paced at one call every 1.2 s, and the dashboard (apps/web/api/logo-domain.ts, its own limit of 50/min); never in the engine"}
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:
   sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}
@@ -33,6 +36,8 @@ fundamentals_filings:
   gdelt_pacing:     {min_seconds_between_requests: 6, note: "GDELT returns 429 when called faster (one every 5 s); enforced on gdelt_doc"}
 news:
   alpaca_news_ws:   {use: primary_stream, auth: key, note: "Benzinga feed; verify free status + latency day 1"}
+  alpaca_news_rest: {use: engine_news_poller, auth: key, endpoint: "/v1beta1/news (50 symbols and 50 stories a request)",
+                     note: "requests count against alpaca; src/kaibot/ingest/news_poll.py inside the engine: every 5 min weekdays 04:00-20:00 ET, 30 min otherwise; about 2-3 requests a poll for ~75 symbols (about 600 a weekday, 150 a weekend day); free plan confirmed 19 Nov 2026; KAIBOT_NEWS_POLL=off stops it"}
   finnhub_news:     {use: secondary, budget_per_min: 10}
   pr_newswire_rss:  {use: primary_source, poll_seconds: 60}
   globenewswire_rss: {use: primary_source, poll_seconds: 60}

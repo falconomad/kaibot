@@ -1,0 +1,18 @@
+{
+ "query": "SPY",
+ "count": 2,
+ "results": [
+  {
+   "symbol": "SPY",
+   "name": "SPDR S&P 500 ETF Trust",
+   "website": "spy.de",
+   "exchange": "XETRA"
+  },
+  {
+   "symbol": "SPY",
+   "name": "SPDR S&P 500 ETF Trust",
+   "website": "https://www.ssga.com/",
+   "exchange": "NYSE ARCA"
+  }
+ ]
+}

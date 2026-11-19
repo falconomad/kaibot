@@ -21,6 +21,7 @@ import { Health } from "./pages/Health";
 import { Tape } from "./pages/Tape";
 import { Positions } from "./pages/Positions";
 import { ctxFor, emptyOverview, glitches, paperRun, render, text } from "./pages/testkit";
+import css from "./app.css?raw";
 
 vi.mock("./lib/api", () => import("./pages/testkit-api"));
 vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
@@ -171,6 +172,13 @@ describe("3. today in plain words", () => {
     const tpl = text(inRouter(<DailyNoteCard note={{ ...NOTE_TEMPLATE, source: "template", why: "no ANTHROPIC_API_KEY" }} now={new Date("2026-11-19T22:30:00Z")} />));
     expect(tpl).toContain("Written from a fixed template, not by AI");
     expect(tpl).not.toContain("Written by AI");
+  });
+  it("the styles hold text with nowhere to break: three lines on the card, wrapped inside the sheet", () => {
+    // measured in a browser by scripts/mobile_check.py --stress (a link and a ticker list with no spaces, at 375 to 430 px)
+    expect(css).toMatch(/\.note-text \{[^}]*overflow-wrap: anywhere;[^}]*-webkit-line-clamp: 3;[^}]*overflow: hidden;/);
+    expect(css).toMatch(/\.note-full \{[^}]*overflow-wrap: anywhere;/);
+    // the reason under the note ("the AI note was not used: ...") is the engine's own text and may be one long link
+    expect(css).toMatch(/\.sheet-body \{[^}]*overflow-wrap: break-word;/);
   });
   it("names the day when the note is not today's", () => {
     const t = text(inRouter(<DailyNoteCard note={{ ...NOTE_MODEL, source: "model", why: null }} now={new Date("2026-11-20T12:00:00Z")} />));
