@@ -70,7 +70,7 @@ from kaibot.replay.history import BarHistory
 from kaibot.risk.gate import BOOK_HARD_CEILINGS, BookLimits, RiskPolicy
 from kaibot.risk.portfolio import Instrument, PortfolioBuilder
 from kaibot.strategies.base import Event, TargetList
-from kaibot.strategies.momentum import RESIZE_BUFFER, DailyContext
+from kaibot.strategies.momentum import RESIZE_BUFFER, SMA_MARKET, DailyContext, market_on
 
 FILL_SESSIONS = 5  # a missing close carries the last one for at most 5 sessions (both pre-registrations)
 MIN_PRICE, MIN_ADV = 5.0, 50e6  # the universe filter: price >= $5, 20-day average dollar volume >= $50M
@@ -335,6 +335,113 @@ def plan_session(builder: PortfolioBuilder, tl: TargetList | None, name: str,
     return plan, targets
 
 
+# ---------------------------------------------------------------- #363: the latest decision's buys, carried over
+
+CARRY = "carry"  # the purpose of a carried buy (its client ids say `-carry-`)
+UNBOOKED = "unbooked"  # a finished buy whose fill the venue reported and the ledger has not booked yet
+NOT_CARRIED = ("canceled", "rejected", "sold", UNBOOKED)  # a buy is not sent again after these
+
+
+def ended_buys(om: OrderManager, strategy: str, since: str, before: str, *,
+               base: Mapping[str, float] | None = None, held: Mapping[str, float] | None = None) -> dict[str, str]:
+    """symbol -> how the last buy order of `strategy` from session `since` up to (not including) `before` ended
+    (the order manager's state word), oldest first so the latest wins; "sold" when any sale of the symbol went out
+    in that time (a forced sale before a disputed split, a sale pending from the decision): such a name is never
+    bought back before the next decision. An order refused as `lost` (it never reached the venue) does not count:
+    it is sent again under a new attempt.
+
+    QA-Ops on #366:
+    - `base` (shares held when the plan was made) and `held` (shares held now): a sleeve that holds less than its
+      base plus what the plan's buys have booked since has lost shares since the decision, by whatever path (a
+      protective stop, the watchdog's or the dead-man's emergency stop, a flatten, a sale the owner accepted): it
+      is "sold" too, and not bought back before the next decision. Without `base` only the orders are read;
+    - a protective or fail-safe stop (purpose `stop`, adopted by the manager) counts as a sale once it SOLD
+      shares, up to and including `before` (a stop adopted at this morning's restart carries today's session): a
+      resting stop is no sale, a filled one is;
+    - "unbooked" when a finished buy of that time filled shares at the venue that the ledger has not booked yet
+      (`cum` above `booked`, the #337 case across sessions): `held` does not know those shares, so the difference
+      to the target must not be sent again until they are booked."""
+    out: dict[str, str] = {}
+    sold: set[str] = set()
+    unbooked: set[str] = set()
+    bought: dict[str, float] = {}
+    for r in sorted(om.orders.values(), key=lambda r: (r.session, r.created or "")):
+        if r.strategy != strategy:
+            continue
+        if r.side == "sell":
+            if r.purpose == "stop":
+                if since <= r.session <= before and r.booked > 1e-9:
+                    sold.add(r.symbol)
+            elif since <= r.session < before:
+                sold.add(r.symbol)
+            continue
+        if r.purpose == "stop" or not (since <= r.session < before):
+            continue
+        bought[r.symbol] = bought.get(r.symbol, 0.0) + r.booked
+        if not r.open and r.cum > r.booked + 1e-9:
+            unbooked.add(r.symbol)
+        if r.state is St.REJECTED and str(r.reason or "").startswith("lost"):
+            continue
+        out[r.symbol] = str(r.state)
+    if base is not None and held is not None:
+        for sym in set(base) | set(bought):
+            if float(held.get(sym, 0.0)) + 1e-6 < float(base.get(sym, 0.0)) + bought.get(sym, 0.0):
+                sold.add(sym)
+    return {**out, **{s: UNBOOKED for s in unbooked}, **{s: "sold" for s in sold}}
+
+
+def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], held: Mapping[str, float],
+                  data: DailyData, fill_i: int, k: int, ended: Mapping[str, str]) -> tuple[list[Target], dict]:
+    """#363 (trend_momentum.md Amendments 11 to 13, mom_12_1_band.md Amendments 9 to 11), shared by the research
+    runner and the live daily path. Between two decisions, each session sends again what the latest decision's buys
+    still lack:
+    `plan` is that decision's targets [(symbol, shares, purpose)] as sent on its fill session `fill_i`; `held` the
+    shares held now; `data` the daily bars up to the previous close `k`; `ended` how each symbol's last buy order
+    since the fill session ended (`ended_buys`). A buy or resize increase is carried at the plan's own target
+    shares (the target loop sends target - held - open: never above the target, the plan is never re-sized), unless:
+    - SPY closed below its 200-day average at k (section 2: new buys only while the market filter is on);
+    - the stock had no bar on the fill day (section 4: such a buy is dropped);
+    - its last order was cancelled or refused by the venue, or it was sold since (never sent again), or a fill of
+      it is not booked yet (`ended_buys`);
+    - the rule could not buy it at k: it is outside the rule's ranked universe (section 2's universe filter: price,
+      liquidity, point-in-time membership; or no score), or below its 100-day average or with a 15% move
+      (trend_momentum's "Not buyable"). Its rank is not read again: that is the next decision's;
+    - it split since the fill session (the plan's shares are on the old basis; the next decision sizes it again).
+    Returns the carried targets and the note the send journals (`of`, `carried`, `skipped`, `risk_off`)."""
+    want = [(sym, int(q)) for sym, q, p in plan if p in ("buy", "resize", CARRY)
+            and int(q) > float(held.get(sym, 0.0)) + 1e-9]
+    if not want:
+        return [], {}
+    note: dict = {"of": str(data.day(fill_i)), "carried": [], "skipped": {}, "risk_off": False}
+    v = data.view(k)
+    if getattr(strategy, "market_filter", False) and not market_on(v.close(SMA_MARKET)[:, v.spy]):
+        note["risk_off"] = True
+        note["skipped"] = {sym: "market filter off" for sym, _ in want}
+        return [], note
+    score, in_universe, sell_if = strategy.signals(v)
+    out = []
+    for sym, q in want:
+        j = data._col.get(sym)
+        state = ended.get(sym)
+        why = ("not in the daily view" if j is None else
+               "no bar on the fill day" if not math.isfinite(float(data.raw_c[fill_i, j])) else
+               "sold since the decision" if state == "sold" else
+               "a fill the venue reported is not booked yet" if state == UNBOOKED else
+               f"order {state}" if state in NOT_CARRIED else
+               "split since the decision" if any(data.split_at(t, j) != 1.0 for t in range(fill_i + 1, k + 1))
+               else None)
+        if why is None:  # the rule's own ranked universe at k: the universe filter, a score, its buy conditions
+            reason = ("universe" if not bool(in_universe[j]) else
+                      "no score" if not math.isfinite(float(score[j])) else sell_if(j))
+            why = f"not buyable: {reason}" if reason is not None else None
+        if why is not None:
+            note["skipped"][sym] = why
+            continue
+        out.append(Target(name, sym, q, CARRY, {"why": CARRY}))
+        note["carried"].append([sym, q, float(held.get(sym, 0.0))])
+    return out, note
+
+
 # ---------------------------------------------------------------- the ledger (#117) and the trade rows
 
 
@@ -566,6 +673,7 @@ class DailyRun:
     stops: dict = field(default_factory=dict)  # (strategy, symbol) -> protective stop price, when protect_atr
     guards: list[tuple[int, str, str]] = field(default_factory=list)  # (session, symbol, guard) an outer cap cut
     basis_gaps: list[tuple[int, str]] = field(default_factory=list)  # (session, held symbol) see builder_sizing
+    carried: list[tuple[int, str, int]] = field(default_factory=list)  # #363: (session, symbol, target) carried
 
     @property
     def entries(self) -> dict[int, int]:
@@ -604,7 +712,8 @@ def _venue_actions(broker: SimBroker, symbol: str, *, split: float = 1.0, delist
 def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, fill: str = "base",
               cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
               on_session: Callable[[int], None] | None = None, protect_atr: float | None = None,
-              builder: PortfolioBuilder | None = None, execution: str = "near_close") -> DailyRun:
+              builder: PortfolioBuilder | None = None, execution: str = "near_close",
+              carry: bool = True) -> DailyRun:
     """One continuous account of one multi-day strategy over sessions i0..i1, starting flat: the strategy decides
     after each close, the portfolio builder sizes (`momentum_builder`: the pre-registered sizing at the rule's own
     limits), the target loop (engine/targets.py) sends
@@ -621,7 +730,10 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     path's parity test passes the live book's builder (`engine/live_daily.live_builder`).
     `execution` (base fill only): "near_close" (default, the live path's orders since issue #333: DAY market
     orders at 15:50 ET, filled at the closing print) or "close" (`cls` orders sent at 09:00). Both give the same
-    fills, costs and equity; only the orders' type and send time differ."""
+    fills, costs and equity; only the orders' type and send time differ.
+    `carry` (#363, default on, as the live path): between decisions, the latest decision's buys the venue left
+    unfilled are sent again (`carry_targets`). On this venue it never fires (see the function); False is for the
+    test that shows it."""
     if execution not in ("near_close", "close"):
         raise ValueError("execution is near_close or close")
     if i0 < 1 or i1 >= len(data.dates) or i0 > i1:
@@ -648,6 +760,8 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                                 "ledger_cash0": float(equity0), "broker_cash": broker.cash,
                                 "broker_cash0": float(equity0), "equity": led.equity}, om.journal)
     pending: dict[str, str] = {}
+    # #363: the latest decision's fill session, its targets and the shares held when they were planned
+    last_plan: tuple[int, list[tuple[str, int, str]], dict[str, float]] | None = None
     exits_on: dict[int, list[int]] = {}
     for j, sessions in data.exits.items():
         for s in sessions:
@@ -726,7 +840,18 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             run.refused.append((i, recon.last.summary()["diffs"]))  # the target loop refuses buys, sales go out
         plan, planned = plan_session(builder, tl, name, held, pending, data, i, eq, led.cash, forced)
         targets += planned
+        if plan is None and carry and last_plan is not None and last_plan[0] < i:
+            sold = {t.symbol for t in planned}
+            now_held = {s: q for s, (q, _) in held.items()}
+            ended = ended_buys(om, name, str(data.dates[last_plan[0]]), str(data.dates[i]), base=last_plan[2],
+                               held=now_held)
+            more, _ = carry_targets(strategy, name, last_plan[1], now_held, data, last_plan[0], i - 1, ended)
+            more = [t for t in more if t.symbol not in sold and t.symbol not in forced]
+            targets += more
+            run.carried += [(i, t.symbol, t.shares) for t in more]
         if plan is not None:
+            last_plan = (i, [(t.symbol, int(t.shares), t.purpose) for t in planned],
+                         {s: float(q) for s, (q, _) in held.items()})
             run.skipped += plan.skipped
             run.guards += [(i, s, why) for s, why in plan.guarded.items()]
             run.basis_gaps += [(i, s) for s in plan.basis_gaps]
@@ -765,7 +890,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             if stops is not None and f.side == "buy" and (name, s) not in run.stops:
                 run.stops[(name, s)] = round(ref - protect_atr * float(data.atr20[i - 1, j]) / data.split_at(i, j),
                                              2)
-            if kind == "buy":
+            if kind in ("buy", CARRY):
                 run.opened.append((i, j, qty * ref / eq))
             elif kind == "resize" and s in led.pos:
                 run.resized.append((i, j, led.pos[s] * ref / eq))
