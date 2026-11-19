@@ -22,6 +22,8 @@ fundamentals_filings:
   sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}
   sec_earnings_8k:  {use: research_earnings_dates, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files), www.sec.gov/files/company_tickers.json, www.sec.gov/Archives/edgar/cik-lookup-data.txt",
                      note: "requests count against sec_edgar; scripts/fetch_earnings_dates.sh: about 2,000 on the first run, about 700 per --refresh; research store data/earnings, never in the live path"}
+  sec_filings_8k:   {use: research_8k_items, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files)",
+                     note: "requests count against sec_edgar (same budget, 5 req/s; SEC's fair-access limit is 10); scripts/fetch_earnings_dates.sh --all-items: about 2,000 on the first run, about 700 per --all-items --refresh; research store data/filings, never in the live path (docs/ops/filings_8k.md)"}
   finnhub_earnings_calendar: {use: research_forward_calendar, auth: key, endpoint: "/api/v1/calendar/earnings?from&to (token in X-Finnhub-Token header)",
                      note: "requests count against finnhub; 10 per daily snapshot (64 days in 7-day chunks); free-plan access confirmed by the first run, a 401/403/429 is logged as unavailable"}
   sec_spinoff_8k:   {use: research_spinoff_ratios_shadow, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files), www.sec.gov/Archives/edgar/data/{cik}/{accession}/ (8-K documents, index.json), www.sec.gov/files/company_tickers.json",

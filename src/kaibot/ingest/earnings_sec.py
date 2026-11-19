@@ -20,6 +20,12 @@ Source (checked 12 Nov 2026 on sec.gov "EDGAR Application Programming Interfaces
 What a row is NOT: Item 2.02 also covers pre-announcements and some restatements; a few companies put the release
 under Item 7.01 or 8.01 only. Rows are kept as filed; `report` marks the first 2.02 filing after a gap of at least
 `REPORT_GAP_DAYS` (the quarterly report), the others are follow-ups. Amendments (8-K/A) are not used.
+
+Every 8-K with its items (story S100, #374). The same files list every 8-K and 8-K/A of a company with its items.
+`parse_block(..., forms=ALL_FORMS, item=None)` keeps them all, a `Cache` made with the same two arguments is their
+own resume state (data/filings/sec/submissions), and `build_filings` makes the table of
+data/filings/filings_8k.parquet. The defaults are the S85 extract, unchanged: the same inputs give the same
+announcements.parquet, byte for byte. Reader and coverage report: `kaibot.ingest.filings_pit`.
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ OVERRIDES = PKG / "cik_overrides.csv"
 START = date(2016, 1, 1)
 ITEM = "2.02"
 FORMS = {"8-K"}
+ALL_FORMS = frozenset({"8-K", "8-K/A"})  # S100: every current report and its amendments
 REPORT_GAP_DAYS = 30
 SOURCE = "sec_edgar_8k_item_2.02"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/{name}"
@@ -52,6 +59,8 @@ BUDGET = "sec_edgar"
 MAX_CANDIDATES = 4  # name matches checked per unresolved company (one request each)
 COLUMNS = ["symbol", "company", "cik", "accepted_ts", "session", "last_close_before", "filing_date", "form",
            "items", "accession", "report", "source"]
+FILINGS_COLUMNS = ["symbol", "company", "cik", "accepted_ts", "session", "last_close_before", "filing_date", "form",
+                   "items", "accession"]  # S100; filing_date is what the acceptance-time check (tz_check) needs
 _CIK = re.compile(r"^\d{1,10}$")
 _ACC = re.compile(r"^\d{10}-\d{2}-\d{6}$")
 _FILE = re.compile(r"^CIK\d{10}-submissions-\d{3}\.json$")
@@ -87,9 +96,13 @@ def _parse_utc(s: object) -> datetime | None:
     return t.astimezone(UTC) if t.tzinfo else None
 
 
-def parse_block(block: object, start: date = START) -> tuple[list[Filing], list[date]]:
+def parse_block(block: object, start: date = START, forms: Iterable[str] = FORMS, item: str | None = ITEM,
+                ) -> tuple[list[Filing], list[date]]:
     """(8-K Item 2.02 filings, filing dates of periodic reports) since `start` from one columnar block
-    (`filings.recent` or an older-filings file). Malformed rows are skipped."""
+    (`filings.recent` or an older-filings file). Malformed rows are skipped.
+
+    `forms` and `item` choose what is kept: the defaults are the S85 extract; `forms=ALL_FORMS, item=None` keeps
+    every 8-K and 8-K/A whatever its items (S100), `items` exactly as filed (it may be empty)."""
     cols = ("accessionNumber", "filingDate", "acceptanceDateTime", "form", "items")
     if not isinstance(block, dict) or not all(isinstance(block.get(c), list) for c in cols):
         raise ValueError("submissions: unexpected schema")
@@ -106,9 +119,9 @@ def parse_block(block: object, start: date = START) -> tuple[list[Filing], list[
             continue
         if form in _PERIODIC:
             periodic.append(fdate)
-        if form not in FORMS or not isinstance(items, str):
+        if form not in forms or not isinstance(items, str):
             continue
-        if ITEM not in {i.strip() for i in items.split(",")}:
+        if item is not None and item not in {i.strip() for i in items.split(",")}:
             continue
         ts = _parse_utc(at)
         if not (isinstance(acc, str) and _ACC.match(acc)) or ts is None:
@@ -174,14 +187,16 @@ class Company:
         self.fetched_at, self.requests = other.fetched_at, self.requests + other.requests
 
 
-def company_from_submissions(cik: str, doc: object, older: Mapping[str, object], start: date = START) -> Company:
+def company_from_submissions(cik: str, doc: object, older: Mapping[str, object], start: date = START,
+                             forms: Iterable[str] = FORMS, item: str | None = ITEM) -> Company:
     if not isinstance(doc, dict) or str(doc.get("cik", "")).lstrip("0") != cik.lstrip("0"):
         raise ValueError(f"submissions for CIK {cik}: wrong or missing cik")
-    filings, periodic = parse_block((doc.get("filings") or {}).get("recent"), start)
+    forms = frozenset(forms)
+    filings, periodic = parse_block((doc.get("filings") or {}).get("recent"), start, forms, item)
     for name in older_files(doc, start):
         if name not in older:
             raise ValueError(f"submissions for CIK {cik}: older file {name} not fetched")
-        f, p = parse_block(older[name], start)
+        f, p = parse_block(older[name], start, forms, item)
         filings += f
         periodic += p
     uniq = {f.accession: f for f in filings}
@@ -215,12 +230,17 @@ def sec_getter(user_agent: str) -> Callable[[str], bytes]:
 
 class Cache:
     """data/earnings/sec/CIK##########.json: one small extract per CIK. A CIK with a file is never fetched again
-    unless `refresh`; files are written atomically, so a stopped run resumes where it stopped."""
+    unless `refresh`; files are written atomically, so a stopped run resumes where it stopped.
 
-    def __init__(self, root: Path, get: Callable[[str], bytes] | None):
+    `forms` and `item` are what the extract keeps (`parse_block`). An extract holds only that, so each choice
+    needs a `root` of its own: the S85 extract and the all-items extract (S100) never share a folder."""
+
+    def __init__(self, root: Path, get: Callable[[str], bytes] | None, forms: Iterable[str] = FORMS,
+                 item: str | None = ITEM):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.get = get
+        self.forms, self.item = frozenset(forms), item
         self.requests = 0
         self.errors: dict[str, str] = {}
 
@@ -248,7 +268,7 @@ class Cache:
                 self.requests += 1
             if cached is not None:
                 doc = {**doc, "filings": {"recent": (doc.get("filings") or {}).get("recent"), "files": []}}
-            fresh = company_from_submissions(cik, doc, older)
+            fresh = company_from_submissions(cik, doc, older, forms=self.forms, item=self.item)
         except Exception as e:  # noqa: BLE001  (one bad company must not stop a 700-company run)
             self.errors[cik] = f"{type(e).__name__}: {str(e)[:160]}"
             log.warning("earnings: CIK %s failed: %s", cik, self.errors[cik])
@@ -457,6 +477,33 @@ def build(m: Membership, mapping: Sequence[Mapping_], load: Callable[[str], Comp
     for c in ("session", "last_close_before", "filing_date"):
         df[c] = pd.to_datetime(df[c]).dt.date
     return df.sort_values(["company", "accepted_ts"], ignore_index=True)
+
+
+def build_filings(m: Membership, mapping: Sequence[Mapping_], load: Callable[[str], Company | None]):
+    """Every 8-K and 8-K/A since 2016 with its items (S100, #374): a pandas DataFrame with FILINGS_COLUMNS, one row
+    per filing of every mapped company. `load` reads the ALL-ITEMS extracts (a `Cache` made with
+    `forms=ALL_FORMS, item=None`). `symbol`, `session` and `last_close_before` mean what they mean in `build`."""
+    import pandas as pd
+
+    rows = []
+    for mp in mapping:
+        if not mp.cik:
+            continue
+        co = load(mp.cik)
+        if co is None:
+            continue
+        for f in co.filings:
+            d = f.accepted_ts.astimezone(nyse.ET).date()
+            rows.append({"symbol": ticker_on(m, mp.company, d), "company": mp.company, "cik": mp.cik,
+                         "accepted_ts": f.accepted_ts, "session": nyse.first_session_opening_after(f.accepted_ts),
+                         "last_close_before": nyse.last_session_closed_by(f.accepted_ts),
+                         "filing_date": f.filing_date, "form": f.form, "items": f.items,
+                         "accession": f.accession})
+    df = pd.DataFrame(rows, columns=FILINGS_COLUMNS)
+    df["accepted_ts"] = pd.to_datetime(df["accepted_ts"], utc=True)
+    for c in ("session", "last_close_before", "filing_date"):
+        df[c] = pd.to_datetime(df[c]).dt.date
+    return df.sort_values(["company", "accepted_ts", "accession"], ignore_index=True)
 
 
 def tz_check(df) -> dict:

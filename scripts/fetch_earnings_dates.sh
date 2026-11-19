@@ -8,6 +8,12 @@
 #   ./scripts/fetch_earnings_dates.sh --snapshot       only today's forward-calendar snapshot (10 Finnhub requests)
 #   ./scripts/fetch_earnings_dates.sh --install-daily  schedule --snapshot every night at 01:10 local time (launchd)
 #   ./scripts/fetch_earnings_dates.sh --status         what is stored (offline)
+# Every 8-K with its items (story S100, issue #374): a second store, data/filings/filings_8k.parquet, with every 8-K
+# and 8-K/A of the same companies since 2016. It does not touch data/earnings. See docs/ops/filings_8k.md
+#   ./scripts/fetch_earnings_dates.sh --all-items            first run: about 10-15 minutes, about 2,000 SEC requests
+#   ./scripts/fetch_earnings_dates.sh --all-items --refresh  later: every company's newest filings (~3 minutes)
+#   ./scripts/fetch_earnings_dates.sh --all-items --build    rebuild the table and the report from the cache (offline)
+#   ./scripts/fetch_earnings_dates.sh --all-items --status   what is stored (offline)
 # SEC fair access is 10 requests/s with a declared User-Agent; this uses 5/s and SEC_USER_AGENT from the .env.
 # How to read the result and how the research harness uses it: docs/ops/earnings_dates.md
 set -euo pipefail
@@ -22,6 +28,22 @@ fi
 .venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-engine.txt  # locked (uv.lock export, #122)
 export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"  # macOS python.org builds lack root certs
 mkdir -p logs data/earnings
+
+USAGE="Usage: ./scripts/fetch_earnings_dates.sh [--refresh|--snapshot|--install-daily|--status|--all-items [--refresh|--build|--status]]"
+if [ "${1:-}" = "--all-items" ]; then
+  case "${2:-}" in
+    --status|--build) exec .venv/bin/python scripts/fetch_earnings_dates.py --all-items "$2" ;;
+    --refresh|"") ;;
+    *) echo "$USAGE"; exit 2 ;;
+  esac
+  [ -f "$ENV_FILE" ] || { echo "No .env found at $ENV_FILE (set KAIBOT_ENV_FILE=/path/to/.env)"; exit 1; }
+  grep -q "^SEC_USER_AGENT=" "$ENV_FILE" || { echo "Missing SEC_USER_AGENT in $ENV_FILE ('Name email@domain')"; exit 1; }
+  awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
+  trap 'echo; echo "Stopped. Run again to resume."; exit 130' INT TERM
+  mkdir -p data/filings
+  awake .venv/bin/python scripts/fetch_earnings_dates.py --env "$ENV_FILE" --all-items ${2:+"$2"} 2>&1 | tee logs/fetch_filings_8k.log
+  exit 0  # a failed run has already left with its own exit code (set -e, pipefail)
+fi
 
 case "${1:-}" in
   --status) exec .venv/bin/python scripts/fetch_earnings_dates.py --status ;;
@@ -47,7 +69,7 @@ EOF
     echo "Scheduled: the forward-calendar snapshot runs every night at 01:10 (log: logs/earnings_calendar.log)."
     exit 0 ;;
   --snapshot|--refresh|"") ;;
-  *) echo "Usage: ./scripts/fetch_earnings_dates.sh [--refresh|--snapshot|--install-daily|--status]"; exit 2 ;;
+  *) echo "$USAGE"; exit 2 ;;
 esac
 
 [ -f "$ENV_FILE" ] || { echo "No .env found at $ENV_FILE (set KAIBOT_ENV_FILE=/path/to/.env)"; exit 1; }
