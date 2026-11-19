@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import replace
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import numpy as np
 import pytest
@@ -30,6 +30,7 @@ from kaibot.engine.daily import DailyData, momentum_limits, run_daily
 from kaibot.engine.journal import Journal
 from kaibot.engine.ledger import LEDGER_KINDS, Ledger, price_key
 from kaibot.engine.reconcile import Reconciler
+from kaibot.engine.targets import Target
 from kaibot.risk.profiles import load_profiles, rule_book_limits
 from kaibot.strategies import momentum as mom
 
@@ -722,3 +723,395 @@ def test_carry_targets_drop_what_the_pre_registration_drops(data):
     for sym, why in note["skipped"].items():
         if why.startswith("not buyable"):
             assert sell_if(gap.col(sym)) is not None
+
+
+# ---------------------------------------------------------------- #366 (QA-Ops second key): the carry-over under attack
+# The first change that buys on a session without a decision. What must hold whatever the venue or the process does:
+# held + open + new order <= the latest decision's target shares, only names of that plan, only for this run, never a
+# name that lost shares since the decision, and never past the cash or the book's caps.
+
+
+class Guarded(Harness):
+    """Checks EVERY buy the venue receives: its symbol is in the plan in force (the send of the latest decision's
+    fill session) and the venue's position + its open buys + this order is at most that plan's target shares."""
+
+    def build(self) -> None:
+        super().build()
+        if getattr(self, "_guarded", None) is not self.broker:
+            self._guarded, self.violations, real = self.broker, [], self.broker.submit
+
+            def submit(req):
+                if req.side == "buy":
+                    self.check(req)
+                return real(req)
+
+            self.broker.submit = submit
+
+    def plan_in_force(self) -> dict:
+        name = self.strategy.name
+        fills = {b["fill_session"] for *_, b in self.journal.entries(kinds=("md_decision",))
+                 if b["strategy"] == name and b["target"] is not None}
+        last = {}
+        for *_, b in self.journal.entries(kinds=("md_send",)):
+            if b["strategy"] == name and b["session"] in fills:
+                last = b
+        return last
+
+    def check(self, req) -> None:
+        target = {t[0]: int(t[1]) for t in self.plan_in_force().get("targets", []) if t[2] in ("buy", "resize")}
+        pos = float((self.broker.positions().get(req.symbol) or {}).get("qty") or 0)
+        working = sum(float(o["qty"]) - float(o.get("filled_qty") or 0) for o in self.broker.open_orders()
+                      if o["symbol"] == req.symbol and o["side"] == "buy")
+        if req.symbol not in target:
+            self.violations.append((req.client_order_id, "not in the plan in force"))
+        elif pos + working + float(req.qty) > target[req.symbol] + 1e-9:
+            self.violations.append((req.client_order_id, f"{pos} + {working} + {req.qty} > {target[req.symbol]}"))
+
+
+FILL_DAY = I0 + 2  # 2023-02-01: the fixture's first decision is filled here; the next sessions carry
+CARRY_DAY = FILL_DAY + 1
+
+
+def _guarded(data, tmp_path, crash=None):
+    s = mom.VERSIONS["trend_momentum"]
+    return s, Guarded(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path, crash=crash)
+
+
+def _carries(h):
+    return [o for o in h.broker.orders.values() if "-carry-" in o["client_order_id"]]
+
+
+def _session(h, i, *, send=True, decide=True) -> None:
+    """One session as Harness.run drives it (no crash points)."""
+    d, day = h.d, h.d.day(i)
+    h.account.recon.check("session_start")
+    h.clock.set(_at(day, time(9, 30)))
+    h.broker.advance(_at(day, time(9, 30)))
+    for minute in (49, 50, 51, 52, 53, 55, 56, 57, 58):
+        h.clock.set(_at(day, time(15, minute)))
+        h.live.sync()
+        if send:
+            h.live.send(day)
+    h.clock.set(_at(day, time(15, 59)))
+    h.broker.advance(_at(day, time(15, 59)))
+    h.clock.set(_at(day, time(16, 30)))
+    h.live.sync()
+    h.live.sync(force=True)
+    h.account.ledger.apply("mark", h.mark(i))
+    h.journal.append("mark", h.mark(i))
+    if decide:
+        h.live.after_close(d.day(i))
+
+
+def _to_the_carry_day(h, *, expire=True, sessions=None, at: time | None = time(15, 50)) -> date:
+    """Drive the run up to the 15:50 of the first carry day (`at=None`: to the evening before it); the fill day's
+    first buy expires, its second fills 1."""
+    if expire:
+        h.broker.script.hold(None, bars=None)
+        h.broker.script.fills(None, [1.0])
+    h.live.after_close(h.d.day(I0 - 1))
+    for i in range(I0, CARRY_DAY):
+        _session(h, i, **(sessions or {}).get(i, {}))
+    day = h.d.day(CARRY_DAY)
+    if at is not None:
+        h.account.recon.check("session_start")
+        h.clock.set(_at(day, at))
+    return day
+
+
+def test_no_buy_ever_exceeds_the_plan_when_a_third_of_all_orders_expire_or_fill_in_part(data, tmp_path):
+    """Every third buy of the run expires unfilled and every third fills one share, carried buys included (so they
+    are carried again). At every buy the venue receives: position + open buys + the order <= the plan's target."""
+    s, h = _guarded(data, tmp_path)
+    real, n = h.broker.submit, {"i": 0}
+
+    def submit(req):
+        n["i"] += 1
+        if req.side == "buy" and n["i"] % 3 == 0:
+            h.broker.script.hold(req.symbol, bars=None)
+        elif req.side == "buy" and n["i"] % 3 == 1:
+            h.broker.script.fills(req.symbol, [1.0])
+        return real(req)
+
+    h.broker.submit = submit
+    h.run()
+    assert h.violations == [] and len(_carries(h)) > 20
+    sends = {b["session"]: b for *_, b in h.journal.entries(kinds=("md_send",))}
+    fills = sorted({b["fill_session"] for *_, b in h.journal.entries(kinds=("md_decision",))
+                    if b["target"] is not None})
+    for a, nxt in zip(fills, [*fills[1:], "9999"], strict=True):  # per decision: bought <= target - held then
+        for sym, q, p, _ in sends[a]["targets"]:
+            got = sum(float(f["qty"]) for f in h.broker.fills if f["symbol"] == sym and f["side"] == "buy"
+                      and a <= f["transaction_time"][:10] < nxt)
+            assert p not in ("buy", "resize") or got <= q, (a, sym, got, q)
+    for b in sends.values():  # a carry only between decisions, of the latest decision, and only names of its plan
+        if b.get("carry"):
+            assert b["session"] not in fills
+            assert b["carry"]["of"] == max(f for f in fills if f < b["session"])
+            plan = {t[0] for t in sends[b["carry"]["of"]]["targets"] if t[2] in ("buy", "resize")}
+            assert {c[0] for c in b["carry"]["carried"]} <= plan
+            assert {t[0] for t in b["targets"] if t[2] == "carry"} <= plan
+
+
+@pytest.mark.parametrize("where", ["after_decision", "after_send", "before_booking"])
+def test_a_restart_on_a_carry_day_sends_each_carried_buy_once(data, tmp_path, where):
+    """The process is killed and rebuilt from the journal on three sessions after the fill day: before the window,
+    between the carried order and its fill, and between the fill and its booking."""
+    s, h = _guarded(data, tmp_path, crash={where: {CARRY_DAY, CARRY_DAY + 1, CARRY_DAY + 2}})
+    h.broker.script.hold(None, bars=None)
+    h.broker.script.fills(None, [1.0])
+    h.run()
+    assert h.restarts == 3 and h.violations == []
+    assert len(_carries(h)) == 2 and {o["status"] for o in _carries(h)} == {"filled"}
+    booked = [b for *_, b in h.journal.entries(kinds=("fill",))]
+    assert len(booked) == len(h.broker.fills) == len({b["activity"] for b in booked})
+
+
+@pytest.mark.parametrize("when", ["before_venue", "after_venue"])
+def test_a_crash_inside_the_carry_send_sends_nothing_twice(data, tmp_path, when):
+    """The process dies in the target loop of a carry day, before or after the venue got the first carried order."""
+    s, h = _guarded(data, tmp_path)
+    h.broker.script.hold(None, bars=None)
+    h.broker.script.fills(None, [1.0])
+    real, seen = h.broker.submit, {"crashed": False}
+
+    def submit(req):
+        if "-carry-" in req.client_order_id and not seen["crashed"]:
+            seen["crashed"] = True
+            if when == "after_venue":
+                real(req)
+            raise Crash()
+        return real(req)
+
+    h.broker.submit = submit
+    h.run()
+    assert seen["crashed"] and h.restarts == 1 and h.violations == []
+    plan = {t[0]: t[1] for t in next(b for *_, b in h.journal.entries(kinds=("md_send",))
+                                     if b["session"] == str(data.day(FILL_DAY)))["targets"]}
+    week = str(data.day(FILL_DAY + 4))
+    for sym, q in plan.items():
+        got = sum(float(f["qty"]) for f in h.broker.fills if f["symbol"] == sym and f["side"] == "buy"
+                  and f["transaction_time"][:10] <= week)
+        assert got == q, (sym, got, q)  # each name at its target, once
+
+
+def test_a_fill_the_ledger_has_not_booked_yet_is_not_bought_again_by_the_carry(data, tmp_path):
+    """#337 across sessions: a buy of the fill day reads `filled` at the venue, but its FILL activity is not listed
+    until after the next session's window. The ledger holds 0, so `target - held` is the whole order again. The
+    carry-over waits for the booking (the order manager knows the venue's filled quantity), also with the
+    reconciliation's own block switched off here to show it does not depend on it."""
+    s, h = _guarded(data, tmp_path)
+    real_act, real_submit = h.broker.activities, h.broker.submit
+    hide = {"sym": None, "until": _at(data.day(CARRY_DAY), time(16, 20))}
+
+    def submit(req):
+        o = real_submit(req)
+        hide["sym"] = hide["sym"] or o["symbol"]
+        return o
+
+    h.broker.submit = submit
+    h.broker.activities = lambda *a, **k: [r for r in real_act(*a, **k)
+                                           if h.clock() >= hide["until"] or r.get("symbol") != hide["sym"]]
+    h.live.after_close(data.day(I0 - 1))
+    for i in range(I0, CARRY_DAY + 2):
+        h.account.recon.allows = lambda *a, **k: None
+        _session(h, i)
+    sym = hide["sym"]
+    sends = {b["session"]: b for *_, b in h.journal.entries(kinds=("md_send",))}
+    q = {t[0]: t[1] for t in sends[str(data.day(FILL_DAY))]["targets"]}[sym]
+    assert sends[str(data.day(CARRY_DAY))]["carry"]["skipped"] == {
+        sym: "a fill the venue reported is not booked yet"}
+    assert h.violations == [] and not _carries(h)
+    assert sum(float(f["qty"]) for f in h.broker.fills if f["symbol"] == sym and f["side"] == "buy") == q
+    assert h.account.held(s.name)[sym][0] == q  # booked once it was listed; nothing more was wanted
+
+
+def test_a_new_run_never_buys_the_old_runs_plan(data, tmp_path):
+    """The owner starts a new run after the decision's fill day (the old one is flattened first). The old run's
+    plan was sized on the old run's equity: the new run carries nothing of it and waits for its own decision."""
+    s, h = _guarded(data, tmp_path)
+    day = _to_the_carry_day(h)
+    assert h.live._plan(h.live.rules[0], day, RID)["carry"]["carried"]  # the same run: it would carry
+    h.journal.append("run", {"run_id": 2, "amount": 10_000.0})
+    h.account.ledger.apply("run", {"run_id": 2, "amount": 10_000.0})
+    h.account.run_id = lambda: 2
+    try:
+        type(h.account).book = property(lambda self: self.ledger.book(2))
+        planned = h.live._plan(h.live.rules[0], day, 2)
+    finally:
+        type(h.account).book = property(lambda self: self.ledger.book(RID))
+    assert planned["targets"] == [] and "carry" not in planned
+
+
+def test_a_name_an_emergency_stop_sold_since_the_decision_is_not_bought_back(data, tmp_path):
+    """The engine is down after the fill day; the watchdog puts an emergency stop on a held name and it fills. Back
+    up, the engine adopts the stop and books the sale. The name is "sold since the decision": the carry-over leaves
+    it to the next decision (the amendment's order-history rule), whatever order sold it."""
+    from kaibot.broker.protocol import OrderRequest
+    from kaibot.engine.watchdog import failsafe_coid
+
+    s, h = _guarded(data, tmp_path)
+    day = _to_the_carry_day(h, at=None)
+    held = h.account.held(s.name)
+    sym = sorted(x for x in held if held[x][0] > 1)[0]
+    h.clock.set(_at(day, time(9, 0)))
+    px = float(data.raw_c[CARRY_DAY - 1, data.col(sym)])
+    h.broker.submit(OrderRequest(sym, "sell", held[sym][0], "stop", "gtc", failsafe_coid(s.name, sym, h.clock()),
+                                 stop_price=px * 2))  # far above the market: it fills at the next bar
+    for t in (time(9, 30), time(12, 0)):
+        h.clock.set(_at(day, t))
+        h.broker.advance(_at(day, t))
+    assert sym not in h.broker.positions()
+    h.restart()
+    h.account.recon.check("session_start")
+    assert sym not in h.account.held(s.name)  # the sale is booked
+    h.clock.set(_at(day, time(15, 50)))
+    note = h.live._plan(h.live.rules[0], day, RID)["carry"]
+    assert note["skipped"][sym] == "sold since the decision" and sym not in {c[0] for c in note["carried"]}
+    assert note["carried"]  # the names the venue left short are still carried
+
+
+def test_nothing_is_carried_without_the_decisions_own_send_or_without_last_evenings_record(data, tmp_path):
+    """Engine down on the decision's fill day (no `md_send` of it): nothing is carried on the days after, the buys
+    wait for the next decision. Engine down in the evening (no record for the next session): nothing either."""
+    (tmp_path / "a").mkdir()
+    s, h = _guarded(data, tmp_path / "a")
+    day = _to_the_carry_day(h, expire=False, sessions={FILL_DAY: {"send": False}})
+    assert h.broker.orders == {}
+    assert h.live._plan(h.live.rules[0], day, RID) == {"run_id": RID, "strategy": s.name, "session": str(day),
+                                                      "decided": str(data.day(FILL_DAY)), "targets": []}
+    (tmp_path / "b").mkdir()
+    s, h = _guarded(data, tmp_path / "b")
+    day = _to_the_carry_day(h, sessions={FILL_DAY: {"decide": False}})
+    planned = h.live._plan(h.live.rules[0], day, RID)
+    assert planned["targets"] == [] and planned.get("note") == "no decision" and "carry" not in planned
+
+
+def test_once_a_newer_decision_exists_nothing_of_the_older_plan_is_carried(data, tmp_path):
+    """The next decision ends the carry-over, also when that decision's own send never happened (engine down in its
+    window): the older plan's short buys are not picked up again; they are the newer decision's business."""
+    s, h = _guarded(data, tmp_path)
+    _to_the_carry_day(h, at=None)
+    _session(h, CARRY_DAY, send=False)  # nothing was carried that day: both names are still short
+    day, rule = data.day(CARRY_DAY + 1), h.live.rules[0]
+    h.account.recon.check("session_start")
+    h.clock.set(_at(day, time(15, 50)))
+    assert len(h.live._plan(rule, day, RID)["carry"]["carried"]) == 2  # the latest decision's plan: carried
+    first = next(b for *_, b in h.journal.entries(kinds=("md_decision",)) if b["target"] is not None)
+    h.journal.append("md_decision", {**first, "session": str(data.day(FILL_DAY)),
+                                     "fill_session": str(data.day(CARRY_DAY))})  # a newer decision, never sent
+    planned = h.live._plan(rule, day, RID)
+    assert planned["targets"] == [] and "carry" not in planned
+
+
+def test_a_stock_the_rule_could_not_buy_at_the_last_close_is_not_carried(data):
+    """Section 2's "Not buyable" (below its 100-day average, a 15% move), read at the previous close: the reason is
+    in the note. Found on the fixture: a session where one stock is buyable and another is not."""
+    from kaibot.engine import daily
+
+    s = mom.VERSIONS["trend_momentum"]
+    for k in range(I0, I1):
+        sell_if = s.signals(data.view(k))[2]
+        ok = [x for x in data.symbols[:60] if np.isfinite(data.raw_c[k - 1, data.col(x)])]
+        bad = [x for x in ok if sell_if(data.col(x)) is not None]
+        good = [x for x in ok if sell_if(data.col(x)) is None]
+        if bad and good and daily.market_on(data.view(k).close(daily.SMA_MARKET)[:, data.view(k).spy]):
+            break
+    else:
+        pytest.fail("the fixture has no such session")
+    out, note = daily.carry_targets(s, s.name, [(good[0], 7, "buy"), (bad[0], 7, "buy")], {}, data, k - 1, k, {})
+    assert [(t.symbol, t.shares, t.purpose) for t in out] == [(good[0], 7, "carry")]
+    assert note["skipped"] == {bad[0]: f"not buyable: {sell_if(data.col(bad[0]))}"}
+    assert note["carried"] == [[good[0], 7, 0.0]] and note["risk_off"] is False
+
+
+def test_a_carried_buy_must_still_fit_the_cash_and_the_books_caps_at_the_last_close(data, tmp_path):
+    """A carried buy keeps the plan's shares, sized at the decision's prices against that day's cash, and the paper
+    account lends rather than refuses. So at the previous close it must fit: the cash less the 3% reserve, the
+    book's exposure cap, the per-name cap, the sector cap. Best-ranked first; what does not fit is journalled with
+    its reason and tried again at the next session."""
+    s, h = _guarded(data, tmp_path)
+    day = _to_the_carry_day(h)
+    rule = h.live.rules[0]
+    base = h.live._plan(rule, day, RID)["carry"]
+    (a, qa, ha), (b, qb, hb) = base["carried"]
+    k = CARRY_DAY - 1
+    cost = {x: (q - held) * float(data.raw_c[k, data.col(x)]) for x, q, held in base["carried"]}
+    eq, real_cash = h.account.equity(), h.account.cash
+    try:
+        # 1. cash: room for the first name only (the intraday rule holds the rest at 15:50, or prices rose)
+        h.account.cash = lambda: 0.03 * eq + cost[a] + 1.0
+        note = h.live._plan(rule, day, RID)["carry"]
+        assert [c[0] for c in note["carried"]] == [a]
+        assert note["skipped"] == {b: "no cash room at the last close (the cash reserve is kept)"}
+        # 2. no cash at all: nothing is carried, both are journalled, and the event says so
+        h.account.cash = lambda: 0.0
+        n0 = len(h.events)
+        planned = h.live._plan(rule, day, RID)
+        assert planned["targets"] == [] and set(planned["carry"]["skipped"]) == {a, b}
+        assert [body["skipped"] for kind, body in h.events[n0:] if kind == "multi_day_carry"] == [
+            planned["carry"]["skipped"]]
+    finally:
+        h.account.cash = real_cash
+    # 3. the caps, on the same book: per-name, sector, exposure
+    lim = rule.builder.limits
+    held = h.account.held(s.name)
+    carry = [Target(s.name, a, qa, "carry"), Target(s.name, b, qb, "carry")]
+    assert h.live._carry_room(rule, data.day(k), carry, held) == {}
+    worth_of = {x: q * float(data.raw_c[k, data.col(x)]) for x, q in ((a, qa), (b, qb))}
+    big = max(worth_of, key=worth_of.get)
+    tight = ld.Rule(s, dataclasses.replace(rule.builder, limits=replace(
+        lim, max_name_pct=sum(worth_of.values()) / 2 / eq * 100)))  # between the two positions' worth
+    assert h.live._carry_room(tight, data.day(k), carry, held) == {big: "above the per-name cap at the last close"}
+    worth = sum(q * m for q, m in held.values())
+    full = ld.Rule(s, dataclasses.replace(rule.builder, limits=replace(
+        lim, max_gross_pct=(worth + cost[a]) / eq * 100 + 0.01)))
+    assert h.live._carry_room(full, data.day(k), carry, held) == {
+        b: "the book is at its exposure cap at the last close"}
+    sector = replace(data, sector={x: "one" for x in data.symbols})
+    h.live._data = {data.day(k): ld.as_of(sector, k)}
+    one = ld.Rule(s, dataclasses.replace(rule.builder, limits=replace(
+        lim, max_sector_pct=(worth + cost[a]) / eq * 100 + 0.01)))
+    assert h.live._carry_room(one, data.day(k), carry, held) == {
+        b: "its sector is at the sector cap at the last close"}
+    # 4. a book that cannot be valued carries nothing
+    h.account.equity = lambda: float("nan")
+    assert set(h.live._carry_room(rule, data.day(k), carry, held)) == {a, b}
+
+
+def test_a_failing_carry_never_holds_back_the_sessions_sales_and_is_one_event(data, tmp_path):
+    """Whatever goes wrong inside the carry-over, the session's send is still planned (its pending sales go out),
+    nothing is carried, and the failure is an event and in the journalled send."""
+    s, h = _guarded(data, tmp_path)
+    day = _to_the_carry_day(h)
+    rule = h.live.rules[0]
+    sale = Target(s.name, "ZZZ", 0, "sell", {"why": "pending"})
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.setattr(ld, "plan_session", lambda *a, **k: (None, [sale]))
+        monkey.setattr(h.live, "_carry_room", lambda *a, **k: 1 / 0)
+        planned = h.live._plan(rule, day, RID)
+    finally:
+        monkey.undo()
+    assert planned["targets"] == [["ZZZ", 0, "sell", "pending"]]
+    assert planned["carry"]["carried"] == [] and "ZeroDivisionError" in planned["carry"]["error"]
+    assert [body["step"] for kind, body in h.events if kind == "multi_day_error"] == ["carry"]
+
+
+def test_a_carried_buy_has_its_row_for_the_fail_safes_before_the_venue_gets_the_order(data, tmp_path):
+    """#342 for a carried buy: the account's `before_send` hook (the engine writes today's ledger_position rows
+    from it) gets each carried buy at its target shares before the first carried order reaches the venue."""
+    s, h = _guarded(data, tmp_path)
+    seen: list = []
+    h.account.before_send = lambda rule, session, planned: seen.append(
+        (str(session), dict(planned), len(_carries(h))))
+    h.broker.script.hold(None, bars=None)
+    h.broker.script.fills(None, [1.0])
+    h.live.after_close(data.day(I0 - 1))
+    for i in range(I0, CARRY_DAY + 1):
+        _session(h, i)
+    (fill_day, plan, _), (carry_day, carried, sent_before) = seen
+    x, y = _first_orders(h)
+    assert fill_day == str(data.day(FILL_DAY)) and carry_day == str(data.day(CARRY_DAY))
+    assert carried == {x["symbol"]: plan[x["symbol"]], y["symbol"]: plan[y["symbol"]]} and sent_before == 0
+    assert len(_carries(h)) == 2

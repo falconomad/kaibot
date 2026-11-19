@@ -338,40 +338,71 @@ def plan_session(builder: PortfolioBuilder, tl: TargetList | None, name: str,
 # ---------------------------------------------------------------- #363: the latest decision's buys, carried over
 
 CARRY = "carry"  # the purpose of a carried buy (its client ids say `-carry-`)
-NOT_CARRIED = ("canceled", "rejected", "sold")  # a buy is not sent again after these
+UNBOOKED = "unbooked"  # a finished buy whose fill the venue reported and the ledger has not booked yet
+NOT_CARRIED = ("canceled", "rejected", "sold", UNBOOKED)  # a buy is not sent again after these
 
 
-def ended_buys(om: OrderManager, strategy: str, since: str, before: str) -> dict[str, str]:
+def ended_buys(om: OrderManager, strategy: str, since: str, before: str, *,
+               base: Mapping[str, float] | None = None, held: Mapping[str, float] | None = None) -> dict[str, str]:
     """symbol -> how the last buy order of `strategy` from session `since` up to (not including) `before` ended
     (the order manager's state word), oldest first so the latest wins; "sold" when any sale of the symbol went out
     in that time (a forced sale before a disputed split, a sale pending from the decision): such a name is never
     bought back before the next decision. An order refused as `lost` (it never reached the venue) does not count:
-    it is sent again under a new attempt."""
+    it is sent again under a new attempt.
+
+    QA-Ops on #366:
+    - `base` (shares held when the plan was made) and `held` (shares held now): a sleeve that holds less than its
+      base plus what the plan's buys have booked since has lost shares since the decision, by whatever path (a
+      protective stop, the watchdog's or the dead-man's emergency stop, a flatten, a sale the owner accepted): it
+      is "sold" too, and not bought back before the next decision. Without `base` only the orders are read;
+    - a protective or fail-safe stop (purpose `stop`, adopted by the manager) counts as a sale once it SOLD
+      shares, up to and including `before` (a stop adopted at this morning's restart carries today's session): a
+      resting stop is no sale, a filled one is;
+    - "unbooked" when a finished buy of that time filled shares at the venue that the ledger has not booked yet
+      (`cum` above `booked`, the #337 case across sessions): `held` does not know those shares, so the difference
+      to the target must not be sent again until they are booked."""
     out: dict[str, str] = {}
     sold: set[str] = set()
+    unbooked: set[str] = set()
+    bought: dict[str, float] = {}
     for r in sorted(om.orders.values(), key=lambda r: (r.session, r.created or "")):
-        if r.strategy != strategy or r.purpose == "stop" or not (since <= r.session < before):
+        if r.strategy != strategy:
             continue
         if r.side == "sell":
-            sold.add(r.symbol)
+            if r.purpose == "stop":
+                if since <= r.session <= before and r.booked > 1e-9:
+                    sold.add(r.symbol)
+            elif since <= r.session < before:
+                sold.add(r.symbol)
             continue
+        if r.purpose == "stop" or not (since <= r.session < before):
+            continue
+        bought[r.symbol] = bought.get(r.symbol, 0.0) + r.booked
+        if not r.open and r.cum > r.booked + 1e-9:
+            unbooked.add(r.symbol)
         if r.state is St.REJECTED and str(r.reason or "").startswith("lost"):
             continue
         out[r.symbol] = str(r.state)
-    return {**out, **{s: "sold" for s in sold}}
+    if base is not None and held is not None:
+        for sym in set(base) | set(bought):
+            if float(held.get(sym, 0.0)) + 1e-6 < float(base.get(sym, 0.0)) + bought.get(sym, 0.0):
+                sold.add(sym)
+    return {**out, **{s: UNBOOKED for s in unbooked}, **{s: "sold" for s in sold}}
 
 
 def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], held: Mapping[str, float],
                   data: DailyData, fill_i: int, k: int, ended: Mapping[str, str]) -> tuple[list[Target], dict]:
-    """#363 (trend_momentum.md Amendment 11, mom_12_1_band.md Amendment 9), shared by the research runner and the
-    live daily path. Between two decisions, each session sends again what the latest decision's buys still lack:
+    """#363 (trend_momentum.md Amendments 11 and 12, mom_12_1_band.md Amendments 9 and 10), shared by the research
+    runner and the live daily path. Between two decisions, each session sends again what the latest decision's buys
+    still lack:
     `plan` is that decision's targets [(symbol, shares, purpose)] as sent on its fill session `fill_i`; `held` the
     shares held now; `data` the daily bars up to the previous close `k`; `ended` how each symbol's last buy order
     since the fill session ended (`ended_buys`). A buy or resize increase is carried at the plan's own target
     shares (the target loop sends target - held - open: never above the target, the plan is never re-sized), unless:
     - SPY closed below its 200-day average at k (section 2: new buys only while the market filter is on);
     - the stock had no bar on the fill day (section 4: such a buy is dropped);
-    - its last order was cancelled or refused by the venue, or it was sold since (never sent again);
+    - its last order was cancelled or refused by the venue, or it was sold since (never sent again), or a fill of
+      it is not booked yet (`ended_buys`);
     - the rule could not buy it at k (below its 100-day average, a 15% move: section 2's "Not buyable");
     - it split since the fill session (the plan's shares are on the old basis; the next decision sizes it again).
     Returns the carried targets and the note the send journals (`of`, `carried`, `skipped`, `risk_off`)."""
@@ -393,6 +424,7 @@ def carry_targets(strategy, name: str, plan: Sequence[tuple[str, int, str]], hel
         why = ("not in the daily view" if j is None else
                "no bar on the fill day" if not math.isfinite(float(data.raw_c[fill_i, j])) else
                "sold since the decision" if state == "sold" else
+               "a fill the venue reported is not booked yet" if state == UNBOOKED else
                f"order {state}" if state in NOT_CARRIED else
                "split since the decision" if any(data.split_at(t, j) != 1.0 for t in range(fill_i + 1, k + 1))
                else None)
@@ -725,7 +757,8 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
                                 "ledger_cash0": float(equity0), "broker_cash": broker.cash,
                                 "broker_cash0": float(equity0), "equity": led.equity}, om.journal)
     pending: dict[str, str] = {}
-    last_plan: tuple[int, list[tuple[str, int, str]]] | None = None  # #363: the latest decision's fill session
+    # #363: the latest decision's fill session, its targets and the shares held when they were planned
+    last_plan: tuple[int, list[tuple[str, int, str]], dict[str, float]] | None = None
     exits_on: dict[int, list[int]] = {}
     for j, sessions in data.exits.items():
         for s in sessions:
@@ -806,14 +839,16 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         targets += planned
         if plan is None and carry and last_plan is not None and last_plan[0] < i:
             sold = {t.symbol for t in planned}
-            ended = ended_buys(om, name, str(data.dates[last_plan[0]]), str(data.dates[i]))
-            more, _ = carry_targets(strategy, name, last_plan[1], {s: q for s, (q, _) in held.items()}, data,
-                                    last_plan[0], i - 1, ended)
+            now_held = {s: q for s, (q, _) in held.items()}
+            ended = ended_buys(om, name, str(data.dates[last_plan[0]]), str(data.dates[i]), base=last_plan[2],
+                               held=now_held)
+            more, _ = carry_targets(strategy, name, last_plan[1], now_held, data, last_plan[0], i - 1, ended)
             more = [t for t in more if t.symbol not in sold and t.symbol not in forced]
             targets += more
             run.carried += [(i, t.symbol, t.shares) for t in more]
         if plan is not None:
-            last_plan = (i, [(t.symbol, int(t.shares), t.purpose) for t in planned])
+            last_plan = (i, [(t.symbol, int(t.shares), t.purpose) for t in planned],
+                         {s: float(q) for s, (q, _) in held.items()})
             run.skipped += plan.skipped
             run.guards += [(i, s, why) for s, why in plan.guarded.items()]
             run.basis_gaps += [(i, s) for s in plan.basis_gaps]

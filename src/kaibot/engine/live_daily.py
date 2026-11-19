@@ -38,7 +38,18 @@ at the close"); on 18 Nov 2026 23 of 30 `cls` buys got nothing. A DAY market ord
 fill, and a partial fill's remainder is worked again while the order is marketable. The research venue fills it at
 the closing print at cost model v1, as it did the `cls` order (SimBroker `near_close`), so the fills of the ten-year
 runs do not change (Amendment 10 of trend_momentum, Amendment 8 of mom_12_1_band). A remainder that still expires is
-never sent again: a buy waits for the rule's next decision, a sale is sent again at the next session.
+not sent again that session; a sale is sent again at the next session, and so is a buy (below).
+
+Carry-over (issue #363; Amendments 11 and 12 of trend_momentum, 9 and 10 of mom_12_1_band). On a session that is not a
+decision's fill session, `send` plans again what the latest decision's buys still lack: the plan's own target shares
+(`md_send` of the fill session, of this run) less the shares held, through the same target loop, so never above the
+target. Left out, each with its reason in `md_send.carry.skipped` and the `multi_day_carry` event: while the market
+filter is off, a stock the rule could not buy now, one without a bar on the fill day, one whose last order the venue
+cancelled or refused, one that lost shares since the decision (by any path), one with a fill not booked yet, a split,
+an announced corporate action, the overnight cap, and whatever does not fit the cash less the reserve or the book's
+caps at the previous close (`_carry_room`: the paper account lends, so the engine checks). A failure in the carry-over
+carries nothing and never holds back the session's sales. No decision record for the session, no send of the
+decision, or no daily view of the previous close: nothing is carried that session.
 
 Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
 every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the
@@ -88,6 +99,7 @@ import pandas as pd
 
 from kaibot.broker.protocol import Broker
 from kaibot.engine.daily import (
+    CARRY,
     CASH_RESERVE,
     DailyData,
     carry_targets,
@@ -1192,17 +1204,31 @@ class LiveDaily:
             plan, targets = plan_session(r.builder, None, r.name, {}, pending, None, 0, 0.0, 0.0)
             if dec is None:  # no decision was taken after the last close: nothing is carried on an old plan
                 return self._planned(r, session, rid, prev, targets, None)
-            carry, note = self._carry(r, session, prev, held, {t.symbol for t in targets})
-            if not carry:
-                return {**self._planned(r, session, rid, prev, targets, None), **({"carry": note} if note else {})}
-            targets = self._overnight_cut(r, session, targets + carry, held)
-            targets, ca = self._ca_cut(r.name, session, prev, targets, held)
-            kept = {t.symbol for t in targets}
-            note = {**note, "carried": [c for c in note["carried"] if c[0] in kept]}
-            for sym in sorted({t.symbol for t in carry} - kept):
-                note["skipped"][sym] = "corporate action or overnight cap"
-            self.event("multi_day_carry", {"strategy": r.name, "session": str(session), **note})
-            return {**self._planned(r, session, rid, prev, targets, None), **ca, "carry": note}
+            sales = list(targets)  # the pending sales: they go out whatever happens to the carry-over
+            ca: dict = {}
+            try:
+                carry, note = self._carry(r, session, rid, prev, held, {t.symbol for t in sales})
+                if carry:
+                    targets = self._overnight_cut(r, session, sales + carry, held)
+                    targets, ca = self._ca_cut(r.name, session, prev, targets, held)
+                    kept = {t.symbol for t in targets}
+                    for sym in sorted({t.symbol for t in carry} - kept):
+                        note["skipped"][sym] = "corporate action or overnight cap"
+                    for sym, why in self._carry_room(r, prev, [t for t in targets if t.purpose == CARRY],
+                                                     held).items():
+                        note["skipped"][sym] = why
+                    targets = [t for t in targets if t.purpose != CARRY or t.symbol not in note["skipped"]]
+                    kept = {t.symbol for t in targets if t.purpose == CARRY}
+                    note = {**note, "carried": [c for c in note["carried"] if c[0] in kept]}
+            except Exception as e:  # QA-Ops on #366: a failed carry-over never holds back the session's sales
+                log.exception("carry-over failed: nothing is carried this session")
+                why = f"{type(e).__name__}: {e}"[:200]
+                self.event("multi_day_error", {"step": "carry", "strategy": r.name, "session": str(session),
+                                               "error": why})
+                targets, ca, note = sales, {}, {"carried": [], "skipped": {}, "risk_off": False, "error": why}
+            if note:  # every carry-over and every skip, with its reason (also when nothing is carried)
+                self.event("multi_day_carry", {"strategy": r.name, "session": str(session), **note})
+            return {**self._planned(r, session, rid, prev, targets, None), **ca, **({"carry": note} if note else {})}
         try:
             data = self._view(prev, self.now())
         except DataNotReady as e:  # the evening's view went away (store moved): only the pending sales
@@ -1250,37 +1276,113 @@ class LiveDaily:
                                                    "not_bought": [t.symbol for t in cut][:30]})
         return [t for t in targets if t not in cut]
 
-    def _carry(self, r: Rule, session: date, prev: date, held: Mapping[str, tuple[float, float | None]],
-               busy: set[str]) -> tuple[list[Target], dict]:
+    def _carry(self, r: Rule, session: date, rid: int, prev: date,
+               held: Mapping[str, tuple[float, float | None]], busy: set[str]) -> tuple[list[Target], dict]:
         """#363 (trend_momentum Amendment 11, mom_12_1_band Amendment 9): on a session that is not a decision's fill
         session, the latest decision's buys that are still short of their targets (engine/daily.carry_targets, the
         research runner's core). The plan is that decision's journalled send (`md_send` of its fill session: after
         the review, the corporate-action guard and the overnight cap of that day). The evening's daily view gives
-        the market filter, the fill day's bar and the rule's buy conditions; without it nothing is carried."""
+        the market filter, the fill day's bar and the rule's buy conditions; without it nothing is carried.
+
+        QA-Ops on #366: only a decision and a send of THIS run count (a plan's share counts were sized on its own
+        run's equity: a new run started since never buys the old run's plan); a stock the ledger booked a split
+        for today is skipped (the plan's shares are on yesterday's basis); the shares held at the decision go to
+        `ended_buys`, so a name that lost shares since (an emergency stop that fired while the engine was down) is
+        not bought back."""
         last = None
         for b in self._entries("md_decision"):
-            if b.get("strategy") == r.name and b.get("target") is not None and b.get("fill_session") < str(session):
+            if b.get("run_id") == rid and b.get("strategy") == r.name and b.get("target") is not None \
+                    and b.get("fill_session") < str(session):
                 last = b
         plan_send = self._send_entry(r.name, date.fromisoformat(last["fill_session"])) if last else None
-        if plan_send is None or self.om is None:
+        if plan_send is None or plan_send.get("run_id") != rid or self.om is None:
             return [], {}
+        now_held = {s: float(q) for s, (q, _) in held.items()}
         plan = [(s, int(q), p) for s, q, p, _ in plan_send["targets"] if s not in busy]
-        if not any(p in ("buy", "resize") and q > float(held.get(s, (0.0, None))[0]) for s, q, p in plan):
+        if not any(p in ("buy", "resize") and q > now_held.get(s, 0.0) for s, q, p in plan):
             return [], {}
+        note = {"of": last["fill_session"], "carried": [], "skipped": {}, "risk_off": False}
         try:
             data = self._view(prev, self.now())
         except DataNotReady as e:
             self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
                                              "why": ("no carry-over: " + str(e))[:200]})
-            return [], {"of": last["fill_session"], "carried": [], "skipped": {}, "risk_off": False,
-                        "unread": str(e)[:200]}
-        plan = [x for x in plan if x[0] not in data.dropped]
+            return [], {**note, "unread": str(e)[:200]}
+        short = {s for s, q, p in plan if p in ("buy", "resize") and q > now_held.get(s, 0.0)}
+        early = {s: "daily prices failed the check" for s in short if s in data.dropped}
+        splits = self.account.splits(session)
+        early.update({s: "split today" for s in short if s in splits})
+        plan = [x for x in plan if x[0] not in early]
         fill = date.fromisoformat(last["fill_session"])
         if fill not in set(data.dates.astype(object)):
             return [], {}
-        ended = ended_buys(self.om, r.name, str(fill), str(session))
-        return carry_targets(r.strategy, r.name, plan, {s: q for s, (q, _) in held.items()}, data,
-                             data.index_of(fill), data.index_of(prev), ended)
+        ended = ended_buys(self.om, r.name, str(fill), str(session),
+                           base={s: float(q) for s, q in (last.get("held") or {}).items()}, held=now_held)
+        out, got = carry_targets(r.strategy, r.name, plan, now_held, data, data.index_of(fill),
+                                 data.index_of(prev), ended)
+        note = {**note, **got}
+        if early:
+            if note["risk_off"]:
+                early = {s: "market filter off" for s in early}
+            note["skipped"] = {**note["skipped"], **early}
+        return out, note
+
+    def _carry_room(self, r: Rule, prev: date, carry: Sequence[Target],
+                    held: Mapping[str, tuple[float, float | None]]) -> dict[str, str]:
+        """QA-Ops on #366: a carried buy keeps the plan's share count, which was sized at the decision's prices and
+        against that day's cash. Nothing downstream sizes it again, and the paper account is a margin account (the
+        venue lends, it does not refuse). So before a carried buy goes out it must still fit at the previous close,
+        as a decision-day buy must in the builder: the per-name cap, its sector's cap, the cash less the builder's
+        reserve, and the book's gross and overnight cap with the cash floor. Best-ranked first (the plan's order);
+        as in the ranked fill, a name over its own or its sector's cap is skipped and the next may fit, and once
+        the cash or the book's cap is reached buying stops. Returns symbol -> why it is not sent this session (it
+        is tried again at the next). Only ever removes a buy; a book that cannot be valued carries nothing."""
+        if not carry:
+            return {}
+        lim = r.builder.limits
+        eq, cash = float(self.account.equity()), float(self.account.cash())
+        if not (math.isfinite(eq) and eq > 0 and math.isfinite(cash)):
+            return {t.symbol: "the book's equity or cash cannot be read" for t in carry}
+        data = self._view(prev, self.now())
+        k, tol = data.index_of(prev), 1e-9 * eq
+
+        def close(sym: str) -> float:
+            j = data._col.get(sym)
+            return float(data.px[k, j]) if j is not None else math.nan
+
+        def bucket(sym: str) -> str:
+            return data.sector.get(sym) or f"own:{sym}"  # a stock without a sector is its own (Amendment 4)
+
+        exposure, used = 0.0, {}
+        for sym, (q, mark) in held.items():
+            px = float(mark) if mark is not None and math.isfinite(float(mark)) and float(mark) > 0 else close(sym)
+            if not (math.isfinite(px) and px > 0):
+                return {t.symbol: f"the book cannot be valued (no price for {sym})" for t in carry}
+            exposure += float(q) * px
+            used[bucket(sym)] = used.get(bucket(sym), 0.0) + float(q) * px
+        money = cash - float(r.builder.cash_reserve or 0.0) * eq
+        cap = eq * min(lim.max_gross_pct, lim.max_overnight_pct, 100 - lim.min_cash_pct) / 100
+        out: dict[str, str] = {}
+        stopped: str | None = None
+        for t in carry:
+            px, have = close(t.symbol), float(held.get(t.symbol, (0.0, None))[0])
+            add = (t.shares - have) * px
+            if stopped is not None:
+                out[t.symbol] = stopped
+            elif not (math.isfinite(px) and px > 0):
+                out[t.symbol] = "no price at the last close"
+            elif t.shares * px > eq * lim.max_name_pct / 100 + tol:
+                out[t.symbol] = "above the per-name cap at the last close"
+            elif used.get(bucket(t.symbol), 0.0) + add > eq * lim.max_sector_pct / 100 + tol:
+                out[t.symbol] = "its sector is at the sector cap at the last close"
+            elif add > money + tol:
+                out[t.symbol] = stopped = "no cash room at the last close (the cash reserve is kept)"
+            elif exposure + add > cap + tol:
+                out[t.symbol] = stopped = "the book is at its exposure cap at the last close"
+            else:
+                money, exposure = money - add, exposure + add
+                used[bucket(t.symbol)] = used.get(bucket(t.symbol), 0.0) + add
+        return out
 
     def _adopted(self, rule: str) -> dict[str, str]:
         f = getattr(self.account, "adopted", None)  # an Account without corporate actions adopts nothing

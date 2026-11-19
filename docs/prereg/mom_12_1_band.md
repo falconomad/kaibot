@@ -304,3 +304,37 @@ rule, its decision, its targets or its sizing.
 5. **Known deviation, live against research.** A carried buy fills at a later session's price than the decision's
    fill day. That is a deviation of the venue (Alpaca paper's auction simulation), counted by Gate C as such, like
    the near-close timing of Amendment 10 of trend_momentum (8 of mom_12_1_band). Paper only, as that amendment.
+
+## Amendment 10 (19 Nov 2026, QA-Ops second key on issue #363, before the third live paper session): limits on the carry-over of Amendment 9
+
+Written on 19 Nov 2026, with Amendment 9 and before its first use. It only narrows Amendment 9: every item
+below leaves a carried buy out; none sends more shares, and nothing is sized again. No research result is affected
+(item 5). The same text is Amendment 12 of trend_momentum.
+
+1. **This run only.** The plan is the latest decision's send of the paper run that is running. A new run started
+   since then (the old one is flattened first) carries nothing of the old run's plan: its share counts were sized
+   on the old run's equity. The new run buys at its own first decision.
+2. **Sold since the decision, by any path.** Amendment 9 (item 2, "Order history") leaves out a stock sold since
+   the decision. That is read from the shares, not only from the rule's own orders: a sleeve that holds less than
+   it held at the decision plus what the decision's buys have filled since has lost shares, whatever sold them
+   (the watchdog's or the dead-man's emergency stop while the engine was down, a protective stop, a flatten). It
+   is not bought back before the next decision.
+3. **A fill that is not booked yet.** A stock with a finished buy whose fill the venue reported and the ledger
+   has not booked yet is not carried until it is booked. Otherwise the difference to the target would be bought a
+   second time.
+4. **Cash and the book's limits, at the previous close.** A carried buy keeps the plan's shares, which were sized
+   at the decision's prices and against that day's cash. Alpaca paper is a margin account: it lends, it does not
+   refuse. So a carried buy is sent only while it still fits at the previous close's prices: its position under
+   the per-name cap, its sector under the sector cap (Amendment 4), the cash less the 3% reserve (Amendment 3),
+   and the book under its exposure cap with the cash floor. Best-ranked first, in the plan's order. A stock over
+   its own or its sector's cap is left out and the next may fit; once the cash or the exposure cap is reached,
+   buying stops, as in the ranked fill. A stock that is left out is tried again at the next session. A stock the
+   ledger booked a split for on that session is left out too. Live path only: the research venue checks the cash
+   at the print.
+5. **Research and Gate B unchanged.** Nothing here can add a carry-over, and on the research venue nothing is
+   carried (Amendment 9, item 4); the same test passes for both momentum rules. With a protective stop
+   (an experiment option of the research runner; neither momentum rule has one) a stopped-out stock is not
+   bought back either: a test compares the runs with and without the carry-over.
+6. **Journal.** Each stock left out is in the session's `md_send` entry (`carry.skipped`) with its reason, and the
+   `multi_day_carry` event is sent also when nothing is carried. A failure inside the carry-over carries nothing,
+   is an event (`multi_day_error`, step `carry`) and never holds back the session's sales.
