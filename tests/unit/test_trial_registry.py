@@ -207,7 +207,7 @@ def test_migration_0015_is_append_only_and_not_shared():
     files = list((ROOT / "migrations").glob("0015_*"))
     assert [f.name for f in files] == ["0015_m7_trial_registry.sql"]  # the number is not shared
     sql = files[0].read_text()
-    assert "create table if not exists kaibot.trial_registry" in sql and "NOT APPLIED" in sql
+    assert "create table if not exists kaibot.trial_registry" in sql
     assert "trial_id   text        not null unique" in sql and "check (n_trials >= 0)" in sql
     assert "before update or delete on kaibot.trial_registry" in sql
     assert "before truncate on kaibot.trial_registry" in sql

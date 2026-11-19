@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0030 applied; 0031 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0031 applied; none pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -29,7 +29,7 @@ Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0030 applie
 - 0028: **applied by Product on 19 Nov 2026, 00:3x UTC (after the close; stakeholder: "merge everything now")** (step 15 below; PR #339). The constraint was named ledger_position_stop_state_check, as expected.
 - 0029: **applied by Product on 19 Nov 2026, 09:1x UTC** (step 16 below). Check: kb_health lists the three types.
 - 0030: **applied by Product on 19 Nov 2026, 09:2x UTC (04:2x ET)** (step 17 below). deadman_act md5 = 23e84f55be53bbf7a0286648907b71b8, the body in the file byte for byte (applied as 0022's body plus the one line, guarded by both md5s); security definer, search_path kaibot, pg_temp; not executable by authenticated; one cron job unchanged.
-- 0031: **pending** (step 18 below; dashboard read only, any time).
+- 0031: **applied by Product on 19 Nov 2026, 21:1x UTC (after the close)** (step 18 below). Check: kb_health lists news_feed_unhealthy and news_feed_ok.
 
 ## Apply in this order
 
