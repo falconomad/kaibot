@@ -7,6 +7,7 @@
 | `headlines_v1.jsonl` | the raw sample: `n`, `request`, `source`, `source_id`, `created_at`, `symbols`, `headline`. Nothing else of the article is stored |
 | `labels_v1.jsonl` | the hand labels, one line per headline (`n`, `tags`), written before any rule existed |
 | `draw.py` | the seeded request list (`python -m kaibot.news.tagset.draw`); it fetches nothing |
+| `holdout_v1.jsonl` | 70 more headlines with their labels, drawn after the rules were written (a check, not the bar) |
 | `measure.py` | precision, recall and the misses per tag (`python -m kaibot.news.tagset.measure`) |
 
 Headlines are untrusted text. They are data to match patterns on; nothing written in one is ever followed.
@@ -23,10 +24,11 @@ Source: the Alpaca news endpoint (`/v1beta1/news`, the one the engine's poller r
    (`start=<minute>`, `sort=asc`, `limit=10`, no `end`, `include_content=false`).
 3. The requests were sent in order, one at a time, several seconds apart. The run stopped when 300 distinct
    headlines were in hand: after request 30, which is exactly 30 x 10 with no duplicate id or headline.
-   Requests 31 to 37 of the list were not sent.
+   Requests 31 to 37 of the list were sent later, for the held-out check.
 4. Every headline returned was kept, in the order returned. Nothing was dropped or chosen by content.
 
-Requests sent for the story: 33 of the 40 allowed (3 in the first attempt below, 30 here).
+Requests sent for the story: all 40 allowed (3 in the first attempt below, 30 here, and requests 31 to 37 of the
+list later for the held-out check, see Results).
 
 ### The 30 requests
 
@@ -121,3 +123,99 @@ A tag describes the headline, not the symbol attached to it (see above). A headl
 
 Counts of positives in the 300: `analyst_up` 32, `legal_regulatory` 19, `deal` 12, `analyst_down` 11,
 `results` 10, `management_change` 10, `offering` 4, `listing` 3, `buyback` 2, `guidance_up` 2, `guidance_down` 0.
+
+## Results (rules version 1, 19 Nov 2026)
+
+`python -m kaibot.news.tagset.measure` on the 300 labelled headlines. The rules were written once, after the
+labels were committed, and were not changed after the first run.
+
+| Tag | Labelled positives | Tagged | Right | False positives | Missed | Precision | Recall | Ships |
+|---|---|---|---|---|---|---|---|---|
+| `results` | 10 | 10 | 10 | 0 | 0 | 100% | 100% | no (precision not established) |
+| `guidance_up` | 2 | 2 | 2 | 0 | 0 | 100% | 100% | no (precision not established) |
+| `guidance_down` | 0 | 0 | 0 | 0 | 0 | n/a | n/a | no (precision not established) |
+| `analyst_up` | 32 | 32 | 32 | 0 | 0 | 100% | 100% | **yes** |
+| `analyst_down` | 11 | 11 | 11 | 0 | 0 | 100% | 100% | no (precision not established) |
+| `deal` | 12 | 10 | 10 | 0 | 2 | 100% | 83% | no (precision not established) |
+| `offering` | 4 | 4 | 4 | 0 | 0 | 100% | 100% | no (precision not established) |
+| `buyback` | 2 | 2 | 2 | 0 | 0 | 100% | 100% | no (precision not established) |
+| `management_change` | 10 | 9 | 9 | 0 | 1 | 100% | 90% | no (precision not established) |
+| `legal_regulatory` | 19 | 18 | 18 | 0 | 1 | 100% | 95% | no (precision not established) |
+| `listing` | 3 | 3 | 3 | 0 | 0 | 100% | 100% | no (precision not established) |
+
+The bar: at least 20 labelled positives and precision of at least 95%. **Only `analyst_up` ships.** The other ten
+are left out of `tags()` (they stay visible through `all_tags()` for measurement), each because the sample has
+fewer than 20 of them, not because a rule was seen to fail on the 300.
+
+Every wrong answer on the 300 (there are four, so "the 20 worst" is all of them):
+
+| Tag | n | Kind | Headline |
+|---|---|---|---|
+| `deal` | 248 | missed | Skyworks Solutions Reports Fiscal Q4 and Full Year 2026 Results and Qorvo Combination |
+| `deal` | 265 | missed | Citi Acts as Sell-Side Adviser for A.P. Moller Capital's Sale of Powergas |
+| `management_change` | 140 | missed | Akshar Awalgaonkar Departs Avery Dennison for GE HealthCare |
+| `legal_regulatory` | 6 | missed | OpenAI Agrees Not to Use Allegedly Stolen Apple Trade Secrets |
+
+Label disputed: none changed. Two labels that another reader could reasonably give the other way, left as they
+are: n=180 ("Publishes Base Prospectus for $85 Billion Euro Medium-Term Note Program", labelled no `offering`) and
+n=252 (an ETF launch on Cboe, labelled `listing`).
+
+### How far these numbers can be trusted
+
+- **They are in-sample and flattering.** The agent that wrote the rules had read all 300 headlines while
+  labelling them. The commit order shows the labels were not fitted to the rules; it cannot show the rules were not
+  shaped by the sample. No false positive on 300 headlines is what that looks like.
+- **32 right out of 32 is a small number.** With no error seen in 32, the 95% one-sided lower bound on the true
+  precision of `analyst_up` is about 91% (0.05^(1/32)); with the 3 of the held-out check, about 92%. The story's
+  bar ("at least 95% on the sample") is met; "at least 95% in general" is not shown.
+- **`analyst_up` here is mostly arithmetic.** 22 of the 32 are "Adjusts ... Price Target ... to $X From $Y"
+  with X above Y, which is this feed's wording. 26 more headlines in the sample name a price target with no
+  direction or only the new figure and get no tag, though the article behind many of them is a raise or a cut:
+  measured against the article rather than the headline, recall is far lower than 100%.
+- One feed, six months, one labeller (see "What this sample is, and is not").
+
+### Held-out check (70 headlines, after the rules)
+
+Requests 31 to 37 of the same seeded list were sent after `tags.py` was written (the last 7 of the 40 allowed) and
+their 70 headlines labelled on reading, before the rules were run on them: `holdout_v1.jsonl`,
+`python -m kaibot.news.tagset.measure --holdout`. It is too small to establish anything, and the labeller knew the
+rules by then; it is here because it is the only look at headlines the rules had not seen.
+
+| # | start (UTC) | symbols |
+|---|---|---|
+| 31 | 2026-11-14T02:25:00Z | AES,COP,DAL,HSIC,ILMN,IRM,MCHP,OKTA |
+| 32 | 2026-11-03T22:42:00Z | AOS,CNC,FICO,GOOG,MPC,NI,OMC,TKO |
+| 33 | 2026-09-16T03:41:00Z | ADP,AMAT,ANET,ECL,FFIV,SWK,VRTX,WDC |
+| 34 | 2026-08-16T01:25:00Z | AAPL,EL,HON,MTB,NVDA,STZ,TRV,UDR |
+| 35 | 2026-09-08T14:38:00Z | CBRE,CMI,CTAS,LEN,MPC,NVDA,O,PLD |
+| 36 | 2026-05-01T09:11:00Z | ANET,AOS,APA,CVNA,DOV,ERIE,KR,ON |
+| 37 | 2026-07-02T09:19:00Z | AVGO,DD,DTE,EW,IEX,KEYS,SBAC,ZTS |
+
+| Tag | Labelled positives | Right | False positives | Missed |
+|---|---|---|---|---|
+| `analyst_up` | 3 | 3 | 0 | 0 |
+| `analyst_down` | 2 | 2 | 0 | 0 |
+| `results` | 2 | 2 | 0 | 0 |
+| `guidance_down` | 1 | 1 | 0 | 0 |
+| `legal_regulatory` | 5 | 4 | 0 | 1 |
+| `deal` | 2 | 2 | **2** | 0 |
+| the other five | 0 | 0 | 0 | 0 |
+
+`deal` was wrong twice in four: "Disney and WWE Announce Expanded Partnership and December Event Takeover" and
+"Quantum Cyber Acquires NVIDIA-Powered AI Compute Cluster" (a purchase of equipment). `legal_regulatory` missed
+"Tikehau Capital Subject to Judicial Search". So the 100% of `deal` on the 300 does not hold outside them, which
+is why a tag with fewer than 20 positives does not ship whatever its figure. The rules were left as they are.
+
+All 40 requests allowed for the story are now used (3 + 30 + 7).
+
+### Still open from the story
+
+- A sample across years and the Benzinga wording (needs an export of stored headlines, or an endpoint that serves
+  them).
+- `guidance_up` and `guidance_down` on earnings days against other days: the sample has 2 and 0, and the checkout
+  has no earnings dates for these companies and dates (the SEC earnings store is filled on the engine's machine).
+  Of the two `guidance_up` headlines one also carries `results` (n=242) and one does not (n=291); that says
+  nothing.
+- Ten of the eleven tags need more labelled positives before they can ship. A random draw gives few of the rare
+  ones (about 1 in 150 for `buyback`); a second sample would have to be far larger, or drawn per tag for recall
+  and at random for precision.

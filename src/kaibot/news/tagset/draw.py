@@ -4,7 +4,8 @@ Each request: one minute drawn uniformly from FIRST..LAST (UTC), and SYMBOLS_PER
 S&P 500 members in force on that date (point-in-time, src/kaibot/ingest/sp500/changes.csv). The request asks the
 Alpaca news endpoint (`/v1beta1/news`, the one the engine's poller reads) for the first PER_REQUEST headlines at or
 after that minute for those symbols (sort=asc, no end). The sample is the first SAMPLE distinct headlines in
-request order. README.md has the run of 19 Nov 2026 and why FIRST is 29 Apr 2026.
+request order (requests 1 to 30); requests 31 to 37 are the held-out check. README.md has the run of 19 Nov 2026
+and why FIRST is 29 Apr 2026.
 
     python -m kaibot.news.tagset.draw
 """
