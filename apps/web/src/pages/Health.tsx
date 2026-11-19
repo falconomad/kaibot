@@ -60,6 +60,9 @@ const EV: Record<string, string> = {
   multi_day_error: "Multi-day step failed (no orders sent)", multi_day_overnight_off: "Overnight holding is off: buys skipped",
   multi_day_unfilled: "Order not filled: expired at the close", daily_note: "Daily note written",
   multi_day_review_shadow: "Pre-open reviewer (observer, no effect on trades)",
+  // #354: the engine's news poller (heartbeat `news`)
+  news_feed_unhealthy: "News feed down or empty (stock summaries and the reviewer see no new news)",
+  news_feed_ok: "News feed back",
 };
 
 
