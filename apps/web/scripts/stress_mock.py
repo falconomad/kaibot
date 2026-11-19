@@ -17,9 +17,11 @@ SYMS = ["NVDA", "AVGO", "LLY", "COST", "GOOGL", "BRK.B", "META", "MSFT", "AAPL",
 
 
 class StressMock(mock_data.Mock):
-    def __init__(self, scenario: str = "running", now: dt.datetime | None = None):
+    def __init__(self, scenario: str = "running", now: dt.datetime | None = None, note: dict | None = None):
+        """note: the daily note the heartbeat carries, in place of NOTE (see NOTES below)."""
         super().__init__(scenario, now)
         self.session = str(self.days[-1])
+        self.note = note
         self.book_rows = []
         for i, s in enumerate(SYMS):
             cost = 40 + i * 37.31
@@ -69,13 +71,34 @@ class StressMock(mock_data.Mock):
             "12 shares of TSLA were not filled and expired at the close. It holds 28 stocks, about 60 percent of the pot, and "
             "the rest is cash. Nothing else changed.")
 
+    # The note at its worst (mobile_check.py --stress), in the shapes src/kaibot/agents/daily_note.py writes:
+    # - long: the longest paragraph the page keeps (2,000 characters), written tonight by the model;
+    # - template: the fixed template's paragraph at its longest (900 characters: rule code, shares and tickers), with the
+    #   reason the AI note was not used (200 characters), for an earlier day: the card's longest heading and label;
+    # - token: text with nothing to break at: a link, and a list of tickers with no spaces. The same in the reason.
+    LINK = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001318605&type=8-K&dateb=&owner=include&count=40&output=atom"
+    TICKERS = ",".join([*SYMS, "SUPERLONGER", *SYMS[:12]])
+
+    @classmethod
+    def notes(cls, today: dt.date) -> dict[str, dict]:
+        template = ("trend_momentum: bought " + ", ".join(f"{3 + i} {s}" for i, s in enumerate(SYMS)) + "; sold 9 NFLX, 21 SUPERLONG. Not bought: "
+                    + ", ".join(SYMS[:20]) + ". Holding 28 stocks. Book: equity $10,412.5 at the last close, cash $4,100.25. ") * 3
+        return {
+            "long": {"session": str(today), "source": "model", "text": " ".join([cls.NOTE] * 8)[:2000]},
+            "template": {"source": "template", "text": template[:900].strip(),
+                         "why": ("numbers not in the facts: ['10412.50', '4100.25', '28', '12', '60'] and the model's answer was not used, so "
+                                 "the fixed template wrote the paragraph from the same records of the day instead of it" + " again" * 20)[:200]},
+            "token": {"session": str(today), "source": "template", "text": f"See {cls.LINK} and {cls.TICKERS} for the day.",
+                      "why": f"error: HTTPSConnectionPool(host='api.anthropic.com',port=443):{cls.LINK}"[:200]},
+        }
+
     def heartbeat(self):
         beats = super().heartbeat()
         for b in beats:
             md = (b.get("detail") or {}).get("multi_day")
             if b["process"] == "engine" and md is not None:
                 md["exits"] = {"trend_momentum": "target_list"}
-                md["daily_note"] = {"session": self.session, "text": self.NOTE, "source": "model"}
+                md["daily_note"] = {"session": self.session, "text": self.NOTE, "source": "model"} | (self.note or {})
                 md["rules"]["trend_momentum"]["exit"] = "target_list"
                 md["rules"]["trend_momentum"]["review_shadow"] = {
                     "mode": "shadow", "session": str(self.today), "status": "done", "would_veto": ["SUPERLONGER"], "would_downgrade": ["BRK.B", "TSLA"],
@@ -90,4 +113,8 @@ class StressMock(mock_data.Mock):
                         "payload": {"strategy": "trend_momentum", "symbol": "TSLA", "side": "buy", "qty": 28, "filled": 16, "left": 12,
                                     "coid": "md-3", "session": str(self.today), "status": "expired", "purpose": "entry", "type": "market", "tif": "day"}},
                        *h["events"]]
+        if self.note and self.note.get("why"):
+            # the note's event carries the reason the AI note was not used; the heartbeat's copy does not
+            note = {"session": self.session, "text": self.NOTE, "source": "model"} | self.note
+            h["events"] = [{"type": "daily_note", "ts": mock_data.iso(self.now), "run_id": 1, "payload": note}, *h["events"]]
         return h
