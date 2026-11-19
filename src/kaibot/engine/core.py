@@ -589,6 +589,8 @@ class Engine:
         if self.daily is not None:
             try:
                 st["multi_day"] = self.daily.status(self.now().astimezone(_et()).date())
+                if self.book_line is None or self.book_line.get("run_id") != self._rid():
+                    self._book_line_marked()  # a start with the market closed: the line at the close marks
                 if self.book_line is not None and self.book_line.get("run_id") == self._rid():
                     st["multi_day"]["book_line"] = dict(self.book_line)  # #229
             except Exception:
@@ -635,7 +637,18 @@ class Engine:
                 self._book_peak_ts = e.get("ts")
         return peak
 
-    def _book_end_check(self, book_pnl: float) -> None:
+    def _book_line_marked(self) -> None:
+        """Product, 19 Nov 2026: the book line (and its peak) at the close marks, after the close and for a heartbeat
+        that has none (a start with the market closed). The minute ticks compute it on live prices only while the
+        session runs, before the day's last daily fills and the close's marks are booked, so after the 18 Nov close
+        it still showed the pot. The line and the peak only: the book end is still checked (and confirmed) by the
+        session's minute ticks on live prices, so nothing is sold with the market closed. Never raises."""
+        try:
+            self._book_end_check(self._book_pnl(live=False), at_close=True)
+        except Exception:
+            log.exception("book line at the close marks not computed")
+
+    def _book_end_check(self, book_pnl: float, at_close: bool = False) -> None:
         """#206 (stakeholder decision 13 Nov 2026, decision 15 section 11): the multi-day book's own run end.
         Book equity = the run's pot + the book's P&L since the run began; its peak is journalled (`md_book_peak`),
         so a restart measures from the same peak. At `BookLimits.run_drawdown_end_pct` below the peak (the level's
@@ -651,7 +664,8 @@ class Engine:
         if ended:
             if self.book_line is not None and self.book_line.get("run_id") == rid:
                 self.book_line = {**self.book_line, "ended": True}
-            if self._md_sleeves():  # closed: whatever is still held is sold (a sale under way is not repeated)
+            # closed: whatever is still held is sold (a sale under way is not repeated); never with the market closed
+            if self._md_sleeves() and not at_close:
                 self._flatten_md("book_drawdown", {}, self.monotonic())
             return
         rules = self.daily.rules
@@ -670,6 +684,8 @@ class Engine:
                           "end_pct": end, "ended": False}
         if self._breach_rid != rid:  # QA-Ops second key on #213: an unconfirmed breach survives a restart
             self._breach, self._breach_rid = self._journalled_breach(rid), rid
+        if at_close:  # after the close: the line and the peak only (see `_book_line_marked`)
+            return
         if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
             if self._breach is not None:
                 self.journal.append("md_book_breach_clear", {"run_id": rid, "peak": round(peak, 2),
@@ -1634,12 +1650,12 @@ class Engine:
             else:  # follow-up of #333: a planned buy not held yet, at its last price (unpriced)
                 px = self._md_price(sym) or 0.0
                 cost, mark, opened, divs = px, px, str(today), 0.0
-            self.store.upsert("ledger_position", {
+            self._position_row({
                 "run_id": b.run_id, "session": str(today), "strategy": strategy, "symbol": sym, "qty": q,
                 "avg_cost": round(cost, 4), "mark": round(mark, 4), "priced": False,
                 "opened_session": opened, "dividends": round(divs, 2),
                 "stop_px": round(ms, 2) if ms is not None else None,
-                "stop_state": "resting" if ms is not None else "missing"}, "run_id,session,strategy,symbol")
+                "stop_state": self._stop_state(strategy, ms is not None)})
         self.store.event("positions_rewritten", {"session": str(today), "why": why,
                                                  "sleeves": len(b.sleeves)}, b.run_id)
 
@@ -2616,6 +2632,7 @@ class Engine:
                 self._close_ledger(d)
             except Exception:  # the day's trading result is written; the close is recomputable from the journal
                 log.exception("ledger close failed")
+            self._book_line_marked()  # Product, 19 Nov 2026: the book line at the close's marks
         self.store.event(
             "session_end",
             {
@@ -2675,13 +2692,13 @@ class Engine:
             from kaibot.engine.failsafe import clean
 
             ms = md_stops.get((clean(r["strategy"]), clean(r["symbol"])))
-            self.store.upsert("ledger_position", {
+            self._position_row({
                 "run_id": d.run_id, "session": str(d.day), "strategy": r["strategy"], "symbol": r["symbol"],
                 "qty": r["qty"], "avg_cost": round(r["avg_cost"], 4), "mark": round(r["mark"], 4),
                 "priced": r["priced"], "opened_session": r["opened"], "dividends": round(r["dividends"], 2),
                 "stop_px": round(p.stop, 2) if p is not None else (round(ms, 2) if ms is not None else None),
-                "stop_state": "resting" if (p is not None and p.stop_order_id) or ms is not None else "missing"},
-                "run_id,session,strategy,symbol")
+                "stop_state": self._stop_state(r["strategy"], (p is not None and bool(p.stop_order_id))
+                                               or ms is not None)})
         # #266: a row written at this session's open (`_write_positions`) for a sleeve sold since is zeroed
         held_now = {(r["strategy"], r["symbol"]) for r in c.positions}
         if self.daily is not None:
@@ -2689,6 +2706,41 @@ class Engine:
                 if (r["strategy"], r["symbol"]) not in held_now and float(r.get("qty") or 0) != 0:
                     self.store.upsert("ledger_position", {**r, "qty": 0.0, "priced": False},
                                       "run_id,session,strategy,symbol")
+
+    def _stop_state(self, strategy: str, resting: bool) -> str:
+        """`ledger_position.stop_state` (Product, 19 Nov 2026): "resting" with a stop at the broker; without one,
+        "none_by_design" for a sleeve of a rule that exits by its target list (live_daily.exit_kind: no stop in its
+        pre-registration), else "missing" (a stop that should be there: the dashboard's alarm)."""
+        if resting:
+            return "resting"
+        if self.daily is not None:
+            from kaibot.engine.live_daily import exit_kind
+
+            if exit_kind(strategy) == "target_list":
+                return "none_by_design"
+        return "missing"
+
+    def _position_row(self, row: dict) -> None:
+        """Upsert one `ledger_position` row. Until migration 0028 is applied the database refuses "none_by_design"
+        (its check constraint): the row is then written as "missing", as before, and never lost (the fail-safes read
+        these rows); one `stop_state_fallback` event says so, and this process keeps writing "missing". In production
+        `ledger_position` is a local table of the JournalStore: the refusal reaches the replicator, which sends the
+        row as "missing" and reports it the same way (QA-Ops on #339, `journal.Replicator`)."""
+        key = "run_id,session,strategy,symbol"
+        if row.get("stop_state") == "none_by_design":
+            if not getattr(self, "_nbd_refused", False):
+                try:
+                    self.store.upsert("ledger_position", row, key)
+                    return
+                except Exception as e:
+                    if "stop_state_check" not in str(e) and "23514" not in str(e):
+                        raise
+                    self._nbd_refused = True
+                    self.store.event("stop_state_fallback", {
+                        "error": str(e)[:200], "action": "apply migrations/0028_stop_none_by_design.sql, then restart "
+                                                         "the engine; until then rows say 'missing'"}, self._rid())
+            row = {**row, "stop_state": "missing"}
+        self.store.upsert("ledger_position", row, key)
 
     def _reconcile(self, b) -> dict:
         """Cash and positions against the broker. Positions: the ledger's shares per symbol (all rules) against

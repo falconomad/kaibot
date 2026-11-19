@@ -275,3 +275,52 @@ def test_the_unchecked_helper_and_kb_book_are_closed_to_callers(pg):
     with pytest.raises(RuntimeError, match="permission denied"):
         pg.sql(f"select public.kb_book({R})", role="anon")
     assert pg.json(f"select public.kb_book({R})", role="authenticated")["run_id"] == R  # the owner still reads it
+
+
+def test_the_book_line_is_the_marked_equity_after_the_close_and_after_a_restart(tmp_path, monkeypatch):
+    """Product, 19 Nov 2026: after the 18 Nov close the heartbeat's book line still said 95000 (the pot) while
+    ledger_day.close_equity was 94997.26. The line was computed only by the session's minute ticks, before the
+    day's daily fills and marks were all booked, and never again after the close (nor after a restart). Now the
+    close recomputes it at the close marks, and a heartbeat without one computes it: its equity is the book's
+    marked equity, i.e. ledger_day's close equity here (one multi-day rule, no intraday trade)."""
+    from test_live_daily_engine import SEND, DailyAccount
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, SEND + 1)  # the buy goes out at 15:50
+    a.broker.script.hold("B", bars=None)  # (only later orders: the first is already at the venue)
+    a.ticks(a.open2, SEND + 1, 390)
+    a.after_close(a.open2)
+    (day,) = [r for r in a.store.tables["ledger_day"] if str(r["session"]) == str(a.open2.date())]
+    marked = float(day["close_equity_venue"])
+    assert abs(marked - 10_000.0) > 0.005  # the fill's costs and the close's mark moved it
+    line = a.eng._daily_status({"state": "market_closed"})["multi_day"]["book_line"]
+    assert line["equity"] == pytest.approx(marked, abs=0.01)
+    assert line["drawdown_pct"] == pytest.approx(max(0.0, (line["peak"] - marked) / line["peak"] * 100), abs=0.01)
+    eng = a.restart()  # a heartbeat after a restart, market closed: the line is there, at the same marked equity
+    line2 = eng._daily_status({"state": "market_closed"})["multi_day"]["book_line"]
+    assert line2["equity"] == pytest.approx(marked, abs=0.01) and line2["peak"] == line["peak"]
+    assert "B" in a.broker.pos  # nothing was sold by a check after the close
+
+
+def test_0028_allows_none_by_design_and_kb_book_names_each_positions_exit(pg):
+    """Migration 0028 (applied twice: idempotent): the new stop state is allowed, and kb_book gives every position
+    its `stop_state` and `exit` ("target_list" for none_by_design, else "broker_stop")."""
+    ins = (f"insert into kaibot.ledger_position (run_id, session, strategy, symbol, qty, avg_cost, mark, priced, "
+           f"opened_session, dividends, stop_state) values ({R}, '{DAYS[1]}', 'trend_momentum', 'NBD', 1, 10, 10, "
+           f"true, '{DAYS[1]}', 0, 'none_by_design')")
+    with pytest.raises(Exception, match="stop_state_check"):
+        pg.sql(ins)
+    for _ in range(2):
+        pg.sql((ROOT / "migrations" / "0028_stop_none_by_design.sql").read_text())
+    pg.sql(ins)
+    try:
+        b = pg.json(f"select public.kb_book({R}, '{DAYS[1]}')")
+        by = {p["symbol"]: p for p in b["positions"]}
+        assert (by["NBD"]["stop_state"], by["NBD"]["exit"], by["NBD"]["stop"]) == ("none_by_design", "target_list",
+                                                                                  None)
+        assert (by["XOM"]["stop_state"], by["XOM"]["exit"]) == ("missing", "broker_stop")
+        assert by["XOM"]["sell_when"] is not None and by["AAPL"]["sector"] == "Information Technology"  # 0020's
+    finally:
+        pg.sql("delete from kaibot.ledger_position where symbol = 'NBD'")

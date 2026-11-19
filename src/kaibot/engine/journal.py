@@ -617,6 +617,10 @@ class Replicator:
         self.sent = 0
         self.conflicts = 0
         self._conflicts: list[dict] = []
+        # QA-Ops on #339: a `none_by_design` stop state Supabase refused (migration 0028 not applied), sent as
+        # "missing" instead; reported once (`take_fallbacks`)
+        self.stop_state_fallback = False
+        self._fallbacks: list[dict] = []
         self._lock = threading.Lock()
         self._pump_lock = threading.Lock()
         self._stop = threading.Event()
@@ -708,7 +712,8 @@ class Replicator:
     def status(self) -> dict:
         return {"cursor": self.journal.cursor(self.name), "last_seq": self.journal.last_seq(),
                 "pending": self.pending(), "error": self.last_error, "schema": self.schema,
-                "conflicts": self.conflicts, "journal": self.journal.journal_id}
+                "conflicts": self.conflicts, "journal": self.journal.journal_id,
+                "stop_state_fallback": self.stop_state_fallback}
 
     def _db_id(self, table: str, v):
         return self.ids.get((table, v), v) if isinstance(v, int) else v
@@ -765,7 +770,15 @@ class Replicator:
     def _send_0018(self, seq: int, op: dict) -> None:
         t = op["table"]
         if op["op"] != "insert":
-            return send(self.remote, self.journal.jseq(seq), op)
+            try:
+                return send(self.remote, self.journal.jseq(seq), op)
+            except Exception as e:
+                alt = _stop_state_missing(op, e)
+                if alt is None:
+                    raise
+                send(self.remote, self.journal.jseq(seq), alt)
+                self._fell_back(seq, e)
+                return None
         row = _row_0018(t, op["row"], self.journal.jseq(seq))
         try:
             self.remote.insert(t, row, returning=False)
@@ -798,6 +811,23 @@ class Replicator:
         log.error("replica conflict in %s at entry %d (%s): kept going; the journal holds the engine's row",
                   t, seq, c["reason"])
         return stored
+
+    def _fell_back(self, seq: int, err: Exception) -> None:
+        if self.stop_state_fallback:
+            return
+        f = {"seq": seq, "table": "ledger_position", "error": str(err)[:200],
+             "action": "apply migrations/0028_stop_none_by_design.sql; until then Supabase's rows say 'missing'"}
+        self.journal.append("replica_fallback", f)
+        with self._lock:
+            self.stop_state_fallback = True
+            self._fallbacks.append(f)
+        log.warning("Supabase refused stop_state 'none_by_design' (migration 0028 not applied): sent as 'missing'")
+
+    def take_fallbacks(self) -> list[dict]:
+        """QA-Ops on #339: stop-state fallbacks since the last call (the engine turns each into an event)."""
+        with self._lock:
+            out, self._fallbacks[:] = list(self._fallbacks), []
+        return out
 
     def take_conflicts(self) -> list[dict]:
         """Conflicts since the last call (the engine turns each into a `replica_conflict` event and a halt row)."""
@@ -879,6 +909,21 @@ def _duplicate(e: Exception) -> bool:
     real error, so replication pauses on the entry and retries it, it is never dropped as a conflict (#165 N2)."""
     text = str(e)
     return "23505" in text or "duplicate key" in text
+
+
+def _stop_state_missing(op: dict, err: Exception) -> dict | None:
+    """QA-Ops on #339: a `ledger_position` write with stop_state `none_by_design` that Supabase refused by its check
+    constraint (23514: migration 0028 not applied) as the same write with "missing", the value before 0028; else
+    None (any other refusal stays an error and pauses replication, as before)."""
+    if op.get("table") != "ledger_position":
+        return None
+    msg = str(err)
+    if "23514" not in msg or "stop_state" not in msg:
+        return None
+    part = "row" if op["op"] in ("insert", "upsert") else "values"
+    if (op.get(part) or {}).get("stop_state") != "none_by_design":
+        return None
+    return {**op, part: {**op[part], "stop_state": "missing"}}
 
 
 def send(remote, jseq: int, op: dict) -> None:
