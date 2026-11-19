@@ -79,6 +79,8 @@ class SleeveView:
     symbol: str
     qty: float
     stop: float | None = None  # the sleeve's protective stop price, if known
+    # #344: opened in its own row's session (a planned or just-bought buy): never a holding renamed overnight
+    opened_today: bool = False
 
 
 @dataclass
@@ -185,13 +187,17 @@ def plan(positions: Mapping[str, dict], orders: list[dict], book: BookView | Non
     sleeves = book.multi_day(names) if book is not None else []
     # #291: a multi-day symbol gone at the broker (a symbol change while the engine was down?): an unexplained
     # position holding exactly its shares is taken as the renamed holding and kept, never closed as intraday
+    # (#344: only sleeves held over a close: one opened today, e.g. a planned buy that never filled, is not gone; its
+    # book row still explains its own symbol)
+    booked = {s.symbol for s in sleeves}
     book_qty: dict[str, float] = {}
     for s in sleeves:
-        book_qty[s.symbol] = book_qty.get(s.symbol, 0.0) + s.qty
+        if not s.opened_today:
+            book_qty[s.symbol] = book_qty.get(s.symbol, 0.0) + s.qty
     gone = {sym: q for sym, q in book_qty.items() if float((positions.get(sym) or {}).get("qty") or 0) <= EPS}
     renamed: dict[str, str] = {}
     for sym in sorted(positions):
-        if sym in book_qty or _open_sells(live, sym):
+        if sym in booked or _open_sells(live, sym):
             continue
         have = float(positions[sym].get("qty") or 0)
         old = next((o for o, q in sorted(gone.items()) if abs(q - have) <= EPS and o not in renamed.values()), None)
@@ -357,9 +363,11 @@ def book_from_journal(journal, run_id: int | None = None, today=None) -> BookVie
         return BookView([], "journal", run_id)
     stops = stops_from_journal(journal)
     qty = {k: float(s.qty) for k, s in b.sleeves.items() if s.qty > EPS}
+    held = set(qty)  # #344: a sleeve only today's buys make (not booked yet) is opened today
     for k, q in (pending_from_journal(journal, today) if today is not None else {}).items():
         qty[k] = qty.get(k, 0.0) + q
-    return BookView([SleeveView(k[0], k[1], q, stops.get(k)) for k, q in qty.items()], "journal", run_id)
+    return BookView([SleeveView(k[0], k[1], q, stops.get(k), opened_today=k not in held) for k, q in qty.items()],
+                    "journal", run_id)
 
 
 def book_from_store(store) -> BookView:
@@ -373,5 +381,8 @@ def book_from_store(store) -> BookView:
         return BookView([], "store", rid)
     rows = store.select("ledger_position", {"run_id": f"eq.{rid}", "session": f"eq.{last[0]['session']}"})
     return BookView([SleeveView(r["strategy"], r["symbol"], float(r["qty"]),
-                                float(r["stop_px"]) if r.get("stop_px") is not None else None) for r in rows],
+                                float(r["stop_px"]) if r.get("stop_px") is not None else None,
+                                # #344: the row's own session opened it (a planned or just-bought buy)
+                                opened_today=r.get("opened_session") is not None
+                                and str(r["opened_session"]) == str(r["session"])) for r in rows],
                     "store", rid)

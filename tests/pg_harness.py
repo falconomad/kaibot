@@ -2,8 +2,8 @@
 
 `DeadmanDb` starts a private cluster in a temp directory (unix socket only), creates stand-ins for what Supabase
 provides (pg_net's `net` schema, Vault's `vault.decrypted_secrets`, pg_cron's `cron` schema, the kaibot tables the
-dead-man reads) and applies migrations 0017 and 0019 as files. `pump(broker)` plays Alpaca for pg_net: it answers
-the GETs from a `SimBroker` and carries out the POSTs and DELETEs on it, as the paper venue would.
+dead-man reads) and applies migrations 0017, 0019, 0022 and 0030 as files. `pump(broker)` plays Alpaca for pg_net:
+it answers the GETs from a `SimBroker` and carries out the POSTs and DELETEs on it, as the paper venue would.
 
 Skipped when no Postgres binaries are installed (GitHub's ubuntu runners have PostgreSQL 16 preinstalled).
 """
@@ -104,6 +104,7 @@ class DeadmanDb:
         self.file(ROOT / "migrations" / "0017_deadman_early_close.sql")
         self.file(ROOT / "migrations" / "0019_deadman_overnight.sql")
         self.file(ROOT / "migrations" / "0022_deadman_exdate.sql")  # #291: the ex-date rules
+        self.file(ROOT / "migrations" / "0030_deadman_planned_row_not_gone.sql")  # #344: planned rows are not gone
         self.sql("insert into vault.decrypted_secrets values ('kaibot_alpaca_paper_key_id', 'k'), "
                  "('kaibot_alpaca_paper_secret', 's')")
 

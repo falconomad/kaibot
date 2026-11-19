@@ -12,8 +12,8 @@ Fail closed (docs/ops/failsafe.md) says the opposite: a position that neither th
 is intraday and is sold in the flatten window. Here A, a position of exactly the planned shares with no legs (a
 manual buy at the paper dashboard, or an intraday position whose legs are gone), is that position.
 
-These tests assert the fail-closed behaviour and are expected to fail until the fix (`xfail(strict=True)`: once the
-fix lands they pass, strict turns that into a failure, and the marker must come off). The dead-man runs as SQL
+These tests assert the fail-closed behaviour (fixed in #344: a sleeve opened in its own row's session, a planned or
+just-bought buy, can never be a holding renamed overnight, so it is not "gone at the broker"). The dead-man runs as SQL
 (migrations 0017/0019/0022) in a throwaway local Postgres (tests/pg_harness.py).
 """
 
@@ -22,14 +22,11 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pandas as pd
-import pytest
 from test_failsafe_drills import DAY2, MD, beat
 from test_live_daily_engine import SEND, _killed_right_after_the_send
 
 from kaibot.engine import failsafe
 from kaibot.engine.watchdog import Watchdog, book_reader
-
-ISSUE = "#344: the #291 rename rule treats a planned, never-filled row as a symbol gone at the broker"
 
 
 def _planned_b_unfilled_and_a_with_the_same_shares(tmp_path, monkeypatch):
@@ -52,7 +49,7 @@ def _sells_of(a, sym):
 def test_the_plan_alone_shows_it():
     """The pure plan, as both fail-safes build it today: the book view cannot tell B's planned row (opened today,
     nothing held) from a holding renamed overnight, so A, unexplained with B's shares, is kept. This one passes now
-    and documents the mechanism; the fix gives the plan that distinction (a sleeve opened in its row's session)."""
+    and documents the mechanism; the fix gives the plan that distinction (`opened_today`, below)."""
     book = failsafe.BookView([failsafe.SleeveView(MD, "B", 12.0, None)], "store", 7)
     p = failsafe.plan({"A": {"qty": "12", "current_price": "100"}}, [], book, flatten=True)
     assert p.multi_day == {"A": 12.0} and p.close == []  # today: A is kept, with an emergency stop on it
@@ -60,7 +57,49 @@ def test_the_plan_alone_shows_it():
     assert any("symbol change" in x for x in p.alarms)
 
 
-@pytest.mark.xfail(strict=True, reason=ISSUE)
+def test_a_sleeve_opened_today_is_never_gone_at_the_broker():
+    """#344: B opened in its own row's session (planned, not filled) is not a holding renamed overnight: A, unexplained
+    with B's shares, is intraday and closed in the flatten window. B's row still counts as a book row."""
+    book = failsafe.BookView([failsafe.SleeveView(MD, "B", 12.0, None, opened_today=True)], "store", 7)
+    p = failsafe.plan({"A": {"qty": "12", "current_price": "100"}}, [], book, flatten=True)
+    assert p.multi_day == {} and p.close == ["A"] and p.stops == []
+    assert not any("symbol change" in x for x in p.alarms)
+    # B held after all (it filled): its row explains it, it is kept as multi-day with its stop, not taken as A's
+    p = failsafe.plan({"A": {"qty": "12", "current_price": "100"}, "B": {"qty": "12", "current_price": "50"}}, [],
+                      book, flatten=True)
+    assert p.multi_day == {"B": 12.0} and p.close == ["A"]
+
+
+def test_an_older_sleeve_next_to_one_opened_today_is_still_gone_by_its_own_shares():
+    """Only the sleeve opened today leaves the gone set: an older sleeve of the same symbol still counts, by its
+    shares alone (the SQL sums the older rows only, too)."""
+    book = failsafe.BookView([failsafe.SleeveView(MD, "B", 12.0, None),
+                              failsafe.SleeveView("mom_12_1_band", "B", 5.0, None, opened_today=True)], "store", 7)
+    p = failsafe.plan({"A": {"qty": "12", "current_price": "100"}}, [], book, flatten=True)
+    assert p.multi_day == {"A": 12.0} and p.close == []
+
+
+class _Store:
+    def __init__(self, rows):
+        self.tables = {"run": [{"id": 7, "status": "running"}], "ledger_position": rows}
+
+    def select(self, table, q):
+        rows = self.tables[table]
+        if table == "ledger_position" and "session" in q:
+            rows = [r for r in rows if r["session"] == q["session"].removeprefix("eq.")]
+        return rows[:1] if q.get("limit") == "1" else rows
+
+
+def test_book_from_store_marks_rows_opened_in_their_session():
+    rows = [{"session": "2026-11-19", "strategy": MD, "symbol": "B", "qty": "12", "stop_px": None,
+             "opened_session": "2026-11-19"},
+            {"session": "2026-11-19", "strategy": MD, "symbol": "C", "qty": "3", "stop_px": "90",
+             "opened_session": "2026-11-12"},
+            {"session": "2026-11-19", "strategy": MD, "symbol": "D", "qty": "4", "stop_px": None,
+             "opened_session": None}]
+    b = failsafe.book_from_store(_Store(rows))
+    assert {s.symbol: s.opened_today for s in b.sleeves} == {"B": True, "C": False, "D": False}
+
 def test_the_watchdog_sells_an_unexplained_position_next_to_a_planned_row(tmp_path, monkeypatch):
     a, qty = _planned_b_unfilled_and_a_with_the_same_shares(tmp_path, monkeypatch)
     beat(a.store, a.clock())
@@ -75,7 +114,6 @@ def test_the_watchdog_sells_an_unexplained_position_next_to_a_planned_row(tmp_pa
     assert "A" not in a.broker.pos, "A is unexplained: sold in the flatten window (fail closed)"
 
 
-@pytest.mark.xfail(strict=True, reason=ISSUE)
 def test_the_dead_man_sells_an_unexplained_position_next_to_a_planned_row(tmp_path, monkeypatch):
     from pg_harness import DeadmanDb
 
@@ -100,3 +138,22 @@ def test_the_dead_man_sells_an_unexplained_position_next_to_a_planned_row(tmp_pa
         assert "A" not in a.broker.pos, "A is unexplained: sold in the flatten window (fail closed)"
     finally:
         db.stop()
+
+
+def test_0030_is_0022s_deadman_act_with_only_the_344_line_added():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "migrations"
+
+    def fn(name):
+        t = (root / name).read_text()
+        return t[t.index("create or replace function kaibot.deadman_act("):].split("\n$$;", 1)[0].splitlines()
+
+    old, new = fn("0022_deadman_exdate.sql"), fn("0030_deadman_planned_row_not_gone.sql")
+    added = [x for x in new if x not in old]
+    assert [x for x in new if x != added[0]] == old and len(added) == 1
+    assert "lp.opened_session is null or lp.opened_session < lp.session" in added[0]
+    m30 = "0030_deadman_planned_row_not_gone.sql"
+    later = [p.name for p in sorted(root.glob("*.sql"))
+             if p.name > m30 and "function kaibot.deadman_act(" in p.read_text()]
+    assert later == []
