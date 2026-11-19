@@ -1,0 +1,24 @@
+{
+ "query": "AAPL",
+ "count": 3,
+ "results": [
+  {
+   "symbol": "AAPL.MX",
+   "name": "Apple Inc.",
+   "website": "apple.mx",
+   "exchange": "BMV"
+  },
+  {
+   "symbol": "AAPL",
+   "name": "Apple Inc.",
+   "website": "apple.de",
+   "exchange": "XETRA"
+  },
+  {
+   "symbol": "AAPL",
+   "name": "Apple Inc.",
+   "website": "https://www.Apple.com/",
+   "exchange": "NASDAQ"
+  }
+ ]
+}
