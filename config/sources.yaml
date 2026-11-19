@@ -17,6 +17,9 @@ market_data:
                      cache: "data/databento (Parquet, per symbol; cached symbols never re-requested)",
                      ledger: "data/databento/ledger.jsonl (estimated spend of every confirmed download; total never past credit_usd)", budget_per_min: 20,
                      note: "historical validation only, never in the live path; scripts/fetch_databento.py is dry-run unless --confirm; bbo-1m spread calibration of cost model v2: scripts/fetch_spread_calibration.py plan / report (offline)"}
+  allinvestview_logo_search: {use: dashboard_logo_domains, auth: none, endpoint: "https://www.allinvestview.com/api/logo-search/?q=SYMBOL",
+                     limit: "60 req/min per IP", budget_per_min: 45,
+                     note: "ticker -> company website for the cdn.tickerlogos.com logos (#330, #331); only scripts/fetch_symbol_meta.py --fill-domains, paced at one call every 1.2 s, and the dashboard (apps/web/api/logo-domain.ts, its own limit of 50/min); never in the engine"}
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:
   sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}

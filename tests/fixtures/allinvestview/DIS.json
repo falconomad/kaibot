@@ -1,0 +1,24 @@
+{
+ "query": "DIS",
+ "count": 3,
+ "results": [
+  {
+   "symbol": "DIS",
+   "name": "Walt Disney Co",
+   "website": null,
+   "exchange": "NYSE"
+  },
+  {
+   "symbol": "DIS",
+   "name": "Walt Disney Co",
+   "website": "javascript:alert(1)",
+   "exchange": "NYSE"
+  },
+  {
+   "symbol": "DIS",
+   "name": "Walt Disney Co",
+   "website": "https://thewaltdisneycompany.com/investors",
+   "exchange": "NYSE"
+  }
+ ]
+}
