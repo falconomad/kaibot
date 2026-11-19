@@ -7,8 +7,9 @@
 // - kb_equity_series(p_run): one point per session, `marked` false for sessions closed before the ledger existed.
 // - heartbeat `detail.experiments` (cap, stop line) and `detail.multi_day` (last decision, notes): lib/experiment.ts.
 // Not in the contract, so not shown (the boards' fallbacks): sell-condition readings, the next close's planned
-// orders, the book's own peak (so the distance to the stop line), a price during the day (the pot is "at the last
-// close"). Every field is untrusted jsonb and read through the parsers below.
+// orders, the book's own peak (so the distance to the stop line). A price during the day is not in the contract
+// either: it comes from the paper account (api/marks.ts, lib/marks.ts), and only while the account holds exactly this
+// book. Every field is untrusted jsonb and read through the parsers below.
 import type { Daily, LedgerPos, Overview, Run } from "./api";
 import { exitOf } from "./exits";
 import type { Curve } from "./model";
@@ -109,15 +110,25 @@ export const daysHeld = (opened: string | null, session: string | null) => {
   return Number.isFinite(d) && d >= 0 ? d : null;
 };
 
-export function holdingView(p: BookPosition, b: Pick<Book, "equity" | "session">) {
-  const value = p.qty * p.mark;
+/** The paper account's price of a holding now (lib/marks.ts), with the live pot it is a share of. */
+export interface LiveMark { price: number; prevClose: number | null; pot: number }
+
+/** One holding's figures. With `live` (the account holds exactly what the book says, lib/marks.liveBook) every figure
+ *  is at the price now: value, gain against the average cost, share of the live pot, and today's change against the
+ *  previous close. Without it every figure is at the close mark and there is no change today. Never a mix. */
+export function holdingView(p: BookPosition, b: Pick<Book, "equity" | "session">, live?: LiveMark | null) {
+  const price = live ? live.price : p.mark;
+  const value = p.qty * price;
   const cost = p.qty * p.avgCost;
   const gain = value - cost + p.dividends;
+  const pot = live ? live.pot : b.equity;
+  const prev = live?.prevClose ?? null;
   return {
-    value, gain, gainPct: cost > 0 ? (gain / cost) * 100 : null,
-    share: b.equity && b.equity > 0 ? value / b.equity : null,
+    price, value, gain, gainPct: cost > 0 ? (gain / cost) * 100 : null,
+    day: live && prev ? p.qty * (price - prev) : null, dayPct: live && prev ? (price / prev - 1) * 100 : null,
+    share: pot && pot > 0 ? value / pot : null,
     days: daysHeld(p.opened, b.session),
-    stopBelowPct: p.stop && p.mark > 0 ? ((p.mark - p.stop.price) / p.mark) * 100 : null,
+    stopBelowPct: p.stop && price > 0 ? ((price - p.stop.price) / price) * 100 : null,
   };
 }
 
@@ -181,6 +192,9 @@ export interface PotNow {
   positions: Record<string, LedgerPos>;
   /** "book": the marked multi-day book (ledger_day); "realised": closed trades and the intraday ledger only. */
   source: "book" | "realised";
+  /** Where the pot shown comes from, so the page can say how fresh it is: the engine's minute row (its time), the
+   *  booked close (its session), or null when it is only the sum of closed trades. */
+  from: { kind: "engine"; ts: string } | { kind: "close"; session: string } | null;
 }
 
 /** Stakeholder, 18 Nov 2026: the pot is the marked book, never the sum of closed trades. With a ledger_day row the pot is
@@ -204,17 +218,19 @@ export function potNow(run: Pick<Run, "amount_usd">, o: Pick<Overview, "daily" |
   if (close === null || close === undefined || !book?.session) {
     const dayStart = fresh ? before : ledgerPot;
     const d = ledgerPot - dayStart;
-    return { pot: ledgerPot, dayPnl: d, dayPct: dayStart ? (d / dayStart) * 100 : 0, dayLabel: "today", today: true, positions, source: "realised" };
+    return { pot: ledgerPot, dayPnl: d, dayPct: dayStart ? (d / dayStart) * 100 : 0, dayLabel: "today", today: true, positions, source: "realised",
+      from: fresh ? { kind: "engine", ts: l!.ts } : null };
   }
   if (book.session < today && fresh) {
     // in the session: the engine's minute ledger is the whole run marked live (its start equity is the last ledger
     // close, multi-day sleeves at the latest price: engine/core.py equity_now), so today = it less the last close
     const d = ledgerPot - close;
-    return { pot: ledgerPot, dayPnl: d, dayPct: close ? (d / close) * 100 : 0, dayLabel: "today", today: true, positions, source: "book" };
+    return { pot: ledgerPot, dayPnl: d, dayPct: close ? (d / close) * 100 : 0, dayLabel: "today", today: true, positions, source: "book",
+      from: { kind: "engine", ts: l!.ts } };
   }
   const prior = (series ?? []).filter((p) => p.session < book.session!).at(-1)?.closeEquity ?? book.prevClose ?? run.amount_usd;
   const d = close - prior;
   const isToday = book.session >= today;
   return { pot: close, dayPnl: d, dayPct: prior ? (d / prior) * 100 : 0, dayLabel: isToday ? "today" : `on ${sessionDay(book.session)}`,
-    today: isToday, positions, source: "book" };
+    today: isToday, positions, source: "book", from: { kind: "close", session: book.session } };
 }
