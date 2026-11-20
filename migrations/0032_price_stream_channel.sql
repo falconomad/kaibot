@@ -1,7 +1,7 @@
 -- 0032: only the owner may receive the streamed prices (stakeholder, 20 Nov 2026: dashboard prices about once a
 -- second; scripts/price_stream.py, apps/web/src/lib/stream.ts).
 --
--- NOT APPLIED. The stakeholder applies it (or Product on his word); docs/ops/migrations_pending.md, step 19.
+-- APPLIED by Product on 20 Nov 2026 (docs/ops/migrations_pending.md, step 19).
 --
 -- What changes. scripts/price_stream.py on the Mac broadcasts the held stocks' IEX prices, at most one message a
 -- second, on the PRIVATE Supabase Realtime channel `kb:prices` (event `prices`) with the service key, which needs no

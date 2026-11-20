@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0031 applied; 0032 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0032 applied; none pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -30,7 +30,7 @@ Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0031 applie
 - 0029: **applied by Product on 19 Nov 2026, 09:1x UTC** (step 16 below). Check: kb_health lists the three types.
 - 0030: **applied by Product on 19 Nov 2026, 09:2x UTC (04:2x ET)** (step 17 below). deadman_act md5 = 23e84f55be53bbf7a0286648907b71b8, the body in the file byte for byte (applied as 0022's body plus the one line, guarded by both md5s); security definer, search_path kaibot, pg_temp; not executable by authenticated; one cron job unchanged.
 - 0031: **applied by Product on 19 Nov 2026, 21:1x UTC (after the close)** (step 18 below). Check: kb_health lists news_feed_unhealthy and news_feed_ok.
-- 0032: **pending: NOT APPLIED** (step 19 below; the price-stream PR). Until it is applied the dashboard stays on its 10 s poll.
+- 0032: **applied by Product on 20 Nov 2026, about 17:0x UTC** (step 19 below; PRs #394, #395). Check: one policy `kb owner receives prices` (SELECT, {authenticated}) on realtime.messages; `kb_price_stream_reader()` not executable by anon.
 
 ## Apply in this order
 
