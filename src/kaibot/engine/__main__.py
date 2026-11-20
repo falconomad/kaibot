@@ -405,6 +405,11 @@ def main() -> None:
         log.error("engine stopped: lease lost (positions it was managing: %s)", sorted(eng.pos))
         replicator.stop(flush_s=5.0)  # our own rows only (engine-assigned ids): safe to finish sending
         raise SystemExit(EXIT_LEASE)
+    # #311: the daily note, if the engine stops after the close before its 16:10 ET tick wrote it (off: a no-op)
+    note_final = getattr(getattr(eng, "daily", None), "note_final", None)
+    if note_final is not None:
+        with contextlib.suppress(Exception):
+            note_final()
     try:
         eng.store.heartbeat(eng.process, {"state": "stopped", "host": host})
         eng.store.event("engine_stop", {"positions": list(eng.pos)}, eng._rid())

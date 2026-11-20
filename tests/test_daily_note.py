@@ -154,19 +154,105 @@ class Live:
         return self.e.get(kind, [])
 
 
-def test_the_desk_writes_once_after_1700_et():
+def test_the_desk_writes_once_from_1610_et():
     _, llm, g = gw({"paragraph": GOOD})
     desk = dn.NoteDesk(g, inline=True)
-    before = Live(datetime(2026, 11, 18, 21, 30, tzinfo=UTC), ENTRIES)  # 16:30 ET
+    before = Live(datetime(2026, 11, 18, 21, 5, tzinfo=UTC), ENTRIES)  # 16:05 ET
     assert desk.tick(before) == [] and llm.calls == []
-    after = Live(datetime(2026, 11, 18, 22, 5, tzinfo=UTC), ENTRIES)  # 17:05 ET
+    after = Live(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES)  # 16:10 ET: inside the session (ends 16:30)
     recs = desk.tick(after)
     assert len(recs) == 1 and recs[0]["source"] == "model" and recs[0]["session"] == str(D)
     assert desk.tick(after) == [] and len(llm.calls) == 1  # once a day
-    done = Live(datetime(2026, 11, 18, 22, 5, tzinfo=UTC), {**ENTRIES, dn.KIND: [{"session": str(D)}]})
+    later = Live(datetime(2026, 11, 18, 21, 29, tzinfo=UTC), ENTRIES)  # the session's last tick
+    assert desk.tick(later) == [] and desk.tick(later, final=True) == [] and len(llm.calls) == 1  # never twice
+    done = Live(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), {**ENTRIES, dn.KIND: [{"session": str(D)}]})
     assert dn.NoteDesk(g, inline=True).tick(done) == []  # a restart finds it in the journal
-    no_plan = Live(datetime(2026, 11, 21, 22, 5, tzinfo=UTC), ENTRIES)  # no session that day
+    assert dn.NoteDesk(g, inline=True).tick(done, final=True) == []
+    no_plan = Live(datetime(2026, 11, 21, 21, 10, tzinfo=UTC), ENTRIES)  # no session that day
     assert dn.NoteDesk(g, inline=True).tick(no_plan) == []
+    assert dn.NoteDesk(g, inline=True).tick(no_plan, final=True) == []
+
+
+def test_the_note_time_is_inside_the_live_session():
+    from datetime import time
+
+    from kaibot.engine import live_daily as ld
+    from kaibot.engine.runner import AFTER_CLOSE
+
+    session_end = (datetime.combine(D, time(16, 0)) + AFTER_CLOSE).time()  # the engine's last tick: 16:30 ET
+    assert ld.SEND_UNTIL < dn.NOTE_FROM < session_end
+    assert dn.CLOSE <= dn.NOTE_FROM
+
+
+CARRY_DAY = date(2026, 11, 19)
+CARRY = {  # #366: a carry-over day: the send is journalled as `md_send` of THAT session, with its `carry` note
+    "md_send": ENTRIES["md_send"] + [
+        {"run_id": 1, "strategy": R, "session": str(CARRY_DAY), "decided": str(D),
+         "targets": [["AAA", 20, "carry", "rank 3"]],
+         "carry": {"of": str(D), "carried": [["AAA", 20]], "skipped": {"CCC": "market filter off"},
+                   "risk_off": False}}],
+    "fill": ENTRIES["fill"] + [{"strategy": R, "session": str(CARRY_DAY), "symbol": "AAA", "side": "buy",
+                                "qty": 8.0, "px": 102.0, "purpose": "carry"}],
+}
+
+
+def test_a_carry_over_day_gets_its_note():
+    _, llm, g = gw({"paragraph": "x"})
+    g.client = None  # no key: the template, from the carry day's own records
+    recs = dn.NoteDesk(g, inline=True).tick(Live(datetime(2026, 11, 19, 21, 10, tzinfo=UTC), CARRY))
+    assert len(recs) == 1 and recs[0]["session"] == str(CARRY_DAY)
+    r = recs[0]["facts"]["rules"][R]
+    assert r["plan"] == [{"symbol": "AAA", "target_shares": 20, "purpose": "carry", "reason": "rank 3"}]
+    assert r["bought"] == [{"symbol": "AAA", "shares": 8.0, "price": 102.0}]
+    assert r["not_carried_over"] == [{"symbol": "CCC", "why": "market filter off"}]
+    assert "OLD" not in json.dumps(recs[0]["facts"]) and "BBB" not in json.dumps(r)  # other sessions' records
+
+
+def test_the_engine_stop_writes_a_missing_note_once_after_the_close():
+    _, llm, g = gw({"paragraph": GOOD})
+    desk = dn.NoteDesk(g)  # a worker thread on ticks; the stop writes in its own thread
+    early = Live(datetime(2026, 11, 18, 20, 59, tzinfo=UTC), ENTRIES)  # 15:59 ET: the day is not over
+    assert desk.tick(early, final=True) == [] and llm.calls == []
+    stop = Live(datetime(2026, 11, 18, 21, 5, tzinfo=UTC), ENTRIES)  # 16:05 ET: stopped before the 16:10 tick
+    assert desk.tick(stop) == []
+    recs = desk.tick(stop, final=True)
+    assert len(recs) == 1 and recs[0]["session"] == str(D) and len(llm.calls) == 1
+    assert desk.tick(stop, final=True) == [] and desk.tick(stop) == [] and len(llm.calls) == 1
+
+
+def test_the_engine_stop_waits_for_a_note_being_written():
+    import threading
+
+    _, llm, g = gw({"paragraph": GOOD})
+    desk = dn.NoteDesk(g)
+    gate = threading.Event()
+    real = desk._write
+    desk._write = lambda day, f: (gate.wait(5), real(day, f))
+    at = Live(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES)
+    assert desk.tick(at) == []  # started in a worker thread
+    threading.Timer(0.05, gate.set).start()
+    recs = desk.tick(at, final=True)
+    assert len(recs) == 1 and len(llm.calls) == 1
+
+
+def test_the_desk_never_raises():
+    class Broken(Live):
+        def _entries(self, kind):
+            raise RuntimeError("journal unreadable")
+
+    class BadClock:
+        def now(self):
+            raise RuntimeError("no clock")
+
+    _, llm, g = gw({"paragraph": GOOD})
+    for live in (Broken(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES), BadClock(), None):
+        for final in (False, True):
+            assert dn.NoteDesk(g, inline=True).tick(live, final=final) == []
+    boom = Gateway(FakeStore(), None, CFG)
+    boom.reserve = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gateway down"))
+    recs = dn.NoteDesk(boom, inline=True).tick(Live(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES),
+                                               final=True)
+    assert len(recs) == 1 and recs[0]["source"] == "template"
 
 
 @pytest.mark.parametrize("text", [
