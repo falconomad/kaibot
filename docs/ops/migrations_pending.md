@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0032 applied; 0033 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0032 applied; 0033 and 0034 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -32,6 +32,7 @@ Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0032 applie
 - 0031: **applied by Product on 19 Nov 2026, 21:1x UTC (after the close)** (step 18 below). Check: kb_health lists news_feed_unhealthy and news_feed_ok.
 - 0032: **applied by Product on 20 Nov 2026, about 17:0x UTC** (step 19 below; PRs #394, #395). Check: one policy `kb owner receives prices` (SELECT, {authenticated}) on realtime.messages; `kb_price_stream_reader()` not executable by anon.
 - 0033: **pending (NOT APPLIED)** (step 20 below; dashboard read only, any time; the PR for kb_health's engine health events, #392 item 4).
+- 0034: **pending (NOT APPLIED)** (step 21 below; dashboard read only, any time; the market notices of #378).
 
 ## Apply in this order
 
@@ -60,6 +61,7 @@ run it again. Do not reorder them.
 | 18 | `migrations/0031_kb_health_news_feed_events.sql` (whole file; the PR for kb_health's news events). After 0029. Any time, also while the engine runs: dashboard read only | `kb_health` also returns `news_feed_unhealthy` and `news_feed_ok`, the engine's news poller's health events (#354, PR #355), which Health.tsx labels. 0029's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
 | 19 | `migrations/0032_price_stream_channel.sql` (whole file; the price-stream PR). Any time, also while the engine runs: dashboard only, additive. Then, in the Supabase dashboard: Realtime > Settings > "Allow public access" **off** (the dashboard uses no public channel) | Only the owner may receive the streamed prices: one SELECT policy on `realtime.messages` for `authenticated`, topic `kb:prices`, broadcasts only, `kaibot.is_owner()` through the definer wrapper `public.kb_price_stream_reader()` (0002 revokes `is_owner` from authenticated). No INSERT policy (browsers cannot send), no table or row changes; `scripts/price_stream.py` sends with the service key and stores nothing | No: `create or replace function`, `revoke`/`grant`, and `create policy` inside an "if not exists" block (no drop) |
 | 20 | `migrations/0033_kb_health_engine_health_events.sql` (whole file; the PR for kb_health's engine health events). After 0031. Any time, also while the engine runs: dashboard read only | `kb_health` also returns 15 health events the engine sends that the list left out, among them `multi_day_carry` (#366) and `corporate_actions_error` (#392), plus `ledger_mismatch`, `reconcile_blocked`, `replica_conflict`, `watchdog_protect` and the others named in the file's header. 0031's function otherwise, owner-only; the engine does not call it. Health.tsx shows an unlabelled type by its name until Design labels it | No: one `create or replace function`, then the revoke/grant of 0021 |
+| 21 | `migrations/0034_market_notices.sql` (whole file; the PR for #378's market notices). Independent of 0033. Any time, also while the engine runs: dashboard read only, additive | The dashboard's "New on the market" and "Big day" notices: table `kaibot.market_notice` (RLS on, no policy; written only by `scripts/publish_notices.py` with the service key, off unless `KAIBOT_NOTICES=1`) and the owner-only read `public.kb_market_notices(p_today)`, which also turns the engine's `market_alarm` events (#377, only with `KAIBOT_MARKET_ALARM=on`) into notices. The engine neither reads nor writes the table. Until it is applied the dashboard shows no notice | No: `create table if not exists`, `create index if not exists`, `create or replace function`, `revoke` and `grant` only |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -120,6 +122,10 @@ select prosrc like '%news_feed_unhealthy%' and prosrc like '%news_feed_ok%' and 
 -- step 20 (0033): kb_health returns the engine's health events (multi_day_carry, corporate_actions_error, ...)
 select prosrc like '%multi_day_carry%' and prosrc like '%corporate_actions_error%' and prosrc like '%news_feed_ok%'
   from pg_proc where proname = 'kb_health';                                                          -- true
+-- step 21 (0034): the market notices, owner-only
+select has_function_privilege('anon', 'public.kb_market_notices(date)', 'execute');               -- false
+select has_table_privilege('authenticated', 'kaibot.market_notice', 'select');                    -- false
+select relrowsecurity from pg_class where oid = 'kaibot.market_notice'::regclass;                  -- true
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false

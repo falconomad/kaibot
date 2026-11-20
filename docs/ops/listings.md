@@ -206,3 +206,18 @@ Known limits:
   (`prior_stats`: the standard deviation of the 20 daily returns before the session, and the first return needs two
   closes) its first possible signal is on the 22nd session, one later (21 Dec 2026 for ANT). Backend-quant should
   say which reading the table is to show. For `orb_stocks_in_play` code and design agree on the 15th.
+
+## On the dashboard (#378)
+
+`scripts/publish_notices.py` turns the watch's listings (and, once #377 is merged, the market-event alarm) into the
+dashboard's "New on the market" and "Big day" notices: rows of `kaibot.market_notice` (migration 0034), read by
+`kb_market_notices()`. Off by default. To switch it on, after the stakeholder's "apply" of 0034:
+
+```bash
+.venv/bin/python scripts/publish_notices.py --now 2026-11-19T06:45:00Z   # dry run: what 19 Nov looked like
+.venv/bin/python scripts/publish_notices.py --write --env ~/Projects/kaibot-secrets/.env   # once, by hand
+echo 'KAIBOT_NOTICES=1' >> ~/Projects/kaibot-secrets/.env               # then the nightly daily job runs it
+```
+
+It writes only `kaibot.market_notice`, never fails the daily job (log `logs/notices.log`) and is not on the engine's
+path. Design: `docs/design/m8_market_notices.md`.
