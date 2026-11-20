@@ -112,6 +112,8 @@ class NewsDesk:
         self._by_ticker: dict[str, set[int]] = {}
         self._seen: dict[tuple[str, str], datetime] = {}
         self._pending: list[int] = []
+        self._orphans: set[int] = set()  # cluster rows written without their item whose delete failed (#360)
+        self.orphans_removed = 0  # such rows deleted so far (a count for tests and logs)
         self.triage_calls = 0
 
     # ---------------- ingest ----------------
@@ -128,6 +130,7 @@ class NewsDesk:
 
     def ingest(self, raw_items: Iterable[dict]) -> dict:
         now = self.clock()
+        removed = self._remove_orphans()
         items = [x for x in (normalise(r, now) for r in raw_items) if x is not None]
         stored = self._stored_keys({x["headline_sha1"] for x in items})
         added = created = 0
@@ -142,6 +145,7 @@ class NewsDesk:
             created += res
         tri = self._triage_pending()
         self._prune(now)
+        self.orphans_removed += removed + self._remove_orphans()
         return {"fetched": len(items), "added": added, "clusters_created": created, "triaged": tri}
 
     def _stored_keys(self, shas: set[str]) -> set[tuple[str, str]]:
@@ -196,6 +200,7 @@ class NewsDesk:
             log.warning("news insert skipped: %s", type(e).__name__)
             if created and cid is not None and cid in self._clusters:  # an empty cluster: forget it, never triage
                 self._forget(cid)
+                self._orphans.add(cid)  # and delete its row (#360): now, or at the next ingest if that fails
             return None
         self._seen[(it["headline_sha1"], it["source"])] = it["published_at"]
         c.sha1s.add(it["headline_sha1"])
@@ -218,6 +223,21 @@ class NewsDesk:
             except Exception as e:
                 log.warning("news cluster update failed: %s", type(e).__name__)
         return 1 if created else 0
+
+    def _remove_orphans(self) -> int:
+        """Delete the cluster rows whose first item was never written (#360). Never raises; a row whose delete
+        fails stays in the set and is tried again at the next ingest. Readers never showed such a row (a cluster
+        without items is skipped by `clusters_for`), so this only keeps the table clean."""
+        n = 0
+        for cid in sorted(self._orphans):
+            try:
+                self.store.delete("news_cluster", {"id": cid})
+            except Exception as e:
+                log.warning("empty news cluster %s not deleted yet: %s", cid, type(e).__name__)
+                continue
+            self._orphans.discard(cid)
+            n += 1
+        return n
 
     def _triage_pending(self) -> int:
         n = 0

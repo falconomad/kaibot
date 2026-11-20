@@ -40,6 +40,43 @@ only writer) polls every 5 minutes on weekdays 04:00-20:00 ET and every 30 minut
   fetch watermark (asked again next time; the desk skips stored stories), counts as `failing` and backs off 5, 10,
   20 ... 60 min (heartbeat `news.retry_at`).
 
+## Clustering quality, measured offline (#360, 21 Nov 2026)
+`python -m kaibot.news.clustereval` runs the real `NewsDesk.ingest` on the hand-labelled sample in
+`tests/fixtures/news_clusters/` (91 Benzinga headlines via Alpaca, 8 symbols, 20-22 Oct 2026, fetched 10 Nov 2026;
+82 stories, 8 of them with two or three headlines; labelled before the rule ran). No network, no LLM.
+
+| Rule | Clusters | Stories split (of the 8 with 2+ headlines) | Clusters merging stories | Pair precision | Pair recall |
+|---|---|---|---|---|---|
+| **desk, MinHash >= 0.8 (current)** | 90 | **8 of 8** | 1 | 0% | 0% |
+| desk, MinHash >= 0.5 | 90 | 8 of 8 | 1 | 0% | 0% |
+| desk, MinHash >= 0.3 | 89 | 8 of 8 | 2 | 0% | 0% |
+| desk, MinHash >= 0.1 | 88 | 8 of 8 | 3 | 0% | 0% |
+| offline only: content-word Jaccard >= 0.3, single link, same ticker, 24 h | 85 | 5 of 8 | 2 | 62% | 50% |
+| offline only: the same at >= 0.45 | 85 | 5 of 8 | 2 | 62% | 50% |
+| offline only: the same at >= 0.6 | 88 | 8 of 8 | 2 | 33% | 10% |
+
+What it says:
+- **The current rule joins verbatim echoes only.** On this sample every story told twice in other words was split
+  ("JPMorgan's Turkish Brokerage Unit to Surrender Operating License" and "'JPMorgan's Turkey Securities Unit Plans
+  to Cease Operations' - Bloomberg"; the $35 billion Chinese Nvidia orders three times). The word 3-shingle MinHash
+  of two rewritten headlines is about 0 (0.00 to 0.09 on the 10 same-story pairs), so lowering the threshold joins
+  no echo and only merges different stories. The rule does what it was built for (wire copies of one press
+  release, which this sample barely has, since every item is Benzinga), not "same story".
+- **One merge, and it is a drop:** a daily template ("10 Information Technology Stocks With Whale Alerts In
+  Today's Session") repeated the next day has the same `(headline_sha1, source)`, so the desk skips the second day's
+  item as already seen (the in-memory window keeps keys for 48 h; the unique index keeps them for ever).
+- **No headline-only threshold separates rewrites from templates.** Content-word overlap joins 3 of the 8 echo
+  stories, but different stories with templated headlines (two earnings "Prediction Market Preview"s; two days of
+  CNBC "Final Trades") overlap just as much.
+- **Nothing is changed here.** A rule that joins rewritten echoes (for example word overlap plus a shared number or
+  name, or the provider's own story ids) changes what the room and the reviewer see, so it is its own story.
+
+## Empty clusters (#360)
+An item insert can fail after its new cluster row was written (QA-Ops on #355). The desk then deletes that row at
+once (`Store.delete`); if the delete fails too it keeps the id and deletes it at the start of the next ingest
+(`NewsDesk.orphans_removed` counts them). Readers never showed such a row: `clusters_for` skips a cluster without
+items. Tests: `tests/unit/test_news_empty_cluster.py`.
+
 ## Point-in-time reads
 `clusters_for(symbol, as_of, hours=24)` and `evidence_pack(...)` use only clusters with `first_seen <= as_of` and
 items with `available_ts <= as_of`; tickers and `n_outlets` are recomputed from those items, and a triage whose
