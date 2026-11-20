@@ -219,3 +219,31 @@ All 40 requests allowed for the story are now used (3 + 30 + 7).
 - Ten of the eleven tags need more labelled positives before they can ship. A random draw gives few of the rare
   ones (about 1 in 150 for `buyback`); a second sample would have to be far larger, or drawn per tag for recall
   and at random for precision.
+
+## Sample v2: across years, from the Mac's research store (declared 20 Nov 2026, before any v2 headline was seen)
+
+The three open points above need headlines that this checkout does not have. The Mac's research store
+(`data/news/symbol=XYZ/YYYY.parquet`, Benzinga through Alpaca, downloaded earlier by `scripts/fetch_history.py
+--news`) has them for the research stocks. `draw_store.py` draws v2 from it; nothing is fetched except by `probe`.
+
+| Step | Who | Command |
+|---|---|---|
+| 1. What the store holds, per year and source | the stakeholder, on the Mac | `.venv/bin/python -m kaibot.news.tagset.draw_store history` |
+| 2. Does the engine's key still get old Benzinga headlines? (3 requests) | the stakeholder, on the Mac | `.venv/bin/python -m kaibot.news.tagset.draw_store probe --env ~/Projects/kaibot-secrets/.env` |
+| 3. The draw (writes `headlines_v2.jsonl`, `draw_v2.jsonl` here) | the stakeholder, on the Mac | `.venv/bin/python -m kaibot.news.tagset.draw_store draw` |
+| 4. Labels for all eleven tags, from `headlines_v2.jsonl` only, into `labels_v2.jsonl` | Agents-AI | by hand; `draw_v2.jsonl` stays closed until the last label |
+| 5. The table | anyone | `python -m kaibot.news.tagset.measure --v2` |
+
+Frozen settings (`draw_store.py`): seed `379205`; **random** stratum of 50 headlines per calendar year in the
+store; **fired** strata of 25 headlines per tag that did not ship in v1, drawn uniformly from the headlines on
+which the unchanged v1 rule fires (for `guidance_up` and `guidance_down`: 25 on earnings days and 25 on other
+days). Earnings day: a symbol of the headline has an Item 2.02 8-K (`data/earnings/announcements.parquet`) whose
+session or acceptance date is the headline's New York date.
+
+How it is read (`measure.py --v2`): precision of a tag on its fired stratum (a uniform sample of what the rule tags
+in the store), recall on the random stratum only. A tag ships with at least 20 labelled positives in the sample
+and precision of at least 95% on at least 20 tagged headlines of its fired stratum (of the random stratum for
+`analyst_up`). The rules stay at `RULES_VERSION = 1`; the draw refuses any other version.
+
+Limits, said beforehand: the store covers today's research stocks, not former index members (survivorship), and
+the labeller is again an agent who has read the rules, so the fired strata measure the rules, not the labeller.
