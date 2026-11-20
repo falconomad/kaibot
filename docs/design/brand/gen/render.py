@@ -123,7 +123,8 @@ def extras(b) -> int:
     t = mock.after("dark")
     chart = (f'<div class="spec" style="padding:16px 0 12px"><div style="padding:0 16px;font-size:14px;color:#B2B8C1">Paper pot against the market</div>{mock.chart(t, 390, 190, "after")}'
              '<div style="display:flex;gap:18px;padding:8px 16px 0;font-size:13px;color:#B2B8C1"><span><i style="display:inline-block;width:18px;height:3px;border-radius:2px;background:#4F95F0;vertical-align:middle"></i> Your pot</span>'
-             '<span><i style="display:inline-block;width:18px;border-top:2px dotted #808692;vertical-align:middle"></i> S&amp;P 500</span><span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#4F95F0"></i> Now</span></div></div>')
+             f'<span><i style="display:inline-block;width:18px;border-top:2px dotted {t["s-spy"]};vertical-align:middle"></i> S&amp;P 500</span>'
+             '<span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#4F95F0"></i> Now</span></div></div>')
     pv = ('<div class="pv">'
           + f'<div style="{"".join(f"--{k}:{v};" for k, v in t.items())}" data-v="after">{mock.header("after", t)}</div>'
           + '<h3>kaibo brand system v1</h3><p class="lead">Every colour, letter and shape now comes from the logo you picked: its blue, its black and white, its round ends and its point.</p>'
@@ -131,7 +132,7 @@ def extras(b) -> int:
           + '<h3>Home, before</h3><p class="lead">Today: white button, generic mark, the experiment note in the brand blue.</p>' + crop("before", 620)
           + '<h3>Home, after</h3><p class="lead">The wordmark in the header. Red still means halted, amber still means Paper. The experiment note is now a grey lab note with a flask, so it cannot be mistaken for a button.</p>' + crop("after", 620)
           + '<h3>A position sheet</h3><p class="lead">Blue is kept for the one main action and the live point.</p>' + sheet
-          + '<h3>The chart</h3><p class="lead">Your pot in brand blue, ending in the logo point. The market is a quiet dotted grey line.</p>' + chart + "</div>")
+          + '<h3>The chart</h3><p class="lead">Your pot in brand blue, ending in the logo point. The market is a quiet dotted mauve line.</p>' + chart + "</div>")
     total += shot(b, wrap(pv), ROOT / "brand_system_preview.png", 2, ".pv")
     return total
 

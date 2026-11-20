@@ -54,7 +54,7 @@ Dark is the theme the app runs; light is defined and off. A gain or a loss alway
 | `--exp-line` | `#808692` | `#5D646F` | Experiment: dashed edge |
 | `--exp-hatch` | `#40454F` | `#B2B8C1` | Experiment: hatch |
 | `--s-pot` | `#4F95F0` | `#2F6FDE` | Chart: pot line |
-| `--s-spy` | `#808692` | `#5D646F` | Chart: benchmark, dotted |
+| `--s-spy` | `#9E65A1` | `#A168A4` | Chart: benchmark, dotted |
 | `--s-up` | `#10A66E` | `#039F68` | Chart: gain mark |
 | `--s-down` | `#BC262F` | `#A7021D` | Chart: loss mark |
 

@@ -42,7 +42,7 @@
   --gain: #3ADD98; --gain-tint: #092B1C; --loss: #FF716D; --loss-tint: #371715;
   --pass: #3ADD98; --warn: #F7B746; --warn-tint: #32240B; --fail: #FF716D;
   --ai: #C9B7FD; --ai-tint: #231E30;
-  --s-pot: #4F95F0; --s-spy: #808692;
+  --s-pot: #4F95F0; --s-spy: #9E65A1;
   --on-sea: #0A0B0D; --sea-line: #174189; --focus: #7FB4F9; --selection: #174189; --live: #4F95F0; --control: #808692;
   --gain-line: #0A5C3B; --loss-line: #AD4B48; --warn-line: #906E34; --warn-text: #F7B746; --on-warn: #0A0B0D; --paper-edge: #F7B746; --ai-line: #50466C;
   --exp-bg: #1B1E23; --exp-line: #808692; --exp-hatch: #40454F; --exp-text: #F4F5F7;
@@ -60,7 +60,7 @@
   --gain: #00764C; --gain-tint: #D8F8E5; --loss: #BC262F; --loss-tint: #FFE9E6;
   --pass: #00764C; --warn: #F7B746; --warn-tint: #FFECCF; --fail: #BC262F;
   --ai: #6844AA; --ai-tint: #F0EBFF;
-  --s-pot: #2F6FDE; --s-spy: #5D646F;
+  --s-pot: #2F6FDE; --s-spy: #A168A4;
   --on-sea: #FFFFFF; --sea-line: #B4D4FE; --focus: #2F6FDE; --selection: #B4D4FE; --live: #2F6FDE; --control: #5D646F;
   --gain-line: #8ECFAC; --loss-line: #D14E4D; --warn-line: #A87507; --warn-text: #835B05; --on-warn: #0A0B0D; --paper-edge: #A87507; --ai-line: #C0B7DF;
   --exp-bg: #E4E6EA; --exp-line: #5D646F; --exp-hatch: #B2B8C1; --exp-text: #0A0B0D;
