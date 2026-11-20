@@ -807,3 +807,87 @@ def test_service_status_says_whether_the_worker_runs(tmp_path):
     finally:
         w.kill()
     assert f"ticker checks: running (pid {w.pid}" in x.stdout and '"NBIS"' in x.stdout
+
+
+# ---------------------------------------------------------------- the price relay beside the engine
+# scripts/price_stream.py (20 Nov 2026) streams the held stocks' prices to the dashboard. Off unless
+# KAIBOT_PRICE_STREAM=on; when on it runs like the ticker-check worker, and nothing it does reaches the engine.
+@pytest.fixture
+def relay_env(checks):
+    r, env, tmp = checks
+    return r, {**env, "KAIBOT_TICKER_CHECKS": "0", "KAIBOT_STREAM_START_DELAY": "0"}, tmp
+
+
+def relay_starts(tmp):
+    return [ln for ln in worker_starts(tmp) if "price_stream.py" in ln]
+
+
+def test_the_relay_is_off_by_default(relay_env):
+    r, env, tmp = relay_env
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, env, check=True)
+    assert "price relay" not in x.stdout and relay_starts(tmp) == []
+
+
+@pytest.mark.parametrize("value", ["off", "0", "maybe"])
+def test_only_on_turns_the_relay_on(relay_env, value):
+    r, env, tmp = relay_env
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_PRICE_STREAM": value}, check=True)
+    assert "price relay on" not in x.stdout and relay_starts(tmp) == []
+
+
+def test_the_relay_runs_beside_the_engine_from_the_env_file_and_stops_with_it(relay_env):
+    r, env, tmp = relay_env
+    env_file = tmp / "service.env"
+    env_file.write_text("KAIBOT_PRICE_STREAM=on  # the dashboard's streamed prices\n")
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 4))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_ENV_FILE": str(env_file)})
+    assert x.returncode == 0 and "price relay on" in x.stdout
+    (start,) = relay_starts(tmp)
+    assert start.endswith(f"-u scripts/price_stream.py --env {env_file}")
+    assert gone(int(start.split()[1])) and "worker-term" in (tmp / "worker.calls").read_text()
+    assert not (r / "data/live/price_stream.pid").exists()
+    log = (tmp / "logs/price_stream.log").read_text()
+    assert "price relay started" in log and "price relay stopped with the engine" in log
+
+
+def test_a_relay_that_dies_or_cannot_start_never_touches_the_engine(relay_env):
+    r, env, tmp = relay_env
+    on = {**env, "KAIBOT_PRICE_STREAM": "on"}
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 7))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**on, "FAKE_WORKER_EXIT": "3"})
+    assert x.returncode == 0 and "engine exited cleanly" in x.stdout  # the engine's code, not the relay's
+    assert (tmp / "ran").read_text().split() == ["up"]  # one engine run: never stopped or restarted by the relay
+    assert len(relay_starts(tmp)) >= 2
+    assert "price relay exited with code 3" in (tmp / "logs/price_stream.log").read_text()
+    (tmp / "ran").unlink()
+    (tmp / "logs/price_stream.log").unlink()
+    nopy = tmp / "nopy"
+    nopy.mkdir()
+    (nopy / "python3").write_text("#!/bin/bash\nexit 1\n")  # no usable Python 3.11+ on PATH either
+    (nopy / "python3").chmod(0o755)
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 2))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r,
+           {**on, "FAKE_IMPORT": "1", "PATH": f"{nopy}:{env['PATH']}"})
+    assert x.returncode == 0 and (tmp / "ran").read_text().split() == ["up"]
+    assert (tmp / "logs/price_stream.log").read_text().count("cannot start the price relay yet") == 1
+
+
+def test_a_stop_reaches_the_relay_too(relay_env):
+    r, env, tmp = relay_env
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 60))
+    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, env={**env, "KAIBOT_PRICE_STREAM": "on"},
+                         stdout=subprocess.PIPE, text=True)
+    try:
+        for _ in range(100):
+            if relay_starts(tmp) and (r / "data/live/price_stream.pid").exists():
+                break
+            time.sleep(0.1)
+        pid = int((r / "data/live/price_stream.pid").read_text())
+        p.send_signal(__import__("signal").SIGINT)
+        out, _ = p.communicate(timeout=40)
+    finally:
+        p.kill()
+    assert p.returncode == 0 and "stopped (on request)" in out
+    assert gone(pid) and "worker-term" in (tmp / "worker.calls").read_text()

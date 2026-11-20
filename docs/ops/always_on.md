@@ -42,8 +42,17 @@ Never two engines: the service checks for an engine started by hand (`engine_gua
 by hand while the service runs, yours is refused. If the service finds one started by hand, it stands by and takes
 over about a minute after that one stops.
 
+Beside the engine, in its own process group and never able to stop or restart it: the ticker-check worker
+(`scripts/run_ticker_checks.py`, on unless `KAIBOT_TICKER_CHECKS=0`) and, only with `KAIBOT_PRICE_STREAM=on` in the
+`.env`, the price relay (`scripts/price_stream.py`, 20 Nov 2026): during market hours (Alpaca's clock) it streams the
+held stocks' IEX trades (one Alpaca websocket, at most 30 stocks, the largest by value) and broadcasts at most one
+message a second on the private Supabase Realtime channel `kb:prices`, which only the owner can read (migration 0032).
+It sends no order and writes only its heartbeat (`process = 'price_stream'`). IEX is one exchange: its prices can
+differ from the consolidated price by a few cents. Without it, or when it is silent for 5 s, the dashboard polls every
+10 s as before. `./scripts/service.sh status` shows both.
+
 Logs, in `~/Library/Logs/kaibot/`: `engine.log`, `watchdog.log` (Python mode; Docker: `docker logs kaibot-watchdog`),
-`daily.log`, `healthcheck.log`. Each is rotated at 10 MB and every night, 14 gzipped copies kept.
+`daily.log`, `healthcheck.log`, `ticker_checks.log`, `price_stream.log`. Each is rotated at 10 MB and every night, 14 gzipped copies kept.
 
 ## Everyday commands
 

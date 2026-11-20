@@ -10,6 +10,7 @@ What stands in for Supabase (only so the migrations apply; the tests themselves 
 - roles anon, authenticated, service_role;
 - `auth.users` and `auth.uid()`, which reads the session setting `test.uid` (the tests set it per call);
 - the legacy public tables 0003 locks;
+- Realtime's `realtime.messages` (RLS on) and `realtime.topic()`, which reads `test.topic` (0032);
 - pg_net's `net` schema, Vault's `vault`, pg_cron's `cron` (as in tests/pg_harness.py). The two
   `create extension if not exists pg_cron / pg_net` lines of 0006 are left out when applying: those extensions do
   not exist outside Supabase, and their schemas are the stand-ins.
@@ -49,6 +50,14 @@ do $$ declare t text; begin
     'transactions', 'worker_runs'] loop
     execute format('create table public.%I (id bigint)', t);
   end loop; end $$;
+create schema realtime;
+create table realtime.messages (id bigserial primary key, topic text not null, extension text not null,
+  event text, payload jsonb, private boolean default true);
+alter table realtime.messages enable row level security;
+create function realtime.topic() returns text language sql stable as
+  $f$ select nullif(current_setting('test.topic', true), '') $f$;
+grant usage on schema realtime to anon, authenticated;
+grant select on realtime.messages to anon, authenticated;
 create schema net;
 create table net.calls (id bigserial primary key, method text, url text, params jsonb, body jsonb,
   done boolean not null default false);
