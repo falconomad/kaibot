@@ -41,7 +41,7 @@ Baseline on 12 Nov 2026 (branch of #122, main @ the PR's base):
 
 ## Migration record (#361)
 
-`tests/test_migrations_pending_hygiene.py` (repo only, no database or network) fails when `docs/ops/migrations_pending.md` and `migrations/` disagree: file numbers must be unique and run 0001, 0002, ... without gaps; every file has exactly one `- NNNN: applied ...` or `- NNNN: pending ...` entry; the "Last checked against main on <date> (<set> applied; <set> pending)" summary matches the list (`none pending` when nothing is); every pending migration has a step, steps run 1, 2, ... and name real files, and an entry's "step N" is its own row; an applied migration's header has no `-- NOT APPLIED` line (a pending one no `-- APPLIED` line). So a new migration's PR adds its file, its list entry, its step and the summary together.
+`tests/test_migrations_pending_hygiene.py` (repo only, no database or network) fails when `docs/ops/migrations_pending.md` and `migrations/` disagree: file numbers must be unique and run 0001, 0002, ... without gaps; every file has exactly one `- NNNN: applied ...` or `- NNNN: pending ...` entry; the "Last checked against main on <date> (<set> applied; <set> pending)" summary matches the list (`none pending` when nothing is); every pending migration has a step, steps run 1, 2, ... and name real files, and an entry's "step N" is its own row; no migration header claims a status (no `-- APPLIED` or `-- NOT APPLIED` line; a header cannot be updated when a file is applied, so the status lives only in `docs/ops/migrations_pending.md`, #368). So a new migration's PR adds its file, its list entry, its step and the summary together.
 
 ## Dead code
 

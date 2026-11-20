@@ -1,7 +1,8 @@
 -- 0022: the off-box dead-man on an ex-date with the engine down since before the open (#291; #266 gap 1).
 --
--- NOT APPLIED. Production migrations are the stakeholder's (Product applies on his word): after 0019 (and 0020,
--- 0021, which it does not touch).
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's (Product applies on his word): after 0019 (and 0020, 0021, which it does
+-- not touch).
 --
 -- Why. kaibot.deadman_act (0019) reads the active run's last kaibot.ledger_position rows. #287 makes the engine write
 -- today's rows as soon as a split, spin-off, symbol change or cash merger changes a share count, but an engine that
