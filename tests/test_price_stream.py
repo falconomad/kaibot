@@ -151,6 +151,28 @@ def test_the_relay_publishes_once_per_second_with_the_payload_the_page_reads():
     assert list(p["prices"]) == ["XOM"]
 
 
+def test_no_price_from_before_a_gap_or_an_earlier_session_is_broadcast_again():
+    held = [{"symbol": s, "market_value": "1000", "asset_class": "us_equity"} for s in ("AAA", "BBB")]
+    http = FakeHttp(positions=held)
+    r, clock, _ = relay(http)
+    r.tick()
+    r.ws.queue.append([{"T": "t", "S": "AAA", "p": 10.0}, {"T": "t", "S": "BBB", "p": 20.0}])
+    r.tick()
+    assert http.broadcasts[-1]["prices"] == {"AAA": 10.0, "BBB": 20.0}
+    http.is_open = False  # the close: the stream ends
+    clock.t += 61
+    r.tick()
+    http.is_open = True  # the next session: only AAA trades
+    clock.t += 61
+    r.tick()
+    r.ws.queue.append([{"T": "t", "S": "AAA", "p": 11.0}])
+    clock.t += 2
+    r.tick()
+    assert http.broadcasts[-1]["prices"] == {"AAA": 11.0}   # BBB's price from the day before is not sent as new
+    r.fail(clock.t, ps.ConnectionClosed("lost"))           # a dropped connection forgets the prices too
+    assert r.coalescer.prices == {} and r.coalescer.take(clock.t + 5) is None
+
+
 def test_a_failed_broadcast_is_dropped_and_never_stops_the_relay():
     http = FakeHttp()
     http.fail_broadcast = True

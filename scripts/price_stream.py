@@ -130,6 +130,12 @@ class Coalescer:
         for s in [s for s in self.prices if s not in keep]:
             del self.prices[s]
 
+    def reset(self) -> None:
+        """Forget every price (the stream went down or the session ended): a snapshot after the next connection
+        carries only prices traded on it, never one from before the gap or from an earlier session."""
+        self.prices.clear()
+        self.dirty = False
+
     def take(self, now: float) -> dict[str, float] | None:
         if not self.dirty or not self.prices or now - self.sent_at < self.gap:
             return None
@@ -441,6 +447,7 @@ class Relay:
             with contextlib.suppress(Exception):
                 self.ws.close()
         self.ws, self.sent, self.healthy_since = None, set(), None
+        self.coalescer.reset()  # no price from before a gap is broadcast again as if it were new
 
     def fail(self, t: float, e: BaseException) -> None:
         self.disconnect(_why(e))
