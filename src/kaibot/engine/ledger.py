@@ -14,6 +14,8 @@ Entries (kind, body), every body carries `run_id`:
               the basis it moved from the parent to them (Alpaca's cost basis), both split over the parent's holders
               by shares; cash and the parent's shares do not change
     symbol_change {symbol, new_symbol, ex_date, ref}            #266: the sleeves move to the new symbol
+    fee       {amount, date, ref, sub_type?}                    #238: a fee the venue took apart from any fill
+              (Alpaca's FEE activities: TAF, SEC, CAT), `amount` negative; the run's cash and equity, no sleeve
     mark      {session, prices {(strategy, symbol) | "strategy|symbol": px}, pnl_venue, pnl_shadow, ts?}
               the session's close: every open sleeve is marked, the day is closed
 
@@ -35,7 +37,7 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 
-LEDGER_KINDS = ("run", "position", "fill", "dividend", "split", "spinoff", "symbol_change", "mark")
+LEDGER_KINDS = ("run", "position", "fill", "dividend", "split", "spinoff", "symbol_change", "mark", "fee")
 
 
 @dataclass
@@ -84,6 +86,7 @@ class Book:
     sleeves: dict[tuple[str, str], Sleeve] = field(default_factory=dict)
     closes: list[Close] = field(default_factory=list)
     dividends_total: float = 0.0
+    fees_total: float = 0.0  # #238: account fees (negative) the venue took apart from the fills
     realized_venue: float = 0.0  # since the run began (fills only)
     day_realized: float = 0.0
     day_dividends: float = 0.0
@@ -123,7 +126,7 @@ class Book:
             px = prices.get(k)
             px = px if px is not None else (s.mark if s.mark is not None else s.avg_cost)
             open_term += s.qty * px - s.cost
-        return reported + open_term + self.dividends_total
+        return reported + open_term + self.dividends_total + self.fees_total
 
 
 class Ledger:
@@ -210,6 +213,14 @@ class Ledger:
             b.cash += cash
             b.dividends_total += cash
             b.day_dividends += cash
+
+    def _fee(self, b: Book, e: dict) -> None:
+        """#238: once per ref. The daily results (`days`) do not hold it, so equity counts it on its own."""
+        if self._seen(b, e):
+            return
+        amount = float(e["amount"])
+        b.cash += amount
+        b.fees_total += amount
 
     def _split(self, b: Book, e: dict) -> None:
         if self._seen(b, e):
@@ -365,6 +376,34 @@ def actions_from_daily_store(df, session: str) -> list[Action]:
 DIVIDEND_ACTIVITIES = ("DIV", "DIVNRA", "DIVFEE", "DIVROC", "DIVTXEX", "DIVCGL", "DIVCGS", "DIVFT", "DIVTW", "CGD")
 SPLIT_ACTIVITIES = ("SSP",)
 CORPORATE_ACTIVITIES = DIVIDEND_ACTIVITIES + SPLIT_ACTIVITIES
+
+
+FEE_ACTIVITIES = ("FEE",)  # #238: Alpaca's fees charged apart from the fills (activity_sub_type TAF, SEC, CAT, ...)
+
+
+def fees_from_activities(rows: Iterable[dict]) -> list[dict]:
+    """#238: Alpaca's FEE activities as ledger `fee` bodies (without run_id): the net amount (negative), the date,
+    the activity id as the ref (documented on every activity). A row without an id is named by its posting time,
+    sub-type and amount instead; a row without either, or without an amount, is skipped (it could not be booked
+    exactly once)."""
+    out = []
+    for r in rows:
+        if r.get("activity_type") not in FEE_ACTIVITIES or r.get("net_amount") in (None, ""):
+            continue
+        amount = float(r["net_amount"])
+        if not math.isfinite(amount) or amount == 0:
+            continue
+        if r.get("id"):
+            ref = f"alpaca:{r['id']}"
+        elif r.get("created_at"):
+            ref = f"alpaca-fee:{r['created_at']}:{r.get('activity_sub_type') or ''}:{r['net_amount']}"
+        else:
+            continue
+        body = {"amount": amount, "date": str(r.get("date") or "")[:10], "ref": ref}
+        if r.get("activity_sub_type"):
+            body["sub_type"] = str(r["activity_sub_type"])
+        out.append(body)
+    return out
 
 
 def actions_from_activities(rows: Iterable[dict], ledger_qty: Mapping[str, float],

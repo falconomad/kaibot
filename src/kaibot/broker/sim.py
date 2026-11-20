@@ -325,6 +325,17 @@ class SimBroker(BrokerBase):
         self.non_trade.append({"activity_type": "MA", "id": f"{day}::ma{n + 2}", "date": day, "symbol": symbol,
                                "qty": "0", "net_amount": str(qty * price)})
 
+    def post_fee(self, amount: float, *, day: str, sub_type: str = "TAF") -> None:
+        """#238: a fee Alpaca charges apart from the fill (its regulatory fees, e.g. TAF, SEC, CAT): the cash is
+        taken and a FEE activity posted, as Alpaca paper does the evening after the trades (seen on 18 Nov 2026:
+        `{"activity_type": "FEE", "activity_sub_type": "CAT", "net_amount": "-0.01", ...}`)."""
+        if self.cash is not None:
+            self.cash -= amount
+        n = len(self.non_trade)
+        self.non_trade.append({"activity_type": "FEE", "activity_sub_type": sub_type, "id": f"{day}::fee{n + 1}",
+                               "date": day, "created_at": f"{day}T23:59:00Z", "net_amount": f"{-amount:.2f}",
+                               "status": "executed", "currency": "USD"})
+
     def symbol_change(self, old: str, new: str, *, day: str) -> None:
         """Alpaca updates the asset's symbol: the position is renamed (an SC activity names the new symbol)."""
         if old not in self.pos:

@@ -133,7 +133,10 @@ with the broker (`engine/reconcile.py`):
   dividends accrued at the ex-date that are not paid yet.
 - **Tolerance (cash):** the larger of **$1 and 0.05% of the run's pot** ($50 at $100k). It covers what the ledger
   does not model to the cent:
-  - regulatory sale fees (SEC, FINRA TAF);
+  - a regulatory fee the venue has taken but not posted yet. Alpaca puts no fee on a fill; it posts its fees
+    (SEC, FINRA TAF, CAT) as `FEE` activities the evening after the trades, and the engine books each one once, as
+    a `fee` ledger entry, at the next session start (#238). So these fees no longer use up the tolerance over
+    time;
   - cash in lieu and dividend amounts rounded by the broker;
   - dividend withholding.
 - **Tolerance (shares):** none.

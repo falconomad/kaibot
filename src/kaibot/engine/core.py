@@ -54,10 +54,12 @@ from kaibot.engine.execution import flatten_at_close
 from kaibot.engine.journal import Journal, canon
 from kaibot.engine.ledger import (
     CORPORATE_ACTIVITIES,
+    FEE_ACTIVITIES,
     LEDGER_KINDS,
     Action,
     Ledger,
     actions_from_activities,
+    fees_from_activities,
     price_key,
 )
 from kaibot.engine.market import LiveMarket, session_minutes
@@ -1232,7 +1234,8 @@ class Engine:
             returning=False,
         )
         self.run, self.peak = run, amount
-        self._book("run", {"run_id": run["id"], "amount": amount, "broker_cash0": self._broker_cash()})
+        self._book("run", {"run_id": run["id"], "amount": amount, "broker_cash0": self._broker_cash(),
+                           "started": self.now().astimezone(UTC).isoformat()})
         self.day = None  # if a session is in progress, the new run starts trading at the next 5-minute check
 
     def _set_run_status(self, status: str, reason: str | None = None) -> None:
@@ -1484,6 +1487,7 @@ class Engine:
         self._load_rules(self.day)
         self._restore_session(self.day)
         self._corporate_actions(today)
+        self._account_fees(today)  # #238: before the account check and the reconciliation below
         # S68: custom tickers are loaded only in 'Only these' mode (decision 12); All / Prefer = the catalogue alone
         custom = self.day.rules.custom_universe() if self.day.rules and not self.day.refused else {}
         if self.market.set_custom(custom):  # S68: the custom list changed since the history was loaded
@@ -1559,6 +1563,42 @@ class Engine:
             self._adopt_actions(b, today)
         if self.daily is not None and {k: s.qty for k, s in b.sleeves.items()} != shares0:
             self._write_positions(b, today)
+
+    def _account_fees(self, today: date) -> None:
+        """#238: the fees the venue took apart from the fills, booked to the run's cash once each, so the ledger's
+        cash follows the broker's to the cent. Alpaca puts no fee on a FILL activity (the fill books 0, #241); its
+        regulatory fees (TAF, SEC, CAT) come as FEE activities the evening after the trades. Read at every session
+        start, from the run's start (the broker's cash baseline), each booked once by its activity id. Research
+        (`corporate_actions` given) has none: `SimBroker` charges its fees on the fill. Never raises: a failed read
+        is one `venue_fee_unread` event, and the fees are read again at the next session start; until then a large
+        unbooked fee shows as a cash difference in the reconciliation, as before."""
+        if self.corporate_actions is not None or self.run is None:
+            return
+        b = self.ledger.book(self._rid())
+        if b is None or b.broker_cash0 is None:  # no cash baseline: the reconciliation does not compare cash
+            return
+        started = self._run_started()
+        try:  # two days early: Alpaca dates a fee by its trade day and posts it the evening after
+            rows = self.broker.activities(started - timedelta(days=2), types=FEE_ACTIVITIES)
+        except Exception as e:
+            log.exception("account fee activities unavailable")
+            self.store.event("venue_fee_unread", {"day": str(today), "what": "FEE activities",
+                                                  "error": f"{type(e).__name__}: {e}"[:200]}, self._rid())
+            return
+        for body in fees_from_activities([r for r in rows if _posted_since(r, started)]):
+            if body["ref"] not in b.booked:
+                self._book("fee", {"run_id": b.run_id, **body})
+
+    def _run_started(self) -> datetime:
+        """When the run's ledger began, the moment the broker's cash baseline was read: the `run` entry's `started`
+        (the engine's clock; #238), else the time the journal wrote it (runs begun before #238; live, that is the
+        same moment). Without one (a journal older than the ledger): 10 days back, like the corporate-actions read."""
+        rid = self._rid()
+        for _, ts, _, body in self.journal.entries(kinds=("run",)):
+            if int(body.get("run_id", -1)) == int(rid):
+                t = datetime.fromisoformat(body.get("started") or ts)
+                return (t if t.tzinfo else t.replace(tzinfo=UTC)) - timedelta(minutes=1)
+        return self.now() - timedelta(days=10)
 
     def _md_positions_after_fills(self, today: date) -> None:
         """#333 (QA-Ops second key): the near-close orders fill from 15:50 ET, before the fail-safes' flatten window
@@ -2895,3 +2935,14 @@ def _num(v):
 
 def new_idempotency_key() -> str:
     return uuid.uuid4().hex
+
+
+def _posted_since(row: dict, since: datetime) -> bool:
+    """#238: did this fee reach the broker's cash after `since` (the run's cash baseline)? By its `created_at`
+    when Alpaca gives one (a fee for the trade day before the run, posted after the baseline, counts), else by its
+    date (from the baseline's day on)."""
+    created = row.get("created_at")
+    if created:
+        t = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        return (t if t.tzinfo else t.replace(tzinfo=UTC)) >= since
+    return str(row.get("date") or "")[:10] >= since.astimezone(UTC).date().isoformat()
