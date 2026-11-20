@@ -147,9 +147,10 @@ describe("calm on a phone, and the colour check", () => {
     expect(css).not.toMatch(/var\(--(warn|loss|gain|down|up|amber|ai|exp|accent|sea(?!-ink))[a-z-]*\)/);
     expect(css.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/#[0-9A-Fa-f]{3,6}\b|animation|@keyframes/);
   });
-  it("one line that cannot push the page wider; the long words wrap in the sheet", () => {
+  it("a line that wraps on a narrow phone instead of being cut, and never pushes the page wider", () => {
     const rule = (sel: string) => new RegExp(`${sel.replace(/\./g, "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-    expect(rule(".nt-text")).toMatch(/min-width: 0;.*white-space: nowrap;.*overflow: hidden;.*text-overflow: ellipsis/);
+    expect(rule(".nt-text")).toMatch(/min-width: 0;.*white-space: normal;.*overflow-wrap: anywhere/);
+    expect(css).not.toMatch(/text-overflow|line-clamp/);
     expect(rule(".nt-row")).toContain("min-width: 0");
     expect(rule(".nt-row")).toContain("min-height: 48px");
     expect(rule(".nt-list li span:last-child")).toContain("overflow-wrap: anywhere");

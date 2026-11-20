@@ -1,5 +1,6 @@
 /* #378 market notices (docs/design/m8_market_notices.md). Loaded with the Notices chunk only, not in the first load.
-   Neutral on purpose: card surface, hairline edge, no colour of meaning, no dot, no pulse. 48 px, one line. */
+   Neutral on purpose: card surface, hairline edge, no colour of meaning, no dot, no pulse. 48 px; one line where it fits,
+   and on a narrow phone the line wraps to a second one instead of ending in an ellipsis (Product, 21 Nov 2026). */
 .nt-rows { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .nt-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 48px; height: auto; padding: 8px 12px 8px 14px;
   border-radius: var(--r-row); border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
@@ -7,7 +8,7 @@
 .nt-row:hover:not(:disabled) { background: var(--surface-2); filter: none; }
 .nt-row svg { flex: none; color: var(--stale); }
 .nt-row .nt-ico { color: var(--slate); }
-.nt-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt-text { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 .nt-kind { color: var(--slate); }
 .nt-row.more { color: var(--slate); }
 @media (max-width: 760px) { .nt-kind { display: none; } }
