@@ -168,5 +168,4 @@ The stakeholder delegated the four questions ("don't wait for my input"). Produc
 4. **Narrow phones:** a long line **wraps to a second line** instead of ending in "..." (the stakeholder has asked
    for readability before). Built in `apps/web/src/components/notices.css`, `.nt-text`.
 
-The states board (`mockups/v4/notices/states.png`) still shows the rows cut with "...", as they were drawn
-before decision 4; the built rows wrap.
+The mockups are redrawn with decision 4: the states board shows the longer rows on two lines.

@@ -38,7 +38,7 @@ CSS = mock.CSS + """
 .nt{display:flex;align-items:center;gap:10px;min-height:48px;margin:8px 16px 0;padding:8px 12px 8px 14px;border-radius:16px;
  background:var(--surface);border:1px solid var(--rule);font-size:15px;font-weight:500;color:var(--ink)}
 .nt .ni{flex:none;color:var(--slate)}
-.nt .g{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nt .g{flex:1;min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.35}
 .nt .k{color:var(--slate);font-weight:500}
 .nt.more{color:var(--slate)}
 .err{margin:8px 16px 0;font-size:13px;color:var(--slate);display:flex;gap:8px;align-items:center;min-height:44px}
