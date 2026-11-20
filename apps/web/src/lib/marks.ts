@@ -64,20 +64,74 @@ export function liveBook(book: Book | null | undefined, marks: Marks | null | un
   return { ...marks, pot: close + dayPnl, dayPnl, dayPct: close ? (dayPnl / close) * 100 : 0 };
 }
 
+// ---------------------------------------------------------------- the engine's minute row (#384)
+// Contract (issue #384, docs/ops/ledger.md "The minute row"): kb_overview `ledger.multi_day` = { v: 1, cash_ledger,
+// invested, settling: [symbol], positions: [{ rule, symbol, qty, avg_cost, mark, mark_ts, mark_from, value }] }.
+// - Authoritative: the pot is the row's equity (potNow: min(equity_venue, equity_shadow)); the holdings' shares are
+//   the booked book (kb_book); the row's marks are the prices that equity counts each holding at.
+// - Day positions come ONLY from `ledger.positions`. `multi_day.positions` is never added to them: the same stock would
+//   show twice (as a day position and as a book row). It only prices the book's own rows.
+// - Used only as the fallback for the rows' prices when the account's live prices may not be (liveBook null), and only
+//   when the row is today's, the book is the last close's, nothing is settling (orders filling, 15:50-15:57 ET) and
+//   the row lists exactly the book's holdings with the same shares. Anything else: the close marks, as before.
+
+/** A book priced from one source, as markOf reads it. */
+export interface PricedBook { by: Record<string, Mark>; pot: number }
+export interface EngineBook extends PricedBook { at: number }
+
+interface MinutePos { rule: string; symbol: string; qty: number; mark: number }
+/** `ledger.multi_day` -> its holdings, or null when it is absent, of another version, or not what the engine writes. */
+export function parseMinuteBook(raw: unknown): { settling: string[]; positions: MinutePos[] } | null {
+  const r = raw as { v?: unknown; settling?: unknown; positions?: unknown } | null;
+  if (!r || typeof r !== "object" || r.v !== 1 || !Array.isArray(r.positions) || !Array.isArray(r.settling)) return null;
+  const positions: MinutePos[] = [];
+  for (const p of r.positions.slice(0, 600) as ({ rule?: unknown; symbol?: unknown; qty?: unknown; mark?: unknown } | null)[]) {
+    if (!p || typeof p.rule !== "string" || typeof p.symbol !== "string" || !fin(p.qty) || !fin(p.mark) || p.mark <= 0) return null;
+    positions.push({ rule: p.rule, symbol: p.symbol, qty: p.qty, mark: p.mark });
+  }
+  return { settling: r.settling.filter((s): s is string => typeof s === "string"), positions };
+}
+
+/** The book priced at the engine's minute marks, or null when they may not be used (see above). `prevClose` is the
+ *  book's close mark, so a row's "today" is against the last close, as the pot's is. */
+export function engineMarks(book: Book | null | undefined, o: Pick<Overview, "ledger"> | undefined, now = Date.now()): EngineBook | null {
+  const l = o?.ledger;
+  if (!book?.session || !book.positions.length || !l) return null;
+  const at = Date.parse(l.ts), today = etDay(now);
+  if (!Number.isFinite(at) || etDay(at) !== today || book.session >= today) return null;
+  const m = parseMinuteBook(l.multi_day);
+  if (!m || m.settling.length || m.positions.length !== book.positions.length) return null;
+  const row = new Map(m.positions.map((p) => [`${p.rule}|${p.symbol}`, p]));
+  if (row.size !== m.positions.length) return null;
+  const by: Record<string, Mark> = {};
+  for (const p of book.positions) {
+    const x = row.get(`${p.rule}|${p.symbol}`);
+    if (!x || !(Math.abs(x.qty - p.qty) < 1e-6)) return null;
+    const q = (by[p.symbol]?.qty ?? 0) + p.qty;
+    if (by[p.symbol] && by[p.symbol].price !== x.mark) return null; // one stock, one price
+    by[p.symbol] = { qty: q, price: x.mark, prevClose: p.mark > 0 ? p.mark : null };
+  }
+  return { at, by, pot: Math.min(l.equity_venue, l.equity_shadow) };
+}
+
 /** One stock's live price for lib/book.holdingView; null when the page is not live. */
-export function markOf(live: LiveBook | null | undefined, symbol: string): LiveMark | null {
+export function markOf(live: PricedBook | null | undefined, symbol: string): LiveMark | null {
   const m = live?.by[symbol];
   return live && m ? { price: m.price, prevClose: m.prevClose, pot: live.pot } : null;
 }
 
 /** The pot for Home and Positions: live when the marks may be used, else exactly potNow. `fresh` says which. */
+/** `engine` (#384): when the pot is the engine's minute row, the book's rows priced at that same row's marks, else null.
+ *  The rows' figures and the pot then come from one source, as with `live`. */
 export function potLive(run: Pick<Run, "amount_usd">, o: Pick<Overview, "daily" | "ledger" | "today"> | undefined, book?: Book | null,
-  series?: SeriesPoint[] | null, marks?: Marks | null, now = new Date()): PotNow & { live: LiveBook | null; fresh: Fresh | null } {
+  series?: SeriesPoint[] | null, marks?: Marks | null, now = new Date()): PotNow & { live: LiveBook | null; engine: EngineBook | null; fresh: Fresh | null } {
   const live = liveBook(book, marks, o, now.getTime());
   if (live) return { pot: live.pot, dayPnl: live.dayPnl, dayPct: live.dayPct, dayLabel: "today", today: true, positions: {}, source: "book", from: null,
-    live, fresh: live.streamAt !== undefined ? { kind: "live", at: live.streamAt, feed: "stream" } : { kind: "live", at: live.at, feed: "poll" } };
+    live, engine: null, fresh: live.streamAt !== undefined ? { kind: "live", at: live.streamAt, feed: "stream" } : { kind: "live", at: live.at, feed: "poll" } };
   const p = potNow(run, o, book, series, now), f = p.from;
-  return { ...p, live: null, fresh: !f ? null : f.kind === "engine" ? { kind: "engine", at: Date.parse(f.ts) } : f };
+  const engine = f?.kind === "engine" && p.source === "book" ? engineMarks(book, o, now.getTime()) : null;
+  return { ...p, live: null, engine: engine && engine.pot === p.pot ? engine : null,
+    fresh: !f ? null : f.kind === "engine" ? { kind: "engine", at: Date.parse(f.ts) } : f };
 }
 
 /** The one small line near the pot: "Live · prices 4 s ago", "Updated a minute ago by the engine", "At Wednesday's close". */

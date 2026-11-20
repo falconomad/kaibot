@@ -208,7 +208,8 @@ def report_conflicts(eng: Engine, replicator: Replicator) -> None:
     each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local)."""
     for f in replicator.take_fallbacks():  # QA-Ops on #339: migration 0028 not applied yet (rows say "missing")
         with contextlib.suppress(Exception):
-            eng.store.event("stop_state_fallback", {k: f[k] for k in ("seq", "error", "action")}, eng._rid())
+            eng.store.event(f.get("event", "stop_state_fallback"), {k: f[k] for k in ("seq", "error", "action")},
+                            eng._rid())
     for c in replicator.take_conflicts():
         with contextlib.suppress(Exception):
             detail = {k: c[k] for k in ("seq", "table", "key", "reason")}

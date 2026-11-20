@@ -82,14 +82,14 @@ export function Positions() {
       return { kind: "day", symbol, p, value: p.qty * now, rank: p.qty * now, gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null };
     }),
     ...(b?.positions ?? []).map((p): Open => {
-      const v = holdingView(p, b!, markOf(live?.live, p.symbol));
+      const v = holdingView(p, b!, markOf(live?.live ?? live?.engine, p.symbol));
       return { kind: "book", symbol: p.symbol, p, value: v.value, gain: v.gain, day: v.dayPct, rank: p.qty * p.mark };
     }),
   ].sort((x, y) => y.rank - x.rank);
-  // the rows' prices: live, or the close marks (never the engine's minute row: it has no price per stock)
-  const fresh = live?.live ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
-  // for Tick: a change of source (live prices or close marks) replaces a figure without the tint of a move
-  const from = live?.live ? "live" : "close";
+  // the rows' prices: live, else the engine's minute row when it lists exactly the book (#384), else the close marks
+  const fresh = live?.live || live?.engine ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
+  // for Tick: a change of source (live prices, the engine's row, close marks) replaces a figure without the tint of a move
+  const from = live?.live ? "live" : live?.engine ? "engine" : "close";
   const invested = open.reduce((a, o) => a + o.value, 0);
   const pot = live?.pot ?? null;
   const expHeld = exps.find((e) => e.experiment && open.some((o) => o.kind === "book" && findExperiment(o.p.rule, [e])));
@@ -184,7 +184,7 @@ export function Positions() {
       <Sheet open={sheet !== null} onClose={() => setSheet(null)} title={sheet?.symbol ?? ""}>
         {sheet && ("id" in sheet ? <ClosedSheet t={sheet} exp={findExperiment(sheet.strategy, exps)} />
           : sheet.kind === "day" ? <DaySheet o={sheet} exps={exps} />
-          : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} exits={exits} live={markOf(live?.live, sheet.symbol)} />)}
+          : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} exits={exits} live={markOf(live?.live ?? live?.engine, sheet.symbol)} />)}
       </Sheet>
     </>
   );

@@ -186,7 +186,7 @@ export function Live() {
     && ["scheduled", "running", "paused"].includes(r.status)).sort((a, b) => b.created_at.localeCompare(a.created_at))[0] ?? null : null;
 
   const book = useBookData;
-  const rows = holdingRows(live?.positions ?? {}, book, live?.live);
+  const rows = holdingRows(live?.positions ?? {}, book, live?.live ?? live?.engine);
   const noteNow = run.kind === "paper" && !ended
     ? dailyNote(multiDayFrom(engineDetail(overview.heartbeat)), (healthCache.data?.events ?? []).filter((e) => e.run_id === null || e.run_id === run.id)) : null;
   const note = noteNow && showNote(noteNow) ? noteNow : null;
@@ -233,7 +233,7 @@ export function Live() {
         </div>}
       </section>
 
-      {run.kind === "paper" && <TopHoldings from={live?.live ? "live" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} />}
+      {run.kind === "paper" && <TopHoldings from={live?.live ? "live" : live?.engine ? "engine" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} />}
       {note && <DailyNoteCard note={note} />}
       {run.kind === "replay" && (
         <section className="card" aria-labelledby="last-h">
