@@ -385,10 +385,12 @@ def fees_from_activities(rows: Iterable[dict]) -> list[dict]:
     """#238: Alpaca's FEE activities as ledger `fee` bodies (without run_id): the net amount (negative), the date,
     the activity id as the ref (documented on every activity). A row without an id is named by its posting time,
     sub-type and amount instead; a row without either, or without an amount, is skipped (it could not be booked
-    exactly once)."""
+    exactly once). A canceled one (status `canceled`) took no cash and is skipped too."""
     out = []
     for r in rows:
         if r.get("activity_type") not in FEE_ACTIVITIES or r.get("net_amount") in (None, ""):
+            continue
+        if str(r.get("status") or "executed").lower() == "canceled":  # Alpaca: executed | correct | canceled
             continue
         amount = float(r["net_amount"])
         if not math.isfinite(amount) or amount == 0:

@@ -354,3 +354,27 @@ def test_research_runs_and_runs_without_a_cash_baseline_read_no_fees():
     eng.ledger.book(7).broker_cash0 = None
     eng._account_fees(datetime(2026, 11, 19).date())
     assert eng.broker.calls == [] and eng.ledger.book(7).cash == 10_000.0
+
+
+def test_a_malformed_fee_row_is_one_event_and_books_nothing():
+    """QA-Ops (#408): `_account_fees` never raises, also when a row cannot be read (a bad amount or time)."""
+    eng = _fee_engine([_fee(1, "2026-11-19T01:06:00Z"), _fee(2, "2026-11-19T01:07:00Z", amount="n/a")])
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert eng.ledger.book(7).cash == 10_000.0
+    assert [k for k, _ in eng.store.events] == ["venue_fee_unread"]
+    eng = _fee_engine([{**_fee(1, "2026-11-19T01:06:00Z"), "created_at": "not a time"}])
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert [k for k, _ in eng.store.events] == ["venue_fee_unread"]
+
+
+def test_fees_booked_before_a_restart_are_not_booked_again_after_it():
+    """QA-Ops (#408): after a restart the ledger is folded again from the journal; its refs keep each fee once."""
+    from kaibot.engine.ledger import Ledger
+
+    rows = [_fee(1, "2026-11-19T01:06:00Z"), _fee(2, "2026-11-19T01:06:01Z", "-0.37", "TAF")]
+    eng = _fee_engine(rows)
+    eng._account_fees(datetime(2026, 11, 19).date())
+    eng.ledger = Ledger.fold([(k, b) for _, _, k, b in eng.journal.entries()])  # the restart
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert len(eng.journal.entries(kinds=("fee",))) == 2
+    assert eng.ledger.book(7).cash == pytest.approx(10_000.0 - 0.38)

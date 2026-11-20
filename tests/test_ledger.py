@@ -226,3 +226,9 @@ def test_fees_from_alpaca_s_fee_activities():
     (no_id,) = fees_from_activities([{k: v for k, v in PAPER_FEE.items() if k != "id"}])
     assert no_id["ref"] == "alpaca-fee:2026-11-19T01:06:18.903549Z:CAT:-0.01"
     assert FEE_ACTIVITIES == ("FEE",)
+
+
+def test_a_canceled_fee_activity_is_not_booked():
+    """QA-Ops (#408): Alpaca's activity status is executed, correct or canceled; a canceled fee took no cash."""
+    assert fees_from_activities([{**PAPER_FEE, "status": "canceled"}]) == []
+    assert len(fees_from_activities([{**PAPER_FEE, "status": "correct"}])) == 1

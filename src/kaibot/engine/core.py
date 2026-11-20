@@ -1580,12 +1580,13 @@ class Engine:
         started = self._run_started()
         try:  # two days early: Alpaca dates a fee by its trade day and posts it the evening after
             rows = self.broker.activities(started - timedelta(days=2), types=FEE_ACTIVITIES)
+            fees = fees_from_activities([r for r in rows if _posted_since(r, started)])  # QA-Ops: a bad row too
         except Exception as e:
             log.exception("account fee activities unavailable")
             self.store.event("venue_fee_unread", {"day": str(today), "what": "FEE activities",
                                                   "error": f"{type(e).__name__}: {e}"[:200]}, self._rid())
             return
-        for body in fees_from_activities([r for r in rows if _posted_since(r, started)]):
+        for body in fees:
             if body["ref"] not in b.booked:
                 self._book("fee", {"run_id": b.run_id, **body})
 
