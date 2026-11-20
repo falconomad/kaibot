@@ -473,7 +473,7 @@ class LiveDaily:
                  known_order_ids: Callable[[], set[str]] = set,
                  session_close: Callable[[date], time | None] = lambda d: None,
                  store=None, reenable: str | None = None, ca=None, review=None,
-                 shadow=None, note=None) -> None:
+                 shadow=None, note=None, filing_flags=None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps). `ca`: the live-safety exclusion of
         announced corporate actions (engine/corp_guard.CorporateActionGuard; #266, Amendment 6); None: none."""
@@ -512,6 +512,9 @@ class LiveDaily:
         self.review = review  # #131: agents/preopen_daily.PreopenDesk, or None (off: nothing below changes)
         self.shadow = shadow  # #310: agents/preopen_shadow.ShadowDesk, or None. An observer: never read back
         self.note = note  # #311: agents/daily_note.NoteDesk, or None. Writes the day's plain-words report; never read
+        # #375: (symbols, as_of, session) -> a `filing_flag_shadow` event body, or None (KAIBOT_FILING_FLAG=shadow).
+        # A logged observer: nothing on this path reads its answer, so targets and orders are the same on or off
+        self.filing_flags = filing_flags
 
     # ---------------------------------------------------------------- state
     @property
@@ -886,8 +889,19 @@ class LiveDaily:
                                               "ranked": tl.features.get("ranked") if tl else None,
                                               "sell_when": dict(tl.features.get("sell_when") or {}) if tl else {},
                                               "sectors": {s: data.sector.get(s) for s in [*held, *buy[:60]]}})
+            self._filing_observe(r.name, closed, now, [*held, *buy])
             done.append(r.name)
         return done
+
+    def _filing_observe(self, rule: str, session: date, now: datetime, symbols: list[str]) -> None:
+        """#375: the 8-K do-not-buy flags of the decision's names, logged once per decision. Never raises."""
+        if self.filing_flags is None:
+            return
+        try:
+            body = self.filing_flags(sorted(set(symbols)), now, session)
+            self.event("filing_flag_shadow", {"strategy": rule, "session": str(session), **body})
+        except Exception:
+            log.exception("filing flag observer failed (no effect on the plan or the orders)")
 
     def _view(self, k: date, now: datetime) -> DailyData:
         if k not in self._data:
@@ -1667,7 +1681,7 @@ def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Call
 
 def for_engine(engine, load: Callable[[date, datetime], DailyData],
                rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None,
-               review=None, shadow=None, note=None) -> LiveDaily:
+               review=None, shadow=None, note=None, filing_flags=None) -> LiveDaily:
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
@@ -1694,7 +1708,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
                      store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review,
-                     shadow=shadow, note=note)
+                     shadow=shadow, note=note, filing_flags=filing_flags)
 
 
 def calendar_close(cal: dict | None) -> time | None:
