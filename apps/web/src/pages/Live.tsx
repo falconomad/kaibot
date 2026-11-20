@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Meter, engineChip, useRunCtx } from "../components/Shell";
 import { PotChart, RANGES, type RangeKey, chartCaption, rangesFor } from "../components/PotChart";
@@ -24,6 +24,9 @@ import { dailyNote, showNote } from "../lib/engineevents";
 import { multiDayFrom } from "../lib/experiment";
 import { FreshLine, useMarks } from "../components/Marks";
 import { potLive } from "../lib/marks";
+
+// #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
+const MarketNotices = lazy(() => import("../components/Notices"));
 
 function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
@@ -202,6 +205,7 @@ export function Live() {
       {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
       <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} />
       <StartBanner state={startState(run, overview)} />
+      {run.kind === "paper" && <Suspense fallback={null}><MarketNotices /></Suspense>}
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
