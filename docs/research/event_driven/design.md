@@ -979,3 +979,32 @@ them. I give no numbers from them, and none of them is a reason to skip a test.
 
 Empty on 19 Nov 2026. S96 (#370) and S97 (#371) add their numbers here, each with its date, the code version and
 the pre-registration's sha256.
+
+### S97 (#371): the shadow rules to date
+
+How to get the numbers: `DATABASE_URL=... ./scripts/shadow_results.sh` runs section 5's four queries
+(`scripts/shadow_results.sql`, the same text, kept the same by `tests/test_shadow_results_sql.py`) in a session the
+server keeps read-only, and prints Q1-Q4 in order. They can also be pasted one by one into the Supabase SQL editor.
+The test runs every query on a scratch Postgres with rows shaped like `engine/shadow.py`'s and checks each number
+against a hand calculation.
+
+**19 Nov 2026, Product (a read-only query on production, one summary per session, latest wins; posted on #371):**
+
+| Rule | Sessions | First | Last | Would-be trades | Result on paper | Up days | Down days |
+|---|---|---|---|---|---|---|---|
+| news_continuation | 4 | 13 Nov | 18 Nov | 1 | -$321.69 | 0 | 1 |
+| orb_stocks_in_play | 4 | 13 Nov | 18 Nov | 17 | +$523.50 | 1 | 2 |
+
+Backend-quant, 21 Nov 2026, reading that output: four sessions for each rule. `news_continuation` had 1 would-be
+trade, or 0.25 per session; `orb_stocks_in_play` had 17, or 4.25 per session. At these rates, 900 trades on unchanged
+code (the intraday bar of `config/gate.yaml`) take about 3,600 sessions for `news_continuation` (some 14 years) and
+about 212 sessions for `orb_stocks_in_play` (some 10 months). Reaching 50 trades, from which a rule can be killed but
+not passed, takes about 196 more sessions for `news_continuation` and about 8 more for `orb_stocks_in_play`. Both
+counts restart with each engine change, and engine merges are daily at present. Q2 to Q4 have not been run yet, so I
+cannot say whether there are sessions without a summary or shadow errors; Product's table shows one summary for each
+of the four sessions. Nothing here says anything about an edge, for or against: both rules are far below every
+threshold in section 5. Their verdict comes from S96's ten-year tests. The dollar results are left unread on purpose:
+the pot changed between runs (section 5).
+
+Next: Product runs `./scripts/shadow_results.sh` and posts the four outputs unchanged on #371; they go in here with
+their date and the engine's `code_sha`.
