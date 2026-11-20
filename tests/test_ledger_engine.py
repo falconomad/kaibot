@@ -349,3 +349,24 @@ def test_the_engine_asks_only_codes_alpaca_accepts(tmp_path):
     session(eng, broker, clock, D2)
     assert asked and all(not unknown_activity_types(t) for t in asked)
     assert not [e for e in rows(store, "event") if e["type"] == "corporate_actions_error"]
+
+
+def test_a_combined_read_that_fails_once_and_then_reads_by_group_writes_no_error(tmp_path):
+    """QA-Ops (#400): the combined request fails (a timeout, not a refused code) and both groups then come in:
+    everything is booked and no `corporate_actions_error` is written (it would be a false alarm in kb_health)."""
+    eng, broker, clock, store = carried(tmp_path)
+    qty = rows(store, "trade")[0]["qty"]
+    broker.non_trade.append({"activity_type": "DIV", "id": "20260804::1", "date": D2, "net_amount": "1.25",
+                             "symbol": "A", "qty": str(qty), "per_share_amount": "0.1"})
+    real = broker.activities
+
+    def activities(after=None, types=("FILL",)):
+        if "DIV" in types and "SPLIT" in types:
+            raise BrokerError(0, "timed out")
+        return real(after, types)
+
+    broker.activities = activities
+    offer(eng, D2, at=())
+    session(eng, broker, clock, D2)
+    assert not [e for e in rows(store, "event") if e["type"] == "corporate_actions_error"]
+    assert rows(store, "ledger_day")[1]["dividends"] == pytest.approx(1.25, abs=0.005)

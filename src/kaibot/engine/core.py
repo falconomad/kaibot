@@ -1585,13 +1585,16 @@ class Engine:
                 refused[name] = str(e)[:200]
         if len(refused) == len(CORPORATE_ACTIVITY_GROUPS):
             raise first
+        rows.sort(key=lambda r: str(r.get("date") or r.get("transaction_time") or ""))
+        if not refused:  # QA-Ops: the combined request failed once (e.g. a timeout) and both groups came in
+            log.warning("corporate actions: the combined read failed (%s); both groups read on their own", first)
+            return rows
         log.warning("corporate actions: only part of the read was accepted: %s", refused)
         self.store.event("corporate_actions_error", {
             "day": str(today), "error": str(first)[:200], "refused": refused,
             "read": [n for n, _ in CORPORATE_ACTIVITY_GROUPS if n not in refused],
             "action": "the groups read are booked; the refused ones are not (a missed split shows as drift)"},
             self._rid())
-        rows.sort(key=lambda r: str(r.get("date") or r.get("transaction_time") or ""))
         return rows
 
     def _md_positions_after_fills(self, today: date) -> None:
