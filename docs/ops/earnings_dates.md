@@ -5,6 +5,9 @@ headline in 24 hours", and `replay/earnings.py` (#113) can only *estimate* the n
 calendars do not reach back ten years. EDGAR does: every company furnishes its earnings release on an 8-K with
 **Item 2.02**, and EDGAR stamps the filing with its acceptance time, to the second.
 
+Every other 8-K of the same companies, with its items, is a second store built by
+`./scripts/fetch_earnings_dates.sh --all-items` (S100, #374): `docs/ops/filings_8k.md`. It does not change this one.
+
 ## What the stakeholder runs on the Mac
 
 ```bash
