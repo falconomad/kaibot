@@ -1,8 +1,7 @@
 -- 0034 (#384; Backend-quant, 20 Nov 2026): the minute ledger row says what the multi-day book holds.
 --
--- NOT APPLIED (docs/ops/migrations_pending.md, step 20). Numbered 0034: 0033 is kept for the kb_health migration
--- another team is adding at the same time; apply 0033 first if it exists by then, else this one alone is fine (it
--- does not depend on it).
+-- Status (applied or pending): docs/ops/migrations_pending.md (step 21). Numbered 0034 because 0033 is PR #401's
+-- (the health-events function); the two do not depend on each other.
 --
 -- What changes. One nullable jsonb column on kaibot.ledger (the engine's one row a minute). The engine fills it with
 -- the multi-day book: the ledger's cash, and per sleeve (rule, symbol) its shares and the price this row's equity
