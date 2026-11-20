@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0031 applied; none pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 20 Nov 2026 (0001-0031 applied; 0032 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -30,6 +30,7 @@ Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0031 applie
 - 0029: **applied by Product on 19 Nov 2026, 09:1x UTC** (step 16 below). Check: kb_health lists the three types.
 - 0030: **applied by Product on 19 Nov 2026, 09:2x UTC (04:2x ET)** (step 17 below). deadman_act md5 = 23e84f55be53bbf7a0286648907b71b8, the body in the file byte for byte (applied as 0022's body plus the one line, guarded by both md5s); security definer, search_path kaibot, pg_temp; not executable by authenticated; one cron job unchanged.
 - 0031: **applied by Product on 19 Nov 2026, 21:1x UTC (after the close)** (step 18 below). Check: kb_health lists news_feed_unhealthy and news_feed_ok.
+- 0032: **pending: NOT APPLIED** (step 19 below; the price-stream PR). Until it is applied the dashboard stays on its 10 s poll.
 
 ## Apply in this order
 
@@ -56,6 +57,7 @@ run it again. Do not reorder them.
 | 16 | `migrations/0029_kb_health_engine_followup_events.sql` (whole file; the PR for kb_health's follow-up events). After 0021. Any time, also while the engine runs: dashboard read only | `kb_health` also returns `multi_day_unfilled` (an order the venue let expire at the close with shares left, #333/#337), `daily_note` (#311/#318) and `multi_day_review_shadow` (the pre-open reviewer's observer verdicts, #310/#317), which the dashboard reads since #349. 0021's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
 | 17 | `migrations/0030_deadman_planned_row_not_gone.sql` (whole file; the PR for #344). After 0022. **Outside 09:30-16:00 ET** (the dead-man acts in market hours); independent of 0029 | The dead-man's #291 rename rule leaves out rows opened in their own session (a planned buy written before the 15:50 send that never filled), so an unexplained position with exactly the planned shares is sold in the flatten window instead of kept with an emergency stop. `deadman_act` is 0022's body plus that one line; the watchdog (`failsafe.plan`) follows the same rule | No: one `create or replace function`, then 0022's revokes for it (the function's `net.http_*` calls are 0019's, run only when the dead-man acts) |
 | 18 | `migrations/0031_kb_health_news_feed_events.sql` (whole file; the PR for kb_health's news events). After 0029. Any time, also while the engine runs: dashboard read only | `kb_health` also returns `news_feed_unhealthy` and `news_feed_ok`, the engine's news poller's health events (#354, PR #355), which Health.tsx labels. 0029's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
+| 19 | `migrations/0032_price_stream_channel.sql` (whole file; the price-stream PR). Any time, also while the engine runs: dashboard only, additive. Then, in the Supabase dashboard: Realtime > Settings > "Allow public access" **off** (the dashboard uses no public channel) | Only the owner may receive the streamed prices: one SELECT policy on `realtime.messages` for `authenticated`, topic `kb:prices`, broadcasts only, `kaibot.is_owner()` through the definer wrapper `public.kb_price_stream_reader()` (0002 revokes `is_owner` from authenticated). No INSERT policy (browsers cannot send), no table or row changes; `scripts/price_stream.py` sends with the service key and stores nothing | No: `create or replace function`, `revoke`/`grant`, and `create policy` inside an "if not exists" block (no drop) |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 

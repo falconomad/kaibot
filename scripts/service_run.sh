@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # What the launchd agents run (issue #121). Not for hand use: start by hand with ./scripts/run_engine.sh.
 #   service_run.sh engine   one engine run through run_engine.sh, with the alarm pinger and the ticker-check worker
-#                           (scripts/run_ticker_checks.py, read-only, log ticker_checks.log) beside it
+#                           (scripts/run_ticker_checks.py, read-only, log ticker_checks.log) beside it, and the price
+#                           relay (scripts/price_stream.py) when KAIBOT_PRICE_STREAM=on
 #   service_run.sh daily    nightly job: rotate logs, back up local files, refresh the daily bar store (a second run
 #                           the same day only refreshes the store)
 # Settings (written into the plist by install_service.sh): KAIBOT_SERVICE_MODE (docker|python), KAIBOT_ENV_FILE,
-# KAIBOT_LOG_DIR. KAIBOT_TICKER_CHECKS=0 turns the worker off and KAIBOT_DAILY_FETCH=0 skips the nightly bar refresh,
+# KAIBOT_LOG_DIR. KAIBOT_PRICE_STREAM=on adds the price relay (scripts/price_stream.py, log price_stream.log; off by
+# default; read like the others, on/off or 1/0). KAIBOT_TICKER_CHECKS=0 turns the worker off and KAIBOT_DAILY_FETCH=0 skips the nightly bar refresh,
 # each read from the service's environment or the .env (`switch`: an explicit 0 or 1). Exit codes for launchd
 # (KeepAlive restarts only after a non-zero exit; the worker never changes them):
 #   0  clean stop (service.sh stop, logout) or on hold (data/HOLD): launchd leaves it stopped
@@ -159,6 +161,103 @@ checks_end() {  # $1 = the loop's pid: give it 15 s to stop the worker, then end
   rm -f "$CHECKS_PID"; return 0
 }
 
+# ---- the price relay (20 Nov 2026): scripts/price_stream.py streams the held stocks' IEX prices to the dashboard
+# (Supabase Realtime, at most one message a second, market hours only). Off unless KAIBOT_PRICE_STREAM=on. A separate
+# process in its own process group: it sends no order and writes no trading table. Whatever it does (fails, hangs,
+# exits) never reaches the engine: nothing here signals, waits on or restarts the engine, and the service's exit
+# code is the engine's alone. Restarted when it dies (5 s, doubling to 5 min); stopped with the engine.
+STREAM_PID=data/live/price_stream.pid
+STREAM_LOG="$LOG_DIR/price_stream.log"
+STREAM_NOTE=data/live/price_stream.note
+STREAM_BOX=kaibot-price-stream
+S_PID=""; S_KIND=""; S_CMD=()
+
+stream_on() {  # KAIBOT_PRICE_STREAM: on/1 starts the relay; off/0/unset does not; anything else is off, said once
+  local v; v="$(setting KAIBOT_PRICE_STREAM off | tr '[:upper:]' '[:lower:]')"
+  case "$v" in
+    on|1|true|yes) return 0 ;;
+    off|0|false|no) return 1 ;;
+    *) say "KAIBOT_PRICE_STREAM='$v' is not on or off: the price relay stays off"; return 1 ;;
+  esac
+}
+
+stream_cmd() {  # S_CMD and S_KIND; 1 when it cannot run yet. Needs Python 3.11+ only (no package beyond the stdlib).
+  local py cert
+  for py in "$REPO/.venv/bin/python" "$(command -v python3 || true)"; do
+    if [ -n "$py" ] && [ -x "$py" ] && PYTHONPATH="$REPO/src" "$py" -c \
+        'import sys; assert sys.version_info >= (3, 11); import kaibot.engine.config' 2>/dev/null; then
+      cert="${SSL_CERT_FILE:-$("$py" -m certifi 2>/dev/null)}"
+      S_KIND=python; S_CMD=(env PYTHONUNBUFFERED=1 ${cert:+SSL_CERT_FILE="$cert"}
+                            "$py" -u scripts/price_stream.py --env "$ENV_FILE")
+      return 0
+    fi
+  done
+  if [ "$MODE" = docker ] && docker image inspect kaibot-engine >/dev/null 2>&1; then
+    S_KIND=docker; S_CMD=(docker run --rm --init --name "$STREAM_BOX"
+      -v "$ENV_FILE:/secrets/.env:ro" -v "$REPO/scripts/price_stream.py:/app/scripts/price_stream.py:ro"
+      kaibot-engine python -u scripts/price_stream.py --env /secrets/.env)
+    return 0
+  fi
+  return 1
+}
+
+stream_stop_relay() {
+  if [ -n "$S_PID" ]; then
+    kill -TERM "$S_PID" 2>/dev/null
+    for _ in $(seq 10); do kill -0 "$S_PID" 2>/dev/null || break; sleep 1; done
+    kill -KILL "$S_PID" 2>/dev/null
+    wait "$S_PID" 2>/dev/null
+  fi
+  [ "$S_KIND" = docker ] && docker rm -f "$STREAM_BOX" >/dev/null 2>&1
+  S_PID=""; rm -f "$STREAM_PID"
+}
+
+stream_loop() {  # stream_loop ENGINE_PID WRAPPER_PID: in the background, output to the relay's log only
+  local engine="$1" parent="$2" delay=5 started code
+  alive() { kill -0 "$engine" 2>/dev/null && kill -0 "$parent" 2>/dev/null; }
+  nap() { local i; for ((i = 0; i < $1; i++)); do alive || return 1; sleep 1; done; }
+  trap 'stream_stop_relay; say "price relay stopped with the engine"; exit 0' TERM INT HUP
+  nap "${KAIBOT_STREAM_START_DELAY:-15}" || exit 0  # after run_engine.sh has checked out the release
+  while alive; do
+    if ! stream_cmd; then
+      local why="cannot start the price relay yet: no Python 3.11+ with the repo's src"
+      [ "$MODE" = docker ] && why="$why and no kaibot-engine image"
+      [ "$(cat "$STREAM_NOTE" 2>/dev/null)" = "$why" ] || { say "$why (retrying every minute)"; echo "$why" > "$STREAM_NOTE"; }
+      nap 60 || break; continue
+    fi
+    rm -f "$STREAM_NOTE"; started=$SECONDS
+    "${S_CMD[@]}" </dev/null &
+    S_PID=$!; echo "$S_PID" > "$STREAM_PID"
+    say "price relay started (pid $S_PID, $S_KIND)"
+    while alive && kill -0 "$S_PID" 2>/dev/null; do sleep 1; done
+    alive || break
+    wait "$S_PID"; code=$?; S_PID=""; rm -f "$STREAM_PID"
+    [ $((SECONDS - started)) -ge 300 ] && delay=5
+    say "price relay exited with code $code: starting it again in $delay s (the engine is not affected)"
+    nap "$delay" || break
+    delay=$((delay * 2 > 300 ? 300 : delay * 2))
+  done
+  stream_stop_relay; say "price relay stopped with the engine"
+}
+
+stream_reap() {  # a relay left by a killed service run: stop it, so two never hold the one IEX connection
+  local p; p="$(cat "$STREAM_PID" 2>/dev/null)"
+  if [ -n "$p" ] && ps -p "$p" -o command= 2>/dev/null | grep -q price_stream; then
+    kill "$p" 2>/dev/null; say "stopped a price relay left from an earlier run (pid $p)"
+  fi
+  rm -f "$STREAM_PID"
+  [ "$MODE" = docker ] && docker rm -f "$STREAM_BOX" >/dev/null 2>&1
+  return 0
+}
+
+stream_end() {  # $1 = the loop's pid: give it 15 s to stop the relay, then end its process group
+  kill -TERM "$1" 2>/dev/null || return 0
+  for _ in $(seq 15); do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done
+  kill -KILL -- "-$1" 2>/dev/null; kill -KILL "$1" 2>/dev/null
+  [ "$MODE" = docker ] && docker rm -f "$STREAM_BOX" >/dev/null 2>&1
+  rm -f "$STREAM_PID"; return 0
+}
+
 run_engine() {
   if [ -f data/HOLD ]; then note_once "on hold (data/HOLD exists): not starting. ./scripts/service.sh unhold"; exit 0; fi
   # Local pid lock: one service engine per machine, even while run_engine.sh is still installing or building.
@@ -176,9 +275,9 @@ run_engine() {
   fi
   echo $$ > "$lock"; rm -f "$NOTE"
   rotate "$LOG_DIR/engine.log" 10000000; rotate "$LOG_DIR/watchdog.log" 10000000
-  rotate "$CHECKS_LOG" 10000000
+  rotate "$CHECKS_LOG" 10000000; rotate "$STREAM_LOG" 10000000
 
-  local flag=() child pinger="" checks="" code
+  local flag=() child pinger="" checks="" streamer="" code
   case "$MODE" in docker) flag=(--docker);; python) flag=(--python);; esac
   say "starting the engine (mode $MODE)"
   set -m  # the engine gets its own process group, so a stop reaches caffeinate, python or docker in one signal
@@ -196,6 +295,12 @@ run_engine() {
     checks_loop "$child" "$$" </dev/null >>"$CHECKS_LOG" 2>&1 &
     checks=$!
     say "ticker-check worker on (log $CHECKS_LOG)"
+  fi
+  if stream_on; then  # its own process group too; off by default
+    stream_reap
+    stream_loop "$child" "$$" </dev/null >>"$STREAM_LOG" 2>&1 &
+    streamer=$!
+    say "price relay on (log $STREAM_LOG)"
   fi
   set +m
 
@@ -215,6 +320,7 @@ run_engine() {
   done
   trap - INT TERM HUP
   [ -n "$checks" ] && checks_end "$checks"
+  [ -n "$streamer" ] && stream_end "$streamer"
   [ -n "$pinger" ] && { sleep 2; kill "$pinger" 2>/dev/null; }
   rm -f "$lock"
   if [ "$stopping" = 1 ]; then say "engine stopped (on request)"; exit 0; fi

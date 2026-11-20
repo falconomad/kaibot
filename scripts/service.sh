@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Day-to-day control of the always-on engine (issue #121; install first with ./scripts/install_service.sh).
-#   ./scripts/service.sh status    is it running (engine and ticker-check worker), which release, last log lines
+#   ./scripts/service.sh status    is it running (engine, ticker-check worker, price relay), which release, last log lines
 #   ./scripts/service.sh stop      stop cleanly for today (starts again next weekday 15:00 or at login)
 #   ./scripts/service.sh start     start now
 #   ./scripts/service.sh restart   stop cleanly, then start (e.g. after ./scripts/release.sh)
@@ -30,6 +30,12 @@ case "${1:-status}" in
       echo "ticker checks: running (pid $CPID, log $LOG_DIR/ticker_checks.log)"
     else echo "ticker checks: not running$(running && echo " (starting or waiting: see $LOG_DIR/ticker_checks.log)")"; fi
     [ -s "$LOG_DIR/ticker_checks.log" ] && echo "  last: $(tail -n 1 "$LOG_DIR/ticker_checks.log" | cut -c1-160)"
+    # the price relay beside the engine (scripts/price_stream.py; only with KAIBOT_PRICE_STREAM=on in the .env)
+    SPID="$(cat data/live/price_stream.pid 2>/dev/null)"
+    if [ -n "$SPID" ] && ps -p "$SPID" -o command= 2>/dev/null | grep -q price_stream; then
+      echo "price relay: running (pid $SPID, log $LOG_DIR/price_stream.log)"
+    else echo "price relay: not running (on only with KAIBOT_PRICE_STREAM=on; log $LOG_DIR/price_stream.log)"; fi
+    [ -s "$LOG_DIR/price_stream.log" ] && echo "  last: $(tail -n 1 "$LOG_DIR/price_stream.log" | cut -c1-160)"
     echo "engines on this machine:$(./scripts/engine_guard.sh --list | tr '\n' ' ')"
     bash scripts/release.sh --show | sed -n '1,3p'
     echo "--- last lines of $LOG_DIR/engine.log"; tail -n 8 "$LOG_DIR/engine.log" 2>/dev/null ;;
