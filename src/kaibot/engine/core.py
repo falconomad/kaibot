@@ -321,8 +321,12 @@ class Engine:
         ex_dividends=None,
         daily=None,
         recent_actions=None,
+        market_alarm=None,
     ):
         self.broker, self.market, self.store = broker, market, store
+        # S103 (#377): (session, now) -> the alarm's flags, written as a `market_alarm` event at session start. A
+        # notice only: nothing in the engine reads it back, so it cannot change an order (None = not written).
+        self.market_alarm = market_alarm
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
@@ -1522,6 +1526,21 @@ class Engine:
         if self.experiments:
             start["experiments"] = self.experiments
         self.store.event("session_start", start, self._rid())
+        self._log_market_alarm(today)
+
+    def _log_market_alarm(self, today: date) -> None:
+        """S103 (#377): one `market_alarm` event per session start; any failure is a `market_alarm_error` event."""
+        if self.market_alarm is None:
+            return
+        try:
+            self.store.event("market_alarm", self.market_alarm(today, self.now()), self._rid())
+        except Exception as e:  # noqa: BLE001 - a notice must never stop a session
+            log.warning("market alarm failed: %s", type(e).__name__)
+            try:
+                self.store.event("market_alarm_error", {"day": str(today), "error": f"{type(e).__name__}: {e}"[:200]},
+                                 self._rid())
+            except Exception:  # noqa: BLE001
+                log.exception("market alarm error event failed")
 
     def _start_equity(self) -> float:
         se = self.ledger.start_equity(self.run["id"])
