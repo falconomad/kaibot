@@ -133,6 +133,28 @@ def test_alpaca_submit_sends_any_order_request(monkeypatch):
                       "stop_price": "480.00", "client_order_id": "kb-9"})]
 
 
+def test_alpaca_activities_refuses_a_code_outside_alpaca_s_enum_without_sending(monkeypatch):
+    """#392: Alpaca answers 422 "invalid activity type: SSP" for the whole request; the adapter refuses the same
+    request itself, with the same status, and sends nothing."""
+    sent = []
+    monkeypatch.setattr(broker_alpaca._Http, "call", lambda self, *a, **k: sent.append(a) or [])
+    with pytest.raises(AlpacaError) as e:
+        AlpacaPaper("k", "s").activities(types=("DIV", "SSP"))
+    assert e.value.status == 422 and "invalid activity type: SSP" in str(e.value) and sent == []
+    AlpacaPaper("k", "s").activities(types=("DIV", "SPLIT"))
+    assert sent and sent[0][2]["activity_types"] == "DIV,SPLIT"
+
+
+def test_sim_broker_refuses_a_code_outside_alpaca_s_enum_as_alpaca_does():
+    from kaibot.broker.sim import SimBroker
+
+    sim = SimBroker.__new__(SimBroker)  # only the request check is exercised: no venue state is needed
+    sim.down = False
+    with pytest.raises(BrokerError) as e:
+        sim.activities(types=("SSP",))
+    assert e.value.status == 422
+
+
 def test_alpaca_activities_reads_fills_page_by_page(monkeypatch):
     pages = [[{"id": f"a{i}", "activity_type": "FILL"} for i in range(100)], [{"id": "a100", "activity_type": "FILL"}]]
     sent = []
