@@ -1,0 +1,8 @@
+ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
+NEWT|New Ticker Corp Common Stock|N|NEWT|N|100|N|NEWT
+OLD|Old Shell Co Common Stock|N|OLD|N|100|N|OLD
+PRNT|Parent Industries Inc. Common Stock|N|PRNT|N|100|N|PRNT
+RNM|Rename Holdings Inc. Common Stock|N|RNM|N|100|N|RNM
+SPNC|Spinco Inc. Common Stock|N|SPNC|N|100|N|SPNC
+SPY|SPDR S&P 500 ETF Trust|P|SPY|Y|100|N|SPY
+File Creation Time: 1119202618:30||||||

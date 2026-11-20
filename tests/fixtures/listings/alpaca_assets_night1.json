@@ -1,0 +1,9 @@
+[
+ {"id":"a0000000-0000-4000-8000-000000000001","class":"us_equity","exchange":"NASDAQ","symbol":"AAPL","name":"Apple Inc. Common Stock","status":"active","tradable":true,"marginable":true,"shortable":true,"fractionable":true,"attributes":["has_options"]},
+ {"id":"a0000000-0000-4000-8000-000000000002","class":"us_equity","exchange":"NYSE","symbol":"OLDT","name":"Old Ticker Corp Common Stock","status":"active","tradable":true,"marginable":true,"shortable":true,"fractionable":true,"attributes":[]},
+ {"id":"a0000000-0000-4000-8000-000000000003","class":"us_equity","exchange":"ARCA","symbol":"SPY","name":"SPDR S&P 500 ETF Trust","status":"active","tradable":true,"marginable":true,"shortable":true,"fractionable":true,"attributes":["has_options"]},
+ {"id":"a0000000-0000-4000-8000-000000000004","class":"us_equity","exchange":"NYSE","symbol":"RNMO","name":"Rename Holdings Inc. Common Stock","status":"active","tradable":true,"marginable":true,"shortable":true,"fractionable":true,"attributes":[]},
+ {"id":"a0000000-0000-4000-8000-000000000005","class":"us_equity","exchange":"NYSE","symbol":"PRNT","name":"Parent Industries Inc. Common Stock","status":"active","tradable":true,"marginable":true,"shortable":true,"fractionable":true,"attributes":[]},
+ {"id":"c0000000-0000-4000-8000-000000000001","class":"crypto","exchange":"CRYPTO","symbol":"BTC/USD","name":"Bitcoin","status":"active","tradable":true,"marginable":false,"shortable":false,"fractionable":true},
+ {"id":"not-an-asset","symbol":7}
+]

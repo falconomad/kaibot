@@ -13,6 +13,10 @@ risk,broker,agents,replay}` may import `kaibot.ingest.alt` (enforced by `tests/u
 
 Queries live in `src/kaibot/ingest/alt/gdelt.py` (`QUERIES`); their names are partition keys, so rename with care.
 
+A fourth source, `listings` (story S102, #376), is the new-listing watch: Alpaca's asset list, SEC EDGAR's daily
+index and Nasdaq Trader, collected by the same command and the same nightly job. It has its own page:
+`docs/ops/listings.md`. Unlike the three above it also reads the Alpaca paper keys from the env file.
+
 ## Layout and point-in-time rules
 ```
 data/alt/<source>/date=YYYY-MM-DD/part-<ingest time>-<id>.parquet     (append-only)
