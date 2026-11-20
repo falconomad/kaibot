@@ -1,7 +1,6 @@
 # Dashboard notices: "New on the market" and "Big day"
 
-Issue #378 (M8 · S104). Date: 21 Nov 2026. **Status: proposal.** It needs the stakeholder's design approval (through
-Product) before Frontend's build ships. Design for M8: `docs/research/event_driven/design.md`, sections 3.5 and 4.
+Issue #378 (M8 · S104). Date: 21 Nov 2026. **Status: decided** (Product, 21 Nov 2026, on the stakeholder's word "don't wait for my input"; answers at the end). Design for M8: `docs/research/event_driven/design.md`, sections 3.5 and 4.
 Brand: `docs/design/brand/brand_system_v1.md` (the name is always lowercase **kaibo**).
 
 ## Why
@@ -25,7 +24,8 @@ control is the sheet's own Close (the X; Escape and a tap outside also close it)
 
 ### The words, per kind
 
-The phone line is short so it fits on one line at 390 px; the sheet's title is the full sentence. Times are the
+The phone line is short so it fits on one line at 390 px (on a narrower phone it wraps to a second line); the sheet's
+title is the full sentence. Times are the
 viewer's own (the browser's time zone), with "your time" when a time is shown; New York time is in the sheet.
 
 | Kind | Phone line (today) | Before / after its day | Sheet title |
@@ -49,12 +49,12 @@ recording how the rest of the market moves today."
 **Home, under the status rows and above the pot** (phone and desktop). The order of the rows above the pot is
 unchanged: a halt, a caution, the engine, the experiment; the notices come last, because they are the least urgent.
 
-- **One line each.** 48 px tall (a status row is 56), card surface `--surface`, hairline edge `--rule`, an outline
+- **One row each, never cut.** At least 48 px tall (a status row is 56), card surface `--surface`, hairline edge `--rule`, an outline
   icon in `--slate`, the line in `--ink` at 15 px / 500, a chevron. On a phone the kind is carried by the icon (a flag
   for a listing, a calendar for a big day) and is in the row's accessible name; on desktop it is also written before
-  the line in `--slate` ("New on the market · Anthropic (ANT) started trading today"). A line too long for its row
-  ends in an ellipsis; the sheet always has the whole sentence. At 390 px the lines above fit; on a 360 px phone a
-  long company name can be cut ("Anthropic (ANT) started trading to..."). Question 4 below.
+  the line in `--slate` ("New on the market · Anthropic (ANT) started trading today"). At 390 px the lines above
+  fit on one line. A line too long for its row **wraps to a second line** (no ellipsis, no line clamp; decision 4):
+  on a 360 px phone "Anthropic (ANT) started trading today" takes two lines and the row grows to fit.
 - **Never a warning, never an action.** No tint of meaning (not amber, red, green, violet or blue), no dot, no
   pulse, no badge with a count, no `role="alert"` or `"status"`: a screen reader reads it in the page's order and is
   not interrupted. Not the shape of a button (no fill, no pill). The chevron says "more to read", as on every row.
@@ -157,11 +157,16 @@ Where the rows come from, all on the Mac, none on the trading path:
 
 The engine neither reads nor writes `kaibot.market_notice`; nothing that trades imports the publisher (tests).
 
-## Questions for the stakeholder
+## Decisions (Product, 21 Nov 2026)
 
-1. Is the place right: under the status rows, above the pot? (The alternative was under the holdings, where it
-   would be missed on a phone.)
-2. Should ordinary new listings ever be on Home, or only very large ones, as proposed?
-3. Is "Tomorrow: ..." for major notices wanted, or only notices on their own day?
-4. On the narrowest phones, should a long listing line wrap to a second line rather than end in "..."? (Proposed:
-   one line, as the issue asks; the full sentence is one tap away.)
+The stakeholder delegated the four questions ("don't wait for my input"). Product decided:
+
+1. **Place:** yes, under the status rows and above the pot.
+2. **Ordinary new listings:** never a row on Home. Only major listings are rows; ordinary ones appear only in a
+   sheet's "Also this week" list.
+3. **"Tomorrow: ...":** kept, for major notices only.
+4. **Narrow phones:** a long line **wraps to a second line** instead of ending in "..." (the stakeholder has asked
+   for readability before). Built in `apps/web/src/components/notices.css`, `.nt-text`.
+
+The states board (`mockups/v4/notices/states.png`) still shows the rows cut with "...", as they were drawn
+before decision 4; the built rows wrap.
