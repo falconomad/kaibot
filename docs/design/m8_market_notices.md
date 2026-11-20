@@ -20,8 +20,8 @@ nothing in them leads to an order, a setting or a promise of a trade.
 | **New on the market** | a new listing (an IPO or a direct listing) found by the listing watch (S102) | "Anthropic (ANT) started trading today" | "kaibo does not buy brand-new listings: they have no price history to judge, and on average they have done worse than the market in their first years. Its rules could first look at ANT in about 12 months." Then the first day of trading, the earliest date for the rule on paper and for the owner's own ticker list, and one line on why those are earliest dates, not a forecast |
 | **Big day** | a flag of the market-event alarm (S103): the Fed's decision, the inflation report, several of the largest companies reporting, an index change at the close | "Fed decision at 20:00 your time" | "kaibo is not changing anything today; it is recording what happens on days like this." Then when (in the viewer's time and in New York) and how often days like this come |
 
-Every sheet ends with the same line: **"A notice only informs. kaibo changes nothing because of it."** It has one
-button, Close, and no link.
+Every sheet ends with the same line: **"A notice only informs. kaibo changes nothing because of it."** Its only
+control is the sheet's own Close (the X; Escape and a tap outside also close it). No link, no other button.
 
 ### The words, per kind
 
@@ -53,7 +53,8 @@ unchanged: a halt, a caution, the engine, the experiment; the notices come last,
   icon in `--slate`, the line in `--ink` at 15 px / 500, a chevron. On a phone the kind is carried by the icon (a flag
   for a listing, a calendar for a big day) and is in the row's accessible name; on desktop it is also written before
   the line in `--slate` ("New on the market · Anthropic (ANT) started trading today"). A line too long for its row
-  ends in an ellipsis; the sheet always has the whole sentence.
+  ends in an ellipsis; the sheet always has the whole sentence. At 390 px the lines above fit; on a 360 px phone a
+  long company name can be cut ("Anthropic (ANT) started trading to..."). Question 4 below.
 - **Never a warning, never an action.** No tint of meaning (not amber, red, green, violet or blue), no dot, no
   pulse, no badge with a count, no `role="alert"` or `"status"`: a screen reader reads it in the page's order and is
   not interrupted. Not the shape of a button (no fill, no pill). The chevron says "more to read", as on every row.
@@ -162,3 +163,5 @@ The engine neither reads nor writes `kaibot.market_notice`; nothing that trades 
    would be missed on a phone.)
 2. Should ordinary new listings ever be on Home, or only very large ones, as proposed?
 3. Is "Tomorrow: ..." for major notices wanted, or only notices on their own day?
+4. On the narrowest phones, should a long listing line wrap to a second line rather than end in "..."? (Proposed:
+   one line, as the issue asks; the full sentence is one tap away.)
