@@ -9,7 +9,7 @@
 --   ledger_mismatch           ledger and broker differ (the drift check)
 --   reconcile_blocked         the reconciliation blocks entries
 --   dividend_difference       a dividend paid differs from the one accrued
---   venue_fee_unread          a fill's venue fee could not be read
+--   venue_fee_unread          a venue fee could not be read (a fill's, #241; Alpaca's FEE activities, #238)
 --   replica_conflict          Supabase holds another row for a journal key (replication)
 --   stop_state_fallback       ledger_position rows written with a fallback stop_state (0028 not applied)
 --   engine_lease_takeover     the engine took over an expired lease from another host
