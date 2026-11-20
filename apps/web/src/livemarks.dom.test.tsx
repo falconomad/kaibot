@@ -17,11 +17,11 @@ import { Live } from "./pages/Live";
 import { Positions } from "./pages/Positions";
 import { ctxFor, emptyOverview, paperRun, render } from "./pages/testkit";
 
-const asked = vi.hoisted(() => ({ marks: vi.fn<() => Promise<unknown>>() }));
+const asked = vi.hoisted(() => ({ marks: vi.fn<() => Promise<unknown>>(), prices: vi.fn<(on: (s: unknown) => void) => () => void>() }));
 vi.mock("./lib/api", async () => {
   const kit = await import("./pages/testkit-api");
   const never = () => new Promise<never>(() => {});
-  return { ...kit, api: new Proxy({}, { get: (_t, k) => (k === "marks" ? asked.marks : never) }) };
+  return { ...kit, api: new Proxy({}, { get: (_t, k) => (k === "marks" ? asked.marks : k === "prices" ? asked.prices : never) }) };
 });
 vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
 
@@ -58,7 +58,7 @@ const tab = async (state: "hidden" | "visible") => {
   await act(async () => { window.dispatchEvent(new Event("visibilitychange")); });
 };
 
-beforeEach(() => { asked.marks.mockReset(); });
+beforeEach(() => { asked.marks.mockReset(); asked.prices.mockReset(); asked.prices.mockImplementation(() => () => {}); });
 afterEach(async () => { await unmount(); await tab("visible"); vi.useRealTimers(); });
 
 describe("the market is open and the tab is visible", () => {
@@ -206,6 +206,50 @@ describe("the market is closed", () => {
   });
 });
 
+describe("streamed prices (scripts/price_stream.py over Supabase Realtime)", () => {
+  /** The channel as api.prices hands it to the page: `send` plays one broadcast from the relay. */
+  const channel = () => {
+    const c: { on: ((s: unknown) => void) | null; left: number; send: (prices: Record<string, number>) => Promise<void> } = {
+      on: null, left: 0,
+      send: async (prices) => { await act(async () => { c.on?.({ at: Date.now(), asOf: new Date().toISOString(), prices }); }); },
+    };
+    asked.prices.mockImplementation((on) => { c.on = on; return () => { c.left++; c.on = null; }; });
+    return c;
+  };
+
+  it("a message replaces the polled price within the second and the tag says live; 5 s of silence: back on the 10 s poll", async () => {
+    const c = channel();
+    asked.marks.mockImplementation(xom(158.68));
+    await start(OPEN);
+    expect(asked.prices).toHaveBeenCalledTimes(1);
+    expect(page()).toContain("Paper pot$94,958.46");
+    expect(document.querySelector(".fresh .feed")?.textContent).toBe("10 s");
+    await c.send({ XOM: 159.18 });
+    expect(page()).toContain("Paper pot$94,968.46");           // 94,997.26 + 20 x (159.18 - 160.62)
+    expect(page()).toContain("Live · prices 1 s ago");
+    expect(document.querySelector(".fresh .feed")?.textContent).toBe("live");
+    await pass(1_000); await c.send({ XOM: 159.68 });
+    expect(page()).toContain("Paper pot$94,978.46");
+    expect(asked.marks).toHaveBeenCalledTimes(1);              // the poll keeps its own pace
+    await pass(5_100);                                         // silent for more than 5 s
+    expect(page()).toContain("Paper pot$94,958.46");           // the polled price again, without a word
+    expect(document.querySelector(".fresh .feed")?.textContent).toBe("10 s");
+    expect(page()).not.toMatch(/error|offline|lost/i);
+  });
+
+  it("a stream never makes stale polled figures live, and the channel is left when the market closes", async () => {
+    const c = channel();
+    asked.marks.mockImplementationOnce(xom(158.68)).mockRejectedValue(new TypeError("Failed to fetch"));
+    await start("2026-11-19T20:59:00Z");                       // 15:59 in New York
+    for (let i = 0; i < 29; i++) { await c.send({ XOM: 159 }); await pass(1_000); }
+    expect(page()).not.toContain("Live ·");                   // the poll is 30 s old: not live, stream or not
+    expect(page()).toContain("Paper pot$94,960.00");           // the engine's figure, not the streamed price
+    expect(c.left).toBe(0);
+    await pass(60_000);                                        // 16:00 has passed
+    expect(c.left).toBe(1);
+  });
+});
+
 describe("axe: the live state and its fallback", () => {
   it("Home and Positions: no serious or critical finding, and the line that counts seconds is plain text", async () => {
     for (const marks of [await xom(158.68)(), null]) {
@@ -215,8 +259,8 @@ describe("axe: the live state and its fallback", () => {
       const home = render(<Live />, { ctx: ctxFor(run, { overview: overview() }), seeds: all });
       const pos = render(<Positions />, { ctx: ctxFor(run, { overview: overview() }), seeds: all, path: "/positions", route: "/positions" });
       vi.useRealTimers();
-      expect(home).toContain(m ? '<p class="fresh live">Live · prices 2 s ago</p>' : '<p class="fresh">Updated a minute ago by the engine</p>');
-      expect(pos).toContain(m ? '<p class="fresh live">Live · prices 2 s ago</p>' : "<p class=\"fresh\">At Wednesday&#x27;s close</p>");
+      expect(home).toContain(m ? '<p class="fresh live">Live · prices 2 s ago<span class="feed" title="Prices update every 10 s">10 s</span></p>' : '<p class="fresh">Updated a minute ago by the engine</p>');
+      expect(pos).toContain(m ? '<p class="fresh live">Live · prices 2 s ago<span class="feed" title="Prices update every 10 s">10 s</span></p>' : "<p class=\"fresh\">At Wednesday&#x27;s close</p>");
       expect(lines(await audit(home))).toEqual([]);
       expect(lines(await audit(pos))).toEqual([]);
     }

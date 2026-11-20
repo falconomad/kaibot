@@ -3,6 +3,7 @@ import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
 import { parseSummary } from "./summary";
 import { type Marks, parseMarks } from "./marks";
+import { STREAM_EVENT, STREAM_TOPIC, type Stream, parseStream } from "./stream";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
 import { checkerAnswer, type TickerCheck, type TickerLists } from "./tickers";
 export { coerce };
@@ -161,6 +162,42 @@ function fixTrade(t: Trade): Trade {
 function fixRun(r: Run): Run { return { ...r, amount_usd: Number(r.amount_usd), peak_equity: num(r.peak_equity) }; }
 
 
+/** The one shared subscription behind api.prices. */
+const PRICES_LEAVE_MS = 2_000;
+const priceStream: {
+  listeners: Set<(s: Stream) => void>; ch: ReturnType<typeof supa.channel> | null; joining: boolean;
+  leaveTimer: ReturnType<typeof setTimeout> | null;
+} = { listeners: new Set(), ch: null, joining: false, leaveTimer: null };
+
+function leavePrices(): void {
+  const p = priceStream;
+  if (p.leaveTimer) { clearTimeout(p.leaveTimer); p.leaveTimer = null; }
+  if (p.ch) { void supa.removeChannel(p.ch); p.ch = null; }
+}
+
+async function joinPrices(): Promise<void> {
+  const p = priceStream;
+  p.joining = true;
+  try {
+    await supa.realtime.setAuth().catch(() => {});  // the signed-in session's token, so the owner policy can see who asks
+    // A channel of this topic still leaving (an earlier leave) would be handed back by supa.channel and never join again.
+    const old = supa.getChannels().find((c) => c.topic === `realtime:${STREAM_TOPIC}`);
+    if (old) await supa.removeChannel(old).catch(() => "error");
+  } finally {
+    p.joining = false;
+  }
+  if (!p.listeners.size || p.ch) return;
+  const ch = supa.channel(STREAM_TOPIC, { config: { private: true } });
+  p.ch = ch
+    .on("broadcast", { event: STREAM_EVENT }, (m: { payload?: unknown }) => {
+      const s = parseStream(m.payload);
+      if (s) for (const f of [...p.listeners]) f(s);
+    })
+    .subscribe((status, err) => {
+      if (status === "CHANNEL_ERROR" && /unauthori[sz]ed|denied|policy/i.test(String(err?.message ?? "")) && p.ch === ch) leavePrices();
+    });
+}
+
 export const api = {
   claimOwner: () => rpc<boolean>("kb_claim_owner"),
   runs: async () => (await rpc<Run[]>("kb_runs")).map(fixRun),
@@ -250,6 +287,25 @@ export const api = {
     const at = Date.now();
     if (!r.ok || !(r.headers.get("content-type") ?? "").includes("application/json")) return null;
     return parseMarks(await r.json().catch(() => null), at, r.headers.get("date"));
+  },
+  /** Streamed prices (lib/stream.ts, scripts/price_stream.py): joins the private Realtime channel that only the owner
+   *  may read (migration 0032) and calls `on` with each message the relay broadcasts, at most one a second. Returns the
+   *  function that stops `on`. Every page shares ONE channel (supabase-js hands out one channel per topic, so a page
+   *  leaving its own would take the next page's with it); the channel is left 2 s after the last page stops, so a move
+   *  between Live and Positions keeps it. Refused (not the owner, 0032 not applied, the relay off): no message comes
+   *  and the page stays on the 10 s poll; a refusal leaves the channel, so nothing retries until a page asks again. */
+  prices: (on: (s: Stream) => void): (() => void) => {
+    const p = priceStream;
+    p.listeners.add(on);
+    if (p.leaveTimer) { clearTimeout(p.leaveTimer); p.leaveTimer = null; }
+    if (!p.ch && !p.joining) void joinPrices();
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      p.listeners.delete(on);
+      if (!p.listeners.size && !p.leaveTimer) p.leaveTimer = setTimeout(leavePrices, PRICES_LEAVE_MS);
+    };
   },
   /** Stock summaries (migration 0023): the card from /api/summary, which writes today's on the first view (owner only,
    *  inside its own caps). Where the function is not deployed (local dev) the stored card is read with the RPC.

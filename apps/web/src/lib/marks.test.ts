@@ -189,7 +189,7 @@ describe("how fresh the pot is: three states", () => {
     expect(freshText({ kind: "close", session: "2026-11-10" }, Date.parse("2026-11-19T22:30:00Z"))).toBe("At the close of Nov 10"); // a weekday alone would mislead
   });
   it("the pot's state follows what is shown: live, the engine's minute row, or the close", () => {
-    expect(potLive(run, ov(), BOOK, SERIES, marks(), new Date(NOW)).fresh).toEqual({ kind: "live", at: AT });
+    expect(potLive(run, ov(), BOOK, SERIES, marks(), new Date(NOW)).fresh).toEqual({ kind: "live", at: AT, feed: "poll" });
     expect(potLive(run, ov(), BOOK, SERIES, null, new Date(NOW)).fresh).toEqual({ kind: "engine", at: Date.parse("2026-11-19T17:39:21Z") });
     // Wednesday night, the close booked: the minute row of that day is not used (potNow), and no price is asked for
     const night = new Date("2026-11-18T22:35:00Z");
