@@ -13,6 +13,7 @@ from fakes import Clock, FakeBroker, FakeData, FakeStore
 from test_engine import synth_frames
 from test_journal import Remote
 
+from kaibot.broker.protocol import BrokerError, unknown_activity_types
 from kaibot.engine.core import Engine
 from kaibot.engine.journal import LIVE_ID_BASE, Journal, JournalStore, Replicator
 from kaibot.engine.ledger import Action
@@ -285,3 +286,66 @@ def test_drill_supabase_unreachable_for_10_minutes_keeps_stops_and_the_flatten(t
     assert len(remote.tables["fill"]) == 2 and remote.tables["daily_result"][0]["session"] == D2
     assert remote.tables["ledger_day"][0]["close_equity"] == store.tables["ledger_day"][0]["close_equity"]
     assert remote.tables["command"][0]["applied_at"] is not None
+
+
+# ---------------------------------------------------------------- #392: one refused activity code
+def _refusing(broker, refused):
+    """Alpaca refuses a whole activities request that carries one code it does not accept (422)."""
+    real = broker.activities
+
+    def activities(after=None, types=("FILL",)):
+        bad = [t for t in types if t in refused]
+        if bad:
+            raise BrokerError(422, f'{{"code":40010001,"message":"invalid activity type: {bad[0]}"}}')
+        return real(after, types)
+
+    broker.activities = activities
+
+
+@pytest.mark.parametrize("refused", [{"SPLIT"}, {"DIV"}])
+def test_a_refused_code_in_one_group_does_not_blank_the_other_group(tmp_path, refused):
+    eng, broker, clock, store = carried(tmp_path)
+    qty = rows(store, "trade")[0]["qty"]
+    broker.non_trade.append({"activity_type": "DIV", "id": "20260804::1", "date": D2, "net_amount": "1.25",
+                             "symbol": "A", "qty": str(qty), "per_share_amount": "0.1"})
+    _refusing(broker, refused)
+    offer(eng, D2, at=())
+    session(eng, broker, clock, D2)
+    (ev,) = [e for e in rows(store, "event") if e["type"] == "corporate_actions_error"]
+    booked = rows(store, "ledger_day")[1]["dividends"]
+    if refused == {"SPLIT"}:  # the dividends still come in
+        assert booked == pytest.approx(1.25, abs=0.005)
+        assert set(ev["payload"]["refused"]) == {"splits"} and ev["payload"]["read"] == ["dividends"]
+    else:
+        assert booked == pytest.approx(0.0, abs=0.005)
+        assert set(ev["payload"]["refused"]) == {"dividends"} and ev["payload"]["read"] == ["splits"]
+    assert "invalid activity type" in ev["payload"]["error"]
+
+
+def test_every_group_refused_keeps_the_old_error_path(tmp_path):
+    """Nothing is booked and one event is written; the read failure alone blocks no entries (decision 15: the
+    share-count check is the guard for a missed split)."""
+    eng, broker, clock, store = carried(tmp_path)
+    _refusing(broker, {"DIV", "SPLIT"})
+    offer(eng, D2, at=())
+    session(eng, broker, clock, D2)
+    ev = [e for e in rows(store, "event") if e["type"] == "corporate_actions_error"]
+    assert len(ev) == 1 and "refused" not in ev[0]["payload"]
+    assert rows(store, "ledger_day")[1]["dividends"] == pytest.approx(0.0, abs=0.005)
+    assert eng.kill is None
+
+
+def test_the_engine_asks_only_codes_alpaca_accepts(tmp_path):
+    eng, broker, clock, store = carried(tmp_path)
+    asked = []
+    real = broker.activities
+
+    def activities(after=None, types=("FILL",)):
+        asked.append(tuple(types))
+        return real(after, types)
+
+    broker.activities = activities
+    offer(eng, D2, at=())
+    session(eng, broker, clock, D2)
+    assert asked and all(not unknown_activity_types(t) for t in asked)
+    assert not [e for e in rows(store, "event") if e["type"] == "corporate_actions_error"]
