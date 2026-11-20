@@ -168,4 +168,4 @@ The stakeholder delegated the four questions ("don't wait for my input"). Produc
 4. **Narrow phones:** a long line **wraps to a second line** instead of ending in "..." (the stakeholder has asked
    for readability before). Built in `apps/web/src/components/notices.css`, `.nt-text`.
 
-The mockups are redrawn with decision 4: the states board shows the longer rows on two lines.
+The mockups are redrawn with decision 4 (rows wrap instead of being cut). At the mockups' 390 px every sample line fits on one line; the two-line case was checked in Chromium at 360 px on the built component.
