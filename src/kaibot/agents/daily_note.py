@@ -50,6 +50,8 @@ EVENT = "daily_note"
 NOTE_FROM = time(16, 10)
 CLOSE = time(16, 0)  # ET: the regular close; the engine's stop (`final`) writes the note from here on
 DEFAULT_LIMITS = {"max_tokens": 400, "timeout_s": 20.0}
+# The engine's stop waits at most this long for the note (well inside `docker stop -t 20` + the service's 60 s).
+FINAL_WAIT_MAX_S = 25.0
 
 SYSTEM = """You write kaibo's daily report: ONE short paragraph (at most 5 sentences, plain words, no lists, no
 headings) saying what kaibo did today and why. kaibo is a PAPER trading system for US stocks; its rules are fixed
@@ -220,8 +222,9 @@ class NoteDesk:
         finished records for the caller to journal. Never raises.
 
         `final=True` is the engine's stop (`LiveDaily.note_final`): from the close (16:00 ET) on, the note is
-        written then and there if it was not yet, in the caller's thread (a worker thread would die with the
-        process), and a note already being written is waited for (bounded by the model call's own timeout)."""
+        started then and there if it was not yet, and the caller waits for it, or for a note already being written,
+        at most `final_wait_s` (the model call's timeout + 5 s, never more than FINAL_WAIT_MAX_S): the gateway's
+        database calls retry, so the stop must not wait on them. A note still unfinished then is lost (logged)."""
         try:
             now = (self.clock() if self.clock else live.now()).astimezone(NY)
             day = now.date()
@@ -232,17 +235,20 @@ class NoteDesk:
                     f = facts(day, {k: live._entries(k) for k in ("md_send", "md_sent", "fill", "md_review_shadow")},
                               {r.name: dict(live.account.held(r.name)) for r in live.rules},
                               {"equity": _safe(live.account.equity), "cash": _safe(live.account.cash)})
-                    self._start(day, f, inline=final)
-            elif final and self._job is not None and self._job[0] == str(day) and self._job[1] is not None:
-                self._job[1].join(timeout=note_limits(self.gateway)["timeout_s"] + 5.0)
+                    self._start(day, f)
+            if final and self._job is not None and self._job[0] == str(day) and self._job[1] is not None:
+                self._job[1].join(timeout=final_wait_s(self.gateway))
+                if self._job[1].is_alive():
+                    log.warning("daily note not finished within %.0f s of the engine's stop: not written",
+                                final_wait_s(self.gateway))
         except Exception:
             log.exception("daily note not started (nothing else is affected)")
         with self._lock:
             out, self._done = self._done, []
         return out
 
-    def _start(self, day: date, f: dict, inline: bool = False) -> None:
-        if self.inline or inline:
+    def _start(self, day: date, f: dict) -> None:
+        if self.inline:
             self._job = (str(day), None)
             self._write(day, f)
             return
@@ -266,6 +272,14 @@ def _safe(fn):
         return fn()
     except Exception:
         return None
+
+
+def final_wait_s(gateway) -> float:
+    """How long the engine's stop waits for the note: the model call's timeout + 5 s, capped (#311, QA on #397)."""
+    try:
+        return min(note_limits(gateway)["timeout_s"] + 5.0, FINAL_WAIT_MAX_S)
+    except Exception:
+        return FINAL_WAIT_MAX_S
 
 
 def note_limits(gateway) -> dict:

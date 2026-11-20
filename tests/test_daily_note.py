@@ -248,11 +248,46 @@ def test_the_desk_never_raises():
     for live in (Broken(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES), BadClock(), None):
         for final in (False, True):
             assert dn.NoteDesk(g, inline=True).tick(live, final=final) == []
-    boom = Gateway(FakeStore(), None, CFG)
-    boom.reserve = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gateway down"))
+    boom = Gateway(FakeStore(), FakeLLM({}), CFG)  # enabled, and its call raises: the template
+    boom.call = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("gateway down"))
     recs = dn.NoteDesk(boom, inline=True).tick(Live(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES),
                                                final=True)
-    assert len(recs) == 1 and recs[0]["source"] == "template"
+    assert len(recs) == 1 and recs[0]["source"] == "template" and "gateway down" in recs[0]["why"]
+
+
+def test_the_engine_stop_waits_a_bounded_time(monkeypatch):
+    import threading
+    import time as _time
+
+    monkeypatch.setattr(dn, "FINAL_WAIT_MAX_S", 0.2)
+    _, llm, g = gw({"paragraph": GOOD})
+    assert dn.final_wait_s(g) == 0.2 and dn.final_wait_s(None) == 0.2
+    hang = threading.Event()
+    for started in (False, True):  # the stop starts the note itself, or finds one in flight
+        desk = dn.NoteDesk(g)
+        desk._write = lambda day, f: hang.wait(30)  # a database that keeps retrying
+        at = Live(datetime(2026, 11, 18, 21, 10, tzinfo=UTC), ENTRIES)
+        if started:
+            assert desk.tick(at) == []
+        t0 = _time.monotonic()
+        assert desk.tick(at, final=True) == []
+        assert _time.monotonic() - t0 < 2.0
+    hang.set()
+
+
+def test_a_failed_sync_starts_no_note_and_keeps_its_error():
+    from kaibot.engine import live_daily as ld
+
+    live = ld.LiveDaily.__new__(ld.LiveDaily)
+    steps: list = []
+    live._shadow_collect = lambda: None
+    live._note_step = lambda final=False: steps.append(final)
+    live._sync = lambda force: (_ for _ in ()).throw(RuntimeError("broker down"))
+    with pytest.raises(RuntimeError, match="broker down"):
+        live.sync()
+    assert steps == []  # its facts could miss this tick's fills
+    live._sync = lambda force: None  # the early returns included
+    assert live.sync() is None and steps == [False]
 
 
 @pytest.mark.parametrize("text", [

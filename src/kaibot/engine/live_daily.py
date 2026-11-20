@@ -695,10 +695,11 @@ class LiveDaily:
         while it has open orders; before the closing auction (15:59 ET) at most every POLL_EVERY (a `cls` order
         does not change until the auction), from then on at every call."""
         self._shadow_collect()  # #310: an observer's finished records (never read back by this path)
-        try:
-            self._sync(force)
-        finally:  # #311: the day's plain-words report, from 16:10 ET, after this tick's fills are booked (never
-            self._note_step()  # read back by this path; never raises)
+        self._sync(force)
+        # #311: the day's plain-words report, from 16:10 ET, after this tick's fills are booked (also after the early
+        # returns). Not after a failed sync: its facts could miss fills, and a note is written once (never read back
+        # by this path; never raises). A sync that keeps failing leaves the note to the engine's stop (note_final).
+        self._note_step()
 
     def _sync(self, force: bool) -> None:
         om = self._manager()
