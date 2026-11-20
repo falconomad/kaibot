@@ -62,7 +62,7 @@ worker thread) and goes on; `sync` journals a finished record (`md_review_shadow
 Nothing on this path reads a shadow record back, and no step waits for it: the targets, the orders and the fills are
 the same with it on or off (tests/unit/test_preopen_shadow_sim.py). Its errors only log.
 
-Daily note (#311, OFF by default: `note` is None unless KAIBOT_DAILY_NOTE=on). After 17:00 ET `sync` hands the
+Daily note (#311, OFF by default: `note` is None unless KAIBOT_DAILY_NOTE=on). After 16:10 ET `sync` hands the
 day's records (plan, orders, fills, holdings, book) to agents/daily_note.NoteDesk, which writes one plain-words
 paragraph in a worker thread; `sync` journals it (`daily_note`) with its event, `status` shows the latest. Nothing on
 this path reads it back.
@@ -695,7 +695,13 @@ class LiveDaily:
         while it has open orders; before the closing auction (15:59 ET) at most every POLL_EVERY (a `cls` order
         does not change until the auction), from then on at every call."""
         self._shadow_collect()  # #310: an observer's finished records (never read back by this path)
-        self._note_step()  # #311: the day's plain-words report, after 17:00 ET (never read back by this path)
+        self._sync(force)
+        # #311: the day's plain-words report, from 16:10 ET, after this tick's fills are booked (also after the early
+        # returns). Not after a failed sync: its facts could miss fills, and a note is written once (never read back
+        # by this path; never raises). A sync that keeps failing leaves the note to the engine's stop (note_final).
+        self._note_step()
+
+    def _sync(self, force: bool) -> None:
         om = self._manager()
         if om is None or not (om.live or force):
             return
@@ -1100,14 +1106,19 @@ class LiveDaily:
         except Exception:
             log.exception("shadow pre-open record not journalled (no effect on the plan or the orders)")
 
-    def _note_step(self) -> None:
+    def note_final(self) -> None:
+        """#311: the engine is stopping. From the close on, today's note is written now if it was not yet (the last
+        tick may come before NOTE_FROM); it changes nothing else. Never raises."""
+        self._note_step(final=True)
+
+    def _note_step(self, final: bool = False) -> None:
         """#311: start the day's plain-words report once and journal it (`daily_note`) with its event. Never raises."""
         if self.note is None:
             return
         try:
             from kaibot.agents.daily_note import EVENT, KIND, event_body
 
-            for rec in self.note.tick(self):
+            for rec in self.note.tick(self, final=final):
                 if any(b.get("session") == rec.get("session") for b in self._entries(KIND)):
                     continue
                 self.journal.append(KIND, rec)
