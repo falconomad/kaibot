@@ -3,6 +3,7 @@ import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
 import { parseSummary } from "./summary";
 import { type Marks, parseMarks } from "./marks";
+import { STREAM_EVENT, STREAM_TOPIC, type Stream, parseStream } from "./stream";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
 import { checkerAnswer, type TickerCheck, type TickerLists } from "./tickers";
 export { coerce };
@@ -250,6 +251,24 @@ export const api = {
     const at = Date.now();
     if (!r.ok || !(r.headers.get("content-type") ?? "").includes("application/json")) return null;
     return parseMarks(await r.json().catch(() => null), at, r.headers.get("date"));
+  },
+  /** Streamed prices (lib/stream.ts, scripts/price_stream.py): joins the private Realtime channel that only the owner
+   *  may read (migration 0032) and calls `on` with each message the relay broadcasts, at most one a second. Returns the
+   *  function that leaves the channel. Refused (not the owner, 0032 not applied, the relay off): no message comes and
+   *  the page stays on the 10 s poll; a refusal leaves the channel, so nothing retries. */
+  prices: (on: (s: Stream) => void): (() => void) => {
+    let ch: ReturnType<typeof supa.channel> | null = null, left = false;
+    const leave = () => { left = true; if (ch) { void supa.removeChannel(ch); ch = null; } };
+    void (async () => {
+      await supa.realtime.setAuth().catch(() => {});  // the signed-in session's token, so the owner policy can see who asks
+      if (left) return;
+      ch = supa.channel(STREAM_TOPIC, { config: { private: true } })
+        .on("broadcast", { event: STREAM_EVENT }, (m: { payload?: unknown }) => { const s = parseStream(m.payload); if (s) on(s); })
+        .subscribe((status, err) => {
+          if (status === "CHANNEL_ERROR" && /unauthori[sz]ed|denied|policy/i.test(String(err?.message ?? ""))) leave();
+        });
+    })();
+    return leave;
   },
   /** Stock summaries (migration 0023): the card from /api/summary, which writes today's on the first view (owner only,
    *  inside its own caps). Where the function is not deployed (local dev) the stored card is read with the RPC.

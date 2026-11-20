@@ -7,6 +7,7 @@ import { api, type Overview, type Run } from "../lib/api";
 import { pct, tone } from "../lib/fmt";
 import { type Fresh, type Marks, STALE_MS, freshText } from "../lib/marks";
 import { MARKS_MS, marksPollMs, poll } from "../lib/poll";
+import { STREAM_STALE_MS, type Stream, applyStream, mergeStream } from "../lib/stream";
 import { Tick } from "./Tick";
 
 /** The paper account's prices, asked for every 10 s while the tab is visible AND the market is open (lib/poll.ts
@@ -24,15 +25,36 @@ export function useMarks(run: Run, overview: Overview | undefined): { marks: Mar
   }, []);
   // One try per poll, never a retry: the function already shares the engine's request budget at Alpaca.
   const q = useQuery({ queryKey: ["marks"], queryFn: api.marks, enabled: open, retry: false, staleTime: MARKS_MS / 2, ...poll(open ? MARKS_MS : false) });
-  const marks = open ? q.data ?? null : null;
+  const polled = open ? q.data ?? null : null;
+  const stream = usePriceStream(open);
   // Prices that stop arriving (a failed poll keeps the last answer) must stop being live: draw again as they turn 30 s old.
   useEffect(() => {
-    if (!marks) return;
-    const id = setTimeout(() => again((n) => n + 1), Math.max(0, marks.at + STALE_MS - Date.now()) + 50);
+    if (!polled) return;
+    const id = setTimeout(() => again((n) => n + 1), Math.max(0, polled.at + STALE_MS - Date.now()) + 50);
     return () => clearTimeout(id);
-  }, [marks]);
-  const fresh = !!marks && Date.now() - marks.at <= STALE_MS;
+  }, [polled]);
+  const fresh = !!polled && Date.now() - polled.at <= STALE_MS;
+  // Streamed prices over the polled ones while the stream is live (lib/stream.applyStream); the poll's alone otherwise.
+  const marks = open ? applyStream(polled, stream) : null;
   return { marks, waiting: open && (q.isPending || (q.isFetching && !q.isError && !!q.data && !fresh)) };
+}
+
+/** The relay's streamed prices (api.prices, scripts/price_stream.py) while `on` (the same market-hours rule as the
+ *  poll): the last message, or null. The channel is left when `on` turns off or the page goes. A message that stops
+ *  coming is dropped 5 s after the last one, so the page goes back to the poll by itself. */
+function usePriceStream(on: boolean): Stream | null {
+  const [s, set] = useState<Stream | null>(null);
+  useEffect(() => {
+    if (!on) { set(null); return; }
+    const off = api.prices((m) => set((old) => mergeStream(old && m.at - old.at <= STREAM_STALE_MS ? old : null, m)));
+    return () => { if (typeof off === "function") off(); set(null); };
+  }, [on]);
+  useEffect(() => {
+    if (!s) return;
+    const id = setTimeout(() => set((cur) => (cur === s ? null : cur)), Math.max(0, s.at + STREAM_STALE_MS - Date.now()) + 50);
+    return () => clearTimeout(id);
+  }, [s]);
+  return s;
 }
 
 /** One small muted line near the figures: "Live · prices 4 s ago", "Updated a minute ago by the engine" or
@@ -46,7 +68,14 @@ export function FreshLine({ fresh }: { fresh: Fresh | null }) {
     const id = setInterval(() => again((n) => n + 1), kind === "live" ? 1000 : 30_000);
     return () => clearInterval(id);
   }, [kind]);
-  return fresh ? <p className={kind === "live" ? "fresh live" : "fresh"}>{freshText(fresh)}</p> : null;
+  if (!fresh) return null;
+  // While live, a small tag says how the prices arrive: "live" (streamed, about once a second) or "10 s" (the poll).
+  const feed = fresh.kind === "live" ? fresh.feed : undefined;
+  return (
+    <p className={kind === "live" ? "fresh live" : "fresh"}>{freshText(fresh)}
+      {feed && <span className="feed" title={feed === "stream" ? "Prices stream about once a second (IEX)" : "Prices update every 10 s"}>{feed === "stream" ? "live" : "10 s"}</span>}
+    </p>
+  );
 }
 
 /** A holding's change today against the previous close, in percent: shown only while the prices are live. `waiting`

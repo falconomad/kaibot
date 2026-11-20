@@ -70,7 +70,7 @@ describe("Home while the market is open and the account holds exactly the book",
     expect(t).toContain("−$226.71 all time");
     expect(t).toContain("−$223.97 today");
     expect(t).toContain("Live · prices 4 s ago");
-    expect(html).toContain('<p class="fresh live">Live · prices 4 s ago</p>');
+    expect(html).toContain('<p class="fresh live">Live · prices 4 s ago<span class="feed" title="Prices update every 10 s">10 s</span></p>');
     // one source: the engine's minute figure is nowhere on the page
     expect(t).not.toContain("94,796.94");
     expect(t).not.toMatch(/by the engine|At .* close/);
@@ -178,7 +178,7 @@ describe("Positions", () => {
     at(NOW);
     const html = positions(marks()), t = text(html);
     expect(t).toMatch(/Positions 7 open · \$15,101\.5\d invested · 16% of the pot/);
-    expect(html).toContain('<p class="fresh live">Live · prices 4 s ago</p>');
+    expect(html).toContain('<p class="fresh live">Live · prices 4 s ago<span class="feed" title="Prices update every 10 s">10 s</span></p>');
     expect(rowOf(html, "XOM", "row")).toBe("XOM Trend momentum · 20 shares · 0 days $3,173.60 −$38.20 −1.18% today");
     expect(rowOf(html, "ABBV", "row")).toMatch(/\$1,411\.85 −\$18\.95 −1\.27% today$/);
     expect([...html.matchAll(/class="row".*?<b>([A-Z]+)<\/b>/gs)].map((m) => m[1])).toEqual(["XOM", "TMO", "BIIB", "BBY", "PFE", "ABBV", "APA"]);
