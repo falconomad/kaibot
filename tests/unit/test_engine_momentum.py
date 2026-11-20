@@ -433,6 +433,74 @@ def test_near_close_orders_change_no_fill_no_cost_and_no_equity_against_the_clos
     assert near.ledger.overdrafts == cls.ledger.overdrafts == [] and near.cash_gap < 1e-6
 
 
+@pytest.mark.parametrize("version", ["trend_momentum", "mom_12_1_band"])
+def test_the_carry_over_never_fires_in_research_and_changes_no_fill_no_cost_and_no_equity(fx, version):
+    """#363: the research runner carries the latest decision's unfilled buys exactly as the live path does. On the
+    research venue a buy either fills whole at the closing print, is cut to the cash at the print (a cancelled rest,
+    never carried), or has no bar on its fill day (dropped, section 4): so nothing is ever carried, and the runs
+    with and without the carry-over book the same orders, fills (to the last bit) and daily equity. Gate B is
+    unchanged."""
+    m, data, i0, i1 = fx
+    s = mom.VERSIONS[version]
+    on = run_daily(s, data, POL, i0, i1)
+    off = run_daily(s, data, POL, i0, i1, carry=False)
+    assert len(on.fills) > 20 and on.fills == off.fills and on.orders == off.orders
+    assert [r["end"] for r in on.book.daily] == [r["end"] for r in off.book.daily]
+    assert not [o for o in on.broker.orders.values() if "-carry-" in str(o.get("client_order_id"))]
+    assert on.carried == [] and on.ledger.overdrafts == []
+
+
+@pytest.mark.parametrize("version", ["trend_momentum", "mom_12_1_band"])
+def test_the_carry_over_never_buys_back_what_a_protective_stop_sold(fx, version):
+    """QA-Ops on #366: with a protective stop (`protect_atr`, an experiment option; neither pre-registration has
+    one) a stopped-out name holds less than its target the next session. The carry-over must not buy it back (it was
+    sold since the decision, whatever order sold it): with a 2-ATR stop the run books the same fills and the same
+    daily equity with and without the carry-over, and the stops did fire."""
+    m, data, i0, i1 = fx
+    s = mom.VERSIONS[version]
+    on = run_daily(s, data, POL, i0, i1, protect_atr=2.0)
+    off = run_daily(s, data, POL, i0, i1, protect_atr=2.0, carry=False)
+    stopped = [o for o in on.broker.orders.values() if o["type"] == "stop" and o["status"] == "filled"]
+    assert stopped and on.carried == [] and on.fills == off.fills
+    assert [r["end"] for r in on.book.daily] == [r["end"] for r in off.book.daily]
+
+
+def test_ended_buys_reads_a_sale_from_the_shares_and_a_fill_that_is_not_booked_from_the_order():
+    """QA-Ops on #366, the shared core's order history (`engine/daily.ended_buys`): a sleeve that holds less than
+    its shares at the plan plus what the plan's buys booked since was sold since (whatever sold it); a filled
+    protective stop is a sale, a resting one is not; a finished buy whose fill is not booked yet is "unbooked"."""
+    from types import SimpleNamespace as O
+
+    from kaibot.engine.daily import ended_buys
+    from kaibot.engine.orders import St
+
+    def order(sym, side, session, state, *, qty=10.0, booked=0.0, cum=None, purpose="buy", reason=None):
+        return O(strategy="r", symbol=sym, side=side, session=session, state=state, qty=qty, booked=booked,
+                 cum=booked if cum is None else cum, purpose=purpose, reason=reason, created=session,
+                 open=state not in (St.FILLED, St.EXPIRED, St.CANCELED, St.REJECTED))
+
+    om = O(orders={n: o for n, o in enumerate([
+        order("A", "buy", "d1", St.EXPIRED, booked=4.0),                       # part-filled, the rest expired
+        order("B", "buy", "d1", St.FILLED, booked=10.0),                       # filled, then stopped out
+        order("B", "sell", "d0", St.FILLED, booked=10.0, purpose="stop"),      # the stop was placed before the plan
+        order("C", "buy", "d1", St.FILLED, booked=0.0, cum=10.0),              # filled at the venue, not booked
+        order("D", "buy", "d1", St.CANCELED),
+        order("E", "buy", "d1", St.REJECTED, reason="lost: never reached the venue"),
+        order("F", "buy", "d1", St.FILLED, booked=10.0),
+        order("F", "sell", "d2", St.ACCEPTED, purpose="stop"),                 # a resting stop: no sale
+        order("G", "buy", "d1", St.FILLED, booked=10.0),
+        order("G", "sell", "d3", St.FILLED, booked=10.0, purpose="stop"),      # adopted and filled today
+        order("H", "buy", "d1", St.EXPIRED),
+        order("H", "buy", "d3", St.FILLED, booked=10.0),                       # today's order: not history yet
+    ])})
+    held = {"A": 4.0, "F": 10.0, "K": 5.0}
+    got = ended_buys(om, "r", "d1", "d3", base={"K": 5.0}, held=held)
+    assert got == {"A": "expired", "B": "sold", "C": "unbooked", "D": "canceled", "F": "filled", "G": "sold",
+                   "H": "expired"}
+    assert ended_buys(om, "r", "d1", "d3")["B"] == "filled"  # without the shares only the orders are read
+    assert ended_buys(om, "r", "d1", "d3", base={"K": 9.0}, held=held)["K"] == "sold"  # held before, fewer now
+
+
 # ---------------------------------------------------------------- 4. live: refused
 
 

@@ -11,6 +11,8 @@
   (file-level findings), `docs/m0/walk_forward_10y.md`, `docs/m0/experiments_001.md`.
 - **Supersedes:** the "engine changes are not approved yet" line of decision 14. Decision 14's risk rules stay, with one
   amendment (earnings, section 6). Decision 11 (local-first engine) stays.
+- **Updated 19 Nov 2026 (section 12):** since 18 Nov 2026 daily rules send near-close DAY market orders on Alpaca
+  paper, not closing-auction orders (#333, PR #337). The closing-auction text below is kept as history and marked.
 
 ## 1. What we promise, and what we do not
 
@@ -59,7 +61,7 @@ Clock event -> MarketData (as of now) -> each Strategy due -> Signals / targets
 | `Strategy` | `name`, `schedule`, `holding` (intraday or multi-day), `warmup`, `on_event(ctx)`; returns signals (intraday) or target lists (multi-day); owns its exit rules; no order code | shadow strategy interface | `Engine._entries`, `_spy_momentum`, `_trail_stops` |
 | `PortfolioBuilder` | signals + book + limits -> target positions per sleeve: volatility sizing, per-name, gross, overnight and sector caps, index trend filter as an exposure dial, cash buffer, whole-share rounding | sizing arithmetic of `risk/gate.size_position` | "max positions" as the only portfolio rule |
 | risk gate | unchanged role: pure, last check before any order; `Snapshot` gains gross, overnight and sector exposure and the gap-scenario loss | `risk/gate.py` | - |
-| `ExecutionPolicy` + `OrderManager` | target changes -> orders; closing-auction, limit and marketable-limit orders for daily rules, brackets for intraday rules, standalone protective stops; intent written first; state machine with an `unknown` state; partial fills, rejects, replace, cancel; reconciliation from account activities | `Engine._open`, `_sync_orders`, `_adopt_orphans` | brackets as the unit of position |
+| `ExecutionPolicy` + `OrderManager` | target changes -> orders; closing-auction, limit and marketable-limit orders for daily rules (since 18 Nov 2026 daily rules send near-close market orders: section 12), brackets for intraday rules, standalone protective stops; intent written first; state machine with an `unknown` state; partial fills, rejects, replace, cancel; reconciliation from account activities | `Engine._open`, `_sync_orders`, `_adopt_orphans` | brackets as the unit of position |
 | `Broker` | `submit`, `cancel`, `replace`, `open_orders`, `positions`, `account`, `activities`, `clock`, `calendar`; `AlpacaPaper`, `SimBroker` (enforces Alpaca's real order rules and the cost model) | `engine/alpaca.py`, `tests/fakes.FakeBroker`, `broker/shadow_costs.py` | `broker/base.py`, six simulators |
 | `Ledger` | positions per (strategy, symbol), cash, daily mark-to-market equity, dividends and splits; state is a fold over a local append-only journal (SQLite), replicated to Supabase | `Pos`, `Day`, `store.ledger` | equity as the sum of `daily_result` rows |
 
@@ -75,7 +77,7 @@ Names may change in implementation; responsibilities may not. Two loops share th
 |---|---|---|
 | Build or adopt | keep the custom engine, restructure as ports and adapters | NautilusTrader has no Alpaca adapter and is mid-rewrite; LEAN is C# with paid tooling and a fragile Alpaca path; copy their patterns, not their code |
 | Decision time for daily rules | after the close on complete daily bars (free, SIP older than 15 minutes) | removes the IEX-vs-SIP divergence without paid data |
-| Execution for daily rules | base: next session's closing auction (`cls`, whole shares, submitted before 15:50 ET; may be queued from 19:00 ET the evening before); alternative: marketable limit after 09:45 ET; no opening-auction orders | the close is the cheapest venue, the open the most expensive |
+| Execution for daily rules | **Current, since 18 Nov 2026 (#333, PR #337; section 12):** near-close DAY market orders, whole shares, sent from 15:50 to 15:57 ET in the next session; no opening-auction orders. **Replaced on 18 Nov 2026, kept as history:** ~~base: next session's closing auction (`cls`, whole shares, submitted before 15:50 ET; may be queued from 19:00 ET the evening before); alternative: marketable limit after 09:45 ET~~ | the close is the cheapest venue, the open the most expensive. Replaced because Alpaca paper runs no closing auction: on 18 Nov 2026 it filled 7 of 30 `cls` buys (4 in full, 3 in part) |
 | Sizing | volatility: shares = equity x 0.001 / ATR(20), under per-name and gross caps; no leverage, no shorts | equal risk per position; gap risk absorbed by size |
 | Stops | exits by rule; a wide protective stop rests at the broker (GTC, whole shares, re-armed before day 90) | tight stops subtract value; the broker stop protects when the engine is off |
 | Source of truth | local journal first, Supabase asynchronously | a database outage must not interrupt stop management |
@@ -117,6 +119,7 @@ replacement passes). Not pursued: leverage, shorting, options, paid data.
 
 Fill model for daily rules in tests: decide after the close of T; **base** fill at the close of T+1 at half a spread per
 side; **stress** fill at the open of T+1 at twice the midday half-spread; a stop gapped through fills at the open.
+This fill model is not changed by the near-close orders of 18 Nov 2026 (section 12).
 
 ## 6. Risk rules for multi-day holding (decision 14, confirmed and amended)
 
@@ -302,7 +305,8 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
      limit at a crossing price). The intraday rule therefore never enters a stock the multi-day book holds or has an
      order in (`multi_day_symbol`), and the daily path holds back a `cls` order while an opposite market, stop or
      limit order (an intraday bracket's target leg included) is open in its symbol. `SimBroker` models the rule
-     (`wash_check`, opt-in, so replays are unchanged).
+     (`wash_check`, opt-in, so replays are unchanged). *Since 18 Nov 2026 the daily path's orders are near-close
+     DAY market orders, not `cls` orders (section 12); the same hold-back applies to them.*
 2. **Book limits exactly as pre-registered**, now **confirmed** (no longer provisional; `config/profiles.yaml`
    `multi_day.provisional: false`): k = 0.1%, the level's `max_position_pct` per name (10 / 15 / 20%), at most
    **30 names**, a **40% sector cap**, the 3% cash reserve of the portfolio builder (Amendment 3) on the 1% hard
@@ -334,3 +338,99 @@ The multi-day rules decide `AFTER_CLOSE`, and their targets are executed only by
 the rule's cap via `risk/profiles.rule_exposure_pct`, closing-auction orders through the order manager,
 protective stops) is a separate two-key story (Backend-quant and QA-Ops). The experiment starts trading only once it
 is merged.
+
+*History, as written on 13 Nov 2026. The live daily path was wired later (issue #206, `engine/live_daily.py`). Since
+18 Nov 2026 it sends near-close market orders, not closing-auction orders (section 12).*
+
+## 12. Update 19 Nov 2026: daily rules send near-close market orders, not closing-auction orders
+
+Product, issue #358. This section records what the code on `main` does today. It changes no rule, no parameter and
+no number.
+
+### What replaced what
+
+- **Before (decided 12 Nov 2026, live for one session, 18 Nov 2026), now history:** daily rules bought and sold in
+  the next session's closing auction (`cls` orders, whole shares, submitted before 15:50 ET). The row "Execution for
+  daily rules" in section 3 said so.
+- **Since the evening of 18 Nov 2026 (issue #333, PR #337):** on the live paper path, daily rules send **DAY market
+  orders, whole shares, from 15:50 to 15:57 ET** in the session after the decision
+  (`ExecutionPolicy("near_close")`, `engine/live_daily.py`).
+- **Why.** Alpaca's paper venue runs no closing auction. It works a `cls` order as a market order in the last
+  seconds before 16:00 and lets the rest expire. On 18 Nov 2026, the rule's first live session, 4 of 30 `cls` buys
+  filled in full, 3 in part and 23 not at all. About 16% of the book was invested against a plan of about 90%. A
+  market order sent from 15:50 gives the paper venue minutes to fill.
+
+### Current behaviour
+
+| Step | What the engine does |
+|---|---|
+| Decision | Unchanged: after the close, on complete daily bars. The target list is journalled (`md_decision`). |
+| Send window | 15:50 to 15:57 ET in the next session. On an early-close day: the close minus 10 minutes to the close minus 3 minutes (12:50 to 12:57 for a 13:00 close). The last three minutes are left for the venue to fill. |
+| Orders | DAY market orders, whole shares. The targets are journalled before any order (`md_send`). Each order is the difference between the target and the shares held and working. Sales go out even when entries are blocked. Buys need no entry block and a clean reconciliation. |
+| Outside the window | The `near_close` style refuses an order before the close minus 10 minutes and from the close on. The engine starts no send after 15:57. A buy still blocked then is dropped for that session. |
+| Fills | Booked once each, from the broker's account activities. An order that reads filled before its fill is booked is not bought a second time (QA-Ops on #337). |
+| Unfilled remainder | A DAY order expires at the close. The shares it had left are **not sent again** that session. The remainder is journalled once (`md_unfilled`) and reported as the event **`multi_day_unfilled`** (symbol, side, quantity, filled, left). `kb_health` returns it (migration 0029, PR #351). |
+| An unfilled buy | It waits for the rule's next decision. Nothing carries it to the next session. Carrying unfilled buys to the next sessions is proposed in PR #366, which is open and not merged. |
+| An unfilled full sale | A sale of a whole position (target zero) that did not fill is sent again in the next session's window. |
+| Fail-safes | Just before the first orders go out, the account gets a row for each planned buy. So the watchdog and the dead-man keep a near-close fill that lands after the engine died (#341). A planned buy that never filled does not make them keep an unrelated position (#344, PR #352, migration 0030). |
+| Intraday rules | Unchanged: brackets, and the flatten at the close minus 5 minutes. |
+
+Not changed by #337: the decision time, the sizing, the plan order (sales, then resizes, then buys best first), the
+3% cash reserve, whole shares, no opening-auction orders, no protective stop for the two momentum rules.
+
+The `close` style (`cls`) is still in `engine/execution.py`. The live daily path does not use it. The research
+runner can still send `cls` orders (`run_daily(execution="close")`) for comparison.
+
+Also corrected after #337: `docs/ops` (PR #346) and the comments of the agents' daily path (PR #347).
+
+### Research runs and the fill model
+
+The research runner (`engine/daily.run_daily`) sends the same near-close orders at 15:50. `SimBroker` fills them at
+the session's closing print, with the same cost model and the same cash check as it filled the `cls` orders. A test
+asserts that fills and daily equity are identical with `cls` orders and with near-close orders. So the fill model of
+section 5 stands, and no report, trial row or Gate B mark changed. The pre-registrations record this: Amendment 10
+of `docs/prereg/trend_momentum.md` and Amendment 8 of `docs/prereg/mom_12_1_band.md`.
+
+### Do Gate B's cost assumptions still describe this execution?
+
+**For the research numbers: yes, nothing moved.** Gate B is judged on fills at the close of T+1. That is the same
+before and after #337.
+
+**For the orders now sent: no, not exactly. This is an open question for Backend-quant.** No number is changed
+here.
+
+- The tested cost is the cost of a fill at the official close. Cost model v1 charges half a spread plus impact at
+  the closing print. Cost model v2 (#111; the model of the Gate B run in #202) has a venue `close`: one full
+  half-spread and half the continuous impact.
+- A market order sent at 15:50 is not a closing-auction fill. On a real exchange it trades in the continuous
+  session: in cost model v2 that is venue `continuous`, with the full impact, at the price of that minute and not
+  at the close.
+- On Alpaca paper it fills at the quote of that moment (IEX-fed), with no impact and no queue. The price move from
+  15:50 to the close is not modelled. The amendments call this a known deviation, live against research, and say
+  Gate C counts it as one.
+
+The questions for Backend-quant, to answer before a daily rule is judged at Gate C or proposed for real money
+(posted on #202):
+
+1. If near-close market orders stay, should the ten-year test price daily fills as `continuous` orders at the
+   15:50 price instead of `close` fills at the closing print? That would be a re-run of the same configuration
+   (section 10). It is not done here.
+2. Is the Gate C tracking tolerance of section 10 (10 bp per session) still right with the 15:50-to-close move
+   inside it?
+3. The amendments say the execution is reviewed again before real money, because a live account's `cls` order does
+   reach the closing auction. Which of the two is then the tested execution?
+
+Until these are answered, read every Gate B number of a daily rule as "priced at the close", and every live paper
+fill as "taken near the close".
+
+### Other records checked for the same wording (19 Nov 2026)
+
+| File | Result |
+|---|---|
+| `docs/decisions/14_multi_day_holding.md` | Checked, nothing to change. It names no order type and no send time. |
+| `docs/prereg/trend_momentum.md` | Not edited (pre-registrations are append-only). Amendment 10 (18 Nov 2026) covers the change. The older text that says "closing auction" (Amendments 2, 3, 6 and 7) stands as written at its date. |
+| `docs/prereg/mom_12_1_band.md` | Not edited. Amendment 8 (18 Nov 2026) covers the change. The older text (Amendments 2, 3 and 6) stands as written at its date. |
+| `docs/prereg/spy_trend_filter.md` | Not edited. Its base fill is "the close of T+1 at the closing-auction price". That is a research fill model and the rule is not on paper, so nothing is wrong today. It has no amendment for near-close orders. If the rule goes on paper it needs one first, by Backend-quant. |
+| The other pre-registrations | Checked, nothing to change. They are intraday rules, or research fill models at the close of T+1 or at the last regular-hours minute. None names an order type and none is on paper. |
+
+Links: issue #333, PR #337, #341, #344 (PR #352), PR #346, PR #347, PR #351, issue #202, PR #366 (open), issue #358.

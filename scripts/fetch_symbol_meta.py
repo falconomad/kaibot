@@ -15,9 +15,11 @@ in the file is never replaced: use apps/web/scripts/logo_domains.mjs --all for t
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
+import ssl
 import sys
 import time
 import urllib.parse
@@ -49,6 +51,12 @@ SEARCH_GAP_S = 1.2  # the same pace as apps/web/scripts/logo_domains.mjs
 US_EXCHANGES = frozenset({"NASDAQ", "NASDAQGS", "NASDAQGM", "NASDAQCM", "NYSE", "NYSE ARCA", "NYSEARCA", "ARCA",
                           "NYSE AMERICAN", "NYSE MKT", "NYSEAMERICAN", "AMEX", "BATS", "CBOE", "CBOE BZX", "BZX",
                           "CBOE BZX EXCHANGE"})
+# What one failed lookup may raise (#383). kaibot.common.http turns statuses, retries that ran out and invalid JSON
+# into HttpError, but three failures pass through it as they are: a body cut short (http.client.IncompleteRead, an
+# HTTPException) and a TLS error during the read (ssl.SSLEOFError, an SSLError) come from r.read(), which `get` neither
+# retries nor wraps, and a body nested too deeply makes json.loads raise RecursionError, not ValueError. Nothing wider:
+# Ctrl-C, an exit and a bug in this script (TypeError, ValueError, ...) still stop the run.
+LOOKUP_FAILURES = (HttpError, http.client.HTTPException, ssl.SSLError, RecursionError)
 _LABEL = re.compile(r"^(?!-)[a-z0-9-]{1,63}(?<!-)$")
 
 
@@ -113,8 +121,8 @@ def fill_domains(out: dict[str, dict], search: Callable[[str], object] = search_
             sleep(SEARCH_GAP_S)
         try:
             ans = search(sym)
-        except HttpError as e:
-            print(f"{sym}: search failed ({e}); domain stays null", file=sys.stderr)
+        except LOOKUP_FAILURES as e:
+            print(f"{sym}: search failed ({type(e).__name__}: {e}); domain stays null", file=sys.stderr)
             continue
         d = pick_domain(sym, ans.get("results") if isinstance(ans, dict) else None)
         if d:

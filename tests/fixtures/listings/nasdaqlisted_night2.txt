@@ -1,0 +1,10 @@
+Symbol|Security Name|Market Category|Test Issue|Financial Status|Round Lot Size|ETF|NextShares
+AAPL|Apple Inc. - Common Stock|Q|N|N|100|N|N
+ANT|Anthropic, PBC - Class A Common Stock|Q|N|N|100|N|N
+MYST|Mystery Corp - Common Stock|S|N|N|100|N|N
+QQQX|Example Nasdaq 100 ETF|G|N|N|100|Y|N
+RGHT|Example Bio Inc. - Rights|S|N|N|100|N|N
+ZVZZT|NASDAQ TEST STOCK|G|Y|N|100|N|N
+ZXZZT|NASDAQ TEST STOCK B|G|Y|N|100|N|N
+broken|row
+File Creation Time: 1119202618:30|||||||

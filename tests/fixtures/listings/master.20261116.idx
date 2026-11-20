@@ -1,0 +1,16 @@
+Description:           Daily Index of EDGAR Dissemination Feed
+Last Data Received:    Nov 16, 2026
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|File Name
+--------------------------------------------------------------------------------
+1234|Some Listed Co|8-K|20261116|edgar/data/1234/0000001234-26-000061.txt
+9990001|Anthropic, PBC|8-A12B|20261116|edgar/data/9990001/0009990001-26-000003.txt
+9990006|Bank Example Corp|8-A12B|20261116|edgar/data/9990006/0009990006-26-000009.txt
+9990003|Spinco Inc.|8-A12B|20261116|edgar/data/9990003/0009990003-26-000002.txt
+this line is not an index row
+9990001|broken row

@@ -1,0 +1,14 @@
+Description:           Daily Index of EDGAR Dissemination Feed
+Last Data Received:    Nov 18, 2026
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|File Name
+--------------------------------------------------------------------------------
+9990004|Spaq Acquisition Corp.|8-A12B|20261118|edgar/data/9990004/0009990004-26-000002.txt
+9990004|Spaq Acquisition Corp.|424B4|20261118|edgar/data/9990004/0009990004-26-000003.txt
+9990005|Follow On Corp|424B4|20261118|edgar/data/9990005/0009990005-26-000031.txt
+9990005|Follow On Corp|S-1|20261118|edgar/data/9990005/0009990005-26-000029.txt

@@ -1,7 +1,7 @@
 """The daily report in plain words (issue #311; Stage 1, approved by the stakeholder: the AI explains, it never
 acts). Off by default; on only with `KAIBOT_DAILY_NOTE=on` (and ANTHROPIC_API_KEY for the model's wording).
 
-After the close (from 17:00 ET, once the closing auction's fills are booked) one short paragraph, "what kaibo did
+After the close (from 16:10 ET, once the day's near-close fills are booked) one short paragraph, "what kaibo did
 today and why", is written by the cheap model (`models.note` in config/llm.yaml, claude-haiku-5-5) through the
 budget gateway (reserve, settle; `limits.note`), from the engine's OWN records of the session only:
 
@@ -44,8 +44,14 @@ FLAG_ENV = "KAIBOT_DAILY_NOTE"
 ON = ("1", "on", "true", "yes")
 KIND = "daily_note"
 EVENT = "daily_note"
-NOTE_FROM = time(17, 0)  # ET: after the closing auction's fills are booked
+# ET: after the day's fills are booked (DAY market orders go out 15:50-15:57 ET and fill within seconds or minutes),
+# and well inside the live engine's session, which ends at the close + 30 min (16:30 ET). It was 17:00 ET until
+# 20 Nov 2026, a tick the engine never reached: no note was ever written.
+NOTE_FROM = time(16, 10)
+CLOSE = time(16, 0)  # ET: the regular close; the engine's stop (`final`) writes the note from here on
 DEFAULT_LIMITS = {"max_tokens": 400, "timeout_s": 20.0}
+# The engine's stop waits at most this long for the note (well inside `docker stop -t 20` + the service's 60 s).
+FINAL_WAIT_MAX_S = 25.0
 
 SYSTEM = """You write kaibo's daily report: ONE short paragraph (at most 5 sentences, plain words, no lists, no
 headings) saying what kaibo did today and why. kaibo is a PAPER trading system for US stocks; its rules are fixed
@@ -85,6 +91,9 @@ def facts(session: date, entries: Mapping[str, list[dict]], held: Mapping[str, M
                                                 for x in b["ca_skipped"]]
         if b.get("ca_unread"):
             r["no_buys_corporate_actions_unread"] = b["ca_unread"]
+        carry = b.get("carry") or {}  # #366: a carry-over day's send (its carried buys are in the plan above)
+        if carry.get("skipped"):
+            r["not_carried_over"] = [{"symbol": s, "why": w} for s, w in sorted(carry["skipped"].items())]
     for b in entries.get("md_sent") or []:
         if b.get("session") == day and b.get("skipped"):
             rules.setdefault(str(b.get("strategy")), {})["orders_not_sent"] = [
@@ -207,13 +216,19 @@ class NoteDesk:
         self._done: list[dict] = []
         self._lock = threading.Lock()
 
-    def tick(self, live) -> list[dict]:
-        """Called on every engine tick (`LiveDaily.sync`). Starts today's note once, after NOTE_FROM ET, when the
-        session had a plan; returns finished records for the caller to journal. Never raises."""
+    def tick(self, live, *, final: bool = False) -> list[dict]:
+        """Called on every engine tick (`LiveDaily.sync`). Starts today's note once, from NOTE_FROM ET, when the
+        session had a plan (an `md_send` of that session: a decision's fill day or a carry-over day, #366); returns
+        finished records for the caller to journal. Never raises.
+
+        `final=True` is the engine's stop (`LiveDaily.note_final`): from the close (16:00 ET) on, the note is
+        started then and there if it was not yet, and the caller waits for it, or for a note already being written,
+        at most `final_wait_s` (the model call's timeout + 5 s, never more than FINAL_WAIT_MAX_S): the gateway's
+        database calls retry, so the stop must not wait on them. A note still unfinished then is lost (logged)."""
         try:
             now = (self.clock() if self.clock else live.now()).astimezone(NY)
             day = now.date()
-            if now.time() >= NOTE_FROM and (self._job is None or self._job[0] != str(day)):
+            if now.time() >= (CLOSE if final else NOTE_FROM) and (self._job is None or self._job[0] != str(day)):
                 sends = live._entries("md_send")
                 if any(b.get("session") == str(day) for b in sends) and not any(
                         b.get("session") == str(day) for b in live._entries(KIND)):
@@ -221,6 +236,11 @@ class NoteDesk:
                               {r.name: dict(live.account.held(r.name)) for r in live.rules},
                               {"equity": _safe(live.account.equity), "cash": _safe(live.account.cash)})
                     self._start(day, f)
+            if final and self._job is not None and self._job[0] == str(day) and self._job[1] is not None:
+                self._job[1].join(timeout=final_wait_s(self.gateway))
+                if self._job[1].is_alive():
+                    log.warning("daily note not finished within %.0f s of the engine's stop: not written",
+                                final_wait_s(self.gateway))
         except Exception:
             log.exception("daily note not started (nothing else is affected)")
         with self._lock:
@@ -252,6 +272,14 @@ def _safe(fn):
         return fn()
     except Exception:
         return None
+
+
+def final_wait_s(gateway) -> float:
+    """How long the engine's stop waits for the note: the model call's timeout + 5 s, capped (#311, QA on #397)."""
+    try:
+        return min(note_limits(gateway)["timeout_s"] + 5.0, FINAL_WAIT_MAX_S)
+    except Exception:
+        return FINAL_WAIT_MAX_S
 
 
 def note_limits(gateway) -> dict:

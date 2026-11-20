@@ -1,0 +1,12 @@
+Description:           Daily Index of EDGAR Dissemination Feed
+Last Data Received:    Nov 19, 2026
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|File Name
+--------------------------------------------------------------------------------
+9990001|Anthropic, PBC|424B4|20261119|edgar/data/9990001/0009990001-26-000004.txt
+1234|Some Listed Co|4|20261119|edgar/data/1234/0000001234-26-000070.txt

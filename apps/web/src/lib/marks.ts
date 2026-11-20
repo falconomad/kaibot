@@ -15,11 +15,13 @@ import { type Book, type LiveMark, type PotNow, type SeriesPoint, potNow } from 
 export const STALE_MS = 30_000;
 
 export interface Mark { qty: number; price: number; prevClose: number | null }
-/** `at`: when the prices were read, on this device's clock (ms). */
-export interface Marks { at: number; by: Record<string, Mark> }
+/** `at`: when the poll's prices were read, on this device's clock (ms). `streamAt`: when streamed prices
+ *  (lib/stream.ts) last replaced some of them; absent on the poll alone. */
+export interface Marks { at: number; by: Record<string, Mark>; streamAt?: number }
 export interface LiveBook extends Marks { pot: number; dayPnl: number; dayPct: number }
 /** Where the pot on screen comes from: live prices, the engine's minute row, or a booked close. */
-export type Fresh = { kind: "live" | "engine"; at: number } | { kind: "close"; session: string };
+/** `feed` (live only): "stream" while streamed prices are in (about once a second), "poll" on the 10 s poll. */
+export type Fresh = { kind: "live"; at: number; feed?: "stream" | "poll" } | { kind: "engine"; at: number } | { kind: "close"; session: string };
 
 const fin = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const etDay = (t: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(t);
@@ -73,7 +75,7 @@ export function potLive(run: Pick<Run, "amount_usd">, o: Pick<Overview, "daily" 
   series?: SeriesPoint[] | null, marks?: Marks | null, now = new Date()): PotNow & { live: LiveBook | null; fresh: Fresh | null } {
   const live = liveBook(book, marks, o, now.getTime());
   if (live) return { pot: live.pot, dayPnl: live.dayPnl, dayPct: live.dayPct, dayLabel: "today", today: true, positions: {}, source: "book", from: null,
-    live, fresh: { kind: "live", at: live.at } };
+    live, fresh: live.streamAt !== undefined ? { kind: "live", at: live.streamAt, feed: "stream" } : { kind: "live", at: live.at, feed: "poll" } };
   const p = potNow(run, o, book, series, now), f = p.from;
   return { ...p, live: null, fresh: !f ? null : f.kind === "engine" ? { kind: "engine", at: Date.parse(f.ts) } : f };
 }

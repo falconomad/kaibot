@@ -1,6 +1,7 @@
 """Issue #311: the daily note on the live daily path, driven on SimBroker as the parity test drives the engine. It is
-written once per session after 17:00 ET from the journal's own records, and the orders, fills and every other
-journal entry are byte for byte the same with it on and off. Template mode (no key): no model, no network."""
+written once per session from 16:10 ET (inside the engine's session, which ends at 16:30 ET) from the journal's
+own records, and the orders, fills and every other journal entry are byte for byte the same with it on and off.
+Template mode (no key): no model, no network."""
 
 from __future__ import annotations
 
@@ -28,7 +29,7 @@ class NoteHarness(Harness):
         super().build()
         self.live.note = self._note
 
-    def run(self) -> None:  # the parity run, plus the engine's evening tick at 17:05 ET
+    def run(self) -> None:  # the parity run, plus the engine's tick at 16:10 ET
         d = self.d
         self.live.after_close(d.day(I0 - 1))
         for i in range(I0, I1 + 1):
@@ -42,13 +43,14 @@ class NoteHarness(Harness):
                 self.live.send(day)
             self.clock.set(_at(day, time(15, 59)))
             self.broker.advance(_at(day, time(15, 59)))
+            self.clock.set(_at(day, time(16, 10)))  # the note's tick: the day's fills are booked first
+            self.live.sync()
             self.clock.set(_at(day, time(16, 30)))
             self.live.sync()
             self.live.sync(force=True)
             self.account.ledger.apply("mark", self.mark(i))
             self.journal.append("mark", self.mark(i))
-            self.clock.set(_at(day, time(17, 5)))
-            self.live.sync()
+            self.live.note_final()  # the engine's stop after the session: the note is already written
             self.live.after_close(day)
 
 
