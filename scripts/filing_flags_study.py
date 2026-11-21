@@ -68,15 +68,30 @@ def events(table: pd.DataFrame, cfg: dict, start: date, member) -> tuple[pd.Data
     return pd.DataFrame(rows, columns=["group", "company", "symbol", "day0", "month"]), left
 
 
-def window_return(c: np.ndarray, i0: int, h: int) -> float | None:
-    """Close of day 0 -> close of day +h (or the last close inside the window). None if day 0 or after is empty."""
+def window_end(c: np.ndarray, i0: int, h: int) -> int | None:
+    """The row of the last close inside (day 0, day +h]; None if day 0 has no close or none follows it."""
     if i0 < 0 or i0 >= len(c) or not np.isfinite(c[i0]):
         return None
-    seg = c[i0 + 1:i0 + h + 1]
-    fin = np.nonzero(np.isfinite(seg))[0]
-    if len(fin) == 0:
+    fin = np.nonzero(np.isfinite(c[i0 + 1:i0 + h + 1]))[0]
+    return None if len(fin) == 0 else int(i0 + 1 + fin[-1])
+
+
+def window_return(c: np.ndarray, i0: int, h: int, end: int | None = None) -> float | None:
+    """Close of day 0 -> close of day +h (or the last close inside the window). None if day 0 or after is empty.
+    With `end`, the return to that row instead (SPY over the same sessions as the stock, as pre-registered)."""
+    e = window_end(c, i0, h) if end is None else end
+    if e is None or i0 < 0 or i0 >= len(c) or e >= len(c) or not (np.isfinite(c[i0]) and np.isfinite(c[e])):
         return None
-    return float(seg[fin[-1]] / c[i0] - 1.0)
+    return float(c[e] / c[i0] - 1.0)
+
+
+def abnormal_return(stock: np.ndarray, spy: np.ndarray, i0: int, h: int) -> float | None:
+    """The stock's window return minus SPY's over the same sessions (the stock's last close inside the window)."""
+    e = window_end(stock, i0, h)
+    if e is None:
+        return None
+    rs, rm = window_return(stock, i0, h, e), window_return(spy, i0, h, e)
+    return None if rs is None or rm is None else rs - rm
 
 
 def t_stat(x: np.ndarray) -> float | None:
@@ -193,11 +208,11 @@ def main(argv: list[str] | None = None) -> int:
                 if i0 is None or j is None:
                     dropped += 1
                     continue
-                rs, rm = window_return(panel.c[:, j], i0, h), window_return(spy, i0, h)
-                if rs is None or rm is None:
+                ar = abnormal_return(panel.c[:, j], spy, i0, h)
+                if ar is None:
                     dropped += 1
                     continue
-                obs.append({"ar": rs - rm, "month": e["month"], "year": e["day0"].year})
+                obs.append({"ar": ar, "month": e["month"], "year": e["day0"].year})
             frame = pd.DataFrame(obs, columns=["ar", "month", "year"])
             st = judge(frame) if len(frame) else judge(pd.DataFrame({"ar": [], "month": [], "year": []}))
             cells[(g, w)] = st

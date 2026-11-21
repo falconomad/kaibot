@@ -172,6 +172,17 @@ def test_window_return_uses_the_last_close_inside_the_window():
     assert S.window_return(c, 4, 1) is None
 
 
+
+def test_spy_is_measured_over_the_same_sessions_as_the_stock():
+    """Pre-registration: "the stock's window return minus SPY's over the same sessions". A stock with no close at
+    the end of the window (delisted, halted) is compared with SPY up to the stock's last close, not to day +h."""
+    stock = np.array([100.0, 101.0, 110.0, np.nan, np.nan, np.nan])
+    spy = np.array([200.0, 202.0, 204.0, 206.0, 208.0, 220.0])
+    assert S.window_end(stock, 0, 5) == 2
+    assert S.abnormal_return(stock, spy, 0, 5) == pytest.approx(0.10 - 0.02)
+    assert S.abnormal_return(spy, spy, 0, 5) == pytest.approx(0.0)
+    assert S.abnormal_return(stock, spy, 3, 2) is None
+
 def test_judge_needs_30_obs_t_35_on_the_smaller_t_and_6_years():
     rng = np.random.default_rng(3)
     rows = [{"ar": -0.02 + rng.normal(0, 0.01), "month": date(y, m, 1), "year": y}
