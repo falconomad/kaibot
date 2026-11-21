@@ -1,0 +1,43 @@
+# M12 ticket 3.6 (#468): the build's supply chain, checked on every pull request and once a week (a new advisory
+# can appear without any change here).
+#   lock      uv.lock and the hash-pinned requirements exports agree (that every requirement carries a hash, and the
+#             rules below for the workflows, are also pinned by tests/unit/test_ci_supply_chain.py in the `ci` run)
+#   pip-audit known vulnerabilities in what the engine image installs, in the research set and in the dev tools
+#   zizmor    the workflows themselves: actions pinned by commit, read-only token, no credentials left behind
+# The two tools are locked with hashes in .github/audit/uv.lock. No job here, or anywhere in CI, has a secret.
+name: supply-chain
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC
+permissions:
+  contents: read
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - name: lockfile and hash-pinned exports
+        run: |
+          ./scripts/lock_deps.sh --check
+          uv lock --check --project .github/audit
+      - name: pip-audit (engine image, research set, dev tools)
+        run: |
+          uv export --frozen --all-groups --all-extras --no-emit-project --format requirements-txt --quiet > /tmp/requirements-dev.txt
+          for f in requirements-engine.txt requirements-research.txt /tmp/requirements-dev.txt; do
+            echo "::group::pip-audit $f"
+            uv run --project .github/audit --locked pip-audit -r "$f" --require-hashes --disable-pip \
+              --progress-spinner off --desc on
+            echo "::endgroup::"
+          done
+      - name: zizmor (workflow audit)
+        run: uv run --project .github/audit --locked zizmor --offline --min-severity low .github/workflows
