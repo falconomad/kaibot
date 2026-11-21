@@ -397,7 +397,7 @@ S106 holds this plan and is **parked** until an event rule has passed Gate B.
 | Two rules, one symbol | one net order per symbol and close. Alpaca refuses opposite orders in a symbol | acceptance criterion of S99 |
 | Market filter | none pre-registered for the event rules. The core's "no new buys while SPY is below its 200-day average" is the core's own setting | a neighbour at most, never added after a run |
 
-### 2.8 How a part-time rule is judged (an open question for Product)
+### 2.8 How a part-time rule is judged (decided by Product on 21 Nov 2026: option B, section 2.9)
 
 Gate B judges a rule as a whole account against SPY: mark 2 asks for a yearly return within two points of SPY's
 with a much smaller drawdown, or one point above it. An event rule holds cash whenever nothing has happened: I
@@ -416,6 +416,75 @@ That is not a reason to loosen the gate. It means the pre-registration must say 
 **Recommendation: B**, decided by Product before S99 starts. For S96 and S98, the one-shots stay as registered
 (option A) and are read on the marks that do not depend on the cash: 1, 3 and 4. Mark 3 compares the rule with
 random entries of the same exposure and holding time, so it is the fair test of the signal itself.
+
+**Decided: B** (Product, 21 Nov 2026, on #373). What it needs before it can run is in section 2.9.
+
+### 2.9 Option B: idle cash in SPY (Product's decision, 21 Nov 2026; nothing changed in the code yet)
+
+**What was decided.** For S99 (#373), an event rule that S96 or S98 did not fail is pre-registered again under a
+new name, `<rule>_on_spy` (for example `news_gap_week_on_spy`). Its book holds SPY with the cash the event trades
+do not use. Each event trade sells a slice of SPY at the same close and buys the stock with it. When the stock is
+sold at the close of day +6, the money goes back into SPY at that close. Gate B is unchanged: all six marks, the
+same benchmark (SPY total return), nothing waived. To pass mark 2, the swaps must add about one point a year to
+SPY after their costs. Every swap pays two extra legs: the SPY sale and the SPY buy-back. The pre-registration of
+S99 states this cost, and the one-shots of S96/S98 (option A, read on marks 1, 3 and 4) do not measure it.
+
+**Why the risk rules must change first.** With up to about 87% of the book in one symbol, five of today's rules
+bind; the first four refuse it outright. I checked each one in the code on 21 Nov 2026:
+
+| # | Rule that refuses SPY at ~87% | Where | Today's value |
+|---|---|---|---|
+| 1 | Per-name cap of the multi-day book | `BookLimits.max_name_pct` (`risk/gate.py`), applied by the portfolio builder (`risk/portfolio.py`, reason `name_cap`) | 10 / 15 / 20% by level (`config/profiles.yaml` `multi_day.levels`); hard ceiling 20% (`BOOK_HARD_CEILINGS` = `HARD_CEILINGS.max_position_pct`) |
+| 2 | Per-name cap of every buy | `RiskPolicy.max_position_pct`: the gate's `position_cap` size candidate and its `position_pct` check in `evaluate` | 10 / 15 / 20% by level; hard ceiling 20% (`HARD_CEILINGS`) |
+| 3 | Sector cap | `BookLimits.max_sector_pct` (the gate's `sector_pct` check and the builder's sector pass). SPY has no sector, so it lands in the shared `unknown` bucket (`portfolio.UNKNOWN_SECTOR`). At 87% that blocks SPY itself and every other stock without a sector | 40%, ceiling 40% |
+| 4 | Volatility sizing | `BookLimits.atr_risk_pct` (k = 0.1%: shares = equity x k / ATR20). With SPY's ATR20 near 1% of its price, that sizes SPY at about 10% of equity | 0.1%, ceiling 0.25% |
+| 5 | Gap scenario of the overnight book | `BookLimits.max_gap_loss_pct`, gap = max(10%, 3 x ATR20) per position (`gap_loss_ps`). In calm markets a 97%-invested book loses at least 9.7% in it (87% SPY at 10%, plus the event stocks at 10% or 3 x their larger ATR), under the limit. In a 2020-like market (SPY's ATR20 near 5%) it is about 13% from SPY alone, so the limit binds | 15%, ceiling 15% |
+
+Rules 1 to 4 must not apply to the SPY holding of such a book. Rule 5 stays as it is. When it binds, the builder
+holds less SPY and the rest stays cash. The pre-registration of S99 says so.
+
+**The risk-rule change it needs** (one PR, tests first, as for any change to `risk/gate.py` and sizing; two keys:
+Backend-quant writes it, QA-Ops gives the second key; replay diff of zero for the rules already on paper; not
+written yet, by Product's instruction, until the stakeholder gives the level limit below):
+
+1. One new book limit, `BookLimits.max_index_pct`: the share of equity the index holding may take in a book whose
+   rule is registered with `idle_cash: index`. It needs a hard ceiling in `BOOK_HARD_CEILINGS`, proposed at 97%
+   (100% minus the builder's 3% cash reserve; the 1% cash floor `min_cash_pct` stays). Like every book limit, it
+   may only tighten per level and per owner (`validate_book`, `tighten_book`).
+2. It applies to **one symbol only**: the universe's market symbol (`config/universe_history.yaml` `market`,
+   SPY). It applies only in the sleeve of a rule that declares `idle_cash: index` in `strategies/registry.py`. For
+   that one holding:
+   - `max_index_pct` replaces rules 1 and 2;
+   - SPY is its own bucket, outside the sector cap and outside `unknown` (rule 3);
+   - its size is the book's rest (equity minus the event positions minus the reserve), not volatility-sized
+     (rule 4).
+   Every other symbol, sleeve and rule keeps today's checks, byte for byte. `RiskPolicy` and its hash do not change:
+   the intraday path and every logged trial digest stay as they are.
+3. Unchanged for this book:
+   - gross and overnight exposure (`max_gross_pct`, `max_overnight_pct`, never above 100 - `min_cash_pct`);
+   - the gap scenario (rule 5), with SPY counted;
+   - `max_names` (SPY counts as one name);
+   - the daily stop, the book's run end, pause and "Flatten and stop", which also sells SPY;
+   - the dead-man, which keeps SPY as a multi-day holding.
+4. The swap is one net order per symbol and close (section 2.7). The SPY sale must fill before the stock's buy is
+   sized, or the buy is sized against the SPY shares being sold. S99 settles which and tests it on `SimBroker`
+   (both are near-close market orders, sent 15:50-15:57 ET).
+
+**The level limit the stakeholder must confirm** (decision 15, section 6: the level limits of multi-day books are
+the stakeholder's). Product brings it in the morning summary. Per level (Careful / Balanced / Aggressive):
+
+- `max_index_pct`: how much of the book may sit in SPY. The proposal follows the experiment's exposure caps
+  (30 / 60 / 100%): 27 / 57 / 97%, that is the cap minus the 3% reserve. Below 100%, the rest of the book is cash,
+  as today.
+- The sleeve's exposure cap (`multi_day.rules.<rule>_on_spy.max_exposure_pct`): the 30 / 60 / 100% above.
+- The book's own run end (`run_drawdown_end_pct`, and the rule's `retire_drawdown_pct`). With SPY as the base,
+  the book's drawdown is about SPY's (2020: about -34% at 100% invested, from memory, not checked today). Today's
+  ends (13 / 21 / 27%) would end such a run in a 2020-like fall. As for `trend_momentum`, the proposal is 1.5 x the
+  engine run's maximum drawdown at each cap, read from S99's run. The stakeholder confirms the numbers with the
+  first paper start, not before.
+
+Until the stakeholder confirms, S99 can run its `SimBroker` test only as research on a branch with the change
+behind `idle_cash: index`. Nothing reaches the paper engine, and no rule on paper changes.
 
 ---
 
@@ -910,8 +979,8 @@ Three honest notes:
 | 1 | Approve milestone M8 as scoped here | stakeholder (new milestones are scope) | yes |
 | 2 | Run the S96 command on the Mac | stakeholder | this week |
 | 3 | "No early buying of new listings; watch and notify instead" | stakeholder | accept. The evidence is against it (section 3.4) |
-| 4 | How a part-time event rule is judged: what the idle cash does (section 2.8) | Product, before S99 | option B: idle cash in SPY, as a new pre-registered rule; Gate B unchanged |
-| 5 | The exposure share of an event sleeve in the multi-day book, and SPY as its cash holding | stakeholder (level limits of multi-day books) | only when a rule has passed Gate B |
+| 4 | How a part-time event rule is judged: what the idle cash does (section 2.8) | Product, before S99 | **decided 21 Nov 2026 (Product, #373): option B**, idle cash in SPY, as a new pre-registered rule (`<rule>_on_spy`); Gate B unchanged (section 2.9) |
+| 5 | The exposure share of an event sleeve in the multi-day book, and SPY as its cash holding: `max_index_pct`, the sleeve's exposure cap and the book's run end per level (section 2.9) | stakeholder (level limits of multi-day books) | proposed 27 / 57 / 97% in SPY under the 30 / 60 / 100% caps; run end from S99's run. Confirmed with the first paper start; the risk-rule change (two keys) is written only after it |
 | 6 | Whether S101's and S103's comparisons count as trials | Product | count them |
 | 7 | Keep event rules on the S&P 500 universe, or widen it so that a large new listing can enter after about a year without waiting for the index | Product, then stakeholder | keep it. Widening is a new rule |
 | 8 | Whether the alarm may ever become a tighten-only switch ("no new buys on big days") | stakeholder | not now; measure first |
