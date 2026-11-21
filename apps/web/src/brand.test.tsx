@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import ts from "typescript";
 import { BRAND, NAME, REPO_DIR, brandText } from "./brand/brand";
-import { ICONS, MANIFEST_PATH, backgroundOf, brandHtml, manifest, manifestJson } from "./brand/assets";
+import { APP_COLOUR, ICONS, MANIFEST_PATH, backgroundOf, brandHtml, manifest, manifestJson } from "./brand/assets";
 import lock from "./brand/icons.lock.json";
 import { Logo, ROLES, TIMING, mark, resetLogoMotion } from "./components/Logo";
 import { capsule, circle, drawnFrom } from "./brand/mark";
@@ -271,14 +271,21 @@ describe("the browser tab, the home-screen label and the manifest read the same 
     expect(indexHtml).toContain('<link rel="icon" href="/src/brand/logo/favicon.svg" type="image/svg+xml" />');
     expect(indexHtml).toContain('<link rel="icon" href="/favicon.ico?v=k1" sizes="32x32" />');
     expect(indexHtml).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=k1" />');
-    expect(indexHtml).toContain(`<link rel="manifest" href="/${MANIFEST_PATH}?v=k1" />`);
+    expect(indexHtml).toContain(`<link rel="manifest" href="/${MANIFEST_PATH}?v=k2" />`);
     expect(ICONS.map((i) => i.file)).toEqual(expect.arrayContaining(["favicon.ico", "apple-touch-icon.png"]));
   });
-  it("the manifest: name and short_name from BRAND, opens in the browser, PNG icons with a maskable one", () => {
+  it("the manifest: name and short_name from BRAND, opens in its own window from the home screen, PNG icons with a maskable one", () => {
     const m = manifest();
     expect([m.name, m.short_name]).toEqual([BRAND, BRAND]);
-    // "browser", not "standalone": the emailed sign-in link opens in the browser, and a standalone app would not see it
-    expect(m.display).toBe("browser");
+    // #481: installable. "standalone" needs the installed app's own sign-in (pwa/CodeEntry.tsx), since it never sees
+    // the browser's; id and scope pin it to the site's root
+    expect([m.display, m.id, m.start_url, m.scope]).toEqual(["standalone", "/", "/", "/"]);
+    // the colour behind the starting app and of the status bar is the page's: the manifest, index.html and the tokens agree
+    expect([m.background_color, m.theme_color]).toEqual([APP_COLOUR, APP_COLOUR]);
+    expect(indexHtml).toContain(`<meta name="theme-color" content="${APP_COLOUR}" />`);
+    expect(indexHtml).toContain('<meta name="apple-mobile-web-app-capable" content="yes" />');
+    expect(indexHtml).toContain('<meta name="mobile-web-app-capable" content="yes" />');
+    expect(indexHtml).toContain('<meta name="apple-mobile-web-app-status-bar-style" content="black" />');
     expect(m.icons).toEqual([
       { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },

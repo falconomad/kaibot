@@ -181,7 +181,8 @@ def main(a) -> int:
         held: list = []
 
         def open_page(path: str, signed_in: bool = True):
-            ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark")
+            ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark",
+                                      service_workers="block")  # #481: no app-shell store in this check
             if signed_in:
                 ctx.add_init_script(session)
             ctx.route("**/*", handler(dist, now, held))

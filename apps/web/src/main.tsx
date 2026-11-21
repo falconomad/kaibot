@@ -87,6 +87,9 @@ function Gate() {
   );
 }
 
+// The installable web app (#481): the service worker and the install offer, fetched after the first screen.
+if (import.meta.env.PROD) void import("./pwa/start");
+
 // Landing from the emailed sign-in link: the glow starts where sign-in had it (lib/glow.ts).
 primeGlowFromUrl();
 
