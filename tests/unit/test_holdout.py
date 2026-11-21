@@ -246,3 +246,20 @@ def test_a_research_script_asked_for_the_hold_out_fails_before_it_reads_anything
         filing_flags_study.main(["--data", str(tmp_path)])
     assert "would read to the newest bar, inside the hold-out" in str(e.value.code)
     assert json.dumps(ho.read_log(tmp_path)) == "[]"
+
+
+def test_the_engine_research_command_on_the_store_is_guarded_too(tmp_path: Path, monkeypatch):
+    """`python -m kaibot.engine.research --universe today|pit` is the go/no-go run of a multi-day rule (decision
+    15) and is not a file in scripts/, so the scan above does not see it. Without --end it reads to today."""
+    monkeypatch.delenv(ho.ENV_OPENING, raising=False)
+    from kaibot.engine import research
+
+    for extra in ([], ["--end", "2026-11-06"], ["--end", "2025-01-01"]):
+        with pytest.raises(SystemExit) as e:
+            research.main(["--strategy", "trend_momentum", "--universe", "pit", "--data", str(tmp_path), *extra])
+        assert str(e.value.code).startswith("hold-out: research.py would read to "), e.value.code
+    assert list(tmp_path.iterdir()) == []
+    with pytest.raises((SystemExit, Exception)) as e:  # inside the research window the guard is silent: no store
+        research.main(["--strategy", "trend_momentum", "--universe", "pit", "--data", str(tmp_path),
+                       "--end", "2024-12-31"])
+    assert "hold-out" not in str(getattr(e.value, "code", e.value))

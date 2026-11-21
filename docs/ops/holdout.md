@@ -35,6 +35,10 @@ Guarded scripts: `momentum_core.py`, `oneshots.py`, `spy_engine.py`, `spy_noise_
 `run_spy_momentum_replay.py`, `filing_flags_study.py`, and the comparisons of `market_alarm_report.py` (its flags
 and rankings read no outcome and stay open, because the live alarm needs the rankings).
 
+The engine's own research command, `python -m kaibot.engine.research --universe today|pit` (the go/no-go run of
+a multi-day rule on the daily store), calls the same guard and takes `--open-holdout`. Without `--end` it would
+read to the newest bar, so it is refused: give `--end 2024-12-31`. Its fixture runs read no store and are open.
+
 A test (`tests/unit/test_holdout.py`) reads every file in `scripts/`. A script that imports the replay, the
 research runner or the daily store must call the guard, or be on the test's exemption list with a reason.
 
