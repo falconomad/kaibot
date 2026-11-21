@@ -1,0 +1,26 @@
+/* #378 market notices (docs/design/m8_market_notices.md). Loaded with the Notices chunk only, not in the first load.
+   Neutral on purpose: card surface, hairline edge, no colour of meaning, no dot, no pulse. 48 px; one line where it fits,
+   and on a narrow phone the line wraps to a second one instead of ending in an ellipsis (Product, 21 Nov 2026). */
+.nt-rows { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.nt-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 48px; height: auto; padding: 8px 12px 8px 14px;
+  border-radius: var(--r-row); border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  font-size: var(--t-sm); font-weight: 500; text-align: left; }
+.nt-row:hover:not(:disabled) { background: var(--surface-2); filter: none; }
+.nt-row svg { flex: none; color: var(--stale); }
+.nt-row .nt-ico { color: var(--slate); }
+.nt-text { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.nt-kind { color: var(--slate); }
+.nt-row.more { color: var(--slate); }
+@media (max-width: 760px) { .nt-kind { display: none; } }
+.nt-err { margin: 0; min-height: 44px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; color: var(--slate); }
+.nt-err .link { min-height: 44px; padding: 0 4px; border: 0; background: none; color: var(--sea-ink); font: inherit; font-weight: 600; }
+.nt-sheet p { overflow-wrap: anywhere; }
+.nt-kick { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--slate); }
+.nt-kv { grid-template-columns: 1fr auto; padding: 12px 0; margin: 4px 0 12px; border-top: 1px solid var(--rule); }
+.nt-kv span:nth-child(odd) { color: var(--slate); }
+.nt-h { margin: 8px 0 6px; font-size: 13px; font-weight: 600; color: var(--stale); text-transform: uppercase; letter-spacing: .06em; }
+.nt-list { list-style: none; margin: 0 0 8px; padding: 0; font-size: var(--t-sm); }
+.nt-list li { display: flex; gap: 12px; padding: 6px 0; min-width: 0; }
+.nt-list li span:first-child { flex: none; width: 96px; }
+.nt-list li span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.nt-only { font-size: 13px; color: var(--slate); border-top: 1px solid var(--rule); padding-top: 12px; margin-top: 8px; }
