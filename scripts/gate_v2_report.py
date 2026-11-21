@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--out", default="")
     ap.add_argument("--tbill", default="", help="cached FRED DTB3 (default: <data>/inputs/fred_dtb3.json if present)")
-    ap.add_argument("--no-tbill", action="store_true", help="idle cash at 0% only")
+    ap.add_argument("--no-tbill", action="store_true", help="idle cash at 0%% only")
     ap.add_argument("--root", default=str(ROOT), help=argparse.SUPPRESS)  # tests: another repository root
     a = ap.parse_args(argv)
     root = Path(a.root)
