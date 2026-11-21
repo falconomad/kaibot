@@ -288,6 +288,22 @@ def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = Fals
     eng.startup()
 
 
+def write_pid_file(data_dir, host: str) -> None:
+    """M9 1.6: this process, for the watchdog's local check when it cannot read the heartbeat (engine/watchdog.py
+    `LocalEngine`). Left in place at a stop: a pid that is gone is exactly what the watchdog must see. Never fatal."""
+    from pathlib import Path
+
+    from kaibot.engine.failsafe import PID_FILE
+
+    try:
+        path = Path(data_dir) / PID_FILE
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"pid": os.getpid(), "host": host, "started": datetime.now(UTC).isoformat()}))
+        tmp.replace(path)
+    except Exception:
+        log.exception("pid file not written: the watchdog will judge the engine by its journal alone")
+
+
 def make_beat(eng: Engine, lease: EngineLease, host: str, stop: dict):
     """The heartbeat, which also renews the lease. A failed renewal leaves `lease.ok` False (no entries until it
     works again); a lease that now belongs to another engine sets `stop` so the main loop ends."""
@@ -372,6 +388,7 @@ def main() -> None:
     host = socket.gethostname()
     lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host)
     start_with_lease(eng, lease, adopt_journal=a.adopt_journal)
+    write_pid_file(settings.data_dir, host)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
     # Once, now: with 0018 the new tables; without it the pre-0018 ones (the dashboard keeps updating).
     # Supabase unreachable: asked again at the first pass that reaches it.

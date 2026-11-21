@@ -25,9 +25,21 @@ While the market is open, every 15 s:
   Symbols a retry does not start count as failed. A watchdog that first sees the stale engine after the dead-man
   time still gets its single late pass.
 - a failed open-orders read (entry cancels) is logged and recorded, and the poll's flatten still runs.
-It never buys. The only orders it sends are protective stop sells and the sales of intraday shares. If the
-heartbeat cannot be read (Supabase down) it counts as stale: failing closed costs at most a flat afternoon for the
-intraday sleeves, and the multi-day sleeves keep their stops either way.
+It never buys. The only orders it sends are protective stop sells and the sales of intraday shares.
+
+A heartbeat that cannot be READ (Supabase unreachable from this machine) is not yet a dead engine (M9 1.6, audit
+M4: three minutes without Supabase cancelled a healthy engine's working buys). The watchdog then asks this machine
+(`LocalEngine`): the engine's process, from the pid file it writes at start, and the last write to its journal,
+which is on the same disk and gets the minute row of every tick of a session. A process that is gone is dead at
+once; otherwise the engine counts as alive only while its last journal write is younger than LOCAL_ALIVE_S. Alive:
+nothing is cancelled, sold or halted this poll (`heartbeat_unreadable_engine_alive`). Anything else (no journal, a
+silent journal, no local evidence wired) is stale as before: failing closed costs at most a flat afternoon for
+the intraday sleeves, and the multi-day sleeves keep their stops either way. A heartbeat that was read and is
+stale, or no heartbeat row at all, is acted on whatever the journal says.
+
+Before each entry cancel the watchdog appends the order's ids to a local file (CANCELS_FILE, next to the journal;
+the journal itself it never writes). The engine's carry-over reads it: a buy the watchdog cancelled is sent again
+at the next session like one that never reached the venue (engine/daily.ended_buys).
 
 Limits: it runs on the same machine as the engine, so it does not survive the laptop sleeping or losing power.
 For that, the broker-held GTC stops protect open positions, and the off-box dead-man (Supabase pg_cron; migration
@@ -38,11 +50,16 @@ python -m kaibot.engine.watchdog            (started by scripts/run_engine.sh ne
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import signal
+import socket
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from datetime import time as dtime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from kaibot.broker.protocol import Broker, OrderRequest
@@ -67,16 +84,79 @@ ENTRY_PREFIX = "kb"  # S80: intraday "kb-<run>-..." and the order manager's "kb<
 OPEN_ENTRY_STATES = failsafe.OPEN_STATES
 PROTECT_EVERY_S = 60.0  # S80: the stop check runs at most once a minute while the engine is stale
 SENT_COVERS_S = 180.0  # a stop this watchdog sent counts as resting for this long (the venue may list it late)
+# M9 1.6: with the heartbeat unreadable, the engine is alive while its journal's last write is younger than this.
+# A session's tick writes the minute row once a minute, so a healthy engine's last write is up to a minute plus one
+# tick old: one tick period on top of STALE_S. A dead or hung engine is acted on at most this long after its last
+# write (a gone process: at once).
+LOCAL_ALIVE_S = 150
+CANCELS_FILE, PID_FILE = failsafe.CANCELS_FILE, failsafe.PID_FILE
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # it exists and is not ours to signal
+        return True
+    return True
+
+
+class LocalEngine:
+    """What this machine knows about the engine without Supabase (M9 1.6): its process and its journal's last write.
+    `verdict()` is (alive, why). Alive needs a journal write younger than `alive_s`; a pid file written on this
+    host that names a process that is gone is dead whatever the journal says. A process that exists proves
+    nothing (it may hang), and a pid from another host (Docker: the engine's container) is not checked."""
+
+    def __init__(self, data_dir: str | Path, now: Callable[[], datetime] = lambda: datetime.now(UTC),
+                 alive_s: float = LOCAL_ALIVE_S, host: str | None = None,
+                 pid_alive: Callable[[int], bool] = _pid_alive) -> None:
+        self.dir, self.now, self.alive_s = Path(data_dir), now, alive_s
+        self.host = host if host is not None else socket.gethostname()
+        self.pid_alive = pid_alive
+        self.journal = failsafe.ReadOnlyJournal(self.dir / "journal.sqlite")
+
+    def process_gone(self) -> int | None:
+        """The engine's pid when its pid file is of this host and that process no longer exists; else None."""
+        try:
+            b = json.loads((self.dir / PID_FILE).read_text())
+            pid = int(b["pid"])
+            if str(b.get("host")) != self.host or pid <= 0:
+                return None
+            return None if self.pid_alive(pid) else pid
+        except Exception:  # no file, unreadable, not ours: no evidence either way
+            return None
+
+    def verdict(self) -> tuple[bool, str]:
+        gone = self.process_gone()
+        if gone is not None:
+            return False, f"the engine process {gone} is gone"
+        last = self.journal.last_ts()
+        if last is None:
+            return False, "no journal write to be read"
+        age = (self.now() - last).total_seconds()
+        if age < -self.alive_s:  # a write from the future proves nothing (a clock that was set back)
+            return False, f"the journal's last write is {-age:.0f} s in the future"
+        if age <= self.alive_s:
+            return True, f"the journal was written {max(age, 0.0):.0f} s ago"
+        return False, f"the journal's last write is {age:.0f} s old"
 
 
 class Watchdog:
     def __init__(self, broker: Broker, store, engine_process: str = "engine", stale_s: float = STALE_S,
-                 now=lambda: datetime.now(UTC), book=None):
+                 now=lambda: datetime.now(UTC), book=None, local: LocalEngine | None = None,
+                 cancel_log: str | Path | None = None):
         """`book`: a callable returning the book (failsafe.BookView: which sleeve holds which shares, at which stop),
-        or None. main() reads the engine's local journal, else the ledger rows in Supabase."""
+        or None. main() reads the engine's local journal, else the ledger rows in Supabase.
+        `local` (M9 1.6): this machine's own evidence of the engine, asked only when the heartbeat could not be
+        read; None: an unreadable heartbeat is stale. `cancel_log`: the local file every entry cancel is written
+        to first (CANCELS_FILE); None: not written."""
         self.broker, self.store, self.engine_process = broker, store, engine_process
         self.stale_s, self.now = stale_s, now
         self.book = book
+        self.local, self.cancel_log = local, Path(cancel_log) if cancel_log is not None else None
+        self.unreadable = False  # the last heartbeat read failed (as opposed to: read, and stale or missing)
+        self._alive_said = False
         self._protected_at: datetime | None = None
         self._sent: dict[tuple[str, str], tuple[datetime, int]] = {}  # stops sent: (strategy, symbol) -> (when, qty)
         self._alarms: tuple = ()
@@ -87,16 +167,49 @@ class Watchdog:
         self._calendar_failed: tuple = (None, False)  # (ET day, the read failed that day)
 
     def heartbeat_age(self) -> float:
+        self.unreadable = False
         try:
             rows = self.store.select("heartbeat", {"process": f"eq.{self.engine_process}", "limit": "1"})
         except Exception:
-            log.exception("heartbeat read failed: treating the engine as down")
+            self.unreadable = True
+            log.exception("heartbeat read failed: the engine counts as down unless this machine shows it alive")
             return float("inf")
         if not rows or not rows[0].get("ts"):
             return float("inf")
         ts = rows[0]["ts"]
         ts = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
         return max(0.0, (self.now() - ts).total_seconds())
+
+    def _alive_locally(self) -> str | None:
+        """M9 1.6: why the engine counts as alive although its heartbeat could not be read; None: it does not."""
+        if not self.unreadable or self.local is None:
+            return None
+        try:
+            alive, why = self.local.verdict()
+        except Exception:
+            log.exception("local engine check failed: treating the engine as down")
+            return None
+        if not alive:
+            log.error("heartbeat unreadable and %s: treating the engine as down", why)
+            return None
+        return why
+
+    def _note_cancel(self, o: dict, age: float) -> None:
+        """Append the order to the local cancel record, durably, BEFORE the venue is asked (a record without a
+        cancel is harmless: only a cancelled order is ever looked up in it). Never stops the cancel."""
+        if self.cancel_log is None:
+            return
+        try:
+            line = json.dumps({"ts": self.now().isoformat(), "by": "watchdog", "order_id": o.get("id"),
+                               "client_order_id": o.get("client_order_id"), "symbol": o.get("symbol"),
+                               "heartbeat_age_s": None if age == float("inf") else round(age, 1)})
+            with open(self.cancel_log, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            log.exception("cancel record not written for %s (the carry-over will not send it again)",
+                          o.get("symbol"))
 
     def _entry_orders(self, orders: list[dict]) -> list[dict]:
         return [o for o in orders if failsafe.is_entry(o)]
@@ -179,7 +292,15 @@ class Watchdog:
             if self.tripped:
                 self._event("watchdog_recovered", {"heartbeat_age_s": round(age, 1)})
             self.tripped = False
+            self._alive_said = False
             return {"state": "ok", "age_s": age}
+        why = self._alive_locally()
+        if why is not None:  # M9 1.6: Supabase is unreachable, the engine is not dead: nothing is cancelled or sold
+            if not self._alive_said:
+                log.warning("heartbeat unreadable, but %s: the engine is alive, nothing is cancelled", why)
+            self._alive_said = True
+            return {"state": "heartbeat_unreadable_engine_alive", "why": why}
+        self._alive_said = False
         out = {"state": "engine_stale", "age_s": age, "canceled": [], "closed": []}
         orders = None
         try:
@@ -189,6 +310,7 @@ class Watchdog:
             log.exception("open-orders read failed: no entry cancels this poll")
             entries, out["entry_read_failed"] = [], f"{type(e).__name__}: {e}"[:200]
         for o in entries:
+            self._note_cancel(o, age)
             try:
                 self.broker.cancel_order(o["id"])
                 out["canceled"].append(o["symbol"])
@@ -339,7 +461,8 @@ def main() -> None:
     settings = Settings.from_env()
     store = Store(settings.supabase_url, settings.supabase_service_key)
     wd = Watchdog(AlpacaPaper(settings.alpaca_key, settings.alpaca_secret), store, settings.engine_name,
-                  book=book_reader(journal_path(settings.data_dir), store))
+                  book=book_reader(journal_path(settings.data_dir), store), local=LocalEngine(settings.data_dir),
+                  cancel_log=Path(settings.data_dir) / CANCELS_FILE)
     stop = {"now": False}
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True))
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
@@ -347,7 +470,7 @@ def main() -> None:
     while not stop["now"]:
         try:
             st = wd.step()
-            if st["state"] not in ("ok", "market_closed"):
+            if st["state"] not in ("ok", "market_closed", "heartbeat_unreadable_engine_alive"):
                 log.info("%s", st)
         except Exception:
             log.exception("watchdog step failed (will retry)")
