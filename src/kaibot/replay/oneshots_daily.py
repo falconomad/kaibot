@@ -1,12 +1,13 @@
 """The four daily one-shot rules of issue #112 (story S72) in the multi-day research harness of #113:
 `pullback_uptrend` (RSI-2 type), `ath_breakout` (all-time-high breakout, a distribution over random signal
 subsets), `post_earnings_week` (one week after an SEC-dated earnings release) and `weekly_fall_rebound` (the
-stakeholder's question: buy a large stock after its worst five sessions).
+stakeholder's question: buy a large stock after its worst five sessions); and `news_gap_week` of M8 (S98, #372:
+one week after a large up-move on heavy volume with company news, against the same jumps without news).
 
 Research only, PROVISIONAL: nothing here is imported by the engine. The frozen constructions, neighbours, fill
 models and pass marks are in docs/prereg/<rule>.md, committed before this file; nothing here is tuned. The
 simulator is the one of #113 (`multiday.Engine`), the data bundle, the statistics, the exposure-matched control
-and Gate B are those of `multiday_core` (#127, #143). This module only adds the four rules: no seventh simulator.
+and Gate B are those of `multiday_core` (#127, #143). This module only adds the rules: no seventh simulator.
 
 No look-ahead: a decision for session i reads rows <= i - 1 of arrays whose row t uses sessions <= t, plus the
 account as it stood before the session. Signals use split-adjusted closes without dividends (`Market.signals.c`);
@@ -28,7 +29,8 @@ from kaibot.replay.multiday import Caps, Engine, MBook
 from kaibot.risk.gate import RiskPolicy
 
 CASH_RESERVE = mc.CASH_RESERVE  # 3% of equity (Amendment 3 of the momentum pre-registrations), same here
-RULES = ("pullback_uptrend", "ath_breakout", "post_earnings_week", "weekly_fall_rebound")
+RULES = ("pullback_uptrend", "ath_breakout", "post_earnings_week", "weekly_fall_rebound", "news_gap_week")
+NEWS_LEAD = np.timedelta64(15 * 60, "s")  # news_gap_week: a headline or filing counts up to 15 minutes before the close
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,12 @@ class DailySpec:
     fall: float = -0.15
     decile: float = 0.10
     market_filter: bool = False
+    # news_gap_week (docs/prereg/news_gap_week.md): jump >= move_sigma x the 20-session sigma over SPY, volume >=
+    # rel_vol x its 20-session mean; news "headline" (data/news), "filing" (a non-2.02 8-K, `info8k`) or "none"
+    # (the `nonews` control: neither a headline nor any 8-K)
+    move_sigma: float = 1.0
+    rel_vol: float = 3.0
+    news: str = "headline"
 
     def params(self) -> dict:
         return dataclasses.asdict(self)
@@ -73,6 +81,9 @@ VERSIONS: dict[str, DailySpec] = {
     "weekly_fall_rebound": DailySpec("weekly_fall_rebound", "weekly_fall_rebound", 10, 0.10, "close", hold=5),
     "weekly_fall_rebound_20": DailySpec("weekly_fall_rebound", "weekly_fall_rebound_20", 10, 0.10, "close",
                                         hold=20),
+    "news_gap_week": DailySpec("news_gap_week", "news_gap_week", 10, 0.10, "close", hold=5),
+    "news_gap_week_nonews": DailySpec("news_gap_week", "news_gap_week_nonews", 10, 0.10, "close", hold=5,
+                                      news="none"),
 }
 # The base version of each rule (the Gate B row) and the versions a run of the rule reports.
 RULE_VERSIONS: dict[str, tuple[str, ...]] = {
@@ -80,7 +91,11 @@ RULE_VERSIONS: dict[str, tuple[str, ...]] = {
     "ath_breakout": ("ath_breakout", "ath_breakout_k5", "ath_breakout_k20"),
     "post_earnings_week": ("post_earnings_week",),
     "weekly_fall_rebound": ("weekly_fall_rebound", "weekly_fall_rebound_20"),
+    "news_gap_week": ("news_gap_week", "news_gap_week_nonews"),
 }
+# Versions that are a control, not a configuration of the rule: run at the base fill and 1x costs only, compared
+# with the base version (news_gap_week's `nonews`), never in the plateau check.
+CONTROLS = {"news_gap_week_nonews"}
 # At most five per rule, as declared in docs/prereg/<rule>.md. A plateau check around the base version.
 NEIGHBOURS: dict[str, dict[str, dict]] = {
     "pullback_uptrend": {"rsi5": {"rsi_max": 5.0}, "rsi15": {"rsi_max": 15.0},
@@ -92,6 +107,8 @@ NEIGHBOURS: dict[str, dict[str, dict]] = {
                            "slots20": {"max_names": 20, "weight": 0.05}},
     "weekly_fall_rebound": {"fall10": {"fall": -0.10}, "fall20": {"fall": -0.20},
                             "slots5": {"max_names": 5, "weight": 0.20}, "market_filter": {"market_filter": True}},
+    "news_gap_week": {"move2": {"move_sigma": 2.0}, "relvol2": {"rel_vol": 2.0}, "hold10": {"hold": 10},
+                      "info8k": {"news": "filing"}},
 }
 assert all(len(v) <= 5 for v in NEIGHBOURS.values())
 
@@ -134,17 +151,55 @@ def rsi_wilder(c: np.ndarray, n: int = 2) -> np.ndarray:
     return out
 
 
-class DailySignals:
-    """What the four rules read, computed once per `Market` and cached per setting. `events` (post_earnings_week):
-    column -> sorted session indexes of day 0 of each announcement (first session that opens after the filing)."""
+@dataclass
+class NewsInputs:
+    """What news_gap_week reads besides the bars (docs/prereg/news_gap_week.md). Times are UTC, datetime64[s],
+    sorted per column. `headlines`: column -> stored headline times (data/news; a column with at least one has
+    headline coverage). `filings_non202`: column -> acceptance times of form 8-K filings whose items do not include
+    2.02; `filings_all`: of every form 8-K. `earnings`: column -> session indexes of day 0 of each earnings report.
+    `complete`: per session, True when it lies in a complete news month. `windows`: per session k, (after, upto):
+    the close of k - 1 and 15 minutes before the close of k (NYSE times, early closes included)."""
 
-    def __init__(self, market: mc.Market, events: Mapping[int, Sequence[int]] | None = None) -> None:
+    headlines: Mapping[int, np.ndarray]
+    filings_non202: Mapping[int, np.ndarray]
+    filings_all: Mapping[int, np.ndarray]
+    earnings: Mapping[int, Sequence[int]]
+    complete: np.ndarray
+    windows: tuple[np.ndarray, np.ndarray]
+
+
+def news_windows(dates: Sequence) -> tuple[np.ndarray, np.ndarray]:
+    """Per session k of `dates`: (the close of k - 1, the close of k minus 15 minutes) in UTC, datetime64[s];
+    NaT for k = 0."""
+    from kaibot.ingest import nyse_sessions as nyse
+
+    d = [pd.Timestamp(x).date() for x in np.asarray(dates, dtype="datetime64[D]")]
+    close = np.array([np.datetime64(nyse.close_utc(x).replace(tzinfo=None), "s") for x in d], dtype="datetime64[s]")
+    after = np.r_[np.array(["NaT"], dtype="datetime64[s]"), close[:-1]]
+    return after, close - NEWS_LEAD
+
+
+def _any_in(times: np.ndarray | None, after: np.datetime64, upto: np.datetime64) -> bool:
+    """A time t with after < t <= upto (a time after `upto` never counts)."""
+    if times is None or not len(times):
+        return False
+    return bool(np.searchsorted(times, upto, "right") > np.searchsorted(times, after, "right"))
+
+
+class DailySignals:
+    """What the rules read, computed once per `Market` and cached per setting. `events` (post_earnings_week):
+    column -> sorted session indexes of day 0 of each announcement (first session that opens after the filing).
+    `news` (news_gap_week): `NewsInputs`."""
+
+    def __init__(self, market: mc.Market, events: Mapping[int, Sequence[int]] | None = None,
+                 news: NewsInputs | None = None) -> None:
         self.m = market
         self.s = market.signals
         self.c = self.s.c  # split-adjusted closes, a missing bar carried for at most 5 sessions
         self.ok = self.s.ok  # price >= $5, 20-day dollar volume >= $50M, (point in time) index member
         self.px = self.s.px  # raw closes: the price floor and the order sizes
         self.events = {int(j): sorted(int(x) for x in v) for j, v in (events or {}).items()}
+        self.news = news
         self._cache: dict[tuple, np.ndarray] = {}
 
     def _get(self, key: tuple, make) -> np.ndarray:
@@ -217,6 +272,58 @@ class DailySignals:
             return out
         return self._get(("ear_thr", pct, window, min_events), make)
 
+    def jumps(self, move_sigma: float, rel_vol: float) -> tuple[np.ndarray, np.ndarray]:
+        """(mask, excess) (sessions x columns): row k is a jump day on the bars up to the close of k. excess = the
+        close-to-close return k - 1 -> k minus SPY's (split-adjusted bars, a missing bar is no return); mask:
+        excess > 0, excess >= move_sigma x the ddof-1 std of the stock's returns of k - 20 .. k - 1, volume on k
+        >= rel_vol x the mean volume of k - 20 .. k - 1 (all 20 present in both)."""
+        def make():
+            c = np.asarray(self.m.sig.c, dtype=float)
+            v = np.asarray(self.m.sig.v, dtype=float)
+            r = np.vstack([np.full((1, c.shape[1]), np.nan), c[1:] / c[:-1] - 1.0])
+            ex = r - r[:, [self.m.spy]]
+            sd = pd.DataFrame(r).rolling(20, min_periods=20).std(ddof=1).shift(1).to_numpy()
+            av = pd.DataFrame(v).rolling(20, min_periods=20).mean().shift(1).to_numpy()
+            return np.stack([ex, sd, av, v])
+        ex, sd, av, v = self._get(("jump_inputs",), make)
+        with np.errstate(invalid="ignore"):
+            mask = (ex > 0) & (ex >= move_sigma * sd) & (v >= rel_vol * av) & np.isfinite(sd) & np.isfinite(av)
+        return mask, ex
+
+    def news_gap(self, spec: DailySpec) -> dict[int, list[tuple[int, float]]]:
+        """Event day k -> [(column, excess return)] of news_gap_week's construction `spec` (point in time: every
+        input is known by 15 minutes before the close of k, the decision is after that close)."""
+        key = ("news_gap", spec.move_sigma, spec.rel_vol, spec.news)
+        if key in self._cache:
+            return self._cache[key]  # type: ignore[return-value]
+        nw = self.news
+        if nw is None:
+            raise ValueError("news_gap_week needs NewsInputs")
+        if spec.news not in ("headline", "filing", "none"):
+            raise ValueError(f"unknown news test {spec.news}")
+        mask, ex = self.jumps(spec.move_sigma, spec.rel_vol)
+        earn = {int(j): set(int(x) for x in v) for j, v in nw.earnings.items()}
+        after, upto = nw.windows
+        covered = {j for j, t in nw.headlines.items() if len(t)}
+        out: dict[int, list[tuple[int, float]]] = {}
+        for k, j in zip(*np.nonzero(mask), strict=True):
+            k, j = int(k), int(j)
+            if k < 1 or k in earn.get(j, ()):
+                continue
+            if spec.news != "filing" and (j not in covered or not nw.complete[k]):
+                continue
+            a, u = after[k], upto[k]
+            if spec.news == "headline":
+                hit = _any_in(nw.headlines.get(j), a, u)
+            elif spec.news == "filing":
+                hit = _any_in(nw.filings_non202.get(j), a, u)
+            else:
+                hit = not (_any_in(nw.headlines.get(j), a, u) or _any_in(nw.filings_all.get(j), a, u))
+            if hit:
+                out.setdefault(k, []).append((j, float(ex[k, j])))
+        self._cache[key] = out  # type: ignore[assignment]
+        return out
+
 
 # ---------------------------------------------------------------- the rule (all four constructions)
 
@@ -256,6 +363,8 @@ class DailyRule:
         elif sp.rule == "post_earnings_week":
             self.thr = s.ear_threshold(sp.ear_pct, sp.ear_window, sp.ear_min_events)
             self.by_day = s.ear()
+        elif sp.rule == "news_gap_week":
+            self.by_day = s.news_gap(sp)
         else:
             self.r5 = s.ret5()
 
@@ -304,6 +413,9 @@ class DailyRule:
                 if not math.isfinite(thr):
                     return []
                 got = [(j, e) for j, e in self.by_day.get(d0, []) if ok[j] and e >= thr and e > 0]
+                return [j for j, _ in sorted(got, key=lambda x: (-x[1], x[0]))]
+            if sp.rule == "news_gap_week":  # event day k: decided after its close, bought at the close of k + 1
+                got = [(j, e) for j, e in self.by_day.get(k, []) if ok[j]]
                 return [j for j, _ in sorted(got, key=lambda x: (-x[1], x[0]))]
             if sp.market_filter and not s.s.market_on[k]:
                 return []
@@ -402,3 +514,53 @@ def median_seed(stats_by_seed: Mapping[int, Mapping]) -> int:
     """The seed whose Sharpe is the median: the ((n + 1) // 2)-th of n by Sharpe (ties by seed), the 100th of 200."""
     order = sorted(stats_by_seed, key=lambda s: (stats_by_seed[s]["sharpe"], s))
     return int(order[(len(order) - 1) // 2])
+
+
+# ---------------------------------------------------------------- news_gap_week: the rule against its control
+
+MIN_CONTROL_TRADES = 30
+CONTROL_T = 2.0
+
+
+def trade_excess(book: MBook, market: mc.Market) -> np.ndarray:
+    """Per trade: the net return (P&L after all costs over the entry value) minus SPY's close-to-close return from
+    the entry session's close to the exit session's close (split-adjusted)."""
+    dates = np.asarray(market.sig.dates, dtype="datetime64[D]")
+    spy = np.asarray(market.sig.c, dtype=float)[:, market.spy]
+    out = []
+    for t in book.trades:
+        value = t.qty * t.entry
+        a = np.searchsorted(dates, np.datetime64(t.date, "D"))
+        b = np.searchsorted(dates, np.datetime64(t.exit_date, "D"))
+        if value <= 0 or a >= len(dates) or b >= len(dates):
+            continue
+        rs = spy[b] / spy[a] - 1.0
+        if math.isfinite(rs):
+            out.append(t.pnl / value - rs)
+    return np.asarray(out, dtype=float)
+
+
+def welch_t(a: np.ndarray, b: np.ndarray) -> float | None:
+    """(mean a - mean b) / sqrt(var a / n_a + var b / n_b), ddof 1; None with fewer than two of either."""
+    if len(a) < 2 or len(b) < 2:
+        return None
+    se = math.sqrt(float(np.var(a, ddof=1)) / len(a) + float(np.var(b, ddof=1)) / len(b))
+    return None if se == 0 else (float(np.mean(a)) - float(np.mean(b))) / se
+
+
+def against_control(base_row: Mapping, ctl_row: Mapping, base_x: np.ndarray, ctl_x: np.ndarray) -> dict:
+    """docs/prereg/news_gap_week.md, "Against the control": clearly above = a higher daily Sharpe AND a higher
+    mean per-trade excess return with Welch t >= 2.0; fewer than 30 trades in either: cannot be judged (which counts
+    as not clearly above)."""
+    t = welch_t(base_x, ctl_x)
+    out = {"base_sharpe": base_row.get("sharpe"), "control_sharpe": ctl_row.get("sharpe"),
+           "base_trades": len(base_x), "control_trades": len(ctl_x),
+           "base_mean_excess_pct": round(100 * float(np.mean(base_x)), 3) if len(base_x) else None,
+           "control_mean_excess_pct": round(100 * float(np.mean(ctl_x)), 3) if len(ctl_x) else None,
+           "welch_t": None if t is None else round(t, 2)}
+    if len(base_x) < MIN_CONTROL_TRADES or len(ctl_x) < MIN_CONTROL_TRADES or t is None:
+        out["verdict"] = "cannot be judged"
+    else:
+        sharpe_up = float(base_row.get("sharpe") or 0.0) > float(ctl_row.get("sharpe") or 0.0)
+        out["verdict"] = "clearly above" if sharpe_up and t >= CONTROL_T else "not clearly above"
+    return out

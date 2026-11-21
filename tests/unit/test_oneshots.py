@@ -48,7 +48,8 @@ POL = tm.POL
 def test_daily_neighbours_are_the_pre_registered_ones(rule):
     p = prereg.load(rule, ROOT, committed=False)
     assert set(p.neighbours) == set(od.NEIGHBOURS[rule]) and len(p.neighbours) <= 5
-    assert p.status == "pre-registered" and p.date == date(2026, 11, 13)
+    assert p.status == "pre-registered"
+    assert p.date == (date(2026, 11, 21) if rule == "news_gap_week" else date(2026, 11, 13))  # M8 (S98, #372)
 
 
 def test_intraday_neighbours_and_settings_are_the_pre_registered_ones():
@@ -475,8 +476,10 @@ def runs(tmp_path_factory):
             for s in stocks for i in range(25, len(d) - 10, 61)]
     (data / "earnings").mkdir()
     pd.DataFrame(rows).to_parquet(data / "earnings" / "announcements.parquet")
+    out["news_gap_week_missing"] = call("--rule", "news_gap_week", *base)  # no data/news, no data/filings yet
     for rule in od.RULES:
-        out[rule] = call("--rule", rule, *base)
+        if rule != "news_gap_week":
+            out[rule] = call("--rule", rule, *base)
     # intraday: today's list is the same file; six of its stocks and SPY get minute bars from 2022-01
     mdata = data
     first = str(d[0])
@@ -490,6 +493,13 @@ def runs(tmp_path_factory):
         f = mdata / "news" / f"symbol={s}" / "all.parquet"
         f.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame({"created_at": pd.to_datetime(t).tz_localize("UTC")}).to_parquet(f, index=False)
+    out["news_gap_week_no_filings"] = call("--rule", "news_gap_week", *base)
+    fil = [{"symbol": s, "company": s, "form": "8-K", "items": "8.01, 9.01" if i % 2 else "2.02, 9.01",
+            "accepted_ts": pd.Timestamp(str(d[i])).tz_localize("UTC") + pd.Timedelta(hours=15)}
+           for s in stocks for i in range(30, len(d) - 10, 17)]
+    (data / "filings").mkdir()
+    pd.DataFrame(fil).to_parquet(data / "filings" / "filings_8k.parquet")
+    out["news_gap_week"] = call("--rule", "news_gap_week", *base)
     mend = ["--data", str(data), "--universe-file", str(uni), "--start", first, "--end", str(d[139]),
             "--control-runs", "3", "--seeds", "3"]
     mp.setattr(script, "first_train_month", lambda start, warmup: np.datetime64(first, "M"))
@@ -508,6 +518,11 @@ def test_missing_data_skips_with_a_message_and_a_note(runs):
     assert out["orb_missing"][0] == script.SKIPPED and "minute history" in out["orb_missing"][1]
     assert not (data / "reports" / "oneshots_post_earnings_week_skipped.json").exists()  # ran later: note removed
     assert all(out[r][0] in (0, None) for r in (*od.RULES, *script.INTRADAY))
+    code, text = out["news_gap_week_missing"]
+    assert code == script.SKIPPED and "news history" in text
+    code, text = out["news_gap_week_no_filings"]
+    assert code == script.SKIPPED and "filings_8k.parquet" in text
+    assert not (data / "reports" / "oneshots_news_gap_week_skipped.json").exists()
 
 
 def test_daily_reports_carry_marks_benchmarks_control_hashes_and_trial_rows(runs):
@@ -612,3 +627,27 @@ def test_the_one_shots_are_research_only():
         assert banned not in daily, banned
     intraday = (ROOT / "src" / "kaibot" / "replay" / "oneshots_intraday.py").read_text()
     assert "kaibot.engine" not in intraday and "from kaibot.replay.sim import" in intraday
+
+
+def test_news_gap_week_report_compares_with_its_control_and_counts_six_configurations(runs):
+    """S98 (#372), docs/prereg/news_gap_week.md: mark 5 cannot be judged (today's list), the nonews control is one
+    row and the base's comparison with it, no 30%/60% cap rows, the S96 reading, six n_trials rows in the registry."""
+    data, base, mend, out, call = runs
+    assert out["news_gap_week"][0] in (0, None), out["news_gap_week"][1][-2000:]
+    _, rep = script.find_report(data / "reports", "news_gap_week")
+    bv, cv = rep["versions"]["news_gap_week"], rep["versions"]["news_gap_week_nonews"]
+    assert [r["kind"] for r in cv["rows"]] == ["control"] and cv["control_of"] == "news_gap_week"
+    assert "gate_b" not in cv and "book" not in cv and "book" not in bv
+    assert {r["exposure_pct"] for r in bv["rows"]} == {100.0}
+    assert next(g for g in bv["gate_b"] if g["mark"] == 5)["verdict"] != "fail"
+    assert bv["against_control"]["control"] == "news_gap_week_nonews"
+    assert bv["against_control"]["verdict"] in ("clearly above", "not clearly above", "cannot be judged")
+    assert [x["mark"] for x in bv["extra_marks"]] == ["control"]
+    assert rep["reading"].startswith(("goes on to S99", "dropped"))
+    assert rep["news"]["filings"]["form_8k"] > 0 and "complete_news_months" in rep["news"]
+    trials = [json.loads(x) for x in (data / "trials.jsonl").read_text().splitlines()]
+    mine = [t for t in trials if t["strategy"] == "news_gap_week"]
+    assert sum(t["n_trials"] for t in mine) == 6
+    assert {t["experiment"] for t in mine if t["n_trials"]} == {
+        "news_gap_week", "news_gap_week_nonews", *(f"news_gap_week~{n}" for n in od.NEIGHBOURS["news_gap_week"])}
+    assert "news_gap_week" in (data / "reports" / script.SUMMARY).read_text()
