@@ -177,6 +177,15 @@ def test_fetch_writes_the_cache_and_status_reads_it(tmp_path: Path, capsys):
     assert tbill.find(tmp_path / "none") is None
 
 
+def test_a_failed_fetch_exits_in_one_line_and_never_shows_the_key(tmp_path: Path):
+    def boom():
+        raise RuntimeError("GET https://api.stlouisfed.org/fred/series/observations?api_key=SECRETKEY123 failed")
+
+    with pytest.raises(SystemExit) as e:
+        fetch_tbill.main(["--data", str(tmp_path)], fetch=boom)
+    assert str(e.value) == "FAILED: RuntimeError; nothing was written" and tbill.find(tmp_path) is None
+
+
 def test_a_wrong_series_or_unit_is_refused(tmp_path: Path):
     with pytest.raises(ValueError, match="outside -1 to 25"):
         tbill.write_cache(tmp_path / "x.json", fred([("2026-11-20", "379")]))  # basis points, not percent

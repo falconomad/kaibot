@@ -72,7 +72,13 @@ def main(argv: list[str] | None = None, fetch=None) -> dict:
                           "api_key": key}
                 return http.get_json(URL, source="fred", params=params, timeout=30)["observations"]
 
-        tbill.write_cache(data / tbill.FILE, fetch())
+        try:
+            rows = fetch()
+        except Exception as e:  # no traceback: the request's URL holds the key (common.http redacts its own)
+            from kaibot.common.http import HttpError
+
+            sys.exit(f"FAILED: {e if isinstance(e, HttpError) else type(e).__name__}; nothing was written")
+        tbill.write_cache(data / tbill.FILE, rows)
     out = status(data)
     print(json.dumps(out, indent=1))
     return out
