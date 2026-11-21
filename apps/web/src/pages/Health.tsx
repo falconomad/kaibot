@@ -63,6 +63,25 @@ const EV: Record<string, string> = {
   // #354: the engine's news poller (heartbeat `news`)
   news_feed_unhealthy: "News feed down or empty (stock summaries and the reviewer see no new news)",
   news_feed_ok: "News feed back",
+  // 0033: the engine's health events (#392 item 4)
+  multi_day_carry: "Unfilled buys carried to the next session",
+  corporate_actions_error: "Couldn't read today's dividends and splits",
+  ledger_mismatch: "Books differ from the broker",
+  reconcile_blocked: "Books differ from the broker: new buys stopped",
+  dividend_difference: "Dividend paid differs from the one expected",
+  venue_fee_unread: "Couldn't read a trading fee",
+  replica_conflict: "The dashboard's copy differs from the engine's record (the engine's is kept)",
+  stop_state_fallback: "Stops shown as missing until a database update is applied",
+  engine_lease_takeover: "Engine took over from another computer",
+  journal_adopted: "Engine started from a damaged local record (you allowed it)",
+  order_adopted: "Order left by a crash taken back",
+  session_finalized_late: "Session closed late, after a restart",
+  watchdog_protect: "Watchdog put protective stops back",
+  multi_day_exit_recovered: "Sale sent before a crash found and booked",
+  multi_day_shorting_on: "Shorting is on at the broker: multi-day buys held back",
+  // 0036: sent under a dynamic name (#410, #131)
+  multi_day_column_missing: "Live prices of held stocks wait for a database update",
+  multi_day_review: "Pre-open reviewer (can veto or halve buys)",
 };
 
 

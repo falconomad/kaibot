@@ -54,4 +54,20 @@ describe("Engine health page states", () => {
     expect(text(html)).toContain("budget view missing");
     expect(text(html)).toContain("Processes");
   });
+
+  it("every engine health event of 0033 and 0036 reads in plain words, never by its code name", () => {
+    const types = ["multi_day_carry", "corporate_actions_error", "ledger_mismatch", "reconcile_blocked", "dividend_difference",
+      "venue_fee_unread", "replica_conflict", "stop_state_fallback", "engine_lease_takeover", "journal_adopted", "order_adopted",
+      "session_finalized_late", "watchdog_protect", "multi_day_exit_recovered", "multi_day_shorting_on",
+      "multi_day_column_missing", "multi_day_review", "command_accept_reconcile"];
+    const events = types.map((type, i) => ({ type, ts: `2026-11-21T0${i % 10}:00:00Z`, run_id: 7, payload: {} }));
+    const html = render(<Health />, { seeds: [{ key: ["health"], data: { ...quiet, events } }, { key: ["llm_budget"], data: budget }] });
+    const t = text(html);
+    for (const type of types) expect(t).not.toContain(type.replace(/_/g, " "));
+    expect(t).toContain("Books differ from the broker: new buys stopped");
+    expect(t).toContain("Live prices of held stocks wait for a database update");
+    expect(t).toContain("Pre-open reviewer (can veto or halve buys)");
+    expect(t).toContain("You asked to accept the differences between the books and the broker");
+    expect(glitches(html)).toEqual([]);
+  });
 });
