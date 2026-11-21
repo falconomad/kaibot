@@ -12,8 +12,9 @@ Rules (docs/ops/hygiene.md, "Migration record"):
   the list (`none pending` when nothing is);
 - every pending migration has a step in "## Apply in this order"; steps run 1, 2, ... once each, name a file that
   exists, and a list entry's "step N" names the row of its own migration;
-- a migration the list calls applied has no `-- NOT APPLIED` line in its header comment, and a pending one has no
-  `-- APPLIED` line.
+- no migration header claims a status (`-- APPLIED ...` or `-- NOT APPLIED ...`): the status lives only in
+  `docs/ops/migrations_pending.md`, because a header cannot be updated when Product applies the file (Product on
+  #368; the seven stale headers of #361 were fixed there).
 """
 
 from __future__ import annotations
@@ -28,18 +29,12 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS = ROOT / "migrations"
 DOC = ROOT / "docs" / "ops" / "migrations_pending.md"
 
-# Applied migrations whose header still says "NOT APPLIED" on main when this test landed (19 Nov 2026). The header
-# fix is a comment-only change in migrations/ (Backend-quant's folder), handed off from #361. Only these may be
-# stale; any NEW stale header fails. Remove a number here once its header is fixed (nothing fails if you don't).
-KNOWN_STALE_HEADERS = frozenset({"0015", "0017", "0019", "0021", "0022", "0023", "0024"})
-
 FILE_RE = re.compile(r"^(\d{4})_[a-z0-9_]+\.sql$")
 ENTRY_RE = re.compile(r"^- (\d{4})(?:-(\d{4}))?: (.*)$")
 STEP_REF_RE = re.compile(r"\bsteps? (\d+)(?:-(\d+))? below\b")
 ROW_RE = re.compile(r"^\| (\d+) \| `migrations/([^`]+)`")
 SUMMARY_RE = re.compile(r"Last checked against main on [^()]+\(([^()]*)\)")
-NOT_APPLIED_RE = re.compile(r"^--\s*NOT APPLIED\b")
-APPLIED_RE = re.compile(r"^--\s*APPLIED\b")
+STATUS_RE = re.compile(r"^--\s*(NOT APPLIED|APPLIED)\b")
 
 
 @dataclass
@@ -144,7 +139,7 @@ def header(sql: str) -> list[str]:
     return out
 
 
-def check(doc: str, files: dict[str, str], known_stale: frozenset[str] = frozenset()) -> list[str]:
+def check(doc: str, files: dict[str, str]) -> list[str]:
     """Every disagreement between the record and the files ({file name: file text})."""
     rec = parse(doc)
     problems = list(rec.problems)
@@ -198,15 +193,12 @@ def check(doc: str, files: dict[str, str], known_stale: frozenset[str] = frozens
             elif step_num[step] not in group:
                 problems.append(f"list: {key} names step {step}, but step {step} is {rec.steps[step]}")
 
-    for n, s in sorted(rec.status.items()):
-        if n not in numbered:
-            continue
-        name = numbered[n][0]
-        head = header(files[name])
-        if s == "applied" and any(NOT_APPLIED_RE.match(h) for h in head) and n not in known_stale:
-            problems.append(f"header: {name} says NOT APPLIED; the list says applied")
-        if s == "pending" and any(APPLIED_RE.match(h) for h in head):
-            problems.append(f"header: {name} says APPLIED; the list says pending")
+    for n in nums:
+        for name in numbered[n]:
+            for h in header(files[name]):
+                sm = STATUS_RE.match(h)
+                if sm:
+                    problems.append(f"header: {name} says {sm[1]}; a status lives only in migrations_pending.md")
     return problems
 
 
@@ -228,12 +220,7 @@ def _repo_files() -> dict[str, str]:
 # ---------- the repo ----------
 
 def test_migrations_pending_agrees_with_the_migration_files():
-    assert check(DOC.read_text(), _repo_files(), KNOWN_STALE_HEADERS) == []
-
-
-def test_known_stale_headers_are_only_applied_migrations():
-    rec = parse(DOC.read_text())
-    assert {n for n in KNOWN_STALE_HEADERS if rec.status.get(n) != "applied"} == set()
+    assert check(DOC.read_text(), _repo_files()) == []
 
 
 # ---------- the checker catches each kind of drift ----------
@@ -259,7 +246,7 @@ Owner: backend-quant. Last checked against main on 19 Nov 2026 (0001-0002 applie
 GOOD_FILES = {
     "0001_a.sql": "-- 0001: a.\ncreate table a (x int);\n",
     "0002_b.sql": "-- 0002: b.\n--\n-- Additive.\ncreate table b (x int);\n-- NOT APPLIED below the header is fine\n",
-    "0003_c.sql": "-- 0003: c.\n--\n-- NOT APPLIED. The stakeholder applies it.\ncreate table c (x int);\n",
+    "0003_c.sql": "-- 0003: c.\n--\n-- Status: docs/ops/migrations_pending.md.\ncreate table c (x int);\n",
 }
 
 
@@ -305,19 +292,23 @@ def _swap(old: str, new: str) -> str:
     pytest.param(_swap("| 2 | `migrations/0003_c.sql` (whole file) | c | No |\n", ""), GOOD_FILES,
                  "steps: 0003 is pending but has no step", id="pending-without-step"),
     pytest.param(GOOD_DOC, {**GOOD_FILES, "0002_b.sql": "-- 0002: b.\n-- NOT APPLIED. Apply on 'apply'.\nselect 1;\n"},
-                 "header: 0002_b.sql says NOT APPLIED; the list says applied", id="stale-not-applied-header"),
+                 "header: 0002_b.sql says NOT APPLIED", id="not-applied-header-on-an-applied-file"),
+    pytest.param(GOOD_DOC, {**GOOD_FILES, "0003_c.sql": "-- 0003: c.\n-- NOT APPLIED.\nselect 1;\n"},
+                 "header: 0003_c.sql says NOT APPLIED", id="not-applied-header-even-when-pending"),
     pytest.param(GOOD_DOC, {**GOOD_FILES, "0003_c.sql": "-- 0003: c.\n-- APPLIED on 19 Nov.\nselect 1;\n"},
-                 "header: 0003_c.sql says APPLIED; the list says pending", id="applied-header-but-pending"),
+                 "header: 0003_c.sql says APPLIED", id="applied-header-on-a-pending-file"),
+    pytest.param(GOOD_DOC, {**GOOD_FILES, "0001_a.sql": "-- 0001: a.\n-- APPLIED by Product.\nselect 1;\n"},
+                 "header: 0001_a.sql says APPLIED", id="applied-header-even-when-applied"),
 ])
 def test_the_checker_catches(doc, files, expect):
     problems = check(doc, files)
     assert any(p.startswith(expect) for p in problems), problems
 
 
-def test_known_stale_headers_are_tolerated_but_new_ones_are_not():
-    files = {**GOOD_FILES, "0002_b.sql": "-- 0002: b.\n-- NOT APPLIED.\nselect 1;\n"}
-    assert check(GOOD_DOC, files, frozenset({"0002"})) == []
-    assert check(GOOD_DOC, files, frozenset({"0001"})) != []
+def test_no_header_in_the_repo_claims_a_status():
+    """#368: the seven stale NOT APPLIED headers (0015, 0017, 0019, 0021-0024) and 0032's APPLIED line are gone."""
+    claims = [(name, h) for name, text in sorted(_repo_files().items()) for h in header(text) if STATUS_RE.match(h)]
+    assert claims == []
 
 
 def test_number_sets_read_like_the_summary_line():

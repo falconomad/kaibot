@@ -46,11 +46,12 @@ def test_0029_is_0021_with_only_the_three_types_added():
     assert "grant execute on function public.kb_health() to authenticated;" in tail_new
 
 
-def test_0029_is_superseded_only_by_0031():
-    """0031 (the news poller's events) re-creates kb_health; its own test checks it against this file."""
+def test_0029_is_superseded_only_by_0031_and_0033():
+    """0031 (the news poller's events) and 0033 (the engine's health events) re-create kb_health; each one's own
+    test checks it against the one before."""
     later = sorted(p.name for p in (ROOT / "migrations").glob("*.sql")
                    if p.name > M29.name and "kb_health" in p.read_text())
-    assert later == ["0031_kb_health_news_feed_events.sql"]
+    assert later == ["0031_kb_health_news_feed_events.sql", "0033_kb_health_engine_health_events.sql"]
 
 
 def test_0029_has_no_destructive_statement():

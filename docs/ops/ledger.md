@@ -111,8 +111,14 @@ enough outage still lets them act on their own rules.
 - Research: `python -m kaibot.engine.research --strategy <rule> --corporate-actions data/daily` books the daily
   store's splits and cash dividends on their ex-date (`kaibot.replay.corporate_actions`).
 - Live: at the open, when the run holds a position, the engine reads Alpaca's non-trade activities (`DIV*` with
-  `net_amount`; `SSP` splits). Alpaca does not document the fields of a split row, so the ratio is the broker's
+  `net_amount`; `SPLIT` splits). Alpaca does not document the fields of a split row, so the ratio is the broker's
   share count over the ledger's; without both the split is not booked and the drift check stops entries.
+  The codes asked for must be in the API reference's `ActivityType` enum (a test pins them): one unknown code makes
+  Alpaca refuse the whole request (#392: `SSP`, the older guide's name for a split, gave 422 "invalid activity type"
+  from 18 Nov 2026 until the fix). If Alpaca refuses the combined request, dividends and splits are asked one group
+  at a time; a refused group is a `corporate_actions_error` event naming it (`refused`), and the other group is
+  still booked. A failed read does not by itself block entries: a missed split shows as a share-count difference
+  and the drift check stops entries; a missed payment leaves its accrual open until a later read matches it.
   A live dividend is booked when Alpaca pays it (the activity date), not on the ex-date: the mark-to-market close
   shows the ex-date drop first and the cash later. That is exact for intraday rules (nothing is held over an
   ex-date, so nothing is ever paid). It is **not** right for a rule held across sessions: equity is understated
