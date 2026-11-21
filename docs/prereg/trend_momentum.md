@@ -451,3 +451,25 @@ mom_12_1_band.
 7. **What this can cost.** A stock that really moves more than 10% in a day (an earnings day) is not traded that
    session: a sale is a day late, a buy waits for the carry-over's conditions. IEX quotes of a thinly traded stock may be older than
    300 seconds without a halt; the reasons in `md_withheld` are to be reviewed after the first ten live sessions.
+
+## Amendment 15 (21 Nov 2026, QA-Ops second key on issue #441, PR #490, before the first use of Amendment 14): the pre-send check never withholds a sale
+
+Written on 21 Nov 2026, with Amendment 14 and before its first use. It only narrows Amendment 14: the check
+withholds fewer orders, never more; it adds no order and changes no share count, rank or target. No research result
+is affected (item 4). The same text is Amendment 13 of mom_12_1_band.
+
+1. **Sales are exempt.** The check of Amendment 14 (item 2) applies to buys and resizes up only. A sale to zero
+   and a reduction go out in their own session whatever the quote says: stale, far from the sizing close, or
+   missing. Where Amendment 14 says "the order is withheld", read "the buy is withheld".
+2. **Why.** Decision 15 (section 12) lets sales go out even when entries are blocked, so that the book is never
+   locked in. A sale only takes risk off and is never larger than the shares held. A stock whose IEX quote is
+   stale or far from the close day after day could otherwise never be sold.
+3. **What falls away.** Item 4 of Amendment 14 carried a withheld sale to zero as a pending sale and a withheld
+   reduction as the same reduction. Neither can happen now, and the carry of a withheld reduction is removed from
+   the code. A buy still withheld at the end of the window is carried as that item says. In item 7, "a sale is a
+   day late" no longer applies. A sale of a halted stock is sent and may expire unfilled; a sale to zero is then
+   sent again at the next session, as before (decision 15, section 12).
+4. **Research and Gate B unchanged.** As Amendment 14, item 6. Added tests: the check gives no reason for a sale
+   with any quote; every sale of the fixture run, with a stale quote or a quote 20% under its sizing close, goes
+   out in its own session exactly as without the check; a sale does not wait for the quote read, which is made
+   only when a buy is about to go out.

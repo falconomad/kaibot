@@ -51,16 +51,17 @@ cash less the reserve or the book's caps at the previous close (`_carry_room`: t
 checks). A failure in the carry-over carries nothing and never holds back the session's sales. No decision record for
 the session, no send of the decision, or no daily view of the previous close: nothing is carried that session.
 
-Pre-send gate (M9 ticket 1.16, issue #441; Amendment 14 of trend_momentum, 12 of mom_12_1_band). With a quote source
+Pre-send gate (M9 ticket 1.16, #441; Amendments 14-15 of trend_momentum, 12-13 of mom_12_1_band). With a quote source
 (`quotes`: the engine's IEX latest quotes; None on the research path and in replays: no gate, nothing read), each
-order the target loop is about to send is checked by engine/execution.PreSendGate against the stock's latest quote
+BUY the target loop is about to send is checked by engine/execution.PreSendGate against the stock's latest quote
 and its sizing close (the previous session's raw close, on today's share basis): a quote that is not fresh (halted or
-not trading), a move outside the collar, or a buy above the book's per-name cap is WITHHELD: no order, one
+not trading), a move outside the collar, or a value above the book's per-name cap is WITHHELD: no order, one
 `md_withheld` record per (rule, session, stock, side), and the reason in the `multi_day_orders` event. The loop asks
-again on every tick of the window. What is still withheld when the window ends is carried to the next session: a
-buy by the carry-over above (it has no order, so `ended_buys` has nothing against it), a sale to zero as a pending
-sale (`_pending`), a withheld reduction as the same reduction (`_withheld_trims`). Without a quote (the read failed
-or timed out, or the feed has none for the stock) the order is checked at the prior close and goes out.
+again on every tick of the window. A buy still withheld when the window ends is carried to the next session by the
+carry-over above (it has no order, so `ended_buys` has nothing against it). A sale (to zero or a reduction) is
+never withheld: it goes out whatever its quote says (QA-Ops on #490; decision 15: sales go out, the book is never
+locked in). Without a quote (the read failed or timed out, or the feed has none for the stock) the buy is checked
+at the prior close and goes out.
 
 Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
 every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the
@@ -1087,7 +1088,8 @@ class LiveDaily:
 
     def _gate_check(self, r: Rule, session: date, targets: Sequence[Target]):
         """The target loop's `presend` for this tick, or None without a quote source. The quotes are read once,
-        only when the loop has an order to send, for every stock of the plan in one request; a failed read is one
+        only when the loop has a BUY to send (sales go out first and never wait for the read), for every stock of
+        the plan in one request; a failed read is one
         `multi_day_error` event (step `presend_quotes`) and every order is then checked at its prior close."""
         if self.quotes is None:
             return None
@@ -1095,6 +1097,8 @@ class LiveDaily:
         state: dict = {}
 
         def check(t: Target, side: str, qty: float) -> str | None:
+            if side != "buy":
+                return None  # a sale is never withheld, and it never waits for the quote read either (QA-Ops, #490)
             if not state:
                 state["closes"] = self._sizing_closes(r.name, session, symbols)
                 state["cap"] = None
@@ -1122,8 +1126,8 @@ class LiveDaily:
         return check
 
     def _note_withheld(self, rule: str, session: date, rid: int, withheld) -> list[list]:
-        """Journal each withheld order once per (rule, session, stock, side) (`md_withheld`: the record the next
-        session's carry of a reduction reads) and return [[symbol, why]] for the orders event."""
+        """Journal each withheld buy once per (rule, session, stock, side) (`md_withheld`: the record for the
+        review of the gate's reasons) and return [[symbol, why]] for the orders event."""
         out = [[k[1], why[:160]] for k, _, why in withheld]
         if not out:
             return out
@@ -1142,21 +1146,6 @@ class LiveDaily:
                                                 "symbol": sym, "side": side, "target": target, "held": held,
                                                 "why": why[:160]})
         return out
-
-    def _withheld_trims(self, rule: str, session: date, held: Mapping[str, object]) -> list[Target]:
-        """Reductions (a resize down, not to zero) the pre-send gate withheld on the last send before `session`:
-        sent again as the same reduction, to the same target shares, while the sleeve still holds more. A sale to
-        zero is `_pending`'s; a buy is the carry-over's."""
-        last = None
-        for b in self._entries("md_send"):
-            if b.get("strategy") == rule and b.get("session") < str(session):
-                last = b
-        if last is None:
-            return []
-        gated = {b.get("symbol") for b in self._entries("md_withheld")
-                 if b.get("strategy") == rule and b.get("session") == last["session"] and b.get("side") == "sell"}
-        return [Target(rule, s, int(q), "resize", {"why": "withheld"}) for s, q, _, _ in last["targets"]
-                if s in gated and s in held and 0 < int(q) < float(held[s][0])]
 
     # ---------------------------------------------------------------- the pre-open review (#131, off by default)
     def _window_left(self, now: datetime) -> float:
@@ -1354,7 +1343,6 @@ class LiveDaily:
             plan, targets = plan_session(r.builder, None, r.name, {}, pending, None, 0, 0.0, 0.0)
             if dec is None:  # no decision was taken after the last close: nothing is carried on an old plan
                 return self._planned(r, session, rid, prev, targets, None)
-            targets = targets + self._withheld_trims(r.name, session, held)  # M9 1.16: a withheld reduction
             sales = list(targets)  # the pending sales: they go out whatever happens to the carry-over
             ca: dict = {}
             try:

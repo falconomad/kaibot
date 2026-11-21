@@ -4,11 +4,14 @@ The audit's finding (engine_audit/report.md, "confirmed absent"): no quote, halt
 before the near-close DAY market orders go out, and the share count was sized at the previous close. These tests
 fail on main @ 453bb87 (no `PreSendGate`, no `presend` in the target loop, no `quotes` on the live daily path).
 
-The gate (engine/execution.PreSendGate, pure): a halted stock, a quote that is not fresh, a move since the sizing
-close outside the collar, or a buy worth more than the cap is WITHHELD; a missing quote falls back to the prior
-close (the order goes out, checked at that price). A withheld order is not dropped: the live daily path sends it
-again at the next session (a buy through the carry-over of Amendments 11 to 13, a sale to zero as a pending sale, a
-withheld reduction as a reduction).
+The gate (engine/execution.PreSendGate, pure): a BUY of a halted stock, with a quote that is not fresh, with a move
+since the sizing close outside the collar, or worth more than the cap is WITHHELD; a missing quote falls back to
+the prior close (the order goes out, checked at that price). A withheld buy is not dropped: the live daily path
+sends it again at the next session through the carry-over of Amendments 11 to 13.
+
+QA-Ops on #490: a SALE is never withheld (decision 15, section 12: "Sales go out even when entries are blocked";
+the audit: the book cannot be locked in). A sale to zero and a reduction go out in their own session whatever the
+quote says.
 """
 
 from __future__ import annotations
@@ -50,9 +53,18 @@ def test_a_fresh_quote_inside_the_collar_passes():
     assert GATE.check("sell", 10, close=100.0, quote=q(95.0, 95.2), now=NOW, max_value=None) is None
 
 
-def test_a_halted_stock_is_withheld_whatever_its_quote():
-    why = GATE.check("sell", 10, close=100.0, quote=q(100.0, 100.1), now=NOW, halted=True)
+def test_a_buy_of_a_halted_stock_is_withheld_whatever_its_quote():
+    why = GATE.check("buy", 10, close=100.0, quote=q(100.0, 100.1), now=NOW, halted=True)
     assert why and "halted" in why
+
+
+@pytest.mark.parametrize("quote", [q(100.0, 100.1), q(100.0, 100.1, age_s=3600.0), q(79.95, 80.05), q(119.95, 120.05),
+                                   q(1.0, 500.0), None])
+@pytest.mark.parametrize("halted", [False, True])
+def test_a_sale_is_never_withheld(quote, halted):
+    """Decision 15: sales go out even when entries are blocked; nothing a quote says may lock a position in."""
+    for close in (100.0, None):
+        assert GATE.check("sell", 10, close=close, quote=quote, now=NOW, max_value=1.0, halted=halted) is None
 
 
 def test_a_stale_quote_is_withheld_as_not_trading():
@@ -61,11 +73,10 @@ def test_a_stale_quote_is_withheld_as_not_trading():
     assert GATE.check("buy", 10, close=100.0, quote=q(100.0, 100.1, age_s=GATE.max_age_s - 1), now=NOW) is None
 
 
-@pytest.mark.parametrize("side", ["buy", "sell"])
 @pytest.mark.parametrize("gap", [0.20, -0.20])
-def test_a_twenty_percent_gap_since_the_sizing_close_is_withheld(side, gap):
+def test_a_buy_twenty_percent_from_the_sizing_close_is_withheld(gap):
     px = 100.0 * (1 + gap)
-    why = GATE.check(side, 10, close=100.0, quote=q(px - 0.05, px + 0.05), now=NOW)
+    why = GATE.check("buy", 10, close=100.0, quote=q(px - 0.05, px + 0.05), now=NOW)
     assert why and "sizing close" in why and "20" in why
 
 
@@ -235,21 +246,41 @@ def test_a_withheld_order_goes_out_later_in_the_same_window_once_its_quote_is_fr
     assert [b for *_, b in h.journal.entries(kinds=("md_sent",)) if b["session"] == str(day)]  # the step completed
 
 
-def test_a_withheld_sale_is_sent_again_at_the_next_session(data, tmp_path):
+def test_a_sale_goes_out_in_its_own_session_whatever_its_quote(data, tmp_path):
+    """QA-Ops on #490: every sale of the run (sales to zero and reductions) has a stale quote, or one 20% under
+    the sizing close: each goes out in its own session, at its own shares, exactly as without the gate."""
     (tmp_path / "dry").mkdir()
     s, _, _, dry = _first_plan(data, tmp_path)
-    sale = min((o for o in dry.broker.orders.values() if o["side"] == "sell"), key=lambda o: int(o["id"][1:]))
-    day = datetime.fromisoformat(sale["submitted_at"]).astimezone(NY).date()
-    sym = sale["symbol"]
+    sales = sorted((o for o in dry.broker.orders.values() if o["side"] == "sell"), key=lambda o: int(o["id"][1:]))
+    assert sales and any("-resize-" in o["client_order_id"] for o in sales), "the fixture has no reduction"
+    assert any("-resize-" not in o["client_order_id"] for o in sales)
     h = Quoted(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path)
-    h.gap = {(str(day), sym): -0.20}
+    h.stale, h.gap = set(), {}
+    for n, o in enumerate(sales):
+        day = datetime.fromisoformat(o["submitted_at"]).astimezone(NY).date()
+        if n % 2:
+            h.stale.add((str(day), o["symbol"]))
+        else:
+            h.gap[(str(day), o["symbol"])] = -0.20
     h.run()
-    assert not [o for o in _orders_on(h, day) if o["symbol"] == sym]
-    held = [b for *_, b in h.journal.entries(kinds=("md_withheld",)) if b["session"] == str(day)]
-    assert [(b["symbol"], b["side"]) for b in held] == [(sym, "sell")]
-    nxt = data.day(data.index_of(day) + 1)
-    again = [o for o in _orders_on(h, nxt) if o["symbol"] == sym]
-    assert [(o["side"], float(o["qty"]), o["status"]) for o in again] == [("sell", float(sale["qty"]), "filled")]
+    key = lambda o: (o["client_order_id"], o["submitted_at"], o["symbol"], o["side"], float(o["qty"]),  # noqa: E731
+                     o["status"])
+    assert sorted(map(key, h.broker.orders.values())) == sorted(map(key, dry.broker.orders.values()))
+    assert not list(h.journal.entries(kinds=("md_withheld",)))
+
+
+def test_a_sale_never_waits_for_the_quote_read(data, tmp_path):
+    """QA-Ops on #490: the plan's sales go out before its buys; the quote read (up to 8 s, and it can fail) is made
+    only when a buy is about to go out, so a slow or broken feed costs a sale nothing."""
+    s = mom.VERSIONS["trend_momentum"]
+    h = Quoted(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path)
+    (rule,) = h.live.active()
+    day = data.day(I0)
+    check = h.live._gate_check(rule, day, [Target(rule.name, "AAA", 0, "sell"), Target(rule.name, "BBB", 10, "buy")])
+    assert check(Target(rule.name, "AAA", 0, "sell"), "sell", 5) is None and h.asked == []
+    h.down = True
+    assert check(Target(rule.name, "BBB", 10, "buy"), "buy", 10) is None  # the feed is down: the prior close
+    assert h.asked == [["AAA", "BBB"]]
 
 
 def test_without_quotes_the_orders_go_out_at_the_prior_close_exactly_as_before(data, tmp_path):
@@ -283,29 +314,6 @@ def test_the_gate_is_off_without_a_quote_source(data, tmp_path):
     s = mom.VERSIONS["trend_momentum"]
     h = Harness(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path)
     assert h.live.quotes is None and EQ0 and I0
-
-
-def test_a_withheld_reduction_is_sent_again_as_the_same_reduction(data, tmp_path):
-    """A resize down (not to zero) is neither a pending sale nor a carried buy: the gate's own record carries it."""
-    (tmp_path / "dry").mkdir()
-    s, _, _, dry = _first_plan(data, tmp_path)
-    trims = [o for o in dry.broker.orders.values() if o["side"] == "sell" and "-resize-" in o["client_order_id"]]
-    assert trims, "the fixture has no reduction"
-    trim = min(trims, key=lambda o: int(o["id"][1:]))
-    day = datetime.fromisoformat(trim["submitted_at"]).astimezone(NY).date()
-    sym = trim["symbol"]
-    h = Quoted(data, s, ld.live_builder(s, momentum_limits(s, POL, 100.0)), tmp_path)
-    h.stale = {(str(day), sym)}
-    h.run()
-    assert not [o for o in _orders_on(h, day) if o["symbol"] == sym]
-    nxt = data.day(data.index_of(day) + 1)
-    again = [o for o in _orders_on(h, nxt) if o["symbol"] == sym]
-    assert [(o["side"], float(o["qty"]), o["status"]) for o in again] == [("sell", float(trim["qty"]), "filled")]
-    send = [b for *_, b in h.journal.entries(kinds=("md_send",)) if b["session"] == str(nxt)][-1]
-    assert [t for t in send["targets"] if t[0] == sym][0][2:] == ["resize", "withheld"]
-    sells = [o for o in h.broker.orders.values() if o["symbol"] == sym and "withheld" not in o["client_order_id"]
-             and o["side"] == "sell" and datetime.fromisoformat(o["submitted_at"]).astimezone(NY).date() in (day, nxt)]
-    assert len(sells) == 1  # sent once
 
 
 def test_the_engines_quote_read_has_a_deadline_and_other_data_clients_get_no_gate():

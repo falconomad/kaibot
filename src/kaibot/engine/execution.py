@@ -19,12 +19,15 @@ Styles, with Alpaca's rules (docs/research/engine_v3/notes_engine_architecture.m
   sends live: only `ExecutionPolicy(research_open=True)` builds it, and the live path never sets that.
 
 The pre-send gate (M9 ticket 1.16, issue #441; `PreSendGate`, pure like the rest of this module): the last check
-before a near-close market order goes out. The share count was sized at the previous close, so the gate reads the
-stock's latest quote and WITHHOLDS the order when the stock is halted, when its quote is not fresh (no update for
+before a near-close market BUY goes out. The share count was sized at the previous close, so the gate reads the
+stock's latest quote and WITHHOLDS the buy when the stock is halted, when its quote is not fresh (no update for
 `max_age_s`: halted or not trading), when both sides of the quote are further than `collar` from the sizing close,
-or when a buy is worth more than the caller's cap. A missing quote falls back to the prior close: the order is
+or when the buy is worth more than the caller's cap. A missing quote falls back to the prior close: the order is
 checked at that price and goes out (a market-data outage must not become one more way to miss a rebalance). The
-gate never changes a quantity or a price. The caller carries a withheld order to the next session
+gate never changes a quantity or a price. A SALE IS NEVER WITHHELD (QA-Ops on #490; decision 15, section 12:
+"Sales go out even when entries are blocked"; the audit: the book cannot be locked in): a sale only takes risk
+off, its quantity is never above the shares held, and a stock whose IEX quote is stale or far from the close day
+after day would otherwise never be sold. The caller carries a withheld buy to the next session
 (engine/live_daily.py); the research venue has no quotes and no gate (the pre-registrations' amendments).
 
 Holding policy per rule: intraday sleeves are flattened at the close minus 5 minutes, multi-day sleeves are not
@@ -147,7 +150,8 @@ def quote_from_alpaca(row) -> Quote | None:
 
 @dataclass(frozen=True)
 class PreSendGate:
-    """`check` gives the reason an order is withheld, or None (it may go out). Frozen constants, not tuned:
+    """`check` gives the reason a buy is withheld, or None (it may go out); a sale always gets None (never
+    withheld: see the module's text). Frozen constants, not tuned:
     `max_age_s` 300 s (a limit-up/limit-down pause lasts five minutes; a liquid stock's quote changes every few
     seconds), `collar` 10% from the sizing close (the rule's sizing assumed that close), and for a buy the caller's
     value cap (the live path: the book's per-name cap with the collar's head-room, so a price inside the collar
@@ -158,6 +162,8 @@ class PreSendGate:
 
     def check(self, side: str, qty: float, *, close: float | None, quote: Quote | None, now: datetime,
               max_value: float | None = None, halted: bool = False) -> str | None:
+        if side != "buy":
+            return None  # a sale is never withheld (decision 15: sales go out; the book cannot be locked in)
         if halted:
             return f"{WITHHELD}the stock is halted"
         close = float(close) if close is not None and math.isfinite(close) and close > 0 else None
@@ -174,21 +180,12 @@ class PreSendGate:
                         f"({close:.2f} -> {ref:.2f}; collar {100 * self.collar:.0f}%)")
         else:
             ref = close  # no quote: the prior close
-        if side == "buy" and max_value is not None and ref is not None and float(qty) * ref > max_value + 1e-6:
+        if max_value is not None and ref is not None and float(qty) * ref > max_value + 1e-6:
             return f"{WITHHELD}order value ${float(qty) * ref:,.0f} is above the cap ${max_value:,.0f}"
         return None
 
 
 def flatten_at_close(holding) -> bool:
-    """The pre-send gate (M9 ticket 1.16, issue #441; `PreSendGate`, pure like the rest of this module): the last check
-before a near-close market order goes out. The share count was sized at the previous close, so the gate reads the
-stock's latest quote and WITHHOLDS the order when the stock is halted, when its quote is not fresh (no update for
-`max_age_s`: halted or not trading), when both sides of the quote are further than `collar` from the sizing close,
-or when a buy is worth more than the caller's cap. A missing quote falls back to the prior close: the order is
-checked at that price and goes out (a market-data outage must not become one more way to miss a rebalance). The
-gate never changes a quantity or a price. The caller carries a withheld order to the next session
-(engine/live_daily.py); the research venue has no quotes and no gate (the pre-registrations' amendments).
-
-Holding policy per rule: an intraday sleeve is flattened at the close minus 5 minutes, a multi-day one is
+    """Holding policy per rule: an intraday sleeve is flattened at the close minus 5 minutes, a multi-day one is
     not (it keeps its protective stop at the broker overnight)."""
     return str(getattr(holding, "value", holding)) != "multi_day"

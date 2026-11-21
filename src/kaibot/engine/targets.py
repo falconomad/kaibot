@@ -14,7 +14,8 @@ frees the shares a protective stop holds (engine/protect.py) and goes out once t
 The pre-send gate (M9 1.16, issue #441): `presend(target, side, shares)` is asked once every other check has
 passed, before a sale's protective stop is released, and its reason withholds the order (`LoopResult.withheld`):
 nothing is journalled or sent for it and no attempt number is used, so the next run of the loop (the next tick, or
-the next session's carry-over) asks again.
+the next session's carry-over) asks again. The live gate (execution.PreSendGate) gives a reason for buys only: a
+sale is never withheld.
 
 The targets come from the portfolio builder (`risk/portfolio.PortfolioBuilder.build(...).targets`, which `targets_
 from_plan` turns into this loop's input) or, on the research path, from the frozen sizing of the pre-registrations
