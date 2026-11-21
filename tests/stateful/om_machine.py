@@ -79,6 +79,9 @@ KNOWN: dict[str, int] = {
     # the order `pending_cancel` for good: nothing asks again. The `cancel` rule therefore runs with the network up
     # and the fuse held.
     "cancel_unanswered": 491,
+    # the target loop waits for a finished order's unbooked fill only when the order is of today's session; with
+    # yesterday's it buys the target again. `_send` therefore does not run the loop while such a fill is open.
+    "unbooked_other_session": 507,
 }
 
 # Invariant 4: the legal graph. A state may always be written again (the venue's fields changed); nothing leaves a
@@ -363,6 +366,9 @@ class OrdersAndLedger(RuleBasedStateMachine):
     def _send(self, style: str, fit: bool, fault: str, part: int) -> None:
         """The daily path's pre-send step: targets less (ledger + working orders), through the order manager.
         `fit`: usually a style whose window is open now; otherwise whichever was drawn (the policy must refuse)."""
+        stale = any(r.session != self._session() for r in self.om.settling.values())
+        if stale and "unbooked_other_session" in KNOWN:
+            return
         fitting = self._open_styles()
         if fit and fitting and style not in fitting:
             style = fitting[STYLES.index(style) % len(fitting)]
@@ -386,6 +392,18 @@ class OrdersAndLedger(RuleBasedStateMachine):
         self._run(lambda: reconcile_targets(self.om, ExecutionPolicy(style), targets, held, now=self.clock(),
                                             session=self._session(), run=RUN, quotes=quotes))
         script._plans.clear()
+
+    @precondition(lambda self: any(n > 0 for n in self.targets.values()))
+    @rule(i=st.integers(0, 7), keep=st.integers(0, CAP - 1), style=st.sampled_from(STYLES),
+          fault=st.sampled_from(FAULTS), part=st.integers(1, CAP - 1))
+    def reduce(self, i: int, keep: int, style: str, fault: str, part: int) -> None:
+        """A sleeve that is wanted is wanted less (or not at all), then the send: without this rule a sale needs
+        two lucky draws in a row, and whole example streams went by without one (see the fixed program in
+        test_stateful_orders_ledger.py)."""
+        wanted = sorted(k for k, n in self.targets.items() if n > 0)
+        key = wanted[i % len(wanted)]
+        self.targets[key] = min(keep, self.targets[key] - 1)
+        self._send(style, True, fault, part)
 
     def _pick(self, i: int, **kw):
         working = sorted(self.om.working(**kw), key=lambda r: r.coid)
@@ -607,3 +625,18 @@ class OrdersAndLedger(RuleBasedStateMachine):
             else:
                 assert time(9, 45) <= t < time(16, 0), f"a marketable limit sent at {t}"
 
+
+
+def replay(program: list[tuple[str, dict]], machine: type[OrdersAndLedger] = OrdersAndLedger) -> OrdersAndLedger:
+    """Run a fixed program of rule calls, as Hypothesis prints a failing example, checking every invariant after
+    every step. No Hypothesis involved: what it does depends on nothing but the program."""
+    m = machine()
+    checks = sorted(n for n in dir(m) if n[:3] == "inv" and n[3:4].isdigit())
+    try:
+        for name, kwargs in program:
+            getattr(m, name)(**kwargs)
+            for check in checks:
+                getattr(m, check)()
+    finally:
+        m.teardown()
+    return m

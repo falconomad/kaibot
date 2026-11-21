@@ -9,6 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write  # to set the labels: the only write permission in any workflow
+      pull-requests: write  # to set the labels (the write permissions of CI are listed in test_ci_supply_chain.py)
     steps:
       - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9  # v5.0.0
