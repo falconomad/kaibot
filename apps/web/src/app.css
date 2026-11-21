@@ -685,6 +685,9 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 .status-row.info { background: var(--surface-2); border-color: var(--rule-strong); color: var(--text); }
 .status-dot { flex: none; width: 10px; height: 10px; border-radius: 999px; background: var(--down); }
 .sheet-list { margin: 0 0 12px; padding-left: 20px; } .sheet-list li { margin-bottom: 6px; }
+/* #439: the ledger/broker differences in the "Books and broker" sheet */
+.recon-list { list-style: none; margin: 0 0 12px; padding: 0; } .recon-list li { padding: 12px 0; border-top: 1px solid var(--rule); }
+.recon-list li:first-child { border-top: 0; } .recon-list .kv { grid-template-columns: minmax(0, 1fr) 0 auto; }
 .sheet-body .card { padding: 0; border: 0; background: transparent; }
 
 .home-band { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px 24px; }
