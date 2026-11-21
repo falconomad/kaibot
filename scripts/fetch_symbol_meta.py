@@ -103,6 +103,20 @@ def pick_domain(symbol: str, results: object) -> str | None:
     return None
 
 
+def unknown_exchanges(symbol: str, results: object) -> list[str]:
+    """Exchange spellings of exact-ticker results that `US_EXCHANGES` does not know, sorted, without repeats (#383).
+
+    Printed on a miss so the first real run shows how the live API spells US exchanges other than NASDAQ. A spelling
+    that turns out to be a US exchange is then added to `US_EXCHANGES` by hand; nothing is added automatically.
+    """
+    if not isinstance(results, list):
+        return []
+    seen = {r.get("exchange").strip() for r in results
+            if isinstance(r, dict) and r.get("symbol") == symbol and isinstance(r.get("exchange"), str)
+            and r.get("exchange").strip() and r.get("exchange").strip().upper() not in US_EXCHANGES}
+    return sorted(seen)
+
+
 def search_logo(symbol: str, *, opener=None, budget: Budget | None = None) -> object:
     """AllInvestView's answer for one ticker (public, no key), under its own budget in config/sources.yaml."""
     return get_json(SEARCH_URL, source=SEARCH_SOURCE, params={"q": symbol}, headers={"Accept": "application/json"},
@@ -124,11 +138,14 @@ def fill_domains(out: dict[str, dict], search: Callable[[str], object] = search_
         except LOOKUP_FAILURES as e:
             print(f"{sym}: search failed ({type(e).__name__}: {e}); domain stays null", file=sys.stderr)
             continue
-        d = pick_domain(sym, ans.get("results") if isinstance(ans, dict) else None)
+        results = ans.get("results") if isinstance(ans, dict) else None
+        d = pick_domain(sym, results)
         if d:
             out[sym]["domain"] = found[sym] = d
         else:
-            print(f"{sym}: no exact US match; domain stays null", file=sys.stderr)
+            other = unknown_exchanges(sym, results)
+            note = f" (exact ticker on an exchange not in US_EXCHANGES: {', '.join(other)})" if other else ""
+            print(f"{sym}: no exact US match{note}; domain stays null", file=sys.stderr)
     return found
 
 
