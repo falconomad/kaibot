@@ -23,7 +23,7 @@ const Icon = ({ kind }: { kind: Notice["kind"] }) => (
 );
 const Chev = () => <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6 L15 12 L9 18" /></svg>;
 
-/** Home's notices: nothing while loading, on a day without notices or before migration 0034; a quiet line on error. */
+/** Home's notices: nothing while loading, on a day without notices or before migration 0035; a quiet line on error. */
 export default function MarketNotices({ tz }: { tz?: string }) {
   const q = useQuery({ queryKey: ["market-notices"], queryFn: fetchNotices, staleTime: 10 * MIN, ...poll(30 * MIN) });
   if (q.isError) return (

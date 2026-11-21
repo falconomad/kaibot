@@ -29,7 +29,7 @@ const FED = { kind: "big_day", flag: "fed_day", tier: "major", session: "2026-12
 const CPI = { ...FED, flag: "cpi_day", tier: "notice", session: "2026-12-10", starts: "2026-12-10T13:30:00+00:00" };
 const IDX = { ...FED, flag: "index_reshuffle", tier: "notice", session: "2026-12-09", starts: "2026-12-09T21:00:00+00:00", detail: { index: ["russell_recon"] } };
 
-/** kb_market_notices as migration 0034 answers for 19 Nov 2026 (tests/test_market_notices_sql.py seeds the same). */
+/** kb_market_notices as migration 0035 answers for 19 Nov 2026 (tests/test_market_notices_sql.py seeds the same). */
 const NOV19 = parseNotices({ today: "2026-11-19", from: "2026-11-13", to: "2026-11-27",
   sessions: ["2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24", "2026-11-25", "2026-11-27"], notices: [ANT, ANT_BIG, EXBI] })!;
 const day = (today: string, sessions: string[], notices: unknown[], from = sessions[0]): Notices =>
@@ -123,7 +123,7 @@ describe("which notices are on Home, and when they go", () => {
 });
 
 describe("loading, empty, not applied and error", () => {
-  it("nothing while loading, on an empty day or before migration 0034 (null); one quiet line on an error", () => {
+  it("nothing while loading, on an empty day or before migration 0035 (null); one quiet line on an error", () => {
     expect(text(render(<MarketNotices />))).toBe("");
     expect(text(render(<MarketNotices />, { seeds: [{ key: ["market-notices"], data: null }] }))).toBe("");
     expect(text(render(<MarketNotices />, { seeds: [{ key: ["market-notices"], data: day("2026-12-07", DEC, []) }] }))).toBe("");

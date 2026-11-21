@@ -1,5 +1,5 @@
 // #378 (M8 S104): the market notices on Home, "New on the market" and "Big day" (docs/design/m8_market_notices.md).
-// Read-only: kb_market_notices (migration 0034). They inform only; nothing here leads to an order or a setting.
+// Read-only: kb_market_notices (migration 0035). They inform only; nothing here leads to an order or a setting.
 // Loaded with the Notices chunk only (components/Notices.tsx is lazy), so none of this is in the first load.
 import { supa } from "./api";
 import { ruleName } from "./explain";
@@ -45,7 +45,7 @@ export function parseNotices(raw: unknown): Notices | null {
   return { today: r.today, from: String(r.from ?? r.today), to: String(r.to ?? r.today), sessions, notices };
 }
 
-/** kb_market_notices; null while migration 0034 is not applied (the function does not exist yet). */
+/** kb_market_notices; null while migration 0035 is not applied (the function does not exist yet). */
 export async function fetchNotices(): Promise<Notices | null> {
   const { data, error } = await supa.rpc("kb_market_notices", {});
   if (error) {
