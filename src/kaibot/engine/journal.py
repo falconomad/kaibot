@@ -799,7 +799,17 @@ class Replicator:
                 raise
             keys = ("id",) if t in ID_TABLES else ("jseq",) if t in JSEQ_TABLES else NATURAL_KEYS.get(t)
             self._settle(seq, t, row, e, keys)
+        if t == "ledger" and "multi_day" in row and self.multi_day_fallback:
+            self._multi_day_back(seq)
         return None
+
+    def _multi_day_back(self, seq: int) -> None:
+        """QA on #410: a minute row went WITH `multi_day` (migration 0034 applied): the fallback is over, so the
+        status flag clears. Supabase took the row (or holds it already, a duplicate), so the column exists. Should the
+        column go missing again, `_without_multi_day` reports it again."""
+        with self._lock:
+            self.multi_day_fallback = False
+        log.info("Supabase takes ledger.multi_day again (from entry %d): minute rows carry the multi-day marks", seq)
 
     def _settle(self, seq: int, t: str, row: dict, err: Exception, keys) -> dict | None:
         """A "duplicate key" answer: read the stored row by the key that clashed. The same row: sent before, done.

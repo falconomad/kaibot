@@ -193,6 +193,59 @@ def test_before_0034_rows_go_without_the_column_and_it_is_tried_again_hourly():
     st.insert("ledger", _ledger_row(4), returning=False)
     rep.pump()
     assert remote.tables["ledger"][-1]["multi_day"]["v"] == 1
+    assert rep.status()["multi_day_fallback"] is False  # QA on #410: the flag clears once a row goes with it
+
+
+def test_the_fallback_flag_stays_while_rows_go_without_the_column_and_clears_on_the_first_write_with_it():
+    """QA on #410: `multi_day_fallback` (the replicator's status, the heartbeat) said true after 0034 was applied
+    and the column worked. It stays true while rows still go without the column (inside the retry hour, or refused
+    again), clears on the first row Supabase takes WITH it, and a later refusal reports once more."""
+    remote = Pre0034()
+    st = JournalStore(Journal(), remote, live=True)
+    rep = Replicator(st.journal, remote)
+    t = [1000.0]
+    rep.clock = lambda: t[0]
+    st.insert("ledger", _ledger_row(0), returning=False)
+    rep.pump()
+    assert rep.multi_day_fallback is True
+    t[0] += 3601  # retried, still not there: still true, not reported twice
+    st.insert("ledger", _ledger_row(1), returning=False)
+    rep.pump()
+    assert rep.multi_day_fallback is True and remote.refused == 2 and len(rep.take_fallbacks()) == 1
+    remote.has_column = True
+    st.insert("ledger", _ledger_row(2), returning=False)
+    rep.pump()  # inside the retry hour: the row goes without it, the flag stays
+    assert "multi_day" not in remote.tables["ledger"][-1] and rep.multi_day_fallback is True
+    t[0] += 3601
+    st.insert("ledger", _ledger_row(3), returning=False)
+    rep.pump()
+    assert remote.tables["ledger"][-1]["multi_day"]["v"] == 1
+    assert rep.status()["multi_day_fallback"] is False and rep.take_fallbacks() == []
+    remote.has_column = False  # the column gone again (a restored backup): reported again
+    st.insert("ledger", _ledger_row(4), returning=False)
+    rep.pump()
+    assert rep.multi_day_fallback is True
+    assert [f["event"] for f in rep.take_fallbacks()] == ["multi_day_column_missing"]
+
+
+def test_a_duplicate_answer_with_the_column_also_clears_the_flag():
+    """A row sent before whose answer was lost comes back as a duplicate: Supabase checked its columns, so the
+    column exists and the flag clears too."""
+    remote = Pre0034()
+    st = JournalStore(Journal(), remote, live=True)
+    rep = Replicator(st.journal, remote)
+    t = [1000.0]
+    rep.clock = lambda: t[0]
+    st.insert("ledger", _ledger_row(0), returning=False)
+    rep.pump()
+    assert rep.multi_day_fallback is True
+    remote.has_column, t[0] = True, t[0] + 3601
+    row = _ledger_row(1)
+    st.insert("ledger", row, returning=False)
+    remote.insert("ledger", dict(row), returning=False)  # already there (the earlier answer was lost)
+    rep.pump()
+    assert rep.pending() == 0 and rep.conflicts == 0 and rep.multi_day_fallback is False
+    assert [r["ts"] for r in remote.tables["ledger"]].count(row["ts"]) == 1  # the duplicate path, not a second row
 
 
 def test_another_refusal_of_a_ledger_row_is_still_an_error():
