@@ -609,8 +609,9 @@ def _row_daily(rep: dict) -> list[list]:
             verdict = f"control of `{x['control_of']}` (not judged on its own)"
         else:
             verdict = "reported (distribution only)"
-        out.append([f"`{v}`", "point-in-time S&P 500, daily store", f"{rep['window'][0]} to {rep['window'][1]}",
-                    what, verdict])
+        where = ("today's list inside the point-in-time S&P 500, complete news months, daily store"
+                 if rep.get("rule") == "news_gap_week" else "point-in-time S&P 500, daily store")  # its prereg
+        out.append([f"`{v}`", where, f"{rep['window'][0]} to {rep['window'][1]}", what, verdict])
     return out
 
 
