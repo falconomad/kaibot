@@ -10,8 +10,9 @@ explain; it never refuses to take risk off.
   and not yet paid (receivables).
 
 Tolerance (cash): max(CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT % of equity), $1 or 0.05%, $50 at $100k. It absorbs
-what the ledger does not model to the cent: regulatory sale fees (SEC and FINRA TAF, cents per trade), cash in
-lieu and dividend amounts rounded by the broker, and a dividend's withholding. Quantity has no tolerance.
+what the ledger does not model to the cent: a regulatory fee taken and not yet posted (Alpaca's FEE activities are
+booked at the next session start, #238), cash in lieu and dividend amounts rounded by the broker, and a dividend's
+withholding. Quantity has no tolerance.
 
 What is refused while a difference is open (`Reconciler.allows`):
 - a buy in a symbol with a share, fill or unbooked difference, and every buy while cash differs;

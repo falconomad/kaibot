@@ -12,11 +12,13 @@ from kaibot.broker.protocol import unknown_activity_types
 from kaibot.engine.ledger import (
     CORPORATE_ACTIVITIES,
     CORPORATE_ACTIVITY_GROUPS,
+    FEE_ACTIVITIES,
     SPLIT_ACTIVITIES,
     Action,
     Ledger,
     actions_from_activities,
     actions_from_daily_store,
+    fees_from_activities,
 )
 
 RUN = 7
@@ -218,3 +220,35 @@ def test_the_corporate_activity_codes_are_in_alpaca_s_documented_enum():
 def test_alpaca_split_without_a_known_ratio_is_not_guessed():
     got = actions_from_activities([ALPACA_ACTIVITIES[2]], ledger_qty={"NVDA": 3}, broker_qty={})
     assert got == []
+
+
+# ---------------------------------------------------------------- #238: Alpaca's fees apart from the fills
+PAPER_FEE = {"activity_type": "FEE", "activity_sub_type": "CAT", "date": "2026-11-18",  # the paper account, 18 Nov
+             "created_at": "2026-11-19T01:06:18.903549Z", "net_amount": "-0.01", "status": "executed",
+             "currency": "USD", "id": "20261118000000000::dc82adfb-b795-42eb-bdb4-f78741ae9b91"}
+
+
+def test_a_fee_lowers_cash_and_equity_once_per_ref():
+    lg = Ledger.fold([("run", {"run_id": RUN, "amount": 1000.0}),
+                      ("fee", {"run_id": RUN, "amount": -0.21, "date": "2026-11-18", "ref": "alpaca:f1"}),
+                      ("fee", {"run_id": RUN, "amount": -0.21, "date": "2026-11-18", "ref": "alpaca:f1"}),
+                      ("fee", {"run_id": RUN, "amount": -0.01, "date": "2026-11-18", "ref": "alpaca:f2"})])
+    b = lg.book(RUN)
+    assert b.cash == pytest.approx(999.78) and b.equity({}) == pytest.approx(999.78)
+    assert lg.start_equity(RUN) == pytest.approx(999.78)
+
+
+def test_fees_from_alpaca_s_fee_activities():
+    got = fees_from_activities([PAPER_FEE, {**PAPER_FEE, "activity_type": "DIV"}, {**PAPER_FEE, "net_amount": None},
+                                {k: v for k, v in PAPER_FEE.items() if k not in ("id", "created_at")}])
+    assert got == [{"amount": -0.01, "date": "2026-11-18", "sub_type": "CAT",
+                    "ref": "alpaca:20261118000000000::dc82adfb-b795-42eb-bdb4-f78741ae9b91"}]
+    (no_id,) = fees_from_activities([{k: v for k, v in PAPER_FEE.items() if k != "id"}])
+    assert no_id["ref"] == "alpaca-fee:2026-11-19T01:06:18.903549Z:CAT:-0.01"
+    assert FEE_ACTIVITIES == ("FEE",)
+
+
+def test_a_canceled_fee_activity_is_not_booked():
+    """QA-Ops (#408): Alpaca's activity status is executed, correct or canceled; a canceled fee took no cash."""
+    assert fees_from_activities([{**PAPER_FEE, "status": "canceled"}]) == []
+    assert len(fees_from_activities([{**PAPER_FEE, "status": "correct"}])) == 1

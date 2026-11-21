@@ -10,7 +10,9 @@ v2. The difference never resets, so it crossed the reconcile tolerance ($50 at $
    change) is 0 at every close and nothing is blocked; every sale's booked fee is the venue's.
 2. `Engine._venue_fees`: the fees of the order's FILL activities; Alpaca's carry none (its regulatory fees are
    separate FEE activities) and give 0; a failed read gives 0 and says so.
-3. A multi-day sleeve sold by a flatten books the venue's fee."""
+3. A multi-day sleeve sold by a flatten books the venue's fee.
+4. (part 2) Alpaca's fees apart from the fills (FEE activities: TAF, SEC, CAT, posted the evening after) are booked
+   once each at the next session start, so the cash still follows the broker's to the cent."""
 
 from __future__ import annotations
 
@@ -230,8 +232,8 @@ def test_the_order_sync_passes_the_orders_sending_time_on_every_exit_path():
 
 
 def test_the_reconciliation_still_catches_a_real_cash_difference(frame):
-    """The fix books what the venue reports; cash the venue takes without reporting it on a fill (an Alpaca FEE
-    activity, a fee the engine never read) still shows: $40 stays inside the $50 tolerance at $100k, $60 more
+    """The fix books what the venue reports (on the fill, or as a FEE activity); cash the venue takes without
+    reporting it at all still shows: $40 stays inside the $50 tolerance at $100k, $60 more
     blocks entries at the next check."""
     sd = from_frame("SPY", frame)
     days = [str(d) for d in sd.dates][-4:]
@@ -260,3 +262,119 @@ def test_the_reconciliation_still_catches_a_real_cash_difference(frame):
         store.journal.close()
     assert blocked[:2] == [False, False]  # nothing, then $40: inside the tolerance
     assert blocked[2:] == [True, True], blocked  # $100 in all: blocked from the next check on
+
+
+# ---------------------------------------------------------------- Alpaca's separate FEE activities (#238, part 2)
+
+
+def test_alpaca_s_separate_fee_activities_are_booked_so_cash_never_drifts(frame):
+    """Alpaca puts no fee on a FILL activity; it takes its regulatory fees (TAF, SEC, CAT) apart from the fill, as
+    FEE activities posted the evening after the trades (the paper account posted one on 18 Nov 2026). Here the venue
+    charges nothing on the fills (0 bp) and takes $1.75 a session that way: unbooked, that is past the $50
+    tolerance at $100k in 29 sessions and entries stay blocked. Booked at the next session start, the ledger's
+    cash follows the broker's to the cent at every close, and each fee is booked once."""
+    sd = from_frame("SPY", frame)
+    days = [str(d) for d in sd.dates][-TEST:]
+    costs = costs_for("0", {"SPY": adv_table(frame)})
+    profiles = load_profiles()
+    start = pd.Timestamp(f"{days[0]} 09:00", tz=ET).tz_convert(UTC).to_pydatetime() - timedelta(minutes=30)
+    trace = []
+    with tempfile.TemporaryDirectory() as tmp:
+        store = JournalStore(Journal(Path(tmp) / "journal.sqlite"))
+        sim = simulation({"SPY": frame}, {}, "SPY", store=store, policies=profiles, start=start,
+                         cache_dir=Path(tmp) / "h", vix=pd.Series(dtype=float), fomc=set(), costs=costs,
+                         cash=100_000.0, calendar=se.calendar_of(sd), strategies={lv: [] for lv in profiles})
+        costs.clock = sim.clock
+        eng = sim.engine
+        eng.shadow_only = ()
+        strat = registry.research_intraday()["spy_noise_band"]
+        eng.live_strategies = lambda: (strat,)
+        store.insert("command", {"kind": "new_run", "payload": {"amount_usd": 100_000.0, "level": "balanced"},
+                                 "idempotency_key": "drift-fee", "applied_at": None})
+        eng.startup()
+        eng.apply_commands()
+        for day in days:
+            assert not run_sessions(eng, sim.broker, sim.clock, [day], strict=True).errors
+            b = eng.ledger.book(eng._rid())
+            drift = (float(sim.broker.account()["cash"]) - b.broker_cash0) - (b.cash - b.amount)
+            trace.append({"day": day, "drift": drift, "blocked": not eng._reconciled()})
+            sim.broker.post_fee(1.75, day=day, sub_type="TAF")  # the evening after the session
+        fees = [e[3] for e in eng.journal.entries(kinds=("fee",))]
+        store.journal.close()
+    assert max(abs(r["drift"]) for r in trace) < 1e-6, [r for r in trace if abs(r["drift"]) >= 1e-6][:3]
+    assert not any(r["blocked"] for r in trace)
+    assert len(fees) == TEST - 1 and len({f["ref"] for f in fees}) == TEST - 1  # each once; the last not yet read
+    assert all(f["amount"] == -1.75 for f in fees)
+
+
+def _fee_engine(rows=None, fail=False, started="2026-11-18T14:00:00+00:00"):
+    from kaibot.engine.ledger import Ledger
+
+    eng = _engine(_Broker(rows, fail))
+    eng.corporate_actions = None
+    eng._rid = lambda: 7
+    eng.now = lambda: datetime(2026, 11, 20, 14, 30, tzinfo=UTC)
+    eng.ledger = Ledger()
+    eng._book = lambda kind, body: (eng.journal.append(kind, body), eng.ledger.apply(kind, body))
+    eng._book("run", {"run_id": 7, "amount": 10_000.0, "broker_cash0": 50_000.0, "started": started})
+    return eng
+
+
+def _fee(i, created, amount="-0.01", sub="CAT"):
+    return {"activity_type": "FEE", "activity_sub_type": sub, "id": f"f{i}", "date": created[:10],
+            "created_at": created, "net_amount": amount}
+
+
+def test_fee_activities_are_read_from_the_run_start_and_booked_once():
+    rows = [_fee(0, "2026-11-18T01:06:00Z"),  # before the run's cash baseline: already in it, not booked
+            _fee(1, "2026-11-19T01:06:00Z"), _fee(2, "2026-11-19T01:06:01Z", "-0.37", "TAF")]
+    eng = _fee_engine(rows)
+    eng._account_fees(datetime(2026, 11, 19).date())
+    eng._account_fees(datetime(2026, 11, 20).date())  # the next session start (or a restart): nothing twice
+    b = eng.ledger.book(7)
+    assert b.cash == pytest.approx(10_000.0 - 0.38) and b.fees_total == pytest.approx(-0.38)
+    assert [x["ref"] for *_, x in eng.journal.entries(kinds=("fee",))] == ["alpaca:f1", "alpaca:f2"]
+    (after, types_), _ = eng.broker.calls
+    assert types_ == ("FEE",) and after == datetime(2026, 11, 16, 13, 59, tzinfo=UTC)  # two days (and a minute) early
+
+
+def test_a_failed_fee_read_books_nothing_and_says_so():
+    eng = _fee_engine(fail=True)
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert eng.ledger.book(7).cash == 10_000.0
+    assert [k for k, _ in eng.store.events] == ["venue_fee_unread"]
+
+
+def test_research_runs_and_runs_without_a_cash_baseline_read_no_fees():
+    eng = _fee_engine([_fee(1, "2026-11-19T01:06:00Z")])
+    eng.corporate_actions = lambda day: []  # research: SimBroker charges its fees on the fill
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert eng.broker.calls == []
+    eng = _fee_engine([_fee(1, "2026-11-19T01:06:00Z")])
+    eng.ledger.book(7).broker_cash0 = None
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert eng.broker.calls == [] and eng.ledger.book(7).cash == 10_000.0
+
+
+def test_a_malformed_fee_row_is_one_event_and_books_nothing():
+    """QA-Ops (#408): `_account_fees` never raises, also when a row cannot be read (a bad amount or time)."""
+    eng = _fee_engine([_fee(1, "2026-11-19T01:06:00Z"), _fee(2, "2026-11-19T01:07:00Z", amount="n/a")])
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert eng.ledger.book(7).cash == 10_000.0
+    assert [k for k, _ in eng.store.events] == ["venue_fee_unread"]
+    eng = _fee_engine([{**_fee(1, "2026-11-19T01:06:00Z"), "created_at": "not a time"}])
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert [k for k, _ in eng.store.events] == ["venue_fee_unread"]
+
+
+def test_fees_booked_before_a_restart_are_not_booked_again_after_it():
+    """QA-Ops (#408): after a restart the ledger is folded again from the journal; its refs keep each fee once."""
+    from kaibot.engine.ledger import Ledger
+
+    rows = [_fee(1, "2026-11-19T01:06:00Z"), _fee(2, "2026-11-19T01:06:01Z", "-0.37", "TAF")]
+    eng = _fee_engine(rows)
+    eng._account_fees(datetime(2026, 11, 19).date())
+    eng.ledger = Ledger.fold([(k, b) for _, _, k, b in eng.journal.entries()])  # the restart
+    eng._account_fees(datetime(2026, 11, 19).date())
+    assert len(eng.journal.entries(kinds=("fee",))) == 2
+    assert eng.ledger.book(7).cash == pytest.approx(10_000.0 - 0.38)
