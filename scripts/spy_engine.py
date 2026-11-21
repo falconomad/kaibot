@@ -77,6 +77,7 @@ from kaibot.engine.events import load_calendar  # noqa: E402
 from kaibot.engine.journal import Journal, JournalStore  # noqa: E402
 from kaibot.engine.runner import run_sessions, simulation  # noqa: E402
 from kaibot.evaluation import gate_v2 as gv  # noqa: E402
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.replay import spy_noise_band as nb  # noqa: E402
@@ -687,6 +688,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-neighbours", action="store_true", help="skip the eight neighbour runs (mark 6 unjudged)")
     ap.add_argument("--has", action="store_true", help="exit 0 if a finished report exists")
     ap.add_argument("--summary", action="store_true", help="print the newest report's page and write it")
+    holdout.add_argument(ap)
     a = ap.parse_args(argv)
     data = Path(a.data)
     if a.has:
@@ -704,6 +706,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not a.end:
         ap.error("--end is required for a run")
+    holdout.enforce(script=__file__, end=a.end, rule=RULE, opening=a.open_holdout, data=a.data)
     rep = run(a)
     f = write(rep, data)
     text = page(json.loads(f.read_text()), f.name)

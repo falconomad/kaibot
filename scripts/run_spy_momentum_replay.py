@@ -19,6 +19,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_symbol  # noqa: E402
 from kaibot.replay.spy_momentum import run  # noqa: E402
@@ -33,7 +34,9 @@ def main() -> None:
     ap.add_argument("--level", default="balanced", choices=["balanced", "aggressive"])
     ap.add_argument("--equity", type=float, default=100_000.0)
     ap.add_argument("--label", default="")
+    holdout.add_argument(ap)
     a = ap.parse_args()
+    holdout.enforce(script=__file__, end=a.end, rule="spy_late_momentum", opening=a.open_holdout, data=a.data)
     data = Path(a.data)
     start, end = np.datetime64(a.start, "D"), np.datetime64(a.end, "D")
     spy = load_symbol(data, "SPY")  # SPY alone fits in memory for 10 years (~2,700 x 390 x 6 floats)

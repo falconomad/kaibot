@@ -39,6 +39,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.features import market_alarm as ma  # noqa: E402
@@ -258,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data", type=Path, default=ROOT / "data")
     ap.add_argument("--flags-only", action="store_true", help="flags and shares only; reads no outcome")
     ap.add_argument("--rankings-only", action="store_true", help="refresh data/alarm/top10.csv and stop")
+    holdout.add_argument(ap)
     a = ap.parse_args(argv)
     data = Path(a.data)
     start = date.fromisoformat(a.start)
@@ -270,6 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         end = max(spy.index)
     else:
         end = date.today() - timedelta(days=1)
+    if not (a.flags_only or a.rankings_only):
+        # the comparisons read outcomes (SPY's move, the rule's returns): a research read. The flags and the
+        # monthly rankings read no outcome, and the live alarm needs the rankings, so those two modes stay open
+        holdout.enforce(script=__file__, end=end, rule=STUDY, opening=a.open_holdout, data=data)
     (data / "alarm").mkdir(parents=True, exist_ok=True)
     if have_daily:
         rk = build_rankings(data, start, end + timedelta(days=31))
