@@ -15,10 +15,11 @@ Layouts read (each from the script that writes it):
 - engine_core: `engine_<level>_<version>_pit_<ts>.json` (the engine with SimBroker); `rows[]`, daily files in
   the folder of the same name;
 - oneshots: `oneshots_<rule>_<ts>.json` (oneshots.py); `versions.<name>.rows[]`;
-- spy: `spy_<level>_<version>_<ts>.json` (spy_noise_band.py); `rows[]`, `timing_control`;
+- spy: `spy_<level>_<version>_<ts>.json` (the SPY noise-band script); `rows[]`, `timing_control`;
 - spy_engine: `spy_engine_<level>_<ts>.json` (spy_engine.py); `rows[]`, the files named in each row;
 - spy_trend: `spy_trend_<ts>.json` (spy_trend.py); `rows[]`, daily files in the folder, `control.<model>`;
-- multiday and walk-forward: `walkforward_<level>_<tag>.json`; `files.tuned` and `files.default`.
+- the walk-forwards (intraday and multi-day first look): `walkforward_<level>_<tag>.json`; `files.tuned`
+  and `files.default`.
 
 A row whose daily file is missing is still listed, with `daily_file` None and the report's own summary numbers:
 nothing is dropped silently. A file that is not a report (a gate report, a study, a skipped marker) is ignored
@@ -49,7 +50,7 @@ class Row:
     """One simulated account of one report."""
 
     report: str  # the report's file name
-    set: str  # core | engine_core | oneshots | spy | spy_engine | spy_trend | multiday | walkforward | ?
+    set: str  # the report's `set`: core, engine_core, oneshots, spy, spy_engine, spy_trend, walkforward, ...
     rule: str  # the pre-registration name (the spec before "~")
     label: str
     role: str  # base | neighbour | cost | fill | exposure | control | variant | other
