@@ -19,7 +19,8 @@ Layouts read (each from the script that writes it):
 - spy_engine: `spy_engine_<level>_<ts>.json` (spy_engine.py); `rows[]`, the files named in each row;
 - spy_trend: `spy_trend_<ts>.json` (spy_trend.py); `rows[]`, daily files in the folder, `control.<model>`;
 - the walk-forwards (intraday and multi-day first look): `walkforward_<level>_<tag>.json`; `files.tuned`
-  and `files.default`.
+  and `files.default`;
+- intraday one-shots: `oneshots_<rule>_<ts>.json` with `variants.<name>.account`; daily files hold `ret` only.
 
 A row whose daily file is missing is still listed, with `daily_file` None and the report's own summary numbers:
 nothing is dropped silently. A file that is not a report (a gate report, a study, a skipped marker) is ignored
@@ -92,6 +93,13 @@ def _raw_rows(rep: dict) -> list[tuple[str | None, dict, dict]]:
         out += [(None, r, rep) for r in rep["rows"] if isinstance(r, dict) and "label" in r]
     for name, block in (rep.get("versions") or {}).items() if isinstance(rep.get("versions"), dict) else ():
         out += [(name, r, block) for r in (block.get("rows") or []) if isinstance(r, dict) and "label" in r]
+    if isinstance(rep.get("variants"), dict) and rep.get("rule"):
+        # the intraday one-shots (oneshots.py): variants.<name>.account, daily files named after the account
+        for name, v in rep["variants"].items():
+            if isinstance(v, dict) and isinstance(v.get("account"), dict):
+                label = rep["rule"] if name == "base" else f"{rep['rule']}~{name}"
+                out.append((None, {"label": label, "spec": label, "kind": "base" if name == "base" else "neighbour",
+                                   **v["account"]}, rep))
     return out
 
 
@@ -193,6 +201,7 @@ def rows(f: Path, rep: dict) -> list[Row]:
         rel = (r.get("files") or {}).get("daily") if isinstance(r.get("files"), dict) else None
         cands = [folder / rel] if rel else []
         cands.append(folder / f.stem / f"daily_{_safe(r['label'])}.csv")
+        cands.append(folder / f.stem / f"daily_{r['label']}.csv")  # the intraday one-shots keep the "~"
         daily_file = next((c for c in cands if c.is_file()), None)
         out.append(Row(f.name, meta["set"], rule, r["label"], role, spec.split("~")[1] if "~" in spec else None,
                        r.get("cost", r.get("mult")), daily_file, _control(rep, block, r),
@@ -297,6 +306,18 @@ def newest_per_rule(all_rows: list[Row], *, role: str = "base") -> dict[tuple[st
         if r.role == role:
             out[(r.rule, run_kind(r))] = r
     return out
+
+
+EVIDENCE = {"engine_core": 0, "spy_engine": 0, "spy_cost_rerun": 0, "core": 1, "oneshots": 1, "spy_trend": 1,
+            "spy": 2, "walkforward": 4}  # any other set (the multi-day first look): 5
+
+
+def evidence_rank(r: Row) -> tuple:
+    """Lower is better evidence: the engine with SimBroker first, then the point-in-time universe, then cost
+    model v2. Used to pick the run a page or a table leads with; it judges nothing."""
+    cm = r.meta.get("cost_model_row") or r.meta.get("cost_model")
+    return (EVIDENCE.get(r.set, 5), 0 if r.meta.get("universe_mode") == "point_in_time" else 1,
+            0 if cm == "v2" else 1, r.label)
 
 
 def run_kind(r: Row) -> str:
