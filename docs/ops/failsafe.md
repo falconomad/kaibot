@@ -54,7 +54,10 @@ the Mac itself before acting, because three minutes without Supabase used to can
 - **Alive:** nothing is cancelled, sold or halted on that poll (log line "heartbeat unreadable, but ... the engine
   is alive"). **Not alive:** exactly the old path. A dead engine is therefore acted on at most 150 s after its last
   journal write instead of 90 s after its last heartbeat, and only while Supabase is unreadable too.
-- A heartbeat that **was read** and is stale, or no heartbeat row at all, is acted on whatever the journal says. The
+- **The end of the outage (QA-Ops, #485).** The first good read after unreadable ones usually shows the engine's
+  last beat from before the outage (the watchdog polls every 15 s, the engine beats about every 10 s). For 90 s
+  (`STALE_S`) from that first good read a stale row is judged by the Mac in the same way; a fresh beat ends it.
+- Otherwise a heartbeat that **was read** and is stale, or no heartbeat row at all, is acted on whatever the journal says. The
   dead-man in Supabase is unchanged: if the Mac is cut off for more than 3 minutes while Supabase is up, it still
   cancels the entries from its side.
 - **Carried, not lost.** Before each entry cancel the watchdog appends the order's ids to `watchdog_cancels.jsonl`

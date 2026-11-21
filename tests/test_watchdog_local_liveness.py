@@ -302,3 +302,87 @@ def test_a_buy_cancelled_without_the_watchdogs_record_is_still_not_carried(tmp_p
     assert not [o for o in d.md() if "-carry-" in o["client_order_id"]]
     (note,) = [b["carry"] for *_, b in d.eng.journal.entries(kinds=("md_send",)) if b.get("carry")]
     assert note["skipped"] == {NEW: "order canceled"}
+
+
+# ---------------------------------------------------------------- QA-Ops review of #485: the end of the outage
+class BackStore(StaleStore):
+    """Supabase unreachable, then back. The heartbeat row it then shows is the engine's last one from before the
+    outage, until the engine's next beat lands (`beat`)."""
+
+    def __init__(self, clock, last_beat):
+        super().__init__(clock)
+        self.down, self.ts = True, last_beat
+
+    def select(self, table, params):
+        if self.down:
+            raise RuntimeError("supabase unreachable")
+        return [{"process": "engine", "ts": self.ts.isoformat()}]
+
+    def beat(self):
+        self.ts = self.clock()
+
+
+def _outage(tmp_path, minutes=3):
+    """Three minutes without Supabase, a healthy engine (a journal write a minute); then Supabase answers."""
+    clock = Clock(T0)
+    j = _engine_writes(tmp_path, clock)
+    store = BackStore(clock, T0)
+    wd, venue = _watchdog(tmp_path, clock, store)
+    for k in range(4 * minutes):
+        clock.t = T0 + timedelta(seconds=15 * (k + 1))
+        if k % 4 == 3:
+            j.append("row", {"op": "insert", "table": "ledger", "row": {"ts": clock().isoformat()}})
+        assert wd.step()["state"] == "heartbeat_unreadable_engine_alive"
+    store.down = False
+    return clock, j, store, wd, venue
+
+
+def test_supabase_back_before_the_engines_next_beat_cancels_nothing(tmp_path):
+    """The watchdog polls every 15 s and the engine beats about every 10 s, so after an outage the watchdog often
+    reads the old row first: a heartbeat three minutes old, of an engine whose journal was written seconds ago.
+    That engine is alive. It has `stale_s` from the first good read to land a beat."""
+    clock, j, store, wd, venue = _outage(tmp_path)
+    clock.t += timedelta(seconds=5)
+    out = wd.step()  # read, three minutes old
+    assert out["state"] == "heartbeat_unreadable_engine_alive" and venue.canceled == [] and not wd.tripped
+    store.beat()
+    clock.t += timedelta(seconds=15)
+    assert wd.step()["state"] == "ok" and venue.canceled == [] and store.halts == []
+
+
+def test_an_engine_that_does_not_beat_within_the_stale_time_after_supabase_is_back_is_acted_on(tmp_path):
+    """The allowance ends: Supabase answers, the journal is still written, and no beat lands for 90 s (the engine
+    cannot write there). A heartbeat that is read and stale is acted on, as before."""
+    clock, j, store, wd, venue = _outage(tmp_path)
+    for _ in range(7):  # good reads from +15 s to +105 s: 90 s from the first one, the journal written all along
+        clock.t += timedelta(seconds=15)
+        j.append("row", {"op": "insert", "table": "ledger", "row": {"ts": clock().isoformat()}})
+        assert wd.step()["state"] == "heartbeat_unreadable_engine_alive"
+    clock.t += timedelta(seconds=15)
+    j.append("row", {"op": "insert", "table": "ledger", "row": {"ts": clock().isoformat()}})
+    out = wd.step()  # past the allowance, the journal fresh: the read heartbeat decides
+    assert out["state"] == "engine_stale" and venue.canceled == ["o1"] and wd.tripped
+
+
+def test_supabase_back_and_the_journal_silent_is_a_dead_engine(tmp_path):
+    clock, j, store, wd, venue = _outage(tmp_path)
+    clock.t += timedelta(seconds=60)  # inside the allowance; the last journal write is now 105 s old: alive
+    assert wd.step()["state"] == "heartbeat_unreadable_engine_alive"
+    clock.t = T0 + timedelta(seconds=180 + LOCAL_ALIVE_S + 1)  # no write since the outage ended: dead
+    out = wd.step()
+    assert out["state"] == "engine_stale" and venue.canceled == ["o1"]
+
+
+def test_supabase_back_and_the_engine_process_gone_is_dead_at_once(tmp_path):
+    clock, j, store, wd, venue = _outage(tmp_path)
+    (tmp_path / PID_FILE).write_text(json.dumps({"pid": 4242, "host": wd.local.host}))
+    wd.local.pid_alive = lambda pid: False
+    clock.t += timedelta(seconds=5)
+    assert wd.step()["state"] == "engine_stale" and venue.canceled == ["o1"]
+
+
+def test_supabase_back_with_no_heartbeat_row_is_acted_on(tmp_path):
+    clock, j, store, wd, venue = _outage(tmp_path)
+    store.select = lambda table, params: []
+    clock.t += timedelta(seconds=5)
+    assert wd.step()["state"] == "engine_stale" and venue.canceled == ["o1"]

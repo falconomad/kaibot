@@ -35,7 +35,9 @@ once; otherwise the engine counts as alive only while its last journal write is 
 nothing is cancelled, sold or halted this poll (`heartbeat_unreadable_engine_alive`). Anything else (no journal, a
 silent journal, no local evidence wired) is stale as before: failing closed costs at most a flat afternoon for
 the intraday sleeves, and the multi-day sleeves keep their stops either way. A heartbeat that was read and is
-stale, or no heartbeat row at all, is acted on whatever the journal says.
+stale, or no heartbeat row at all, is acted on whatever the journal says. The one exception (QA-Ops, #485): for
+STALE_S after the first good read that ends an unreadable spell, a stale row is judged by this machine too (the
+engine's next beat may not have landed yet).
 
 Before each entry cancel the watchdog appends the order's ids to a local file (CANCELS_FILE, next to the journal;
 the journal itself it never writes). The engine's carry-over reads it: a buy the watchdog cancelled is sent again
@@ -156,6 +158,13 @@ class Watchdog:
         self.book = book
         self.local, self.cancel_log = local, Path(cancel_log) if cancel_log is not None else None
         self.unreadable = False  # the last heartbeat read failed (as opposed to: read, and stale or missing)
+        # QA-Ops (#485): the end of an unreadable spell. The first good read after it usually shows the engine's
+        # last beat from BEFORE the outage (this watchdog polls every 15 s, the engine beats about every 10 s), so
+        # for `stale_s` from that read a stale row is judged by this machine too. After that, and whenever no
+        # unreadable spell came before, a heartbeat that was read and is stale is acted on whatever the journal says.
+        self._was_unreadable = False
+        self._readable_at: datetime | None = None
+        self._row = False  # the last read returned a heartbeat row
         self._alive_said = False
         self._protected_at: datetime | None = None
         self._sent: dict[tuple[str, str], tuple[datetime, int]] = {}  # stops sent: (strategy, symbol) -> (when, qty)
@@ -167,22 +176,26 @@ class Watchdog:
         self._calendar_failed: tuple = (None, False)  # (ET day, the read failed that day)
 
     def heartbeat_age(self) -> float:
-        self.unreadable = False
+        self.unreadable, self._row = False, False
         try:
             rows = self.store.select("heartbeat", {"process": f"eq.{self.engine_process}", "limit": "1"})
         except Exception:
-            self.unreadable = True
+            self.unreadable, self._was_unreadable, self._readable_at = True, True, None
             log.exception("heartbeat read failed: the engine counts as down unless this machine shows it alive")
             return float("inf")
+        if self._was_unreadable and self._readable_at is None:
+            self._readable_at = self.now()
         if not rows or not rows[0].get("ts"):
             return float("inf")
+        self._row = True
         ts = rows[0]["ts"]
         ts = ts if isinstance(ts, datetime) else datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
         return max(0.0, (self.now() - ts).total_seconds())
 
     def _alive_locally(self) -> str | None:
-        """M9 1.6: why the engine counts as alive although its heartbeat could not be read; None: it does not."""
-        if not self.unreadable or self.local is None:
+        """M9 1.6: why the engine counts as alive although its heartbeat could not be read (or, QA-Ops #485, was
+        read stale within `stale_s` of the end of an unreadable spell); None: it does not."""
+        if self.local is None or not (self.unreadable or self._recovering()):
             return None
         try:
             alive, why = self.local.verdict()
@@ -193,6 +206,11 @@ class Watchdog:
             log.error("heartbeat unreadable and %s: treating the engine as down", why)
             return None
         return why
+
+    def _recovering(self) -> bool:
+        """A heartbeat row was read, right after reads that failed: the engine may not have beaten yet."""
+        return (self._row and self._was_unreadable and self._readable_at is not None
+                and 0 <= (self.now() - self._readable_at).total_seconds() <= self.stale_s)
 
     def _note_cancel(self, o: dict, age: float) -> None:
         """Append the order to the local cancel record, durably, BEFORE the venue is asked (a record without a
@@ -293,6 +311,7 @@ class Watchdog:
                 self._event("watchdog_recovered", {"heartbeat_age_s": round(age, 1)})
             self.tripped = False
             self._alive_said = False
+            self._was_unreadable, self._readable_at = False, None  # a fresh beat was read: the spell is over
             return {"state": "ok", "age_s": age}
         why = self._alive_locally()
         if why is not None:  # M9 1.6: Supabase is unreachable, the engine is not dead: nothing is cancelled or sold
