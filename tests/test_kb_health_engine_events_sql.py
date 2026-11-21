@@ -28,6 +28,9 @@ ROUTINE = {"cash_merger_booked", "dividend_booked", "split_booked", "config_appl
            "multi_day_canceled", "multi_day_decision", "multi_day_fill", "multi_day_orders", "multi_day_plan",
            "multi_day_review_applied", "multi_day_sold", "multi_day_stops_cancelled", "multi_day_view_dropped",
            "positions_rewritten", "session_restored"}
+# S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
+# nothing and a failure stops nothing, so neither is a health event
+ROUTINE |= {"market_alarm", "market_alarm_error"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 
