@@ -1,8 +1,9 @@
 -- 0024: kb_ticker_check_answer: the dashboard's Vercel function answers 'My lists' ticker checks (stakeholder,
 -- 18 Nov 2026: "move the check onto Vercel so it works even when the Mac is off").
 --
--- NOT APPLIED. Production migrations are the stakeholder's (Product applies on his word). Dashboard-only, like 0020 and
--- 0021: any time, also while the engine runs. Independent of every other pending migration (0023, stock summaries).
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's (Product applies on his word). Dashboard-only, like 0020 and 0021: any
+-- time, also while the engine runs. Independent of 0023 (stock summaries).
 --
 -- Until now only scripts/run_ticker_checks.py on the Mac (service role) answered the rows kb_check_ticker leaves
 -- `pending`. apps/web/api/check-ticker.ts runs the same check (engine/tickercheck.py's verdict; a shared JSON and two
