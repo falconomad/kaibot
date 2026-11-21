@@ -52,6 +52,7 @@ def test_the_queries_only_read():
                              r"|\bset\s+(role|session)|pg_sleep|dblink|lo_", code)
     sh = SH.read_text()
     assert "default_transaction_read_only=on" in sh and "set default_transaction_read_only = on" in sh
+    assert " -1 " in sh and '-c "set transaction read only"' in sh  # QA-Ops: one read-only transaction as well
     assert os.access(SH, os.X_OK)
 
 
@@ -210,4 +211,17 @@ def test_the_whole_file_runs_in_a_read_only_session():
     assert r.returncode == 0, r.stderr
     w = subprocess.run(["psql", *shlex.split(PG), "-X", "-q", "-v", "ON_ERROR_STOP=1", "-c",
                         "insert into kaibot.run (amount_usd) values (5000)"], capture_output=True, text=True, env=env)
+    assert w.returncode and "read-only transaction" in w.stderr
+
+
+@needs_pg
+def test_one_read_only_transaction_even_when_the_pooler_drops_session_settings():
+    """QA-Ops on #371: with no startup option and no session setting (a transaction-mode pooler), the script's
+    `-1` plus `set transaction read only` still runs the file and refuses a write in the same run."""
+    env = {k: v for k, v in os.environ.items() if k != "PGOPTIONS"}
+    base = ["psql", *shlex.split(PG), "-X", "-q", "-1", "-v", "ON_ERROR_STOP=1", "-c", "set transaction read only"]
+    r = subprocess.run([*base, "-f", str(SQL)], capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    w = subprocess.run([*base, "-c", "insert into kaibot.run (amount_usd) values (5000)"], capture_output=True,
+                       text=True, env=env)
     assert w.returncode and "read-only transaction" in w.stderr
