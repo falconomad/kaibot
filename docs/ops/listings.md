@@ -210,8 +210,8 @@ Known limits:
 ## On the dashboard (#378)
 
 `scripts/publish_notices.py` turns the watch's listings (and, once #377 is merged, the market-event alarm) into the
-dashboard's "New on the market" and "Big day" notices: rows of `kaibot.market_notice` (migration 0034), read by
-`kb_market_notices()`. Off by default. To switch it on, after the stakeholder's "apply" of 0034:
+dashboard's "New on the market" and "Big day" notices: rows of `kaibot.market_notice` (migration 0035), read by
+`kb_market_notices()`. Off by default. To switch it on, after the stakeholder's "apply" of 0035:
 
 ```bash
 .venv/bin/python scripts/publish_notices.py --now 2026-11-19T06:45:00Z   # dry run: what 19 Nov looked like

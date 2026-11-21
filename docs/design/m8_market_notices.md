@@ -82,7 +82,7 @@ tomorrow does not need one.
 |---|---|---|
 | Loading | nothing | most days have no notice; a placeholder would flash and vanish and move the pot down and up |
 | Nothing in the window | nothing | the normal day |
-| Migration 0034 not applied yet (the function does not exist) | nothing | the same as a day without notices; nothing to fix for the stakeholder |
+| Migration 0035 not applied yet (the function does not exist) | nothing | the same as a day without notices; nothing to fix for the stakeholder |
 | Could not load | one muted line, "Market notices could not load." and a text button "Try again" | honest, but quiet: it is not about the account |
 | One or two notices | one row each | |
 | Three or more | two rows and "N more market notices" | |
@@ -126,7 +126,7 @@ stylesheet, so a later token change that breaks them fails the build.
 
 ## The data (contract for Backend-quant and Frontend)
 
-Read-only, owner-only: `public.kb_market_notices(p_today date default null)` (migration **0034**), returning
+Read-only, owner-only: `public.kb_market_notices(p_today date default null)` (migration **0035**), returning
 
 ```json
 {"today": "2026-11-19", "from": "2026-11-13", "to": "2026-11-27",

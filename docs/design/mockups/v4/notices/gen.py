@@ -160,7 +160,7 @@ def states() -> str:
                    + f'<div class="nt more">{ico("cal", 20, 2, "ni")}<span class="g">1 more market notice</span>{CHEV}</div>',
                    "Two rows at most, then one quiet row that opens the list.")
             + card("5 · Loading, nothing today, not set up yet", '<div class="ghost">no row, no placeholder</div>',
-                   "Most days have no notice, so a placeholder would only flash and vanish. Before migration 0034 is applied the "
+                   "Most days have no notice, so a placeholder would only flash and vanish. Before migration 0035 is applied the "
                    "dashboard shows nothing, as on a day without notices.")
             + card("6 · Could not load", '<div class="err">Market notices could not load. <b>Try again</b></div>',
                    "One muted line with a text button. No colour of meaning: it is not a warning about the account.")

@@ -6,7 +6,7 @@ A small job on the Mac, beside the engine and never inside it. It reads
   reading), for listings whose first session falls between four sessions back and five sessions ahead, and
 - the market-event alarm (S103, `kaibot.features.market_alarm.live_alarm`, once PR #403 is merged; skipped while the
   module is not there) for today and the next five sessions, as known now,
-and upserts one row per notice into kaibot.market_notice (migration 0034) with the service key. A row it wrote
+and upserts one row per notice into kaibot.market_notice (migration 0035) with the service key. A row it wrote
 before that it no longer finds (a listing reclassified, a date moved) is marked `withdrawn`. The dashboard reads the
 rows through kb_market_notices(), which also adds the engine's own `market_alarm` events.
 
@@ -239,7 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     store = Store((os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL).rstrip("/"), key).quick(20.0)
     try:
         res = publish(store, rows, back, ahead, now)
-    except Exception as e:  # noqa: BLE001 - e.g. migration 0034 not applied yet
+    except Exception as e:  # noqa: BLE001 - e.g. migration 0035 not applied yet
         print(f"not written: {str(e)[:200]}", file=sys.stderr)
         return 1
     print(json.dumps(res))

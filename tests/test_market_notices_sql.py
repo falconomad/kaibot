@@ -1,4 +1,4 @@
-"""Migration 0034 (#378): kaibot.market_notice and kb_market_notices, the dashboard's market notices.
+"""Migration 0035 (#378): kaibot.market_notice and kb_market_notices, the dashboard's market notices.
 
 The file checks run everywhere. The SQL checks need a scratch Postgres with every migration applied
 (KAIBOT_TEST_PG; CI and KAIBOT_TEST_PG_AUTO=1 build one; skipped otherwise)."""
@@ -16,17 +16,17 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-M34 = ROOT / "migrations" / "0034_market_notices.sql"
+M35 = ROOT / "migrations" / "0035_market_notices.sql"
 PG = os.environ.get("KAIBOT_TEST_PG")
-needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0034 applied")
+needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0035 applied")
 OWNER, OTHER = "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"
 
 
 def _sql() -> str:
-    return "\n".join(line for line in M34.read_text().splitlines() if not line.lstrip().startswith("--")).lower()
+    return "\n".join(line for line in M35.read_text().splitlines() if not line.lstrip().startswith("--")).lower()
 
 
-def test_0034_is_additive_and_owner_only():
+def test_0035_is_additive_and_owner_only():
     s = _sql()
     assert not re.search(r"\b(delete|drop|truncate|alter function)\b", s)
     assert not re.search(r"\bupdate\s+kaibot\.", s) and "insert into" not in s
@@ -37,8 +37,8 @@ def test_0034_is_additive_and_owner_only():
     assert "revoke all on function public.kb_market_notices(date) from public, anon;" in s
 
 
-def test_0034_header_claims_no_status():
-    head = [ln for ln in M34.read_text().splitlines() if ln.startswith("--")]
+def test_0035_header_claims_no_status():
+    head = [ln for ln in M35.read_text().splitlines() if ln.startswith("--")]
     assert not any(re.match(r"^--\s*(NOT )?APPLIED\b", ln) for ln in head)
 
 
@@ -83,8 +83,8 @@ def seeded():
       insert into kaibot.owner (user_id) values ('{OWNER}') on conflict do nothing;
       {rows}
       insert into kaibot.event (ts, type, payload, hash) select '2026-11-19 14:30+00', 'market_alarm',
-        '{json.dumps(alarm)}'::jsonb, 'test-0034-alarm'
-        where not exists (select 1 from kaibot.event where hash = 'test-0034-alarm');""", role=None)
+        '{json.dumps(alarm)}'::jsonb, 'test-0035-alarm'
+        where not exists (select 1 from kaibot.event where hash = 'test-0035-alarm');""", role=None)
 
 
 def notices(today: str = "2026-11-19") -> dict:
@@ -120,8 +120,8 @@ def test_a_fed_day_from_the_engine_starts_at_14_00_new_york(seeded):
     alarm = {"session": "2026-12-09", "flags": {"fed_day": True, "cpi_day": False, "megacap_report": False,
              "index_reshuffle": False, "mega_listing": False}, "tier": "major", "details": {}}
     psql(f"""insert into kaibot.event (ts, type, payload, hash) select '2026-12-09 14:30+00', 'market_alarm',
-      '{json.dumps(alarm)}'::jsonb, 'test-0034-fed'
-      where not exists (select 1 from kaibot.event where hash = 'test-0034-fed');""",
+      '{json.dumps(alarm)}'::jsonb, 'test-0035-fed'
+      where not exists (select 1 from kaibot.event where hash = 'test-0035-fed');""",
          role=None)
     fed = [n for n in notices("2026-12-09")["notices"] if n["flag"] == "fed_day"]
     assert len(fed) == 1 and fed[0]["tier"] == "major"

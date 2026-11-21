@@ -1,5 +1,5 @@
--- 0034: the dashboard's market notices, "New on the market" and "Big day" (#378, M8 S104). Design:
--- docs/design/m8_market_notices.md. After 0033 (number only: no dependency on it).
+-- 0035: the dashboard's market notices, "New on the market" and "Big day" (#378, M8 S104). Design:
+-- docs/design/m8_market_notices.md. After 0034 (number only: no dependency on it; 0034 is #410's).
 --
 -- Status (applied or pending): docs/ops/migrations_pending.md.
 --
