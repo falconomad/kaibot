@@ -75,7 +75,7 @@ describe("the heartbeat's reconcile block", () => {
     expect(refusedText(s.refused!.why)).toMatch(/^The numbers changed after you looked/);
     expect(refusedText("nothing accepted: a difference that was shown has healed: check again")).toMatch(/cleared by itself/);
     expect(refusedText("Kaibot said no")).toBe("Nothing was accepted: kaibo said no");
-    expect(queueErrorText(new Error("unknown command"))).toMatch(/database update that hasn't been applied yet \(migration 0038\)/);
+    expect(queueErrorText(new Error("unknown command"))).toMatch(/database update that hasn't been applied yet \(migration 0037\)/);
     expect(queueErrorText(new Error("not authorised"))).toMatch(/Only the owner/);
     expect(queueErrorText(new Error("fetch failed"))).toMatch(/couldn't be sent, so nothing changed\. fetch failed/);
   });

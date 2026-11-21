@@ -154,7 +154,7 @@ with the broker (`engine/reconcile.py`):
 - **Clearing a real difference.** The owner accepts it with a reason:
   - command line: `python -m kaibot.engine.reconcile --status`, then `--accept "reason"`;
   - engine command: `accept_reconcile` with `{"reason": ...}`;
-  - dashboard (#439, M9 1.14; needs migration 0038): Engine page, safety check "Books and broker". The sheet shows
+  - dashboard (#439, M9 1.14; needs migration 0037): Engine page, safety check "Books and broker". The sheet shows
     each difference (the stock, the engine's shares against the broker's, the cash difference) from the heartbeat's
     `reconcile` block, asks for a reason and a tick that the numbers were compared with the broker, and queues
     `kb_command('accept_reconcile', {"reason": ..., "shown": [{"kind", "symbol", "offset"}]})`. The engine reads the

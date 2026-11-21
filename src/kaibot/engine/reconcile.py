@@ -38,7 +38,7 @@ Edge cases (issue #179):
   expires nothing (the read fails closed by itself).
 
 The owner's command: `python -m kaibot.engine.reconcile --accept "reason"` (accepts the last check's differences
-in the engine's journal; `--status` shows them). From the dashboard (M9 1.14, #439; migration 0038):
+in the engine's journal; `--status` shows them). From the dashboard (M9 1.14, #439; migration 0037):
 `kb_command('accept_reconcile', {"reason": ..., "shown": [{"kind", "symbol", "offset"}, ...]})`, applied by the
 engine like `pause` (`ACCEPT_COMMAND`). `shown` is what the owner's screen displayed when they confirmed (the
 heartbeat's `reconcile.diffs`, `Reconciler.status`): `resolve(..., shown=...)` refuses unless it is exactly the set

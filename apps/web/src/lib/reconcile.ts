@@ -106,7 +106,7 @@ export function refusedText(why: string): string {
 /** Why the command could not be queued, in the owner's words. */
 export function queueErrorText(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e ?? "");
-  if (/unknown command|command_kind_check/i.test(m)) return "This needs a database update that hasn't been applied yet (migration 0038). Nothing was sent.";
+  if (/unknown command|command_kind_check/i.test(m)) return "This needs a database update that hasn't been applied yet (migration 0037). Nothing was sent.";
   if (/not authorised/i.test(m)) return "Only the owner can accept a difference. Nothing was sent.";
   return `The acceptance couldn't be sent, so nothing changed. ${m}`;
 }

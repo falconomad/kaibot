@@ -125,7 +125,7 @@ export interface LlmBudget {
 const numValues = (o: Record<string, unknown> | null | undefined) =>
   Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, Number(v)]));
 
-/** `accept_reconcile` (M9 1.14, migration 0038): payload {reason, shown}, see lib/reconcile.ts. */
+/** `accept_reconcile` (M9 1.14, migration 0037): payload {reason, shown}, see lib/reconcile.ts. */
 export type CommandKind = "pause" | "resume" | "flatten_and_stop" | "set_level" | "accept_reconcile";
 export interface Trade {
   id: number; run_id: number; signal_id: number | null; strategy: string; symbol: string;

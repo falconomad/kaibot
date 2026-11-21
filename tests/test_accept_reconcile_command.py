@@ -72,7 +72,7 @@ def test_the_engine_applies_every_kind_the_dashboard_can_queue():
 
 # ------------------------------------------------------------------ the engine, with the row kb_command stores
 def stored(reason, shown):
-    """What kb_command (0038) writes as the command's payload: the reason trimmed, and only kind, symbol and offset
+    """What kb_command (0037) writes as the command's payload: the reason trimmed, and only kind, symbol and offset
     of each difference shown."""
     return {"reason": reason.strip(),
             "shown": [{"kind": x["kind"], "symbol": x.get("symbol"), "offset": x["offset"]} for x in shown]}
@@ -157,6 +157,27 @@ def test_a_difference_that_changed_or_healed_after_the_screen_was_drawn_is_refus
         assert ev["payload"]["when"] == "accept_refused" and why in ev["payload"]["refused"]
     else:
         assert "refused" not in eng._daily_status({})["reconcile"], "nothing left to explain once the books agree"
+        assert not [e for e in rows(store, "event") if e["type"] == "reconcile_blocked"
+                    and e["payload"].get("when") == "accept_refused"], "nothing is blocked, so no event says so"
+
+
+def test_a_second_command_after_the_acceptance_changes_nothing(tmp_path):
+    """Two devices, or a retry under another key: the first is accepted, the second finds nothing open."""
+    eng, broker, clock, store = carried(tmp_path)
+    drift(eng)
+    eng.startup()
+    shown = screen(eng)
+    queue(store, stored(REASON, shown))
+    queue(store, stored(REASON, shown), key="k-accept-2")
+    eng.apply_commands()
+    first, second = rows(store, "command")[-2:]
+    assert first["applied_at"] is not None and "error" not in first["payload"]
+    assert second["applied_at"] is not None and "healed" in second["payload"]["error"]
+    assert len(eng.journal.entries(kinds=("reconcile_resolved",))) == 1
+    assert len([e for e in rows(store, "event") if e["type"] == f"command_{ACCEPT_COMMAND}"]) == 1
+    assert not [e for e in rows(store, "event") if e["type"] == "reconcile_blocked"
+                and e["payload"].get("when") == "accept_refused"]
+    assert not eng.recon.last.diffs and "refused" not in eng._daily_status({})["reconcile"]
 
 
 def test_a_change_between_the_engines_last_check_and_the_command_is_refused_too(tmp_path):
@@ -214,7 +235,7 @@ def test_the_terminal_command_still_accepts_without_a_screen(tmp_path):
     eng, broker, clock, store = carried(tmp_path)
     drift(eng)
     eng.startup()
-    queue(store, {"reason": REASON})  # a row written before 0038, or by hand: no `shown`
+    queue(store, {"reason": REASON})  # a row written before 0037, or by hand: no `shown`
     eng.apply_commands()
     assert not eng.recon.last.diffs
 
@@ -260,6 +281,19 @@ def test_sql_owner_only(db):
         has = psql(f"select has_function_privilege('{role}', 'public.kb_command(text, text, jsonb)', 'execute');",
                    None).stdout.strip()
         assert has == "f", role
+
+
+@needs_pg
+@pytest.mark.parametrize("role, uid", [("authenticated", OWNER), ("authenticated", OTHER), ("anon", None)])
+def test_sql_the_command_table_cannot_be_written_past_kb_command(db, role, uid):
+    """The only way from the dashboard is kb_command: no signed-in account, the owner included, writes a row itself
+    (a row written directly could carry no `shown`)."""
+    for sql in ("insert into kaibot.command (idempotency_key, kind, payload) values ('idem-direct', "
+                "'accept_reconcile', '{\"reason\": \"by hand\"}'::jsonb);",
+                "update kaibot.command set applied_at = null;", "select count(*) from kaibot.command;"):
+        r = psql(f"set role {role};\n{sql}", uid, check=False)
+        assert r.returncode and "permission denied" in r.stderr, (role, sql, r.stdout, r.stderr)
+    assert commands() == []
 
 
 @needs_pg

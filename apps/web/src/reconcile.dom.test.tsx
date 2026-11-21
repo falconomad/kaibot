@@ -104,6 +104,52 @@ describe("Engine page: books and broker", () => {
     expect(q('[role="dialog"] input[type="text"]')).not.toBeNull();
   });
 
+  it("the numbers change while the sheet is open: the tick is gone, and the command carries the numbers on the screen", async () => {
+    sent.command.mockResolvedValue({ queued: true });
+    await start(health(DIFF));
+    await activate(row());
+    await tick(q<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')!);
+    await type(q<HTMLInputElement>('[role="dialog"] input[type="text"]')!, "a broker fee");
+    expect(button().disabled).toBe(false);
+    // the engine's next check finds one share fewer at the broker
+    await doing(() => { client.setQueryData(["health"], health({ ...DIFF, diffs: [{ ...QTY, broker: 7, offset: -3 }, CASH] })); });
+    await settle();
+    expect(text(sheet())).toContain("3 shares fewer at the broker");
+    expect(q<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')!.checked).toBe(false);
+    expect(button().disabled).toBe(true); // the tick was for the old numbers
+    expect(sent.command).not.toHaveBeenCalled();
+    await tick(q<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')!);
+    await activate(button());
+    await settle();
+    expect(sent.command).toHaveBeenCalledWith("accept_reconcile", { reason: "a broker fee",
+      shown: [{ kind: "quantity", symbol: "XOM", offset: -3 }, { kind: "cash", symbol: null, offset: -2.75 }] });
+  });
+
+  it("the engine refuses while the sheet is still open: 'Sent' gives way to the reason, and the owner can accept again", async () => {
+    sent.command.mockResolvedValue({ queued: true });
+    await start(health(DIFF));
+    await activate(row());
+    await tick(q<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')!);
+    await type(q<HTMLInputElement>('[role="dialog"] input[type="text"]')!, "a broker fee");
+    await activate(button());
+    await settle();
+    expect(said().join(" ")).toContain("Sent.");
+    await doing(() => { client.setQueryData(["health"], health({ ...DIFF, diffs: [{ ...QTY, broker: 7, offset: -3 }, CASH],
+      refused: { ts: "2026-11-20T15:33:00+00:00", why: "nothing accepted: the difference has changed since it was shown: check again and accept the new value" } })); });
+    await settle();
+    expect(text(q('[role="dialog"] [role="alert"]'))).toMatch(/^The numbers changed after you looked, so nothing was accepted/);
+    expect(text(sheet())).not.toContain("Sent. The engine reads the broker once more");
+    expect(button().disabled).toBe(true); // a new tick first
+    await tick(q<HTMLInputElement>('[role="dialog"] input[type="checkbox"]')!);
+    expect(button().disabled).toBe(false);
+    await activate(button());
+    await settle();
+    expect(sent.command).toHaveBeenCalledTimes(2);
+    expect(sent.command).toHaveBeenLastCalledWith("accept_reconcile", { reason: "a broker fee",
+      shown: [{ kind: "quantity", symbol: "XOM", offset: -3 }, { kind: "cash", symbol: null, offset: -2.75 }] });
+    expect(said().join(" ")).toContain("Sent."); // the old refusal is not an answer to the second send
+  });
+
   it("nothing to accept here: a failed read, an unknown fill, or a list cut short", async () => {
     await start(health({ ok: false, diffs: [{ kind: "unavailable", symbol: null, error: "RuntimeError: broker unreachable", offset: null }] }));
     await activate(row());
@@ -141,7 +187,7 @@ describe("Engine page: books and broker", () => {
     await type(q<HTMLInputElement>('[role="dialog"] input[type="text"]')!, "a broker fee");
     await activate(button());
     await settle();
-    expect(text(q('[role="dialog"] form [role="alert"]'))).toContain("database update that hasn't been applied yet (migration 0038)");
+    expect(text(q('[role="dialog"] form [role="alert"]'))).toContain("database update that hasn't been applied yet (migration 0037)");
     expect(button().disabled).toBe(false); // may try again
   });
 });

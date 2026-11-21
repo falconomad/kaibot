@@ -478,11 +478,12 @@ class Engine:
         try:
             self.recon.resolve(str(pl.get("reason") or ""), by="owner (command)", shown=pl.get("shown"))
         except Exception as e:
-            self._recon_refused = {"ts": self.now().isoformat(), "why": str(e)[:200]}
-            self.store.event("reconcile_blocked", {"when": "accept_refused", **self.recon.last.summary(),
-                                                   "refused": str(e)[:200],
-                                                   "action": "entries stay blocked: look at the difference again"},
-                             self._rid())
+            if self.recon.last.diffs:  # nothing open (healed, or a second command after an acceptance): no event
+                self._recon_refused = {"ts": self.now().isoformat(), "why": str(e)[:200]}
+                self.store.event("reconcile_blocked", {"when": "accept_refused", **self.recon.last.summary(),
+                                                       "refused": str(e)[:200],
+                                                       "action": "entries stay blocked: look at the difference again"},
+                                 self._rid())
             raise
         self._recon_refused = None
         self._startup_reconcile("accepted")

@@ -1,5 +1,5 @@
--- 0038 (Frontend, 21 Nov 2026; M9 ticket 1.14, #439): the owner can accept a ledger/broker difference from the
--- dashboard. After 0005. Independent of 0037 (another team's).
+-- 0037 (Frontend, 21 Nov 2026; M9 ticket 1.14, #439): the owner can accept a ledger/broker difference from the
+-- dashboard. After 0005.
 --
 -- What changes.
 --   kaibot.command   the kind check also allows 'accept_reconcile' (0001 allowed pause, resume, flatten_and_stop,

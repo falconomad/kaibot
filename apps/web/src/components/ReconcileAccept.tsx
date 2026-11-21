@@ -3,7 +3,7 @@
 // them: a reason, a tick that the numbers were checked, and one button that says what it does. The command carries
 // what this screen showed; the engine reads the broker again and accepts only if it still finds exactly that.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { NAME } from "../brand/brand";
 import { api } from "../lib/api";
 import { timeBoth } from "../lib/fmt";
@@ -12,11 +12,19 @@ import { REASON_MAX, REASON_MIN, type ReconState, acceptable, diffView, queueErr
 export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconState; engineLive: boolean; waiting: boolean }) {
   const qc = useQueryClient();
   const [reason, setReason] = useState("");
-  const [checked, setChecked] = useState(false);
+  // The tick is for the numbers that were on the screen when it was set: when the engine's next check shows other
+  // numbers, the tick is gone and the owner compares again before anything can be sent.
+  const numbers = JSON.stringify(shownOf(state));
+  const [tickedFor, setTickedFor] = useState<string | null>(null);
+  const checked = tickedFor === numbers;
+  const refusedAtSend = useRef<string | null>(null);
   const rid = useId(), cid = useId();
   const cmd = useMutation({
-    mutationFn: () => api.command("accept_reconcile", { reason: reason.trim(), shown: shownOf(state) }),
-    onSuccess: () => { setChecked(false); void qc.invalidateQueries({ queryKey: ["health"] }); },
+    mutationFn: () => {
+      refusedAtSend.current = state.refused?.ts ?? null;
+      return api.command("accept_reconcile", { reason: reason.trim(), shown: shownOf(state) });
+    },
+    onSuccess: () => { setTickedFor(null); void qc.invalidateQueries({ queryKey: ["health"] }); },
   });
   if (state.ok) {
     return (
@@ -30,7 +38,10 @@ export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconSt
   const can = acceptable(state);
   const views = state.diffs.map(diffView);
   const some = views.some((v) => !v.canAccept) && views.some((v) => v.canAccept);
-  const sent = cmd.isSuccess || waiting;
+  // The engine answered this send with a refusal (a newer one than was on the screen when it was sent): the sheet
+  // stops saying "Sent", says why, and the owner can look again and accept the new numbers.
+  const answered = cmd.isSuccess && !waiting && !!state.refused && state.refused.ts !== refusedAtSend.current;
+  const sent = waiting || (cmd.isSuccess && !answered);
   const ready = can && engineLive && checked && reason.trim().length >= REASON_MIN && !cmd.isPending && !sent;
   return (
     <>
@@ -56,7 +67,7 @@ export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconSt
           <input id={rid} type="text" value={reason} maxLength={REASON_MAX} autoComplete="off" style={{ width: "100%" }}
             placeholder="for example: a broker fee the books don't include" onChange={(e) => setReason(e.target.value)} disabled={sent} />
           <label htmlFor={cid} style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "14px 0" }}>
-            <input id={cid} type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} disabled={sent} style={{ flex: "none", marginTop: 2 }} />
+            <input id={cid} type="checkbox" checked={checked} onChange={(e) => setTickedFor(e.target.checked ? numbers : null)} disabled={sent} style={{ flex: "none", marginTop: 2 }} />
             <span>I compared these numbers with the broker's account.</span>
           </label>
           {!engineLive && <p className="muted">The engine isn't running, so it can't accept anything now. Start it, then come back.</p>}
