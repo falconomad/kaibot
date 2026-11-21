@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0034 applied; 0035 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0035 applied; none pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -33,7 +33,7 @@ Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0034 applie
 - 0032: **applied by Product on 20 Nov 2026, about 17:0x UTC** (step 19 below; PRs #394, #395). Check: one policy `kb owner receives prices` (SELECT, {authenticated}) on realtime.messages; `kb_price_stream_reader()` not executable by anon.
 - 0033: **applied by Product on 21 Nov 2026, about 00:2x UTC** (checked: kb_health lists multi_day_shorting_on; not executable by anon) (step 20 below; dashboard read only, any time; the PR for kb_health's engine health events, #392 item 4).
 - 0034: **applied by Product on 21 Nov 2026, about 02:xx UTC** (step 21 below; dashboard only, any time; the PR for #384). Independent of 0033 (#401, step 20).
-- 0035: **pending (NOT APPLIED)** (step 22 below; dashboard read only, any time; the market notices of #378). 0034 and step 21 are #410's.
+- 0035: **applied by Product on 21 Nov 2026** (checked: kb_market_notices not executable by anon; market_notice not readable by authenticated; RLS on) (step 22 below; dashboard read only, any time; the market notices of #378). 0034 and step 21 are #410's.
 
 ## Apply in this order
 
