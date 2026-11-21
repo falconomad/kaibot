@@ -347,6 +347,12 @@ run_daily() {
     { echo "== $(date '+%Y-%m-%d %H:%M:%S %Z')"; ./scripts/fetch_daily.sh </dev/null; } >>logs/fetch_daily.log 2>&1 ||
       failed+=(fetch_daily)
   fi
+  if switch KAIBOT_NOTICES 0; then  # #378: the dashboard's market notices; off unless 1. Never fails the daily job
+    local py=.venv/bin/python; [ -x "$py" ] || py=python3
+    say "daily job: market notices (scripts/publish_notices.py; log logs/notices.log)"
+    { echo "== $(date '+%Y-%m-%d %H:%M:%S %Z')"; "$py" scripts/publish_notices.py --write --env "$ENV_FILE" </dev/null; } \
+      >>logs/notices.log 2>&1 || say "market notices not published (see logs/notices.log); the daily job goes on"
+  fi
   if [ "${#failed[@]}" -eq 0 ]; then say "daily job finished"; hc log "kaibot daily job finished on $(hostname -s)"
   else say "daily job FAILED: ${failed[*]}"; hc fail "kaibot daily job failed: ${failed[*]}"; exit 1; fi
 }
