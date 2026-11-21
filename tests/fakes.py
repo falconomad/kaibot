@@ -251,6 +251,10 @@ class FakeStore:
             if all(r.get(k) == v for k, v in match.items()):
                 r.update(values)
 
+    def delete(self, table, match):
+        t = self.tables.get(table, [])
+        self.tables[table] = [r for r in t if not all(r.get(k) == v for k, v in match.items())]
+
     def select(self, table, params):
         if table == "summary_call" and table not in self.tables:  # #319: the summaries' spend as one settled row
             v = self.llm.get("summaries", 0.0)
