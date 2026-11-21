@@ -6,7 +6,7 @@ python scripts/gate_v2_report.py --rule trend_highs --daily data/reports/daily_b
     [--random control.json] [--universe today|point_in_time] [--pit-daily daily.csv [--pit-trades trades.csv]
     [--pit-random control.json]] [--neighbour NAME=daily.csv ...]
     [--engine research_harness|simbroker] [--cost-model v1|v2] [--data-repairs] [--benchmark spy_price_only|
-    spy_total_return] [--data data] [--out data/reports]
+    spy_total_return] [--data data] [--out data/reports] [--tbill data/inputs/fred_dtb3.json | --no-tbill]
 
 Reports only: it reads files and writes data/reports/gate_b_<rule>_<ts>.{json,md}. Nothing here trades.
 
@@ -22,6 +22,9 @@ Inputs
   entry and half on its exit session and its fees are put on the exit session: an APPROXIMATION of when the cost
   was charged (the totals are exact). Gap slippage is a price outcome, not a modelled cost, and is not scaled.
 - --random: the JSON of a matched random-entry control (kaibot.evaluation.random_control.ControlResult.to_dict()).
+- --tbill: the cached Treasury-bill rate (scripts/fetch_tbill.py; default <data>/inputs/fred_dtb3.json when it
+  exists). With it the report shows both versions of the account: idle cash at 0% (as simulated, and what every
+  Gate B mark is judged on) and idle cash at the bill rate with the Sharpe and alpha above bills (ticket 2.4).
 
 The defaults describe the research harness of #113 (cost model v1, today's list, price-only SPY): such a run is
 shown as provisional and cannot pass. The report records the sha256 of config/gate_v2.yaml and of the rule's
@@ -40,7 +43,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from kaibot.evaluation import gate_v2, prereg, trials  # noqa: E402
+from kaibot.evaluation import gate_v2, prereg, tbill, trials  # noqa: E402
 
 COST_COLUMNS = ("cost_spread", "cost_impact")
 
@@ -109,6 +112,8 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--benchmark", default="spy_price_only", choices=["spy_price_only", "spy_total_return"])
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--out", default="")
+    ap.add_argument("--tbill", default="", help="cached FRED DTB3 (default: <data>/inputs/fred_dtb3.json if present)")
+    ap.add_argument("--no-tbill", action="store_true", help="idle cash at 0% only")
     ap.add_argument("--root", default=str(ROOT), help=argparse.SUPPRESS)  # tests: another repository root
     a = ap.parse_args(argv)
     root = Path(a.root)
@@ -136,9 +141,11 @@ def main(argv: list[str] | None = None) -> dict:
     source = {"engine": a.engine, "cost_model": a.cost_model, "data_repairs": bool(a.data_repairs),
               "benchmark": a.benchmark, "cost_series": "approximated from the trade table" if approx else
               ("daily" if run.costs is not None else "none")}
+    bills = None if a.no_tbill else (tbill.read_cache(a.tbill) if a.tbill else tbill.find(a.data))
     rep = gate_v2.evaluate_gate_b(gate, rule=a.rule, run=run, pit_run=pit, neighbours=neighbours, prereg=reg,
-                                  source=source, registry=registry, first_run_at=first)
-    rep["inputs"] = {"daily": str(a.daily), "spy": str(a.spy), "trades": a.trades, "random": a.random}
+                                  source=source, registry=registry, first_run_at=first, tbill=bills)
+    rep["inputs"] = {"daily": str(a.daily), "spy": str(a.spy), "trades": a.trades, "random": a.random,
+                     "tbill": None if bills is None else str(a.tbill or Path(a.data) / tbill.FILE)}
     text = gate_v2.render_gate_b(rep)
     out = Path(a.out or Path(a.data) / "reports")
     out.mkdir(parents=True, exist_ok=True)

@@ -16,7 +16,10 @@ What is here, and what each test checks against a series whose truth is known (t
 - `at_cost_multiple`, `breakeven_cost_multiple`  (constant gross and cost: the break-even is gross / cost);
 - `deflated_sharpe`  against the trial count (the best of N unskilled series rarely clears it, although its
                      undeflated probability nearly always does);
-- `sharpe_line`      every Sharpe is printed with its 50% haircut beside it.
+- `sharpe_line`      every Sharpe is printed with its 50% haircut beside it;
+- `tbill_daily`, `with_cash_yield`, `cash_views`  the Treasury-bill rate as the return on idle cash and as the
+                     risk-free rate in the Sharpe and in alpha (M11 ticket 2.4): a fully idle account earns the
+                     bill rate and has an excess Sharpe of zero; a fully invested one is unchanged.
 
 Not claimed: the Sharpe is annualised with sqrt(252), which is exact only for uncorrelated returns (Lo 2002
 gives the correction); the standard error and t do allow for autocorrelation. Cost multiples scale each day's
@@ -73,6 +76,16 @@ def align(net: pd.Series, benchmark: pd.Series) -> tuple[pd.Series, pd.Series]:
         raise ValueError(f"the benchmark has no return for {len(missing)} of the strategy's sessions "
                          f"(first: {missing[0].date()})")
     return net, benchmark.reindex(net.index)
+
+
+def _rf(rf, n: int):
+    """The risk-free rate as one number or as one value per session (never a series of another length)."""
+    if np.isscalar(rf):
+        return float(rf)
+    a = _arr(rf, "risk-free rate")
+    if a.size != n:
+        raise ValueError(f"the risk-free rate has {a.size} values, the returns have {n}: one per session is needed")
+    return a
 
 
 # ---------------------------------------------------------------- Newey-West
@@ -144,6 +157,7 @@ def sharpe_hac(returns, *, periods: int = PERIODS, lags: int | None = None, hair
     """Annualised Sharpe of daily returns with a Newey-West standard error and t.
 
     SR = mu / sigma (daily, in excess of the daily risk-free rate `rf`, default 0), annualised by sqrt(periods).
+    `rf` is one number or one value per session (`tbill_daily`).
 
     Standard error (Lo 2002, "The Statistics of Sharpe Ratios", the GMM form for returns that are not i.i.d.):
     with theta = (mu, sigma^2) estimated from the moments h_t = (r_t - mu, (r_t - mu)^2 - sigma^2),
@@ -155,7 +169,8 @@ def sharpe_hac(returns, *, periods: int = PERIODS, lags: int | None = None, hair
     for normal i.i.d. returns it is (1 + SR^2 / 2) / T, so t is close to the plain mean / (sd / sqrt(T)).
     Positive autocorrelation makes S, and so the error, larger. A constant series has no Sharpe: 0 with an
     infinite error."""
-    r = _arr(returns) - rf
+    r = _arr(returns)
+    r = r - _rf(rf, r.size)
     n = r.size
     if n < 3:
         raise ValueError("need at least 3 daily returns")
@@ -203,10 +218,11 @@ def alpha_beta(returns, benchmark, *, periods: int = PERIODS, lags: int | None =
 
     alpha is the intercept times `periods`; alpha_t = intercept / its standard error. A long-only book is
     mostly market exposure, so the alpha and its t, not the raw Sharpe, say whether the rule added anything."""
-    y, m = _arr(returns) - rf, _arr(benchmark, "benchmark returns") - rf
+    y, m = _arr(returns), _arr(benchmark, "benchmark returns")
     if y.size != m.size:
         raise ValueError("returns and benchmark must cover the same sessions")
     n = y.size
+    y, m = y - _rf(rf, n), m - _rf(rf, n)
     if n < 10:
         raise ValueError("need at least 10 sessions for a regression")
     x = np.column_stack([np.ones(n), m])
@@ -231,6 +247,125 @@ def exposure_matched(benchmark, exposure) -> np.ndarray:
     if m.size != e.size:
         raise ValueError("benchmark and exposure must cover the same sessions")
     return np.r_[0.0, e[:-1]] * m
+
+
+# ---------------------------------------------------------------- Treasury bills: idle cash and the risk-free rate
+
+DAYS_DISCOUNT = 360  # a bill's quoted rate is a bank discount on a 360-day year
+DAYS_YEAR = 365
+BILL_DAYS = 91  # the 3-month bill (FRED series DTB3)
+
+
+def discount_to_yield(discount_pct, days: int = BILL_DAYS):
+    """Investment yield (a fraction a year, simple, on 365 days) of a bill quoted at a bank discount of
+    `discount_pct` percent: y = 365 * d / (360 - d * days). The discount is taken off the face value, the yield
+    is earned on the price paid, so the yield is the higher of the two (5.00% discount on 91 days: 5.13%)."""
+    d = np.asarray(discount_pct, dtype=float) / 100.0
+    return DAYS_YEAR * d / (DAYS_DISCOUNT - d * days)
+
+
+def tbill_daily(rate_pct: pd.Series, sessions, *, max_stale_days: int = 10) -> pd.Series:
+    """The Treasury-bill return of each session, point in time (M11 ticket 2.4).
+
+    `rate_pct`: the 3-month bill's secondary-market rate in percent, bank discount basis, indexed by its
+    observation date (FRED `DTB3`; `scripts/fetch_tbill.py` caches it). `sessions`: the sessions to price.
+
+    Session t's return is what cash held from the close of session t-1 to the close of t earned:
+
+        rf_t = yield(rate observed at the last date STRICTLY BEFORE t) * (calendar days from t-1 to t) / 365.
+
+    Strictly before, for two reasons that agree: the rate of day d is published after that day's close (the
+    Federal Reserve's H.15 release, which FRED copies the next business day), so it is the newest rate a
+    decision before session t could know; and cash lent at the close of t-1 earns the rate of t-1, not of t.
+    Calendar days, so a weekend pays three days. The first session has no previous session: it is paid one day.
+
+    A session whose newest earlier observation is more than `max_stale_days` calendar days old is an error (a
+    hole in the file must be fixed, not filled with an old rate), and so is a session before the first
+    observation. Returns a Series on `sessions`."""
+    idx = pd.DatetimeIndex(pd.to_datetime(sessions))
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    idx = idx.normalize()
+    if not idx.is_monotonic_increasing or not idx.is_unique:
+        raise ValueError("sessions must be sorted and unique")
+    obs = dated(rate_pct.dropna(), "Treasury-bill rate")
+    if not len(obs):
+        raise ValueError("the Treasury-bill series is empty")
+    pos = obs.index.searchsorted(idx, side="left") - 1  # the last observation dated before the session
+    if (pos < 0).any():
+        raise ValueError(f"no Treasury-bill rate before {idx[pos < 0][0].date()}: the series starts "
+                         f"{obs.index[0].date()}")
+    age = (idx - obs.index[pos]).days
+    if (age > max_stale_days).any():
+        bad = idx[age > max_stale_days][0]
+        raise ValueError(f"the newest Treasury-bill rate before {bad.date()} is {int(age.max())} days old "
+                         f"(limit {max_stale_days}): refresh the file")
+    days = np.r_[1, np.diff(idx.to_numpy()).astype("timedelta64[D]").astype(int)] if len(idx) else np.array([])
+    y = discount_to_yield(obs.to_numpy()[pos])
+    return pd.Series(y * days / DAYS_YEAR, index=idx, name="rf")
+
+
+def idle_share(exposure) -> np.ndarray:
+    """Share of equity that sat in cash going into each session: 1 - yesterday's close exposure, never below 0
+    (the book is unlevered; a rounding above 100% invested is not a loan). Before the first session the book is
+    flat, so the first session is fully idle (the convention of `exposure_matched`)."""
+    e = _arr(exposure, "exposure")
+    return np.clip(1.0 - np.r_[0.0, e[:-1]], 0.0, 1.0)
+
+
+def with_cash_yield(net, exposure, rf) -> np.ndarray:
+    """Daily returns when idle cash earns the Treasury-bill rate instead of 0%:
+
+        r'_t = r_t + (1 - exposure_(t-1)) * rf_t.
+
+    `net`: the account's daily returns as simulated (cash earns nothing). `exposure`: share of equity invested
+    at each close. `rf`: `tbill_daily` on the same sessions. First order: the interest is not itself reinvested
+    in positions, so later position sizes are those of the zero-cash run (about rf^2 a day; the same reading as
+    `at_cost_multiple`). Alpaca pays no interest on a paper account's cash, so this is what a real cash sweep
+    into bills would have added, not what the paper account shows."""
+    r, e, f = _arr(net), _arr(exposure, "exposure"), _arr(rf, "risk-free rate")
+    if not r.size == e.size == f.size:
+        raise ValueError("returns, exposure and the risk-free rate must cover the same sessions")
+    return r + idle_share(e) * f
+
+
+def exposure_matched_with_cash(benchmark, exposure, rf) -> np.ndarray:
+    """`exposure_matched` with the rest of the account in Treasury bills: e_(t-1) * m_t + (1 - e_(t-1)) * rf_t."""
+    return with_cash_yield(exposure_matched(benchmark, exposure), exposure, rf)
+
+
+def cash_views(net, benchmark, exposure, rf, *, periods: int = PERIODS, haircut: float = 0.5,
+               warn_above: float = 1.0) -> dict:
+    """Both versions of one account, side by side (ticket 2.4: "every report shows both versions"):
+
+    - `zero_cash`: the account as simulated, idle cash at 0%, Sharpe against a risk-free rate of 0 (every report
+      before 21 Nov 2026);
+    - `tbill_cash`: idle cash earns the bill rate, and the Sharpe and the alpha are in excess of it.
+
+    Each holds the rule's curve, the benchmark's, the alpha/beta regression and the benchmark held at the rule's
+    exposure. The benchmark's own return is the same in both (SPY is fully invested); only its Sharpe changes.
+    `exposure` None (no exposure series was written): the rule's `tbill_cash` curve cannot be computed and is
+    None, the Sharpe of the simulated curve in excess of bills is still shown as `simulated_excess`."""
+    r, m, f = _arr(net), _arr(benchmark, "benchmark returns"), _arr(rf, "risk-free rate")
+    if not r.size == m.size == f.size:
+        raise ValueError("returns, benchmark and the risk-free rate must cover the same sessions")
+    kw = {"periods": periods, "haircut": haircut, "warn_above": warn_above}
+    zero = {"rule": curve(r, **kw), "benchmark": curve(m, **kw),
+            "alpha_beta": asdict(alpha_beta(r, m, periods=periods)), "exposure_matched": None}
+    bill = {"rule": None, "simulated_excess": curve(r, rf=f, **kw), "benchmark": curve(m, rf=f, **kw),
+            "alpha_beta": None, "exposure_matched": None}
+    out = {"rf": {"mean_ann": float(np.prod(1.0 + f) ** (periods / f.size) - 1.0), "total": total_return(f),
+                  "sessions": int(f.size)},
+           "mean_idle_share": None, "zero_cash": zero, "tbill_cash": bill}
+    if exposure is not None:
+        e = _arr(exposure, "exposure")
+        rc = with_cash_yield(r, e, f)
+        out["mean_idle_share"] = float(idle_share(e).mean())
+        zero["exposure_matched"] = curve(exposure_matched(m, e), **kw)
+        bill.update(rule=curve(rc, rf=f, **kw), alpha_beta=asdict(alpha_beta(rc, m, periods=periods, rf=f)),
+                    exposure_matched=curve(exposure_matched_with_cash(m, e, f), rf=f, **kw),
+                    cash_added_cagr=cagr(rc, periods) - cagr(r, periods))
+    return out
 
 
 # ---------------------------------------------------------------- return, drawdown, years, turnover
@@ -441,12 +576,15 @@ def drawdown_bands(returns, *, horizon: int | None = None, runs: int = 5000, mea
 
 
 def curve(returns, *, periods: int = PERIODS, haircut: float = 0.5, warn_above: float = 1.0,
-          lags: int | None = None) -> dict:
-    """Return, CAGR, Sharpe (with its error, t and haircut) and mark-to-market drawdown of one daily series."""
+          lags: int | None = None, rf=0.0) -> dict:
+    """Return, CAGR, Sharpe (with its error, t and haircut) and mark-to-market drawdown of one daily series.
+    `rf` (a number or one value per session) is taken off in the Sharpe only: return, CAGR and drawdown are
+    what the account made."""
     r = _arr(returns)
     return {"sessions": int(r.size), "total_return": total_return(r), "cagr": cagr(r, periods),
             "max_drawdown": max_drawdown(r),
-            "sharpe": asdict(sharpe_hac(r, periods=periods, lags=lags, haircut=haircut, warn_above=warn_above))}
+            "sharpe": asdict(sharpe_hac(r, periods=periods, lags=lags, haircut=haircut, warn_above=warn_above,
+                                        rf=rf))}
 
 
 def cost_table(net, costs, multiples: Sequence[float] = (1.0, 2.0, 3.0), **kw) -> dict:
