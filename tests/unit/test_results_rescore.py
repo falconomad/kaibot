@@ -197,6 +197,8 @@ def test_the_rescore_scores_existing_reports_without_running_anything(data: Path
     text = (out / "gate_v3_rescore.md").read_text()
     assert text in capsys.readouterr().out and "This is a re-score, not a verdict" in text
     assert "| trend_momentum | core, point_in_time, costs v2 |" in text and "| cross_sectional_momentum |" in text
+    # the stored control p-value covers the report's whole window: where that ran into the hold-out it is marked
+    assert f"{2 / 501:.4f}{gate_v3_rescore.DAGGER} |" in text and "it has seen hold-out sessions" in text
     assert json.loads((out / "gate_v3_rescore.json").read_text())["gate_sha"] == res["gate_sha"]
     assert not (data / "trials.jsonl").read_text().count("rescore"), "a re-score logs no trial"
     assert sorted(p.name for p in data.iterdir()) == ["inputs", "out", "reports", "trials.jsonl"]  # only --out
@@ -211,3 +213,17 @@ def test_the_rescore_says_what_it_could_not_score(data: Path, tmp_path: Path):
     assert "Runs that could not be scored" in gate_v3_rescore.render(res)
     with pytest.raises(SystemExit, match="reads the reports of earlier runs"):
         gate_v3_rescore.main(["--data", str(tmp_path / "nowhere")])
+
+
+def test_the_rescore_changes_no_file_under_data_so_it_logs_no_trial(data: Path, tmp_path_factory):
+    import hashlib
+
+    def snapshot() -> dict:
+        return {str(f.relative_to(data)): hashlib.sha256(f.read_bytes()).hexdigest()
+                for f in sorted(data.rglob("*")) if f.is_file()}
+
+    before = snapshot()
+    assert "trials.jsonl" in before
+    gate_v3_rescore.main(["--data", str(data), "--out", str(tmp_path_factory.mktemp("rescore_out"))])
+    assert snapshot() == before, "a re-score reads data/ and writes only under --out: no trial row, no report"
+

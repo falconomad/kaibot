@@ -95,6 +95,11 @@ A run passes only when its source says engine `simbroker`, cost model `v2`, data
   different question ("are companies with news different?") and S3 is then unknown, never passed.
 - **The p-value** is (1 + random Sharpes at or above the rule's) / (runs + 1). With 500 runs the smallest
   possible value is 1/501 = 0.002.
+  That floor matters (QA-Ops, 21 Nov 2026): a family of four rules needs 4 x p at or below 0.10 / 12, which 500
+  runs reach only when the rule beats every random portfolio (4 / 501 = 0.00798), and not at all once there are
+  thirteen families (0.10 / 13 = 0.00769) or five rules in the family. "500 runs or more" is a minimum: a rule
+  in a family of several rules should be run with at least 2,000, or S3 cannot be passed for a reason that has
+  nothing to do with the rule.
 - **Inside a family** the family's p-value is its smallest member p-value times the number of rules the family
   lists (Bonferroni).
 - **Across families** Holm's step-down is applied to the family p-values. A family with no usable control counts
@@ -237,9 +242,17 @@ pass about as many with no edge. What follows from it:
 - Rules should be chosen on decades of published evidence and low turnover, then tested once, not chosen by
   which had the best decade.
 
-**Open for Product** (not decided here, and nothing in the code assumes an answer): whether a sleeve with strong
-published evidence that meets S1, S2, S5 and S6 but not S3 and S4 may be admitted to a book at a small fixed
-budget. That would be a new tier with a weaker claim ("no evidence of harm"), and it needs its own record.
+**The open question, answered.** Whether a sleeve with strong published evidence that meets S1, S2, S5 and S6
+but not S3 and S4 may be admitted to a book at a small fixed budget was left open for Product when this record
+was written. Product answered it on 21 Nov 2026: yes, with limits. The answer is section 14.
+
+**Checked by simulation (QA-Ops, 21 Nov 2026).** 20,000 simulated sleeves per row, 1,930 sessions of normal active
+returns, the gate's own `holm` and `deflated_sharpe` code, a 500-run control, eleven other families not passing,
+S4 on the strict default spread. Share passing S3 and S4 together, one rule and 6 configurations / four rules
+and 20 configurations: information ratio 0: 0.5% / 0.1%; 0.25: 2.9% / 0.6%; 0.5: 10.9% / 3.2%; 0.75: 30.1% /
+11.8%; 1.0: 56.1% / 31.4%; 1.5: 93.6% / 80.2%. The table above is S4's pass rate alone (at 0.5: 11.4% and 3.7%
+in the simulation); passing both marks is one to three points rarer. Twelve no-skill families judged one by
+one at 0.10: at least one passes 71% of the time; under Holm 9%. The table's conclusion stands.
 
 ## 10. What happens to gate v2 and to the verdicts already given
 
@@ -250,6 +263,9 @@ budget. That would be a new tier with a weaker claim ("no evidence of harm"), an
   failed its ten-year test, and real money stays barred for it whatever a re-score shows.
 - **Re-score.** `scripts/gate_v3_rescore.py` scores every existing report under gate v3 without re-running any
   rule and writes `docs/research/results/gate_v3_rescore.md`. It is information for choosing what to test next.
+  Its numbers from the daily files are cut to the research window. Its control p-values are the earlier
+  reports' own, over their whole windows: for a run that went past 2024-12-31 they have seen hold-out sessions,
+  and the table marks them. A verdict takes its control from a run that ends inside the research window.
 - **A new verdict needs a new run** on the research window, with a pre-registration that declares the fields of
   section 8, logged as a trial.
 
@@ -290,3 +306,29 @@ budget. That would be a new tier with a weaker claim ("no evidence of harm"), an
   anything decision 15, section 9 already reserves.
 - **Unchanged:** paper only; a pre-registration before the first run; every run logged as a trial; go/no-go
   numbers only from the engine with `SimBroker`.
+
+## 14. Evidence-based sleeves: the open question of section 9, answered
+
+**Product, 21 Nov 2026, delegated by the stakeholder.** The question was whether a sleeve whose signal has strong
+published evidence may be admitted to a book without passing the two chance marks, S3 (the control) and S4 (the
+deflated Sharpe). The answer is **yes, with limits**:
+
+- **Only with strong published, replicated evidence** for the signal.
+- **Labelled.** Such a sleeve is an "evidence-based, not proven here" sleeve, in those words, in its
+  pre-registration, in every report and wherever the book shows it. It has not passed gate v3 and no report may
+  say that it has.
+- **At most 10% of the book in total**, across all such sleeves together, not each.
+- **Pre-registered** before its first run, as every rule is (section 8).
+- **Every other mark holds:** S1, S2, S5 and S6. The book it joins is judged by the book test as any book is.
+- **Reviewed against the hold-out once:** the final check of section 7, under one opening of the hold-out.
+- **Everything else needs the full gate.** A sleeve without that evidence, or one that wants more than its share
+  of the 10%, passes S1 to S6 or does not trade.
+
+What this does not change: the families and the correction (such a sleeve's runs are logged as trials and its
+family stays in the count), paper only, and real money, which stays the stakeholder's decision.
+
+In practice the pre-registration is where the evidence is cited and the label first appears.
+
+Not built yet: `gate_v3.py` has no such tier. `evaluate_sleeve` reports S3 and S4 as they are and returns `fail`
+or `unknown` for such a sleeve; the label, the 10% budget and the check that the other marks hold are applied by
+Product by record until a ticket adds them to the code and to `config/gate_v3.yaml`.

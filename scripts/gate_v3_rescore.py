@@ -9,7 +9,10 @@ no simulator, loads no price bar and logs no trial. Writes <out>/gate_v3_rescore
 
 What it does, per rule and kind of run (the newest report of each):
 1. cuts the account's daily returns to gate v3's research window (2017-05-01 to 2024-12-31). Sessions in the
-   hold-out are dropped before any number is computed, so no hold-out value enters the table;
+   hold-out are dropped before any number is computed FROM THE DAILY FILES (S1, S2, S4, S5). One number cannot
+   be cut: the control's p-value (S3 and the correction across families) is the one the earlier report stored,
+   over that report's whole window, hold-out sessions included when the run went past 2024-12-31. Recomputing
+   it needs a re-run. The table marks those rows;
 2. scores the sleeve marks S1 to S6 of decision 16 (kaibot.evaluation.gate_v3);
 3. applies Holm's correction across the rule families, using the best-evidenced run of each rule for its family's
    p-value (the engine with SimBroker before the research harness, the point-in-time universe before today's list).
@@ -145,6 +148,9 @@ def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dic
             "rows": out, "skipped": skipped}
 
 
+DAGGER = "†"  # a control p-value from a report whose window ran into the hold-out
+
+
 def _cell(mark: dict) -> str:
     return {True: "pass", False: "FAIL", None: "?"}[mark["met"]]
 
@@ -157,7 +163,11 @@ def render(res: dict) -> str:
     out = ["# Gate v3 re-score of the existing rule reports", "",
            f"Generated {res['generated_at']} by `scripts/gate_v3_rescore.py` from {res['reports_read']} reports. No "
            "rule was re-run. Marks are those of decision 16 (`docs/decisions/16_gate_v3.md`), judged on "
-           f"{res['window'][0]} to {res['window'][1]}; later sessions were dropped before any number was computed.",
+           f"{res['window'][0]} to {res['window'][1]}; later sessions were dropped before any number was computed "
+           "from the daily files. The exception is the control's p-value (S3, the Holm column and the families "
+           "table): it is the earlier report's own figure over that report's whole window. Where that window ran "
+           "into the hold-out the p-value is marked with a dagger (†): it has seen hold-out sessions and is not a "
+           "research-window number.",
            "", "**This is a re-score, not a verdict.** Every rule below was pre-registered before decision 16, so "
            "none can pass gate v3; `provisional` means every mark that could be scored holds. Gate v2's verdicts "
            "stand as they were given.", "",
@@ -173,7 +183,8 @@ def render(res: dict) -> str:
         out.append(
             f"| {r['rule']} | {r['run']} | {_num(g['statistics']['mean_exposure'], '{:.0%}')} | "
             f"{_num(n1['annualised'])} | {_num(n1['interval'][0])} to {_num(n1['interval'][1])} | {n1['t']:.2f} | "
-            f"{_num((n2.get('active_return_at') or {}).get('2x'))} | {_num(n3.get('p_value'), '{:.4f}')} | "
+            f"{_num((n2.get('active_return_at') or {}).get('2x'))} | {_num(n3.get('p_value'), '{:.4f}')}"
+            f"{DAGGER if n3.get('p_value') is not None and g.get('sessions_in_holdout_dropped') else ''} | "
             f"{_num(n3.get('holm_adjusted'), '{:.4f}')} | {_num(n4.get('dsr'), '{:.3f}')}"
             f"{' (' + format(n4['configurations'], ',') + ')' if n4.get('configurations') else ''} | "
             + " | ".join(_cell(m[k]) for k in ("s1", "s2", "s3", "s4", "s5", "s6")) + f" | {g['verdict']} |")

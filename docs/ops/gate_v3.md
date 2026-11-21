@@ -40,7 +40,9 @@ cd ~/Projects/kaibot && git pull
 
 It reads the report files, the daily CSVs, `data/trials.jsonl` and the bill-rate file. It writes
 `docs/research/results/gate_v3_rescore.md` and `.json` and prints the table. It runs no simulator, reads no
-price bar and logs no trial. Sessions in the hold-out are dropped before any number is computed.
+price bar and logs no trial. Sessions in the hold-out are dropped before any number is computed from the daily
+files. The control's p-value is the exception: it is the earlier report's own figure over its whole window, so
+for a run that went past 2024-12-31 it has seen hold-out sessions. The table marks it with a dagger (†).
 
 How to read the table:
 
