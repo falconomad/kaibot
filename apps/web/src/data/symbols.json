@@ -117,13 +117,13 @@
   "name": "General Electric Company",
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GE.png",
   "industry": "Aerospace & Defense",
-  "domain": null
+  "domain": "geaerospace.com"
  },
  "GOOGL": {
   "name": "Alphabet Inc.",
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/GOOG.png",
   "industry": "Media",
-  "domain": null
+  "domain": "abc.xyz"
  },
  "GS": {
   "name": "The Goldman Sachs Group, Inc.",
@@ -165,7 +165,7 @@
   "name": "Coca-Cola Co",
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/KO.png",
   "industry": "Beverages",
-  "domain": null
+  "domain": "coca-colacompany.com"
  },
  "LIN": {
   "name": "Linde PLC",
@@ -201,7 +201,7 @@
   "name": "Meta Platforms, Inc.",
   "logo": "https://static2.finnhub.io/file/publicdatany/finnhubimage/stock_logo/FB.png",
   "industry": "Media",
-  "domain": null
+  "domain": "meta.com"
  },
  "MRK": {
   "name": "Merck & Co Inc",
@@ -297,7 +297,7 @@
   "name": "S&P 500 ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "TMO": {
   "name": "Thermo Fisher Scientific Inc.",
@@ -357,67 +357,67 @@
   "name": "Materials ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLC": {
   "name": "Communication ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLE": {
   "name": "Energy ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLF": {
   "name": "Financials ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLI": {
   "name": "Industrials ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLK": {
   "name": "Technology ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLP": {
   "name": "Consumer Staples ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLRE": {
   "name": "Real Estate ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLU": {
   "name": "Utilities ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLV": {
   "name": "Health Care ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XLY": {
   "name": "Consumer Discretionary ETF",
   "logo": null,
   "industry": "ETF",
-  "domain": null
+  "domain": "ssga.com"
  },
  "XOM": {
   "name": "Exxonmobil Holdings Corp",
