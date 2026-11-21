@@ -2623,7 +2623,11 @@ class Engine:
                 "trade_id": p.trade_id,
             }
         unreal = eq - d.start_equity - d.realized_reported
-        md = self._md_minute()
+        try:
+            md = self._md_minute()
+        except Exception:  # QA-Ops on #384: the block is a report; it must never fail the minute (and its retry)
+            log.exception("minute row: multi_day block unreadable, row written without it")
+            md = None
         # #384: `cash` is the row's equity less everything the row lists (day positions at `last`, multi-day sleeves
         # at their marks), in whole cents, so cash + multi_day.invested + sum(qty x last) is the equity exactly
         listed = sum(round(100 * (v["last"] or 0) * v["qty"]) for v in pos.values())

@@ -245,6 +245,12 @@ dashboard (`apps/web/src/lib/marks.ts`, `engineMarks`); `kb_overview` returns th
 - Identity, exact to the cent (`tests/test_ledger_minute_multiday.py`): `cash + multi_day.invested + Σ positions[s].qty × last = equity`.
   `cash_ledger` is the ledger's own cash (`Book.cash`); `cash` equals it within one cent per holding (each holding's
   `value` is rounded to the cent).
+  "equity" here is the engine's reported equity (`equity_now`, realised P&L counted as min(venue, shadow) per
+  trade). It equals `equity_venue` and `equity_shadow` while every closed trade of the day has the same venue and
+  shadow P&L, which is always the case with multi-day rules only (a multi-day sale counts one P&L for all three).
+  An intraday trade whose venue and shadow fills differ moves `equity_venue` away by `realized_venue -
+  realized_reported`; `cash` then follows the reported equity, not the venue's (QA-Ops on #384).
+- If building the block fails, the row is written without it (logged) and the minute goes on: it is a report.
 - `mark` is the price `equity_now` counts the sleeve at, in this order: the last minute bar (`mark_from` `minute_bar`,
   `mark_ts` the bar's end), the broker's `current_price` (`broker`, the time of the positions read), the last close
   mark (`last_close`, 16:00 ET of that close), the average cost (`cost`, `mark_ts` null). Nothing new is fetched.

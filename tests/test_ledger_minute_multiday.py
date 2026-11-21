@@ -229,3 +229,20 @@ def test_near_close_buy_is_settling_until_its_fill_is_booked(tmp_path, monkeypat
     last = rows[-1]["multi_day"]
     assert last["settling"] == [] and [(x["symbol"], x["qty"]) for x in last["positions"]] == [
         ("B", float(a.md_orders()[0]["qty"]))]
+
+
+def test_an_unreadable_multi_day_block_never_fails_the_minute(tmp_path, monkeypatch):
+    """QA-Ops on #384: the block is a report. If building it raises, the minute still completes and its row is
+    written (without the block), so the tick's retry and error streak never start from the report."""
+    a = Account(tmp_path)
+    a.day1()
+
+    def boom(*_a, **_k):
+        raise RuntimeError("mark unreadable")
+
+    monkeypatch.setattr(a.eng, "_md_mark", boom)
+    n = len(a.store.tables["ledger"])
+    a.ticks(a.open2, 0, 5)
+    rows = a.store.tables["ledger"][n:]
+    assert rows and all("multi_day" not in r for r in rows)
+    assert a.eng.day.done_m >= 4
