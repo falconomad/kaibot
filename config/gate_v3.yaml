@@ -1,0 +1,202 @@
+# Evidence gate v3 for MULTI-DAY rules (decision 16, docs/decisions/16_gate_v3.md; M11 ticket 2.5, issue #456).
+#
+# Gate v2 (config/gate_v2.yaml, decision 15 section 7) judged every rule alone in a cash account against a fully
+# invested SPY. Gate v3 judges a rule as a SLEEVE (its return above the same amount of SPY), the account that
+# would actually trade as a BOOK (the absolute test of gate v2), and corrects for the number of rule FAMILIES tried.
+#
+# The numbers below are those of decision 16; tests/unit/test_gate_v3.py compares this file with the decision's
+# text. Every gate v3 report records this file's sha256 (`gate_sha`). Changing a mark, a level, the window or a
+# family needs a decision in docs/decisions/ first.
+#
+# Passing lets Product start a rule on PAPER inside a book that has passed (decision 15 section 9). Nothing here
+# trades, and there is no live path (CLAUDE.md: paper only). Real money is Gate D: the stakeholder's decision.
+version: 3
+applies_to: multi_day
+decision: docs/decisions/16_gate_v3.md
+
+# ---------------------------------------------------------------- the window
+# Marks are judged on the research window only. Sessions from 2025-01-01 on are the hold-out (config/holdout.yaml,
+# ticket 2.6) and are dropped before any number is computed; the hold-out is used once, for the final check below.
+window:
+  research_from: 2017-05-01        # decision 15: out of sample from 2017-05
+  research_to: 2024-12-31          # the last session before the hold-out
+
+# ---------------------------------------------------------------- one level for every test of chance
+# Gate v2 asked each rule alone to beat 90% of random portfolios (a 1-in-10 chance of passing with no skill, per
+# rule). Gate v3 keeps 1 in 10 and applies it to the whole programme: the chance that ANY no-skill family passes.
+level: 0.10
+
+# ---------------------------------------------------------------- Gate A: reason
+gate_a:
+  prereg_dir: docs/prereg
+  committed_before_first_run: true
+  max_neighbours: 5
+  # the pre-registration (or an amendment appended before the run) must also declare, for gate v3:
+  must_declare: [role, kind, family, candidate_pool]   # role: sleeve | book; kind: selection | timing
+
+# ---------------------------------------------------------------- Gate B, part 1: the sleeve test
+# A sleeve is one rule's account. ALL six marks must hold. "Active return" is the sleeve's daily return minus the
+# benchmark's, where the benchmark holds the same amount of SPY (total return) and the rest in Treasury bills.
+sleeve:
+  benchmark:
+    selection: path_matched        # a stock-picking rule: SPY at the sleeve's own exposure, session by session
+    timing: average_matched        # an SPY-only rule: SPY at the sleeve's average exposure, held all the time
+  s1_active_return:                # annualised mean active return, net of costs, above zero
+    annualised_above: 0.0
+  s2_costs:                        # S1 still holds when every cost is doubled; 3x and the break-even are reported
+    costs_multiple: 2.0
+    reported_multiples: [1.0, 2.0, 3.0]
+  s3_control:                      # skill against chance, corrected across rule families
+    random_runs_min: 500
+    pool: candidate_pool           # names drawn from the rule's own candidate pool (timing sleeves: random times)
+    statistic: sharpe_p_value      # (1 + random Sharpes at or above the rule's) / (runs + 1)
+    within_family: bonferroni      # the family's p-value = its smallest member p-value x the number of members
+    across_families: holm          # Holm (1979) step-down over every family in `families`; untested families = 1
+    reported: [benjamini_hochberg, drawdown_percentile, alpha_t]
+  s4_deflated_sharpe:              # the active return's Sharpe against the best of the family's own configurations
+    series: active_return
+    trials: family                 # configurations logged for the family's rules, not the whole registry
+    dsr_min: 0.90                  # = 1 - level
+  s5_universe: point_in_time       # S1 to S4 hold on the point-in-time universe
+  s6_neighbours:                   # every pre-declared neighbour has a positive active return
+    each: active_return_positive
+  final_requires:                  # as gate v2: a run passes only when its source says
+    engine: simbroker
+    cost_model: v2
+    data_repairs: true
+    benchmark: spy_total_return
+
+# ---------------------------------------------------------------- Gate B, part 2: the book test
+# A book is the whole account that would trade: an index core, its overlays and the sleeves at fixed weights, run
+# through the engine as ONE account. The absolute test of gate v2 is kept for it. ALL six marks must hold.
+book:
+  b1_return:                       # gate v2 mark 1 on the research window
+    net_return_positive: true
+    positive_years_share_min: 0.6  # of the counted calendar years, rounded up (6 of 10 in gate v2; 5 of 8 here)
+    years_min: 8                   # 2017 (eight months) to 2024
+    part_year_min_months: 6
+  b2_spy:                          # gate v2 mark 2, unchanged: EITHER branch, against SPY total return
+    defensive:                     #   the stakeholder's goal: SPY-like return with smaller drawdowns
+      cagr_vs_spy_points_min: -2.0
+      max_drawdown_vs_spy_max: 0.75
+    growth:
+      cagr_vs_spy_points_min: 1.0
+      max_drawdown_vs_spy_max: 1.1
+  b3_costs:                        # B1 and B2 still hold at 2x costs
+    costs_multiple: 2.0
+    reported_multiples: [1.0, 2.0, 3.0]
+  b4_universe: point_in_time       # B1 to B3 hold on the point-in-time universe
+  b5_neighbours:                   # every pre-declared neighbour of the book passes B1
+    neighbours_pass: b1
+  b6_sleeves:                      # every return sleeve inside the book has passed the sleeve test
+    every_return_sleeve: pass
+  cash: zero                       # judged with idle cash at 0%, which is what the paper account shows; the
+                                   # Treasury-bill version is reported beside it (ticket 2.4)
+  final_requires:
+    engine: simbroker
+    cost_model: v2
+    data_repairs: true
+    benchmark: spy_total_return
+
+# ---------------------------------------------------------------- the final check on the hold-out
+# After every research-window mark holds, the hold-out is opened ONCE (config/holdout.yaml, purpose final_check).
+# The check asks whether the hold-out looks like the research window, not whether it is significant on its own:
+# 23 months cannot show an edge.
+holdout_check:
+  band: 0.05                       # the hold-out statistic must be at or above the 5th percentile of ...
+  resample: research_window        # ... stationary-bootstrap stretches of the hold-out's length drawn from it
+  sleeve_statistic: active_return
+  book_statistics: [cagr_vs_spy_points, max_drawdown]   # drawdown: at or below the 95th percentile
+  contaminated_before: 2026-11-21  # a rule first run before the freeze has seen the hold-out: its check is
+                                   # labelled a consistency check, never an out-of-sample test
+
+# ---------------------------------------------------------------- bootstrap
+bootstrap:                         # the intervals printed beside S1, B1 and B2, and the hold-out bands
+  method: stationary               # Politis & Romano (1994), as gate v2
+  mean_block_sessions: 20
+  runs: 2000
+  seed: 16                         # fixed
+  interval: 0.90                   # two-sided
+
+# ---------------------------------------------------------------- statistics
+statistics:
+  periods_per_year: 252
+  newey_west_lag: nw1994
+  sharpe_haircut: 0.5
+  sharpe_warning_above: 1.0
+  benchmark: SPY total return
+  risk_free: tbill                 # Sharpe and alpha above the 3-month Treasury bill (ticket 2.4)
+
+# ---------------------------------------------------------------- rule families
+# One family per idea (the published effect a rule leans on). The correction counts FAMILIES: every family listed
+# here has been tested at least once, so m = the number of entries, whether or not a family has a usable p-value.
+# A new pre-registration names an existing family or adds one here in the same pull request, BEFORE its first run;
+# m then grows for every later verdict. Verdicts already given are not reopened when m grows.
+#
+# `v3_declared`: the rule's pre-registration declares its gate v3 role, kind, family and candidate pool. False for
+#   every rule registered before decision 16: its re-score is information and cannot be a pass.
+# `existing_control`: what the control of the rule's EXISTING report drew from, read from the code that wrote it:
+#   candidate_pool  the names the rule could have bought before its own signal; for a rule whose signal is the
+#                   price alone that is every liquid index member of the day (S3 can be scored)
+#   random_timing   SPY-only rule: random decision times with the rule's holding periods (S3 can be scored)
+#   universe        every liquid name, although the rule picks only among names with an event that day (a
+#                   headline, an earnings report): not its candidate pool (S3 unknown)
+#   none            no matched control was run (S3 unknown)
+families:
+  intraday_dip_reversal:
+    idea: buy an intraday dip in a liquid stock and sell the rebound the same day (retired; judged by the M4 gate)
+    rules:
+      dip_reversal: {kind: selection, v3_declared: false, existing_control: none}
+      winners_run: {kind: selection, v3_declared: false, existing_control: none}
+  cross_sectional_momentum:
+    idea: stocks that rose most over the past months keep outperforming (Jegadeesh and Titman)
+    rules:
+      trend_momentum: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+      mom_12_1_band: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+      mom_12_1_band_nofilter: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+      rel_strength: {kind: selection, v3_declared: false, existing_control: none}
+  new_highs_breakout:
+    idea: a stock at a new high keeps trending
+    rules:
+      trend_highs: {kind: selection, v3_declared: false, existing_control: none}
+      ath_breakout: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+  spy_intraday_momentum:
+    idea: an SPY move beyond its usual intraday range continues to the close
+    rules:
+      spy_noise_band: {kind: timing, v3_declared: false, existing_control: random_timing}
+      spy_noise_band_carry: {kind: timing, v3_declared: false, existing_control: random_timing}
+      spy_late_momentum: {kind: timing, v3_declared: false, existing_control: none}
+  overnight_premium:
+    idea: SPY earns most of its return between the close and the next open
+    rules:
+      overnight_spy: {kind: timing, v3_declared: false, existing_control: none}
+  index_trend_timing:
+    idea: hold SPY only above its long moving average
+    rules:
+      spy_trend_filter: {kind: timing, v3_declared: false, existing_control: random_timing}
+  opening_range_breakout:
+    idea: a stock in play that breaks its first five-minute range keeps going that session
+    rules:
+      orb_stocks_in_play: {kind: selection, v3_declared: false, existing_control: none}
+  news_drift:
+    idea: a price move with company news behind it keeps drifting
+    rules:
+      news_continuation: {kind: selection, v3_declared: false, existing_control: none}
+      news_gap_week: {kind: selection, v3_declared: false, existing_control: universe}
+  earnings_drift:
+    idea: stocks drift for days after an earnings surprise
+    rules:
+      post_earnings_week: {kind: selection, v3_declared: false, existing_control: universe}
+  short_term_reversal:
+    idea: a sharp short-term fall in a large stock rebounds
+    rules:
+      pullback_uptrend: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+      weekly_fall_rebound: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+  filing_flags:
+    idea: some 8-K filings other than earnings are followed by a drift (event study, not a trading rule)
+    rules:
+      filing_flags_study: {kind: selection, v3_declared: false, existing_control: none}
+  market_event_alarm:
+    idea: sessions with a very large scheduled event differ from other sessions (event study, not a trading rule)
+    rules:
+      market_alarm_study: {kind: timing, v3_declared: false, existing_control: none}
