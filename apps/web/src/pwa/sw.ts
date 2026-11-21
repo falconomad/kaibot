@@ -71,7 +71,7 @@ self.addEventListener("fetch", (event) => {
     const hit = await cache.match(url.pathname);
     if (hit) return hit;
     const res = await fetch(req);
-    if (res.ok && res.type === "basic" && (KEEP.has(url.pathname) || CODE.test(res.headers.get("content-type") || ""))) {
+    if (res.ok && (KEEP.has(url.pathname) || CODE.test(res.headers.get("content-type") || ""))) {
       await cache.put(url.pathname, res.clone());
     }
     return res;
