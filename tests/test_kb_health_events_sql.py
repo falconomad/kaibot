@@ -60,8 +60,9 @@ def test_0029_has_no_destructive_statement():
 
 def test_the_dashboard_reads_no_event_type_kb_health_leaves_out():
     """Every event type apps/web/src matches on (`type === "..."`, Health.tsx's EV labels) is in the list of the
-    latest kb_health (0031 since #354)."""
-    latest = ROOT / "migrations" / "0031_kb_health_news_feed_events.sql"
+    latest kb_health: the newest migration that re-creates it (0031 since #354, 0033 once #401 is merged)."""
+    latest = max(p for p in (ROOT / "migrations").glob("*.sql")
+                 if "create or replace function public.kb_health()" in p.read_text())
     listed, read = set(_types(_sql(latest))), set()
     for f in (ROOT / "apps" / "web" / "src").rglob("*.ts*"):
         if ".test." in f.name:
