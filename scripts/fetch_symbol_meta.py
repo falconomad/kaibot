@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.common.http import HttpError, get_json  # noqa: E402
 from kaibot.common.ratelimit import Budget  # noqa: E402
+from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
 
 ETF_NAMES = {"SPY": "S&P 500 ETF", "XLK": "Technology ETF", "XLF": "Financials ETF", "XLV": "Health Care ETF",
              "XLY": "Consumer Discretionary ETF", "XLP": "Consumer Staples ETF", "XLE": "Energy ETF",
@@ -202,6 +203,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main() -> None:
     a = parse_args()
+    ensure_ca_bundle()  # python.org's macOS Python has no root certificates (21 Nov 2026: CERTIFICATE_VERIFY_FAILED)
     if a.env:
         for line in Path(a.env).expanduser().read_text().splitlines():
             if "=" in line and not line.startswith("#"):
