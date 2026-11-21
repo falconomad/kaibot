@@ -308,8 +308,12 @@ def load_index_bucket(root: Path | str | None = None) -> dict:
     if bp is None:
         raise NotCalibrated(f"{INDEX_BUCKET_FILE}: half_spread_bp is not set. Measure it with "
                             "scripts/calibrate_index_costs.py and commit the value with its table (ticket 2.3)")
+    source = cfg.get("source") if isinstance(cfg.get("source"), dict) else {}
+    if source.get("method") not in ("fills", "quotes"):
+        raise NotCalibrated(f"{INDEX_BUCKET_FILE}: half_spread_bp is set without `source.method` (fills | quotes). "
+                            "A value goes in with the block scripts/calibrate_index_costs.py printed (ticket 2.3)")
     return {"symbols": symbols, "half_bp": float(bp), "sha256": hashlib.sha256(raw).hexdigest(),
-            "source": dict(cfg.get("source") or {})}
+            "source": dict(source)}
 
 
 def index_params(root: Path | str | None = None, **params) -> V2Params:

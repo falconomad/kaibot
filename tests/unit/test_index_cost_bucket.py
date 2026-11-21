@@ -87,6 +87,21 @@ def write_bucket(root: Path, value: str = "0.25") -> None:
         f"version: 1\nsymbols: [SPY]\nhalf_spread_bp: {value}\nsource: {{method: quotes, rows: 260}}\n")
 
 
+def test_a_value_without_its_measurement_is_refused(tmp_path: Path, monkeypatch):
+    """Inert until MEASURED: a bare number typed into the file is not a calibration."""
+    cfg = tmp_path / "config" / "costs_index_bucket.yaml"
+    cfg.parent.mkdir(parents=True)
+    monkeypatch.setattr(cv, "ROOT", tmp_path)
+    for tail in ("", "source:\n", "source: {rows: 260}\n", "source: {method: guess}\n", "source: fills\n"):
+        cfg.write_text(f"version: 1\nsymbols: [SPY]\nhalf_spread_bp: 0.25\n{tail}")
+        with pytest.raises(cv.NotCalibrated, match="source.method"):
+            cv.load_index_bucket(tmp_path)
+        with pytest.raises(cv.NotCalibrated):
+            get_model("v2_index")
+        with pytest.raises(cv.NotCalibrated):
+            sim_costs.costs_for("v2idx", {"SPY": {}})
+
+
 def test_a_committed_value_builds_the_model(tmp_path: Path, monkeypatch):
     write_bucket(tmp_path)
     b = cv.load_index_bucket(tmp_path)
