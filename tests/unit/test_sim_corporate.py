@@ -1,6 +1,7 @@
 """#266: SimBroker credits a spin-off and applies a symbol change as Alpaca does (written before the code).
-Alpaca: the parent keeps its shares, its cost basis may be lowered, the new shares are a new position, and an SSO
-activity is posted; a symbol change renames the position (SC activity).
+Alpaca: the parent keeps its shares, its cost basis may be lowered, the new shares are a new position, and a SPIN
+activity is posted (SSO in Alpaca's older guide); a symbol change renames the position (NC activity: the guide's SC
+is not in the API's request enum, #392).
 A spin-off sets `cost_basis` on both positions."""
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ def test_a_spin_off_credits_new_shares_and_moves_basis():
     pos = b.positions()
     assert float(pos["A"]["qty"]) == 30 and abs(float(pos["A"]["cost_basis"]) - 0.8 * basis) < 1e-6
     assert float(pos["AN"]["qty"]) == 15 and abs(float(pos["AN"]["cost_basis"]) - 0.2 * basis) < 1e-6
-    (row,) = b.activities(types=("SSO",))
+    (row,) = b.activities(types=("SPIN",))
     assert row["symbol"] == "AN" and row["date"] == NEXT and float(row["qty"]) == 15
 
 
@@ -45,7 +46,7 @@ def test_a_symbol_change_renames_the_position():
     b.symbol_change("A", "A2", day=NEXT)
     pos = b.positions()
     assert "A" not in pos and pos["A2"]["qty"] == before["qty"]
-    (row,) = b.activities(types=("SC",))
+    (row,) = b.activities(types=("NC",))
     assert row["symbol"] == "A2" and row["date"] == NEXT
 
 
