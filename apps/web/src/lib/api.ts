@@ -39,7 +39,9 @@ export interface Scan { bars: number; checks: number; regime_off: number; setups
 export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null;
   /** the git sha the engine runs (engine/core.py `code_sha`) */ code_sha?: string; halted?: boolean } | null }
 export interface LedgerPos { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }
-export interface Ledger { ts: string; cash: number; positions: Record<string, LedgerPos>; equity_venue: number; equity_shadow: number }
+/** kb_overview `ledger`: the engine's newest minute row. `positions` is day positions ONLY; `multi_day` (#384, migration
+ *  0034, absent before it) is the multi-day book in that minute, raw jsonb read by lib/marks.engineMarks. */
+export interface Ledger { ts: string; cash: number; positions: Record<string, LedgerPos>; equity_venue: number; equity_shadow: number; multi_day?: unknown }
 export interface Overview {
   run: Run; daily: Daily[]; heartbeat: Heartbeat[];
   pending_commands: { kind: string; ts: string; payload: Record<string, unknown> }[];

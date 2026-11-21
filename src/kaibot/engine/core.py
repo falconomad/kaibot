@@ -55,10 +55,12 @@ from kaibot.engine.journal import Journal, canon
 from kaibot.engine.ledger import (
     CORPORATE_ACTIVITIES,
     CORPORATE_ACTIVITY_GROUPS,
+    FEE_ACTIVITIES,
     LEDGER_KINDS,
     Action,
     Ledger,
     actions_from_activities,
+    fees_from_activities,
     price_key,
 )
 from kaibot.engine.market import LiveMarket, session_minutes
@@ -322,8 +324,12 @@ class Engine:
         ex_dividends=None,
         daily=None,
         recent_actions=None,
+        market_alarm=None,
     ):
         self.broker, self.market, self.store = broker, market, store
+        # S103 (#377): (session, now) -> the alarm's flags, written as a `market_alarm` event at session start. A
+        # notice only: nothing in the engine reads it back, so it cannot change an order (None = not written).
+        self.market_alarm = market_alarm
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
@@ -372,6 +378,7 @@ class Engine:
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
+        self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
         # core), built by `daily(self)`. None (the default, and always with KAIBOT_MULTIDAY off): the engine is the
         # intraday engine it was, line for line.
@@ -499,6 +506,7 @@ class Engine:
         """S18: the engine's book must match the broker's. Any difference stops new entries."""
         broker_pos = self.broker.positions()
         self._bpos = broker_pos
+        self._bpos_ts = self.now()  # #384: the time of the read, for the minute row's `mark_ts` of a broker price
         diffs = {}
         # S77: per symbol, the sum over the rules holding it; a symbol with an entry or an exit under way is
         # compared once that has settled (as a single position was before)
@@ -1233,7 +1241,8 @@ class Engine:
             returning=False,
         )
         self.run, self.peak = run, amount
-        self._book("run", {"run_id": run["id"], "amount": amount, "broker_cash0": self._broker_cash()})
+        self._book("run", {"run_id": run["id"], "amount": amount, "broker_cash0": self._broker_cash(),
+                           "started": self.now().astimezone(UTC).isoformat()})
         self.day = None  # if a session is in progress, the new run starts trading at the next 5-minute check
 
     def _set_run_status(self, status: str, reason: str | None = None) -> None:
@@ -1485,6 +1494,7 @@ class Engine:
         self._load_rules(self.day)
         self._restore_session(self.day)
         self._corporate_actions(today)
+        self._account_fees(today)  # #238: before the account check and the reconciliation below
         # S68: custom tickers are loaded only in 'Only these' mode (decision 12); All / Prefer = the catalogue alone
         custom = self.day.rules.custom_universe() if self.day.rules and not self.day.refused else {}
         if self.market.set_custom(custom):  # S68: the custom list changed since the history was loaded
@@ -1523,6 +1533,21 @@ class Engine:
         if self.experiments:
             start["experiments"] = self.experiments
         self.store.event("session_start", start, self._rid())
+        self._log_market_alarm(today)
+
+    def _log_market_alarm(self, today: date) -> None:
+        """S103 (#377): one `market_alarm` event per session start; any failure is a `market_alarm_error` event."""
+        if self.market_alarm is None:
+            return
+        try:
+            self.store.event("market_alarm", self.market_alarm(today, self.now()), self._rid())
+        except Exception as e:  # noqa: BLE001 - a notice must never stop a session
+            log.warning("market alarm failed: %s", type(e).__name__)
+            try:
+                self.store.event("market_alarm_error", {"day": str(today), "error": f"{type(e).__name__}: {e}"[:200]},
+                                 self._rid())
+            except Exception:  # noqa: BLE001
+                log.exception("market alarm error event failed")
 
     def _start_equity(self) -> float:
         se = self.ledger.start_equity(self.run["id"])
@@ -1565,6 +1590,42 @@ class Engine:
         if self.daily is not None and {k: s.qty for k, s in b.sleeves.items()} != shares0:
             self._write_positions(b, today)
 
+    def _account_fees(self, today: date) -> None:
+        """#238: the fees the venue took apart from the fills, booked to the run's cash once each, so the ledger's
+        cash follows the broker's to the cent. Alpaca puts no fee on a FILL activity (the fill books 0, #241); its
+        regulatory fees (TAF, SEC, CAT) come as FEE activities the evening after the trades. Read at every session
+        start, from the run's start (the broker's cash baseline), each booked once by its activity id. Research
+        (`corporate_actions` given) has none: `SimBroker` charges its fees on the fill. Never raises: a failed read
+        is one `venue_fee_unread` event, and the fees are read again at the next session start; until then a large
+        unbooked fee shows as a cash difference in the reconciliation, as before."""
+        if self.corporate_actions is not None or self.run is None:
+            return
+        b = self.ledger.book(self._rid())
+        if b is None or b.broker_cash0 is None:  # no cash baseline: the reconciliation does not compare cash
+            return
+        started = self._run_started()
+        try:  # two days early: Alpaca dates a fee by its trade day and posts it the evening after
+            rows = self.broker.activities(started - timedelta(days=2), types=FEE_ACTIVITIES)
+            fees = fees_from_activities([r for r in rows if _posted_since(r, started)])  # QA-Ops: a bad row too
+        except Exception as e:
+            log.exception("account fee activities unavailable")
+            self.store.event("venue_fee_unread", {"day": str(today), "what": "FEE activities",
+                                                  "error": f"{type(e).__name__}: {e}"[:200]}, self._rid())
+            return
+        for body in fees:
+            if body["ref"] not in b.booked:
+                self._book("fee", {"run_id": b.run_id, **body})
+
+    def _run_started(self) -> datetime:
+        """When the run's ledger began, the moment the broker's cash baseline was read: the `run` entry's `started`
+        (the engine's clock; #238), else the time the journal wrote it (runs begun before #238; live, that is the
+        same moment). Without one (a journal older than the ledger): 10 days back, like the corporate-actions read."""
+        rid = self._rid()
+        for _, ts, _, body in self.journal.entries(kinds=("run",)):
+            if int(body.get("run_id", -1)) == int(rid):
+                t = datetime.fromisoformat(body.get("started") or ts)
+                return (t if t.tzinfo else t.replace(tzinfo=UTC)) - timedelta(minutes=1)
+        return self.now() - timedelta(days=10)
     def _corporate_activities(self, today: date) -> list[dict]:
         """#392: Alpaca's dividend and split activities of the last 10 days. One request for both groups; if Alpaca
         refuses it (one bad code refuses the whole request), each group (`CORPORATE_ACTIVITY_GROUPS`) is asked on its
@@ -2621,21 +2682,70 @@ class Engine:
                 "trade_id": p.trade_id,
             }
         unreal = eq - d.start_equity - d.realized_reported
-        self.store.insert(
-            "ledger",
-            {
-                "run_id": d.run_id,
-                "ts": self.now().replace(microsecond=0),
-                "cash": round(eq - sum((v["last"] or 0) * v["qty"] for v in pos.values()), 2),
-                "positions": pos,
-                "equity_venue": round(d.start_equity + d.realized_venue + unreal, 2),
-                "equity_shadow": round(d.start_equity + d.realized_shadow + unreal, 2),
-            },
-            returning=False,
-        )
+        try:
+            md = self._md_minute()
+        except Exception:  # QA-Ops on #384: the block is a report; it must never fail the minute (and its retry)
+            log.exception("minute row: multi_day block unreadable, row written without it")
+            md = None
+        # #384: `cash` is the row's equity less everything the row lists (day positions at `last`, multi-day sleeves
+        # at their marks), in whole cents, so cash + multi_day.invested + sum(qty x last) is the equity exactly
+        listed = sum(round(100 * (v["last"] or 0) * v["qty"]) for v in pos.values())
+        listed += sum(round(100 * x["value"]) for x in (md or {}).get("positions", ()))
+        row = {
+            "run_id": d.run_id,
+            "ts": self.now().replace(microsecond=0),
+            "cash": (round(100 * eq) - listed) / 100,
+            "positions": pos,  # day positions only: a multi-day sleeve never goes here (#384 contract)
+            "equity_venue": round(d.start_equity + d.realized_venue + unreal, 2),
+            "equity_shadow": round(d.start_equity + d.realized_shadow + unreal, 2),
+        }
+        if md is not None:
+            row["multi_day"] = md
+        self.store.insert("ledger", row, returning=False)
         if self.run and self.peak and self.peak > float(self.run.get("peak_equity") or 0):
             self.store.update("run", {"id": self.run["id"]}, {"peak_equity": round(self.peak, 2)})
             self.run["peak_equity"] = round(self.peak, 2)
+
+    def _md_mark(self, symbol: str, sl, b) -> tuple[float, str | None, str]:
+        """#384: the price a multi-day sleeve is counted at in this minute's equity (`equity_now`: the same order),
+        when that price is from, and where it comes from."""
+        px = self.market.last_close(symbol)
+        if px:
+            end = getattr(self.market, "last_bar_end", None)
+            t = end(symbol) if end is not None else None
+            return float(px), _iso(t), "minute_bar"
+        cp = (self._bpos.get(symbol) or {}).get("current_price")
+        if cp and float(cp):
+            return float(cp), _iso(self._bpos_ts), "broker"
+        if sl.mark is not None:
+            last = b.closes[-1].session if b.closes else None
+            return float(sl.mark), _close_ts(last), "last_close"
+        return float(sl.avg_cost), None, "cost"
+
+    def _md_minute(self) -> dict | None:
+        """#384: the minute row's `multi_day` block: the ledger's cash and every multi-day sleeve with its shares and
+        the mark this row's equity counts it at. None (no key in the row) for an engine without the daily path that
+        holds no multi-day sleeve: its rows stay exactly what they were. Contract: issue #384, docs/ops/ledger.md."""
+        sleeves = self._md_sleeves()
+        if self.daily is None and not sleeves:
+            return None
+        rid = self._rid() or (self.day.run_id if self.day else None)
+        b = self.ledger.book(rid) if rid is not None else None
+        if b is None:
+            return None
+        out = []
+        for (rule, sym), sl in sorted(sleeves.items()):
+            mark, ts, src = self._md_mark(sym, sl, b)
+            out.append({"rule": rule, "symbol": sym, "qty": sl.qty, "avg_cost": round(sl.avg_cost, 4),
+                        "mark": round(mark, 4), "mark_ts": ts, "mark_from": src, "value": round(sl.qty * mark, 2)})
+        settling = {k[1] for x in self._md_exits.values() for k, _ in x["keys"]}
+        if self.daily is not None:
+            try:
+                settling |= set(self.daily.working_symbols())
+            except Exception:  # the row is a report: an unreadable order book must not stop the minute
+                log.exception("multi-day working orders unreadable (minute row)")
+        return {"v": 1, "cash_ledger": round(b.cash, 2), "invested": sum(round(100 * x["value"]) for x in out) / 100,
+                "settling": sorted(settling), "positions": out}
 
     def _finalize_day(self) -> None:
         d = self.day
@@ -2921,6 +3031,17 @@ def _iso(v) -> str | None:
     return None if v is None else _parse_ts(v).astimezone(UTC).isoformat()
 
 
+def _close_ts(session: str | None) -> str | None:
+    """16:00 ET of a session (the time a close mark is from), as UTC ISO; None without a session."""
+    if not session:
+        return None
+    try:
+        d = date.fromisoformat(session)
+    except ValueError:
+        return None
+    return datetime(d.year, d.month, d.day, 16, tzinfo=_et()).astimezone(UTC).isoformat()
+
+
 def _et_date(v) -> date | None:
     return None if v is None else _parse_ts(v).astimezone(_et()).date()
 
@@ -2932,3 +3053,14 @@ def _num(v):
 
 def new_idempotency_key() -> str:
     return uuid.uuid4().hex
+
+
+def _posted_since(row: dict, since: datetime) -> bool:
+    """#238: did this fee reach the broker's cash after `since` (the run's cash baseline)? By its `created_at`
+    when Alpaca gives one (a fee for the trade day before the run, posted after the baseline, counts), else by its
+    date (from the baseline's day on)."""
+    created = row.get("created_at")
+    if created:
+        t = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        return (t if t.tzinfo else t.replace(tzinfo=UTC)) >= since
+    return str(row.get("date") or "")[:10] >= since.astimezone(UTC).date().isoformat()

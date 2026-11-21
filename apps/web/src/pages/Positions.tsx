@@ -34,6 +34,7 @@ import { type Unfilled, exitKinds, unfilledFrom, unfilledLine } from "../lib/eng
 import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
 import { DayChange, FreshLine, useMarks } from "../components/Marks";
+import { type BuyState, buyState, buyStateText, carriesFrom, pastBuys } from "../lib/carry";
 import { markOf, potLive } from "../lib/marks";
 
 const PAGE = 50;
@@ -73,7 +74,15 @@ export function Positions() {
   const current = plans.filter((pl) => !pl.fillsAt || pl.fillsAt >= today);
   const unfilled = unfilledFrom(health.data?.events, run.id).filter((u) => u.session === today);
   const matchU = (rule: string, symbol: string, at: string | null) => unfilled.find((u) => u.rule === rule && u.symbol === symbol && (!at || u.session === at)) ?? null;
-  const unmatched = unfilled.filter((u) => !tonight.some((o) => o.rule === u.rule && o.symbol === u.symbol && (!o.fillsAt || o.fillsAt === u.session)));
+  // #366: a decision's buys still short after their fill session are carried at the next sessions' closes until the
+  // next decision (multi_day_carry events, kb_health); each planned buy says where it stands (lib/carry.ts)
+  const carries = carriesFrom(health.data?.events, run.id);
+  const earlier = plans.flatMap((pl) => (pastBuys(pl, carries, b, today) ?? []).map(({ o, s }) => ({ ...o, rule: pl.rule, fillsAt: pl.fillsAt, carry: s })));
+  const withCarry = tonight.map((o) => {
+    const pl = current.find((x) => x.rule === o.rule);
+    return pl && (o.action === "buy" || o.action === "resize") ? { ...o, carry: buyState(pl, o, carries, b, today) } : o;
+  });
+  const unmatched = unfilled.filter((u) => ![...tonight, ...earlier].some((o) => o.rule === u.rule && o.symbol === u.symbol && (!o.fillsAt || o.fillsAt === u.session)));
   const exits = exitKinds(multiDayFrom(engineDetail(overview?.heartbeat)));
   const live = run.kind === "paper" ? potLive(run, overview, b, undefined, mk.marks) : null;
   const open: Open[] = [
@@ -82,14 +91,14 @@ export function Positions() {
       return { kind: "day", symbol, p, value: p.qty * now, rank: p.qty * now, gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null };
     }),
     ...(b?.positions ?? []).map((p): Open => {
-      const v = holdingView(p, b!, markOf(live?.live, p.symbol));
+      const v = holdingView(p, b!, markOf(live?.live ?? live?.engine, p.symbol));
       return { kind: "book", symbol: p.symbol, p, value: v.value, gain: v.gain, day: v.dayPct, rank: p.qty * p.mark };
     }),
   ].sort((x, y) => y.rank - x.rank);
-  // the rows' prices: live, or the close marks (never the engine's minute row: it has no price per stock)
-  const fresh = live?.live ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
-  // for Tick: a change of source (live prices or close marks) replaces a figure without the tint of a move
-  const from = live?.live ? "live" : "close";
+  // the rows' prices: live, else the engine's minute row when it lists exactly the book (#384), else the close marks
+  const fresh = live?.live || live?.engine ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
+  // for Tick: a change of source (live prices, the engine's row, close marks) replaces a figure without the tint of a move
+  const from = live?.live ? "live" : live?.engine ? "engine" : "close";
   const invested = open.reduce((a, o) => a + o.value, 0);
   const pot = live?.pot ?? null;
   const expHeld = exps.find((e) => e.experiment && open.some((o) => o.kind === "book" && findExperiment(o.p.rule, [e])));
@@ -150,8 +159,9 @@ export function Positions() {
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
           )}
           {/* below the list: the plan arrives after the rows, and must not push them down */}
-          {(tonight.length > 0 || unmatched.length > 0) && <NextClose orders={tonight.map((o) => ({ ...o, unfilled: matchU(o.rule, o.symbol, o.fillsAt) }))}
+          {(tonight.length > 0 || unmatched.length > 0) && <NextClose orders={withCarry.map((o) => ({ ...o, unfilled: matchU(o.rule, o.symbol, o.fillsAt) }))}
             extra={unmatched} today={today} />}
+          {earlier.length > 0 && <NextClose orders={earlier} past />}
         </>
       )}
 
@@ -184,7 +194,7 @@ export function Positions() {
       <Sheet open={sheet !== null} onClose={() => setSheet(null)} title={sheet?.symbol ?? ""}>
         {sheet && ("id" in sheet ? <ClosedSheet t={sheet} exp={findExperiment(sheet.strategy, exps)} />
           : sheet.kind === "day" ? <DaySheet o={sheet} exps={exps} />
-          : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} exits={exits} live={markOf(live?.live, sheet.symbol)} />)}
+          : <BookSheet o={sheet} b={b!} exp={findExperiment(sheet.p.rule, exps)} exits={exits} live={markOf(live?.live ?? live?.engine, sheet.symbol)} />)}
       </Sheet>
     </>
   );
@@ -277,21 +287,27 @@ export function BookSheet({ o, b, exp, exits, live }: { o: Pick<Extract<Open, { 
 }
 
 /** #229 item 2: what the multi-day rule sends at the next close, and where each order stands. */
-function NextClose({ orders, extra = [], today }: { orders: (ReturnType<typeof parsePlan>[number]["orders"][number] & { rule: string; fillsAt: string | null; unfilled?: Unfilled | null })[];
-  /** #333: today's orders not filled at the close that the plan no longer lists */ extra?: Unfilled[]; today?: string }) {
+function NextClose({ orders, extra = [], today, past = false }: { orders: (ReturnType<typeof parsePlan>[number]["orders"][number] & { rule: string; fillsAt: string | null; unfilled?: Unfilled | null; carry?: BuyState })[];
+  /** #333: today's orders not filled at the close that the plan no longer lists */ extra?: Unfilled[]; today?: string;
+  /** #366: the buys of a decision whose fill session is over (carried until the next decision) */ past?: boolean }) {
   const at = orders.find((o) => o.fillsAt)?.fillsAt ?? (extra.length ? today ?? null : null);
+  const id = past ? "nc-past-h" : "nc-h";
   return (
-    <section className="card next-close" aria-labelledby="nc-h">
-      <h2 id="nc-h" className="section-h" style={{ margin: 0 }}>At the {at ? `close of ${day(at)}` : "next close"}</h2>
+    <section className="card next-close" aria-labelledby={id}>
+      <h2 id={id} className="section-h" style={{ margin: 0 }}>{past ? `Planned buys for the close of ${at ? day(at) : "the last decision"}` : `At the ${at ? `close of ${day(at)}` : "next close"}`}</h2>
       <ul className="nc-list">{orders.map((o) => {
         const d = o.sharesTarget - o.sharesNow;
         const what = o.sharesTarget === 0 ? `Sell all ${o.sharesNow}` : d > 0 ? `${o.sharesNow ? "Add" : "Buy"} ${d}` : `Sell ${-d}`;
+        const plan = <>{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</>;
+        // #366: once the fill session is over a buy says where it stands: filled, carried, waiting or skipped (and why)
+        const c = o.carry && o.carry.kind !== "order" ? buyStateText(o.carry) : null;
         return (
           <li key={`${o.rule}-${o.symbol}`}>
             <StockBadge symbol={o.symbol} size={40} />
-            <span className="nc-mid"><b>{o.symbol}</b><span className="muted">{o.unfilled ? unfilledLine(o.unfilled)
-              : <>{what} share{Math.abs(d) === 1 && o.sharesTarget !== 0 ? "" : "s"}{o.why ? ` · ${d < 0 || o.sharesTarget === 0 ? reasonText(o.why) : buyText(o.why)}` : ""}</>}</span></span>
-            {o.unfilled ? <span className="nc-state canceled">not filled</span>
+            <span className="nc-mid"><b>{o.symbol}</b><span className="muted">{c ? <>{plan}{c.line ? <> · {c.line}</> : null}</>
+              : o.unfilled ? unfilledLine(o.unfilled) : plan}</span></span>
+            {c ? <span className={`nc-state ${c.tone}`}>{c.tag}</span>
+              : o.unfilled ? <span className="nc-state canceled">not filled</span>
               : <span className={`nc-state ${o.state}`}>{STATE_TEXT[o.state]}{o.state === "working" && o.sharesNow > 0 && o.sharesTarget > o.sharesNow ? ` · ${o.sharesNow} of ${o.sharesTarget} held` : ""}</span>}
           </li>
         );

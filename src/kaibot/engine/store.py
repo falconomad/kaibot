@@ -89,6 +89,14 @@ class Store:
     def select(self, table: str, params: dict) -> list[dict]:
         return self._call("GET", table, params) or []
 
+    def delete(self, table: str, match: dict):
+        """DELETE the rows equal to `match` (every key required). Used by the news desk to remove a cluster row
+        whose first item could not be written (#360); nothing on the order path deletes."""
+        if not match:
+            raise ValueError("delete needs a match: refusing to delete a whole table")
+        params = {k: f"eq.{v}" for k, v in match.items()}
+        return self._call("DELETE", table, params, prefer="return=minimal")
+
     def rpc(self, fn: str, args: dict) -> Any:
         """Call a kaibot.* Postgres function (service role only)."""
         return self._call("POST", f"rpc/{fn}", body=args)

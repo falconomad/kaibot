@@ -322,3 +322,29 @@ def test_a_stop_request_or_a_programming_error_is_not_swallowed(exc):
 
     with pytest.raises(type(exc)):
         mod.fill_domains(rows, search, sleep=lambda s: None)
+
+
+def test_a_miss_names_the_exchange_spellings_it_did_not_know(capsys):
+    """#383: the first real run must show how the live API spells exchanges we have not seen; nothing is guessed."""
+    rows = {"JPM": {"name": "JPM", "logo": None, "industry": None, "domain": None},
+            "XYZ": {"name": "XYZ", "logo": None, "industry": None, "domain": None}}
+    answers = {
+        "JPM": {"results": [{"symbol": "JPM", "exchange": "New York Stock Exchange", "website": "https://jpmorgan.com"},
+                            {"symbol": "JPM", "exchange": " New York Stock Exchange ", "website": "jpm.com"},
+                            {"symbol": "JPM", "exchange": "LSE", "website": "jpm.co.uk"},
+                            {"symbol": "JPM.L", "exchange": "XETRA", "website": "x.de"}]},
+        "XYZ": {"results": []},
+    }
+    found = mod.fill_domains(rows, answers.__getitem__, sleep=lambda s: None)
+    assert found == {} and rows["JPM"]["domain"] is None
+    err = capsys.readouterr().err
+    assert ("JPM: no exact US match (exact ticker on an exchange not in US_EXCHANGES: LSE, New York Stock Exchange)"
+            in err)
+    assert "XETRA" not in err
+    assert "XYZ: no exact US match; domain stays null" in err
+
+
+def test_known_spellings_are_not_reported_as_unknown():
+    res = [{"symbol": "KO", "exchange": "nyse", "website": None}, {"symbol": "KO", "exchange": None}]
+    assert mod.unknown_exchanges("KO", res) == []
+    assert mod.unknown_exchanges("KO", "not a list") == []

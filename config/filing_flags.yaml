@@ -1,0 +1,19 @@
+# 8-K filing flags (story S101, #375; docs/prereg/filing_flags_study.md). Read only by kaibot.features.filing_flag,
+# which is a logged observer: nothing reads a flag for an order. The groups are the six pre-registered ones and
+# never change here (a change is an amendment of the pre-registration first).
+#
+# `counted` lists the groups the study found to count (negative, |t| >= 3.5, same sign in 6 of 10 years), each
+# with the N sessions of its flag. It stays empty until scripts/filing_flags_study.py has run on the Mac and its
+# report is posted on #375; then it is filled by hand in a PR that links the report.
+exclude_items: ["2.02"]
+groups:
+  g402_non_reliance: ["4.02"]
+  g401_auditor: ["4.01"]
+  g205_206_restructuring: ["2.05", "2.06"]
+  g502_officers: ["5.02"]
+  g101_agreement: ["1.01"]
+  g301_103_delisting_bankruptcy: ["3.01", "1.03"]
+counted: {}
+# The shadow log (KAIBOT_FILING_FLAG=shadow) also records the groups that did not count, labelled counted: false,
+# for this many sessions after day 0, so forward evidence accumulates. It changes nothing either way.
+shadow_sessions: 20

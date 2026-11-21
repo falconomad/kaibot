@@ -139,7 +139,10 @@ with the broker (`engine/reconcile.py`):
   dividends accrued at the ex-date that are not paid yet.
 - **Tolerance (cash):** the larger of **$1 and 0.05% of the run's pot** ($50 at $100k). It covers what the ledger
   does not model to the cent:
-  - regulatory sale fees (SEC, FINRA TAF);
+  - a regulatory fee the venue has taken but not posted yet. Alpaca puts no fee on a fill; it posts its fees
+    (SEC, FINRA TAF, CAT) as `FEE` activities the evening after the trades, and the engine books each one once, as
+    a `fee` ledger entry, at the next session start (#238). So these fees no longer use up the tolerance over
+    time;
   - cash in lieu and dividend amounts rounded by the broker;
   - dividend withholding.
 - **Tolerance (shares):** none.
@@ -229,3 +232,37 @@ the second appears as `"SYMBOL|strategy"` in `positions`.
 | - | `kb_equity_series` | the "MTM pot series" for the chart |
 
 Frontend (not edited here): replace the draft types with these, make `cap` nullable, drop the mock.
+
+## The minute row (`kaibot.ledger`, #384)
+
+One row a minute while the engine trades. Contract between the engine (`Engine._ledger`, `_md_minute`) and the
+dashboard (`apps/web/src/lib/marks.ts`, `engineMarks`); `kb_overview` returns the whole newest row as `ledger`.
+
+| Field | Meaning | Authoritative for |
+|---|---|---|
+| `equity_venue`, `equity_shadow` | the run marked now (unchanged) | the pot (`potNow`: the lower of the two) |
+| `positions` | **day positions only** (unchanged). A multi-day sleeve never goes here | the dashboard's day-position rows |
+| `cash` | the row's equity less everything the row lists, in whole cents (was: equity less day positions, so a multi-day book showed as cash) | a "cash" figure |
+| `multi_day` (jsonb, migration 0034) | `{v: 1, cash_ledger, invested, settling: [symbol], positions: [{rule, symbol, qty, avg_cost, mark, mark_ts, mark_from, value}]}` | the price of each multi-day holding in that minute |
+
+- Identity, exact to the cent (`tests/test_ledger_minute_multiday.py`): `cash + multi_day.invested + Σ positions[s].qty × last = equity`.
+  `cash_ledger` is the ledger's own cash (`Book.cash`); `cash` equals it within one cent per holding (each holding's
+  `value` is rounded to the cent).
+  "equity" here is the engine's reported equity (`equity_now`, realised P&L counted as min(venue, shadow) per
+  trade). It equals `equity_venue` and `equity_shadow` while every closed trade of the day has the same venue and
+  shadow P&L, which is always the case with multi-day rules only (a multi-day sale counts one P&L for all three).
+  An intraday trade whose venue and shadow fills differ moves `equity_venue` away by `realized_venue -
+  realized_reported`; `cash` then follows the reported equity, not the venue's (QA-Ops on #384).
+- If building the block fails, the row is written without it (logged) and the minute goes on: it is a report.
+- `mark` is the price `equity_now` counts the sleeve at, in this order: the last minute bar (`mark_from` `minute_bar`,
+  `mark_ts` the bar's end), the broker's `current_price` (`broker`, the time of the positions read), the last close
+  mark (`last_close`, 16:00 ET of that close), the average cost (`cost`, `mark_ts` null). Nothing new is fetched.
+- `settling`: symbols with a daily-path order open (15:50-15:57 ET near-close orders) or a multi-day sale not yet
+  booked. A fill is booked at the start of the tick that sees it; until then it is in neither `cash` nor
+  `multi_day.positions`. A reader does not compare shares while `settling` is not empty.
+- `multi_day` is absent (no key) for an engine without the daily path that holds no multi-day sleeve.
+- No double counting: the dashboard takes day positions from `positions` only and prices the **booked** book
+  (`kb_book`) with `multi_day.positions` only when the row is today's, `settling` is empty and the row lists exactly
+  the book's (rule, symbol, shares); the account's live prices (`/api/marks`) come first. Otherwise the close marks.
+- Before 0034 is applied the replicator sends the rows without `multi_day` (the journal keeps it), says so once
+  (event `multi_day_column_missing`) and tries the column again hourly; no restart is needed after the apply.

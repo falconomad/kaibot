@@ -111,7 +111,9 @@ def build(settings: Settings) -> Engine:
                                    note=make_daily_note(remote)),  # #311: None unless KAIBOT_DAILY_NOTE=on
                   # #266: spin-offs and symbol changes of held multi-day positions, adopted from Alpaca's record
                   # (only used with the daily path: KAIBOT_MULTIDAY=on)
-                  recent_actions=RecentActions(get=bounded_data_get(data)))
+                  recent_actions=RecentActions(get=bounded_data_get(data)),
+                  # S103 (#377): the market-event alarm as a logged notice; off unless KAIBOT_MARKET_ALARM=on
+                  market_alarm=market_alarm_from_env(os.environ))
     # Data (19 Nov 2026): news on a schedule, so news_item fills without the room (ingest/news_poll.py). Started in
     # main() after the lease; never with --check. KAIBOT_NEWS_POLL=off: None
     eng.news_poller = news_poll.for_engine(eng, desk, data, locked.lock)
@@ -131,6 +133,19 @@ def bounded_data_get(data):
     http = copy.copy(data.http)
     http.timeout_s, http.deadline_s = ORDER_TIMEOUT_S, ORDER_DEADLINE_S
     return lambda path, params: http.call("GET", f"{DATA_URL}{path}", params)
+
+
+def market_alarm_from_env(env) -> object | None:
+    """S103 (#377): the market-event alarm's (session, now) -> flags, or None unless KAIBOT_MARKET_ALARM=on.
+
+    It reads the committed calendars and the research files under <repo>/data (earnings, alarm/top10.csv); a missing
+    file makes its flag unknown. The engine only writes the result as an event: no order path reads it."""
+    if str(env.get("KAIBOT_MARKET_ALARM", "off")).strip().lower() != "on":
+        return None
+    from kaibot.features.market_alarm import live_alarm
+
+    log.info("market alarm: ON (a logged notice; it gates nothing)")
+    return live_alarm
 
 
 def daily_path(data=None, review=None, shadow=None, note=None):
@@ -169,7 +184,21 @@ def daily_path(data=None, review=None, shadow=None, note=None):
     if note is not None:
         log.info("daily note in plain words: ON (KAIBOT_DAILY_NOTE=on, %s)",
                  "Haiku" if note.gateway.enabled else "no ANTHROPIC_API_KEY: the code's template")
-    return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review, shadow=shadow, note=note)
+    flags = filing_flags_from_env(os.environ)  # #375: None unless KAIBOT_FILING_FLAG=shadow
+    if flags is not None:
+        log.warning("8-K filing flags in SHADOW mode (KAIBOT_FILING_FLAG=shadow): logged only, no effect on orders")
+    return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review, shadow=shadow, note=note,
+                                             filing_flags=flags)
+
+
+def filing_flags_from_env(env):
+    """#375: the 8-K filing-flag observer (kaibot.features.filing_flag), or None unless KAIBOT_FILING_FLAG=shadow.
+    Imported only when switched on; the daily path writes its answer as an event and reads nothing back."""
+    if str(env.get("KAIBOT_FILING_FLAG", "off")).strip().lower() != "shadow":
+        return None
+    from kaibot.features.filing_flag import from_env
+
+    return from_env(env)
 
 
 EXIT_JOURNAL = 4
@@ -208,7 +237,8 @@ def report_conflicts(eng: Engine, replicator: Replicator) -> None:
     each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local)."""
     for f in replicator.take_fallbacks():  # QA-Ops on #339: migration 0028 not applied yet (rows say "missing")
         with contextlib.suppress(Exception):
-            eng.store.event("stop_state_fallback", {k: f[k] for k in ("seq", "error", "action")}, eng._rid())
+            eng.store.event(f.get("event", "stop_state_fallback"), {k: f[k] for k in ("seq", "error", "action")},
+                            eng._rid())
     for c in replicator.take_conflicts():
         with contextlib.suppress(Exception):
             detail = {k: c[k] for k in ("seq", "table", "key", "reason")}

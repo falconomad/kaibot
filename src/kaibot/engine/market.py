@@ -248,6 +248,13 @@ class LiveMarket:
         df = self.today_bars.get(s)
         return float(df["c"].iloc[-1]) if df is not None and len(df) else None
 
+    def last_bar_end(self, s: str) -> datetime | None:
+        """#384: when the last minute bar of `s` ended (its start plus a minute), the time its close is from."""
+        df = self.today_bars.get(s)
+        if df is None or not len(df):
+            return None
+        return pd.Timestamp(df["ts"].iloc[-1]).to_pydatetime() + timedelta(minutes=1)
+
     def last_bar_minute(self, s: str) -> int | None:
         df = self.today_bars.get(s)
         if df is None or not len(df):
