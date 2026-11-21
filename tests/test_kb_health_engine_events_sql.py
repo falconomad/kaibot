@@ -35,6 +35,9 @@ needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Po
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
+# M9 1.15 (#440): a command row the engine refused. A health event, left out only until a migration lists it and the
+# Health page names it (#512); it is logged as an error and written to the event table meanwhile
+ROUTINE |= {"command_rejected"}
 
 # Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
 # missed). Each dynamic call site below, and where its names come from; a new dynamic call fails
