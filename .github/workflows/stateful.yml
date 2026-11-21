@@ -1,0 +1,35 @@
+# M12 ticket 3.1 (#463): the stateful property test over the order manager and the ledger (tests/stateful/) with a
+# larger, bounded example budget than the ordinary test run pays, and branch coverage of the modules under test.
+# The ordinary `ci` run already runs the same tests with the small default budget; this job is the deeper search.
+name: stateful
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: stateful-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  orders-and-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # the bound on the search: the budget below takes about two minutes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: state machine, 300 examples of up to 50 steps, branch coverage
+        env: {KAIBOT_STATEFUL_EXAMPLES: "300", KAIBOT_STATEFUL_STEPS: "50"}
+        run: |
+          uv run coverage run --branch \
+            --include='src/kaibot/engine/orders.py,src/kaibot/engine/ledger.py,src/kaibot/engine/targets.py,src/kaibot/engine/execution.py' \
+            -m pytest tests/stateful -q -p no:cacheprovider --hypothesis-show-statistics
+      - name: coverage summary
+        if: always()
+        run: |
+          uv run coverage report --show-missing | tee coverage.txt
+          { echo '### Stateful test: branch coverage of the modules under test'; echo '```'; cat coverage.txt; echo '```'; } \
+            >> "$GITHUB_STEP_SUMMARY"
