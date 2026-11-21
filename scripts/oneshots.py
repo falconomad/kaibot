@@ -12,7 +12,10 @@ Rules (pre-registered in docs/prereg/<rule>.md, committed before this file; `pre
 without one):
 - daily, on the point-in-time S&P 500 (#123) and the daily store (#124), one continuous $100k account from 2017-05:
   `pullback_uptrend`, `ath_breakout` (5, 10 and 20 positions, a distribution over --seeds random signal subsets),
-  `post_earnings_week` (needs data/earnings from S85), `weekly_fall_rebound` (5 and 20 sessions held).
+  `post_earnings_week` (needs data/earnings from S85), `weekly_fall_rebound` (5 and 20 sessions held), and M8's
+  `news_gap_week` (S98, #372; needs data/news, data/filings from S100 and data/earnings; its headline versions
+  trade today's list in complete news months, the `info8k` neighbour the full point-in-time universe, and the
+  base is compared with the `nonews` control; no 30%/60% cap rows).
   Grid: fill base / stress x costs 0x (break-even input), 1x, 2x, 3x at a 100% cap, and the 30% and 60% caps at
   the base fill; the pre-declared neighbours; the exposure-matched random control (Gate B mark 3, --control-runs);
   SPY total return, price-only SPY and the equal-weight members as benchmarks; Gate B marks 1-6.
@@ -153,6 +156,64 @@ def earnings_events(a: argparse.Namespace, data: Path, m: mc.Market) -> tuple[di
                  "events": int(sum(len(v) for v in out.values()))}
 
 
+def news_inputs(a: argparse.Namespace, data: Path, m: mc.Market) -> tuple[od.NewsInputs, dict]:
+    """news_gap_week's headlines, 8-K filings, earnings days and complete news months (docs/prereg/news_gap_week.md).
+    Skipped with a message when data/news, data/filings or data/earnings is missing."""
+    from kaibot.ingest.filings_pit import has_item
+    from kaibot.ingest.sp500_pit import Membership
+
+    if not (data / "news").is_dir():
+        raise Skip(f"no news history at {data / 'news'}: run scripts/fetch_history.py --news first")
+    ff = data / "filings" / "filings_8k.parquet"
+    if not ff.is_file():
+        raise Skip(f"no 8-K filings at {ff}: run ./scripts/fetch_earnings_dates.sh --all-items first (S100, #374)")
+    earn, earn_info = earnings_events(a, data, m)  # raises Skip without data/earnings
+    raw = m.raw
+    ms = Membership.load(universe=Path(a.universe_file))
+    cfg = yaml.safe_load(Path(a.universe_file).read_text())
+    listed = {s for syms in cfg["sectors"].values() for s in syms}
+    heads: dict[int, np.ndarray] = {}
+    counts: dict[str, dict[str, int]] = {}
+    last = None
+    for j in m.stocks.tolist():
+        t = load_news_times(data, raw.symbols[j])
+        if len(t):
+            heads[j] = t
+            mon = t.astype("datetime64[M]").astype(str)
+            u, n = np.unique(mon, return_counts=True)
+            counts[raw.symbols[j]] = dict(zip(u.tolist(), n.tolist(), strict=True))
+            last = t[-1] if last is None or t[-1] > last else last
+    have = np.isfinite(np.asarray(raw.c, dtype=float))
+    months = raw.dates.astype("datetime64[M]").astype(str)
+    bar_months = {s: sorted(set(months[have[:, j]].tolist())) for s in listed if s in raw._col
+                  for j in [raw.col(s)]}
+    complete = oi.complete_months({s: c for s, c in counts.items() if s in listed}, bar_months, last)
+    tab = pd.read_parquet(ff)
+    tab = tab[tab["form"].astype(str) == "8-K"]
+    acc = pd.to_datetime(tab["accepted_ts"], utc=True).dt.tz_localize(None).to_numpy().astype("datetime64[s]")
+    non202 = ~has_item(tab["items"], "2.02").to_numpy()
+    cmap = ms.key_map(list(raw.symbols))
+    stocks = set(m.stocks.tolist())
+    f_all: dict[int, list] = {}
+    f_non: dict[int, list] = {}
+    for comp, t, keep in zip(tab["company"].astype(str), acc, non202, strict=True):
+        j = cmap.get(comp)
+        if j is None or j not in stocks or np.isnat(t):
+            continue
+        f_all.setdefault(j, []).append(t)
+        if keep:
+            f_non.setdefault(j, []).append(t)
+    srt = lambda d: {j: np.sort(np.asarray(v, dtype="datetime64[s]")) for j, v in d.items()}  # noqa: E731
+    nw = od.NewsInputs(headlines=heads, filings_non202=srt(f_non), filings_all=srt(f_all), earnings=earn,
+                       complete=np.isin(months, complete), windows=od.news_windows(raw.dates))
+    info = {"earnings": earn_info, "filings": {"file": str(ff), "form_8k": len(tab), "columns": len(f_all)},
+            "companies_with_headlines": len(heads), "last_headline": None if last is None else str(last),
+            "complete_news_months": oi.month_ranges(complete), "complete_news_month_count": len(complete),
+            "note": "headline versions: today's list (former members have no stored headline), complete news "
+                    "months only; info8k: the full point-in-time universe"}
+    return nw, info
+
+
 def run_daily_rule(a: argparse.Namespace, rule: str) -> None:
     t0 = time.time()
     data = Path(a.data)
@@ -160,11 +221,15 @@ def run_daily_rule(a: argparse.Namespace, rule: str) -> None:
     gate_sha = GateV2.load(ROOT).sha
     print(f"pre-registration {pre['file']} sha256 {pre['sha256'][:12]}; gate_v2 {gate_sha[:12]}", flush=True)
     m, input_sha, symbols, info = daily_market(a, data, t0)
-    events, ev_info = ({}, None)
+    events, ev_info, news, news_info = ({}, None, None, None)
     if rule == "post_earnings_week":
         events, ev_info = earnings_events(a, data, m)
         print(f"SEC announcements: {ev_info}", flush=True)
-    sig = od.DailySignals(m, events)
+    if rule == "news_gap_week":
+        news, news_info = news_inputs(a, data, m)
+        print(f"news: {news_info['companies_with_headlines']} companies with headlines, "
+              f"{news_info['complete_news_month_count']} complete months", flush=True)
+    sig = od.DailySignals(m, events, news)
     pol = load_profiles()[a.level]
     bars = m.raw
     folds = make_folds(first_train_month(a.start, WARMUP_DAYS), np.datetime64(a.end, "D"))
@@ -229,8 +294,11 @@ def run_daily_rule(a: argparse.Namespace, rule: str) -> None:
             print(f"  {vname}: {len(seeds)} seeds, median seed {med}, {time.time() - t0:.0f}s", flush=True)
         else:
             med = None
-        base_row, book, r = one(spec, "base", 1.0, 100.0, med, "grid")
+        base_row, book, r = one(spec, "base", 1.0, 100.0, med, "control" if vname in od.CONTROLS else "grid")
         rows.append(base_row)
+        if vname in od.CONTROLS:  # news_gap_week's nonews: one row, compared with the base below
+            versions[vname] = {"rows": rows, "control_of": od.RULE_VERSIONS[rule][0], "book": book}
+            continue
         if not is_base and seeded:
             versions[vname] = {"rows": rows, "distribution": dist, "median_seed": med}
             continue
@@ -242,7 +310,7 @@ def run_daily_rule(a: argparse.Namespace, rule: str) -> None:
                     st = [one(spec, fill, cost, 100.0, s, "seed", log=False, files=False)[0] for s in seeds]
                     dist[f"{fill}|{cost:g}x"] = od.distribution(st)
                 rows.append(one(spec, fill, cost, 100.0, med, "grid" if cost else "break_even_input")[0])
-        for cap in GRID_CAPS:
+        for cap in (() if rule == "news_gap_week" else GRID_CAPS):  # news_gap_week: no cap rows (its prereg)
             rows.append(one(spec, "base", 1.0, cap, med, "grid")[0])
         by = {x["label"]: x for x in rows}
         suffix = "" if med is None else f"|seed{med}"
@@ -276,7 +344,8 @@ def run_daily_rule(a: argparse.Namespace, rule: str) -> None:
                 rows.append(nrow)
                 nb[nspec.name.split("~")[1]] = nrow
         gate = mc.gate_b(base_row, by.get(lab("base", 2.0)), by.get(lab("base", 3.0)), bench["spy"], control, nb, be,
-                         spy_tr=bench.get("spy_total_return"), universe="point_in_time")
+                         spy_tr=bench.get("spy_total_return"),
+                         universe="today" if rule == "news_gap_week" else "point_in_time")
         extra = []
         if seeded:
             share = dist["base|1x"].get("share_passing_mark1_pct", 0.0)
@@ -287,19 +356,57 @@ def run_daily_rule(a: argparse.Namespace, rule: str) -> None:
                            "control": control and {k: v for k, v in control.items()
                                                    if k not in ("sharpe", "cagr_pct", "max_drawdown_pct",
                                                                 "return_pct", "avg_exposure_pct")},
-                           "distribution": dist, "neighbour_distribution": nb_dist, "median_seed": med}
+                           "distribution": dist, "neighbour_distribution": nb_dist, "median_seed": med,
+                           "book": book}
         print(f"  {vname}: done, {time.time() - t0:.0f}s", flush=True)
+    for cname, x in list(versions.items()):
+        if "control_of" not in x:
+            continue
+        ctl_book = x.pop("book")
+        bv = versions[x["control_of"]]
+        bbook = bv.pop("book", None)
+        if bbook is not None:
+            cmp_ = od.against_control(bv["rows"][0], x["rows"][0], od.trade_excess(bbook, m),
+                                      od.trade_excess(ctl_book, m))
+            bv["against_control"] = {"control": cname, **cmp_}
+            bv["extra_marks"].append({"mark": "control", "text": "clearly above the nonews control",
+                                      "verdict": "pass" if cmp_["verdict"] == "clearly above" else "fail",
+                                      "detail": f"{cmp_['verdict']}: Sharpe {cmp_['base_sharpe']} vs "
+                                                f"{cmp_['control_sharpe']}, mean excess per trade "
+                                                f"{cmp_['base_mean_excess_pct']}% vs {cmp_['control_mean_excess_pct']}%"
+                                                f" (Welch t {cmp_['welch_t']}; {cmp_['base_trades']} and "
+                                                f"{cmp_['control_trades']} trades)"})
+    for x in versions.values():
+        x.pop("book", None)  # the books are not part of the report
     rep = {"set": "oneshots", "kind": "daily", "rule": rule, "status": STATUS, "run_at": run_at.isoformat(),
            "code_sha": ctx["code_sha"], "prereg": pre, "gate_v2_sha256": gate_sha, "level": a.level,
            "universe": ctx["universe"], "universe_mode": "point_in_time", "bars": "store", "data": info,
-           "earnings": ev_info, "start": a.start, "end": a.end, "equity": a.equity, "control_runs": a.control_runs,
+           "earnings": ev_info, "news": news_info, "start": a.start, "end": a.end, "equity": a.equity,
+           "control_runs": a.control_runs,
            "seeds": a.seeds if seeded else None, "window": ctx["window"], "input_sha256": input_sha,
            "symbols": len(symbols), "benchmarks": bench, "versions": versions,
-           "verdict": daily_verdict(versions, rule), "runtime_s": round(time.time() - t0, 1),
+           "verdict": daily_verdict(versions, rule), "reading": s96_reading(versions, rule),
+           "runtime_s": round(time.time() - t0, 1),
            "peak_rss_mb": round(peak_rss_mb(), 0)}
     write_trials(data, trials)
     (out / f"{tag}.json").write_text(json.dumps(rep, indent=1, default=str))  # last: "this rule is finished"
     print(f"{rule}: {rep['verdict']}; runtime {rep['runtime_s']}s")
+
+
+def s96_reading(versions: dict, rule: str) -> str | None:
+    """news_gap_week (its prereg, "Reading"): on to S99 only if marks 1, 3 and 4 do not fail and the base is clearly
+    above the nonews control; otherwise dropped. None for the other rules."""
+    if rule != "news_gap_week":
+        return None
+    base = versions.get(od.RULE_VERSIONS[rule][0], {})
+    marks = {str(g["mark"]): g["verdict"] for g in [*base.get("gate_b", []), *base.get("extra_marks", [])]}
+    failed = [k for k in ("1", "3", "4") if marks.get(k) == "fail"]
+    above = (base.get("against_control") or {}).get("verdict") == "clearly above"
+    if not failed and above:
+        return "goes on to S99 (marks 1, 3 and 4 not failed; clearly above the nonews control)"
+    why = [f"mark {', '.join(failed)} failed"] if failed else []
+    why += [] if above else ["not clearly above the control"]
+    return "dropped (" + "; ".join(why) + ")"
 
 
 def daily_verdict(versions: dict, rule: str) -> str:
@@ -498,10 +605,13 @@ def _row_daily(rep: dict) -> list[list]:
             marks = [*x["gate_b"], *x.get("extra_marks", [])]
             failed = [str(g["mark"]) for g in marks if g["verdict"] == "fail"]
             verdict = f"**FAIL** (mark {', '.join(failed)})" if failed else "not failed (provisional, cannot pass)"
+        elif "control_of" in x:
+            verdict = f"control of `{x['control_of']}` (not judged on its own)"
         else:
             verdict = "reported (distribution only)"
-        out.append([f"`{v}`", "point-in-time S&P 500, daily store", f"{rep['window'][0]} to {rep['window'][1]}",
-                    what, verdict])
+        where = ("today's list inside the point-in-time S&P 500, complete news months, daily store"
+                 if rep.get("rule") == "news_gap_week" else "point-in-time S&P 500, daily store")  # its prereg
+        out.append([f"`{v}`", where, f"{rep['window'][0]} to {rep['window'][1]}", what, verdict])
     return out
 
 
@@ -533,6 +643,8 @@ def summary(data: Path) -> str:
             continue
         f, rep = hit
         table += _row_daily(rep) if rep["kind"] == "daily" else _row_intraday(rep)
+        if rep.get("reading"):
+            table.append([f"`{rule}` reading", "", "", rep["reading"], ""])
         notes.append(f"- `{rule}`: pre-registration `{rep['prereg']['file']}` (sha256 "
                      f"`{rep['prereg']['sha256'][:12]}`), report `{f.name}`, code `{rep['code_sha']}`, runtime "
                      f"{rep['runtime_s']} s.")

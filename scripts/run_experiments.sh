@@ -49,7 +49,8 @@
 #       today's list with minute bars, then pullback_uptrend, ath_breakout (a distribution over random signal
 #       subsets at 5, 10 and 20 positions), post_earnings_week (needs data/earnings) and weekly_fall_rebound on
 #       the point-in-time S&P 500 and the daily store; ONE table with pass / fail per rule written to
-#       data/reports/experiments_oneshots_summary.md. A rule whose data is missing is skipped with a message and
+#       data/reports/experiments_oneshots_summary.md; and M8's news_gap_week (S98, #372; data/news, data/filings,
+#       data/earnings; docs/prereg/news_gap_week.md). A rule whose data is missing is skipped with a message and
 #       tried again next time. KAIBOT_ONESHOT_CONTROL_RUNS (500) and KAIBOT_ONESHOT_SEEDS (200) change the control
 #       and the subsets (a different number is a new report). Times: docs/m0/reproduce.md section 10. No .env.
 #   ./scripts/run_experiments.sh spy_trend   issue #201: the SPY trend filter (hold SPY above its 10-month average,
@@ -79,11 +80,11 @@ export SSL_CERT_FILE="${SSL_CERT_FILE:-$("$PY" -m certifi)}"  # macOS python.org
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 mkdir -p logs data/reports
 
-if [ "${1:-}" = "oneshots" ]; then  # reads data/bars_1m, data/news, data/daily, data/earnings: no .env needed
+if [ "${1:-}" = "oneshots" ]; then  # reads data/bars_1m, data/news, data/daily, data/earnings, data/filings: no .env
   RUNS="${KAIBOT_ONESHOT_CONTROL_RUNS:-500}"
   SEEDS="${KAIBOT_ONESHOT_SEEDS:-200}"
   for r in orb_stocks_in_play news_continuation pullback_uptrend ath_breakout post_earnings_week \
-      weekly_fall_rebound; do
+      weekly_fall_rebound news_gap_week; do
     if "$PY" scripts/oneshots.py --has "$r" --start "$START" --end "$END" --universe-file "$UNIVERSE" \
         --control-runs "$RUNS" --seeds "$SEEDS"; then
       echo "== $r: report exists, skipped"
