@@ -11,6 +11,11 @@ buys, never a sale that only reduces exposure), or when the
 execution style refuses it (window, fractional shares): each such key is reported with the reason. A sale first
 frees the shares a protective stop holds (engine/protect.py) and goes out once they are free.
 
+The pre-send gate (M9 1.16, issue #441): `presend(target, side, shares)` is asked once every other check has
+passed, before a sale's protective stop is released, and its reason withholds the order (`LoopResult.withheld`):
+nothing is journalled or sent for it and no attempt number is used, so the next run of the loop (the next tick, or
+the next session's carry-over) asks again.
+
 The targets come from the portfolio builder (`risk/portfolio.PortfolioBuilder.build(...).targets`, which `targets_
 from_plan` turns into this loop's input) or, on the research path, from the frozen sizing of the pre-registrations
 (engine/daily.py). The loop itself never sizes anything.
@@ -18,7 +23,7 @@ from_plan` turns into this loop's input) or, on the research path, from the froz
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -47,6 +52,7 @@ class LoopResult:
     canceled: list[str] = field(default_factory=list)
     skipped: list[tuple[Key, str]] = field(default_factory=list)
     deferred: list[Key] = field(default_factory=list)  # a sale waiting for its protective stop to free the shares
+    withheld: list[tuple[Key, str, str]] = field(default_factory=list)  # (key, side, why): the pre-send gate (1.16)
 
 
 def targets_from_plan(plan, purposes: Mapping[Key, str] | None = None) -> list[Target]:
@@ -64,10 +70,12 @@ def working_shares(om: OrderManager, key: Key) -> float:
 def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequence[Target],
                       held: Mapping[Key, float], *, now: datetime, session: str, run="0", reconciler=None,
                       stops=None, quotes: Mapping[str, tuple[float, float]] | None = None,
-                      sells_first: bool = True) -> LoopResult:
+                      sells_first: bool = True,
+                      presend: Callable[[Target, str, float], str | None] | None = None) -> LoopResult:
     """`held`: broker-confirmed shares per sleeve (the ledger after the manager booked the venue's fills).
     `quotes`: symbol -> (bid, ask) for marketable limits. `sells_first`: sales before purchases (they fund them);
-    False keeps the caller's order (the research path matches the harness's order of the auction)."""
+    False keeps the caller's order (the research path matches the harness's order of the auction).
+    `presend`: the pre-send gate (execution.PreSendGate through the caller's quotes); None: no gate."""
     res = LoopResult()
     todo = []
     for t in targets:
@@ -95,6 +103,10 @@ def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequen
                                        else None)  # a sale that reduces exposure is never refused
         if why:
             res.skipped.append((t.key, why))
+            continue
+        why = presend(t, side, abs(diff)) if presend is not None else None
+        if why:  # before the stop release: a withheld sale leaves its protective stop where it is
+            res.withheld.append((t.key, side, why))
             continue
         if side == "sell" and stops is not None and not stops.release(t.key, float(held.get(t.key, 0.0)) + diff):
             res.deferred.append(t.key)

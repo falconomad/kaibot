@@ -410,3 +410,44 @@ Written on 19 Nov 2026, with Amendments 11 and 12 and before the carry-over's fi
    carried (Amendment 11, item 4), and the same bit-identity test passes for both momentum rules. A test finds, on
    the fixture, a session where one planned stock is in the ranked universe and another is outside the universe
    filter: only the first is carried, for this rule and for mom_12_1_band (Amendment 11 there).
+
+## Amendment 14 (21 Nov 2026, platform, issue #441, M9 ticket 1.16, before its first live paper session): a pre-send check that can withhold a near-close order
+
+Written on 21 Nov 2026, before the check's first use. It changes whether and when a live order goes out, so it is
+recorded here. It can only withhold an order for a session: it never adds an order, and it never changes a share
+count, a rank or a target. No research result is affected (item 6). The same text is Amendment 12 of
+mom_12_1_band.
+
+1. **The gap.** Amendment 10's near-close market orders go out with the share counts sized at the previous
+   close. Nothing read the stock's quote, whether it was trading, or how far it had moved that day (engine audit of
+   21 Nov 2026, "confirmed absent"; reproduced by a failing test before the change).
+2. **The check (live path only).** Just before an order would be sent, the engine reads the stock's latest IEX
+   quote (one request per tick for the whole plan, ended after 8 seconds) and the close its shares were sized at
+   (the previous session's raw close, on today's share basis). The order is withheld when:
+   - the quote is older than 300 seconds (the stock is halted or not trading; a limit-up/limit-down pause lasts
+     five minutes);
+   - both the bid and the ask are more than 10% away from the sizing close (the side nearer the close is read,
+     because IEX is one exchange's book and one side can sit far from the market);
+   - a buy's value at that price is above the book's per-name cap plus 10% (a wrong quantity; a sale is exempt: it
+     only reduces exposure and can never be larger than the shares held).
+   The constants are fixed here and are not tuned on results.
+3. **No quote: the prior close.** When the quote cannot be read, or the feed has none for the stock, the order is
+   checked at the sizing close and goes out. A market-data outage must not become one more way to miss a rebalance;
+   the read failure is one `multi_day_error` event (step `presend_quotes`) per session.
+4. **Withheld, not dropped.** The check is asked again on every tick of the send window, so an order goes out the
+   minute its quote is fresh and inside the collar. What is still withheld when the window ends is sent again at
+   the next session, checked against that session's previous close: a buy by the carry-over of Amendments
+   11 to 13 and under their limits (it never had an order, so nothing in the order history is against
+   it); a sale to zero as a pending sale, as an unfilled sale already is; a reduction (a resize down) as the same
+   reduction to the same target shares while the sleeve still holds more. The last is new: a reduction that the
+   venue let expire is still not sent again (section 4); only one this check withheld is.
+5. **Journal.** One `md_withheld` entry per (rule, session, stock, side) with the reason, and the reasons in the
+   session's `multi_day_orders` event (`withheld`). No new event name.
+6. **Research and Gate B unchanged.** The research venue has no quotes and fills at the closing print; the check
+   exists only where a quote source is given, and only the live engine's market-data client is one (a replay's
+   stored bars are not). Tests: with fresh quotes at the previous close the live path on the simulator sends the
+   same orders as without the check; with the feed down for the whole run, too; a stock without a fresh quote and
+   a stock 20% from its sizing close are withheld and bought at the next session at the plan's own shares.
+7. **What this can cost.** A stock that really moves more than 10% in a day (an earnings day) is not traded that
+   session: a sale is a day late, a buy waits for the carry-over's conditions. IEX quotes of a thinly traded stock may be older than
+   300 seconds without a halt; the reasons in `md_withheld` are to be reviewed after the first ten live sessions.

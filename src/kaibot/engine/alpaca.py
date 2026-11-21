@@ -8,6 +8,7 @@ and `_Http` are re-exported here so that existing imports and tests keep working
 
 from __future__ import annotations
 
+import copy
 import urllib.request  # noqa: F401  (kept: tests reach urllib through this module)
 from datetime import UTC, datetime, timedelta
 
@@ -66,6 +67,15 @@ class AlpacaData:
     def latest_quotes(self, symbols: list[str]) -> dict[str, dict]:
         d = self._d("/v2/stocks/quotes/latest", {"symbols": ",".join(symbols), "feed": "iex"})
         return d.get("quotes") or {}
+
+    def quotes_within(self, symbols: list[str], deadline_s: float) -> dict[str, dict]:
+        """`latest_quotes` that ends within `deadline_s`, retries and budget waits included (AlpacaError 0 past
+        it): the pre-send gate reads it inside the send window (M9 1.16, issue #441), where the plain client's
+        30 s a try, five tries would cost the window."""
+        http = copy.copy(self.http)  # same key, budget and opener; only the time limits differ
+        http.timeout_s, http.deadline_s = min(self.http.timeout_s, deadline_s), deadline_s
+        d = http.call("GET", f"{DATA_URL}/v2/stocks/quotes/latest", {"symbols": ",".join(symbols), "feed": "iex"})
+        return (d or {}).get("quotes") or {}
 
     def news_count(self, symbol: str, start: datetime, end: datetime) -> int:
         d = self._d("/v1beta1/news", {"symbols": symbol, "start": _iso(start), "end": _iso(end), "limit": 50})
