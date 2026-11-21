@@ -60,9 +60,12 @@ def check(s: HelperSession) -> list[tuple[str, bool, str]]:
          lambda: s.rpc("kb_helper_heartbeat", {"p_process": "price_stream", "p_detail": {"state": "check"}}))
     step("broadcast on kb:prices accepted", lambda: s.broadcast("kb:prices", "prices", {"feed": "iex", "prices": {}}))
     for name, method, table, body in (
-            ("insert a command: refused", "POST", "command", {"kind": "flatten_and_stop", "payload": {}}),
+            # QA-Ops on #497: probes that do no harm even if a right were wrongly open: a command kind the table's
+            # check refuses and the engine ignores, and a heartbeat row no process reads (never the engine's own)
+            ("insert a command: refused", "POST", "command", {"kind": "helper_check_probe", "payload": {}}),
             ("read the engine lease: refused", "GET", "engine_lease", None),
-            ("write the engine's heartbeat: refused", "POST", "heartbeat", {"process": "engine", "ts": "2000-01-01"})):
+            ("write a heartbeat row directly: refused", "POST", "heartbeat",
+             {"process": "helper_check_probe", "ts": "2000-01-01"})):
         code = table_call(s, method, table, body)
         out.append((name, code in (401, 403, 404), f"HTTP {code}"))
     try:

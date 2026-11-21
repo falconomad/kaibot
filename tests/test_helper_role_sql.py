@@ -124,11 +124,38 @@ def test_the_helper_cannot_insert_a_command_or_touch_the_lease_or_any_engine_tab
               "where n.nspname = 'public' and p.proname = 'kb_command' limit 1;", role=None)
     assert fn.startswith("kb_command(")
     refused("select public.kb_runs();", "not authorised", uid=HELPER)
+    for kind, payload in (("flatten_and_stop", "{}"), ("pause", "{}"), ("accept_reconcile", "{}"),
+                          ("new_run", '{"amount_usd": 5000, "level": "balanced"}')):  # QA-Ops: called, not only found
+        refused(f"select public.kb_command('{kind}', 'helper-{kind}', '{payload}'::jsonb);", "not authorised",
+                uid=HELPER)
+    assert psql("select count(*) from kaibot.command;", role=None) == "0"
     refused("select kaibot.is_helper();", "permission denied", uid=HELPER)
     lease_fns = psql("select string_agg(p.oid::regprocedure::text, ';') from pg_proc p join pg_namespace n on "
                      "n.oid = p.pronamespace where n.nspname in ('kaibot', 'public') and p.proname like '%lease%' "
                      "and has_function_privilege('authenticated', p.oid, 'execute');", role=None)
     assert lease_fns == ""  # no lease function is callable by a signed-in user
+
+
+@needs_pg
+def test_a_helper_can_never_become_the_owner(seeded):
+    """QA-Ops on #497: 0002's kb_claim_owner() makes the first signed-in user the owner while kaibot.owner is
+    empty, and the helper is a signed-in user. With an owner it answers false; without one it is refused (the
+    trigger on kaibot.owner), and another user can still claim."""
+    assert psql("select public.kb_claim_owner();", uid=HELPER) == "f"
+    assert psql("select string_agg(user_id::text, ',') from kaibot.owner;", role=None) == OWNER
+    psql("delete from kaibot.owner;", role=None)
+    try:
+        refused("select public.kb_claim_owner();", "a helper cannot be the owner", uid=HELPER)
+        refused(f"insert into kaibot.owner (user_id) values ('{HELPER}');", "a helper cannot be the owner",
+                role=None)
+        assert psql("select count(*) from kaibot.owner;", role=None) == "0"
+        assert psql("select public.kb_helper_whoami();", uid=HELPER) == '{"helper": true}'  # still only a helper
+        assert psql("select public.kb_claim_owner();", uid=OTHER) == "t"  # the first other user, as before
+        psql(f"update kaibot.owner set user_id = '{OWNER}';", role=None)
+        refused(f"update kaibot.owner set user_id = '{HELPER}';", "a helper cannot be the owner", role=None)
+    finally:
+        psql(f"delete from kaibot.owner; insert into kaibot.owner (user_id) values ('{OWNER}');", role=None)
+    refused("select kaibot.owner_not_helper();", "permission denied", uid=HELPER)
 
 
 @needs_pg

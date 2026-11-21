@@ -21,11 +21,14 @@
 -- and it may SEND on the private Realtime channel kb:prices (one INSERT policy on realtime.messages; 0032's SELECT
 -- policy for the owner is unchanged). Nothing else: no command, no lease, no halt, no run, no ledger, no owner row.
 -- The owner is never a helper (is_helper is false for the owner's user id), so the dashboard's sign-in gains nothing.
+-- And a helper never becomes the owner (QA-Ops on #497): 0002's kb_claim_owner() makes the first signed-in user
+-- the owner while kaibot.owner is empty, and the helper is a signed-in user. A trigger on kaibot.owner refuses a
+-- row whose user is listed in kaibot.helper, whoever writes it. With an owner present nothing changes.
 --
 -- Additive: `create table if not exists`, `create or replace function`, revoke/grant, `create policy` only when it
 -- does not exist yet. No delete, drop or truncate; the two `update`s are inside the new functions (a heartbeat
 -- upsert, a notice upsert / withdrawal). No engine object changes: the engine, the watchdog and the dead-man work
--- the same before and after. Any time, also while the engine runs. Until the setup of docs/ops/helper_role.md is
+-- the same before and after (the one trigger is on kaibot.owner, which only the dashboard's sign-in reads). Any time, also while the engine runs. Until the setup of docs/ops/helper_role.md is
 -- done the helpers keep using the service key, unchanged.
 --
 -- Check after applying (read-only):
@@ -34,6 +37,7 @@
 --   select policyname, cmd, roles from pg_policies where schemaname = 'realtime' and tablename = 'messages'
 --     and policyname = 'kb helper sends prices';                                    -- one row, INSERT, {authenticated}
 --   select count(*) from kaibot.helper;                                              -- 0 until the setup's step 2
+--   select tgname from pg_trigger where tgrelid = 'kaibot.owner'::regclass and not tgisinternal;   -- owner_not_helper
 
 create table if not exists kaibot.helper (
   user_id  uuid primary key references auth.users (id) on delete cascade,
@@ -50,6 +54,25 @@ language sql stable security definer set search_path = '' as $$
      and not exists (select 1 from kaibot.owner o where o.user_id = (select auth.uid()));
 $$;
 revoke all on function kaibot.is_helper() from public, anon, authenticated;
+
+-- a helper can never be the owner (kb_claim_owner on an empty owner table, or a mistaken insert)
+create or replace function kaibot.owner_not_helper() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if exists (select 1 from kaibot.helper h where h.user_id = new.user_id) then
+    raise exception 'a helper cannot be the owner' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+revoke all on function kaibot.owner_not_helper() from public, anon, authenticated;
+
+do $$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'owner_not_helper'
+                 and tgrelid = 'kaibot.owner'::regclass) then
+    create trigger owner_not_helper before insert or update on kaibot.owner
+      for each row execute function kaibot.owner_not_helper();
+  end if;
+end $$;
 
 create or replace function public.kb_helper_whoami() returns jsonb
 language sql stable security definer set search_path = '' as $$

@@ -16,7 +16,9 @@ the market-notice job and some research scripts used that same key. After this s
 
 It cannot insert a command, read or take the lease, write a halt, or touch the owner row: the helper is the
 ordinary `authenticated` role, which has no right on any `kaibot` table (migration 0004), and the dashboard's
-functions answer only the owner. `tests/test_helper_role_sql.py` checks each of these on a scratch database.
+functions answer only the owner. It can never become the owner either: the "first signed-in user becomes the
+owner" function of migration 0002 answers only while there is no owner, and 0038 adds a trigger that refuses an
+owner row for a user listed as a helper. `tests/test_helper_role_sql.py` checks each of these on a scratch database.
 
 **Nothing changes until you do the setup.** Without the helpers' env file the relay and the notice job keep
 using the engine's `.env` exactly as before (they say "still on the service key" in their logs).
@@ -58,8 +60,9 @@ file of step 3.
    PYTHONPATH=src python3 scripts/helper_check.py
    ```
    Eight lines, each `OK`: the sign-in, "the database lists this user as a helper", the heartbeat, a test
-   broadcast, and four things that must be refused (insert a command, read the lease, write the engine's
-   heartbeat directly and through the helper function). It prints no key. **If the broadcast line says FAIL**,
+   broadcast, and four things that must be refused (insert a command, read the lease, write a heartbeat row
+   directly, write the engine's heartbeat through the helper function). The two write probes carry values that
+   do no harm even if they were accepted (a command kind that does not exist, a heartbeat row no process reads). It prints no key. **If the broadcast line says FAIL**,
    stop here and tell Product: sending on a private channel with a user's sign-in over Realtime's REST endpoint
    is the one step that could not be tried before this setup (see "Not verified" below); delete `helper.env` and
    everything runs as before.
