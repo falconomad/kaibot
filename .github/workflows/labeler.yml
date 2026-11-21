@@ -1,10 +1,14 @@
 name: label PRs by team
-on: [pull_request_target]
-permissions:
-  contents: read
-  pull-requests: write
+# `pull_request_target` runs with the base repository's token so that a pull request from a fork can be labelled.
+# That is safe only as long as this workflow never checks out or runs the pull request's code: it does neither
+# (actions/labeler reads the list of changed files from the API). tests/unit/test_ci_supply_chain.py keeps it so.
+on: [pull_request_target]  # zizmor: ignore[dangerous-triggers] no checkout, no code from the pull request is run
+permissions: {}
 jobs:
   label:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # to set the labels: the only write permission in any workflow
     steps:
-      - uses: actions/labeler@v5
+      - uses: actions/labeler@8558fd74291d67161a8a78ce36a881fa63b766a9  # v5.0.0
