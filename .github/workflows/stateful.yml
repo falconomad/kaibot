@@ -6,13 +6,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "23 4 * * 6"  # Saturdays 04:23 UTC: the weekly random-seed run (job `weekly-random-seeds`)
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: stateful-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  orders-and-ledger:
+  orders-and-ledger:  # pull requests and main: derandomised, so one pull request never gets a draw another did not
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15  # the bound on the search: the budget below takes about half a minute
     steps:
@@ -33,3 +37,69 @@ jobs:
           uv run coverage report --show-missing | tee coverage.txt
           { echo '### Stateful test: branch coverage of the modules under test'; echo '```'; cat coverage.txt; echo '```'; } \
             >> "$GITHUB_STEP_SUMMARY"
+  # QA's suggestion on #494: once a week a search nobody has run before. A fresh seed, not derandomised, a larger
+  # budget, and the Hypothesis search for the planted bugs (a measure of the search's reach). A failure opens an
+  # issue with the seed and the shrunk program, or adds a comment to the open one.
+  weekly-random-seeds:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write  # to open the issue with the failing seed: the only thing this job writes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: state machine, random seed, 1500 examples of up to 50 steps
+        id: search
+        env: {KAIBOT_STATEFUL_RANDOM: "1", KAIBOT_STATEFUL_HUNT: "1", KAIBOT_STATEFUL_EXAMPLES: "1500",
+              KAIBOT_STATEFUL_STEPS: "50"}
+        run: |
+          seed=$(( (RANDOM << 15 | RANDOM) + 1 ))
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          echo "seed $seed" | tee -a "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          uv run pytest tests/stateful -q -p no:cacheprovider --hypothesis-seed="$seed" 2>&1 | tee stateful.log
+      - name: open an issue with the failing seed
+        if: failure() && steps.search.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SEED: ${{ steps.search.outputs.seed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "The weekly random-seed run of the stateful test (\`tests/stateful/\`) failed."
+            echo
+            echo "- seed: \`$SEED\`"
+            echo "- commit: \`$COMMIT\`"
+            echo "- run: $RUN_URL"
+            echo
+            echo "Run it again:"
+            echo
+            echo '```'
+            echo "KAIBOT_STATEFUL_RANDOM=1 KAIBOT_STATEFUL_HUNT=1 KAIBOT_STATEFUL_EXAMPLES=1500 KAIBOT_STATEFUL_STEPS=50 \\"
+            echo "  PYTHONPATH=src pytest tests/stateful -q -p no:cacheprovider --hypothesis-seed=$SEED"
+            echo '```'
+            echo
+            echo "What failed, and the shrunk program where Hypothesis printed one (invariant calls left out):"
+            echo
+            echo '```'
+            grep -v 'state\.inv[0-9]' stateful.log | grep -E '^(E  |FAILED|ERROR)|state\.|Error' | head -120
+            echo '```'
+            echo
+            echo "If it is an engine defect: a minimal failing case, a strict xfail and an entry in \`KNOWN\`"
+            echo "(\`tests/stateful/om_machine.py\`). If \`test_the_search_finds_a_planted_bug\` is what failed, the"
+            echo "search missed a planted defect within its budget: a question about the search's reach, not the engine."
+          } > issue.md
+          title="Stateful weekly random-seed run failed"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title (seed $SEED)" --body-file issue.md \
+              --label bug --label team:qa-ops
+          fi
