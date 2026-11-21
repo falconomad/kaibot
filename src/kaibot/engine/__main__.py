@@ -184,7 +184,21 @@ def daily_path(data=None, review=None, shadow=None, note=None):
     if note is not None:
         log.info("daily note in plain words: ON (KAIBOT_DAILY_NOTE=on, %s)",
                  "Haiku" if note.gateway.enabled else "no ANTHROPIC_API_KEY: the code's template")
-    return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review, shadow=shadow, note=note)
+    flags = filing_flags_from_env(os.environ)  # #375: None unless KAIBOT_FILING_FLAG=shadow
+    if flags is not None:
+        log.warning("8-K filing flags in SHADOW mode (KAIBOT_FILING_FLAG=shadow): logged only, no effect on orders")
+    return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review, shadow=shadow, note=note,
+                                             filing_flags=flags)
+
+
+def filing_flags_from_env(env):
+    """#375: the 8-K filing-flag observer (kaibot.features.filing_flag), or None unless KAIBOT_FILING_FLAG=shadow.
+    Imported only when switched on; the daily path writes its answer as an event and reads nothing back."""
+    if str(env.get("KAIBOT_FILING_FLAG", "off")).strip().lower() != "shadow":
+        return None
+    from kaibot.features.filing_flag import from_env
+
+    return from_env(env)
 
 
 EXIT_JOURNAL = 4

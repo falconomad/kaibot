@@ -33,6 +33,8 @@ ROUTINE = {"cash_merger_booked", "dividend_booked", "split_booked", "config_appl
 ROUTINE |= {"market_alarm", "market_alarm_error"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
+# #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
+ROUTINE |= {"filing_flag_shadow"}
 
 
 def _emitted() -> set[str]:
