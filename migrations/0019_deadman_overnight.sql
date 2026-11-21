@@ -1,9 +1,10 @@
 -- 0019: the off-box dead-man for multi-day books (M7 S80, issue #120; decision 15 sections 4 and 6; audit B1 item 8).
 --
--- NOT APPLIED. Production migrations are the stakeholder's: apply this one on "apply", after 0017 and 0018 (it reads
--- kaibot.market_calendar_exception and kaibot.ledger_position). It must be applied before the first multi-day
--- position is held overnight (the same release, #133): until then 0006/0017 keep flattening the whole paper account
--- at the close minus 4 minutes, which is right for an intraday-only book and wrong for a multi-day one.
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's. Apply after 0017 and 0018 (it reads kaibot.market_calendar_exception and
+-- kaibot.ledger_position), before the first multi-day position is held overnight (the same release, #133): without it
+-- 0006/0017 flatten the whole paper account at the close minus 4 minutes, which is right for an intraday-only book and
+-- wrong for a multi-day one.
 --
 -- What changes. 0006/0017 sent DELETE /v2/positions?cancel_orders=true at the close minus 4 minutes when the engine
 -- heartbeat was stale: every position sold, every protective stop cancelled. From this migration on, whenever the

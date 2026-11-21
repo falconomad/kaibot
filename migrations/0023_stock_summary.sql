@@ -2,9 +2,10 @@
 -- on demand by the dashboard's serverless function (apps/web/api/summary.ts) when the owner opens a stock, and read
 -- back by the stock sheets, the trade page and the My lists chips. The engine never reads any of it.
 --
--- NOT APPLIED. Production migrations are the stakeholder's (Product applies on his word). Additive only, like 0020 and
--- 0021: two new tables and five new owner-only functions; no engine table or function is touched. Any time, also while
--- the engine runs.
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's (Product applies on his word). Additive only, like 0020 and 0021: two new
+-- tables and five new owner-only functions; no engine table or function is touched. Any time, also while the engine
+-- runs.
 --
 -- The function runs with the publishable key and the owner's own session (no service-role key): every write goes
 -- through the definer functions below, which hold the summaries' own hard caps for every instance at once:

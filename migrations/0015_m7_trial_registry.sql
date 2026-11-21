@@ -1,8 +1,8 @@
 -- 0015: one trial registry (M7 S86, issue #126; decision 15 section 7; audit F5).
 --
--- NOT APPLIED. Production migrations are the stakeholder's: apply this one on "apply". Nothing needs it before
--- then: the gate reports read the registry file and the older kaibot.trial table, and skip this table while it
--- does not exist.
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's. The gate reports read the registry file and the older kaibot.trial
+-- table, and skip this table where it does not exist.
 --
 -- kaibot.trial_registry: one row per research RUN (replay, walk-forward, ablation, config replay).
 -- `n_trials` is the number of CONFIGURATIONS that run searched. Every consumer counts configurations, the sum
