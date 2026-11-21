@@ -14,7 +14,7 @@ concurrency:
 jobs:
   orders-and-ledger:
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # the bound on the search: the budget below takes about two minutes
+    timeout-minutes: 15  # the bound on the search: the budget below takes about half a minute
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}

@@ -31,6 +31,9 @@ targets never above CAP, and the execution style's window. The account-level cap
 window of `engine/live_daily.py` sit above the order manager and belong to the whole-engine fault simulation
 (ticket 3.2).
 
+The planted bugs of test_stateful_orders_ledger.py (`PLANTED`) are found only through these checks, and each of
+the nine catches at least one of them on its own (QA review of PR #494: the others switched off in turn).
+
 Known engine defects the machine steps around are listed in `KNOWN`, each with its issue; each has a strict xfail
 test with the minimal case in test_stateful_orders_ledger.py.
 """

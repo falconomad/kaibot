@@ -18,6 +18,7 @@ from om_machine import DAYS, KNOWN, FusedJournal, FusedVenue, Kill, OrdersAndLed
 from reference_ledger import ReferenceLedger, dec
 
 from kaibot.broker.protocol import OrderRequest
+from kaibot.engine import execution as execution_mod
 from kaibot.engine import ledger as ledger_mod
 from kaibot.engine import orders as orders_mod
 from kaibot.engine.orders import OrderManager, St, client_order_id
@@ -120,6 +121,17 @@ def _terminal_reopened(monkeypatch):
     monkeypatch.setattr(orders_mod.OrderManager, "cancel", cancel)
 
 
+def _window_ignored(monkeypatch):
+    """The execution policy builds every order as if it were inside its style's window (the window check gone)."""
+    inside = {"close": "12:00", "near_close": "15:55", "marketable_limit": "12:00"}
+    real = execution_mod.ExecutionPolicy.request
+
+    def request(self, symbol, side, qty, now, coid, **kw):
+        return real(self, symbol, side, qty, et(DAYS[0], inside[self.style]), coid, **kw)
+
+    monkeypatch.setattr(execution_mod.ExecutionPolicy, "request", request)
+
+
 PLANTED = {
     "a duplicate fill is booked twice": (_no_dedupe, "booked twice|reconciliation finds differences|reference"),
     "a sale's fees are not booked": (_sell_fees_dropped, "reference|identity|venue"),
@@ -127,6 +139,7 @@ PLANTED = {
                                                 "fills never attributed|two working orders|above their cap"),
     "the venue is called before the intent is journalled": (_intent_after_send, "intent"),
     "a terminal state is left": (_terminal_reopened, "illegal transition|the manager says"),
+    "an order leaves outside its window": (_window_ignored, "order sent at|limit sent at"),
 }
 
 
