@@ -82,3 +82,23 @@ def test_every_cluster_has_an_item_when_some_inserts_fail():
     ids = {c["id"] for c in st.tables.get("news_cluster", [])}
     used = {i["cluster_id"] for i in st.tables.get("news_item", [])}
     assert ids == used and len(ids) == 5
+
+
+def test_a_cluster_whose_item_landed_after_all_is_kept_and_not_retried():
+    """QA-Ops on #360: an item insert that timed out but landed leaves a cluster that is not empty. Its delete is
+    refused by the news_item foreign key (23503, no cascade): the desk keeps the row and stops retrying it."""
+    st = ItemFails()
+    d = NewsDesk(st, clock=Clock(T0))
+    calls = {"n": 0}
+
+    def fk(table, match):
+        calls["n"] += 1
+        raise RuntimeError('{"code":"23503","message":"update or delete on table \\"news_cluster\\" violates '
+                           'foreign key constraint"}')
+
+    st.delete = fk
+    d.ingest([art("ACME cuts full-year guidance")])
+    assert d._orphans == set() and calls["n"] == 1
+    st.fail_items = False
+    d.ingest([art("ACME wins a contract")])
+    assert calls["n"] == 1 and d.orphans_removed == 0

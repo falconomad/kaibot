@@ -233,6 +233,12 @@ class NewsDesk:
             try:
                 self.store.delete("news_cluster", {"id": cid})
             except Exception as e:
+                if "23503" in str(e) or "foreign key" in str(e).lower():
+                    # QA-Ops on #360: an item points at it (the insert that "failed" had landed, e.g. a timeout):
+                    # the row is not empty, so it stays, and is not tried again every ingest
+                    log.warning("news cluster %s has an item after all: kept", cid)
+                    self._orphans.discard(cid)
+                    continue
                 log.warning("empty news cluster %s not deleted yet: %s", cid, type(e).__name__)
                 continue
             self._orphans.discard(cid)
