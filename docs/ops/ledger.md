@@ -154,8 +154,14 @@ with the broker (`engine/reconcile.py`):
 - **Clearing a real difference.** The owner accepts it with a reason:
   - command line: `python -m kaibot.engine.reconcile --status`, then `--accept "reason"`;
   - engine command: `accept_reconcile` with `{"reason": ...}`;
-  - dashboard: `kb_command('accept_reconcile', ...)` is a design only. It needs a migration of the `command`
-    kind check and `kb_command`.
+  - dashboard (#439, M9 1.14; needs migration 0037): Engine page, safety check "Books and broker". The sheet shows
+    each difference (the stock, the engine's shares against the broker's, the cash difference) from the heartbeat's
+    `reconcile` block, asks for a reason and a tick that the numbers were compared with the broker, and queues
+    `kb_command('accept_reconcile', {"reason": ..., "shown": [{"kind", "symbol", "offset"}]})`. The engine reads the
+    broker again and accepts only when `shown` is exactly what it finds (all or nothing). A refusal is the event
+    `reconcile_blocked` with `when: accept_refused` and stays in the heartbeat (`reconcile.refused`) until an
+    acceptance or a clean check; buys stay stopped. Differences without an `offset` (a failed read, a fill on an
+    unknown order, a fill not booked yet) cannot be accepted: they clear only when the books agree.
 
   The accepted difference is journalled as an offset (`reconcile_resolved`) and survives restarts. The same
   difference stays accepted; a difference that changes by more than the tolerance blocks again.

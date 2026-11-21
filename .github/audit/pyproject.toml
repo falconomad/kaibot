@@ -1,0 +1,11 @@
+# The audit tools of the `supply-chain` workflow (M12 ticket 3.6, #468), locked with hashes in their own uv.lock so
+# they are pinned like everything else and never enter the engine's dependency set. Upgrade on purpose:
+#   cd .github/audit && uv lock --upgrade
+[project]
+name = "kaibot-ci-audit"
+version = "0"
+requires-python = ">=3.12"
+dependencies = ["pip-audit>=2.9", "zizmor>=1.5"]
+
+[tool.uv]
+package = false

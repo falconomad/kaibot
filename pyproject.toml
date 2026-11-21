@@ -20,7 +20,7 @@ dependencies = [  # the engine image installs exactly these (requirements-engine
 research = ["scipy>=1.14"]  # replay, walk-forward and report scripts; tests compare metrics.py with scipy
 
 [dependency-groups]
-dev = ["kaibot[research]", "pytest>=8", "pytest-xdist>=3.6", "hypothesis>=6.100", "ruff>=0.6", "mypy>=1.11", "types-PyYAML", "import-linter>=2.1"]
+dev = ["kaibot[research]", "pytest>=8", "pytest-xdist>=3.6", "hypothesis>=6.100", "coverage>=7.6", "ruff>=0.6", "mypy>=1.11", "types-PyYAML", "import-linter>=2.1"]
 
 [build-system]
 requires = ["hatchling"]

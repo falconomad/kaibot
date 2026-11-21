@@ -64,6 +64,7 @@ CLOSED = dt.datetime(2026, 11, 19, 22, 30, tzinfo=dt.UTC)  # the same day, 17:30
 
 def context(browser, at: dt.datetime, **kw):
     """A browser context whose clock reads `at` and stays there (timers and animations keep running)."""
+    kw.setdefault("service_workers", "block")  # #481: these checks read the pages, not the app shell's store
     ctx = browser.new_context(**kw)
     ctx.clock.set_fixed_time(at)
     return ctx

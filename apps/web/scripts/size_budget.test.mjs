@@ -65,7 +65,8 @@ describe("the first-load size budget", () => {
   });
   it("the build runs it, and the budget file says which measured numbers it came from", () => {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    expect(pkg.scripts.build).toBe("tsc --noEmit && vite build && node scripts/size_budget.mjs");
+    // #481: the installability check runs after it (scripts/pwa_check.mjs)
+    expect(pkg.scripts.build).toBe("tsc --noEmit && vite build && node scripts/size_budget.mjs && node scripts/pwa_check.mjs");
     const { measured, budget } = JSON.parse(readFileSync(new URL("../size-budget.json", import.meta.url), "utf8"));
     expect(Object.keys(budget)).toEqual(["first_load_js_gzip", "first_load_css_gzip", "preloaded_fonts"]);
     for (const key of ["first_load_js_gzip", "first_load_css_gzip"]) {

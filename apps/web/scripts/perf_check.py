@@ -147,7 +147,8 @@ def routes(ctx, app: str, now: dt.datetime, others: dict, stalled: bool = False)
 
 
 def one_run(browser, app: str, path: str, signed_in: bool, now: dt.datetime, stalled: bool = False) -> dict:
-    ctx = browser.new_context(**PHONE, reduced_motion="no-preference", color_scheme="dark")
+    # #481: no service worker, so the numbers stay those of a first visit (its shell download comes after the load)
+    ctx = browser.new_context(**PHONE, reduced_motion="no-preference", color_scheme="dark", service_workers="block")
     ctx.add_init_script(INIT)
     if signed_in:
         ctx.add_init_script(f"localStorage.setItem('sb-localhost-auth-token', JSON.stringify({json.dumps(mock_data.session_blob(now))}));")
@@ -183,7 +184,7 @@ def shots(browser, app: str, now: dt.datetime, out: pathlib.Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     for w, h, phone in [(390, 844, True), (1280, 800, False)]:
         ctx = browser.new_context(viewport={"width": w, "height": h}, is_mobile=phone, has_touch=phone, device_scale_factor=1,
-                                  reduced_motion="reduce", color_scheme="dark")
+                                  reduced_motion="reduce", color_scheme="dark", service_workers="block")
         ctx.add_init_script(f"localStorage.setItem('sb-localhost-auth-token', JSON.stringify({json.dumps(mock_data.session_blob(now))}));")
         routes(ctx, app, now, {})
         page = ctx.new_page()
