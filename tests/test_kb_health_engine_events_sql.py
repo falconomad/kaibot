@@ -36,12 +36,60 @@ EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
 
+# Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
+# missed). Each dynamic call site below, and where its names come from; a new dynamic call fails
+# test_every_dynamic_event_call_is_known until it is added here with its source.
+CALL_RE = re.compile(r'\b(?:event|_event)\(\s*([^\s"),][^,)]*)')
+DYNAMIC_SITES = {
+    # engine/__main__.report_conflicts: a replicator fallback's "event" key, "stop_state_fallback" by default
+    ("src/kaibot/engine/__main__.py", 'f.get("event"'),
+    # engine/__main__.report_news: the news poller's queued events (`self._events.append(("<name>", ...))`)
+    ("src/kaibot/engine/__main__.py", "kind"),
+    # live_daily: the agents' `EVENT = "<name>"` constants (pre-open review, its shadow, the daily note)
+    ("src/kaibot/engine/live_daily.py", "EVENT"),
+    # live_daily's `event=` callback and the watchdog's `_event`: pass-throughs of names written at their callers
+    ("src/kaibot/engine/live_daily.py", "kind"),
+    ("src/kaibot/engine/watchdog.py", "kind"),
+    # engine/core.py: f"command_{kind}" for every command the engine applies, f"{a.kind}_booked" for corporate actions
+    ("src/kaibot/engine/core.py", 'f"command_{kind}"'),
+    ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),
+}
+FALLBACK_RE = re.compile(r'"event":\s*"([a-z_0-9]+)"')
+AGENT_EVENT_RE = re.compile(r'^EVENT\s*=\s*"([a-z_0-9]+)"', re.M)
+QUEUED_RE = re.compile(r'_events\.append\(\(\s*"([a-z_0-9]+)"')
+COMMAND_RE = re.compile(r'\bkind == (?:"([a-z_]+)"|([A-Z_]+))')
+
+
+def _sources() -> list[Path]:
+    return [*(ROOT / "src").rglob("*.py"), *(ROOT / "scripts").rglob("*.py")]
+
+
+def _dynamic() -> set[str]:
+    src = ROOT / "src" / "kaibot"
+    out = {"stop_state_fallback"}  # report_conflicts' default
+    out |= set(FALLBACK_RE.findall((src / "engine" / "journal.py").read_text()))
+    for p in (src / "agents").glob("*.py"):
+        out |= set(AGENT_EVENT_RE.findall(p.read_text()))
+    out |= set(QUEUED_RE.findall((src / "ingest" / "news_poll.py").read_text()))
+    core = (src / "engine" / "core.py").read_text()
+    apply = core.split('self.store.event(f"command_{kind}"', 1)[0].rsplit("def ", 1)[1]  # the command loop
+    consts = {"ACCEPT_COMMAND": re.search(r'^ACCEPT_COMMAND = "([a-z_]+)"', (src / "engine" / "reconcile.py")
+                                          .read_text(), re.M)[1]}
+    out |= {f"command_{lit or consts[c]}" for lit, c in COMMAND_RE.findall(apply)}
+    out |= {"dividend_booked", "split_booked"}  # f"{a.kind}_booked": the booked kinds (cash mergers have their own)
+    return out
+
 
 def _emitted() -> set[str]:
     out: set[str] = set()
-    for p in [*(ROOT / "src").rglob("*.py"), *(ROOT / "scripts").rglob("*.py")]:
+    for p in _sources():
         out |= set(EMIT_RE.findall(p.read_text()))
-    return out
+    return out | _dynamic()
+
+
+def _latest_kb_health() -> Path:
+    return max(p for p in (ROOT / "migrations").glob("*.sql")
+               if "create or replace function public.kb_health()" in p.read_text())
 
 
 def test_0033_is_0031_with_only_the_new_types_added():
@@ -54,10 +102,12 @@ def test_0033_is_0031_with_only_the_new_types_added():
     assert "grant execute on function public.kb_health() to authenticated;" in tail_new
 
 
-def test_0033_is_the_latest_definition_of_kb_health():
-    later = sorted(p.name for p in (ROOT / "migrations").glob("*.sql")
+def test_every_later_definition_of_kb_health_keeps_0033s_types():
+    """0036 redefines kb_health after 0033; every later definition must still list 0033's types."""
+    later = sorted(p for p in (ROOT / "migrations").glob("*.sql")
                    if p.name > M33.name and "function public.kb_health()" in p.read_text())
-    assert later == []
+    for p in later:
+        assert set(NEW) <= set(_types(_sql(p))), p.name
 
 
 def test_0033_has_no_destructive_statement():
@@ -72,11 +122,32 @@ def test_the_engine_still_sends_every_type_0033_adds():
 
 def test_every_event_the_engine_sends_is_listed_or_left_out_on_purpose():
     """A new event name must be added to kb_health (a migration) or to ROUTINE here, with its reason."""
-    listed = set(_types(_sql(M33)))
-    dynamic = {"dividend_booked", "split_booked"}  # f"{a.kind}_booked" in engine/core.py
+    listed = set(_types(_sql(_latest_kb_health())))
     unknown = _emitted() - listed - ROUTINE
     assert not unknown, sorted(unknown)
-    assert not (ROUTINE - dynamic) & listed
+    assert not ROUTINE & listed
+
+
+def test_every_dynamic_event_call_is_known():
+    """A call whose event name is not a literal: its names reach _emitted() only through DYNAMIC_SITES' sources."""
+    sites = set()
+    for p in _sources():
+        text = p.read_text()
+        for m in CALL_RE.finditer(text):
+            line = text[text.rfind("\n", 0, m.start()) + 1:m.start()]
+            arg = m.group(1).split(",")[0].strip()
+            if line.lstrip().startswith("def ") or line.endswith("on_"):  # definitions; strategies' on_event(ctx)
+                continue
+            sites.add((str(p.relative_to(ROOT)), arg))
+    assert sites - DYNAMIC_SITES == set(), sorted(sites - DYNAMIC_SITES)
+
+
+def test_the_dynamic_names_are_found():
+    """The sources DYNAMIC_SITES name still yield what the engine sends under them (#410, #131, #354, S78)."""
+    d = _dynamic()
+    assert {"multi_day_column_missing", "multi_day_review", "multi_day_review_shadow", "daily_note",
+            "news_feed_unhealthy", "news_feed_ok", "command_pause", "command_set_level", "command_new_run",
+            "command_accept_reconcile", "stop_state_fallback"} <= d
 
 
 INSERT = """insert into kaibot.event (ts, type, payload, hash) values
