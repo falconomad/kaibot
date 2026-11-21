@@ -45,6 +45,7 @@ Restart and recovery (crash, 10-minute outage, API outage, half-written order, t
 ## Engine halts (fail closed)
 Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume)
 and `engine_errors`, which also clears after 5 clean ticks in a row (M9 1.7, #432: the halt row stays, a `halt_cleared` event says why).
+Another halt raised while `engine_errors` is set takes the kill over (its own row and event) and is not cleared by clean ticks.
 
 | Kind | Trigger |
 |---|---|

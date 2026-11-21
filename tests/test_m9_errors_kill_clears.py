@@ -87,3 +87,20 @@ def test_clean_ticks_never_clear_another_halt(tmp_path, monkeypatch):
     for _ in range(3 * core.CLEAN_TICKS_TO_CLEAR):
         a.eng.on_tick_ok()
     assert a.eng.kill == "drift" and _cleared(a) == []
+
+
+def test_a_halt_raised_while_the_errors_kill_is_set_takes_over_and_is_not_cleared(tmp_path, monkeypatch):
+    """QA-Ops (#483): before M9 1.7 a second halt behind `engine_errors` was dropped without harm (nothing cleared
+    the kill before the next session). Now clean ticks clear `engine_errors`, so a drift seen meanwhile must take
+    the kill over, with its own halt row, or five clean ticks would let buys out on books that differ."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    _loop(a, a.open1, 0, 30)
+    _blip(a)
+    assert a.eng.kill == "engine_errors"
+    a.eng._halt_entries("drift", "positions differ from the broker")
+    assert a.eng.kill == "drift" and len(_halts(a)) == 1 and len(_halts(a, "drift")) == 1
+    _blip(a)  # more errors neither take the kill back nor write another row
+    assert a.eng.kill == "drift" and len(_halts(a)) == 1
+    for _ in range(3 * core.CLEAN_TICKS_TO_CLEAR):
+        a.eng.on_tick_ok()
+    assert a.eng.kill == "drift" and a.eng.entry_block() == "halted: drift" and _cleared(a) == []

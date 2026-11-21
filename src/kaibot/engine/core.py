@@ -512,7 +512,10 @@ class Engine:
 
     # ================= fail-closed halts =================
     def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
-        if self.kill:
+        # QA-Ops (#483): `engine_errors` is the one kill that clean ticks clear (`on_tick_ok`), so it must not hide
+        # another halt raised while it is set (drift, broker rejects, the LLM budget): that halt takes over, with
+        # its own row and event, and stays until the next session as it always did.
+        if self.kill and not (self.kill == "engine_errors" and kind != "engine_errors"):
             return
         self.kill = kind
         log.error("entries halted: %s (%s)", kind, reason)
