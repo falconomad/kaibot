@@ -79,7 +79,7 @@ export const bindingText = (code: string | null | undefined) => (code ? BINDING_
 /** Commands waiting for the engine (kb_command kinds). */
 export const COMMAND_TEXT: Record<string, string> = {
   pause: "pause new trades", resume: "resume new trades", flatten_and_stop: "sell everything and stop", set_level: "change the level",
-  new_run: "start a new run",
+  new_run: "start a new run", accept_reconcile: "accept the differences between the books and the broker",
 };
 export const commandText = (code: string) => COMMAND_TEXT[code] ?? words(code);
 

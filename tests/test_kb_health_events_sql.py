@@ -77,6 +77,23 @@ def test_the_dashboard_reads_no_event_type_kb_health_leaves_out():
     assert read and sorted(read - listed) == []
 
 
+def test_every_event_type_kb_health_returns_has_a_plain_word_label():
+    """The reverse of the test above: Health.tsx shows every type the latest kb_health returns in words, never by its
+    code name (EV, or a type it words elsewhere: halts, commands, the corporate-action events of lib/corpactions.ts)."""
+    latest = max(p for p in (ROOT / "migrations").glob("*.sql")
+                 if "create or replace function public.kb_health()" in p.read_text())
+    web = ROOT / "apps" / "web" / "src"
+    health = (web / "pages" / "Health.tsx").read_text()
+    ev = re.search(r"const EV: Record<string, string> = \{(.*?)\n\};", health, re.S)
+    labelled = set(re.findall(r"\b([a-z_]+):\s*\"", ev.group(1)))
+    labelled |= set(re.findall(r'\be\.type === "([a-z_]+)"', (web / "lib" / "corpactions.ts").read_text()))
+    labelled.add("halt")  # eventText: "Halt: <the halt's text>"
+    explain = (web / "lib" / "explain.ts").read_text()
+    commands = re.search(r"const COMMAND_TEXT: Record<string, string> = \{(.*?)\n\};", explain, re.S)
+    labelled |= {f"command_{c}" for c in re.findall(r"\b([a-z_]+):\s*\"", commands.group(1))}
+    assert sorted(set(_types(_sql(latest))) - labelled) == []
+
+
 # ---------------------------------------------------------------- on a scratch Postgres
 
 
