@@ -274,9 +274,12 @@ def tbill_daily(rate_pct: pd.Series, sessions, *, max_stale_days: int = 10) -> p
 
         rf_t = yield(rate observed at the last date STRICTLY BEFORE t) * (calendar days from t-1 to t) / 365.
 
-    Strictly before, for two reasons that agree: the rate of day d is published after that day's close (the
-    Federal Reserve's H.15 release, which FRED copies the next business day), so it is the newest rate a
-    decision before session t could know; and cash lent at the close of t-1 earns the rate of t-1, not of t.
+    Strictly before, because cash lent at the close of t-1 earns the rate of t-1, not of t: the rate of t is
+    never used for session t or any earlier one, so there is no look-ahead in the accrual. This is an ACCRUAL
+    for the evaluation reports, not a signal. The rate of day d is published on the NEXT business day's
+    afternoon (the Federal Reserve's H.15 release, which FRED copies), which can be after session d+1 has
+    closed; the file has no `available_ts`. A rule that wants to DECIDE on the bill rate must therefore not
+    read this series as it is: it needs its own input with the publication time and one more day of lag.
     Calendar days, so a weekend pays three days. The first session has no previous session: it is paid one day.
 
     A session whose newest earlier observation is more than `max_stale_days` calendar days old is an error (a
