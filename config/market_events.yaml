@@ -1,0 +1,82 @@
+# Market-event alarm inputs (story S103, #377; docs/prereg/market_alarm_study.md). Read only by
+# kaibot.features.market_alarm, never by the order path: a stale or wrong entry loses or adds a notice and blocks
+# nothing. Kept apart from config/macro_calendar.yaml on purpose: the engine's entry blackouts read that file and
+# reject unknown keys, so nothing here can change a blackout or a replay. Dates are New York session dates.
+#
+# Extend every autumn with config/macro_calendar.yaml. `covers_until` is per list: the alarm reports a list whose
+# date has passed as stale (no notice from it) instead of guessing.
+covers_until:
+  sp500_quarterly: 2027-12-31
+  russell_recon: 2026-12-31
+  nasdaq100_annual: 2027-12-31
+  mega_listing: 2026-12-31
+
+# The session at whose close the change takes effect (the indexes open changed on the next session).
+index_reshuffle:
+  # S&P 500 quarterly rebalance: "effective after the close of the third Friday of March, June, September and
+  # December" (S&P Dow Jones Indices, Equity Indices Policies & Practices). Derived by that rule with
+  # kaibot.ingest.nyse_sessions; when the third Friday is not a session the last session before it counts
+  # (2026-06-19 Juneteenth: the June 2026 changes were "effective prior to the open of trading on Monday,
+  # June 22, 2026, to coincide with the quarterly rebalance", S&P press release of 5 Jun 2026, read 20 Nov 2026).
+  sp500_quarterly: [2016-03-18, 2016-06-17, 2016-09-16, 2016-12-16, 2017-03-17, 2017-06-16, 2017-09-15, 2017-12-15,
+                    2018-03-16, 2018-06-15, 2018-09-21, 2018-12-21, 2019-03-15, 2019-06-21, 2019-09-20, 2019-12-20,
+                    2020-03-20, 2020-06-19, 2020-09-18, 2020-12-18, 2021-03-19, 2021-06-18, 2021-09-17, 2021-12-17,
+                    2022-03-18, 2022-06-17, 2022-09-16, 2022-12-16, 2023-03-17, 2023-06-16, 2023-09-15, 2023-12-15,
+                    2024-03-15, 2024-06-21, 2024-09-20, 2024-12-20, 2025-03-21, 2025-06-20, 2025-09-19, 2025-12-19,
+                    2026-03-20, 2026-06-18, 2026-09-18, 2026-12-18, 2027-03-19, 2027-06-17, 2027-09-17, 2027-12-17]
+  # Russell US indexes reconstitution: the fourth Friday of June through 2025 (FTSE Russell, Russell US Equity
+  # Indices Construction and Methodology); semi-annual from 2026: "final after the close of ... Friday 26th June"
+  # (LSEG press release of 2 Mar 2026) and "take effect after the close of US equity markets" on Friday
+  # 11 December 2026 (LSEG press release of 1 Sep 2026), both read 20 Nov 2026. 2027 dates are not announced yet.
+  russell_recon: [2016-06-24, 2017-06-23, 2018-06-22, 2019-06-28, 2020-06-26, 2021-06-25, 2022-06-24, 2023-06-23,
+                  2024-06-28, 2025-06-27, 2026-06-26, 2026-12-11]
+  # Nasdaq-100 annual reconstitution: effective before the open of the Monday after the third Friday of December
+  # (Nasdaq-100 Index Methodology), so at the close of that Friday. Derived by that rule. Special and fast-entry
+  # changes are not "the annual change" and are not listed here (a fast entry of a mega listing is a follow-up of
+  # `mega_listing` below).
+  nasdaq100_annual: [2016-12-16, 2017-12-15, 2018-12-21, 2019-12-20, 2020-12-18, 2021-12-17, 2022-12-16, 2023-12-15,
+                     2024-12-20, 2025-12-19, 2026-12-18, 2027-12-17]
+
+# CPI release dates before 2025 (08:30 ET), for the backfill only. 2025 onward are in config/macro_calendar.yaml
+# (cpi_0830) and are not repeated here. Source: the release dates in the archive file names of
+# https://www.bls.gov/bls/news-release/cpi.htm (read 20 Nov 2026); they match FRED release 10 for 2025.
+cpi_0830_history: [2016-01-20, 2016-02-19, 2016-03-16, 2016-04-14, 2016-05-17, 2016-06-16, 2016-07-15, 2016-08-16,
+                   2016-09-16, 2016-10-18, 2016-11-17, 2016-12-15, 2017-01-18, 2017-02-15, 2017-03-15, 2017-04-14,
+                   2017-05-12, 2017-06-14, 2017-07-14, 2017-08-11, 2017-09-14, 2017-10-13, 2017-11-15, 2017-12-13,
+                   2018-01-12, 2018-02-14, 2018-03-13, 2018-04-11, 2018-05-10, 2018-06-12, 2018-07-12, 2018-08-10,
+                   2018-09-13, 2018-10-11, 2018-11-14, 2018-12-12, 2019-01-11, 2019-02-13, 2019-03-12, 2019-04-10,
+                   2019-05-10, 2019-06-12, 2019-07-11, 2019-08-13, 2019-09-12, 2019-10-10, 2019-11-13, 2019-12-11,
+                   2020-01-14, 2020-02-13, 2020-03-11, 2020-04-10, 2020-05-12, 2020-06-10, 2020-07-14, 2020-08-12,
+                   2020-09-11, 2020-10-13, 2020-11-12, 2020-12-10, 2021-01-13, 2021-02-10, 2021-03-10, 2021-04-13,
+                   2021-05-12, 2021-06-10, 2021-07-13, 2021-08-11, 2021-09-14, 2021-10-13, 2021-11-10, 2021-12-10,
+                   2022-01-12, 2022-02-10, 2022-03-10, 2022-04-12, 2022-05-11, 2022-06-10, 2022-07-13, 2022-08-10,
+                   2022-09-13, 2022-10-13, 2022-11-10, 2022-12-13, 2023-01-12, 2023-02-14, 2023-03-14, 2023-04-12,
+                   2023-05-10, 2023-06-13, 2023-07-12, 2023-08-10, 2023-09-13, 2023-10-12, 2023-11-14, 2023-12-12,
+                   2024-01-11, 2024-02-13, 2024-03-12, 2024-04-10, 2024-05-15, 2024-06-12, 2024-07-11, 2024-08-14,
+                   2024-09-11, 2024-10-10, 2024-11-13, 2024-12-11]
+
+# US listings worth at least $100 billion at the offer price, 2016 onward, with dated follow-ups. `known_since`
+# is the first date the session and the offer price were both public (the alarm reads an entry only from then).
+# None before 2026: the largest US listings of 2016-2025 were well under $100 billion at their offer price (Uber
+# 2019, Rivian 2021, Arm 2023; from memory, not re-checked) and are not listed.
+mega_listing:
+  - symbol: SPCX
+    company: Space Exploration Technologies (SpaceX)
+    first_session: 2026-06-12
+    known_since: 2026-06-11
+    offer_price_usd: 135
+    note: "priced at $135 on Thu 11 Jun, first trade 12 Jun on Nasdaq; about $2 trillion at the $150 opening price"
+    source: "https://builtin.com/articles/spacex-ipo-valuation-20260612 (read 20 Nov 2026)"
+    follow_ups: []  # options start, index entry and lock-up end not collected
+  - symbol: ANT
+    company: Anthropic
+    first_session: 2026-11-19
+    known_since: 2026-11-18
+    offer_price_usd: 83
+    note: "980 million shares at $83, priced 18 Nov; Nasdaq notice of 11 Nov named 19 Nov; about $1.1 trillion at the offer price"
+    source: "https://www.anthropic.com/news/anthropic-prices-initial-public-offering (read 20 Nov 2026); Nasdaq DTN2026-28"
+    follow_ups:
+      # As reported (StockAnalysis, 17 Nov 2026, citing Bloomberg): Nasdaq-100 entry at the open of 21 Dec, so at
+      # the close of 18 Dec, announced after the close of 11 Dec. Read only from 11 Dec; correct it if it moves.
+      - {kind: index_entry, session: 2026-12-18, known_since: 2026-12-11,
+         source: "https://stockanalysis.com/news/anthropic-nasdaq-100-funds-december-21/"}
