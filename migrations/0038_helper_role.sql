@@ -1,4 +1,4 @@
--- 0039: a narrow key path for the helpers, so that only the engine holds the service key (M10 ticket 1.26, issue
+-- 0038: a narrow key path for the helpers, so that only the engine holds the service key (M10 ticket 1.26, issue
 -- #451; engine audit of 21 Nov 2026, finding S1).
 --
 -- Status (applied or pending): docs/ops/migrations_pending.md. One-time setup after applying: docs/ops/helper_role.md.

@@ -203,7 +203,7 @@ def publish(store, rows: list[dict], back: list[date], ahead: list[date], now: d
 
 
 def publish_as_helper(session, rows: list[dict], back: list[date], ahead: list[date], now: datetime) -> dict:
-    """`publish` through migration 0039's `kb_helper_publish_notices` (one call: the upsert and the withdrawal of
+    """`publish` through migration 0038's `kb_helper_publish_notices` (one call: the upsert and the withdrawal of
     the window's rows no longer found), as the signed-in helper. Same result shape as `publish`."""
     lo, hi = (back or ahead)[0].isoformat(), ahead[-1].isoformat()
     res = session.rpc("kb_helper_publish_notices", {"p_rows": rows, "p_lo": lo, "p_hi": hi}) or {}

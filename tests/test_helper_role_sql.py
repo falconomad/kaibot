@@ -1,4 +1,4 @@
-"""Migration 0039 (M10 ticket 1.26, issue #451): the helpers' narrow key path.
+"""Migration 0038 (M10 ticket 1.26, issue #451): the helpers' narrow key path.
 
 The audit's finding (S1): the price relay, the notice publisher and scripts hold the service key, with which a
 process can insert any command, take the lease, write the engine's heartbeat or replace the owner row. Verified
@@ -21,9 +21,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-M39 = ROOT / "migrations" / "0039_helper_role.sql"
+M38 = ROOT / "migrations" / "0038_helper_role.sql"
 PG = os.environ.get("KAIBOT_TEST_PG")
-needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0039 applied")
+needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0038 applied")
 OWNER, HELPER, OTHER = (f"00000000-0000-0000-0000-00000000000{i}" for i in (1, 2, 3))
 NOTICE = {"id": "new_listing:ANT:2026-11-19", "kind": "new_listing", "flag": "ipo", "tier": "major",
           "session": "2026-11-19", "symbol": "ANT", "title": "Anthropic (ANT) starts trading", "starts": None,
@@ -32,13 +32,13 @@ NOTICE = {"id": "new_listing:ANT:2026-11-19", "kind": "new_listing", "flag": "ip
 
 
 def _sql() -> str:
-    return "\n".join(line for line in M39.read_text().splitlines() if not line.lstrip().startswith("--")).lower()
+    return "\n".join(line for line in M38.read_text().splitlines() if not line.lstrip().startswith("--")).lower()
 
 
 # ---------------------------------------------------------------- the files
 
 
-def test_0039_is_additive_and_every_function_checks_the_helper():
+def test_0038_is_additive_and_every_function_checks_the_helper():
     s = _sql()
     assert not re.search(r"\b(drop|truncate|alter function|delete from)\b", s)
     assert "enable row level security" in s
@@ -58,8 +58,8 @@ def test_0039_is_additive_and_every_function_checks_the_helper():
     assert "for insert to authenticated" in s and "'kb:prices'" in s and "extension = 'broadcast'" in s
 
 
-def test_0039_header_claims_no_status():
-    head = [ln for ln in M39.read_text().splitlines() if ln.startswith("--")]
+def test_0038_header_claims_no_status():
+    head = [ln for ln in M38.read_text().splitlines() if ln.startswith("--")]
     assert not any(re.match(r"^--\s*(NOT )?APPLIED\b", ln) for ln in head)
 
 

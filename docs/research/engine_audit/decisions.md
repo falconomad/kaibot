@@ -64,3 +64,13 @@ The report's staged plan is tracked as GitHub milestones, one issue per ticket.
 | M11 Yardstick and portfolio | 2.1 to 2.11 | Stage 2 |
 | M12 Self-testing and bounded AI | 3.1 to 3.12 | Stage 3 |
 | M13 Server and multi-user paper | 4.1 to 4.7 | Stage 4 |
+
+## Stakeholder decisions, 21 Nov 2026 (19:38 CET)
+
+The four rows left undecided above are decided by the stakeholder:
+
+- **Non-stock diversifiers (gold, managed futures):** not for now. The product stays US stocks and index funds.
+- **The permanent book stop:** replace it (ticket 2.10, #461). Still a risk-rule change: decision record, tests first, two keys.
+- **A separate cap for index funds:** yes (tickets 2.7 and 2.8, #458 and #459).
+- **A second person with emergency halt access:** no. Instead, when a single transaction would buy or sell a large part of the portfolio, the user is notified and must approve it. To be built with multi-user (M13).
+- **Direction:** an automated bot that can later be connected to Alpaca's or Interactive Brokers' API for live trading. The broker layer must therefore stay swappable (M13).

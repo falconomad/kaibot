@@ -23,7 +23,7 @@ two GETs above, the broadcast POST and the heartbeat upsert. Keys are read from 
 Which Supabase key (M10 ticket 1.26, issue #451; docs/ops/helper_role.md). With the helpers' env file
 (--helper-env, $KAIBOT_HELPER_ENV_FILE or ~/Projects/kaibot-secrets/helper.env: the paper keys, the publishable
 key and the helper user's email and password) the relay reads ONLY that file, signs in as the helper and never has
-the service key: its broadcast is allowed by migration 0039's policy and its heartbeat goes through
+the service key: its broadcast is allowed by migration 0038's policy and its heartbeat goes through
 `kb_helper_heartbeat`, which writes the row 'price_stream' and no other. Without that file it runs as before, on
 the engine's .env with the service key, and says so once in its log.
 

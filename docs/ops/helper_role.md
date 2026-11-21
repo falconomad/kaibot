@@ -5,7 +5,7 @@ lease, write a fresh engine heartbeat (so the dead-man never fires), replace the
 the market-notice job and some research scripts used that same key. After this setup they sign in as a separate
 "helper" user that can do four things and nothing else, and the service key stays with the engine and its watchdog.
 
-**What the helper can do** (migration `0039_helper_role.sql`):
+**What the helper can do** (migration `0038_helper_role.sql`):
 
 | It can | Through | It cannot |
 |---|---|---|
@@ -31,8 +31,8 @@ file of step 3.
      need to receive mail). It must NOT be the address you sign in to the dashboard with.
    - Password: a long random one (your password manager's generator; 30 characters or more).
    - Tick "Auto Confirm User". Create.
-2. **Apply migration 0039 and list the user as a helper.** Supabase dashboard > SQL editor:
-   - run the whole file `migrations/0039_helper_role.sql` (Product may do this on your word, as usual);
+2. **Apply migration 0038 and list the user as a helper.** Supabase dashboard > SQL editor:
+   - run the whole file `migrations/0038_helper_role.sql` (Product may do this on your word, as usual);
    - then run this once, with the email of step 1:
      ```sql
      insert into kaibot.helper (user_id, name)

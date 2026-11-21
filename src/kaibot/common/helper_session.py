@@ -1,9 +1,9 @@
-"""The helpers' narrow key path to Supabase (M10 ticket 1.26, issue #451; migration 0039, docs/ops/helper_role.md).
+"""The helpers' narrow key path to Supabase (M10 ticket 1.26, issue #451; migration 0038, docs/ops/helper_role.md).
 
 The price relay, the notice publisher and the research scripts are not the engine and must not hold the service
 key, which bypasses every policy. A helper signs in as an ordinary Supabase Auth user (email and password) with the
 PUBLISHABLE key and gets the `authenticated` role, which has no right on any kaibot table. It can call only the
-`kb_helper_*` functions of migration 0039 and send on the private Realtime channel `kb:prices`.
+`kb_helper_*` functions of migration 0038 and send on the private Realtime channel `kb:prices`.
 
 Settings, from the helpers' own env file (`helper_env`; never the engine's .env, which holds the service key):
 
@@ -128,6 +128,6 @@ class HelperSession:
         return self._authed(f"/rest/v1/rpc/{fn}", args)
 
     def broadcast(self, topic: str, event: str, payload: dict) -> None:
-        """Realtime's REST broadcast on a PRIVATE topic, as the signed-in helper (0039's INSERT policy)."""
+        """Realtime's REST broadcast on a PRIVATE topic, as the signed-in helper (0038's INSERT policy)."""
         self._authed("/realtime/v1/api/broadcast",
                      {"messages": [{"topic": topic, "event": event, "payload": payload, "private": True}]})

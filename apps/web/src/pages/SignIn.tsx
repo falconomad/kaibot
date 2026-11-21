@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { Suspense, lazy, useState } from "react";
 import { supa } from "../lib/api";
 import { Logo } from "../components/Logo";
 import { FROM_SIGNIN, useGlow } from "../lib/glow";
 import { NAME } from "../brand/brand";
+
+// #481: the installed app signs in with the code from the email; on demand, and nothing in a browser tab.
+const CodeEntry = lazy(() => import("../pwa/CodeEntry"));
 
 export function SignIn() {
   useGlow("signin");
@@ -26,6 +29,7 @@ export function SignIn() {
           <>
             <h1 style={{ margin: 0, fontSize: 18 }}>Check your email</h1>
             <p className="muted" style={{ margin: 0 }}>We sent a sign-in link to {email}. Open it on this device. It expires in an hour.</p>
+            <Suspense><CodeEntry email={email} /></Suspense>
             <button type="button" onClick={() => setState("idle")}>Use a different email</button>
           </>
         ) : (
