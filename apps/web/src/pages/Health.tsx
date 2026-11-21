@@ -64,7 +64,7 @@ const EV: Record<string, string> = {
   news_feed_unhealthy: "News feed down or empty (stock summaries and the reviewer see no new news)",
   news_feed_ok: "News feed back",
   // 0033: the engine's health events (#392 item 4)
-  multi_day_carry: "Unfilled buys carried to the next session",
+  multi_day_carry: "Unfilled buys carried to the next session, or skipped",
   corporate_actions_error: "Couldn't read today's dividends and splits",
   ledger_mismatch: "Books differ from the broker",
   reconcile_blocked: "Books differ from the broker: new buys stopped",
@@ -80,7 +80,7 @@ const EV: Record<string, string> = {
   multi_day_exit_recovered: "Sale sent before a crash found and booked",
   multi_day_shorting_on: "Shorting is on at the broker: multi-day buys held back",
   // 0036: sent under a dynamic name (#410, #131)
-  multi_day_column_missing: "Live prices of held stocks wait for a database update",
+  multi_day_column_missing: "Minute prices of multi-day holdings wait for a database update",
   multi_day_review: "Pre-open reviewer (can veto or halve buys)",
 };
 

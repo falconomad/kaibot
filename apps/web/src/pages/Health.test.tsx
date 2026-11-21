@@ -65,7 +65,8 @@ describe("Engine health page states", () => {
     const t = text(html);
     for (const type of types) expect(t).not.toContain(type.replace(/_/g, " "));
     expect(t).toContain("Books differ from the broker: new buys stopped");
-    expect(t).toContain("Live prices of held stocks wait for a database update");
+    expect(t).toContain("Minute prices of multi-day holdings wait for a database update");
+    expect(t).toContain("Unfilled buys carried to the next session, or skipped");
     expect(t).toContain("Pre-open reviewer (can veto or halve buys)");
     expect(t).toContain("You asked to accept the differences between the books and the broker");
     expect(glitches(html)).toEqual([]);
