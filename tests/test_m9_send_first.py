@@ -142,3 +142,42 @@ def test_the_minute_update_reads_through_the_bounded_client(tmp_path):
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# ---------------------------------------------------------------- QA-Ops review of #484
+def test_the_first_tick_after_a_restart_inside_the_window_checks_the_risk_halts_before_the_send(tmp_path, monkeypatch):
+    """QA-Ops (#484): "the send reads the engine's state as the last completed minute left it" needs a last
+    completed minute. A restart at 15:52 ET on a day that is past the daily stop has none: the stop is first seen
+    on that tick (`_risk_halts`), so there the checks run before the send, as they did before M9 1.5. No buy."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, 30)
+    a.restart()  # the engine was down from 10:00 and comes back inside the window
+    stop = a.eng.policy().max_daily_loss_pct  # the day is just past the level's daily stop
+    a.eng.equity_now = lambda: (a.eng.day.start_equity * (1 - stop / 100) - 1.0, 0.0)
+    assert a.ticks(a.open2, SEND + 2, SEND + 3, catch=True) == []
+    assert a.eng.day.halted and a.eng.entry_block() == "daily stop"
+    a.ticks(a.open2, SEND + 3, 390)
+    assert a.md_orders() == []
+
+
+def test_a_minute_that_did_not_complete_puts_the_next_send_back_behind_the_checks(tmp_path, monkeypatch):
+    """QA-Ops (#484): the send runs first only on state that is one minute old. After a minute whose checks raised
+    (the drift read here), the send waits behind them again (fail closed, as before M9 1.5), and goes out first
+    once a minute has completed."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, SEND - 1)
+    drift = a.eng._check_drift
+
+    def boom():
+        raise RuntimeError("positions unreadable")
+
+    a.eng._check_drift = boom
+    assert len(a.ticks(a.open2, SEND - 1, SEND + 1, catch=True)) == 2  # 15:49 and 15:50: no minute completes
+    assert a.md_orders() == []
+    a.eng._check_drift = drift
+    assert a.ticks(a.open2, SEND + 1, SEND + 2, catch=True) == []  # 15:51: the checks pass, the order goes out
+    assert len(a.md_orders()) == 1

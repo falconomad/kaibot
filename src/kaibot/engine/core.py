@@ -1443,14 +1443,16 @@ class Engine:
         if d is None:
             return self._daily_status({"state": "idle", "account_clean": self.account_clean})
         m = self.market.last_complete_minute(now)
-        if m >= 0 and m != d.done_m:
-            # M9 1.5 (audit M3): the multi-day sync and send run first, before any market-data read or intraday
-            # step. They were the tenth step; a step before them that raised on each tick of 15:50-15:57 ET lost the
-            # decision's orders. The send reads the engine's state as the last completed minute left it.
-            self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
-            if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
-                self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
-            self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
+        # M9 1.5 (audit M3): the multi-day sync and send run first, before any market-data read or intraday step.
+        # They were the tenth step; a step before them that raised on each tick of 15:50-15:57 ET lost the
+        # decision's orders. The send then reads the engine's state as the last completed minute left it.
+        # QA-Ops (#484): only when that minute is the one just before (`done_m == m - 1`). On the first tick after a
+        # (re)start, or after a minute whose checks raised, the state is older than a minute or was never checked
+        # (a daily stop, a book end or a drift first seen now): there the send keeps its old place behind the
+        # checks, exactly as before M9 1.5 (fail closed).
+        first = m >= 0 and d.done_m == m - 1
+        if first:
+            self._md_send_steps(d, sync=True)
         fresh = self._market_update(now)
         if m < 0 or m == d.done_m:
             return self._status(m)  # this minute's work is complete: it is never run twice
@@ -1461,6 +1463,8 @@ class Engine:
         # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
+        if not first:
+            self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
         self._md_positions_after_fills(d.day)  # #333: near-close fills land before the fail-safes' flatten window
         self._recheck_reconcile(m)
         self._late_actions(m)  # #266: a split or spin-off Alpaca credits after the session start
@@ -1473,6 +1477,8 @@ class Engine:
         intraday = self.intraday_live()  # M9 1.5: no intraday rule and no intraday position: none of its steps
         if intraday:
             self._manage_stops(m)
+        if not first:
+            self._md_send_steps(d)
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
@@ -1493,6 +1499,15 @@ class Engine:
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
         d.done_m = m
         return self._status(m)
+
+    def _md_send_steps(self, d: Day, sync: bool = False) -> None:
+        """The daily path's steps of a minute: its order sync (`sync`: when they run first in the tick), the pre-open
+        review and the send. Each is contained (`_daily_step`): a failure never stops the tick."""
+        if sync:
+            self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
+        if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+            self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
+        self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
 
     def intraday_live(self) -> bool:
         """M9 1.5: whether the session has anything intraday to manage: a live rule that is flat by the close, an
