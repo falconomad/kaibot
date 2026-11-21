@@ -74,6 +74,7 @@ EPOCHS = (1 << 21) - 1
 LEDGER_TABLES = frozenset({"ledger_day", "ledger_position"})  # created by 0018: not replicated before it
 FK_COLUMNS = {"run_id": "run", "signal_id": "signal", "order_id": "order", "trade_id": "trade"}
 SCHEMA_0018, SCHEMA_PRE_0018 = "0018", "pre-0018"
+MULTI_DAY_RETRY_S = 3600.0  # #384: how often a missing `ledger.multi_day` column is tried again
 
 SCHEMA = """
 create table if not exists entry (
@@ -621,6 +622,11 @@ class Replicator:
         # "missing" instead; reported once (`take_fallbacks`)
         self.stop_state_fallback = False
         self._fallbacks: list[dict] = []
+        # #384: the minute row's `multi_day` column (migration 0034) not there yet: rows go without it (the journal
+        # keeps the full row), reported once, and the column is tried again after MULTI_DAY_RETRY_S
+        self.multi_day_fallback = False
+        self._md_retry_at = 0.0
+        self.clock: Callable[[], float] = time.monotonic
         self._lock = threading.Lock()
         self._pump_lock = threading.Lock()
         self._stop = threading.Event()
@@ -713,7 +719,7 @@ class Replicator:
         return {"cursor": self.journal.cursor(self.name), "last_seq": self.journal.last_seq(),
                 "pending": self.pending(), "error": self.last_error, "schema": self.schema,
                 "conflicts": self.conflicts, "journal": self.journal.journal_id,
-                "stop_state_fallback": self.stop_state_fallback}
+                "stop_state_fallback": self.stop_state_fallback, "multi_day_fallback": self.multi_day_fallback}
 
     def _db_id(self, table: str, v):
         return self.ids.get((table, v), v) if isinstance(v, int) else v
@@ -746,6 +752,8 @@ class Replicator:
         if op["op"] != "insert":
             return send(self.remote, self.journal.jseq(seq), op)
         row = dict(op["row"])
+        if t == "ledger":  # #384: no `multi_day` column before 0034 (and none on a pre-0018 database)
+            row.pop("multi_day", None)
         eid = row.pop("id", None)
         if t in ID_TABLES and (t, eid) in self.ids:  # sent already
             return None
@@ -780,9 +788,13 @@ class Replicator:
                 self._fell_back(seq, e)
                 return None
         row = _row_0018(t, op["row"], self.journal.jseq(seq))
+        if t == "ledger" and "multi_day" in row and self.clock() < self._md_retry_at:
+            row = {k: v for k, v in row.items() if k != "multi_day"}
         try:
             self.remote.insert(t, row, returning=False)
         except Exception as e:
+            if t == "ledger" and "multi_day" in row and _schema_missing(e) and "multi_day" in str(e):
+                return self._without_multi_day(seq, t, row, e)
             if not _duplicate(e):
                 raise
             keys = ("id",) if t in ID_TABLES else ("jseq",) if t in JSEQ_TABLES else NATURAL_KEYS.get(t)
@@ -822,6 +834,29 @@ class Replicator:
             self.stop_state_fallback = True
             self._fallbacks.append(f)
         log.warning("Supabase refused stop_state 'none_by_design' (migration 0028 not applied): sent as 'missing'")
+
+    def _without_multi_day(self, seq: int, t: str, row: dict, err: Exception) -> None:
+        """#384: Supabase has no `ledger.multi_day` column yet (migration 0034 not applied): the row goes without it,
+        the column is tried again in an hour, and the first time is reported (`take_fallbacks`). `cash` and every
+        other column are right either way; only the per-position marks wait for the apply."""
+        row = {k: v for k, v in row.items() if k != "multi_day"}
+        self._md_retry_at = self.clock() + MULTI_DAY_RETRY_S
+        try:
+            self.remote.insert(t, row, returning=False)
+        except Exception as e:
+            if not _duplicate(e):
+                raise
+            self._settle(seq, t, row, e, NATURAL_KEYS.get(t))
+        if not self.multi_day_fallback:
+            f = {"seq": seq, "table": "ledger", "error": str(err)[:200], "event": "multi_day_column_missing",
+                 "action": "apply migrations/0034_ledger_multi_day.sql; until then the minute rows go without "
+                           "multi_day (retried hourly, no restart needed)"}
+            self.journal.append("replica_fallback", f)
+            with self._lock:
+                self.multi_day_fallback = True
+                self._fallbacks.append(f)
+            log.warning("Supabase has no ledger.multi_day column (migration 0034 not applied): rows sent without it")
+        return None
 
     def take_fallbacks(self) -> list[dict]:
         """QA-Ops on #339: stop-state fallbacks since the last call (the engine turns each into an event)."""

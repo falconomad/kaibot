@@ -378,6 +378,7 @@ class Engine:
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
+        self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
         # core), built by `daily(self)`. None (the default, and always with KAIBOT_MULTIDAY off): the engine is the
         # intraday engine it was, line for line.
@@ -505,6 +506,7 @@ class Engine:
         """S18: the engine's book must match the broker's. Any difference stops new entries."""
         broker_pos = self.broker.positions()
         self._bpos = broker_pos
+        self._bpos_ts = self.now()  # #384: the time of the read, for the minute row's `mark_ts` of a broker price
         diffs = {}
         # S77: per symbol, the sum over the rules holding it; a symbol with an entry or an exit under way is
         # compared once that has settled (as a single position was before)
@@ -2680,21 +2682,70 @@ class Engine:
                 "trade_id": p.trade_id,
             }
         unreal = eq - d.start_equity - d.realized_reported
-        self.store.insert(
-            "ledger",
-            {
-                "run_id": d.run_id,
-                "ts": self.now().replace(microsecond=0),
-                "cash": round(eq - sum((v["last"] or 0) * v["qty"] for v in pos.values()), 2),
-                "positions": pos,
-                "equity_venue": round(d.start_equity + d.realized_venue + unreal, 2),
-                "equity_shadow": round(d.start_equity + d.realized_shadow + unreal, 2),
-            },
-            returning=False,
-        )
+        try:
+            md = self._md_minute()
+        except Exception:  # QA-Ops on #384: the block is a report; it must never fail the minute (and its retry)
+            log.exception("minute row: multi_day block unreadable, row written without it")
+            md = None
+        # #384: `cash` is the row's equity less everything the row lists (day positions at `last`, multi-day sleeves
+        # at their marks), in whole cents, so cash + multi_day.invested + sum(qty x last) is the equity exactly
+        listed = sum(round(100 * (v["last"] or 0) * v["qty"]) for v in pos.values())
+        listed += sum(round(100 * x["value"]) for x in (md or {}).get("positions", ()))
+        row = {
+            "run_id": d.run_id,
+            "ts": self.now().replace(microsecond=0),
+            "cash": (round(100 * eq) - listed) / 100,
+            "positions": pos,  # day positions only: a multi-day sleeve never goes here (#384 contract)
+            "equity_venue": round(d.start_equity + d.realized_venue + unreal, 2),
+            "equity_shadow": round(d.start_equity + d.realized_shadow + unreal, 2),
+        }
+        if md is not None:
+            row["multi_day"] = md
+        self.store.insert("ledger", row, returning=False)
         if self.run and self.peak and self.peak > float(self.run.get("peak_equity") or 0):
             self.store.update("run", {"id": self.run["id"]}, {"peak_equity": round(self.peak, 2)})
             self.run["peak_equity"] = round(self.peak, 2)
+
+    def _md_mark(self, symbol: str, sl, b) -> tuple[float, str | None, str]:
+        """#384: the price a multi-day sleeve is counted at in this minute's equity (`equity_now`: the same order),
+        when that price is from, and where it comes from."""
+        px = self.market.last_close(symbol)
+        if px:
+            end = getattr(self.market, "last_bar_end", None)
+            t = end(symbol) if end is not None else None
+            return float(px), _iso(t), "minute_bar"
+        cp = (self._bpos.get(symbol) or {}).get("current_price")
+        if cp and float(cp):
+            return float(cp), _iso(self._bpos_ts), "broker"
+        if sl.mark is not None:
+            last = b.closes[-1].session if b.closes else None
+            return float(sl.mark), _close_ts(last), "last_close"
+        return float(sl.avg_cost), None, "cost"
+
+    def _md_minute(self) -> dict | None:
+        """#384: the minute row's `multi_day` block: the ledger's cash and every multi-day sleeve with its shares and
+        the mark this row's equity counts it at. None (no key in the row) for an engine without the daily path that
+        holds no multi-day sleeve: its rows stay exactly what they were. Contract: issue #384, docs/ops/ledger.md."""
+        sleeves = self._md_sleeves()
+        if self.daily is None and not sleeves:
+            return None
+        rid = self._rid() or (self.day.run_id if self.day else None)
+        b = self.ledger.book(rid) if rid is not None else None
+        if b is None:
+            return None
+        out = []
+        for (rule, sym), sl in sorted(sleeves.items()):
+            mark, ts, src = self._md_mark(sym, sl, b)
+            out.append({"rule": rule, "symbol": sym, "qty": sl.qty, "avg_cost": round(sl.avg_cost, 4),
+                        "mark": round(mark, 4), "mark_ts": ts, "mark_from": src, "value": round(sl.qty * mark, 2)})
+        settling = {k[1] for x in self._md_exits.values() for k, _ in x["keys"]}
+        if self.daily is not None:
+            try:
+                settling |= set(self.daily.working_symbols())
+            except Exception:  # the row is a report: an unreadable order book must not stop the minute
+                log.exception("multi-day working orders unreadable (minute row)")
+        return {"v": 1, "cash_ledger": round(b.cash, 2), "invested": sum(round(100 * x["value"]) for x in out) / 100,
+                "settling": sorted(settling), "positions": out}
 
     def _finalize_day(self) -> None:
         d = self.day
@@ -2978,6 +3029,17 @@ def _parse_ts(v) -> datetime:
 
 def _iso(v) -> str | None:
     return None if v is None else _parse_ts(v).astimezone(UTC).isoformat()
+
+
+def _close_ts(session: str | None) -> str | None:
+    """16:00 ET of a session (the time a close mark is from), as UTC ISO; None without a session."""
+    if not session:
+        return None
+    try:
+        d = date.fromisoformat(session)
+    except ValueError:
+        return None
+    return datetime(d.year, d.month, d.day, 16, tzinfo=_et()).astimezone(UTC).isoformat()
 
 
 def _et_date(v) -> date | None:

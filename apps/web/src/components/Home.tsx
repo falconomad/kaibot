@@ -14,7 +14,7 @@ import { Sheet } from "./Sheet";
 import { StockBadge } from "./StockBadge";
 import { CA_REASON, caNotes, onDay } from "../lib/corpactions";
 import { exitKinds } from "../lib/engineevents";
-import { type LiveBook, markOf } from "../lib/marks";
+import { type PricedBook, markOf } from "../lib/marks";
 import { DayChange } from "./Marks";
 import { Tick } from "./Tick";
 import { NAME, REPO_DIR } from "../brand/brand";
@@ -192,7 +192,7 @@ type IntradayPos = { qty: number; fill: number | null; stop: number; target: num
 /** Intraday positions (the ledger) and the multi-day book's stocks, biggest first. With `live` (lib/marks.liveBook) a
  *  book row's value and gain are at the price now and it carries today's change; without it they are at the close
  *  mark. The order is by the value at the booked close either way, so rows do not swap places as prices move. */
-export function holdingRows(positions: Record<string, IntradayPos>, book: Book | undefined, live?: LiveBook | null): HoldingRowData[] {
+export function holdingRows(positions: Record<string, IntradayPos>, book: Book | undefined, live?: PricedBook | null): HoldingRowData[] {
   const rows: [number, HoldingRowData][] = Object.entries(positions).map(([s, p]) => {
     const now = p.last ?? p.fill, value = p.qty * (now ?? 0);
     return [value, { key: `d-${s}`, symbol: s, value, gain: p.fill !== null && p.last !== null ? (p.last - p.fill) * p.qty : null,
