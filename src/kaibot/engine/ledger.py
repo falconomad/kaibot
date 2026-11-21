@@ -373,9 +373,17 @@ def actions_from_daily_store(df, session: str) -> list[Action]:
     return out
 
 
+# The `activity_types` the engine asks Alpaca for. Every code must be in Alpaca's documented request enum
+# (`broker/alpaca.ALPACA_ACTIVITY_TYPES`, pinned by a test): one unknown code makes Alpaca refuse the whole request
+# (#392: "invalid activity type: SSP", 422). A stock split is `SPLIT` in the API reference; `SSP` is only the
+# older guide's name and is refused as a filter.
 DIVIDEND_ACTIVITIES = ("DIV", "DIVNRA", "DIVFEE", "DIVROC", "DIVTXEX", "DIVCGL", "DIVCGS", "DIVFT", "DIVTW", "CGD")
-SPLIT_ACTIVITIES = ("SSP",)
+SPLIT_ACTIVITIES = ("SPLIT",)
 CORPORATE_ACTIVITIES = DIVIDEND_ACTIVITIES + SPLIT_ACTIVITIES
+# #392: asked one group at a time when the combined request is refused, so one refused code never blanks the rest
+CORPORATE_ACTIVITY_GROUPS = (("dividends", DIVIDEND_ACTIVITIES), ("splits", SPLIT_ACTIVITIES))
+# a split row is read whichever name it comes back under (the guide's `SSP` or the reference's `SPLIT`)
+SPLIT_ROW_TYPES = ("SPLIT", "SSP")
 
 
 FEE_ACTIVITIES = ("FEE",)  # #238: Alpaca's fees charged apart from the fills (activity_sub_type TAF, SEC, CAT, ...)
@@ -411,9 +419,9 @@ def fees_from_activities(rows: Iterable[dict]) -> list[dict]:
 def actions_from_activities(rows: Iterable[dict], ledger_qty: Mapping[str, float],
                             broker_qty: Mapping[str, float]) -> list[Action]:
     """Live: Alpaca's non-trade account activities. A dividend books its `net_amount` (withholding and fees are
-    their own negative rows). Alpaca does not document the fields of a split row (SSP), so the ratio is never read
-    from it: it is the broker's share count after the split over the ledger's before. With either count unknown the
-    split is not booked here; the drift check then stops entries and says why."""
+    their own negative rows). Alpaca does not document the fields of a split row (SPLIT, formerly SSP), so the
+    ratio is never read from it: it is the broker's share count after the split over the ledger's before. With
+    either count unknown the split is not booked here; the drift check then stops entries and says why."""
     out = []
     for r in rows:
         t, sym = r.get("activity_type"), r.get("symbol")
@@ -422,7 +430,7 @@ def actions_from_activities(rows: Iterable[dict], ledger_qty: Mapping[str, float
         ref, day = f"alpaca:{r.get('id')}", str(r.get("date") or "")[:10]
         if t in DIVIDEND_ACTIVITIES and r.get("net_amount") is not None:
             out.append(Action(sym, day, "dividend", amount=float(r["net_amount"]), ref=ref))
-        elif t in SPLIT_ACTIVITIES:
+        elif t in SPLIT_ROW_TYPES:
             before, after = float(ledger_qty.get(sym) or 0), float(broker_qty.get(sym) or 0)
             if before > 0 and after > 0 and after != before:
                 out.append(Action(sym, day, "split", ratio=after / before, ref=ref))

@@ -54,6 +54,7 @@ from kaibot.broker.protocol import (
     BrokerBase,
     BrokerError,
     OrderRequest,
+    unknown_activity_types,
 )
 from kaibot.broker.shadow_costs import buy_px, half_spread, sell_fees, sell_px
 from kaibot.replay.history import Bar, BarHistory
@@ -293,7 +294,8 @@ class SimBroker(BrokerBase):
     def spin_off(self, parent: str, new: str, *, ratio: float, basis_share: float, day: str,
                  price: float | None = None) -> None:
         """`ratio` new shares per parent share, whole shares credited (the fraction paid in cash at `price`);
-        `basis_share` of the parent's cost basis moves to the new shares. An SSO activity names the new symbol."""
+        `basis_share` of the parent's cost basis moves to the new shares. A SPIN activity (the older guide: SSO)
+        names the new symbol."""
         p = self.pos.get(parent)
         if p is None:
             return
@@ -307,7 +309,7 @@ class SimBroker(BrokerBase):
             self.pos[new] = {"qty": _num(whole), "avg_entry_price": moved / whole, "cost_basis": str(moved)}
         if price is not None and exact - whole > 1e-9 and self.cash is not None:
             self.cash += (exact - whole) * price
-        self.non_trade.append({"activity_type": "SSO", "id": f"{day}::sso{len(self.non_trade) + 1}", "date": day,
+        self.non_trade.append({"activity_type": "SPIN", "id": f"{day}::sso{len(self.non_trade) + 1}", "date": day,
                                "symbol": new, "qty": str(_num(whole))})
 
     def cash_merger(self, symbol: str, *, price: float, day: str) -> None:
@@ -341,7 +343,7 @@ class SimBroker(BrokerBase):
         if old not in self.pos:
             return
         self.pos[new] = self.pos.pop(old)
-        self.non_trade.append({"activity_type": "SC", "id": f"{day}::sc{len(self.non_trade) + 1}", "date": day,
+        self.non_trade.append({"activity_type": "NC", "id": f"{day}::sc{len(self.non_trade) + 1}", "date": day,
                                "symbol": new, "qty": self.pos[new]["qty"]})
 
     def asset(self, symbol: str) -> dict | None:
@@ -349,8 +351,12 @@ class SimBroker(BrokerBase):
         return None
 
     def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
-        """Fills, plus the non-trade activities a test puts in `non_trade` (dividends, splits) of the types asked."""
+        """Fills, plus the non-trade activities a test puts in `non_trade` (dividends, splits) of the types asked.
+        A type outside Alpaca's request enum is refused with 422, as Alpaca refuses it (#392)."""
         self._net()
+        bad = unknown_activity_types(types)
+        if bad:
+            raise BrokerError(422, f'{{"code":40010001,"message":"invalid activity type: {",".join(bad)}"}}')
         # fills are booked in time order: start after `after` (unless a test wrote rows into `fills` itself)
         if after is not None and "FILL" in types and len(self._fill_ts) == len(self.fills):
             k = bisect.bisect_right(self._fill_ts, _utc(after))

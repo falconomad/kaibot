@@ -54,6 +54,7 @@ from kaibot.engine.execution import flatten_at_close
 from kaibot.engine.journal import Journal, canon
 from kaibot.engine.ledger import (
     CORPORATE_ACTIVITIES,
+    CORPORATE_ACTIVITY_GROUPS,
     FEE_ACTIVITIES,
     LEDGER_KINDS,
     Action,
@@ -351,7 +352,7 @@ class Engine:
         self.journal = journal or getattr(store, "journal", None) or Journal()
         self.ledger = Ledger.fold(self.journal.entries(kinds=LEDGER_KINDS))
         # S77: corporate actions for a session: research passes the daily store's table (day -> [Action]); None
-        # reads the broker's non-trade activities (Alpaca: dividends DIV*, splits SSP) when a position is held
+        # reads the broker's non-trade activities (Alpaca: dividends DIV*, splits SPLIT) when a position is held
         self.corporate_actions = corporate_actions
         # S78 (#118): live, dividends are accrued at the ex-date (engine/dividends.ExDateDividends: (day, symbols)
         # -> ex-dividends) and Alpaca's later payment is matched to the accrual; None: booked when paid
@@ -1534,7 +1535,12 @@ class Engine:
     def _corporate_actions(self, today: date) -> None:
         """S77: dividends and splits of the symbols held at the open, booked to every rule that holds them. Research
         passes the daily store's table; live reads Alpaca's non-trade activities. Never raises: a failure is an
-        event, and a split the ledger missed shows as drift (entries stop)."""
+        event, and a split the ledger missed shows as drift (entries stop).
+        Failure behaviour (#392, kept as it was and as decision 15 sections 3 and 6 describe it): a failed read
+        does not by itself block entries or skip buys. The guard for a missed split is the share-count check
+        (account guard, reconciliation, drift halt), which compares the ledger with the broker's positions and
+        stops entries on any difference; a missed dividend payment leaves its ex-date accrual open until a later
+        read matches it (`_late_actions` and the next session start read again)."""
         b = self.ledger.book(self._rid())
         if b is None:
             return
@@ -1549,8 +1555,7 @@ class Engine:
             else:
                 if self.ex_dividends is not None:
                     self._accrue_dividends(b, today)
-                rows = self.broker.activities(self.now() - timedelta(days=10), types=CORPORATE_ACTIVITIES)
-                rows = self._match_dividend_payments(rows)
+                rows = self._match_dividend_payments(self._corporate_activities(today))
                 bq = {s: float(p["qty"]) for s, p in self.broker.positions().items()}
                 acts = actions_from_activities(rows, b.qty_by_symbol(), bq)
         except Exception as e:
@@ -1600,6 +1605,37 @@ class Engine:
                 t = datetime.fromisoformat(body.get("started") or ts)
                 return (t if t.tzinfo else t.replace(tzinfo=UTC)) - timedelta(minutes=1)
         return self.now() - timedelta(days=10)
+    def _corporate_activities(self, today: date) -> list[dict]:
+        """#392: Alpaca's dividend and split activities of the last 10 days. One request for both groups; if Alpaca
+        refuses it (one bad code refuses the whole request), each group (`CORPORATE_ACTIVITY_GROUPS`) is asked on its
+        own, so the dividends still come in when the split code is refused and the other way round. A refused group
+        is one `corporate_actions_error` event naming it (`refused`); when every group is refused this raises, and
+        the caller's error path runs (nothing is booked that session, as before)."""
+        after = self.now() - timedelta(days=10)
+        try:
+            return self.broker.activities(after, types=CORPORATE_ACTIVITIES)
+        except Exception as e:
+            first = e
+        rows: list[dict] = []
+        refused: dict[str, str] = {}
+        for name, types in CORPORATE_ACTIVITY_GROUPS:
+            try:
+                rows.extend(self.broker.activities(after, types=types))
+            except Exception as e:
+                refused[name] = str(e)[:200]
+        if len(refused) == len(CORPORATE_ACTIVITY_GROUPS):
+            raise first
+        rows.sort(key=lambda r: str(r.get("date") or r.get("transaction_time") or ""))
+        if not refused:  # QA-Ops: the combined request failed once (e.g. a timeout) and both groups came in
+            log.warning("corporate actions: the combined read failed (%s); both groups read on their own", first)
+            return rows
+        log.warning("corporate actions: only part of the read was accepted: %s", refused)
+        self.store.event("corporate_actions_error", {
+            "day": str(today), "error": str(first)[:200], "refused": refused,
+            "read": [n for n, _ in CORPORATE_ACTIVITY_GROUPS if n not in refused],
+            "action": "the groups read are booked; the refused ones are not (a missed split shows as drift)"},
+            self._rid())
+        return rows
 
     def _md_positions_after_fills(self, today: date) -> None:
         """#333 (QA-Ops second key): the near-close orders fill from 15:50 ET, before the fail-safes' flatten window

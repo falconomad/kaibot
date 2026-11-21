@@ -12,7 +12,13 @@ import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 
-from kaibot.broker.protocol import BrokerBase, BrokerError, OrderRequest
+from kaibot.broker.protocol import (  # noqa: F401 (ALPACA_ACTIVITY_TYPES: re-exported)
+    ALPACA_ACTIVITY_TYPES,
+    BrokerBase,
+    BrokerError,
+    OrderRequest,
+    unknown_activity_types,
+)
 from kaibot.common.ratelimit import Budget, get_budget
 from kaibot.engine.config import PAPER_TRADING_URL
 
@@ -124,7 +130,12 @@ class AlpacaPaper(BrokerBase):
 
     def activities(self, after: datetime | None = None, types: tuple[str, ...] = ("FILL",)) -> list[dict]:
         """Account activities, oldest first (GET /v2/account/activities, 100 a page). Fills: the order manager
-        (S78) reconciles from them. Dividends and splits (DIV*, SSP): the ledger books them (S77)."""
+        (S78) reconciles from them. Dividends and splits (DIV*, SPLIT): the ledger books them (S77). A type outside
+        Alpaca's enum is refused here as Alpaca would refuse it (422), without a request (#392)."""
+        bad = unknown_activity_types(types)
+        if bad:
+            raise AlpacaError(422, json.dumps({"message": f"invalid activity type: {','.join(bad)}",
+                                               "source": "kaibot: refused before sending"}))
         out: list[dict] = []
         params = {"activity_types": ",".join(types), "direction": "asc", "page_size": ACTIVITY_PAGE}
         if after is not None:

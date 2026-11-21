@@ -1,7 +1,8 @@
 -- 0017: the off-box dead-man on early-close days (M7 S74d, issue #154; follow-up of the QA-Ops review of #151).
 --
--- NOT APPLIED. Production migrations are the stakeholder's: apply this one on "apply". Until then the dead-man of
--- 0006 runs as before (15:56 ET on weekdays only) and early-close days have no off-box dead-man.
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's. Without it the dead-man of 0006 runs as before (15:56 ET on weekdays
+-- only) and early-close days have no off-box dead-man.
 --
 -- 0006 flattens at 15:56 ET, 4 minutes before a regular close, and does not know the calendar. So on early-close
 -- days (13:00 ET) nothing off-box acts at 12:56, while the on-laptop watchdog retries its flatten only until

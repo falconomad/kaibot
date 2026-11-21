@@ -8,8 +8,12 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from kaibot.broker.protocol import unknown_activity_types
 from kaibot.engine.ledger import (
+    CORPORATE_ACTIVITIES,
+    CORPORATE_ACTIVITY_GROUPS,
     FEE_ACTIVITIES,
+    SPLIT_ACTIVITIES,
     Action,
     Ledger,
     actions_from_activities,
@@ -184,7 +188,7 @@ ALPACA_ACTIVITIES = [  # the shape documented for non-trade activities (docs.alp
     {"activity_type": "DIV", "id": "20261110::a", "date": "2026-11-10", "net_amount": "1.02", "symbol": "T",
      "cusip": "00206R102", "qty": "2", "per_share_amount": "0.51"},
     {"activity_type": "DIVNRA", "id": "20261110::b", "date": "2026-11-10", "net_amount": "-0.15", "symbol": "T"},
-    {"activity_type": "SSP", "id": "20261110::c", "date": "2026-11-10", "net_amount": "0", "symbol": "NVDA",
+    {"activity_type": "SPLIT", "id": "20261110::c", "date": "2026-11-10", "net_amount": "0", "symbol": "NVDA",
      "qty": "27"},
     {"activity_type": "FILL", "id": "20261110::d", "symbol": "T"},
 ]
@@ -195,6 +199,22 @@ def test_actions_from_alpaca_activities_fixture():
     assert got == [Action("T", "2026-11-10", "dividend", amount=1.02, ref="alpaca:20261110::a"),
                    Action("T", "2026-11-10", "dividend", amount=-0.15, ref="alpaca:20261110::b"),
                    Action("NVDA", "2026-11-10", "split", ratio=10.0, ref="alpaca:20261110::c")]
+
+
+def test_a_split_row_named_ssp_is_still_read():
+    """#392: `SSP` is refused as a request filter, but a row that comes back under the guide's old name is read."""
+    row = {**ALPACA_ACTIVITIES[2], "activity_type": "SSP"}
+    got = actions_from_activities([row], ledger_qty={"NVDA": 3}, broker_qty={"NVDA": 30})
+    assert got == [Action("NVDA", "2026-11-10", "split", ratio=10.0, ref="alpaca:20261110::c")]
+
+
+def test_the_corporate_activity_codes_are_in_alpaca_s_documented_enum():
+    """#392: Alpaca refuses the whole request for one unknown code. Pinned to the `ActivityType` enum of the
+    Trading API reference (GET /v2/account/activities, checked 20 Nov 2026)."""
+    assert not unknown_activity_types(CORPORATE_ACTIVITIES)
+    assert "SPLIT" in SPLIT_ACTIVITIES and "SSP" not in CORPORATE_ACTIVITIES
+    assert sum((t for _, t in CORPORATE_ACTIVITY_GROUPS), ()) == CORPORATE_ACTIVITIES
+    assert unknown_activity_types(("SSP", "SSO", "DIV")) == ["SSP", "SSO"]
 
 
 def test_alpaca_split_without_a_known_ratio_is_not_guessed():

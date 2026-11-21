@@ -23,6 +23,21 @@ TIMES_IN_FORCE = ("day", "gtc", "opg", "cls", "ioc", "fok")
 ORDER_CLASSES = ("simple", "bracket", "oto", "oco")
 
 
+# #392: the `activity_types` values Alpaca's Trading API reference accepts for GET /v2/account/activities (the
+# `ActivityType` enum, checked 20 Nov 2026). Alpaca refuses a whole request with one code outside it (422
+# "invalid activity type: SSP"), so `activities` refuses such a request itself, before it is sent.
+ALPACA_ACTIVITY_TYPES = frozenset({
+    "FILL", "TRANS", "MISC", "ACATC", "ACATS", "CFEE", "CGD", "CSD", "CSW", "DIV", "DIVCGL", "DIVCGS", "DIVFEE",
+    "DIVFT", "DIVNRA", "DIVROC", "DIVTW", "DIVTXEX", "FEE", "INT", "INTNRA", "INTTW", "JNL", "JNLC", "JNLS", "MA",
+    "NC", "OPASN", "OPCA", "OPCSH", "OPEXC", "OPEXP", "OPTRD", "PTC", "PTR", "REORG", "SPIN", "SPLIT", "FOPT",
+})
+
+
+def unknown_activity_types(types) -> list[str]:
+    """The codes of `types` that Alpaca's request enum does not have (an empty list: the request is valid)."""
+    return [t for t in types if t not in ALPACA_ACTIVITY_TYPES]
+
+
 class BrokerError(RuntimeError):
     """The venue refused or failed a request. `status` follows HTTP: 403 and 422 are rejections, 0 means no
     answer at all (the order may or may not exist at the venue: look it up by its client order id)."""

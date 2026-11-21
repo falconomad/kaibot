@@ -1,7 +1,8 @@
 -- 0021: kb_health lists the live daily path's events (#266; Product, 16 Nov 2026).
 --
--- NOT APPLIED. Production migrations are the stakeholder's (Product applies on his word): apply after 0019 (0020
--- is #247's, open; the two are independent and may be applied in either order).
+-- Status (applied or pending): docs/ops/migrations_pending.md.
+-- Production migrations are the stakeholder's (Product applies on his word): apply after 0019 (0020 and 0021 are
+-- independent and may be applied in either order).
 --
 -- What changes. public.kb_health() (0007) returns the last 80 events of a FIXED list of types. The dashboard's Health
 -- and Activity now label the corporate-action skips of the multi-day path (#273), but the RPC never returned them:

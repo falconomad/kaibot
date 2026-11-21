@@ -163,8 +163,8 @@ def test_a_split_credited_after_the_session_start_is_booked_at_the_next_tick(tmp
     a = Held(tmp_path, monkeypatch, Feed({}))
     a.hold()
     a.ticks(a.open2, 0, 3)
-    a.broker.pos["B"]["qty"] = QTY * 2  # a 2-for-1 split applied late, with Alpaca's SSP row
-    a.broker.non_trade.append({"activity_type": "SSP", "id": "ssp1", "date": DAY2, "symbol": "B", "qty": str(QTY)})
+    a.broker.pos["B"]["qty"] = QTY * 2  # a 2-for-1 split applied late, with Alpaca's SPLIT row
+    a.broker.non_trade.append({"activity_type": "SPLIT", "id": "ssp1", "date": DAY2, "symbol": "B", "qty": str(QTY)})
     a.ticks(a.open2, 3, 10)
     assert a.eng.ledger.book(a.rid).sleeves[(MD, "B")].qty == QTY * 2
     assert a.eng.kill is None and a.eng.recon.last.diffs == []
@@ -239,8 +239,8 @@ def _rows(a, session):
 def test_after_a_split_at_the_open_the_fail_safes_read_the_split_share_count(tmp_path, monkeypatch):
     a = Held(tmp_path, monkeypatch, Feed({}))
     a.hold()
-    a.broker.pos["B"]["qty"] = QTY * 2  # a 2-for-1 split before DAY2's open, with Alpaca's SSP row
-    a.broker.non_trade.append({"activity_type": "SSP", "id": "ssp1", "date": DAY2, "symbol": "B", "qty": str(QTY)})
+    a.broker.pos["B"]["qty"] = QTY * 2  # a 2-for-1 split before DAY2's open, with Alpaca's SPLIT row
+    a.broker.non_trade.append({"activity_type": "SPLIT", "id": "ssp1", "date": DAY2, "symbol": "B", "qty": str(QTY)})
     a.ticks(a.open2, 0, 2)
     rows = _rows(a, DAY2)
     assert rows[(MD, "B")]["qty"] == QTY * 2  # written at the session start, not only at the close
