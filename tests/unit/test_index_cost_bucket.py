@@ -28,6 +28,13 @@ INDEX = V2Params(index_symbols=("SPY",), index_half_bp=0.25)
 NOW = datetime(2026, 11, 20, 22, 0, tzinfo=UTC)  # a Friday evening
 
 
+@pytest.fixture(autouse=True)
+def _no_broker_url_from_another_test(monkeypatch):
+    """The calibration reads ALPACA_BASE_URL from the environment. Other tests load .env files with
+    `load_env_file`, which leaves that variable set in the process, so these tests start without it."""
+    monkeypatch.delenv("ALPACA_BASE_URL", raising=False)
+
+
 def ctx(symbol=None, mid=600.0, adv=40e9, venue="continuous") -> FillCtx:
     return FillCtx(mid, 20, SIG, 1e6, adv, venue, symbol=symbol)
 
