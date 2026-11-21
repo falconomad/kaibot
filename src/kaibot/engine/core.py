@@ -1408,8 +1408,16 @@ class Engine:
         d = self.day
         if d is None:
             return self._daily_status({"state": "idle", "account_clean": self.account_clean})
-        self.market.update(now)
         m = self.market.last_complete_minute(now)
+        if m >= 0 and m != d.done_m:
+            # M9 1.5 (audit M3): the multi-day sync and send run first, before any market-data read or intraday
+            # step. They were the tenth step; a step before them that raised on each tick of 15:50-15:57 ET lost the
+            # decision's orders. The send reads the engine's state as the last completed minute left it.
+            self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
+            if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+                self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
+            self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
+        fresh = self._market_update(now)
         if m < 0 or m == d.done_m:
             return self._status(m)  # this minute's work is complete: it is never run twice
         # S74 (#114, audit D6): `last_m` says the minute was started, `done_m` that it was finished. A step below
@@ -1419,7 +1427,6 @@ class Engine:
         # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
-        self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
         self._md_positions_after_fills(d.day)  # #333: near-close fills land before the fail-safes' flatten window
         self._recheck_reconcile(m)
         self._late_actions(m)  # #266: a split or spin-off Alpaca credits after the session start
@@ -1429,10 +1436,9 @@ class Engine:
                 self._exit(p, "carried_over")
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
-        self._manage_stops(m)
-        if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
-            self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
-        self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
+        intraday = self.intraday_live()  # M9 1.5: no intraday rule and no intraday position: none of its steps
+        if intraday:
+            self._manage_stops(m)
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
@@ -1440,16 +1446,48 @@ class Engine:
             self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
             self.roomflow.collect(m)
-        for strat in self.live_strategies():  # S76: every live strategy the session runs, in registry order
+        # S76: every live strategy the session runs, in registry order. M9 1.5: not on a minute whose bars could not
+        # be read (a rule would decide on stale bars: fail closed, for that minute only)
+        for strat in self.live_strategies() if intraday and fresh else ():
             if due(strat.schedule, Event.BAR_CLOSE, m, d.n_min) and d.decided.get(strat.name) != m \
                     and self._may_enter(m):
                 self._entries(strat, m)
                 d.decided[strat.name] = m
-        self._close_outs(m)
+        if intraday:
+            self._close_outs(m)
         self._ledger(eq)
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
         d.done_m = m
         return self._status(m)
+
+    def intraday_live(self) -> bool:
+        """M9 1.5: whether the session has anything intraday to manage: a live rule that is flat by the close, an
+        intraday position, or a room job. False when only multi-day rules are on (their path is `self.daily`)."""
+        if len(self.pos) or (self.roomflow is not None and self.roomflow.jobs):
+            return True
+        return any(flatten_at_close(s.holding) for s in self.live_strategies())
+
+    def _market_update(self, now: datetime) -> bool:
+        """M9 1.5 (audit M3): the minute's market-data read, which no longer stops the tick. A failed read leaves
+        the bars as they were: the multi-day steps, the order sync, the drift check, the risk halts and the time
+        flatten go on, and no intraday entry is scanned that minute (the caller). One `engine_error` event per
+        distinct failure (step `market_update`), not one a minute. Returns whether the read worked."""
+        try:
+            self.market.update(now)
+        except Exception as e:
+            why = f"{type(e).__name__}: {e}"[:200]
+            if getattr(self, "_market_error", None) == why:
+                log.warning("market data: the minute read is still failing: %s", why)
+                return False
+            self._market_error = why
+            log.exception("market data: the minute read failed (the tick goes on without new bars)")
+            try:
+                self.store.event("engine_error", {"step": "market_update", "error": why}, self._rid())
+            except Exception:  # the event must never be what stops the tick
+                log.exception("market data: the engine_error event was not written")
+            return False
+        self._market_error = None
+        return True
 
     def _maybe_prepare(self, clk: dict, now: datetime) -> None:
         """Load history ahead of the open (the first load takes a few minutes; later ones are incremental)."""

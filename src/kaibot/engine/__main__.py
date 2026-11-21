@@ -84,7 +84,8 @@ def build(settings: Settings) -> Engine:
     broker = AlpacaPaper(settings.alpaca_key, settings.alpaca_secret)
     data = AlpacaData(settings.alpaca_key, settings.alpaca_secret)
     market = LiveMarket(
-        data, sorted(etf_of), etf_of, cfg["market"], settings.data_dir / "history", vix_loader(settings.fred_key)
+        data, sorted(etf_of), etf_of, cfg["market"], settings.data_dir / "history", vix_loader(settings.fred_key),
+        minute_data=bounded_data(data),  # M9 1.5: the per-minute bars read ends within 20 s
     )
     remote = Store(settings.supabase_url, settings.supabase_service_key)
     # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
@@ -118,6 +119,21 @@ def build(settings: Settings) -> Engine:
     # main() after the lease; never with --check. KAIBOT_NEWS_POLL=off: None
     eng.news_poller = news_poll.for_engine(eng, desk, data, locked.lock)
     return eng
+
+
+def bounded_data(data):
+    """M9 1.5 (audit M3): the market-data client for reads made inside the engine's loop every minute
+    (`LiveMarket.update`), bounded like an order call: 6 s an attempt, 20 s in all, retries included. A copy with
+    the same keys and the same rate budget. The plain client (30 s an attempt, five attempts, no deadline) could
+    hold a tick for minutes, past the 15:50-15:57 ET send window and the watchdog's 90 s."""
+    import copy
+
+    from kaibot.broker.alpaca import ORDER_DEADLINE_S, ORDER_TIMEOUT_S
+
+    quick = copy.copy(data)
+    quick.http = copy.copy(data.http)
+    quick.http.timeout_s, quick.http.deadline_s = ORDER_TIMEOUT_S, ORDER_DEADLINE_S
+    return quick
 
 
 def bounded_data_get(data):
