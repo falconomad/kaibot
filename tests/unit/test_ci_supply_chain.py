@@ -2,7 +2,7 @@
 quietly drop them. `zizmor` and `pip-audit` run in the `supply-chain` workflow; this file needs no network.
 
 - actions are pinned by commit (40 hex digits), with the tag in a comment;
-- every workflow sets `permissions` at the top, read-only; the one write permission is listed here by name;
+- every workflow sets `permissions` at the top, read-only; every write permission is listed here by name;
 - no workflow uses a secret or names a production key (Alpaca, Supabase service role, Anthropic);
 - a checkout keeps no credentials; a `pull_request_target` workflow never checks out or runs anything;
 - everything installed is installed from a lock: hash-pinned requirements, `npm ci`, a base image by digest.
@@ -19,7 +19,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
 # the only write permissions any job may hold: (workflow file, job) -> {scope: "write"}
-WRITE_ALLOWED = {("labeler.yml", "label"): {"pull-requests": "write"}}
+WRITE_ALLOWED = {("labeler.yml", "label"): {"pull-requests": "write"},
+                 ("stateful.yml", "weekly-random-seeds"): {"issues": "write"}}  # opens the issue with the seed
 PINNED = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\s+#\s*v?\d[\w.]*\s*$")
 PRODUCTION_KEYS = re.compile(r"APCA|ALPACA|SERVICE_ROLE|SERVICE_KEY|ANTHROPIC_API_KEY|SUPABASE_ACCESS|VERCEL_TOKEN",
                              re.I)
