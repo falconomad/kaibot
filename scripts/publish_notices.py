@@ -202,6 +202,14 @@ def publish(store, rows: list[dict], back: list[date], ahead: list[date], now: d
     return {"written": len(rows), "withdrawn": gone}
 
 
+def publish_as_helper(session, rows: list[dict], back: list[date], ahead: list[date], now: datetime) -> dict:
+    """`publish` through migration 0039's `kb_helper_publish_notices` (one call: the upsert and the withdrawal of
+    the window's rows no longer found), as the signed-in helper. Same result shape as `publish`."""
+    lo, hi = (back or ahead)[0].isoformat(), ahead[-1].isoformat()
+    res = session.rpc("kb_helper_publish_notices", {"p_rows": rows, "p_lo": lo, "p_hi": hi}) or {}
+    return {"written": int(res.get("written") or 0), "withdrawn": list(res.get("withdrawn") or [])}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     env = os.environ.get("KAIBOT_ENV_FILE") or str(Path.home() / "Projects/kaibot-secrets/.env")
@@ -209,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--now", help="ISO time with a zone (default: now); for a replay of an earlier morning")
     ap.add_argument("--write", action="store_true", help="write to Supabase (default: print only)")
+    ap.add_argument("--helper-env", default=None, help="the helpers' env file (docs/ops/helper_role.md)")
     a = ap.parse_args(argv)
     now = datetime.fromisoformat(a.now.replace("Z", "+00:00")) if a.now else datetime.now(UTC)
     if now.tzinfo is None:
@@ -228,17 +237,26 @@ def main(argv: list[str] | None = None) -> int:
         print("dry run: nothing written (add --write)")
         return 0
 
+    from kaibot.common.helper_session import HelperSession, helper_env
     from kaibot.engine.config import DEFAULT_SUPABASE_URL, load_env_file
-    from kaibot.engine.store import Store
 
-    load_env_file(a.env)
-    key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-    if not key:
-        print("SUPABASE_SERVICE_KEY is not set in the env file: nothing written", file=sys.stderr)
-        return 1
-    store = Store((os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL).rstrip("/"), key).quick(20.0)
+    henv = helper_env(a.helper_env)
+    if henv is not None:  # M10 1.26 (#451): the helper sign-in; the service key is never read
+        session = HelperSession.from_env(henv, DEFAULT_SUPABASE_URL, timeout_s=20.0)
+        store = None
+    else:
+        from kaibot.engine.store import Store
+
+        load_env_file(a.env)
+        key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        if not key:
+            print("no helpers' env file and SUPABASE_SERVICE_KEY is not set: nothing written", file=sys.stderr)
+            return 1
+        print("still on the service key (no helpers' env file; docs/ops/helper_role.md)", file=sys.stderr)
+        store = Store((os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL).rstrip("/"), key).quick(20.0)
     try:
-        res = publish(store, rows, back, ahead, now)
+        res = publish(store, rows, back, ahead, now) if store is not None else \
+            publish_as_helper(session, rows, back, ahead, now)
     except Exception as e:  # noqa: BLE001 - e.g. migration 0035 not applied yet
         print(f"not written: {str(e)[:200]}", file=sys.stderr)
         return 1
