@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from walk_forward import peak_rss_mb  # noqa: E402
 
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2, mark_3  # noqa: E402
 from kaibot.replay import spy_momentum  # noqa: E402
 from kaibot.replay import spy_noise_band as nb  # noqa: E402
@@ -352,6 +353,7 @@ def main() -> None:
     ap.add_argument("--control-runs", type=int, default=nb.CONTROL_RUNS,
                     help="random-timing runs for Gate B mark 3 (needs 500; 0 switches the control off)")
     ap.add_argument("--control-seed", type=int, default=nb.CONTROL_SEED)
+    holdout.add_argument(ap)
     a = ap.parse_args()
     data = Path(a.data)
     if a.has:
@@ -365,6 +367,7 @@ def main() -> None:
         return
     if not a.version or not a.end:
         ap.error("--version and --end are required for a run")
+    holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
     run_version(a)
 
 
