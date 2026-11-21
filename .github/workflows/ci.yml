@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   pull_request:
+# M12 ticket 3.6 (#468): the token every job gets can read the repository and nothing else; actions are pinned by
+# commit (the tag is in the comment), checkouts keep no credentials, and no job has a secret. The `supply-chain`
+# workflow and tests/unit/test_ci_supply_chain.py hold all workflows to this.
+permissions:
+  contents: read
 jobs:
   python-tests:  # the suite in two disjoint parts on two runners (#221); `python` below is the check to require
     name: python-tests (${{ matrix.shard }})
@@ -11,9 +16,9 @@ jobs:
       fail-fast: false
       matrix: {shard: ["1/2", "2/2"]}
     steps:
-      - uses: actions/checkout@v4
-        with: {fetch-depth: 0}  # full history: the pre-registration amendment check reads it (#161)
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {fetch-depth: 0, persist-credentials: false}  # full history: the pre-registration check reads it (#161)
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
         with: {version: "0.11.32", enable-cache: true}  # same uv as scripts/lock_deps.sh was run with
       - run: ./scripts/lock_deps.sh --check  # uv.lock and the requirements exports agree (one locked set, #122)
       - run: uv sync --locked
@@ -36,12 +41,14 @@ jobs:
     if: always()  # a skipped check would count as passed; this job must fail instead
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.python-tests.result }}" = success
+      - run: test "$RESULT" = success
+        env: {RESULT: "${{ needs.python-tests.result }}"}
   hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
         with: {version: "0.11.32", enable-cache: true}
       - run: uv sync --locked
       - name: mypy
@@ -59,7 +66,8 @@ jobs:
   image:  # the engine image builds from the locked requirements and its entry points import (#122); runs in parallel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
       - run: |
           base=$(sed -n 's/^FROM \([^ ]*\).*/\1/p' Dockerfile); echo "pinned base: $base"
           echo "python:3.13-slim today: $(docker buildx imagetools inspect python:3.13-slim | sed -n 's/^Digest: *//p')"
@@ -73,8 +81,9 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: 22
           cache: npm

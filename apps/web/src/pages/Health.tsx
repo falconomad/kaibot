@@ -19,6 +19,8 @@ import { findExperiment, multiDayFrom } from "../lib/experiment";
 import { NAME } from "../brand/brand";
 import { caEvent } from "../lib/corpactions";
 import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevents";
+import { reconLine, reconcileFrom } from "../lib/reconcile";
+import { ReconcileAccept } from "../components/ReconcileAccept";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -197,6 +199,7 @@ export function Health() {
   const exps = experimentsOf(h.heartbeat).filter((e) => e.experiment);
   const md = multiDayFrom(engineDetail(h.heartbeat));
   const scan = scanSummary(engine?.detail?.scan, engine?.detail?.entries_today ?? 0);
+  const recon = reconcileFrom(engine?.detail);
   const shadow = shadowReviews(md, h.events.filter((e) => e.run_id === null || e.run_id === run.id));
   return (
     <>
@@ -241,6 +244,11 @@ export function Health() {
           <p>{d.account_clean === false ? `The paper account holds positions or orders ${NAME} didn't place. Entries stay off until it is clean.`
             : `The paper account holds only what ${NAME} placed.`}</p>
         </CheckRow>
+        {recon && (
+          <CheckRow ok={recon.ok} name="Books and broker" line={reconLine(recon)}>
+            <ReconcileAccept state={recon} engineLive={chip.live} waiting={h.pending_commands.some((c) => c.kind === "accept_reconcile")} />
+          </CheckRow>
+        )}
       </ul>
 
       <h2 className="section-h">Today</h2>
