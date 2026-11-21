@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0035 applied; none pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0035 applied; 0036 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -34,6 +34,7 @@ Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0035 applie
 - 0033: **applied by Product on 21 Nov 2026, about 00:2x UTC** (checked: kb_health lists multi_day_shorting_on; not executable by anon) (step 20 below; dashboard read only, any time; the PR for kb_health's engine health events, #392 item 4).
 - 0034: **applied by Product on 21 Nov 2026, about 02:xx UTC** (step 21 below; dashboard only, any time; the PR for #384). Independent of 0033 (#401, step 20).
 - 0035: **applied by Product on 21 Nov 2026** (checked: kb_market_notices not executable by anon; market_notice not readable by authenticated; RLS on) (step 22 below; dashboard read only, any time; the market notices of #378). 0034 and step 21 are #410's.
+- 0036: **pending (NOT APPLIED)** (step 23 below; dashboard read only, any time; kb_health's dynamically named events: `multi_day_column_missing` of #410, `multi_day_review`, `command_accept_reconcile`). After 0033.
 
 ## Apply in this order
 
@@ -64,6 +65,7 @@ run it again. Do not reorder them.
 | 20 | `migrations/0033_kb_health_engine_health_events.sql` (whole file; the PR for kb_health's engine health events). After 0031. Any time, also while the engine runs: dashboard read only | `kb_health` also returns 15 health events the engine sends that the list left out, among them `multi_day_carry` (#366) and `corporate_actions_error` (#392), plus `ledger_mismatch`, `reconcile_blocked`, `replica_conflict`, `watchdog_protect` and the others named in the file's header. 0031's function otherwise, owner-only; the engine does not call it. Health.tsx shows an unlabelled type by its name until Design labels it | No: one `create or replace function`, then the revoke/grant of 0021 |
 | 21 | `migrations/0034_ledger_multi_day.sql` (whole file; the PR for #384). Any time, also while the engine runs: dashboard only, additive. Independent of 0033 (PR #401) | The minute ledger row (`kaibot.ledger`) gets one nullable jsonb column `multi_day`: the ledger's cash and, per multi-day sleeve, shares, mark, the mark's time and source (contract in #384, docs/ops/ledger.md). `kb_overview` already passes the whole row through: no function changes. Until it is applied the engine sends the rows without it and retries hourly (event `multi_day_column_missing`) | No: `add column if not exists` and a `comment on column` only |
 | 22 | `migrations/0035_market_notices.sql` (whole file; the PR for #378's market notices). Independent of 0033 and 0034. Any time, also while the engine runs: dashboard read only, additive | The dashboard's "New on the market" and "Big day" notices: table `kaibot.market_notice` (RLS on, no policy; written only by `scripts/publish_notices.py` with the service key, off unless `KAIBOT_NOTICES=1`) and the owner-only read `public.kb_market_notices(p_today)`, which also turns the engine's `market_alarm` events (#377, only with `KAIBOT_MARKET_ALARM=on`) into notices. The engine neither reads nor writes the table. Until it is applied the dashboard shows no notice | No: `create table if not exists`, `create index if not exists`, `create or replace function`, `revoke` and `grant` only |
+| 23 | `migrations/0036_kb_health_dynamic_events.sql` (whole file; the PR for kb_health's dynamically named events). After 0033. Any time, also while the engine runs: dashboard read only | `kb_health` also returns three health events the engine sends under a name not written at the call, which 0033's grep missed: `multi_day_column_missing` (0034 not applied: the minute rows go without `multi_day`, retried hourly; #384, PR #410), `multi_day_review` (the pre-open review's verdicts when it is on, #131) and `command_accept_reconcile` (the owner accepted the open ledger differences, S78). 0033's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -130,6 +132,9 @@ select data_type from information_schema.columns where table_schema = 'kaibot' a
 select has_function_privilege('anon', 'public.kb_market_notices(date)', 'execute');               -- false
 select has_table_privilege('authenticated', 'kaibot.market_notice', 'select');                    -- false
 select relrowsecurity from pg_class where oid = 'kaibot.market_notice'::regclass;                  -- true
+-- step 23 (0036): kb_health returns the dynamically named events
+select prosrc like '%multi_day_column_missing%' and prosrc like '%''multi_day_review''%' and prosrc like '%multi_day_shorting_on%'
+  from pg_proc where proname = 'kb_health';                                                          -- true
 -- step 7: the dashboard RPCs exist, owner-only
 select count(*) from pg_proc where proname in ('kb_multiday_plan', 'kb_book_closed', 'md_decision_at');   -- 3
 select has_function_privilege('anon', 'public.kb_multiday_plan(bigint)', 'execute');              -- false
