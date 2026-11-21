@@ -366,6 +366,8 @@ class Engine:
         self.recent_actions = recent_actions
         # S78: the ledger against the broker (engine/reconcile.py); accepted offsets fold from the journal
         self.recon = Reconciler(lambda: self._recon_inputs(), self.journal)
+        self._recon_ts: datetime | None = None  # #439: when the last check ran (heartbeat `reconcile.ts`)
+        self._recon_refused: dict | None = None  # the last refused accept_reconcile command, until it is moot
         self._finalize_checked: date | None = None
         self.account_clean = True
         self.code = code_sha()
@@ -462,10 +464,39 @@ class Engine:
             self.recon.last = Reconciliation([Difference("unavailable", None, {"error": f"{type(e).__name__}: "
                                                                                        f"{e}"[:160]})])
             self.recon.checked = True
+        self._recon_ts = self.now()
         if self.recon.last.diffs:
             self.store.event("reconcile_blocked", {"when": when, **self.recon.last.summary(),
                                                    "action": "entries blocked until the book matches the broker "
                                                              "or the owner accepts the difference"}, self._rid())
+
+    def _accept_reconcile(self, pl: dict) -> None:
+        """#439 (M9 1.14): the owner's `accept_reconcile` command. The dashboard sends what its screen showed
+        (`shown`); the reconciler accepts only that, read again at the venue. A refusal is an event and stays in
+        the heartbeat (`reconcile.refused`) until an acceptance or a clean check, so the owner sees why buys are
+        still stopped."""
+        try:
+            self.recon.resolve(str(pl.get("reason") or ""), by="owner (command)", shown=pl.get("shown"))
+        except Exception as e:
+            self._recon_refused = {"ts": self.now().isoformat(), "why": str(e)[:200]}
+            self.store.event("reconcile_blocked", {"when": "accept_refused", **self.recon.last.summary(),
+                                                   "refused": str(e)[:200],
+                                                   "action": "entries stay blocked: look at the difference again"},
+                             self._rid())
+            raise
+        self._recon_refused = None
+        self._startup_reconcile("accepted")
+
+    def _recon_status(self) -> dict:
+        """The heartbeat's `reconcile` block (#439): the last check's differences, as the dashboard shows them."""
+        st = self.recon.status()
+        if st["ok"]:
+            self._recon_refused = None
+        elif self._recon_refused:
+            st["refused"] = self._recon_refused
+        if self._recon_ts is not None:
+            st["ts"] = self._recon_ts.isoformat()
+        return st
 
     def _recheck_reconcile(self, m: int | None = None, force: bool = False) -> None:
         """While entries are blocked by a difference: check again every RECHECK_MINUTES (a late activity heals)."""
@@ -589,7 +620,10 @@ class Engine:
     def _daily_status(self, st: dict) -> dict:
         """#206: the heartbeat's `multi_day` block (`LiveDaily.status`), e.g. "no decision today: daily store not
         refreshed". Absent without the daily path. #211: with KAIBOT_MULTIDAY=on every heartbeat (closed, idle,
-        preparing, after the close) also carries `experiments`, so the dashboard's label and limits never vanish."""
+        preparing, after the close) also carries `experiments`, so the dashboard's label and limits never vanish.
+        #439: every heartbeat also carries `reconcile` (the last ledger/broker check) once a check has run."""
+        if self.recon.checked:
+            st["reconcile"] = self._recon_status()
         if registry.multi_day_enabled() and "experiments" not in st:
             if not self.experiments:  # e.g. a start with the market closed: no session start yet
                 self.experiments = self._experiments()
@@ -1194,8 +1228,7 @@ class Engine:
                     self.flatten_all("manual")
                     self._end_run("stopped", "stopped by user")
                 elif kind == ACCEPT_COMMAND and self.run:  # S78: the owner accepts the open differences
-                    self.recon.resolve(str(pl.get("reason") or ""), by="owner (command)")
-                    self._startup_reconcile("accepted")
+                    self._accept_reconcile(pl)
                 elif kind == "set_level" and self.run and pl.get("level") in self.policies:
                     nxt = self._next_session_date()
                     self.store.insert(

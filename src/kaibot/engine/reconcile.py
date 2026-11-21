@@ -38,9 +38,12 @@ Edge cases (issue #179):
   expires nothing (the read fails closed by itself).
 
 The owner's command: `python -m kaibot.engine.reconcile --accept "reason"` (accepts the last check's differences
-in the engine's journal; `--status` shows them). Dashboard hook (design only, not built: the `command` table's
-check constraint and `kb_command` need a migration): `kb_command('accept_reconcile', {"reason": ...})`, applied by
-the engine like `pause` (`ACCEPT_COMMAND`).
+in the engine's journal; `--status` shows them). From the dashboard (M9 1.14, #439; migration 0038):
+`kb_command('accept_reconcile', {"reason": ..., "shown": [{"kind", "symbol", "offset"}, ...]})`, applied by the
+engine like `pause` (`ACCEPT_COMMAND`). `shown` is what the owner's screen displayed when they confirmed (the
+heartbeat's `reconcile.diffs`, `Reconciler.status`): `resolve(..., shown=...)` refuses unless it is exactly the set
+of acceptable differences the engine has now, at the same values, so a tap never accepts a difference that
+appeared or changed after the screen was drawn.
 """
 
 from __future__ import annotations
@@ -172,6 +175,28 @@ def _same(a: Difference, b: Difference) -> bool:
     return abs(a.offset - b.offset) <= band
 
 
+def _shown_mismatch(have: list[Difference], shown) -> str | None:
+    """None when `shown` (the owner's screen: [{"kind", "symbol", "offset"}]) is exactly `have` at the same values;
+    else why not, in the owner's words."""
+    seen: dict[Key, float] = {}
+    try:
+        for x in shown:
+            seen[(str(x["kind"]), x.get("symbol"))] = float(x["offset"])
+    except (TypeError, KeyError, ValueError, AttributeError):
+        return "the command does not say which differences were shown"
+    if not seen:
+        return "the command does not say which differences were shown"
+    if not have:
+        return "the difference has healed"
+    for d in have:
+        band = float(d.detail.get("tolerance") or 0.0) if d.kind == "cash" else QTY_EPS
+        if d.key not in seen or abs(seen[d.key] - float(d.offset)) > band:
+            return "the difference has changed since it was shown: check again and accept the new value"
+    if set(seen) - {d.key for d in have}:
+        return "a difference that was shown has healed: check again and accept what is left"
+    return None
+
+
 def _diff(d: dict) -> Difference:
     return Difference(d["kind"], d.get("symbol"), {k: v for k, v in d.items() if k not in ("kind", "symbol")})
 
@@ -251,24 +276,47 @@ class Reconciler:
                 return f"unresolved {d.kind} difference" + (f" in {d.symbol}" if d.symbol else "")
         return None
 
-    def resolve(self, reason: str, by: str = "owner") -> None:
-        """The owner looked at the differences and accepts them as they are (journalled with the reason)."""
+    def status(self, limit: int = 20) -> dict:
+        """The last check for the heartbeat (the dashboard shows it before the owner accepts, #439). Each difference
+        carries `offset` (broker minus ledger; None: it cannot be accepted and heals only when the books agree)."""
+        out: dict = {"ok": not self.last.diffs, "checked": self.checked}
+        if self.last.diffs:
+            out["diffs"] = [{"kind": d.kind, "symbol": d.symbol, **d.detail, "offset": d.offset}
+                            for d in self.last.diffs[:limit]]
+            if len(self.last.diffs) > limit:
+                out["more"] = len(self.last.diffs) - limit
+        return out
+
+    def resolve(self, reason: str, by: str = "owner", shown=None) -> None:
+        """The owner looked at the differences and accepts them as they are (journalled with the reason).
+        `shown` (the dashboard's command): what the owner's screen displayed; anything else is refused."""
         if not str(reason or "").strip():
             raise ValueError("a resolution needs a reason")
+        owner = shown
         shown = [d for d in self.last.diffs if d.offset is not None]
+        if owner is not None:
+            why = _shown_mismatch(shown, owner)
+            if why:
+                raise ValueError("nothing accepted: " + why)
         if not shown:
             return
         # issue #179: read the venue again; accept only what is still there at the value shown
         fresh = compare(**self.read(), accepted=self.accepted)
         take = [d for d in fresh.diffs if any(_same(s, d) for s in shown)]
+        why = None
         if not take:
+            healed = not any(d.key in {s.key for s in shown} for d in fresh.diffs)
+            why = "nothing to accept: the difference " + ("has healed" if healed else
+                  "has changed since it was shown: check again and accept the new value")
+        elif owner is not None:  # the dashboard's command is all or nothing: the owner agreed to one screen
+            why = _shown_mismatch([d for d in fresh.diffs if d.offset is not None], owner)
+            why = why and "nothing accepted: " + why
+        if why:
             self.last, self.checked = fresh, True
             if self.journal is not None:
                 self.journal.append("reconcile", {"when": "resolve", **fresh.summary()})
                 self._was_dirty = bool(fresh.diffs)
-            healed = not any(d.key in {s.key for s in shown} for d in fresh.diffs)
-            raise ValueError("nothing to accept: the difference " + ("has healed" if healed else
-                             "has changed since it was shown: check again and accept the new value"))
+            raise ValueError(why)
         if self.journal is not None:
             self.journal.append("reconcile", {"when": "resolve", **fresh.summary()})
             self._was_dirty = bool(fresh.diffs)

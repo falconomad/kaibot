@@ -37,7 +37,8 @@ export interface GateResp { latest: { id: number; ts: string; session: string; b
 export interface NearMiss { symbol: string; m: number; z: number; why: string }
 export interface Scan { bars: number; checks: number; regime_off: number; setups: number; near: number; vetoed: Record<string, number>; to_room: number; recent_near: NearMiss[] }
 export interface Heartbeat { process: string; ts: string; detail: { state?: string; minute?: number; host?: string; next_open?: string; account_clean?: boolean; entries_today?: number; scan?: Scan | null;
-  /** the git sha the engine runs (engine/core.py `code_sha`) */ code_sha?: string; halted?: boolean } | null }
+  /** the git sha the engine runs (engine/core.py `code_sha`) */ code_sha?: string; halted?: boolean;
+  /** #439: the last ledger/broker check, raw; read by lib/reconcile.reconcileFrom */ reconcile?: unknown } | null }
 export interface LedgerPos { qty: number; fill: number | null; stop: number; target: number; status: string; last: number | null; trade_id: number }
 /** kb_overview `ledger`: the engine's newest minute row. `positions` is day positions ONLY; `multi_day` (#384, migration
  *  0034, absent before it) is the multi-day book in that minute, raw jsonb read by lib/marks.engineMarks. */
@@ -124,7 +125,8 @@ export interface LlmBudget {
 const numValues = (o: Record<string, unknown> | null | undefined) =>
   Object.fromEntries(Object.entries(o ?? {}).map(([k, v]) => [k, Number(v)]));
 
-export type CommandKind = "pause" | "resume" | "flatten_and_stop" | "set_level";
+/** `accept_reconcile` (M9 1.14, migration 0038): payload {reason, shown}, see lib/reconcile.ts. */
+export type CommandKind = "pause" | "resume" | "flatten_and_stop" | "set_level" | "accept_reconcile";
 export interface Trade {
   id: number; run_id: number; signal_id: number | null; strategy: string; symbol: string;
   entry_ts: string; exit_ts: string | null; qty: number; entry_px: number; exit_px: number | null;
