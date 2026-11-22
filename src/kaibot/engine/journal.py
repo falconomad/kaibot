@@ -81,6 +81,7 @@ MULTI_DAY_RETRY_S = 3600.0  # #384: how often a missing `ledger.multi_day` colum
 # POISON_AFTER_N passes spread over at least POISON_AFTER_S is poison: journalled, reported, skipped. Both, so a
 # passing state (PostgREST reloading its schema right after a migration) is waited out, not skipped.
 POISON_AFTER_N, POISON_AFTER_S = 5, 120.0
+POISON_REALARM_S = 3600.0  # QA-Ops (#516): a cause still skipping rows is announced again this long after its alarm
 BACKLOG_ALARM_S = 600.0  # rows waiting, and not fewer at any look, for this long: an alarm
 
 SCHEMA = """
@@ -639,7 +640,7 @@ class Replicator:
         self._refused: tuple[int, int, float] | None = None
         self._poisons: list[dict] = []
         self.poisons = 0
-        self._poison_kinds: set[tuple[str, str]] = set()
+        self._poison_kinds: dict[tuple[str, str], float] = {}  # cause -> when its alarm was last queued
         self._backlog_since: float | None = None  # since when rows have been waiting without getting fewer
         self._backlog_last = 0
         self._backlog_alarmed = False
@@ -717,7 +718,8 @@ class Replicator:
         t, now = str(op.get("table")), self.clock()
         n, first = (self._refused[1] + 1, self._refused[2]) if self._refused and self._refused[0] == seq else (1, now)
         self._refused = (seq, n, first)
-        known = (t, code) in self._poison_kinds  # the same refusal of the same table was poison a moment ago
+        last = self._poison_kinds.get((t, code))
+        known = last is not None  # the same refusal of the same table was poison before: no second wait
         if not known and (n < POISON_AFTER_N or now - first < POISON_AFTER_S):
             return False
         part = "row" if op.get("op") in ("insert", "upsert") else "values"
@@ -728,9 +730,11 @@ class Replicator:
         self.journal.append("replica_poison", p)
         with self._lock:
             self.poisons += 1
-            if not known:  # one alarm per cause, not one per row
+            # one alarm per cause, not one per row; again when rows are still being skipped an hour later (the
+            # engine runs for days: a skipped row must not go unannounced because its cause was named on Monday)
+            if last is None or now - last >= POISON_REALARM_S:
                 self._poisons.append(p)
-            self._poison_kinds.add((t, code))
+                self._poison_kinds[(t, code)] = now
         self._refused = None
         log.error("replica poison in %s at entry %d (%s): skipped after %d refusals; the journal holds the row",
                   t, seq, str(err)[:160], n)
@@ -1036,13 +1040,24 @@ def _duplicate(e: Exception) -> bool:
 
 def _refusal(e: Exception) -> str | None:
     """M9 1.12: Supabase answered and refused THIS row (a constraint, a type, a column or table it does not have, a
-    foreign key): the Postgres or PostgREST error code, else the HTTP status, as text. None for everything that
-    says nothing about the row: no answer, 5xx, 401 / 403 (the key: every row would be dropped), 408, 429."""
+    foreign key): the Postgres or PostgREST error code. None for everything that says nothing about the row: no
+    answer, 5xx, 401 / 403 (the key: every row would be dropped), 408, 429.
+
+    QA-Ops (#516): and None for a 4xx that is about the database or the gateway, not the row, because it refuses
+    EVERY row and the whole backlog would be skipped two minutes into it: an answer without a database code (a
+    proxy's 400 / 404, a quota's 402), a database in read-only mode (25006, HTTP 405: Supabase does that when the
+    disk is full), a lock or a serialization failure (55xxx, 40xxx), a schema PostgREST does not expose
+    (PGRST106). Only these are a row's own fault (`_ROW_CODES`): bad data (22xxx), a constraint (23xxx), a column,
+    table, type or function the database does not have (42703, 42P01, 42804, 42883; PGRST204, PGRST205), a body
+    PostgREST cannot read (PGRST102). Anything else waits, as before, and the backlog alarm says so."""
     m = re.search(r"-> (\d{3}):", str(e))
     if not m or not 400 <= int(m.group(1)) < 500 or int(m.group(1)) in (401, 403, 408, 429):
         return None
     c = re.search(r'"code"\s*:\s*"([A-Za-z0-9]+)"', str(e))
-    return c.group(1) if c else m.group(1)
+    return c.group(1) if c and _ROW_CODES.fullmatch(c.group(1)) else None
+
+
+_ROW_CODES = re.compile(r"(22|23)[0-9A-Z]{3}|42(703|P01|804|883)|PGRST(102|204|205)")
 
 
 def _stop_state_missing(op: dict, err: Exception) -> dict | None:

@@ -86,9 +86,13 @@ yet; a position is only held over a close when the engine was off at 15:55.
   (`replica_poison`, with the row), counted in the heartbeat's `replication.poisons`, turned by the engine into a
   `replica_poison` event, a halt row and an ERROR log line (`replica poison: ...`), and skipped; the rows behind
   it go out. Later rows of the same table refused with the same error code follow at once, each journalled, with
-  one alarm for the cause. Never poison: no answer, a 5xx answer, 401 / 403 (the key), 408, 429; replication
-  waits on those as before. Trading is not affected. **Supabase then lacks those rows.** Fix the cause (usually a
-  migration not applied), stop the engine and run `--rebuild` below: the journal still holds every row.
+  one alarm for the cause, repeated every hour while rows are still being skipped. Never poison: no answer, a 5xx
+  answer, 401 / 403 (the key), 408, 429, and any 4xx that is not about the row itself (no database error code
+  in the answer, a database in read-only mode, a lock): those refuse every row, so replication waits on them as
+  before and the backlog alarm below says so. Trading is not affected. **Supabase then lacks those rows**, and
+  what reads Supabase is wrong by them until they are sent: the dashboard, and the dead-man's book if the row was
+  a `ledger_position` (a holding it does not find there is kept only through its own resting stop). Fix the cause (usually a migration not applied),
+  stop the engine and run `--rebuild` below: the journal still holds every row.
 - **Backlog alarm** (M9 1.12). When rows have been waiting for 10 minutes and were not fewer at any look (the
   engine looks every loop, about 10 s), the engine writes a `replica_backlog` event and an ERROR log line
   (`replica backlog: ...`), once per stall; the heartbeat shows `replication.backlog_alarm: true` until the
