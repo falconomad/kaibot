@@ -211,7 +211,11 @@ class Journal:
 
     def verify(self) -> int:
         """#496: every entry is what was appended, or JournalCorrupt naming the first one that is not. Returns how
-        many entries carried a checksum. One pass in journal order."""
+        many entries carried a checksum. One pass in journal order.
+
+        #543: first the file's structure (`check_structure`): the reads by kind are answered from the index
+        `entry_kind_seq`, not from the rows this pass checks, so a damaged index must stop the journal too."""
+        self.check_structure()
         n, prev = 0, None
         with self.lock:
             for seq, ts, kind, body, sum_ in self.db.execute("select seq, ts, kind, body, sum from entry "
@@ -220,6 +224,30 @@ class Journal:
                 prev = sum_
                 n += sum_ is not None
         return n
+
+    def check_structure(self) -> None:
+        """#543: `pragma integrity_check` over the whole file: every page, and every index against its table (a
+        damaged kind index hid an entry from `entries(kinds=...)` and `count` while every checksum passed;
+        `quick_check` does not compare an index with its table). Any finding, or a file SQLite cannot read, is
+        JournalCorrupt: the engine stops with exit code 4. About 0.3 s on 600,000 entries. The owner rebuilds a
+        damaged index with `python -m kaibot.engine.journal --reindex` (`reindex`), with the engine stopped."""
+        try:
+            with self.lock:
+                rows = [str(r[0]) for r in self.db.execute("pragma integrity_check").fetchall()]
+        except sqlite3.DatabaseError as e:
+            raise JournalCorrupt(f"the journal file cannot be read: {e}") from e
+        if rows != ["ok"]:
+            raise JournalCorrupt("the journal file is damaged (" + "; ".join(rows[:3])[:300]
+                                 + "): see docs/ops/ledger.md, Checksums")
+
+    def reindex(self) -> dict:
+        """#543, the owner's explicit word (`python -m kaibot.engine.journal --reindex`, the engine stopped): every
+        index is rebuilt from its table, then the whole journal is checked again (structure and checksums). It
+        repairs an index only: an entry that fails its checksum, or a damaged table, is still refused."""
+        with self.lock:
+            self.db.execute("reindex")
+        self.verify()
+        return {"reindexed": True, "entries": self.last_seq()}
 
     def reseal(self) -> dict:
         """The owner's explicit word (`python -m kaibot.engine.journal --reseal`) after an older release wrote
@@ -1250,14 +1278,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--reseal", action="store_true",
                     help="#496: accept the entries an older release wrote without a checksum (after a roll-back) "
                          "and move the cut-over past them; an entry whose checksum is wrong is never accepted")
+    ap.add_argument("--reindex", action="store_true",
+                    help="#543: rebuild the journal's indexes from its entries after `the journal file is damaged "
+                         "(... index ...)`, then check it again; never with the engine running, never accepts a "
+                         "changed entry")
     ap.add_argument("--rebuild", action="store_true",
                     help="send every row to Supabase again: only into an empty project or from the newest journal "
                          "(an older file's updates revert newer values; never after restoring a backup)")
     a = ap.parse_args(argv)
+    if a.reindex and a.path is not None:  # #543: a local repair, no settings or Supabase needed
+        return _reindex(a.path)
     from kaibot.engine.config import Settings
     from kaibot.engine.store import Store
 
     s = Settings.from_env()
+    if a.reindex:
+        return _reindex(journal_path(s.data_dir))
     try:
         j = Journal(a.path or journal_path(s.data_dir), verify=not a.reseal)
         if a.reseal:
@@ -1276,6 +1312,21 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(json.dumps(rep.status()))
     return 0
+
+
+def _reindex(path: Path) -> int:
+    """#543: open without the check (it would refuse the file), rebuild the indexes, check everything."""
+    j = None
+    try:
+        j = Journal(path, verify=False)
+        print(json.dumps(j.reindex()))
+        return 0
+    except (JournalCorrupt, sqlite3.DatabaseError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    finally:
+        if j is not None:
+            j.close()
 
 
 def journal_path(data_dir: Path) -> Path:
