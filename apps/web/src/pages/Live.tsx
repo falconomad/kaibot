@@ -1,13 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Meter, engineChip, useRunCtx } from "../components/Shell";
 import { PotChart, RANGES, type RangeKey, chartCaption, rangesFor } from "../components/PotChart";
-import { api, type CommandKind, type Level, type Overview, type Run, type Trade } from "../lib/api";
+import { api, type Level, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { R, dateEt, day, money, pct, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
-import { commandText, exitText, ruleName } from "../lib/explain";
-import { ageS, ageText, etToday, evidenceVerdict, levelPlan } from "../lib/derive";
+import { exitText, ruleName } from "../lib/explain";
+import { ageS, ageText, etToday, evidenceVerdict } from "../lib/derive";
 import { StockCell } from "../components/StockBadge";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
@@ -64,49 +64,6 @@ export function TradeRows({ rows }: { rows: Trade[] }) {
   );
 }
 
-export function Controls({ run, overview }: { run: Run; overview: Overview }) {
-  const qc = useQueryClient();
-  const [confirm, setConfirm] = useState(false);
-  const cmd = useMutation({
-    mutationFn: ({ kind, payload }: { kind: CommandKind; payload?: Record<string, unknown> }) => api.command(kind, payload),
-    onSuccess: () => { setConfirm(false); qc.invalidateQueries({ queryKey: ["overview"] }); },
-  });
-  const pending = overview.pending_commands;
-  const plan = levelPlan(run, overview.segments);
-  const paused = run.status === "paused";
-  const ended = !["scheduled", "running", "paused"].includes(run.status);
-  return (
-    <section className="card" aria-labelledby="ctl-h">
-      <h2 id="ctl-h">Controls</h2>
-      <p className="muted" style={{ marginTop: 0, fontSize: 14 }}>No trade-by-trade control. You can pause new entries, or close everything and stop the run.
-        The engine applies a command within about 10 seconds; nothing here changes until it does.</p>
-      {ended ? <p>This run has {run.status}{run.end_reason ? `: ${run.end_reason}` : ""}. Start a new run from the menu.</p> : (
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <button className="full-sm" disabled={cmd.isPending} onClick={() => cmd.mutate({ kind: paused ? "resume" : "pause" })}>{paused ? "Resume entries" : "Pause entries"}</button>
-          {!confirm ? <button className="danger full-sm" onClick={() => setConfirm(true)}>Flatten and stop</button> : (
-            <span className="banner swap full-sm" role="alertdialog" aria-label="Confirm flatten and stop" style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", background: "var(--loss-tint)", borderColor: "var(--loss-line)" }}>
-              Sell every position at market now and end this run?
-              <button onClick={() => setConfirm(false)}>Cancel</button>
-              <button className="primary" style={{ background: "var(--fail)", borderColor: "var(--fail)", color: "var(--paper)" }} disabled={cmd.isPending}
-                onClick={() => cmd.mutate({ kind: "flatten_and_stop" })}>Flatten and stop</button>
-            </span>
-          )}
-          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>Level from next session
-            <select value={plan.next?.level ?? plan.current ?? "balanced"} disabled={cmd.isPending}
-              onChange={(e) => cmd.mutate({ kind: "set_level", payload: { level: e.target.value as Level } })}>
-              {(Object.keys(LEVELS) as Level[]).map((k) => <option key={k} value={k}>{LEVELS[k].name}</option>)}
-            </select>
-          </label>
-        </div>
-      )}
-      {plan.next && <p className="muted" style={{ fontSize: 13 }}>{LEVELS[plan.current ?? "balanced"].name} today; {LEVELS[plan.next.level].name} from {day(plan.next.from_session)}.</p>}
-      {cmd.isError && <p className="loss" role="alert">{String(cmd.error)}</p>}
-      {pending.length > 0 && <p className="muted" style={{ fontSize: 13, marginBottom: 0 }}>Waiting for the engine: {pending.map((p) => commandText(p.kind)).join(", ")}</p>}
-    </section>
-  );
-}
-
-
 /** A new run between "Start paper run" and its first session: the true state, never "waits for the engine" while the
  *  engine's heartbeat is fresh. */
 export function StartBanner({ state: s }: { state: StartState }) {
@@ -116,6 +73,9 @@ export function StartBanner({ state: s }: { state: StartState }) {
   if (s.kind === "queued_waiting") return (
     <div className="banner warn" role="status">A new run{what ? <> of {what}</> : null} is queued. It waits for the engine: its last heartbeat is more than
       90 seconds old.</div>
+  );
+  if (s.kind === "queued_selling") return (
+    <div className="banner" role="status">A new run{what ? <> of {what}</> : null} is waiting: the old run's sale is not complete yet, buys are blocked.</div>
   );
   if (s.kind === "queued_online") return (
     <div className="banner" role="status">A new run{what ? <> of {what}</> : null} is queued. The engine is online and picks it up within about 10 seconds.</div>

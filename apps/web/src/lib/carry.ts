@@ -30,6 +30,8 @@ export interface Carry {
   riskOff: boolean;
   /** the carry-over did not run: the evening's daily view was missing (`unread`) or it failed (`error`) */
   failed: "unread" | "error" | null;
+  /** M9 1.4 (#518): this is a late send, at `session`'s close, of the decision whose own fill session this was */
+  lateOf?: string | null;
 }
 
 /** The run's `multi_day_carry` events, newest session first (a later event of the same session wins). */
@@ -48,7 +50,7 @@ export function carriesFrom(events: Ev[] | undefined, runId: number): Carry[] {
         if (str(s, 12) && w) skipped[s] = w;
       }
       return [{ ts: str(e.ts, 40) ?? "", rule, session, of: date(p.of), carried, skipped, riskOff: p.risk_off === true,
-        failed: str(p.error) ? "error" : str(p.unread) ? "unread" : null }];
+        failed: str(p.error) ? "error" : str(p.unread) ? "unread" : null, lateOf: date(p.late_of) }];
     });
   return out.sort((a, b) => b.session.localeCompare(a.session) || b.ts.localeCompare(a.ts));
 }
@@ -84,6 +86,7 @@ export function skipText(reason: string, rule: string, fillsAt: string | null): 
     "its sector is at the sector cap at the last close": ["its sector is at its limit", true],
     "the book is at its exposure cap at the last close": ["the book is at its limit for money in stocks", true],
     "no price at the last close": ["it had no price at the last close", true],
+    "no bar at the last close": ["it had no price at the last close", true], // a late send's name for it (M9 1.4, #518)
     "the book's equity or cash cannot be read": [`${NAME} could not read the book's value or cash`, true],
   };
   const f = fixed[r];

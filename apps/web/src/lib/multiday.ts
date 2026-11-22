@@ -61,7 +61,8 @@ export const sectorText = (raw: unknown) => { const s = str(raw, 40); return s &
 export type OrderState = "planned" | "working" | "filled" | "canceled" | "refused" | "deferred";
 const STATES: OrderState[] = ["planned", "working", "filled", "canceled", "refused", "deferred"];
 export interface PlanOrder { symbol: string; action: "buy" | "sell" | "resize"; sharesNow: number; sharesTarget: number; why: string | null; state: OrderState }
-export interface Plan { rule: string; decidedAfter: string | null; fillsAt: string | null; orders: PlanOrder[]; sellSoon: string[]; note: string | null }
+export interface Plan { rule: string; decidedAfter: string | null; fillsAt: string | null; orders: PlanOrder[]; sellSoon: string[]; note: string | null;
+  /** when the decision was taken (kb_multiday_plan `decided_at`, the engine's clock); read by lib/planlate.ts */ decidedAt?: string | null }
 export function parsePlan(raw: unknown): Plan[] {
   return arr(obj(raw)?.rules, 20).flatMap((r) => {
     const o = obj(r), rule = str(o?.rule, 80);
@@ -73,7 +74,8 @@ export function parsePlan(raw: unknown): Plan[] {
       return q && symbol && now !== null && target !== null && action ? [{ symbol, action, sharesNow: now, sharesTarget: target, why: str(q.why, 40), state }] : [];
     });
     const sellSoon = arr(o.sell, 100).flatMap((s) => { const sym = str(obj(s)?.symbol, 12); return sym ? [sym] : []; });
-    return [{ rule, decidedAfter: str(o.decided_after_close_of, 10), fillsAt: str(o.fills_at_close_of, 10), orders, sellSoon, note: str(o.note, 200) }];
+    return [{ rule, decidedAfter: str(o.decided_after_close_of, 10), fillsAt: str(o.fills_at_close_of, 10), orders, sellSoon, note: str(o.note, 200),
+      decidedAt: str(o.decided_at, 40) }];
   });
 }
 const OPEN: OrderState[] = ["planned", "working", "deferred"];

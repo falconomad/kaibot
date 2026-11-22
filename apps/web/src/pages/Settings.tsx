@@ -6,7 +6,7 @@ import { levelPlan } from "../lib/derive";
 import { LEVELS } from "../lib/model";
 import { day, money } from "../lib/fmt";
 import { ErrorState } from "../components/States";
-import { Controls } from "./Live";
+import { Controls } from "./Controls";
 import { InstallApp } from "../components/InstallApp";
 
 const STATUS: Record<string, string> = {
