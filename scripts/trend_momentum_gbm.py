@@ -87,6 +87,15 @@ def candidate_pool(data: DailyData):
     return pool
 
 
+def judge(gate_verdict: str, vs_rule_met: bool, sharpe: float) -> tuple[bool, str]:
+    """(leak, verdict): a Sharpe above 1.0 is a data leak and no verdict is given (decision 15 section 7); a gate
+    pass that does not beat `trend_momentum` (the `vs_rule` mark) is a fail."""
+    leak = bool(math.isfinite(sharpe) and sharpe > LEAK_SHARPE)
+    if leak:
+        return True, "suspect: data leak"
+    return False, gate_verdict if vs_rule_met or gate_verdict != "pass" else "fail"
+
+
 def runner_kwargs(cost_model: str) -> dict:
     """`cost_model` for run_daily once it takes one (#572); v1 means the runner's default either way."""
     if "cost_model" in inspect.signature(run_daily).parameters:
@@ -143,7 +152,8 @@ def main(argv: list[str] | None = None) -> dict:
         r = run_daily(strat, data, pol, i0, i1, fill=fill, cost=cost, **kw)
         st = dr.run_stats(r)
         runs[label] = (r, {"label": label, "spec": strat.name, "fill": fill, "cost": cost, "n_trials": n_trials,
-                           "refits": list(getattr(strat, "refits", [])), **st,
+                           "refits": list(getattr(strat, "refits", [])),
+                           "order_days": dict(getattr(strat, "order_days", {})), **st,
                            "runtime_s": round(time.time() - t, 1)})
         print(f"  {label}: CAGR {st['cagr_pct']}%, Sharpe {st['sharpe']}, max drawdown {st['max_drawdown_pct']}%",
               flush=True)
@@ -191,9 +201,7 @@ def main(argv: list[str] | None = None) -> dict:
     diff = series(rule_run)["net"] - series(runs["reference|trend_momentum"][0])["net"]
     vs_rule = {"annualised": float(diff.mean() * 252), "met": bool(diff.mean() > 0)}
     sharpe = float(runs["rule|1x"][1]["sharpe"])
-    leak = bool(math.isfinite(sharpe) and sharpe > LEAK_SHARPE)
-    verdict = "suspect: data leak" if leak else (rep["verdict"] if vs_rule["met"] or rep["verdict"] != "pass"
-                                                 else "fail")
+    leak, verdict = judge(rep["verdict"], vs_rule["met"], sharpe)
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
     tag = f"{RULE}_{LEVEL}_{universe}_{run_at.strftime('%Y%m%dT%H%M%S')}"

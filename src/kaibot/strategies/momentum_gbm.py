@@ -106,6 +106,7 @@ class TrendMomentumGbm:
     room: bool = False
     fitted: Any = None  # the current model, or None (the regression order stands)
     refits: list[dict] = field(default_factory=list)  # one row per refit: row, decision days, rows, used
+    order_days: dict[str, int] = field(default_factory=dict)  # decision days by order used (row 7's report)
 
     rule = "trend_momentum_gbm"
 
@@ -137,7 +138,7 @@ class TrendMomentumGbm:
         return self._base.decision_day(prev, fill)
 
     def with_params(self, **kw) -> TrendMomentumGbm:
-        return dataclasses.replace(self, fitted=None, refits=[], **kw)
+        return dataclasses.replace(self, fitted=None, refits=[], order_days={}, **kw)
 
     def fresh(self) -> TrendMomentumGbm:
         return self.with_params()
@@ -230,6 +231,7 @@ class TrendMomentumGbm:
             buy = [buy[i] for i in sorted(range(len(buy)), key=lambda i: (-float(pred[i])
                                                                           if math.isfinite(pred[i]) else math.inf, i))]
             order = "model"
+        self.order_days[order] = self.order_days.get(order, 0) + 1
         weights = {s: 1.0 for s in [*keep, *buy]}
         return dataclasses.replace(t, strategy=self.name, weights=weights,
                                    features={**t.features, "buy": buy, "order": order,
