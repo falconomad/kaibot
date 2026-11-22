@@ -396,6 +396,10 @@ class Engine:
         self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
         self.sleep = time.sleep  # QA-Ops (#282): the short wait for a cancel inside a flatten (a no-op in tests)
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
+        # M9 1.2: a `flatten_and_stop` / `new_run` command waiting for a flat book: id -> why no position is opened
+        self._cmd_waiting: dict[str, str] = {}
+        self._cmd_note: dict[str, str] = {}  # id -> the last logged reason it waits (logged once per change)
+        self._closed_seen: datetime | None = None  # when the broker's clock last said "closed" (_market_open_now)
         # M9 1.1: the book's run end. A reading above the peak waiting for its second (run, when, equity); the last
         # journalled reason the check was skipped; the splits booked today (day, symbols)
         self._peak_try: tuple[int, datetime, float] | None = None
@@ -427,6 +431,7 @@ class Engine:
         self._restore_positions()
         self._attach_ledger()
         self._rebuild_md_exits()  # #252: a flatten sale sent before a restart is still booked when it fills
+        self._restore_cmd_waiting()  # M9 1.2 (QA-Ops, #525): a flatten command that was waiting still blocks entries
         try:
             self._adopt_orphans()
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
@@ -1092,6 +1097,8 @@ class Engine:
         d = self.day
         if self.run is None or self.run.get("status") != "running":
             return "no running run"
+        if self._cmd_waiting:  # M9 1.2: "Flatten and stop" (or a new run) is selling the book
+            return next(iter(self._cmd_waiting.values()))
         if not self.account_clean:
             return "account not clean"
         if not self._reconciled():
@@ -1535,16 +1542,16 @@ class Engine:
                 continue
             try:
                 if kind == "new_run":
-                    if self.pos or self._md_sleeves() or self._md_exits:  # close the old run's positions first
-                        self.flatten_all("manual")  # (multi-day sleeves too, S80); the command waits until flat
-                        continue
+                    if not self._flat_for_command(c, kind):  # close the old run's positions first (multi-day
+                        continue  # sleeves too, S80); the command waits until flat
                     self._new_run(float(pl["amount_usd"]), pl["level"])
                 elif kind == "pause" and self.run:
                     self._set_run_status("paused")
                 elif kind == "resume" and self.run:
                     self._set_run_status("running")
                 elif kind == "flatten_and_stop" and self.run:
-                    self.flatten_all("manual")
+                    if not self._flat_for_command(c, kind):  # M9 1.2: pending until nothing is left to sell
+                        continue
                     self._end_run("stopped", "stopped by user")
                 elif kind == ACCEPT_COMMAND and self.run:  # S78: the owner accepts the open differences
                     self._accept_reconcile(pl)
@@ -1561,11 +1568,116 @@ class Engine:
                         returning=False,
                     )
                 self.store.mark_applied(c["id"])
+                self._cmd_done(str(c["id"]))
                 self.store.event(f"command_{kind}", pl, self._rid())
             except Exception as e:  # a bad command must never stop the engine
                 log.exception("command %s failed", kind)
+                self._cmd_done(str(c.get("id")))
                 self.store.mark_applied(c["id"], {**pl, "error": str(e)[:200]})
 
+    def _cmd_wait(self, cid: str, kind: str, why: str) -> None:
+        """QA-Ops second key on #525: the entry block of a waiting flatten command is journalled when it starts
+        (and raised as one `command_waiting` event), so that a restart keeps it. Without it, an engine that came
+        back while Supabase was unreachable (`pending_commands` answers none) would open positions in a book the
+        owner had told it to sell."""
+        if cid not in self._cmd_waiting:
+            rid = self._rid()
+            self.journal.append("command_waiting", {"id": cid, "kind": kind, "why": why, "run_id": rid,
+                                                    "ts": self.now().isoformat()})
+            self.store.event("command_waiting", {"command_id": cid, "kind": kind, "why": why,
+                                                 "action": "no position is opened until the book is flat; the "
+                                                           "sales are sent while the market is open and tried "
+                                                           "again on every pass"}, rid)
+        self._cmd_waiting[cid] = why
+
+    def _cmd_done(self, cid: str) -> None:
+        self._cmd_note.pop(cid, None)
+        if self._cmd_waiting.pop(cid, None) is not None:
+            self.journal.append("command_done", {"id": cid, "ts": self.now().isoformat()})
+
+    def _restore_cmd_waiting(self) -> None:
+        """The waiting flatten commands of the running run, from the journal (`command_waiting` without its
+        `command_done`). The command itself is read again from the store; until it is, the block stands. It ends
+        with the command (applied, or failed) or with the run."""
+        rid = self._rid()
+        waiting: dict[str, str] = {}
+        if rid is not None:
+            for _, _t, kind, b in self.journal.entries(kinds=("command_waiting", "command_done")):
+                if kind == "command_done":
+                    waiting.pop(str(b.get("id")), None)
+                elif b.get("run_id") == rid:
+                    waiting[str(b.get("id"))] = str(b.get("why") or "a flatten command is pending")
+        self._cmd_waiting = waiting
+        if waiting:
+            log.warning("a flatten command was waiting before the restart (%s): no position is opened until it "
+                        "is completed", ", ".join(sorted(waiting)))
+
+    def _flat_for_command(self, c: dict, kind: str) -> bool:
+        """M9 1.2 (audit R2): is the book flat, so that this `flatten_and_stop` or `new_run` can be completed?
+
+        While it is not, the command stays pending and every loop pass (about 10 s) comes back here: the flatten is
+        run again (`_exit` skips a position that has its exit order, `_flatten_md` a sleeve whose sale is out), and
+        what it could not close (`FlattenIncomplete`) is tried again by the next pass instead of being written on
+        the command as an error. Sales are sent only while the market is open: a DAY market order sent after the
+        close would wait for the next open (`_book_end_check` avoids the same); with the clock unreadable nothing
+        is sent. As long as the command waits no position is opened (`entry_block`, `_may_enter`); the block is
+        kept in memory until the command is completed, so a pass that could not read the commands (Supabase
+        unreachable: `pending_commands` answers none) does not lift it."""
+        cid = str(c.get("id"))
+        new = kind == "new_run"
+        flat = not (self.pos or self._md_sleeves() or self._md_exits) if new else self._nothing_to_sell()
+        if flat and not new:  # nothing to sell: the flatten still cancels the daily path's working orders (#207),
+            try:  # once, at any hour (it sends no sale), before the run is ended
+                self.flatten_all("manual")
+            except Exception as e:
+                log.warning("command %s (id %s): the last flatten failed (%s): tried again", kind, cid, e)
+                flat = False
+        if flat:
+            return True  # the caller completes the command (`_cmd_done` lifts the block)
+        self._cmd_wait(cid, kind, "new run pending: the old book is being sold" if new else "flatten and stop pending")
+        note = "the market is closed (or its clock could not be read): the sales wait for the open"
+        if self._market_open_now():
+            note = "sales sent, waiting for their fills"
+            try:
+                self.flatten_all("manual")
+            except FlattenIncomplete as e:
+                note = str(e)[:300]
+            except Exception as e:  # nothing here may lose the command
+                note = f"flatten failed: {type(e).__name__}: {e}"[:300]
+        if self._cmd_note.get(cid) != note:  # once per change, not every 10 s
+            self._cmd_note[cid] = note
+            log.warning("command %s (id %s) stays pending: %s", kind, cid, note)
+        return False
+
+    def _nothing_to_sell(self) -> bool:
+        """For "Flatten and stop": no intraday position, no multi-day sale still to book, and no multi-day sleeve
+        the venue still holds shares of. A sleeve the venue holds nothing of (a ledger/broker difference, which
+        `_flatten_md` does not sell either) does not keep the run from ending; an unreadable venue does."""
+        if self.pos or self._md_exits:
+            return False
+        symbols = {k[1] for k in self._md_sleeves()}
+        if not symbols:
+            return True
+        try:
+            have = self.broker.positions()
+        except Exception as e:
+            log.warning("flatten and stop: the broker's positions could not be read (%s): not ended yet", e)
+            return False
+        return all(float((have.get(s) or {}).get("qty") or 0) <= 0 for s in symbols)
+
+    def _market_open_now(self) -> bool:
+        """The broker's clock, for a command's sales. A "closed" answer is kept for 30 s (a pending command asks on
+        every loop pass, all weekend); an "open" one is never kept, so no sale follows the close by a stale read."""
+        now = self.now()
+        if self._closed_seen is not None and timedelta(0) <= now - self._closed_seen < timedelta(seconds=30):
+            return False
+        try:
+            is_open = bool(self.broker.clock()["is_open"])
+        except Exception as e:
+            log.warning("the broker's clock could not be read (%s): no sale is sent", e)
+            return False
+        self._closed_seen = None if is_open else now
+        return is_open
     def _command_refusal(self, kind, pl) -> str | None:
         """M9 1.15 (audit S1): why this command row is not applied (None: it is). The command table is written with
         the service-role key by more than the dashboard's RPC, so the engine checks the row itself: the kind against
@@ -2478,6 +2590,8 @@ class Engine:
     def _may_enter(self, m: int) -> bool:
         d = self.day
         if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
+            return False
+        if self._cmd_waiting:  # M9 1.2: nothing is opened while a flatten command waits
             return False
         if not self._reconciled():  # S78: an open ledger/broker difference blocks entries (exits go on)
             return False
