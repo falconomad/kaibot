@@ -4,7 +4,7 @@ harness of #113 with cost model v1; a rule can fail here, it cannot pass (the go
 `SimBroker`).
 
 python scripts/oneshots.py --rule <rule> --end 2026-11-06 [--start 2016-01-01] [--level balanced]
-    [--control-runs 500] [--seeds 200] [--universe-file config/universe_history.yaml]
+    [--control-runs N] [--seeds 200] [--universe-file config/universe_history.yaml]
 python scripts/oneshots.py --has <rule> --start ... --end ...      exit 0 if that rule has a finished report
 python scripts/oneshots.py --summary    the one table, data/reports/experiments_oneshots_summary.md
 
@@ -686,10 +686,15 @@ def main() -> None:
     ap.add_argument("--end")
     ap.add_argument("--level", default="balanced")
     ap.add_argument("--equity", type=float, default=100_000.0)
-    ap.add_argument("--control-runs", type=int, default=500)
+    ap.add_argument("--control-runs", type=int, default=None,
+                    help="exposure-matched random runs (default from config/gate_v3.yaml for the rule, #560)")
     ap.add_argument("--seeds", type=int, default=200, help="ath_breakout: random signal subsets per setting")
     holdout.add_argument(ap)
     a = ap.parse_args()
+    if a.control_runs is None:  # #560: never fewer than gate v3's S3 needs for this rule (decision 16 s.15)
+        from kaibot.evaluation import gate_v3
+
+        a.control_runs = gate_v3.default_control_runs(a.has or a.rule or "")
     data = Path(a.data)
     if a.has:
         same = {"start": a.start, "end": a.end, "universe": Path(a.universe_file).name}

@@ -77,6 +77,7 @@ from kaibot.engine.events import load_calendar  # noqa: E402
 from kaibot.engine.journal import Journal, JournalStore  # noqa: E402
 from kaibot.engine.runner import run_sessions, simulation  # noqa: E402
 from kaibot.evaluation import gate_v2 as gv  # noqa: E402
+from kaibot.evaluation import gate_v3 as gv3  # noqa: E402
 from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
@@ -681,7 +682,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--end", help="last session (inclusive)")
     ap.add_argument("--level", default="balanced")
     ap.add_argument("--equity", type=float, default=100_000.0)
-    ap.add_argument("--control-runs", type=int, default=nb.CONTROL_RUNS)
+    ap.add_argument("--control-runs", type=int, default=None,
+                    help="random-timing runs (default from config/gate_v3.yaml for spy_noise_band: 2,000, #560)")
     ap.add_argument("--control-seed", type=int, default=nb.CONTROL_SEED)
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2),
                     help="engine runs at the same time, one process each (default: half the CPUs)")
@@ -690,6 +692,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--summary", action="store_true", help="print the newest report's page and write it")
     holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    if a.control_runs is None:  # #560: never fewer than gate v3's S3 needs for this rule (decision 16 s.15)
+        a.control_runs = gv3.default_control_runs(RULE)
     data = Path(a.data)
     if a.has:
         hit = find_report(data / "reports", a.level, start=a.start, end=a.end, test_start=a.test_start,

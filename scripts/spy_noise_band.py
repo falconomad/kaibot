@@ -6,7 +6,7 @@ engine with SimBroker.
 python scripts/spy_noise_band.py --version spy_noise_band|spy_noise_band_carry --end 2026-11-06 [--start 2016-01-01]
 python scripts/spy_noise_band.py --has <version> --start ... --end ...     exit 0 if that version has a report
 python scripts/spy_noise_band.py --summary     one table, written to data/reports/experiments_spy_summary.md
-    [--control-runs 500] [--control-seed 149]   Gate B mark 3: the random-timing control (issue #149)
+    [--control-runs N] [--control-seed 149]   Gate B mark 3: the random-timing control (issue #149)
 
 Each version is ONE continuous $100k account from the first test month (2017-05 with the default start) to --end;
 nothing is tuned. Cost scenarios 0, 0.5, 1, 2 bp a side and cost model v1; version 1 adds its five neighbours,
@@ -15,7 +15,8 @@ against other nights. Writes data/reports/spy_<level>_<version>_<ts>.json, trade
 the same name, and one trial row per run in data/trials.jsonl (n_trials 1 for each configuration at 0.5 bp a side).
 
 Gate B mark 3 for these SPY-only rules (decision 15 section 10, issue #149; prereg amendment 1): each version at
-0.5 bp a side against --control-runs (default 500) seeded random-timing accounts with the same number of SPY round
+0.5 bp a side against --control-runs (default from config/gate_v3.yaml: 2,000; its family has three rules) seeded
+random-timing accounts with the same number of SPY round
 trips, the rule's own holding durations, entries at the rule's check times and the same costs
 (`spy_noise_band.random_timing_control`). The control is a report of the configuration, not a trial. Its per-run
 numbers go to control_timing.csv in the report folder; the verdict is printed under the table.
@@ -350,11 +351,16 @@ def main() -> None:
     ap.add_argument("--end", help="last session (inclusive)")
     ap.add_argument("--level", default="balanced")
     ap.add_argument("--equity", type=float, default=100_000.0)
-    ap.add_argument("--control-runs", type=int, default=nb.CONTROL_RUNS,
-                    help="random-timing runs for Gate B mark 3 (needs 500; 0 switches the control off)")
+    ap.add_argument("--control-runs", type=int, default=None,
+                    help="random-timing runs (default from config/gate_v3.yaml for the version, #560; 0 switches "
+                         "the control off)")
     ap.add_argument("--control-seed", type=int, default=nb.CONTROL_SEED)
     holdout.add_argument(ap)
     a = ap.parse_args()
+    if a.control_runs is None:  # #560: never fewer than gate v3's S3 needs for this rule (decision 16 s.15)
+        from kaibot.evaluation import gate_v3
+
+        a.control_runs = gate_v3.default_control_runs(a.has or a.version or "spy_noise_band")
     data = Path(a.data)
     if a.has:
         sys.exit(0 if find_report(data / "reports", a.level, a.has, start=a.start, end=a.end,
