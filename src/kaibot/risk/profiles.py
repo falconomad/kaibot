@@ -35,15 +35,29 @@ def load_profiles(path: Path = DEFAULT_PATH) -> dict[str, RiskPolicy]:
     return out
 
 
-def load_strategies(path: Path = DEFAULT_PATH) -> dict[str, list[str]]:
+def intraday_enabled(path: Path = DEFAULT_PATH) -> bool:
+    """M10 1.19 (#444): whether the live engine builds the intraday path (profiles.yaml `intraday.enabled`). Off
+    unless the file says `true`: a file without the key (an older copy) runs no intraday rule."""
+    cfg = yaml.safe_load(path.read_text())
+    return (cfg.get("intraday") or {}).get("enabled") is True
+
+
+def load_strategies(path: Path = DEFAULT_PATH, intraday: bool | None = None) -> dict[str, list[str]]:
     """Which live strategies each level runs (profiles.yaml `strategies`). Shadow strategies are separate.
 
+    `intraday`: None (the live engine) reads the file's own switch; True gives the levels' lists whatever the
+    switch says (the owner-config replays and the tests of the levels themselves: research, not the live loop).
+
+    M10 1.19 (#444): the levels' intraday rules count only with `intraday.enabled: true`; with it off (the live
+    default) every level's list is empty, so the engine built from this map has no intraday path at all.
     With KAIBOT_MULTIDAY=on (read now, from the environment) the multi-day rules switched on in `multi_day.rules`
     are added to every level; with it off (the default) the lists are exactly the levels' own."""
     cfg = yaml.safe_load(path.read_text())
     from kaibot.strategies.registry import DEFAULT_LIVE, multi_day_enabled
 
     md = enabled_multi_day(path) if multi_day_enabled() else []
+    if not ((cfg.get("intraday") or {}).get("enabled") is True if intraday is None else intraday):
+        return {name: [*md] for name in cfg["levels"]}
     return {name: [*(lv.get("strategies") or DEFAULT_LIVE), *md] for name, lv in cfg["levels"].items()}
 
 

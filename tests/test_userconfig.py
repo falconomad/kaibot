@@ -13,7 +13,9 @@ from kaibot.engine.userconfig import ConfigError, Rules, defaults, is_tightening
 from kaibot.risk.gate import HARD_CEILINGS, validate_policy
 from kaibot.risk.profiles import load_profiles, load_strategies
 
-PROFILES, STRATS = load_profiles(), load_strategies()
+# M10 1.19 (#444): the levels' own rules. The live switch (`intraday.enabled`, off) is tested in
+# tests/unit/test_m10_intraday_optin.py; these tests are about tightening a level that runs the dip rule.
+PROFILES, STRATS = load_profiles(), load_strategies(intraday=True)
 UCFG = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
 UNIVERSE = frozenset(s for v in UCFG["sectors"].values() for s in v)
 THEMES = {k: v["symbols"] for k, v in UCFG["themes"].items()}

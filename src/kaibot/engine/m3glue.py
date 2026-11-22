@@ -25,7 +25,6 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from kaibot.engine.roomflow import default_pack
 from kaibot.features.pump import rules_veto_extra
 
 log = logging.getLogger(__name__)
@@ -80,6 +79,8 @@ def _locked(desk) -> LockedDesk | None:
 
 
 def make_pack_fn(desk):
+    from kaibot.engine.roomflow import default_pack  # the agent room: intraday path only (M10 1.19)
+
     d = _locked(desk)
 
     def pack_fn(engine, symbol: str, etf: str | None, as_of, feats: dict) -> dict:

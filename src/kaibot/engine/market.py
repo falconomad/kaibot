@@ -13,14 +13,15 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Mapping
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from kaibot.engine.clock import session_minutes  # noqa: F401 - its home since M10 1.19; imported from here too
 from kaibot.ingest.data_checks import Finding, check_all
-from kaibot.replay.data import ET, N_MIN, SymbolDays, from_frame
+from kaibot.replay.data import SymbolDays, from_frame
 from kaibot.replay.features import candidates, daily_stats, regime
 
 log = logging.getLogger("kaibot.engine.market")
@@ -317,13 +318,6 @@ class LiveMarket:
         if df is None or not len(df) or h is None or not len(h):
             return None
         return float(df["c"].iloc[-1] / h["c"].iloc[-1] - 1)
-
-
-def session_minutes(cal: dict, day: date) -> tuple[datetime, int]:
-    """(open as UTC datetime, number of regular-session minutes) from an Alpaca calendar row."""
-    o = pd.Timestamp(f"{day} {cal['open']}", tz=ET)
-    c = pd.Timestamp(f"{day} {cal['close']}", tz=ET)
-    return o.tz_convert(UTC).to_pydatetime(), min(int((c - o).total_seconds() // 60), N_MIN)
 
 
 # Strict = the strategy's rules (candidates() defaults). NEAR only widens what is reported as a near-miss.

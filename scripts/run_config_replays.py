@@ -39,7 +39,8 @@ def process(store, data_dir: Path, *, replay=replay_config, now=None) -> list[di
     fomc = {np.datetime64(str(d), "D") for d in cal.get("fomc_statement_1400", [])}
     uni = frozenset(s for v in cfg["sectors"].values() for s in v)
     themes = {k: v["symbols"] for k, v in (cfg.get("themes") or {}).items()}
-    profiles, strats = load_profiles(), load_strategies()
+    # M10 1.19: a replay of the owner's settings is research on the levels' own rules, whatever the live switch says
+    profiles, strats = load_profiles(), load_strategies(intraday=True)
     out = []
     jobs = [j for j in store.select("replay_job", {"status": "in.(queued,waiting_for_data)", "order": "id.asc"})]
     for j in jobs:

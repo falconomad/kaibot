@@ -757,3 +757,51 @@ nothing again. No research result is affected (item 4). The same text is Amendme
    Gate B mark changes, and no configuration is added (`n_trials` unchanged). Tests:
    `tests/test_watchdog_local_liveness.py` (a watchdog cancel is carried at the plan's shares; a cancel without the
    record is not).
+
+## Amendment 26 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine
+
+Written on 22 Nov 2026, before the change's first use. It changes which steps the live engine runs around this
+rule's own, so it is recorded here. It changes no decision, no target, no share count, no order and no time at
+which an order is sent. No research result is affected (item 6). The same text is Amendment 24 of mom_12_1_band.
+
+1. **Why.** The live engine ran the retired intraday dip rule next to this rule (a soak test), and this rule's
+   steps ran inside the intraday engine's minute: behind its market-data read until M9 ticket 1.5, and still in
+   one loop with its entries, stops, exits, shadow rules and agent room (engine audit, "Three order paths";
+   Stage 1B, ticket 1.19). Product decided on 21 Nov 2026 that the retired rule leaves the live loop (decision
+   D4, `docs/research/engine_audit/decisions.md`).
+2. **The rule's own loop.** With no intraday rule enabled (`intraday.enabled: false` in `config/profiles.yaml`,
+   the setting in force) the live engine runs, per completed minute: the broker's clock; the booking of the
+   venue's fills; the send step; the checks of the ledger against the broker; the daily stop and the book's run
+   end; the minute row. These are the steps this rule had, in the order it had them, the fail-closed order after
+   a restart included (the send runs first only when the minute before was completed). Code:
+   `engine/book_loop.py`. The intraday path is `engine/intraday.py`; the live process does not import it.
+3. **Nothing of the rule changes.** A test runs the same sessions through the engine as it was and through the
+   new loop and compares the whole journal (every decision, send, order, fill, mark and book peak, in order),
+   the venue's orders and positions, every minute row and every event: they are the same, except that the
+   shadow rules' end-of-day event is no longer written.
+4. **What changes around the rule.**
+   - *Marks.* The engine reads today's minute bars of this rule's holdings only, not of the whole intraday
+     universe. Which price a holding is measured at is unchanged (Amendment 21, item 2): a holding inside the
+     old universe at its minute bars, any other at the broker's price. A holding's first read of a session
+     starts at the open. No minute history is loaded before the open.
+   - *The retired rule.* It places no order on the live path any more, so it can neither hold a stock this rule
+     wants nor use the level's entry count or buying power. Its daily soak test has ended. The level's daily
+     stop and its own run end are computed as before; with no intraday position they move with this rule's
+     marks alone, as on every day the dip rule did not trade.
+   - *The owner's settings.* A saved setting that switches an intraday rule on is ignored while the intraday
+     path is off. Before, a setting naming a rule outside the level refused the session, which stops this
+     rule's buys.
+   - *A left-over intraday position.* If the engine starts with an open intraday trade in its store, it does
+     not manage it: its shares count as unknown shares at the venue and no buy goes out until the account is
+     clean. The change is deployed outside the session, when the intraday rule is flat.
+5. **Standing targets.** Which decision is in force, and whether its plan was sent, is read from one record per
+   decision (`engine/standing.py`): due until sent, sent until its buys are met, replaced by a newer decision.
+   The late decision (Amendment 19), the late send (Amendment 20) and the carry-over (Amendments 11 to 13) read
+   that record and are otherwise unchanged; the heartbeat shows it. No order is added, dropped or resized by it.
+6. **Research and Gate B unchanged.** The research runner (`engine/daily.py`) does not go through this loop.
+   The intraday rules stay runnable through the engine with `SimBroker` (an engine built without a level map,
+   as every research run builds it, is the intraday engine as before). No trial row, report or Gate B mark
+   changes, no configuration is added (`n_trials` unchanged), and the bit-identity test of the momentum rules
+   passes unchanged.
+7. **Known deviation, live against research.** None in the orders. In reports only: the day result's SPY return
+   is computed from SPY's previous daily close, not from the last minute bar of the previous session.

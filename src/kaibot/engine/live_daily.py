@@ -122,7 +122,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.broker.protocol import Broker
-from kaibot.engine import failsafe
+from kaibot.engine import failsafe, standing
 from kaibot.engine.daily import (
     CARRY,
     CASH_RESERVE,
@@ -144,6 +144,7 @@ from kaibot.engine.execution import (
 )
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
+from kaibot.engine.standing import Standing
 from kaibot.engine.targets import Target, reconcile_targets
 from kaibot.risk.gate import BOOK_FLOORS, BOOK_HARD_CEILINGS, BookLimits, RiskPolicy, validate_book
 from kaibot.risk.portfolio import PortfolioBuilder
@@ -1539,12 +1540,15 @@ class LiveDaily:
 
     def _latest(self, rule: str, session: date, rid: int) -> dict | None:
         """The latest decision of this run with a target list whose fill session is before `session`."""
-        last = None
-        for b in self._entries("md_decision"):
-            if b.get("run_id") == rid and b.get("strategy") == rule and b.get("target") is not None \
-                    and b.get("fill_session") < str(session):
-                last = b
-        return last
+        st = self.standing(rule, session, rid)
+        return dict(st.decision) if st is not None else None
+
+    def standing(self, rule: str, session: date | None, rid: int) -> Standing | None:
+        """M10 1.19 (#444), standing targets: the decision of this run that is in force on `session` (the latest
+        with a target list whose fill session is before it; None: any session) and what became of it
+        (engine/standing.py). `_latest`, `_sent_plan` and `_unsent` read this one record."""
+        return standing.latest(self._entries("md_decision"), self._entries("md_send"), rule, rid,
+                               before=str(session) if session is not None else None)
 
     def _sent_plan(self, rule: str, rid: int, dec: dict) -> dict | None:
         """The journalled send of decision `dec`'s plan, of this run: the `md_send` of its fill session that holds
@@ -1552,10 +1556,7 @@ class LiveDaily:
         or the late one (`late_of`, M9 1.4)."""
         out = None
         for b in self._entries("md_send"):
-            if b.get("strategy") != rule or b.get("run_id") != rid:
-                continue
-            if b.get("late_of") == dec["fill_session"] or (b.get("session") == dec["fill_session"]
-                                                           and "equity" in b):
+            if b.get("strategy") == rule and b.get("run_id") == rid and standing.holds_plan(b, dec):
                 out = b
         return out
 
@@ -1563,8 +1564,8 @@ class LiveDaily:
         """M9 1.4 (audit M2): the latest decision of this run, when its plan was never sent (the engine was down
         in its fill session's 15:50-15:57 ET window). None when it was sent, on its fill session or late: a late
         send is built once. An older decision is never returned: the newer one replaced it."""
-        last = self._latest(rule, session, rid)
-        return last if last is not None and self._sent_plan(rule, rid, last) is None else None
+        st = self.standing(rule, session, rid)
+        return dict(st.decision) if st is not None and st.state() == standing.DUE else None
 
     def _late_cut(self, r: Rule, session: date, prev: date, dec: dict, targets: list[Target],
                   held: Mapping[str, tuple[float, float | None]], data: DailyData) -> tuple[list[Target], dict]:
@@ -1615,14 +1616,13 @@ class LiveDaily:
         for today is skipped (the plan's shares are on yesterday's basis); the shares held at the decision go to
         `ended_buys`, so a name that lost shares since (an emergency stop that fired while the engine was down) is
         not bought back."""
-        last = self._latest(r.name, session, rid)
-        plan_send = self._sent_plan(r.name, rid, last) if last else None
-        if plan_send is None or self.om is None:
+        st = self.standing(r.name, session, rid)  # M10 1.19: the decision in force and its plan as sent
+        if st is None or st.send is None or self.om is None:
             return [], {}
+        last, plan_send = st.decision, st.send
         now_held = {s: float(q) for s, (q, _) in held.items()}
-        plan = [(s, int(q), p) for s, q, p, _ in plan_send["targets"] if s not in busy]
-        # M9 1.4: a late send's buys that its session's skip rules left out are still due, at the builder's shares
-        plan += [(s, int(q), p) for s, q, p in (plan_send.get("late") or {}).get("due") or [] if s not in busy]
+        # the plan, and after it (M9 1.4) a late send's buys that its session's skip rules left out: still due
+        plan = [x for x in st.plan() if x[0] not in busy]
         if not any(p in ("buy", "resize") and q > now_held.get(s, 0.0) for s, q, p in plan):
             return [], {}
         sent_on = plan_send["session"]  # the plan's own session: the decision's fill session, or its late send's
@@ -1826,6 +1826,13 @@ class LiveDaily:
                 if b.get("strategy") == r.name:
                     last = b.get("session")
             row: dict = {"last_decision": last, "exit": exit_kind(r.name)}
+            try:  # M10 1.19: what the decision in force still owes (a report: it never stops the heartbeat)
+                rid = self.account.run_id()
+                st = self.standing(r.name, None, rid) if rid is not None else None
+                if st is not None:
+                    row["standing"] = st.summary({s: float(q) for s, (q, _) in self.account.held(r.name).items()})
+            except Exception:
+                log.exception("standing targets unreadable (heartbeat)")
             miss = self._missed.get(r.name)
             if miss is not None and (today is None or miss[0] == str(today)):
                 row["note"] = miss[1]

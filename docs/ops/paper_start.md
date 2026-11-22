@@ -107,8 +107,10 @@ off (`config/profiles.yaml`, `multi_day.rules`).
 ## 5. Allow overnight holding (the level limits)
 
 Done in the repository: Product set `all_levels.allow_overnight: true` on 13 Nov 2026. It has an effect only with
-`KAIBOT_MULTIDAY=on` (step 4), which stays your one switch. With the flag off the engine is the intraday engine it
-always was. Do not edit `config/profiles.yaml` by hand on the Mac: the start script could then no longer pull new
+`KAIBOT_MULTIDAY=on` (step 4), which stays your one switch. With the flag off the engine trades nothing: since
+M10 ticket 1.19 (#444) the retired intraday rule is off the live loop (`intraday.enabled: false` in
+`config/profiles.yaml`), so the passages below about "the intraday rule" describe that path only when it is
+switched back on. Do not edit `config/profiles.yaml` by hand on the Mac: the start script could then no longer pull new
 code.
 
 ## 6. The daily bars (automatic with the always-on service)

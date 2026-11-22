@@ -77,6 +77,15 @@ multi_day:
       retire_drawdown_pct: {conservative: 13, balanced: 21, aggressive: 27}
     mom_12_1_band:
       enabled: false
+# The intraday path (rules that are flat by the close: the levels' `strategies` above, the shadow rules below, the
+# agent room). M10 1.19 (#444; Product's decision D4 of 21 Nov 2026, docs/research/engine_audit/decisions.md): the
+# retired intraday rule left the live loop, so this is OFF. With `enabled: false` the live engine is the multi-day
+# book's loop alone (engine/book_loop.py): no level runs an intraday rule whatever its list says, no shadow rule
+# runs, the room is not built and no intraday module is imported. `enabled: true` brings the path back as it was
+# (engine/intraday.py), with the levels' lists. SimBroker research does not read this switch: a research run
+# hands its rule to its own engine (engine/runner.simulation, `python -m kaibot.engine.research`).
+intraday:
+  enabled: false
 shadow_strategies: [orb_stocks_in_play, news_continuation]   # logged "would have" trades, never sent
 all_levels:
   allow_short: false

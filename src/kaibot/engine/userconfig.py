@@ -142,14 +142,17 @@ def tighten(level_policy: RiskPolicy, level_strategies: list[str] | tuple[str, .
     st = _obj(body.get("strategies"), "strategies")
     _only_keys(st, set(registry.owner_toggles()), "strategies")  # S76: the names come from the registry
     on = [s for s in level_strategies if st.get(s, True) is True]
+    intraday_listed = any(s in registry.INTRADAY for s in level_strategies)
     for s, v in st.items():
         if not isinstance(v, bool):
             raise ConfigError(f"strategies.{s} must be true or false")
         # A retired rule (registered, in no level) left `true` in a config saved before its retirement stays off:
         # ignoring it can never switch it on, refusing it would stop the whole session (#128).
-        if v and s not in level_strategies and s not in registry.RETIRED:
+        # M10 1.19 (#444): the same for an intraday rule left `true` when the level runs no intraday rule at all
+        # (`intraday.enabled: false` in config/profiles.yaml): it stays off, and the session is not refused.
+        if v and s not in level_strategies and s not in registry.RETIRED and intraday_listed:
             raise ConfigError(f"{s} is not part of this level")
-    if not on:
+    if not on and level_strategies:
         raise ConfigError("at least one strategy must stay on")
 
     # ---- focus ----

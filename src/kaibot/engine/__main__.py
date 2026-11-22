@@ -28,9 +28,9 @@ import pandas as pd
 import yaml
 
 from kaibot.agents.gateway import from_env as gateway_from_env
-from kaibot.agents.room import Room
 from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
+from kaibot.engine.book_market import BookMarket
 from kaibot.engine.config import ROOT, Settings
 from kaibot.engine.core import Engine
 from kaibot.engine.corp_guard import RecentActions
@@ -55,12 +55,11 @@ from kaibot.engine.m3glue import (
     make_preopen_shadow,
     make_rules_extra,
 )
-from kaibot.engine.market import LiveMarket
 from kaibot.engine.store import Store
 from kaibot.ingest import news_poll
 from kaibot.news import NewsDesk
 from kaibot.news import configure as configure_news
-from kaibot.risk.profiles import load_profiles, load_strategies
+from kaibot.risk.profiles import intraday_enabled, load_profiles, load_strategies
 
 log = logging.getLogger("kaibot.engine")
 FRED_URL = "https://api.stlouisfed.org/fred/series/observations"
@@ -92,17 +91,34 @@ def build(settings: Settings) -> Engine:
     etf_of = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}
     broker = AlpacaPaper(settings.alpaca_key, settings.alpaca_secret)
     data = AlpacaData(settings.alpaca_key, settings.alpaca_secret)
-    market = LiveMarket(
-        data, sorted(etf_of), etf_of, cfg["market"], settings.data_dir / "history", vix_loader(settings.fred_key),
-        minute_data=bounded_data(data),  # M9 1.5: the per-minute bars read ends within 20 s
-    )
+    strategies = load_strategies()
+    # M10 1.19 (#444): the intraday path (its market, the agent room, the shadow rules) is built only when a level
+    # runs an intraday rule: `intraday.enabled: true` in config/profiles.yaml. Off, the engine is the multi-day
+    # book's loop alone and reads the minute bars of its holdings only (engine/book_market.py).
+    intraday = intraday_enabled()
+    if intraday:
+        from kaibot.engine.market import LiveMarket
+
+        market = LiveMarket(
+            data, sorted(etf_of), etf_of, cfg["market"], settings.data_dir / "history",
+            vix_loader(settings.fred_key),
+            minute_data=bounded_data(data),  # M9 1.5: the per-minute bars read ends within 20 s
+        )
+    else:
+        market = BookMarket(data, {*etf_of, *etf_of.values()}, cfg["market"], minute_data=bounded_data(data))
+    log.info("intraday path: %s", "ON (config/profiles.yaml intraday.enabled)" if intraday
+             else "off (the multi-day book's loop only)")
     remote = Store(settings.supabase_url, settings.supabase_service_key)
     # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
     store = JournalStore(open_journal(journal_path(settings.data_dir)), remote, live=True)
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
     gw = gateway_from_env(remote, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
-    room = Room(gw) if gw.enabled else None
+    room = None
+    if intraday and gw.enabled:  # the room reviews intraday candidates only
+        from kaibot.agents.room import Room
+
+        room = Room(gw)
     log.info("agent room: %s", "ON (Sonnet, capped budget)" if room else "off (rules-only)")
     # S33: one news desk per engine; it triages through the gateway only when the room is on.
     desk = NewsDesk(remote, source=data, gateway=gw if gw.enabled else None)
@@ -113,8 +129,9 @@ def build(settings: Settings) -> Engine:
     configure_news(desk)
     locked = LockedDesk(desk)
     eng = Engine(broker, market, store, load_profiles(), fomc, process=settings.engine_name,
-                  calendar_until=covers_until, events=events, strategies=load_strategies(), room=room,
-                  pack_fn=make_pack_fn(locked), rules_extra=make_rules_extra(locked),
+                  calendar_until=covers_until, events=events, strategies=strategies, room=room,
+                  pack_fn=make_pack_fn(locked) if intraday else None,
+                  rules_extra=make_rules_extra(locked) if intraday else None,
                   ex_dividends=ExDateDividends(data),  # S78: dividends accrued at the ex-date (#118)
                   daily=daily_path(data, review=make_preopen(gw, locked),  # #131: review None unless switched on
                                    shadow=make_preopen_shadow(remote, locked),  # #310: None unless shadow
@@ -123,10 +140,13 @@ def build(settings: Settings) -> Engine:
                   # (only used with the daily path: KAIBOT_MULTIDAY=on)
                   recent_actions=RecentActions(get=bounded_data_get(data)),
                   # S103 (#377): the market-event alarm as a logged notice; off unless KAIBOT_MARKET_ALARM=on
-                  market_alarm=market_alarm_from_env(os.environ))
+                  market_alarm=market_alarm_from_env(os.environ),
+                  intraday=intraday)  # M10 1.19: False builds the book's engine; no intraday module is imported
     # Data (19 Nov 2026): news on a schedule, so news_item fills without the room (ingest/news_poll.py). Started in
     # main() after the lease; never with --check. KAIBOT_NEWS_POLL=off: None
     eng.news_poller = news_poll.for_engine(eng, desk, data, locked.lock)
+    if not intraday:
+        market.holdings = eng._md_symbols  # the book's sleeves and the symbols of its working orders
     return eng
 
 
@@ -430,7 +450,9 @@ def main() -> None:
             return {"spy_stories_72h": n, "poller": "on" if getattr(eng, "news_poller", None) else "off"}
 
         step("alpaca_news", news_state)
-        step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
+        if eng.intraday:  # the VIX is read by the intraday regime filter only (M10 1.19)
+            step("fred_vix", lambda: round(float(eng.market.vix_loader().dropna().iloc[-1]), 2))
+        report["intraday_path"] = "on" if eng.intraday else "off"
         print(json.dumps(report, indent=1, default=str))
         ok = not any(isinstance(v, str) and v.startswith("FAILED") for v in report.values())
         print("ALL GOOD" if ok else "Fix the FAILED lines above, then run --check again.")
