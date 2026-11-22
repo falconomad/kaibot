@@ -133,3 +133,17 @@ provider limit (Alpaca: 150 + `--per-min` < 200/min). Nightly alt-data collectio
   fill and the dashboard reports the worse of the two.
 - Whole shares only (bracket orders don't take fractions): with a small pot, expensive stocks can size to 0 and are skipped.
 - The agent room is off in M1 (rules only).
+
+## What will the next send window do? (read-only preview)
+`python scripts/preview_next_send.py --env <the engine's .env>` (with the checkout's `.venv`) reads the local journal
+and the daily store and says, per multi-day rule, what the next 15:50-15:57 ET window would do: the decision's own
+send, a late send of a decision whose window was missed (M9 1.4), a carry-over of buys still short, only pending
+sales, or nothing; per stock the target, the shares held and working, and the shares to buy or sell; and every stock
+left out with its reason. `--journal <file>` and `--daily-data <folder>` name them directly, `--session YYYY-MM-DD`
+picks a session, `--json` prints the same as JSON.
+
+It is safe while the engine is stopped or running: the journal is opened read-only and no entry is written, no
+lease is taken, and neither the broker nor Supabase is contacted (no key is read). The plan comes from the
+engine's own planning code, not from a copy of it. It cannot know what is read only in the window: announced
+corporate actions, the pre-send quote check, entry blocks, fills the engine has not booked yet. It lists these every
+time. Run it after the daily refresh (20:15 ET): before that, the next session's decision cannot be previewed.
