@@ -1310,7 +1310,11 @@ class Engine:
     def apply_commands(self) -> None:
         for c in self.store.pending_commands():
             kind, pl = c["kind"], c.get("payload") or {}
-            why = self._command_refusal(kind, pl)
+            try:
+                why = self._command_refusal(kind, pl)
+            except Exception as e:  # QA-Ops (#513): a row the check itself cannot read is refused, never applied,
+                log.exception("command %r: the check failed", kind)  # and never raises out of the tick
+                why = f"the command could not be checked: {str(e)[:120]}"
             if why is not None:  # M9 1.15: refused before anything is done (a bad new_run sells nothing)
                 self._reject_command(c, why)
                 continue
@@ -3202,7 +3206,7 @@ def run_refusal(amount, level, policies) -> str | None:
         return f"amount_usd is not a number: {_brief(amount)}"
     try:
         x = float(amount)
-    except ValueError:
+    except (ValueError, OverflowError):  # OverflowError: a whole number too large for a float (QA-Ops, #513)
         return f"amount_usd is not a number: {_brief(amount)}"
     if not math.isfinite(x) or not RUN_AMOUNT_MIN_USD <= x <= RUN_AMOUNT_MAX_USD:
         return (f"amount_usd {_brief(amount)} is outside the limits "

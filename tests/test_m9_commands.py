@@ -30,7 +30,7 @@ def _row(a, key):
 
 
 @pytest.mark.parametrize("amount", [1, 999.99, 100_000.01, 10_000_000, -5000, float("nan"), float("inf"), "lots",
-                                    None, True, [5000]])
+                                    None, True, [5000], 10**400, "1e999", {"usd": 5000}])
 def test_a_new_run_outside_the_amount_limits_is_rejected_with_an_event(tmp_path, amount):
     a = Account(tmp_path)
     runs = len(a.store.tables["run"])
@@ -118,3 +118,21 @@ def test_the_amount_limits_are_the_databases(tmp_path):
     sql = (Path(__file__).resolve().parents[1] / "migrations" / "0002_dashboard_access.sql").read_text()
     assert "amount_usd between 1000 and 100000" in sql
     assert (core.RUN_AMOUNT_MIN_USD, core.RUN_AMOUNT_MAX_USD) == (1000.0, 100000.0)
+
+
+def test_a_command_the_check_cannot_read_is_rejected_and_the_tick_goes_on(tmp_path, monkeypatch):
+    """QA-Ops (#513): the check runs outside the command's own try. If it raises, the row would stay pending and
+    raise on every tick (three in a row: the engine_errors kill). It is refused instead, once."""
+    a = Account(tmp_path)
+
+    def boom(amount, level, policies):
+        raise RuntimeError("check broke")
+
+    monkeypatch.setattr(core, "run_refusal", boom)
+    _cmd(a, "new_run", {"amount_usd": 5000, "level": "balanced"}, "odd")
+    a.eng.apply_commands()  # does not raise
+    assert a.eng.run["id"] == a.rid and len(a.store.tables["run"]) == 1
+    (e,) = _events(a, "command_rejected")
+    assert "could not be checked" in e["reason"] and _row(a, "odd")["applied_at"] is not None
+    a.eng.apply_commands()
+    assert len(_events(a, "command_rejected")) == 1
