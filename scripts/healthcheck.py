@@ -43,6 +43,13 @@ ALERTS = [
     ("account_not_clean", re.compile(r"account not clean: ")),
     ("watchdog_tripped", re.compile(r"engine heartbeat .* old: entries canceled")),
     ("watchdog_flatten", re.compile(r"15:55 with the engine down")),
+    # QA-Ops (#523): M9's alerts are ERROR lines and health events; without these they reach only someone who opens
+    # the Health page. Each is logged once per occurrence (a poison cause at most hourly, a skew when it starts, a
+    # calendar once per session), and the same kind pings at most once per 30 minutes.
+    ("replica_poison", re.compile(r"replica poison: ")),
+    ("replica_backlog", re.compile(r"replica backlog: ")),
+    ("clock_skew", re.compile(r"clock skew: ")),  # not "clock skew over: ..."
+    ("calendar_expiring", re.compile(r"calendar expiring: ")),
 ]
 TICK = re.compile(r" tick \{")
 MINUTE = re.compile(r"'minute': (-?\d+)")

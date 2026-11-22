@@ -84,6 +84,17 @@ const EV: Record<string, string> = {
   // 0036: sent under a dynamic name (#410, #131)
   multi_day_column_missing: "Minute prices of multi-day holdings wait for a database update",
   multi_day_review: "Pre-open reviewer (can veto or halve buys)",
+  // 0039: M9 engine safety (#437, #435, #442)
+  replica_poison: "A record the dashboard's database refuses was skipped (the engine keeps it)",
+  replica_backlog: "The dashboard's copy is falling behind the engine's record",
+  clock_skew: "The engine's clock against the broker's (new orders wait while they differ)",
+  calendar_expiring: "A yearly calendar runs out within 30 days and needs extending",
+  // 0039: M9 commands and the book's run end (#427, #440, #426)
+  command_waiting: "Flatten and stop, or a new run, is waiting until every position is sold",
+  command_rejected: "A command from the dashboard was refused by the engine",
+  multi_day_book_unchecked: "Today's prices for some holdings can't be read (the last close is used)",
+  multi_day_book_unconfirmed: "Some holdings have had no confirmed price for a while (the last close is used)",
+  multi_day_unbooked_aged: "A sale stopped waiting for an earlier day's trade that never reached the books",
 };
 
 

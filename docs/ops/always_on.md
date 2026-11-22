@@ -98,7 +98,7 @@ sends short pings (10 s timeout, in the background); it is not on the order path
 |---|---|
 | start | every engine start |
 | success | every 5 minutes while the engine process is alive and not stalled |
-| fail, with the log line | a halt (daily stop, drift, kill switch, …), lease lost or refused, a refused session, an incomplete flatten, an unclean paper account, the watchdog cancelling entries or flattening, the engine exiting with an error, the engine not ticking for 10 minutes during the session, the nightly job failing (at most once per kind per 30 minutes) |
+| fail, with the log line | a halt (daily stop, drift, kill switch, …), lease lost or refused, a refused session, an incomplete flatten, an unclean paper account, the watchdog cancelling entries or flattening, the engine exiting with an error, the engine not ticking for 10 minutes during the session, the nightly job failing, and M9's alerts: a row skipped by the replica (`replica poison`), a replica backlog of ten minutes, the engine's clock differing from the broker's (`clock skew`), a yearly calendar ending within 30 days (at most once per kind per 30 minutes) |
 | log | the nightly job finished (shown on the check's page, does not change its state) |
 
 No pings at all (Mac off, asleep, offline, service stopped) turns the check red after period + grace (about 20

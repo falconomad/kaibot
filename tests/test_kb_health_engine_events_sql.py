@@ -28,36 +28,20 @@ ROUTINE = {"cash_merger_booked", "dividend_booked", "split_booked", "config_appl
            "multi_day_canceled", "multi_day_decision", "multi_day_fill", "multi_day_orders", "multi_day_plan",
            "multi_day_review_applied", "multi_day_sold", "multi_day_stops_cancelled", "multi_day_view_dropped",
            "positions_rewritten", "session_restored"}
-# Health events of M9 tickets whose kb_health migration is not written yet: three open PRs add events, and each
-# cannot bring its own migration (one number, and 0038 is in an open PR). One migration lists them all once they are
-# merged, and empties this set. Until then the events are written and replicated; the Health page does not show them.
+# Health events whose kb_health migration is still to come (several open PRs cannot each bring one: one free number).
+# Empty since 0039 listed M9's replica_poison, replica_backlog, clock_skew and calendar_expiring. A name here is
+# written and replicated, but the Health page does not show it: keep it empty.
 AWAITING_KB_HEALTH: set[str] = set()
 # S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
 # nothing and a failure stops nothing, so neither is a health event
 ROUTINE |= {"market_alarm", "market_alarm_error"}
-# M9 1.12 (#437): a row Supabase refuses for good was skipped; rows waiting for ten minutes and not getting fewer
-AWAITING_KB_HEALTH |= {"replica_poison", "replica_backlog"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
-# M9 1.10 (#435): the host clock and the broker's disagree by more than five seconds (and "ok" when it is over)
-AWAITING_KB_HEALTH |= {"clock_skew"}
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
-# #507 (QA-Ops second key on #524): a sale that no longer waits for an earlier day's unbooked fill. A health event,
-# left out only until a migration lists it and the Health page names it (#512); the open "unbooked" difference
-# (`reconcile_blocked`) is on the Health page meanwhile
-ROUTINE |= {"multi_day_unbooked_aged"}
-# M9 1.2 (#427, QA-Ops second key on #525): a "Flatten and stop" or a new run is waiting for a flat book. A health
-# event, left out only until a migration lists it and the Health page names it (#512); the heartbeat's entry block
-# says the same meanwhile
-ROUTINE |= {"command_waiting"}
-# M9 1.15 (#440): a command row the engine refused. A health event, left out only until a migration lists it and the
-# Health page names it (#512); it is logged as an error and written to the event table meanwhile
-ROUTINE |= {"command_rejected"}
-# M9 1.1 (#426, QA-Ops second key on #527): the book's run end does not see a holding's prices of today. Health
-# events, left out only until a migration lists them and the Health page names them (#512); they are logged as
-# a warning or an error, shown in the heartbeat's book line and written to the event table meanwhile
-ROUTINE |= {"multi_day_book_unchecked", "multi_day_book_unconfirmed"}
+# M9's command_waiting (#427), command_rejected (#440), multi_day_book_unchecked and multi_day_book_unconfirmed
+# (#426), and multi_day_unbooked_aged (#507) are health events; they stood in ROUTINE only until a migration
+# listed them (#512). 0039 lists them.
 
 # Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
 # missed). Each dynamic call site below, and where its names come from; a new dynamic call fails
@@ -78,8 +62,6 @@ DYNAMIC_SITES = {
     ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),
 }
 FALLBACK_RE = re.compile(r'"event":\s*"([a-z_0-9]+)"')
-# M9 1.17 (#442): the macro calendar or the dead-man's holiday table ends within 30 days
-AWAITING_KB_HEALTH |= {"calendar_expiring"}
 AGENT_EVENT_RE = re.compile(r'^EVENT\s*=\s*"([a-z_0-9]+)"', re.M)
 QUEUED_RE = re.compile(r'_events\.append\(\(\s*"([a-z_0-9]+)"')
 COMMAND_RE = re.compile(r'\bkind == (?:"([a-z_]+)"|([A-Z_]+))')
