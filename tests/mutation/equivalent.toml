@@ -1,0 +1,134 @@
+# Surviving mutants that cannot change behaviour (M12 ticket 3.5, #467), with the reason. scripts/mutation_run.py
+# does not report them again. `mutant` is the name mutmut prints (a glob is allowed). mutmut numbers the
+# mutants of a function in order, so an edit of that function renumbers them: a stale entry then hides nothing
+# that matters only if the reason still holds. Check them when the function changes.
+
+# ---- engine/lease.py (first run, 22 Nov 2026: 155 mutants, 143 tried in 6 minutes, 52 survived; renew 11, 12 and
+# 13 are killed by tests/unit/test_lease_renew_gap.py)
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_9"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_10"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_11"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_12"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_13"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_19"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_20"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_21"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_30"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁacquire__mutmut_31"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_38"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_39"
+reason = "the wording of an error message to the owner (LeaseUnavailable, LeaseHeld, LeaseLost): the exception type and when it is raised are what the engine acts on"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_19"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_21"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_22"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_23"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_24"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_26"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_27"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_41"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_42"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_43"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_44"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.x_holder_id__mutmut_18"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.x_holder_id__mutmut_19"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.x_holder_id__mutmut_20"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.x_holder_id__mutmut_21"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_29"
+reason = "the text kept in last_error: only `last_error is None` is ever read (ok, the log condition)"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_30"
+reason = "the text kept in last_error: only `last_error is None` is ever read (ok, the log condition)"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁrenew__mutmut_36"
+reason = "`held` stays True once lost: every reader of `held` (ok, status, renew, release) checks `lost` first"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.xǁEngineLeaseǁage_s__mutmut_1"
+reason = "`or` -> `and` on two fields that are only ever set together (_mark_ok) and are None together before it"
+
+[[equivalent]]
+mutant = "kaibot.engine.lease.x_holder_id__mutmut_2"
+reason = "the random part of the holder id is one hex digit longer: any unique id works (the holder file keeps it)"

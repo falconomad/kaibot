@@ -1,0 +1,80 @@
+# M12 ticket 3.5 (#467): weekly mutation testing of the money-critical modules (scripts/mutation_run.py, mutmut).
+# One job per module of tests/mutation/targets.toml (ledger, orders, journal, risk caps, reconcile, lease,
+# watchdog), each with a 40-minute budget for mutmut on a 4-vCPU runner: a module not finished in time reports the
+# mutants it tried. Then one job folds the results into the tracking issue (#546, rewritten each week) and uploads
+# every survivor's diff. No secret; the only write is that issue.
+name: mutation
+on:
+  schedule:
+    - cron: "11 4 * * 0"  # Sundays 04:11 UTC (no market, no deploy window)
+  workflow_dispatch:
+    inputs:
+      minutes: {description: "budget per module, minutes", default: "40"}
+permissions:
+  contents: read
+concurrency:
+  group: mutation
+  cancel-in-progress: false
+env:
+  PYTHONHASHSEED: "0"
+  TRACKING_ISSUE: "546"
+jobs:
+  module:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55  # the budget plus the install, the stats run and the report
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ledger, orders, journal, risk_caps, reconcile, lease, watchdog]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked --group mutation
+      - name: mutmut within the budget
+        env:
+          TARGET: ${{ matrix.target }}
+          MINUTES: ${{ inputs.minutes || '40' }}
+        run: uv run python scripts/mutation_run.py run "$TARGET" --minutes "$MINUTES" --jobs 4 --out results
+      - name: summary
+        if: always()
+        env: {TARGET: "${{ matrix.target }}"}
+        run: |
+          { echo "### Mutation testing: $TARGET"; cat "results/$TARGET.md" 2>/dev/null || tail -40 "results/$TARGET.log"; } \
+            >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with: {name: "mutation-${{ matrix.target }}", path: results/, if-no-files-found: warn, retention-days: 60}
+  report:
+    needs: module
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write  # rewrites the tracking issue's body: the only thing this job writes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {pattern: "mutation-*", path: all}
+      - name: fold the modules into one report
+        run: python3 scripts/mutation_run.py summary all --out summary.md
+      - run: cat summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with: {name: mutation-results, path: all/, retention-days: 60}
+      - name: update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "Weekly mutation testing (M12 3.5, #467), rewritten by the \`mutation\` workflow."
+            echo
+            echo "- commit: \`$COMMIT\`, run: $RUN_URL (artifact \`mutation-results\`: every survivor's diff)"
+            echo
+            head -c 60000 summary.md
+          } > body.md
+          gh issue edit "$TRACKING_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file body.md

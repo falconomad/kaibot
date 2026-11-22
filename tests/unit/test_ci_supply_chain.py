@@ -22,7 +22,9 @@ WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
 WRITE_ALLOWED = {("labeler.yml", "label"): {"pull-requests": "write"},
                  ("stateful.yml", "weekly-random-seeds"): {"issues": "write"},  # opens the issue with the seed
                  ("dst.yml", "nightly-soak"): {"issues": "write"},  # the same, for the simulation's failing seed
-                 ("replay.yml", "report"): {"issues": "write"}}  # the same, for a nightly replay's difference
+                 ("replay.yml", "report"): {"issues": "write"},  # the same, for a nightly replay's difference
+                 ("fuzz.yml", "target"): {"issues": "write"},  # the same, for a fuzzing finding
+                 ("mutation.yml", "report"): {"issues": "write"}}  # rewrites the mutation tracking issue
 PINNED = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\s+#\s*v?\d[\w.]*\s*$")
 PRODUCTION_KEYS = re.compile(r"APCA|ALPACA|SERVICE_ROLE|SERVICE_KEY|ANTHROPIC_API_KEY|SUPABASE_ACCESS|VERCEL_TOKEN",
                              re.I)
