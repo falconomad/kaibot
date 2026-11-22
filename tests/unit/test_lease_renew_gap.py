@@ -15,10 +15,10 @@ class Store:
     def __init__(self) -> None:
         self.renewals = 0
 
-    def lease_acquire(self, holder, host, ttl):
+    def lease_acquire(self, holder, host, ttl, machine):
         return {"acquired": True, "host": host}
 
-    def lease_renew(self, holder, ttl):
+    def lease_renew(self, holder, ttl, machine):
         self.renewals += 1
         return True
 

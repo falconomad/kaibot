@@ -67,7 +67,15 @@ before you deploy this release.
 
 `scripts/engine_guard.sh` stops a second engine on the **same** machine. The lease stops one on **another**
 machine (Mac and a cloud VM). It is one row in Supabase, `kaibot.engine_lease` (migration `0013_engine_lease.sql`):
-who holds it (`holder`, `host`), since when (`started_at`) and until when (`expires_at`).
+who holds it (`holder`, `host`, `machine`), since when (`started_at`) and until when (`expires_at`).
+
+Since migration `0041_engine_lease_machine.sql` (#562) the lease belongs to the holder id **and the machine**: a key the
+engine computes once at start from the host name and the operating system's machine id (macOS `IOPlatformUUID`,
+Linux `/etc/machine-id`), hashed. It is never stored in the data folder, so a data folder copied to another machine
+(holder file included) does not make that machine the same engine: its start is refused while the lease is live, it
+can never renew or release the first engine's lease, and it takes over only after that lease expired (the first
+engine then stops, `lease lost`). A machine whose name changed waits out its own old lease once (90 s) unless it
+stopped cleanly. A container recreated by Docker gets a new host name and waits the same way; `docker restart` keeps it.
 
 | Moment | What the engine does |
 |---|---|
@@ -75,7 +83,7 @@ who holds it (`holder`, `host`), since when (`started_at`) and until when (`expi
 | Every heartbeat (about every 10 s) | Renews the lease for another 90 s. The heartbeat shows `lease: ok`. |
 | Ctrl-C / SIGTERM | Releases the lease, so another machine can start at once. |
 | Crash, power loss, network gone | Nothing: the lease runs out 90 s after the last renewal and the next engine to start takes it over (event `engine_lease_takeover`). |
-| Restart on the same machine | Gets its own lease back at once (the holder id is kept in `data/live/engine_holder_id`), so a crash does not lock the machine out. |
+| Restart on the same machine | Gets its own lease back at once (the holder id is kept in `data/live/engine_holder_id`, and the machine key is the same), so a crash does not lock the machine out. |
 
 `./scripts/run_engine.sh --check` prints the current lease (`engine_lease`: host and times, or `free`) without taking it.
 
@@ -84,7 +92,8 @@ who holds it (`holder`, `host`), since when (`started_at`) and until when (`expi
 | Log line (exit code 3 unless noted) | Meaning | Do this |
 |---|---|---|
 | `Another Kaibot engine holds the lease: host '…', started …` | An engine on that host is running, or died less than 90 s ago. This one did **not** start and touched nothing. | Stop the other engine (Ctrl-C, `docker stop kaibot-engine`, `docker compose stop engine`), then start this one. If the other machine is already dead, wait 90 s and start again. |
-| `The engine lease could not be checked (…) No degraded start: …` | Supabase is unreachable, or migration 0013 is not applied, and the engine may not start reducing only (the reason follows: no lease record of its own in the journal, another engine seen, or the broker unreadable). Without the lease the engine cannot know it is the only one, so it does not start. | Run `./scripts/run_engine.sh --check`. `supabase: FAILED` is a network or key problem. Only `engine_lease: FAILED` means the migration is missing. |
+| `The engine lease is held by THIS install's holder id on another machine or an older release (host '…' …)` | The data folder (its `engine_holder_id`) was copied from that host, or this machine's name changed, or an engine of a release before #562 still runs here. This one did **not** start. | If another machine runs the engine, stop one of them. On a machine that got a copied data folder, delete `data/live/engine_holder_id` there (a new one is made at the next start). Same machine after a rename or an upgrade: wait 90 s and start again. |
+| `The engine lease could not be checked (…) No degraded start: …` | Supabase is unreachable, or migration 0013 is not applied, and the engine may not start reducing only (the reason follows: no lease record of its own in the journal, one written on another host or machine (#562), another engine seen, or the broker unreadable). Without the lease the engine cannot know it is the only one, so it does not start. | Run `./scripts/run_engine.sh --check`. `supabase: FAILED` is a network or key problem. Only `engine_lease: FAILED` means the migration is missing. |
 | `The engine lease could not be checked … Starting REDUCING ONLY` (WARNING, keeps running) | M10 1.25: Supabase is unreachable at start-up, the last lease recorded in the journal was this machine's own and the broker shows no other engine. Exits, stops, sales and fills are managed; **nothing is bought**, no dashboard command is applied and the heartbeat is not written until `engine lease confirmed and journal verified`. A session that began while Supabase was down could not read your settings; they are read again then (and every minute after, while unreadable), so the day's buys still go out if the 15:50-15:57 send window has not closed. | Nothing, if Supabase comes back. If it found another engine's lease when it came back, it stops with one of the lines above. See [failsafe.md](failsafe.md#degraded-start-supabase-down-when-the-engine-starts-m10-125-450). |
 | `engine lease confirmed and journal verified: fully active (entries allowed)` (INFO) | A reducing-only engine reached Supabase: it holds the lease, its journal is the newest, and nothing blocks buys. | Nothing. |
 | `engine lease confirmed and journal verified, but entries stay OFF: config refused: config unreadable: …` (WARNING, keeps running) | The lease is confirmed but your settings still cannot be read: no buys (exits, stops and sales go on). They are asked again every minute; `owner config vN read again: the session's config refusal is lifted` means buys are allowed again. `… config vN rejected …` instead: the settings were read and are invalid; no buys until the next session. | Usually nothing. If it lasts, run `./scripts/run_engine.sh --check`. For `rejected`, fix the settings on the dashboard (they apply from the next session). |
