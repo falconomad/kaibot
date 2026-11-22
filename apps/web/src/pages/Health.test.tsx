@@ -71,4 +71,34 @@ describe("Engine health page states", () => {
     expect(t).toContain("You asked to accept the differences between the books and the broker");
     expect(glitches(html)).toEqual([]);
   });
+
+  it("M9's events read by what they carry: a cleared halt, the clock, a command that waits or was refused", () => {
+    const ev = (type: string, min: number, payload: Record<string, unknown>) => ({ type, ts: `2026-11-23T15:${String(min).padStart(2, "0")}:00Z`, run_id: 7, payload });
+    const events = [
+      ev("halt_cleared", 6, { kind: "engine_errors", clean_ticks: 5, day: "2026-11-23", why: "5 clean ticks in a row" }),
+      ev("halt_cleared", 1, { kind: "broker_rejects", day: "2026-11-23" }),
+      ev("clock_skew", 20, { state: "skewed", seconds: -90, limit_s: 5 }), ev("clock_skew", 25, { state: "ok", limit_s: 5 }),
+      ev("command_waiting", 30, { command_id: "c1", kind: "flatten_and_stop", why: "flatten and stop pending" }),
+      ev("command_rejected", 31, { command_id: "c2", kind: "new_run", reason: "amount 5 is below 100" }),
+      ev("command_flatten_and_stop", 40, {}),
+    ];
+    const halts = [{ kind: "engine_errors", reason: "3 loop errors in a row: timeout", ts: "2026-11-23T15:00:00Z" },
+      { kind: "replica_poison", reason: "Supabase refuses fill rows (23514): skipped, the journal keeps them (docs/ops/ledger.md)", ts: "2026-11-23T15:10:00Z" }];
+    const html = render(<Health />, { seeds: [{ key: ["health"], data: { ...quiet, events, halts } }, { key: ["llm_budget"], data: budget }] });
+    const t = text(html);
+    expect(t).toContain("Halt cleared after 5 checks in a row without an error: buys are allowed again");
+    expect(t).toContain("Halt cleared at the new session");
+    expect(t).toContain("The engine's clock is 90 seconds behind the broker's: new orders wait until they agree");
+    expect(t).toContain("The engine's clock agrees with the broker's again: new orders go out");
+    expect(t).toContain("Flatten and stop is waiting: the sale is not complete yet, buys are blocked");
+    expect(t).toContain("The engine refused your request to start a new run");
+    expect(t).toContain("You asked to sell everything and stop");
+    expect(t).not.toContain("You asked to waiting");
+    expect(t).not.toContain("You asked to rejected");
+    // Recent halts: the engine_errors row is marked as over, the replicator's row is worded and not marked
+    expect(t).toMatch(/Repeated engine errors: entries halted\s*halt\s*cleared 10:06 ET/);
+    expect(t).toContain("The dashboard's copy lacks a record it refused: trading goes on");
+    expect(t).not.toContain("replica poison");
+    expect(glitches(html)).toEqual([]);
+  });
 });
