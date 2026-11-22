@@ -42,9 +42,10 @@ from kaibot.engine.journal import (
     IdentityError,
     Journal,
     JournalCorrupt,
-    JournalStore,
     Replicator,
+    SnapshotMismatch,
     journal_path,
+    live_store,
 )
 from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
 from kaibot.engine.m3glue import (
@@ -98,7 +99,8 @@ def build(settings: Settings) -> Engine:
     )
     remote = Store(settings.supabase_url, settings.supabase_service_key)
     # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
-    store = JournalStore(open_journal(journal_path(settings.data_dir)), remote, live=True)
+    # M10 1.24 (#449): the minute rows are not kept in memory, and the fold starts at the newest snapshot
+    store = live_store(open_journal(journal_path(settings.data_dir)), remote)
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
     gw = gateway_from_env(remote, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
@@ -302,6 +304,36 @@ def report_conflicts(eng: Engine, replicator: Replicator) -> None:
             eng.store.event("replica_backlog", b, eng._rid())
 
 
+def journal_upkeep(eng: Engine, status, now: datetime, done: dict) -> None:
+    """M10 1.24 (#449): the journal's own housekeeping, with the market closed and at most once a day (UTC).
+
+    - Every entry's checksum is checked again (#496). Reads of the small kinds are answered from memory between
+      starts, so this is what notices a file damaged underneath a running engine; JournalCorrupt goes to the loop,
+      which stops the engine as for any damaged entry.
+    - A snapshot is written when one is due (none yet, a new month, a new run): the next start folds from it.
+      It is written only if a fold of the whole journal gives the state in memory; a difference is an event and
+      an ERROR line, no snapshot, and the engine goes on (the next start folds everything, as before)."""
+    store = eng.store
+    if not isinstance(status, dict) or status.get("state") != "market_closed" or not hasattr(store, "snapshot_due"):
+        return
+    day = now.astimezone(UTC).date()
+    if done.get("day") == day:
+        return
+    done["day"] = day
+    store.journal.verify()
+    why = store.snapshot_due(now)
+    if why is None:
+        return
+    try:
+        got = store.snapshot(why)
+        log.info("journal snapshot written (%s): entry %d covers entries up to %d, %d rows", why, got["seq"],
+                 got["upto"], got["rows"])
+    except SnapshotMismatch as e:
+        log.error("%s", e)
+        with contextlib.suppress(Exception):
+            eng.store.event("journal_snapshot_mismatch", {"error": str(e)[:300]}, eng._rid())
+
+
 def report_news(eng: Engine, poller) -> None:
     """The news poller's health changes (news_feed_unhealthy / news_feed_ok), written from the main thread."""
     if poller is None:
@@ -453,6 +485,10 @@ def main() -> None:
         log.info("news poller: on (every %.0f s now; heartbeat `news`)", news.every_s())
     status: dict = {"state": "starting"}
     last_minute = None
+    upkeep: dict = {}
+    if getattr(eng.store, "snapshot_problem", None):  # the newest snapshot was refused: everything was folded
+        with contextlib.suppress(Exception):
+            eng.store.event("journal_snapshot_unused", {"error": eng.store.snapshot_problem[:300]}, eng._rid())
     log.info("engine up (code %s). Ctrl-C to stop; broker-held stops stay in place.", eng.code)
     last_error = ""
 
@@ -472,6 +508,7 @@ def main() -> None:
                 last_minute = minute
                 if status.get("state") != "market_closed":
                     log.info("tick %s", status)
+                journal_upkeep(eng, status, now, upkeep)
         except LeaseLost as e:
             log.error("%s", e)
             stop.update(now=True, lease_lost=True)

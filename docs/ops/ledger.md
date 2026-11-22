@@ -35,6 +35,33 @@ yet; a position is only held over a close when the engine was off at 15:55.
   code 4)", nothing is sent to the broker meanwhile, and the broker-held stops, the watchdog and the dead-man keep
   working. In Docker on a Mac the engine is a Linux process on a bind mount of `data/live`: write-ahead mode is
   asserted there too, but `fullfsync` is a macOS setting and does not apply (the Python mode gets it).
+- **Size and speed** (M10 1.24, #449; measured with `scripts/bench_journal.py` on a synthetic year: 252 sessions,
+  15 positions, 110,828 entries, 412 MB). Before: a start took 7.3 s and held 1.56 GB, nearly all of it the 98,280
+  minute rows; the journal reads of one tick in the send window took about 50 ms. Now:
+  - **Minute rows are not kept in memory** by the paper engine (`journal.live_store`, table `ledger`). Nothing in
+    the engine reads them back; the journal keeps every one and the replicator sends them to Supabase from there.
+    A `select` of that table still answers (it folds the journal when asked: slow, for a tool, never the tick).
+  - **Snapshots.** A `snapshot` entry holds the store's tables as they were after entry `upto`; a start takes the
+    newest one and folds only the entries after it (0.6 s instead of 7.3 s, 68 MB). The engine writes one with
+    the market closed when none exists, at the first closed tick of a new month (UTC) and for a new run
+    (`journal_upkeep` in `engine/__main__.py`). Before it is written the whole journal is folded again from its
+    first entry and must give exactly the state in memory; if not, nothing is written, the engine logs an ERROR
+    and a `journal_snapshot_mismatch` event and goes on, and the next start folds everything as before. That
+    check takes as long as an old start (about 9 s for the year above; the loop waits for it, which is why it
+    runs with the market closed; the watchdog allows 90 s). A snapshot carries a digest of its state and is
+    checksummed like every entry; one that fails its digest, has another version or was taken by a store with
+    other settings is not used (`journal_snapshot_unused`). Snapshots are never sent to Supabase. A journal
+    written with snapshots holds, entry for entry, the same text as one written without, the snapshots apart
+    (their numbers shift the later entries' numbers by one each).
+  - **Reads from memory.** `entries(kinds=...)` of a small kind (everything except `row`, `import`, `snapshot`)
+    is answered from memory from its second read on, and `Journal.find(kind, field=value, ...)` by an index kept
+    per kind and field set; both are extended on every append. Each read still gets its own copy. Another
+    process that writes to the file (the owner's `reconcile --accept`, anything that changes an entry through
+    SQLite) moves SQLite's `data_version`: the cache is then dropped and the next read goes to the file and
+    checks every checksum, so such a change is noticed by the next read as before (#496). What a cached read no
+    longer does is read the file's bytes again; for damage underneath an open file the upkeep checks every
+    entry's checksum once a day with the market closed (0.4 s for the year above), every start does, and the
+    replicator's reads do for the rows it sends.
 - Entries: `row` (an insert, update or upsert of an engine table), the ledger's `run`, `position`, `fill`,
   `dividend`, `split`, `mark`, the broker trail `intent` (written before every order call: entry, cancel,
   replace, sell, MOC, close) and `ack` (its answer), and `import` / `bootstrap` (rows copied from Supabase once).

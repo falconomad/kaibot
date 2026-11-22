@@ -607,6 +607,10 @@ class LiveDaily:
 
     def decision(self, strategy: str, session: date) -> dict | None:
         """The journalled decision taken after the close of `session` (None: not taken)."""
+        find = getattr(self.journal, "find", None)  # M10 1.24 (#449): by the journal's index, not a full read
+        if find is not None:
+            got = find("md_decision", strategy=strategy, session=str(session))
+            return got[-1] if got else None
         out = None
         for b in self._entries("md_decision"):
             if b.get("strategy") == strategy and b.get("session") == str(session):
@@ -621,6 +625,10 @@ class LiveDaily:
         return out
 
     def _send_entry(self, strategy: str, session: date, kind: str = "md_send") -> dict | None:
+        find = getattr(self.journal, "find", None)  # M10 1.24 (#449)
+        if find is not None:
+            got = find(kind, strategy=strategy, session=str(session))
+            return got[-1] if got else None
         out = None
         for b in self._entries(kind):
             if b.get("strategy") == strategy and b.get("session") == str(session):
