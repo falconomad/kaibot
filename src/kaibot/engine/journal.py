@@ -656,9 +656,8 @@ class JournalStore:
                 self._max_id = max(self._max_id, row["id"])
             if t == "event" and row.get("hash"):
                 self._prev_hash = row["hash"]
-        elif kind == "update":
-            if t == "command" and "applied_at" in op["values"]:
-                self.applied.add(str(op["match"].get("id")))
+        elif kind == "update" and t == "command" and "applied_at" in op["values"]:
+            self.applied.add(str(op["match"].get("id")))
 
     def _from_journal(self, table: str) -> list[dict]:
         """The rows of a table that is not kept in memory, folded from the journal now (every entry checked). A
