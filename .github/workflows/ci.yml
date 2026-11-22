@@ -25,11 +25,16 @@ jobs:
       - run: uv run ruff check .
       # KAIBOT_TEST_SHARD (tests/conftest.py) puts every test in exactly one part; 4 xdist workers per runner
       # (4 vCPU, 16 GB). Same tests and Hypothesis example counts as plain `pytest -q`. See docs/ops/hygiene.md.
+      # M12 3.8 (#470): the test-writing agent's sandbox needs unprivileged user and mount namespaces (unshare -rmn,
+      # then a chroot); Ubuntu's runner blocks them with AppArmor by default. Lifted for this job only, so the
+      # sandbox tests run (KAIBOT_REQUIRE_SANDBOX=1 makes them fail, not skip, when the sandbox is missing).
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: pytest
         # #256: the SQL tests get a throwaway local Postgres 16 with every migration (tests/pg_scratch.py; the runner
         # has the binaries); `-rs` prints why anything is skipped, and more skips than docs/ops/skipped_tests.md
         # accounts for (KAIBOT_MAX_SKIPPED, per part) fail the part
-        env: {KAIBOT_TEST_SHARD: "${{ matrix.shard }}", KAIBOT_TEST_PG_AUTO: "1", KAIBOT_MAX_SKIPPED: "3"}
+        env: {KAIBOT_TEST_SHARD: "${{ matrix.shard }}", KAIBOT_TEST_PG_AUTO: "1", KAIBOT_MAX_SKIPPED: "3",
+              KAIBOT_REQUIRE_SANDBOX: "1"}
         run: |
           (while sleep 2; do free -m | awk '/^Mem:/{print $3}'; done) > mem.txt & sampler=$!
           rc=0; uv run pytest -q -rs -n 4 --dist worksteal --durations=30 || rc=$?; kill $sampler
