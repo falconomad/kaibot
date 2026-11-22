@@ -45,8 +45,9 @@ stocks the wrong way gets a negative coefficient and does not survive.
 
 ## 4. The threshold, adjusted for the batch
 
-One level for the whole programme of screening: **a marginal false discovery rate of 0.10** (the expected number of
-false survivors over the expected number of survivors, across every batch ever screened). It is reached by
+One level for the whole programme of screening: **a marginal false discovery rate of 0.10** (Foster and Stine's mFDR with
+eta = 1 - alpha: the expected number of false survivors over the expected number of survivors plus 0.9, across every
+batch ever screened). It is reached by
 alpha-investing over batches (Foster and Stine, 2008; the batch form of Zrnic, Jiang, Ramdas and Jordan, 2020; both
 cited from memory). Inside each batch Benjamini-Hochberg runs at the batch's own level `q_b`, which the budget sets.
 **There is no fixed in-batch level of 0.10.**
@@ -57,7 +58,7 @@ cited from memory). Inside each batch Benjamini-Hochberg runs at the batch's own
 | Initial wealth W_0 | **0.09** = 0.10 x (1 - 0.10) | the starting wealth Foster and Stine's bound allows at this level (W_0 at most alpha x (1 - alpha)) |
 | Level of batch b | `q_b` = half of the wealth left before it, never above 0.10 | so the budget can never be spent in one batch |
 | Cost of a batch | `q_b / (1 - q_b)` is deducted from the wealth when the batch runs, whatever it finds | Foster and Stine's cost of a test at level `q_b` |
-| Payout | **0.10** to the wealth for each survivor of batch b that the engine later **confirms** (a gate v3 verdict of `pass` or `evidence_based`), credited when that verdict is merged | only confirmed discoveries refill the budget |
+| Payout | **0.10** to the wealth for each survivor of batch b that the engine later **confirms** (a gate v3 verdict of `pass`), credited when that verdict is merged. An `evidence_based` verdict earns no payout: it has not passed S3 and S4 and is "not proven here" (decision 16 section 14) | only confirmed discoveries refill the budget |
 | Out of budget | below 0.005 of wealth no batch may run | Product resets the budget only by a decision record |
 
 In numbers: the first batch runs Benjamini-Hochberg at **q_1 = 0.045** and costs 0.047. The second, without a
@@ -78,7 +79,8 @@ before its run does not count as screened.
 ## 6. Every candidate is a trial, and the screen changes no mark
 
 Each candidate is logged in the trial registry (`data/trials.jsonl`, `evaluation/trials.append`) under its own
-candidate name, with n_trials 1, `variant: screen`, its family ID, its batch ID, the screen's statistic and
+candidate name, `screen:<batch id>:<candidate>` in the row's `strategy` field (never the name of a rule listed in
+`config/gate_v3.yaml`, so a survivor that later becomes a listed rule does not carry its screen row into S4), with n_trials 1, `variant: screen`, its family ID, its batch ID, the screen's statistic and
 p-value, the batch's `q_b` and the code and config hashes. The registry's whole count therefore includes it.
 
 **It does not enter S4. Product's ruling, 22 Nov 2026 (on #569):** screen candidates do not count in S4. S4 counts the
@@ -112,5 +114,7 @@ PYTHONPATH=src python scripts/screen_batch.py --batch docs/research/tier_one_scr
    candidates. The proposal: required for every new **signal**, and not for a re-scaled or re-packaged rule that was
    already judged (such as `trend_momentum_sleeve`, #550).
 3. Who may reset the budget (proposal: Product, by decision record).
+4. Whether an `evidence_based` verdict should also earn the payout. Not proposed here (section 4 pays on `pass`
+   only, QA on #569).
 
 Settled: screen candidates do not count in S4 (Product, 22 Nov 2026; section 6).
