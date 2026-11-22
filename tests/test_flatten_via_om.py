@@ -192,14 +192,14 @@ def test_two_sleeves_of_one_symbol_are_two_sales_each_booked_to_its_own_sleeve(t
 
 
 def test_a_sale_in_flight_when_the_run_has_ended_is_booked_after_a_restart(tmp_path, monkeypatch):
-    """Flatten and stop, then a restart before the fill: no run, so no manager by itself; the sale's own record
+    """The run ends with the flatten's sale sent and not filled (the run's drawdown end; "Flatten and stop" did the
+    same until M9 1.2), then a restart before the fill: no run, so no manager by itself; the sale's own record
     brings the manager of its run back and the fill is booked once."""
     a = _held(tmp_path, monkeypatch)
     a.broker.script.hold("B", bars=3)
-    a.store.insert("command", {"kind": "flatten_and_stop", "payload": {}, "idempotency_key": "k9",
-                               "applied_at": None})
-    a.eng.apply_commands()
-    assert a.store.tables["run"][0]["status"] == "stopped" and len(_sales(a)) == 1 and not _sold(a)
+    a.eng.flatten_all("run_drawdown")
+    a.eng._end_run("ended", "drawdown 8% from peak")
+    assert a.store.tables["run"][0]["status"] == "ended" and len(_sales(a)) == 1 and not _sold(a)
     a.restart()
     assert a.eng.run is None and list(a.eng._md_exits) == [_coid(a)]
     for k in range(5, 12):  # the venue trades; the engine has no run (reaching this step from an idle tick is
