@@ -94,6 +94,9 @@ export const HALT_TEXT: Record<string, string> = {
   config: "Strategy settings refused: the level's defaults apply",
   llm_budget: "Monthly LLM budget reached: no new entries",
   broker_rejects: "The broker rejected several orders in a row: entries halted",
+  // the replicator's notes for the dashboard: trading is not affected (engine/__main__.report_conflicts)
+  replica_conflict: "The dashboard's copy differs from the engine's record: trading goes on",
+  replica_poison: "The dashboard's copy lacks a record it refused: trading goes on",
 };
 export const haltText = (h: Halt) =>
   HALT_TEXT[h.kind] ?? experimentHaltText(h, ruleName) ?? `${h.kind.replace(/_/g, " ")}: ${h.reason}`;

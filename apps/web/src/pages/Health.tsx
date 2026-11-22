@@ -19,6 +19,7 @@ import { findExperiment, multiDayFrom } from "../lib/experiment";
 import { NAME } from "../brand/brand";
 import { caEvent } from "../lib/corpactions";
 import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevents";
+import { clearedAt, clearedFrom, clockSkewText, commandEventText, haltClearedText } from "../lib/healthwords";
 import { reconLine, reconcileFrom } from "../lib/reconcile";
 import { ReconcileAccept } from "../components/ReconcileAccept";
 
@@ -52,7 +53,7 @@ function Proc({ h }: { h: Heartbeat }) {
 const EV: Record<string, string> = {
   engine_start: "Engine started", engine_stop: "Engine stopped", engine_error: "Engine error (retrying)",
   session_start: "Session started", session_end: "Session closed", shadow_session_end: "Shadow strategies scored",
-  halt: "Halt", halt_cleared: "Halt cleared at the new session", account_not_clean: "Paper account not clean",
+  halt: "Halt", halt_cleared: "Halt cleared", account_not_clean: "Paper account not clean",
   calendar_stale: "Event calendar out of date", run_paused: "Run paused", moc_refused: "Market-on-close refused",
   watchdog_flatten: "Watchdog flattened", watchdog_recovered: "Engine heartbeat back", shadow_error: "Shadow strategy error",
   // #207: the live daily path (multi-day rules)
@@ -87,7 +88,7 @@ const EV: Record<string, string> = {
   // 0039: M9 engine safety (#437, #435, #442)
   replica_poison: "A record the dashboard's database refuses was skipped (the engine keeps it)",
   replica_backlog: "The dashboard's copy is falling behind the engine's record",
-  clock_skew: "The engine's clock against the broker's (new orders wait while they differ)",
+  clock_skew: "The engine's clock differs from the broker's: new orders wait until they agree",
   calendar_expiring: "A yearly calendar runs out within 30 days and needs extending",
   // 0039: M9 commands and the book's run end (#427, #440, #426)
   command_waiting: "Flatten and stop, or a new run, is waiting until every position is sold",
@@ -203,6 +204,7 @@ export function Health() {
   const watchdog = h.heartbeat.find((b) => b.process === "watchdog");
   const beatTs = engine?.ts;
   const recovered = h.events.filter((e) => e.type === "watchdog_recovered").map((e) => e.ts);
+  const cleared = clearedFrom(h.events); // #483: a halt row stays on record after its halt was cleared
   const chip = engineChip({ ...(overview ?? {}), heartbeat: h.heartbeat } as never, run);
   const d = (engine?.detail ?? {}) as Record<string, unknown>;
   const wd = (watchdog?.detail ?? {}) as Record<string, unknown>;
@@ -290,6 +292,7 @@ export function Health() {
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>{h.halts.slice(0, 12).map((x, i) => (
               <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <span title={`code: ${x.kind}`}>{haltText(x)}</span><HaltTag x={x} all={h.halts} />
                 {haltResolved(x, beatTs, recovered) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}
+                {clearedAt(x, cleared) && <> <span className="tag allow" title="This halt is over: the engine cleared it">cleared {timeEt(clearedAt(x, cleared)!)} ET</span></>}
                 {x.reason && <div className="muted" style={{ fontSize: 13 }}>{x.reason}</div>}</li>))}</ul>
           ) : <Empty>No halts recorded.</Empty>}
         </section>
@@ -368,6 +371,11 @@ function ShadowRow({ reviews }: { reviews: ShadowReview[] }) {
 /** One event in plain words. Halts name their kind; commands say what was asked. */
 function eventText(e: HealthData["events"][number]): string {
   if (e.type === "halt" && typeof e.payload?.kind === "string") return `Halt: ${haltText({ kind: e.payload.kind, reason: String(e.payload.reason ?? ""), ts: e.ts })}`;
+  // by what they carry (lib/healthwords.ts): why a halt ended, the clock's start and end, a command waiting or refused
+  if (e.type === "halt_cleared") return haltClearedText(e.payload);
+  if (e.type === "clock_skew") return clockSkewText(e.payload);
+  const cmd = commandEventText(e.type, e.payload);
+  if (cmd) return cmd;
   if (e.type.startsWith("command_")) return `You asked to ${commandText(e.type.slice("command_".length))}`;
   const ca = caEvent(e); // #266 corporate actions (kb_health lists them once 0021 is applied)
   if (ca) return ca.head;
