@@ -89,7 +89,9 @@ log = logging.getLogger("kaibot.engine")
 
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
-MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
+MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch (`engine_errors`) trips
+# M9 1.7: clean ticks in a row (one a minute) after which the `engine_errors` kill is cleared; the halt row stays
+CLEAN_TICKS_TO_CLEAR = 5
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
 # S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
@@ -346,6 +348,7 @@ class Engine:
         # replays). When set, entries need a lease that is provably ours right now.
         self.lease = None
         self.error_streak = 0
+        self.clean_ticks = 0  # M9 1.7: ticks in a row that did not raise while the `engine_errors` kill is set
         self._drift_seen: dict = {}
         self.run: dict | None = None
         self.day: Day | None = None
@@ -509,7 +512,10 @@ class Engine:
 
     # ================= fail-closed halts =================
     def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
-        if self.kill:
+        # QA-Ops (#483): `engine_errors` is the one kill that clean ticks clear (`on_tick_ok`), so it must not hide
+        # another halt raised while it is set (drift, broker rejects, the LLM budget): that halt takes over, with
+        # its own row and event, and stays until the next session as it always did.
+        if self.kill and not (self.kill == "engine_errors" and kind != "engine_errors"):
             return
         self.kill = kind
         log.error("entries halted: %s (%s)", kind, reason)
@@ -524,11 +530,27 @@ class Engine:
     def on_tick_error(self, err: Exception) -> None:
         """Called by the main loop when an iteration raises. Repeated failures trip the kill switch."""
         self.error_streak += 1
+        self.clean_ticks = 0
         if self.error_streak >= MAX_ERROR_STREAK:
             self._halt_entries("engine_errors", f"{self.error_streak} loop errors in a row: {str(err)[:120]}")
 
     def on_tick_ok(self) -> None:
+        """Called by the main loop after a tick that did not raise (one a minute). M9 1.7 (audit M5): the
+        `engine_errors` kill is cleared after CLEAN_TICKS_TO_CLEAR such ticks in a row, so a minute of API trouble
+        in the morning no longer blocks the 15:50 buys. Its halt row stays for the record; a `halt_cleared` event
+        says why. A failed pass in between starts the count again. No other kill is ever cleared here."""
         self.error_streak = 0
+        if self.kill != "engine_errors":
+            self.clean_ticks = 0
+            return
+        self.clean_ticks += 1
+        if self.clean_ticks < CLEAN_TICKS_TO_CLEAR:
+            return
+        self.kill, self.clean_ticks = None, 0
+        log.warning("halt engine_errors cleared after %d clean ticks in a row", CLEAN_TICKS_TO_CLEAR)
+        self.store.event("halt_cleared", {"kind": "engine_errors", "clean_ticks": CLEAN_TICKS_TO_CLEAR,
+                                          "day": str(self.day.day) if self.day else None,
+                                          "why": f"{CLEAN_TICKS_TO_CLEAR} clean ticks in a row"}, self._rid())
 
     def lease_ok(self) -> bool:
         """Issue #81: no lease object means the lease is not enforced; otherwise it must be verified and fresh."""
@@ -1566,7 +1588,7 @@ class Engine:
                          and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today)
         if self.kill:
             self.store.event("halt_cleared", {"kind": self.kill, "day": str(today)}, self._rid())
-        self.kill, self.error_streak = None, 0
+        self.kill, self.error_streak, self.clean_ticks = None, 0, 0
         self._check_recent_stops(today)
         if self.calendar_until is not None and today > self.calendar_until:
             self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),

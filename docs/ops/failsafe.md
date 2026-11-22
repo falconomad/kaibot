@@ -43,14 +43,16 @@ Restart and recovery (crash, 10-minute outage, API outage, half-written order, t
   jobs, and `select kaibot.deadman_flatten();` outside the due minutes returns `not 15:56 ET` (or `not 12:56 ET`).
 
 ## Engine halts (fail closed)
-Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume).
+Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume)
+and `engine_errors`, which also clears after 5 clean ticks in a row (M9 1.7, #432: the halt row stays, a `halt_cleared` event says why).
+Another halt raised while `engine_errors` is set takes the kill over (its own row and event) and is not cleared by clean ticks.
 
 | Kind | Trigger |
 |---|---|
 | `daily_stop` | day P&L at the level's daily stop: flatten and halt |
 | `run_drawdown` | drawdown from the run's peak at the level's cap: flatten and end the run |
 | `drift` | engine positions differ from the broker's on two consecutive minutes |
-| `engine_errors` | 3 loop iterations in a row raised |
+| `engine_errors` | 3 loop iterations in a row raised; cleared after 5 ticks in a row that did not raise (about 5 minutes) |
 | `calendar_stale` | today is after `covers_until` in `config/macro_calendar.yaml` |
 | `three_stops` | 3 daily stops within 14 calendar days (~10 sessions): run paused |
 | lease unverified (no halt row) | the engine lease could not be renewed: entries blocked until a renewal succeeds; shown as `lease: unverified` in the heartbeat |
