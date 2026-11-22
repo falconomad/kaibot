@@ -381,9 +381,8 @@ class Engine:
         self._md_exits: dict[str, dict] = {}
         # M9 1.13 (#438): venue order ids of orders this engine placed outside the order manager (intraday entries,
         # their legs and exits; full-flatten sales), kept in the journal so their fills are never taken for fills on
-        # unknown orders (`foreign_fill`) once the position is gone, also after a restart
-        self._own_ids: set[str] = {str(i) for *_, b in self.journal.entries(kinds=("own_order_ids", "md_exit"))
-                                   for i in (b.get("ids") or [b.get("order_id")]) if i}
+        # unknown orders (`foreign_fill`) once the position is gone, also after a restart. Folded at the first use.
+        self._own_ids: set[str] | None = None
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
         self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
@@ -438,12 +437,21 @@ class Engine:
             log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
 
+    def _own(self) -> set[str]:
+        """M9 1.13: the remembered ids, folded from the journal the first time they are asked for."""
+        ids = getattr(self, "_own_ids", None)
+        if ids is None:
+            ids = self._own_ids = {str(i) for *_, b in self.journal.entries(kinds=("own_order_ids", "md_exit"))
+                                   for i in (b.get("ids") or [b.get("order_id")]) if i}
+        return ids
+
     def _remember_ids(self, *ids) -> None:
         """M9 1.13: these venue order ids are the engine's own (journalled once each)."""
-        new = sorted({str(i) for i in ids if i} - self._own_ids)
+        own = self._own()
+        new = sorted({str(i) for i in ids if i} - own)
         if new:
             self.journal.append("own_order_ids", {"ids": new})
-            self._own_ids.update(new)
+            own.update(new)
 
     def own_order_ids(self) -> set[str]:
         """Every venue order id the engine knows as its own outside the order manager: the open intraday positions'
@@ -452,7 +460,7 @@ class Engine:
         self._remember_ids(*(getattr(p, a, None) for p in self.pos.values()
                              for a in ("order_id", "stop_order_id", "target_order_id", "exit_order_id")),
                            *self._md_exits)
-        return self._own_ids
+        return self._own()
 
     def _recon_inputs(self) -> dict:
         """What `reconcile.compare` needs: the ledger's shares per settled symbol against the broker's, and the cash
