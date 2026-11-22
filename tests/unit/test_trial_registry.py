@@ -168,13 +168,14 @@ def test_append_only_adds_a_line(tmp_path: Path):
     assert row["n_trials"] == 1035 and json.loads(f.read_text()) == row
     f.write_text(f.read_text() + '{"trial_id": "cut", "strategy": "x"')  # a crashed run left half a line
     before = f.read_bytes()
-    trials.append(f, {"strategy": "rel_strength"})
+    trials.append(f, {"strategy": "rel_strength", "prereg_sha256": "cd"})
     assert f.read_bytes().startswith(before)  # nothing that was there is rewritten
     rows, bad = trials.read_jsonl(f)
     assert [r["strategy"] for r in rows] == ["trend_highs", "rel_strength"] and bad == 1  # not glued together
     assert rows[1]["n_trials"] == 1 and trials.count_file(f) == 1035 + 1 + 1
-    for wrong in ({"n_trials": 3}, {"strategy": ""}, {"strategy": "x", "n_trials": -1},
-                  {"strategy": "x", "n_trials": 2.5}, {"strategy": "x", "n_trials": True}):
+    for wrong in ({"n_trials": 3}, {"strategy": ""}, {"strategy": "x", "n_trials": -1, "prereg_sha256": "a"},
+                  {"strategy": "x", "n_trials": 2.5, "prereg_sha256": "a"},
+                  {"strategy": "x", "n_trials": True, "prereg_sha256": "a"}):
         with pytest.raises(ValueError):
             trials.append(f, wrong)
 

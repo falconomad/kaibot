@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.engine.shadow import ShadowBook, merged_stats, step  # noqa: E402
 from kaibot.evaluation import holdout  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import ET, N_MIN, load_news_times, load_symbol  # noqa: E402
 from kaibot.risk.profiles import load_profiles  # noqa: E402
@@ -127,6 +128,7 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--symbols", default="", help="comma-separated override of config/universe_seed.yaml")
     holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    pre_sha = trials_mod.guard(NAMES[a.strategy])  # #472: registered before any data is read
     holdout.enforce(script=__file__, end=a.end, rule=a.strategy, opening=a.open_holdout, data=a.data)
     strategy = NAMES[a.strategy]
     data = Path(a.data)
@@ -206,12 +208,12 @@ def main(argv: list[str] | None = None) -> dict:
     tag = "_".join(x for x in (a.strategy, a.label, datetime.now(UTC).strftime("%Y%m%dT%H%M%S")) if x)
     (out / f"shadow_replay_{a.level}_{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
     tr.to_csv(out / f"shadow_trades_{a.level}_{tag}.csv", index=False)
-    with (data / "trials.jsonl").open("a") as fh:
-        fh.write(json.dumps({"ts": rep["run_at"], "strategy": strategy, "mode": "shadow", "level": a.level,
-                             "code_sha": rep["code_sha"], "params": f"pre-registered {a.label}".strip(),
-                             "window": [a.start, str(dl["date"].max()) if len(dl) else None],
-                             "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade",
-                                                             "daily_sharpe_ann")}}, default=str) + "\n")
+    trials_mod.append(data / "trials.jsonl", json.loads(json.dumps({
+        "ts": rep["run_at"], "strategy": strategy, "prereg_sha256": pre_sha, "mode": "shadow", "level": a.level,
+        "code_sha": rep["code_sha"], "params": f"pre-registered {a.label}".strip(),
+        "window": [a.start, str(dl["date"].max()) if len(dl) else None],
+        "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade", "daily_sharpe_ann")}},
+        default=str)))
     print(json.dumps(rep, indent=1, default=str))
     return rep
 

@@ -20,7 +20,8 @@ reported P&L counts SimBroker's costs twice (review of #136, D4). The engine run
 (engine/journal.py, S77) in a temporary file, so the run is the same fold over the same entries as on paper, with
 the ledger's mark-to-market close per session in the summary. `--corporate-actions` books dividends and splits
 from the daily store (data/daily, docs/ops/daily_bars.md) for symbols held at an open. Nothing is written anywhere
-but `--out`; no trial row is logged by this command.
+but `--out` (and, #472, a trial row): every run is refused unless its rule is pre-registered, before any bar is
+read; a run on bars other than the committed fixture logs one trial row to `<--data>/trials.jsonl`.
 """
 
 from __future__ import annotations
@@ -146,12 +147,27 @@ def main(argv: list[str] | None = None) -> int:
     strat = registry.get(a.strategy)
     if strat is not None and strat.holding is Holding.MULTI_DAY:
         return multi_day(a)
+    # #472 (Product, 22 Nov 2026): every research run is registered, the intraday path included, and refused
+    # before any bar is read. A run on bars other than the committed fixture is a trial and is logged
+    from kaibot.evaluation import trials as trials_mod
+
+    rule = a.strategy.split("~")[0]
+    pre_sha = trials_mod.guard(rule, ROOT)
     ca = None
     if a.corporate_actions:
         from kaibot.replay.corporate_actions import daily_store_actions
 
         ca = daily_store_actions(a.corporate_actions)
     rep = run(a.strategy, level=a.level, bars=a.bars, days=a.days, corporate_actions=ca)
+    if Path(a.bars).resolve() != FIXTURE.resolve():
+        from datetime import datetime
+
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        trials_mod.append(Path(a.data) / "trials.jsonl", {
+            "ts": now, "trial_id": f"research_{a.strategy}_{a.level}_{now}", "strategy": rule,
+            "variant": "engine_simbroker_intraday", "label": f"engine {a.strategy}", "level": a.level,
+            "prereg_sha256": pre_sha, "n_trials": 1, "params": {"spec": a.strategy, "bars": str(a.bars)},
+            "window": [a.days[0], a.days[-1]] if a.days else None})
     text = json.dumps(rep, indent=1, sort_keys=True, default=str)
     if a.out:
         a.out.write_text(text + "\n")

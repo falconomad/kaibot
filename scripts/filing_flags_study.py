@@ -172,6 +172,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data", type=Path, default=ROOT / "data")
     holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard(STUDY)
     # the study reads the daily store to its newest bar (it has no --end): that is inside the hold-out
     holdout.enforce(script=__file__, end=None, rule=STUDY, opening=a.open_holdout, data=a.data)
     data, start = Path(a.data), date.fromisoformat(a.start)

@@ -280,24 +280,25 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
         (out_dir / f"{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
         rep["file"] = str(out_dir / f"{tag}.json")
     if trials is not None:
+        from kaibot.evaluation import trials as trials_registry  # #472: every row through trials.append
+
         Path(trials).parent.mkdir(parents=True, exist_ok=True)
-        with Path(trials).open("a") as fh:
-            for lab, (r, row, st) in runs.items():
-                fh.write(json.dumps({
-                    "ts": run_at.isoformat(timespec="seconds"), "trial_id": f"{tag}_{lab}", "strategy": strategy.rule,
-                    "variant": "engine_simbroker", "label": f"engine {lab}", "level": level, "cost_model": "v1",
-                    "universe_mode": universe, "code_sha": code_sha, "status": "engine",
-                    "prereg_sha256": (prereg or {}).get("sha256"),
-                    "n_trials": int(row["fill"] == "base" and row["cost"] == 1.0),
-                    "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"],
-                               "exposure_cap_pct": row["exposure_pct"], "kind": row["kind"]},
-                    "window": rep["oos_window"],
-                    "metrics": {"trades": st["trades"], "net_return_pct": st["return_pct"], "cagr_pct": st["cagr_pct"],
-                                "daily_sharpe_ann": st["sharpe"], "max_drawdown_pct": st["max_drawdown_pct"]}},
-                    default=str) + "\n")
-                pd.DataFrame({"date": [str(x["date"]) for x in r.book.daily], "ret": daily_returns(r.book)}).to_csv(
-                    Path(trials).parent / "trials" / f"{tag}_{lab.replace('|', '_').replace('~', '-')}.csv",
-                    index=False) if (Path(trials).parent / "trials").is_dir() else None
+        for lab, (r, row, st) in runs.items():
+            trials_registry.append(trials, json.loads(json.dumps({
+                "ts": run_at.isoformat(timespec="seconds"), "trial_id": f"{tag}_{lab}", "strategy": strategy.rule,
+                "variant": "engine_simbroker", "label": f"engine {lab}", "level": level, "cost_model": "v1",
+                "universe_mode": universe, "code_sha": code_sha, "status": "engine",
+                "prereg_sha256": (prereg or {}).get("sha256"),
+                "n_trials": int(row["fill"] == "base" and row["cost"] == 1.0),
+                "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"],
+                           "exposure_cap_pct": row["exposure_pct"], "kind": row["kind"]},
+                "window": rep["oos_window"],
+                "metrics": {"trades": st["trades"], "net_return_pct": st["return_pct"], "cagr_pct": st["cagr_pct"],
+                            "daily_sharpe_ann": st["sharpe"], "max_drawdown_pct": st["max_drawdown_pct"]}},
+                default=str)))
+            pd.DataFrame({"date": [str(x["date"]) for x in r.book.daily], "ret": daily_returns(r.book)}).to_csv(
+                Path(trials).parent / "trials" / f"{tag}_{lab.replace('|', '_').replace('~', '-')}.csv",
+                index=False) if (Path(trials).parent / "trials").is_dir() else None
     return rep
 
 

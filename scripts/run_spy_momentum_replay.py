@@ -20,6 +20,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.evaluation import holdout  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_symbol  # noqa: E402
 from kaibot.replay.spy_momentum import run  # noqa: E402
@@ -36,6 +37,7 @@ def main() -> None:
     ap.add_argument("--label", default="")
     holdout.add_argument(ap)
     a = ap.parse_args()
+    pre_sha = trials_mod.guard("spy_late_momentum")  # #472: registered before any data is read
     holdout.enforce(script=__file__, end=a.end, rule="spy_late_momentum", opening=a.open_holdout, data=a.data)
     data = Path(a.data)
     start, end = np.datetime64(a.start, "D"), np.datetime64(a.end, "D")
@@ -71,13 +73,11 @@ def main() -> None:
     t.to_csv(data / "reports" / f"{tag}_trades.csv", index=False)
     (data / "trials").mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"date": d["date"].astype(str), "ret": ret}).to_csv(data / "trials" / f"{tag}.csv", index=False)
-    with (data / "trials.jsonl").open("a") as fh:
-        fh.write(json.dumps({"ts": rep["run_at"], "trial_id": tag, "strategy": "spy_late_momentum",
-                             "level": a.level, "label": a.label, "code_sha": rep["code_sha"],
-                             "params": "pre-registered z>0.5, 15:30 entry, MOC exit, 3xATR5 stop",
-                             "window": [a.start, a.end],
-                             "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade",
-                                                             "daily_sharpe_ann")}}) + "\n")
+    trials_mod.append(data / "trials.jsonl", {
+        "ts": rep["run_at"], "trial_id": tag, "strategy": "spy_late_momentum", "prereg_sha256": pre_sha,
+        "level": a.level, "label": a.label, "code_sha": rep["code_sha"],
+        "params": "pre-registered z>0.5, 15:30 entry, MOC exit, 3xATR5 stop", "window": [a.start, a.end],
+        "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade", "daily_sharpe_ann")}})
     print(json.dumps(rep, indent=1, default=str))
 
 

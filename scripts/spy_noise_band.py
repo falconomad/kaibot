@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from walk_forward import peak_rss_mb  # noqa: E402
 
 from kaibot.evaluation import holdout  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2, mark_3  # noqa: E402
 from kaibot.replay import spy_momentum  # noqa: E402
 from kaibot.replay import spy_noise_band as nb  # noqa: E402
@@ -211,9 +212,7 @@ def run_version(a: argparse.Namespace) -> None:
                        "the close is the last regular-hours 1-minute bar, not the closing auction",
                        "fixed bp scenarios are all-in per side; model v1 is the uncalibrated cost model v1 (S71)",
                        "a small SPY-only research routine, not the engine with SimBroker (decision 15)"]}
-    with (data / "trials.jsonl").open("a") as fh:
-        for t in trials:
-            fh.write(json.dumps(t, default=str) + "\n")
+    trials_mod.append_many(data / "trials.jsonl", [json.loads(json.dumps(t, default=str)) for t in trials])
     (out / f"{tag}.json").write_text(json.dumps(rep, indent=1, default=str))  # last: marks the version finished
     print(build_summary({a.version: (out / f"{tag}.json", json.loads(json.dumps(rep, default=str)))}))
     print(f"runtime {rep['runtime_s']}s, peak RSS {rep['peak_rss_mb']} MB")
@@ -373,6 +372,8 @@ def main() -> None:
         return
     if not a.version or not a.end:
         ap.error("--version and --end are required for a run")
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard("spy_noise_band")
     holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
     run_version(a)
 
