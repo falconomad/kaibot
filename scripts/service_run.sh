@@ -335,7 +335,7 @@ run_engine() {
   if [ "$code" = 0 ]; then say "engine exited cleanly"; exit 0; fi
   if [ "$code" = 4 ]; then  # QA-Ops (#511): the journal was refused; a restart does not cure it, so say what it is
     say "engine exited with code 4: it refused its journal (the reason is the last ERROR line of engine.log;" \
-        "docs/ops/ledger.md). launchd tries again every minute; it is refused until that is fixed. Nothing was sent"
+        "docs/ops/ledger.md). launchd tries again every minute; it is refused until that is fixed"
     hc fail "kaibot engine refused its journal (exit code 4) on $(hostname -s): not trading until fixed; see engine.log and docs/ops/ledger.md"
     exit 1
   fi
