@@ -473,7 +473,7 @@ def _text(row: dict) -> str:
     return json.dumps(row, sort_keys=True, default=str)
 
 
-def violations(o: Outcome, pending_cancel_known: bool = True) -> list[str]:
+def violations(o: Outcome) -> list[str]:
     """Every invariant the end state breaks (an empty list: none)."""
     w, e, out = o.world, o.engine, []
     sim, om, book = w.sim, e.om, e.book()
@@ -522,15 +522,13 @@ def violations(o: Outcome, pending_cancel_known: bool = True) -> list[str]:
             continue
         at_venue = sim.order(r.order_id)
         want = VENUE[at_venue["status"]]
-        if r.state is St.PENDING_CANCEL and want not in (St.CANCELED,) and pending_cancel_known:
-            out.append(f"#491 {r.coid} is pending_cancel here and {at_venue['status']} at the venue")
-        elif r.state is not want and not (want is St.ACCEPTED and r.state is St.PARTIAL):
+        if r.state is not want and not (want is St.ACCEPTED and r.state is St.PARTIAL):
             out.append(f"{r.coid} is {r.state} here and {at_venue['status']} at the venue")
     rest = om.get(coid(e, "s2", "B", DAYS[1], "rest"))
     # the scenario cancels the resting order at 10:00. Cancelled, or never at the venue at all (its first attempt
     # died with the process: `rejected`, lost), is right; a DAY order whose cancel was never sent expires instead
     if rest is not None and rest.state not in (St.CANCELED, St.REJECTED):
-        out.append(f"#491 {rest.coid} was to be cancelled and ended {rest.state}")
+        out.append(f"{rest.coid} was to be cancelled and ended {rest.state}")
     if e.replicator.pending():
         out.append(f"{e.replicator.pending()} rows never reached the replica ({e.replicator.last_error})")
     if e.replicator.conflicts:

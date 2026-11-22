@@ -630,3 +630,24 @@ no rule, no decision, no target and no share count. No research result is affect
    with the run.
 6. **Research and Gate B unchanged.** Commands exist only on the live path. The research venue has none, and the
    bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 21 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again
+
+Written on 22 Nov 2026, before the change's first use. It changes whether a working order the engine decided to
+cancel is really cancelled, so it is recorded here. It never adds an order and changes no decision, target or share
+count. No research result is affected (item 4). The same text is Amendment 23 of trend_momentum.
+
+1. **Why.** The cancel request was made once. When it never arrived (a network error, or the engine killed between
+   its journal entry and the call), the order stayed "being cancelled" in the engine and working at the venue until
+   it ended by itself: a day order at the close, a protective stop never. It could still fill, and a sale waiting
+   for that stop's shares was never sent (found by the stateful test of M12 ticket 3.1).
+2. **The rule.** When the engine reads such an order and the venue still shows it working, the cancel is requested
+   again: at once after a restart, otherwise when the last request is 15 seconds old. An order the venue itself
+   shows as being cancelled is not asked again. The wait doubles after every repeat (15, 30, 60 seconds, ...) up to
+   five minutes, so a venue that does not act on cancels is not asked four times a minute per order for as long as
+   that lasts (QA-Ops second key, PR #521).
+3. **What cannot happen.** Only orders the engine had already decided to cancel are concerned. A second request for
+   an order that is gone is answered without an error. An order that filled before the second request is booked
+   as filled.
+4. **Research and Gate B unchanged.** The research venue answers every cancel at once, so no request is repeated
+   there; the bit-identity test of the momentum rules passes unchanged.
