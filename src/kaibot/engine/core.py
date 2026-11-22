@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import math
+import re
 import subprocess
 import time
 import uuid
@@ -111,6 +112,7 @@ CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": alread
 # S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
 RECHECK_MINUTES = 15  # S78: a blocking reconciliation difference is checked again this often
+CLOCK_SKEW_MAX_S = 5.0  # M9 1.10 (#435): the host clock may differ from the broker's by this much, not more
 BREACH_CONFIRM_S = 60.0  # #211: a book breach must hold on two checks at least this far apart
 
 
@@ -379,6 +381,7 @@ class Engine:
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
+        self.clock_skew: dict | None = None  # M9 1.10: set while the host clock and the broker's disagree
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
         self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
@@ -593,6 +596,8 @@ class Engine:
         journalled is picked up at the next call."""
         if self.daily is None:
             return
+        if step == "send" and self.clock_skew is not None:
+            return  # M9 1.10: the send window is read off the host clock, which disagrees with the broker's
         try:
             call()
         except Exception as e:
@@ -858,6 +863,8 @@ class Engine:
             return f"halted: {self.kill}"
         if not self.lease_ok():
             return "lease unverified"
+        if self.clock_skew is not None:  # M9 1.10
+            return self._clock_block()
         if d is not None and d.halted:
             return "daily stop"
         if d is not None and d.refused:
@@ -1418,9 +1425,51 @@ class Engine:
         return (r.pause_losses, r.pause_minutes) if r else (PAUSE_AFTER_LOSSES, PAUSE_MINUTES)
 
     # ================= per tick =================
+    def _broker_clock(self) -> dict:
+        """M9 1.10 (#435, audit M9): the broker's clock, read at every tick, and its timestamp compared with the
+        host's. Every window (the near-close send, the entry hours, the flatten) is computed from the host clock; a
+        Mac a few minutes slow would send the day's market orders after the close. The broker stamps its answer
+        while the call is under way, so the timestamp may lie anywhere between the host's time before and after
+        the call; beyond that, more than CLOCK_SKEW_MAX_S apart is a skew: `clock_skew` is set, no new order is
+        sent (`entry_block`, `_may_enter`, the daily path's send) and one `clock_skew` event is written; it clears,
+        with a second event, at the first tick the clocks agree. An answer without a readable timestamp counts as
+        a skew (fail closed). Exits, protective stops, cancels and the flatten are not held."""
+        t0 = self.now()
+        clk = self.broker.clock()
+        t1 = self.now()
+        ts = _clock_ts(clk.get("timestamp"))
+        if ts is None:
+            skew = {"state": "unreadable", "broker": str(clk.get("timestamp"))[:40], "host": t1.isoformat(),
+                    "limit_s": CLOCK_SKEW_MAX_S}
+        else:
+            off = (t0 - ts).total_seconds() if ts < t0 else (t1 - ts).total_seconds() if ts > t1 else 0.0
+            skew = None if abs(off) <= CLOCK_SKEW_MAX_S else {
+                "state": "skewed", "seconds": round(off, 1), "broker": ts.isoformat(), "host": t1.isoformat(),
+                "limit_s": CLOCK_SKEW_MAX_S}  # seconds: host minus broker (negative: the host clock is slow)
+        was, self.clock_skew = self.clock_skew, skew
+        if skew is not None and (was is None or was["state"] != skew["state"]):
+            log.error("clock skew: the host clock and the broker's disagree (%s): no new orders until they agree; "
+                      "set this machine's clock (System Settings, Date & Time, set automatically)", skew)
+            self.store.event("clock_skew", {**skew, "action": "no new orders until the clocks agree; exits, stops "
+                                                              "and the flatten go on"}, self._rid())
+        elif skew is None and was is not None:
+            log.warning("clock skew over: the host clock and the broker's agree again")
+            self.store.event("clock_skew", {"state": "ok", "host": t1.isoformat(), "limit_s": CLOCK_SKEW_MAX_S},
+                             self._rid())
+        return clk
+
+    def _clock_block(self) -> str | None:
+        s = self.clock_skew
+        if s is None:
+            return None
+        if s["state"] == "unreadable":
+            return "clock skew: the broker's clock gave no timestamp to compare with"
+        return (f"clock skew: this machine's clock is {abs(s['seconds']):.0f} s "
+                f"{'behind' if s['seconds'] < 0 else 'ahead of'} the broker's")
+
     def tick(self) -> dict:
         now = self.now()
-        clk = self.broker.clock()
+        clk = self._broker_clock()  # M9 1.10: the broker's clock, compared with the host's
         if not clk["is_open"]:
             self._daily_step("sync", lambda: self.daily.sync())  # #206: the closing auction's fills, before the close
             if self.day and not self.day.finalized:
@@ -2070,6 +2119,8 @@ class Engine:
         if not self._reconciled():  # S78: an open ledger/broker difference blocks entries (exits go on)
             return False
         if not self.lease_ok():  # fail closed: the lease could not be renewed, so we may not be the only engine
+            return False
+        if self.clock_skew is not None:  # M9 1.10: the entry hours are read off a clock that disagrees
             return False
         if d.halted or d.flattened or d.refused or m < d.pause_until:
             return False
@@ -3059,6 +3110,19 @@ def _age_s(t: str | None, now: datetime) -> float:
 
 def _parse_ts(v) -> datetime:
     return v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+
+
+def _clock_ts(v) -> datetime | None:
+    """The broker clock's `timestamp` (Alpaca: RFC 3339 with up to nine decimals and an offset) as an aware
+    datetime; None when it is missing, unreadable or has no offset."""
+    m = re.fullmatch(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:?\d\d)", str(v or "").strip())
+    if not m:
+        return None
+    try:
+        t = datetime.fromisoformat(m[1] + "." + (m[2] or "0")[:6].ljust(6, "0") + ("+00:00" if m[3] == "Z" else m[3]))
+    except ValueError:
+        return None
+    return t if t.tzinfo else None
 
 
 def _iso(v) -> str | None:

@@ -55,6 +55,7 @@ Each writes a `halt` row and an event; all clear at the next session start, exce
 | `three_stops` | 3 daily stops within 14 calendar days (~10 sessions): run paused |
 | lease unverified (no halt row) | the engine lease could not be renewed: entries blocked until a renewal succeeds; shown as `lease: unverified` in the heartbeat |
 | account not clean | positions or open orders on symbols the engine doesn't hold (entries blocked until clean) |
+| clock skew (no halt row) | M9 1.10 (#435): the broker clock's timestamp, read at every tick, is more than 5 s from this machine's clock (or the answer has no timestamp): no new order until they agree (the near-close send of the multi-day path, buys and sales alike, and intraday entries); exits, stops, cancels and the flatten go on. One `clock_skew` event when it starts and one (`state: ok`) when it ends; an ERROR log line `clock skew: ...`; `entry_block` says how far and which way. Fix: set the machine's clock (System Settings, Date & Time, "Set time and date automatically") |
 
 Also enforced per entry by `risk/gate.py`: quote older than 5 s, missing bars, buying power (the smaller of the pot
 and the paper account's own figure), the ±30 min event blackout (FOMC 14:00; CPI 08:30 is pre-open), and VIX > 35.
