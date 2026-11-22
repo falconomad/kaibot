@@ -236,7 +236,7 @@ def control_numbers(control: Any) -> dict | None:
 def control_runs_for(gate: GateV3, rule: str) -> int:
     """#547: the control runs S3 needs for `rule` (decision 16 section 15): `random_runs_min_several_rules` (2,000)
     when its family lists two or more rules, `random_runs_min` (500) for a one-rule family or a rule in no family.
-    The research command and the run scripts take their default from here, so a run is never too small for S3."""
+    The research command and `daily_report.report` take their default from here (scripts/ keep their own)."""
     c = gate.cfg["sleeve"]["s3_control"]
     fam = gate.family_of(rule)
     if fam is not None and len(gate.families[fam]["rules"]) > 1:
@@ -801,6 +801,10 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
         have = dict((listed.get("sleeves") or {}) if listed is not None else (budgets or {}))
         bad, eb = {}, {}
         for k, v in sleeves.items():
+            if listed is not None and k not in have:
+                # QA #553: a listed book's return sleeve needs a pre-registered budget, whatever its verdict
+                bad[k] = f"{v}, but the book gives it no budget (none pre-registered under `books:`)"
+                continue
             if v == "pass":
                 continue
             if v == "evidence_based" and gate.tier(k) != "evidence_based":
@@ -830,6 +834,11 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                               gate.cfg["book"]["final_requires"], role="book")
     # #547: the budgets the engine actually ran must be the pre-registered ones; a book run at other weights is
     # another book, so B6 fails and the run cannot carry a verdict
+    if ran_budgets is None and gate.book(book) is not None:
+        # QA #553: a listed book cannot carry a verdict until the budgets it ran are checked against its record
+        checks["budgets_as_pre_registered"] = None
+        reasons.append("the budgets the engine ran were not supplied (`ran_budgets`), so they are not checked "
+                       "against the book's pre-registered ones")
     if ran_budgets is not None:
         problems = book_budget_problems(gate, book, ran_budgets)
         checks["budgets_as_pre_registered"] = not problems

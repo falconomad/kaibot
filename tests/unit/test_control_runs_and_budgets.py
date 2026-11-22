@@ -86,4 +86,21 @@ def test_a_book_run_at_other_budgets_fails_b6_and_cannot_carry_a_verdict():
     bad = g3.evaluate_book(gate, **kw, ran_budgets={"trend_momentum": 20.0})
     assert bad["marks"]["b6"]["met"] is False and "the engine ran 20%" in bad["marks"]["b6"]["why"]
     assert any("other sleeve budgets" in r for r in bad["provisional_reasons"]) and bad["verdict"] == "fail"
-    assert "budgets_as_pre_registered" not in g3.evaluate_book(gate, **kw)["gate_a"]  # not asked: not checked
+    unchecked = g3.evaluate_book(gate, **kw)  # QA #553: a listed book whose run budgets are not given cannot pass
+    assert unchecked["gate_a"]["budgets_as_pre_registered"] is None and unchecked["can_pass"] is False
+    assert any("not checked against" in r for r in unchecked["provisional_reasons"])
+    assert "budgets_as_pre_registered" not in g3.evaluate_book(GATE, **kw)["gate_a"]  # an unlisted book: not asked
+
+
+def test_a_listed_books_sleeve_without_a_pre_registered_budget_fails_b6():
+    """QA #553: missing pre-registered budgets for a listed book never pass, with or without `ran_budgets`."""
+    gate = with_book({"trend_momentum": 10.0})
+    acc = g3.Account(SPY * 0.6 + 0.00005, SPY, costs=pd.Series(0.00001, index=IDX), universe="point_in_time")
+    kw = dict(book="core_book", account=acc, first_run_at=datetime(2026, 11, 25, tzinfo=UTC))
+    for ran in (None, {"trend_momentum": 10.0}, {"trend_momentum": 10.0, "mom_12_1_band": 5.0}):
+        m = g3.evaluate_book(gate, **kw, sleeves={"trend_momentum": "pass", "mom_12_1_band": "pass"},
+                             ran_budgets=ran)["marks"]["b6"]
+        assert m["met"] is False and "mom_12_1_band" in m["why"], ran
+    empty = with_book({})
+    m = g3.evaluate_book(empty, **kw, sleeves={"trend_momentum": "pass"}, ran_budgets={})["marks"]["b6"]
+    assert m["met"] is False and "no budget" in m["why"]
