@@ -753,7 +753,7 @@ class Guarded(Harness):
                  if b["strategy"] == name and b["target"] is not None}
         last = {}
         for *_, b in self.journal.entries(kinds=("md_send",)):
-            if b["strategy"] == name and b["session"] in fills:
+            if b["strategy"] == name and (b["session"] in fills or b.get("late_of") in fills):  # M9 1.4: or late
                 last = b
         return last
 
@@ -972,24 +972,38 @@ def test_a_name_an_emergency_stop_sold_since_the_decision_is_not_bought_back(dat
 
 
 def test_nothing_is_carried_without_the_decisions_own_send_or_without_last_evenings_record(data, tmp_path):
-    """Engine down on the decision's fill day (no `md_send` of it): nothing is carried on the days after, the buys
-    wait for the next decision. Engine down in the evening (no record for the next session): nothing either."""
+    """Engine down on the decision's fill day (no `md_send` of it): nothing is carried on the days after; since
+    M9 1.4 the decision itself is sent late on the next session (tests/unit/test_m9_late_send.py), sized then, and
+    not as a carry-over of share counts nobody journalled.
+    Engine down in the evening (no record for the next session): since M9 1.3 the
+    record is taken late, in the session (tests/unit/test_m9_late_decision.py), and the carry-over runs as after an
+    on-time start; a session that still has no record carries nothing."""
     (tmp_path / "a").mkdir()
     s, h = _guarded(data, tmp_path / "a")
     day = _to_the_carry_day(h, expire=False, sessions={FILL_DAY: {"send": False}})
     assert h.broker.orders == {}
-    assert h.live._plan(h.live.rules[0], day, RID) == {"run_id": RID, "strategy": s.name, "session": str(day),
-                                                      "decided": str(data.day(FILL_DAY)), "targets": []}
+    planned = h.live._plan(h.live.rules[0], day, RID)
+    assert planned["late_of"] == str(data.day(FILL_DAY)) and "carry" not in planned and "equity" in planned
+    assert [t for t in planned["targets"] if t[2] == "buy"] and not [t for t in planned["targets"] if t[2] == "carry"]
     (tmp_path / "b").mkdir()
     s, h = _guarded(data, tmp_path / "b")
     day = _to_the_carry_day(h, sessions={FILL_DAY: {"decide": False}})
+    planned = h.live._plan(h.live.rules[0], day, RID)
+    rec = h.live._decision_for(s.name, day)
+    assert rec["late"] is True and rec["target"] is None and rec["note"] == "not a decision day"
+    assert len(planned["carry"]["carried"]) == 2 and planned.get("note") is None
+    (tmp_path / "c").mkdir()
+    s, h = _guarded(data, tmp_path / "c")
+    day = _to_the_carry_day(h, sessions={FILL_DAY: {"decide": False}})
+    h.live.after_close = lambda *a, **k: []  # the late step takes no record (as when the daily store is not ready)
     planned = h.live._plan(h.live.rules[0], day, RID)
     assert planned["targets"] == [] and planned.get("note") == "no decision" and "carry" not in planned
 
 
 def test_once_a_newer_decision_exists_nothing_of_the_older_plan_is_carried(data, tmp_path):
     """The next decision ends the carry-over, also when that decision's own send never happened (engine down in its
-    window): the older plan's short buys are not picked up again; they are the newer decision's business."""
+    window): the older plan's short buys are not picked up again; they are the newer decision's business (since
+    M9 1.4 the newer decision is then sent late, and nothing of the older plan with it)."""
     s, h = _guarded(data, tmp_path)
     _to_the_carry_day(h, at=None)
     _session(h, CARRY_DAY, send=False)  # nothing was carried that day: both names are still short
@@ -1001,7 +1015,8 @@ def test_once_a_newer_decision_exists_nothing_of_the_older_plan_is_carried(data,
     h.journal.append("md_decision", {**first, "session": str(data.day(FILL_DAY)),
                                      "fill_session": str(data.day(CARRY_DAY))})  # a newer decision, never sent
     planned = h.live._plan(rule, day, RID)
-    assert planned["targets"] == [] and "carry" not in planned
+    assert "carry" not in planned and not [t for t in planned["targets"] if t[2] == "carry"]
+    assert planned["late_of"] == str(data.day(CARRY_DAY))
 
 
 def test_a_stock_the_rule_could_not_buy_at_the_last_close_is_not_carried(data):
