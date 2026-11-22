@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 from kaibot.engine.config import ROOT
+from kaibot.evaluation import gate_v3 as g3
 from kaibot.evaluation import results, tbill
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -189,8 +190,9 @@ def test_the_rescore_scores_existing_reports_without_running_anything(data: Path
     assert g["statistics"]["cash"] == "Treasury bills on both sides"
     assert by[("mom_12_1_band", "core, point_in_time, costs v2")]["gate_v3"]["marks"]["s1"]["met"] is False
     assert by[("mom_12_1_band", "core, point_in_time, costs v2")]["gate_v3"]["verdict"] == "fail"
-    # the correction: momentum's family p is its best rule's p times its four rules
-    assert res["families"]["cross_sectional_momentum"]["p"] == pytest.approx(4 * 2 / 501)
+    # the correction: momentum's family p is its best rule's p times every rule it lists
+    members = len(g3.GateV3.load(ROOT).families["cross_sectional_momentum"]["rules"])
+    assert res["families"]["cross_sectional_momentum"]["p"] == pytest.approx(members * 2 / 501)
     assert res["families"]["spy_intraday_momentum"]["p"] == pytest.approx(3 * 2 / 501)
     assert res["families"]["news_drift"]["p"] is None and len(res["families"]) == 12
     spy = by[("spy_noise_band", "spy, point_in_time, 0.5 bp")]["gate_v3"]
