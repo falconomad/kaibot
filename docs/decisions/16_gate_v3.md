@@ -332,3 +332,33 @@ In practice the pre-registration is where the evidence is cited and the label fi
 Not built yet: `gate_v3.py` has no such tier. `evaluate_sleeve` reports S3 and S4 as they are and returns `fail`
 or `unknown` for such a sleeve; the label, the 10% budget and the check that the other marks hold are applied by
 Product by record until a ticket adds them to the code and to `config/gate_v3.yaml`.
+Superseded by amendment 1 (section 15, item 4), which builds the tier into the code and the config.
+
+## 15. Amendment 1 (22 Nov 2026): QA's follow-ups on #499, the evidence-based tier, books
+
+- **Written by:** Quant research, ticket 2.12 (issue #514). **Status:** proposed. It takes effect when the pull
+  request that adds it is merged (Product confirms by merging, as for section 11). Until then the marks above are
+  in force as written. **Changes:** how gate v3 scores; nothing trades, and no verdict given before it is reopened.
+- **Files:** `config/gate_v3.yaml` (its sha256 changes, so every report written after the merge carries the new
+  hash), `src/kaibot/evaluation/gate_v3.py`, `tests/unit/test_gate_v3_amendment1.py`, `tests/conftest.py`.
+
+| # | What changes | Before | After | Why |
+|---|---|---|---|---|
+| 1 | S4: the variance of the trial Sharpes | the variance of the family's logged Sharpes when there are at least two | never below **1/(T-1)**, the sampling variance of a no-skill Sharpe over the T sessions judged (`s4_deflated_sharpe.variance_floor`) | QA (#499): with near-identical configurations the spread is almost zero, the hurdle almost vanishes, and a no-skill sleeve passed S4 7.5% of the time instead of about 0.5% |
+| 2 | S3: runs of the control | at least 500 | at least 500 for a family of one rule; at least **2,000** for a family of two or more rules (`random_runs_min_several_rules`) | Section 4 already said a multi-rule family "should be run with at least 2,000"; with 500 runs the floor of p (1/501) times the family size can hardly clear Holm. Now it is a mark, not advice |
+| 3 | The selection benchmark's first session | SPY at 0% on the first session of the window (the exposure series was lagged after the cut) | SPY at the exposure of the **close before the window**, when the account was already invested then; 0% only for an account that starts on that session. The bill side uses the same lag | A sleeve invested going into 2017-05-01 was compared with an empty benchmark for one session |
+| 4 | The evidence-based tier of section 14 | applied by Product by record | in the code: a rule's entry under `families` says `tier: evidence_based` and `evidence: <citation>`, written with its pre-registration before its first run. S1, S2, S5 (on S1 and S2) and S6 are judged; S3 and S4 are computed and printed, not judged. The verdict is `evidence_based`, labelled **"evidence-based, not proven here"**, never `pass` unless all six marks hold. In a book, B6 admits such sleeves only with a budget in the book's entry, and all of them together at most **10%** of the book. The pre-registration itself must cite the evidence (its published-evidence section) and carry the label, or the verdict is provisional; B6 admits a sleeve only when its entry takes the tier, reads a listed book's own budgets and leaves B6 unknown while a listed sleeve has no verdict (QA on #542). The final check on the hold-out stays required | Section 14 asked for exactly this; until now `evaluate_sleeve` returned `fail` or `incomplete` for such a sleeve |
+| 5 | Where a book is listed | nowhere: `evaluate_book` looked for the book in a family, so every book was `provisional` | a new section **`books:`** of `config/gate_v3.yaml`: the book's components, each return sleeve's budget (% of the book) and `v3_declared`. A book is in no family and does not change the count of the correction. Its pre-registration adds it in the same pull request, before its first run (section 8, item 5) | A book is the account's construction, not an idea tested for skill; putting it in a family would have made the correction stricter for every rule without reason |
+| 6 | Tests | `load_env_file` in one test left `ALPACA_BASE_URL` (and the other keys of a test's `.env`) in the process for every later test | `tests/conftest.py` removes, after each test, every environment variable the test added | Main's tests leaked a broker URL from one test into another (QA on #499) |
+
+What does not change: the level (0.10), the families and their count (twelve), Holm across families and
+Bonferroni inside one, S1, S2, S5, S6, the book marks B1 to B5, the window, the hold-out and its check, the
+bootstrap, gate v2.
+
+Effect on the re-score of section 10: the rows whose control ran 500 times in a family of several rules
+(`trend_momentum`, `mom_12_1_band`, `mom_12_1_band_nofilter`, `ath_breakout`, `pullback_uptrend`,
+`weekly_fall_rebound`) now show S3 as unknown ("500 runs, 2000 needed") instead of failed. None of them could pass
+before (section 8), and none can now. A new verdict for one of these rules needs a run with 2,000 or more control
+runs.
+
+The simulation of section 9 was run with the strict default spread (1/(T-1)); its table is unchanged by item 1.

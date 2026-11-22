@@ -47,7 +47,8 @@ sleeve:
     costs_multiple: 2.0
     reported_multiples: [1.0, 2.0, 3.0]
   s3_control:                      # skill against chance, corrected across rule families
-    random_runs_min: 500
+    random_runs_min: 500           # a family of ONE rule
+    random_runs_min_several_rules: 2000   # amendment 1 (decision 16 s.15): a family of two or more rules
     pool: candidate_pool           # names drawn from the rule's own candidate pool (timing sleeves: random times)
     statistic: sharpe_p_value      # (1 + random Sharpes at or above the rule's) / (runs + 1)
     within_family: bonferroni      # the family's p-value = its smallest member p-value x the number of members
@@ -57,6 +58,7 @@ sleeve:
     series: active_return
     trials: family                 # configurations logged for the family's rules, not the whole registry
     dsr_min: 0.90                  # = 1 - level
+    variance_floor: one_over_t_minus_1   # amendment 1: V = max(variance of the family's trial Sharpes, 1/(T-1))
   s5_universe: point_in_time       # S1 to S4 hold on the point-in-time universe
   s6_neighbours:                   # every pre-declared neighbour has a positive active return
     each: active_return_positive
@@ -98,6 +100,18 @@ book:
     data_repairs: true
     benchmark: spy_total_return
 
+# ---------------------------------------------------------------- evidence-based sleeves (decision 16 s.14)
+# Product, 21 Nov 2026: a sleeve whose signal has strong published, replicated evidence may join a book without
+# passing S3 and S4, labelled, inside one budget for all such sleeves together. Amendment 1 (s.15) builds it. A
+# rule takes this tier only when its entry under `families` says `tier: evidence_based` and cites the evidence
+# (`evidence:`), both written with its pre-registration before the first run.
+evidence_based:
+  label: "evidence-based, not proven here"   # in every report and wherever the book shows the sleeve
+  marks_required: [s1, s2, s5, s6]           # every other mark holds
+  reported_not_judged: [s3, s4]              # still computed and printed; the family stays in the count
+  book_budget_max_pct: 10.0                  # all such sleeves of one book together, % of the book's equity
+  holdout_check: required                    # the final check of s.7, under one opening of the hold-out
+
 # ---------------------------------------------------------------- the final check on the hold-out
 # After every research-window mark holds, the hold-out is opened ONCE (config/holdout.yaml, purpose final_check).
 # The check asks whether the hold-out looks like the research window, not whether it is significant on its own:
@@ -126,6 +140,16 @@ statistics:
   sharpe_warning_above: 1.0
   benchmark: SPY total return
   risk_free: tbill                 # Sharpe and alpha above the 3-month Treasury bill (ticket 2.4)
+
+# ---------------------------------------------------------------- books (amendment 1, decision 16 s.15)
+# A book is judged by the book test, not as a sleeve, so it is in no family and does not change the count of the
+# correction. Its pre-registration adds it here in the same pull request, before its first run, with the fields of
+# decision 16 s.8 item 5: its components and the fixed weight or budget of each return sleeve (% of the book).
+#   <book>:
+#     components: [index_core, ...]       # the construction: an index core, overlays, sleeves
+#     sleeves: {<rule>: <budget %>}        # every return sleeve and its budget; {} for a book without one
+#     v3_declared: true                    # its pre-registration declares the gate v3 fields
+books: {}
 
 # ---------------------------------------------------------------- rule families
 # One family per idea (the published effect a rule leans on). The correction counts FAMILIES: every family listed

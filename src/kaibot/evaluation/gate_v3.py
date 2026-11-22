@@ -20,6 +20,12 @@ research harness, cost model v1, today's stock list or price-only SPY is `provis
 pre-registration does not declare its gate v3 role, kind, family and candidate pool (every rule registered
 before decision 16), which is why a re-score of an existing report can fail but can never pass.
 
+Amendment 1 (decision 16 section 15, ticket 2.12): S4's trial-Sharpe variance has a floor of 1/(T-1); a family
+of two or more rules needs 2,000 control runs; the selection benchmark's first session holds the exposure of the
+close before the window; the evidence-based tier of section 14 (`tier: evidence_based` in a rule's entry: S1, S2,
+S5 and S6 judged, S3 and S4 printed, verdict `evidence_based`, labelled, at most 10% of a book together); and a
+book is listed under `books:` (not in a family) with its components and sleeve budgets.
+
 Every series is cut to the research window first. Sessions in the hold-out are dropped before any number is
 computed and are counted in the report (`sessions_in_holdout_dropped`).
 """
@@ -56,6 +62,8 @@ REQUIRED = {
     "statistics": ("periods_per_year", "sharpe_haircut", "sharpe_warning_above"),
 }
 KINDS = ("selection", "timing")
+TIERS = ("full", "evidence_based")
+EVIDENCE_LABEL = "evidence-based, not proven here"
 SCORABLE_CONTROLS = ("candidate_pool", "random_timing")
 
 
@@ -90,6 +98,21 @@ class GateV3:
                 seen[rule] = fam
             if not body.get("rules"):
                 raise ValueError(f"config/gate_v3.yaml: family {fam} has no rule")
+            for rule, r in (body.get("rules") or {}).items():
+                tier = r.get("tier", "full")
+                if tier not in TIERS:
+                    raise ValueError(f"config/gate_v3.yaml: {rule}: tier must be one of {TIERS}")
+        for name, b in (cfg.get("books") or {}).items():
+            if name in seen:
+                raise ValueError(f"config/gate_v3.yaml: {name} is both a book and a rule")
+            if not isinstance(b, dict) or not isinstance(b.get("components"), list) \
+                    or not isinstance(b.get("sleeves"), dict) or not isinstance(b.get("v3_declared"), bool):
+                raise ValueError(f"config/gate_v3.yaml: books.{name} needs `components` (a list), `sleeves` (rule: "
+                                 "budget %) and `v3_declared`")
+            for rule, pct in b["sleeves"].items():
+                if isinstance(pct, bool) or not isinstance(pct, int | float) or not 0 < float(pct) <= 100:
+                    raise ValueError(f"config/gate_v3.yaml: books.{name}.sleeves.{rule}: the budget must be a "
+                                     "number in (0, 100] (% of the book)")
         if cfg["bootstrap"]["method"] != "stationary":
             raise ValueError("config/gate_v3.yaml: only the stationary bootstrap is implemented")
         return cls(cfg, hashlib.sha256(raw).hexdigest())
@@ -119,6 +142,17 @@ class GateV3:
     def rule(self, rule: str) -> dict | None:
         fam = self.family_of(rule)
         return None if fam is None else dict(self.families[fam]["rules"][rule])
+
+    def book(self, name: str) -> dict | None:
+        b = (self.cfg.get("books") or {}).get(name)
+        return None if b is None else dict(b)
+
+    def tier(self, rule: str) -> str:
+        return (self.rule(rule) or {}).get("tier", "full")
+
+    @property
+    def evidence(self) -> dict:
+        return dict(self.cfg.get("evidence_based") or {})
 
     def cut(self, s: pd.Series, name: str = "returns") -> tuple[pd.Series, int, int]:
         """The series on the research window, and how many sessions were dropped before and after it."""
@@ -213,16 +247,20 @@ def family_p(gate: GateV3, rule_p: Mapping[str, float | None]) -> dict[str, floa
 # ---------------------------------------------------------------- active return
 
 
-def benchmark(gate: GateV3, kind: str, spy: pd.Series, exposure: pd.Series, rf: pd.Series | None) -> pd.Series:
+def benchmark(gate: GateV3, kind: str, spy: pd.Series, exposure: pd.Series, rf: pd.Series | None,
+              prior: float = 0.0) -> pd.Series:
     """The sleeve's benchmark: the same amount of SPY, the rest in Treasury bills (`rf`; None: at 0%).
 
     selection: yesterday's close exposure times today's SPY return (`mtm.exposure_matched`): the sleeve's own
     timetable of being invested is copied, so only the choice of names is judged.
     timing: the sleeve's AVERAGE exposure times SPY, every session: for an SPY-only rule the timetable is the
-    skill, so it must not be copied."""
+    skill, so it must not be copied.
+
+    `prior` (amendment 1): the exposure at the close before the first session (0 when the account starts on it),
+    so a sleeve invested going into the window is compared with SPY held at that exposure on its first session."""
     how = gate.cfg["sleeve"]["benchmark"][kind]
     e = exposure.to_numpy(dtype=float)
-    held = np.r_[0.0, e[:-1]] if how == "path_matched" else np.full(e.size, float(e.mean()))
+    held = np.r_[float(prior), e[:-1]] if how == "path_matched" else np.full(e.size, float(e.mean()))
     out = held * spy.to_numpy(dtype=float)
     if rf is not None:
         out = out + np.clip(1.0 - held, 0.0, 1.0) * rf.to_numpy(dtype=float)
@@ -239,12 +277,18 @@ def active_return(gate: GateV3, kind: str, acc: Account, tbill: pd.Series | None
     if net.size < 30:
         raise ValueError(f"{net.size} sessions on the research window: nothing to judge")
     net, spy = mtm.align(net, acc.spy)
-    e = mtm.align(net, acc.exposure)[1]
+    full = mtm.dated(acc.exposure, "exposure")
+    e = mtm.align(net, full)[1]
+    before_first = full[full.index < net.index[0]]
+    prior = float(before_first.iloc[-1]) if len(before_first) and math.isfinite(before_first.iloc[-1]) else 0.0
+    held = np.r_[prior, e.to_numpy(dtype=float)[:-1]]  # the exposure going into each session (amendment 1)
     rf = mtm.tbill_daily(tbill, net.index) if tbill is not None else None
-    mine = net if rf is None else pd.Series(mtm.with_cash_yield(net, e, rf), index=net.index)
-    bench = benchmark(gate, kind, spy, e, rf)
+    mine = net if rf is None else pd.Series(net.to_numpy() + np.clip(1.0 - held, 0.0, 1.0) * rf.to_numpy(),
+                                            index=net.index)
+    bench = benchmark(gate, kind, spy, e, rf, prior=prior)
     costs = mtm.align(net, mtm.dated(acc.costs, "costs"))[1] if acc.costs is not None else None
     return {"active": mine - bench, "net": net, "with_cash": mine, "benchmark": bench, "spy": spy, "exposure": e,
+            "held": held,
             "rf": rf, "costs": costs, "dropped_before": before, "dropped_holdout": after}
 
 
@@ -289,10 +333,11 @@ def _path_cagr(paths: np.ndarray, periods: int) -> np.ndarray:
 
 
 def _gate_a(gate: GateV3, rule: str, prereg: Prereg | None, registry: Registry | None,
-            first_run_at: datetime | None, source: Mapping | None, need: Mapping) -> tuple[dict, list[str]]:
+            first_run_at: datetime | None, source: Mapping | None, need: Mapping,
+            role: str = "sleeve") -> tuple[dict, list[str]]:
     src = dict(source or {})
     reasons = [f"{k} is {src.get(k, 'not stated')!r}, a pass needs {v!r}" for k, v in need.items() if src.get(k) != v]
-    entry = gate.rule(rule)
+    entry = gate.rule(rule) if role == "sleeve" else gate.book(rule)
     first = None if prereg is None else (prereg.first_committed_at or prereg.committed_at)
     before = None if first is None or first_run_at is None else _utc(first) <= _utc(first_run_at)
     logged = {r.get("prereg_sha256") for r in (registry.rows if registry is not None else ())
@@ -303,8 +348,13 @@ def _gate_a(gate: GateV3, rule: str, prereg: Prereg | None, registry: Registry |
               "neighbours_at_most": None if prereg is None else
               len(prereg.neighbours) <= gate.cfg["gate_a"]["max_neighbours"],
               "committed_before_first_run": before, "unchanged_since_logged_runs": unchanged,
-              "in_a_family": entry is not None, "family": gate.family_of(rule),
               "declares_gate_v3": bool(entry and entry.get("v3_declared"))}
+    if role == "sleeve":
+        checks.update(in_a_family=entry is not None, family=gate.family_of(rule), tier=gate.tier(rule))
+    else:  # amendment 1: a book is listed under `books:`; it is in no family and not in the correction's count
+        checks.update(listed_as_book=entry is not None,
+                      components=list((entry or {}).get("components") or []),
+                      sleeve_budgets=dict((entry or {}).get("sleeves") or {}))
     if prereg is None:
         reasons.append("no pre-registration was supplied (Gate A)")
     else:
@@ -317,9 +367,27 @@ def _gate_a(gate: GateV3, rule: str, prereg: Prereg | None, registry: Registry |
             reasons.append("the pre-registration is not shown to be committed before the first run (Gate A)")
         if unchanged is False:
             reasons.append("a run of this rule was logged with a different pre-registration hash (Gate A)")
-    if entry is None:
+    if entry is None and role == "book":
+        reasons.append("the book is not listed under `books:` of config/gate_v3.yaml: its pre-registration adds "
+                       "it, with its components and sleeve budgets, before its first run")
+    elif entry is None:
         reasons.append("the rule is in no family of config/gate_v3.yaml: it must be added before its first run")
-    elif not entry.get("v3_declared"):
+    elif role == "sleeve" and entry.get("tier") == "evidence_based" and not str(entry.get("evidence") or "").strip():
+        reasons.append("the rule's entry takes the evidence-based tier but cites no evidence (decision 16 "
+                       "section 14: strong published, replicated evidence, cited in the pre-registration)")
+    if role == "sleeve" and entry is not None and entry.get("tier") == "evidence_based" and prereg is not None:
+        # QA #542: section 14 puts the citation and the label in the pre-registration itself, not only in the config
+        secs = dict(prereg.sections or {})
+        label = str(gate.evidence.get("label", EVIDENCE_LABEL))
+        if not str(secs.get("evidence") or "").strip():
+            reasons.append("the rule takes the evidence-based tier but its pre-registration's published-evidence "
+                           "section is empty (decision 16 section 14)")
+        if label.lower() not in " ".join(str(v) for v in secs.values()).lower():
+            reasons.append(f"the rule takes the evidence-based tier but its pre-registration does not carry the "
+                           f"label \"{label}\" (decision 16 section 14)")
+        checks.update(prereg_cites_evidence=bool(str(secs.get("evidence") or "").strip()),
+                      prereg_carries_label=label.lower() in " ".join(str(v) for v in secs.values()).lower())
+    if entry is not None and not entry.get("v3_declared"):
         reasons.append("the pre-registration does not declare its gate v3 role, kind, family and candidate pool "
                        "(it predates decision 16): this is a re-score, not a verdict")
     return checks, reasons
@@ -382,7 +450,12 @@ def s3(gate: GateV3, rule: str, control: Any, other_family_p: Mapping[str, float
     decision 16): one of the `existing_control` values of config/gate_v3.yaml."""
     c = gate.cfg["sleeve"]["s3_control"]
     fam = gate.family_of(rule)
-    limit = {"runs_min": int(c["random_runs_min"]), "pool": c["pool"], "family_wise_level": gate.level,
+    several = fam is not None and len(gate.families[fam]["rules"]) > 1
+    # amendment 1: a family of several rules multiplies its smallest p-value by its size, so 500 runs (p >= 1/501)
+    # can hardly clear the correction; such a family needs 2,000 or more
+    runs_min = int(c.get("random_runs_min_several_rules", c["random_runs_min"])) if several \
+        else int(c["random_runs_min"])
+    limit = {"runs_min": runs_min, "pool": c["pool"], "family_wise_level": gate.level,
              "families": len(gate.families)}
     n = control_numbers(control)
     if fam is None:
@@ -433,10 +506,21 @@ def s4(gate: GateV3, rule: str, active: pd.Series, registry: Registry | None) ->
     if n < 1:
         return _mark(None, {"family": fam, "configurations": 0}, limit,
                      "the registry holds no trial of this family: the run itself must be logged first")
-    d = mtm.deflated_sharpe(active, n, var, periods=gate.stats_kw["periods"])
+    t = int(np.asarray(active).size)
+    floor = None
+    if gate.cfg["sleeve"]["s4_deflated_sharpe"].get("variance_floor") == "one_over_t_minus_1" and t > 1:
+        # amendment 1: near-identical configurations have almost no spread of Sharpes, which makes the hurdle
+        # vanish; the spread used is never below the sampling variance of an unskilled Sharpe over T sessions
+        floor = 1.0 / (t - 1)
+    used = var if floor is None else max(var or 0.0, floor)
+    d = mtm.deflated_sharpe(active, n, used, periods=gate.stats_kw["periods"])
     met = bool(d.dsr >= lim)
+    if floor is not None:
+        limit["variance_floor"] = "1/(T-1)"
     return _mark(met, {**asdict(d), "family": fam, "configurations": n, "trial_sharpes_used": len(sharpes) if var
-                       else 0, "whole_registry_configurations": registry.configurations},
+                       else 0, "whole_registry_configurations": registry.configurations, "sessions_judged": t,
+                       "variance_of_trial_sharpes": var, "variance_floor": floor,
+                       "variance_floor_binds": bool(floor is not None and (var is None or var < floor))},
                  limit, "" if met else f"deflated Sharpe {d.dsr:.3f} is below {lim:g}")
 
 
@@ -469,6 +553,9 @@ def evaluate_sleeve(gate: GateV3, *, rule: str, account: Account, pit_account: A
     kind = kind or (entry or {}).get("kind") or "selection"
     control_source = control_source or (entry or {}).get("existing_control")
     marks, a = _marks_s1_to_s4(gate, rule, kind, account, tbill, registry, other_family_p, control_source)
+    tier = gate.tier(rule)
+    required = list(gate.evidence.get("marks_required") or ("s1", "s2", "s5", "s6")) \
+        if tier == "evidence_based" else ["s1", "s2", "s3", "s4", "s5", "s6"]
     want = gate.cfg["sleeve"]["s5_universe"]
     if account.universe == want:
         got, where = {k: v["met"] for k, v in marks.items()}, "this run is on the point-in-time universe"
@@ -478,15 +565,27 @@ def evaluate_sleeve(gate: GateV3, *, rule: str, account: Account, pit_account: A
         where = "a second run on the point-in-time universe"
     else:
         got, where = None, ""
+    # the evidence-based tier asks S5 of the marks it judges (S1, S2), not of the printed S3 and S4
+    which = "S1 to S4" if tier != "evidence_based" else ", ".join(k.upper() for k in required if k in
+                                                                    ("s1", "s2", "s3", "s4"))
+    held = None if got is None else _all([v for k, v in got.items() if k in required])
     marks["s5"] = _mark(None, {"universe": account.universe}, {"universe": want},
                         "no run on the point-in-time universe was supplied") if got is None else \
-        _mark(_all(list(got.values())), {"universe": want, "source": where, **got}, {"universe": want},
-              {True: "", False: "S1 to S4 do not all hold on the point-in-time universe",
-               None: "S1 to S4 could not all be scored on the point-in-time universe"}[_all(list(got.values()))])
+        _mark(held, {"universe": want, "source": where, **got}, {"universe": want},
+              {True: "", False: f"{which} do not all hold on the point-in-time universe",
+               None: f"{which} could not all be scored on the point-in-time universe"}[held])
     marks["s6"] = _neighbours(gate, kind, neighbours, prereg.neighbours if prereg is not None else None, tbill)
 
     checks, reasons = _gate_a(gate, rule, prereg, registry, first_run_at, source,
                               gate.cfg["sleeve"]["final_requires"])
+    verdict = _verdict(marks, reasons)
+    for k, m in marks.items():
+        m["judged"] = k in required
+    if tier == "evidence_based" and verdict != "pass":
+        # decision 16 section 14: S3 and S4 are printed, not judged; the verdict says so and never says "pass"
+        part = _verdict({k: marks[k] for k in required}, reasons)
+        verdict = "evidence_based" if part == "pass" else part
+    label = gate.evidence.get("label", EVIDENCE_LABEL) if verdict == "evidence_based" else None
     kw = gate.stats_kw
     stats = {"window": [a["net"].index[0].date().isoformat(), a["net"].index[-1].date().isoformat()],
              "kind": kind, "benchmark": gate.cfg["sleeve"]["benchmark"][kind],
@@ -507,7 +606,9 @@ def evaluate_sleeve(gate: GateV3, *, rule: str, account: Account, pit_account: A
                    "sessions_before_window_dropped": a["dropped_before"],
                    "sessions_in_holdout_dropped": a["dropped_holdout"], "marks": marks,
                    "provisional": bool(reasons), "provisional_reasons": reasons,
-                   "verdict": _verdict(marks, reasons), "can_pass": not reasons, "statistics": stats})
+                   "verdict": verdict, "tier": tier, "label": label,
+                   "needs_holdout_check": verdict in ("pass", "evidence_based"),
+                   "can_pass": not reasons, "statistics": stats})
 
 
 def _neighbours(gate: GateV3, kind: str, neighbours: Mapping[str, Account] | None,
@@ -621,14 +722,17 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                   neighbours: Mapping[str, pd.Series] | None = None, sleeves: Mapping[str, str] | None = None,
                   prereg: Prereg | None = None, source: Mapping[str, Any] | None = None,
                   registry: Registry | None = None, first_run_at: datetime | None = None,
-                  tbill: pd.Series | None = None, as_of: datetime | None = None) -> dict:
+                  tbill: pd.Series | None = None, as_of: datetime | None = None,
+                  budgets: Mapping[str, float] | None = None) -> dict:
     """The book test: marks B1 to B6 for the whole account that would trade.
 
     account: the combined book's run through the engine (one account: shared cash, one per-name cap), not a
     weighted sum of sleeve results. neighbours: daily net returns of each pre-declared neighbour of the book.
     sleeves: the sleeve-test verdict of every return sleeve inside the book, by rule name; an index core and a
     risk overlay are part of the book's construction and are not listed (a book with no return sleeve passes B6
-    with an empty mapping, which must be given explicitly)."""
+    with an empty mapping, which must be given explicitly). A sleeve's verdict `evidence_based` (decision 16
+    section 14) is admitted when the book's entry under `books:` (or `budgets`) gives it a budget and all such
+    sleeves together take at most `evidence_based.book_budget_max_pct` of the book."""
     net, spy, costs, before, after = _cut_book(gate, account)
     marks = _book_1_to_3(gate, account)
     want = gate.cfg["book"]["b4_universe"]
@@ -658,15 +762,45 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                             {"neighbours_pass": "b1"},
                             "; ".join(f"{n}: {'no result supplied' if v is None else 'fails B1'}"
                                       for n, v in res.items() if v is not True))
+    cap = float(gate.evidence.get("book_budget_max_pct", 10.0))
+    limit6 = {"every_return_sleeve": "pass", "or": "evidence_based", "evidence_based_budget_max_pct": cap}
     if sleeves is None:
-        marks["b6"] = _mark(None, {}, {"every_return_sleeve": "pass"},
+        marks["b6"] = _mark(None, {}, limit6,
                             "the sleeve verdicts were not supplied (an empty mapping for a book without sleeves)")
     else:
-        bad = {k: v for k, v in sleeves.items() if v != "pass"}
-        marks["b6"] = _mark(not bad, {"sleeves": dict(sleeves)}, {"every_return_sleeve": "pass"},
-                            "; ".join(f"{k}: {v}" for k, v in bad.items()))
+        # QA #542: a listed book's budgets are its pre-registered record and cannot be replaced by the caller;
+        # `budgets` is read only for a book not (yet) under `books:` (which is provisional by Gate A anyway)
+        listed = gate.book(book)
+        have = dict((listed.get("sleeves") or {}) if listed is not None else (budgets or {}))
+        bad, eb = {}, {}
+        for k, v in sleeves.items():
+            if v == "pass":
+                continue
+            if v == "evidence_based" and gate.tier(k) != "evidence_based":
+                # QA #542: the verdict string alone cannot admit a sleeve; its entry must take the tier (with
+                # its evidence cited) in config/gate_v3.yaml
+                bad[k] = "evidence_based, but its entry in config/gate_v3.yaml does not take the evidence-based tier"
+            elif v == "evidence_based" and k in have:
+                eb[k] = float(have[k])
+            elif v == "evidence_based":
+                bad[k] = "evidence_based, but the book gives it no budget"
+            else:
+                bad[k] = v
+        total = sum(eb.values())
+        why = [f"{k}: {v}" for k, v in bad.items()]
+        if total > cap + 1e-9:
+            why.append(f"evidence-based sleeves take {total:g}% of the book together, at most {cap:g}% is allowed")
+        # QA #542: every return sleeve the book lists needs a verdict; a missing one leaves B6 unknown
+        missing = sorted(set(have) - set(sleeves)) if listed is not None else []
+        state = False if why else (None if missing else True)
+        if missing:
+            why.append("no sleeve verdict supplied for " + ", ".join(missing))
+        label = gate.evidence.get("label", EVIDENCE_LABEL)
+        marks["b6"] = _mark(state, {"sleeves": dict(sleeves), "evidence_based_budget_pct": total,
+                                    "labels": {k: label for k in eb}, "missing_verdicts": missing},
+                            limit6, "; ".join(why))
     checks, reasons = _gate_a(gate, book, prereg, registry, first_run_at, source,
-                              gate.cfg["book"]["final_requires"])
+                              gate.cfg["book"]["final_requires"], role="book")
     kw = gate.stats_kw
     stats = {"window": [net.index[0].date().isoformat(), net.index[-1].date().isoformat()],
              "book": mtm.curve(net, **kw), "spy": mtm.curve(spy, **kw),
@@ -761,6 +895,9 @@ def render_sleeve(rep: dict) -> str:
     """The sleeve test as Markdown."""
     st, m = rep["statistics"], rep["marks"]
     out = _head(rep, "Gate v3, sleeve test", SLEEVE_LABELS)
+    if rep.get("tier") == "evidence_based":
+        out += ["", "Tier: evidence-based (decision 16 section 14). S3 and S4 are printed, not judged."
+                    + (f" This sleeve is **{rep['label']}**: it has not passed gate v3." if rep.get("label") else "")]
     n1 = m["s1"]["numbers"]
     out += ["", f"- Family: {rep['family'] or 'none'}. Kind: {st['kind']} (benchmark: SPY, {st['benchmark']}; "
                 f"cash: {st['cash']}). Mean exposure {_pct(st['mean_exposure'], 0)}.",
