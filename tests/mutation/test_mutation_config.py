@@ -56,3 +56,36 @@ def test_the_report_lists_survivors_and_marks_a_spent_budget():
     text = mr.summary([rep])
     assert "| lease |" in text and "budget spent" in text and "75%" in text
     assert "x_holder_id__mutmut_10" in text and "```diff" in text
+
+
+def test_an_unreadable_results_file_falls_back_to_the_last_whole_copy(tmp_path):
+    """#561: the stop at the end of the budget landed while mutmut rewrote its results file (it was empty)."""
+    meta = tmp_path / "mutants" / "src" / "kaibot" / "engine" / "lease.py.meta"
+    meta.parent.mkdir(parents=True)
+    meta.with_name(meta.name + ".good").write_text('{"exit_code_by_key": {"m_1": 1, "m_2": 0, "m_3": null}}')
+    meta.write_text("")
+    got = mr.results(tmp_path, "src/kaibot/engine/lease.py")
+    assert got == {"m_1": "killed", "m_2": "survived", "m_3": "not checked"}
+
+
+def test_the_budget_stop_keeps_the_results_a_torn_write_would_lose(tmp_path, monkeypatch):
+    """A stand-in for mutmut: writes its results, then on the interrupt empties the file (the torn write) and exits."""
+    fake = tmp_path / "fake_mutmut.py"
+    fake.write_text(
+        "import json, signal, sys, time\n"
+        "from pathlib import Path\n"
+        "meta = Path('mutants/x.py.meta'); meta.parent.mkdir(parents=True, exist_ok=True)\n"
+        "meta.write_text(json.dumps({'exit_code_by_key': {'a': 1, 'b': 0}}))\n"
+        "def torn(*_):\n"
+        "    meta.write_text(''); sys.exit(1)\n"
+        "signal.signal(signal.SIGINT, torn)\n"
+        "time.sleep(60)\n")
+    monkeypatch.setattr(mr, "mutmut_bin", lambda: [sys.executable, str(fake)])
+    monkeypatch.setattr(mr, "SNAPSHOT_S", 0.2)
+    work = tmp_path / "work"
+    work.mkdir()
+    with open(tmp_path / "log", "w") as log:
+        complete, took = mr.run_mutmut(work, 1.5 / 60, 1, log, work / "mutants" / "x.py.meta")
+    assert not complete and took < 20
+    assert (work / "mutants" / "x.py.meta").read_text() == ""  # the stop tore the file, as on the runner
+    assert mr.results(work, "x.py") == {"a": "killed", "b": "survived"}

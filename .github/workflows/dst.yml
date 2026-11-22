@@ -37,12 +37,14 @@ jobs:
         env: {KAIBOT_DST_SEEDS: "200"}
         run: uv run pytest tests/dst -q -p no:cacheprovider -n 4 --dist worksteal --durations=5
   nightly-soak:
+    # runs the repository's code with a read-only token; `soak-report` (no repository code) writes the issue (#561)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
-      issues: write  # to open the issue with the failing seed: the only thing this job writes
+    outputs:
+      outcome: ${{ steps.soak.outcome }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}
@@ -60,13 +62,35 @@ jobs:
         run: |
           { echo '### Deterministic simulation: nightly soak'; cat soak.md 2>/dev/null || tail -40 soak.log; } \
             >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: dst-soak
+          path: |
+            soak.md
+            soak.log
+          if-no-files-found: ignore
+          retention-days: 30
+  soak-report:
+    # the soak found a failing seed: opens an issue (or comments on the open one). Runs no repository code: it reads
+    # the soak's report and log from their artifact.
+    needs: nightly-soak
+    if: always() && needs.nightly-soak.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with the failing seed: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: dst-soak}
+        continue-on-error: true
       - name: open an issue with the failing seed
-        if: failure() && steps.soak.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT: ${{ github.sha }}
         run: |
+          touch soak.log
           {
             echo "The nightly soak of the deterministic simulation (\`tests/dst/\`) found a seed that breaks an invariant."
             echo
