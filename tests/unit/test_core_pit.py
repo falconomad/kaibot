@@ -556,7 +556,7 @@ def test_spy_total_return_is_read_from_the_store_for_a_minute_bar_run(pit_runs, 
 def test_run_experiments_has_the_core_pit_set_and_it_is_documented():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
     for needle in ('"${1:-}" = "core_pit"', "--universe pit", "--summary --set core_pit",
-                   "experiments_core_pit_summary.md", 'KAIBOT_CORE_CONTROL_RUNS:-500'):
+                   "experiments_core_pit_summary.md", 'KAIBOT_CORE_CONTROL_RUNS:-}'):
         assert needle in sh, needle
     assert sh.index('"${1:-}" = "core_pit"') < sh.index("No .env found")  # needs no .env
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "run_experiments.sh")]).returncode == 0
