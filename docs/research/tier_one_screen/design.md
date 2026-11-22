@@ -1,6 +1,7 @@
 # A tier-one screen so only survivors get an engine run (design; M11 ticket 2.11, issue #462)
 
-- **Status:** design, for Product. It changes no code, no gate mark, no config and nothing live. The code and the
+- **Status:** design, for Product. **Revised 22 Nov 2026 (#568, QA on #557):** the level inside a batch is now the
+  one the budget sets (section 4), and screen candidates do not count in S4 (section 6; Product's ruling, 22 Nov 2026). It changes no code, no gate mark, no config and nothing live. The code and the
   config come in a later pull request, written against this document. Any change to the marks below after that
   pull request needs a decision record (decision 16 section 13).
 - **Written by:** Quant research, 22 Nov 2026.
@@ -44,18 +45,28 @@ stocks the wrong way gets a negative coefficient and does not survive.
 
 ## 4. The threshold, adjusted for the batch
 
-- Inside a batch: **Benjamini-Hochberg at q = 0.10** over the batch's p-values. This is the procedure decision 16
-  section 4 names for the screen: it bounds the expected share of false survivors, and it pays off when many
-  candidates are screened.
-- Across batches, the budget for testing in sequence: **alpha-investing** (Foster and Stine, 2008, cited from memory)
-  with an initial wealth of 0.05, a payout of 0.025 per survivor, and each batch spending at most half of the wealth
-  left. Batch b runs Benjamini-Hochberg at the level it is allowed to spend, `q_b`. Only survivors that are later
-  **confirmed by the engine** (a gate v3 verdict of `pass` or `evidence_based`) earn the payout. A programme that
-  screens many ideas with no confirmed survivor therefore runs out of budget and must stop screening until Product
-  resets it by decision record. That is the bound decision 16 section 6 asked for.
-- The wealth ledger is one file committed in the repository, `docs/research/tier_one_screen/budget.md`, append-only,
-  one line per batch (date, batch id, wealth before, q spent, survivors, wealth after). A batch whose line is not
-  committed before its run does not count as screened.
+One level for the whole programme of screening: **a marginal false discovery rate of 0.10** (Foster and Stine's mFDR with
+eta = 1 - alpha: the expected number of false survivors over the expected number of survivors plus 0.9, across every
+batch ever screened). It is reached by
+alpha-investing over batches (Foster and Stine, 2008; the batch form of Zrnic, Jiang, Ramdas and Jordan, 2020; both
+cited from memory). Inside each batch Benjamini-Hochberg runs at the batch's own level `q_b`, which the budget sets.
+**There is no fixed in-batch level of 0.10.**
+
+| Setting | Value | Why |
+|---|---|---|
+| Programme-wide level | mFDR 0.10 | the one-in-ten of decision 16, applied to screening |
+| Initial wealth W_0 | **0.09** = 0.10 x (1 - 0.10) | the starting wealth Foster and Stine's bound allows at this level (W_0 at most alpha x (1 - alpha)) |
+| Level of batch b | `q_b` = half of the wealth left before it, never above 0.10 | so the budget can never be spent in one batch |
+| Cost of a batch | `q_b / (1 - q_b)` is deducted from the wealth when the batch runs, whatever it finds | Foster and Stine's cost of a test at level `q_b` |
+| Payout | **0.10** to the wealth for each survivor of batch b that the engine later **confirms** (a gate v3 verdict of `pass`), credited when that verdict is merged. An `evidence_based` verdict earns no payout: it has not passed S3 and S4 and is "not proven here" (decision 16 section 14) | only confirmed discoveries refill the budget |
+| Out of budget | below 0.005 of wealth no batch may run | Product resets the budget only by a decision record |
+
+In numbers: the first batch runs Benjamini-Hochberg at **q_1 = 0.045** and costs 0.047. The second, without a
+confirmed survivor in between, runs at 0.0214, and every later batch at about half the one before. A programme that screens many ideas and confirms none therefore
+runs out of budget. That is the bound for testing in sequence that decision 16 section 6 asked for. The ledger is one
+file committed in the repository, `docs/research/tier_one_screen/budget.md`, append-only, one line per batch (date,
+batch id, wealth before, q_b, survivors, wealth after) and one line per payout. A batch whose line is not committed
+before its run does not count as screened.
 
 ## 5. What a survivor gets, and what a non-survivor gets
 
@@ -65,21 +76,29 @@ stocks the wrong way gets a negative coefficient and does not survive.
 - A **non-survivor** is recorded and is not run through the engine. It may come back only as a new candidate in a
   later batch, with its own budget cost, and never with changed settings in the same batch.
 
-## 6. Every candidate is a trial
+## 6. Every candidate is a trial, and the screen changes no mark
 
-Each candidate is logged in the trial registry (`data/trials.jsonl`, `evaluation/trials.append`) with n_trials 1,
-its family ID, its batch ID, the screen's statistic and p-value, the batch's q and the code and config hashes.
-Survivor or not, it counts toward its family's configurations in S4 (decision 16: the deflated Sharpe counts the
-family's own configurations). The screen therefore makes later verdicts in a family stricter, as it should.
+Each candidate is logged in the trial registry (`data/trials.jsonl`, `evaluation/trials.append`) under its own
+candidate name, `screen:<batch id>:<candidate>` in the row's `strategy` field (never the name of a rule listed in
+`config/gate_v3.yaml`, so a survivor that later becomes a listed rule does not carry its screen row into S4), with n_trials 1, `variant: screen`, its family ID, its batch ID, the screen's statistic and
+p-value, the batch's `q_b` and the code and config hashes. The registry's whole count therefore includes it.
+
+**It does not enter S4. Product's ruling, 22 Nov 2026 (on #569):** screen candidates do not count in S4. S4 counts the
+configurations of a pre-registered rule, the configurations logged for the rules its family lists in
+`config/gate_v3.yaml` (decision 16 section 4), and a screen candidate is not such a rule. The screen's own
+multiplicity is handled by its own budget: Benjamini-Hochberg inside each batch at the level the alpha-investing
+budget sets (section 4). Candidates are still logged as trials (above), so the registry's whole count includes them.
+A survivor that becomes a rule is listed in its family with its pre-registration, and from then on its engine runs
+count in S4 like any rule's. No mark changes, so no decision record is needed.
 
 ## 7. What the code will be (the next pull request; not written yet)
 
 | File | What |
 |---|---|
-| `config/screen.yaml` | the statistic, the horizon (21 sessions), the charge (10 bp), q (0.10), the alpha-investing settings (0.05, 0.025, at most half spent) |
+| `config/screen.yaml` | the statistic, the horizon (21 sessions), the charge (10 bp), the mFDR level (0.10), the alpha-investing settings (W_0 0.09, half spent per batch, payout 0.10, floor 0.005) |
 | `src/kaibot/evaluation/screen.py` | pure: the rank IC per decision day, its Newey-West t and p, Benjamini-Hochberg at q_b, the alpha-investing ledger |
 | `scripts/screen_batch.py` | reads a batch file (`docs/research/tier_one_screen/batches/<id>.yaml`, committed before the run), the store, `holdout.enforce`, writes the batch report and one trial row per candidate |
-| `tests/unit/test_screen.py` | the rank IC by hand; Benjamini-Hochberg by hand; on synthetic panels with no signal, the share of batches with any survivor at most about q; a planted signal survives; the ledger runs out with no confirmed survivor; a batch file changed after its run is refused |
+| `tests/unit/test_screen.py` | the rank IC by hand; Benjamini-Hochberg by hand at q_b; the batch levels 0.045, 0.0214, ... with no payout; on synthetic batches with no signal, false survivors over survivors at most about 0.10 across many batches; a planted signal survives; the ledger runs out with no confirmed survivor; a batch file changed after its run is refused; a candidate's trial row does not change S4's count |
 
 ## 8. Mac command (once the code exists)
 
@@ -89,9 +108,13 @@ PYTHONPATH=src python scripts/screen_batch.py --batch docs/research/tier_one_scr
 
 ## 9. Decisions for Product
 
-1. q = 0.10 inside a batch, and the alpha-investing settings (0.05 initial, 0.025 payout, at most half spent per
-   batch).
+1. The programme-wide mFDR level (0.10) and the alpha-investing settings (W_0 0.09, half spent per batch, payout
+   0.10 per confirmed survivor, floor 0.005).
 2. Whether the screen is required before every new rule's engine run, or only for batches of three or more
-   candidates. The proposal: required for every new **signal**, and not for a re-scaled or re-packaged rule that
-   was already judged (such as `trend_momentum_sleeve`, #550).
+   candidates. The proposal: required for every new **signal**, and not for a re-scaled or re-packaged rule that was
+   already judged (such as `trend_momentum_sleeve`, #550).
 3. Who may reset the budget (proposal: Product, by decision record).
+4. Whether an `evidence_based` verdict should also earn the payout. Not proposed here (section 4 pays on `pass`
+   only, QA on #569).
+
+Settled: screen candidates do not count in S4 (Product, 22 Nov 2026; section 6).
