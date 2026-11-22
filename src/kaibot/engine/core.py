@@ -449,8 +449,8 @@ class Engine:
         """Every venue order id the engine knows as its own outside the order manager: the open intraday positions'
         orders and legs (remembered here, so a leg cancelled or replaced later stays known), the full-flatten sales
         and everything remembered before."""
-        self._remember_ids(*(x for p in self.pos.values()
-                             for x in (p.order_id, p.stop_order_id, p.target_order_id, p.exit_order_id)),
+        self._remember_ids(*(getattr(p, a, None) for p in self.pos.values()
+                             for a in ("order_id", "stop_order_id", "target_order_id", "exit_order_id")),
                            *self._md_exits)
         return self._own_ids
 
