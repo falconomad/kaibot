@@ -375,6 +375,18 @@ def _gate_a(gate: GateV3, rule: str, prereg: Prereg | None, registry: Registry |
     elif role == "sleeve" and entry.get("tier") == "evidence_based" and not str(entry.get("evidence") or "").strip():
         reasons.append("the rule's entry takes the evidence-based tier but cites no evidence (decision 16 "
                        "section 14: strong published, replicated evidence, cited in the pre-registration)")
+    if role == "sleeve" and entry is not None and entry.get("tier") == "evidence_based" and prereg is not None:
+        # QA #542: section 14 puts the citation and the label in the pre-registration itself, not only in the config
+        secs = dict(prereg.sections or {})
+        label = str(gate.evidence.get("label", EVIDENCE_LABEL))
+        if not str(secs.get("evidence") or "").strip():
+            reasons.append("the rule takes the evidence-based tier but its pre-registration's published-evidence "
+                           "section is empty (decision 16 section 14)")
+        if label.lower() not in " ".join(str(v) for v in secs.values()).lower():
+            reasons.append(f"the rule takes the evidence-based tier but its pre-registration does not carry the "
+                           f"label \"{label}\" (decision 16 section 14)")
+        checks.update(prereg_cites_evidence=bool(str(secs.get("evidence") or "").strip()),
+                      prereg_carries_label=label.lower() in " ".join(str(v) for v in secs.values()).lower())
     if entry is not None and not entry.get("v3_declared"):
         reasons.append("the pre-registration does not declare its gate v3 role, kind, family and candidate pool "
                        "(it predates decision 16): this is a re-score, not a verdict")
@@ -756,12 +768,19 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
         marks["b6"] = _mark(None, {}, limit6,
                             "the sleeve verdicts were not supplied (an empty mapping for a book without sleeves)")
     else:
-        have = dict(budgets if budgets is not None else (gate.book(book) or {}).get("sleeves") or {})
+        # QA #542: a listed book's budgets are its pre-registered record and cannot be replaced by the caller;
+        # `budgets` is read only for a book not (yet) under `books:` (which is provisional by Gate A anyway)
+        listed = gate.book(book)
+        have = dict((listed.get("sleeves") or {}) if listed is not None else (budgets or {}))
         bad, eb = {}, {}
         for k, v in sleeves.items():
             if v == "pass":
                 continue
-            if v == "evidence_based" and k in have:
+            if v == "evidence_based" and gate.tier(k) != "evidence_based":
+                # QA #542: the verdict string alone cannot admit a sleeve; its entry must take the tier (with
+                # its evidence cited) in config/gate_v3.yaml
+                bad[k] = "evidence_based, but its entry in config/gate_v3.yaml does not take the evidence-based tier"
+            elif v == "evidence_based" and k in have:
                 eb[k] = float(have[k])
             elif v == "evidence_based":
                 bad[k] = "evidence_based, but the book gives it no budget"
@@ -771,9 +790,15 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
         why = [f"{k}: {v}" for k, v in bad.items()]
         if total > cap + 1e-9:
             why.append(f"evidence-based sleeves take {total:g}% of the book together, at most {cap:g}% is allowed")
+        # QA #542: every return sleeve the book lists needs a verdict; a missing one leaves B6 unknown
+        missing = sorted(set(have) - set(sleeves)) if listed is not None else []
+        state = False if why else (None if missing else True)
+        if missing:
+            why.append("no sleeve verdict supplied for " + ", ".join(missing))
         label = gate.evidence.get("label", EVIDENCE_LABEL)
-        marks["b6"] = _mark(not why, {"sleeves": dict(sleeves), "evidence_based_budget_pct": total,
-                                      "labels": {k: label for k in eb}}, limit6, "; ".join(why))
+        marks["b6"] = _mark(state, {"sleeves": dict(sleeves), "evidence_based_budget_pct": total,
+                                    "labels": {k: label for k in eb}, "missing_verdicts": missing},
+                            limit6, "; ".join(why))
     checks, reasons = _gate_a(gate, book, prereg, registry, first_run_at, source,
                               gate.cfg["book"]["final_requires"], role="book")
     kw = gate.stats_kw

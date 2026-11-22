@@ -56,9 +56,13 @@ def sleeve(edge=0.0, exposure=0.4, noise=0.0015, seed=1, index=IDX, **kw) -> g3.
     return g3.Account(net, spy, e, **kw)
 
 
-def prereg(rule=RULE, neighbours=("n1", "n2")) -> Prereg:
+EVIDENCE_SECTIONS = {"evidence": "Jegadeesh and Titman (1993); Asness, Moskowitz and Pedersen (2013).",
+                     "hypothesis": "An evidence-based, not proven here sleeve (decision 16 section 14)."}
+
+
+def prereg(rule=RULE, neighbours=("n1", "n2"), sections=EVIDENCE_SECTIONS) -> Prereg:
     return Prereg(rule, Path(f"docs/prereg/{rule}.md"), "cd" * 32, "pre-registered", date(2026, 11, 23),
-                  tuple(neighbours), {}, datetime(2026, 11, 23, tzinfo=UTC))
+                  tuple(neighbours), dict(sections), datetime(2026, 11, 23, tzinfo=UTC))
 
 
 def registry(n=6, strategy=RULE, spread=0.0) -> Registry:
@@ -213,8 +217,11 @@ def test_the_tier_needs_its_evidence_and_is_never_taken_by_a_default():
 # ---------------------------------------------------------------- books
 
 
-def book_gate(sleeves=None) -> g3.GateV3:
+def book_gate(sleeves=None, tiered=(RULE, "news_gap_week")) -> g3.GateV3:
     def change(c):
+        for rule in tiered:
+            fam = next(f for f, b in c["families"].items() if rule in b["rules"])
+            c["families"][fam]["rules"][rule].update(tier="evidence_based", evidence=EVIDENCE)
         c["books"] = {"core_book": {"components": ["index_core", RULE], "sleeves": sleeves or {RULE: 10.0},
                                     "v3_declared": True}}
     return gate_with(change)
@@ -247,8 +254,8 @@ def test_b6_admits_evidence_based_sleeves_inside_one_10_percent_budget():
     m = book(two, {RULE: "evidence_based", "news_gap_week": "evidence_based"})["marks"]["b6"]
     assert m["met"] is False and "12% of the book" in m["why"]  # 10% for all such sleeves together, not each
     assert book(book_gate({RULE: 10.0}), {RULE: "fail"})["marks"]["b6"]["met"] is False
-    nobudget = gate_with(lambda c: c.update(books={"core_book": {"components": ["index_core"], "sleeves": {},
-                                                                 "v3_declared": True}}))
+    nobudget = book_gate({})
+    nobudget.cfg["books"]["core_book"]["sleeves"] = {}
     m = book(nobudget, {RULE: "evidence_based"})["marks"]["b6"]
     assert m["met"] is False and "no budget" in m["why"]
 
@@ -269,3 +276,32 @@ def test_every_number_is_finite_and_serialisable():
     rep = judge(evidence_gate(), sleeve(0.03))
     json.dumps(rep)
     assert all(math.isfinite(v) for v in rep["marks"]["s4"]["numbers"].values() if isinstance(v, float))
+
+
+# ---------------------------------------------------------------- QA on #542: the tier is enforced, not only recorded
+
+
+def test_the_tier_needs_the_citation_and_the_label_in_the_pre_registration():
+    weak = sleeve(0.03, control={**CONTROL, "percentile": 80.0, "p_value": 0.2})
+    rep = judge(evidence_gate(), weak, prereg=prereg(sections={"hypothesis": "evidence-based, not proven here"}))
+    assert rep["verdict"] == "provisional" and rep["label"] is None
+    assert any("published-evidence section is empty" in r for r in rep["provisional_reasons"])
+    rep = judge(evidence_gate(), weak, prereg=prereg(sections={"evidence": EVIDENCE}))
+    assert rep["verdict"] == "provisional" and any("does not carry the label" in r for r in rep["provisional_reasons"])
+    assert rep["gate_a"]["prereg_cites_evidence"] is True and rep["gate_a"]["prereg_carries_label"] is False
+
+
+def test_b6_does_not_take_the_tier_from_the_verdict_string_alone():
+    m = book(book_gate({RULE: 5.0}, tiered=()), {RULE: "evidence_based"})["marks"]["b6"]
+    assert m["met"] is False and "does not take the evidence-based tier" in m["why"]
+
+
+def test_b6_reads_a_listed_books_budgets_not_the_callers():
+    m = book(book_gate({RULE: 6.0, "news_gap_week": 6.0}), {RULE: "evidence_based", "news_gap_week": "evidence_based"},
+             budgets={RULE: 1.0, "news_gap_week": 1.0})["marks"]["b6"]
+    assert m["met"] is False and m["numbers"]["evidence_based_budget_pct"] == 12.0
+
+
+def test_b6_is_unknown_when_a_listed_sleeve_has_no_verdict():
+    m = book(book_gate({RULE: 5.0, "news_gap_week": 5.0}), {RULE: "evidence_based"})["marks"]["b6"]
+    assert m["met"] is None and m["numbers"]["missing_verdicts"] == ["news_gap_week"]
