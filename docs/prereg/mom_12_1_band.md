@@ -604,3 +604,29 @@ happens at the end are unchanged. No research result is affected (item 6). The s
 6. **Research and Gate B unchanged.** The book's run end is checked by the live engine only, on its minute
    ticks; the research runs do not go through it. No trial row, report or Gate B mark changes, and the
    bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 20 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): "Flatten and stop" and a new run wait until the book is flat
+
+Written on 22 Nov 2026, before the change's first use. It changes when the sales of an owner's "Flatten and stop"
+(and of a new run, which sells the old book first) are sent and when the run ends, so it is recorded here. It changes
+no rule, no decision, no target and no share count. No research result is affected (item 6). The same text is Amendment 22 of trend_momentum.
+
+1. **Why.** A flatten that could not close everything was written on the owner's command as an error; the command
+   was then finished, the run stayed running with the position, and nothing tried again (engine audit, finding R2).
+   When the flatten did go through, the run was ended while its sales were still unfilled.
+2. **The command waits.** The command stays pending until nothing is left to sell: no intraday position, no sale
+   still to book, and no sleeve the venue still holds shares of. Every loop pass (about 10 seconds) runs the flatten
+   again; a position that already has its sale is not sold twice. The run ends, and the command is finished, on the
+   first pass that finds the book flat.
+3. **No buys while it waits.** From the moment the command is read until it is finished, no position is opened: the
+   near-close send of this rule buys nothing (its sales still go out) and the carry-over of issue #363 sends nothing.
+4. **Sales only while the market is open.** With the market closed, or its clock unreadable, no sale is sent; the
+   command waits and the sales go out on the first loop pass after the open. Before, they were sent as day market
+   orders that waited for the next open. The book's own run end already never sold with the market
+   closed and is not changed.
+5. **Across a restart (QA-Ops second key, PR #525).** The wait is journalled when it starts (`command_waiting`, with
+   one event of that name) and read back at start-up. An engine restarted while the command is pending and the
+   commands cannot be read (the database unreachable) still opens no position; the block ends with the command or
+   with the run.
+6. **Research and Gate B unchanged.** Commands exist only on the live path. The research venue has none, and the
+   bit-identity test of the momentum rules passes unchanged.

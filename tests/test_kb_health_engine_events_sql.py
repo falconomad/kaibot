@@ -35,6 +35,10 @@ needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Po
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
+# M9 1.2 (#427, QA-Ops second key on #525): a "Flatten and stop" or a new run is waiting for a flat book. A health
+# event, left out only until a migration lists it and the Health page names it (#512); the heartbeat's entry block
+# says the same meanwhile
+ROUTINE |= {"command_waiting"}
 # M9 1.15 (#440): a command row the engine refused. A health event, left out only until a migration lists it and the
 # Health page names it (#512); it is logged as an error and written to the event table meanwhile
 ROUTINE |= {"command_rejected"}
