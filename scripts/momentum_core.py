@@ -5,7 +5,7 @@ model v1, price-only SPY; cannot pass Gate B until S71, S83 and S84 have landed.
 
 python scripts/momentum_core.py --version trend_momentum|mom_12_1_band|mom_12_1_band_nofilter --end 2026-11-06
     [--universe today|pit|config/universe_history.yaml] [--universe-file config/universe_history.yaml]
-    [--bars minute|store] [--start 2016-01-01] [--level balanced] [--control-runs 500] [--entries-control-runs 0]
+    [--bars minute|store] [--start 2016-01-01] [--level balanced] [--control-runs N] [--entries-control-runs 0]
     [--earnings auto|off] [--refresh-daily] [--costs v1|v2]
 python scripts/momentum_core.py --has <version> --start ... --end ... --universe ... --control-runs N   exit 0 if done
 python scripts/momentum_core.py --summary [--set core|core_pit]   one table, written to
@@ -830,8 +830,9 @@ def main() -> None:
     ap.add_argument("--end", help="last session (inclusive)")
     ap.add_argument("--level", default="balanced")
     ap.add_argument("--equity", type=float, default=100_000.0)
-    ap.add_argument("--control-runs", type=int, default=500, help="exposure-matched random runs per exposure "
-                    "cap (Gate B mark 3 needs 500; 0 switches the control off)")
+    ap.add_argument("--control-runs", type=int, default=None, help="exposure-matched random runs per exposure "
+                    "cap (default from config/gate_v3.yaml: 2,000 for a rule whose family has several rules, 500 "
+                    "otherwise, #560; 0 switches the control off)")
     ap.add_argument("--entries-control-runs", type=int, default=0, help="the entries-matched control of #127 as a "
                     "diagnostic (never judged; 0: not run)")
     ap.add_argument("--control-seed", type=int, default=127)
@@ -842,6 +843,10 @@ def main() -> None:
                     help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
     holdout.add_argument(ap)
     a = ap.parse_args()
+    if a.control_runs is None:  # #560: never fewer than gate v3's S3 needs for this rule (decision 16 s.15)
+        from kaibot.evaluation import gate_v3
+
+        a.control_runs = gate_v3.default_control_runs(a.has or a.version or "")
     data = Path(a.data)
     if a.has:
         uni_file, mode, bars = universe_mode(a)

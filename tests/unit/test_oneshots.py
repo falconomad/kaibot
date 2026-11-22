@@ -595,7 +595,7 @@ def test_no_pre_registration_no_run(monkeypatch, tmp_path):
 
 def test_run_experiments_has_the_oneshots_set_and_it_is_documented():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
-    for needle in ('"${1:-}" = "oneshots"', "scripts/oneshots.py --summary", "KAIBOT_ONESHOT_CONTROL_RUNS:-500",
+    for needle in ('"${1:-}" = "oneshots"', "scripts/oneshots.py --summary", "KAIBOT_ONESHOT_CONTROL_RUNS:-}",
                    "KAIBOT_ONESHOT_SEEDS:-200", 'if [ "$rc" = 3 ]', "experiments_oneshots_summary.md",
                    "orb_stocks_in_play news_continuation pullback_uptrend ath_breakout post_earnings_week"):
         assert needle in sh, needle

@@ -244,6 +244,11 @@ def control_runs_for(gate: GateV3, rule: str) -> int:
     return int(c["random_runs_min"])
 
 
+def default_control_runs(rule: str, root: Path | str | None = None) -> int:
+    """#560: `control_runs_for` on the committed config/gate_v3.yaml, for a run script's `--control-runs` default."""
+    return control_runs_for(GateV3.load(root), rule)
+
+
 def book_budget_problems(gate: GateV3, book: str, ran: Mapping[str, float]) -> list[str]:
     """#547: the budgets the engine ran (sleeve -> % of the book) against the book's pre-registered entry under
     `books:`. Empty when they match; otherwise one line per difference. A book not listed is a difference too."""

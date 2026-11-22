@@ -14,8 +14,8 @@
 #       data/reports/experiments_core_summary.md. Pre-registered in docs/prereg/. Reuses the daily-bar cache of
 #       the multiday set (builds it if missing: 5 to 10 minutes more). Measured on synthetic bars of the real size
 #       (busy 2-CPU cloud machine: trend_momentum 4.5 min), not on the real data. Since #143 the random control
-#       is the exposure-matched one of decision 15 section 10, 500 runs per exposure cap by default (what Gate B
-#       mark 3 asks for; KAIBOT_CORE_CONTROL_RUNS changes it, and a different number of runs is a new report, not
+#       is the exposure-matched one of decision 15 section 10, with the runs config/gate_v3.yaml asks for by default (#560;
+#       2,000 for a momentum rule); KAIBOT_CORE_CONTROL_RUNS changes it, and a different number of runs is a new report, not
 #       a resume); SPY total return is read from the daily store (data/daily) when it holds SPY. Needs no .env.
 #   ./scripts/run_experiments.sh core_pit    issue #143: the same three versions on the point-in-time S&P 500
 #       (#123) with every symbol read from the daily store (#124: raw prices, dividends, SPY total return), then
@@ -38,7 +38,7 @@
 #   ./scripts/run_experiments.sh spy_engine  issue #202: the Gate B go/no-go of spy_noise_band (decision 15): the
 #       frozen rule through the ENGINE with SimBroker + SimClock on SPY minute bars, 2017-05-01 to the end, on cost
 #       model v2 and at the prereg's 0.5 / 1 bp, plus the five neighbours (11 engine runs, KAIBOT_SPY_ENGINE_JOBS at a
-#       time, default half the CPUs), the random-timing control (KAIBOT_SPY_CONTROL_RUNS, 500), then ONE page with
+#       time, default half the CPUs), the random-timing control (KAIBOT_SPY_CONTROL_RUNS; default from config/gate_v3.yaml, #560), then ONE page with
 #       decision 15's Gate B marks, the prereg's marks and the harness side by side, written to
 #       data/reports/experiments_spy_engine.md. Runs the harness's spy_noise_band first if its report is missing.
 #       Needs no .env; uses data/daily (SPY total return) and data/inputs/fred_vixcls.json when present.
@@ -51,11 +51,11 @@
 #       the point-in-time S&P 500 and the daily store; ONE table with pass / fail per rule written to
 #       data/reports/experiments_oneshots_summary.md; and M8's news_gap_week (S98, #372; data/news, data/filings,
 #       data/earnings; docs/prereg/news_gap_week.md). A rule whose data is missing is skipped with a message and
-#       tried again next time. KAIBOT_ONESHOT_CONTROL_RUNS (500) and KAIBOT_ONESHOT_SEEDS (200) change the control
+#       tried again next time. KAIBOT_ONESHOT_CONTROL_RUNS (default from config/gate_v3.yaml, #560) and KAIBOT_ONESHOT_SEEDS (200) change the control
 #       and the subsets (a different number is a new report). Times: docs/m0/reproduce.md section 10. No .env.
 #   ./scripts/run_experiments.sh spy_trend   issue #201: the SPY trend filter (hold SPY above its 10-month average,
 #       else cash; month-end check, filled at the next close), its five neighbours, cost models v1 and v2, the
-#       random-timing control of Gate B mark 3 (500 runs per cost model; KAIBOT_SPY_TREND_CONTROL_RUNS changes it,
+#       random-timing control of Gate B mark 3 (the gate's default runs per cost model, #560; KAIBOT_SPY_TREND_CONTROL_RUNS changes it,
 #       and a different number is a new report) and Gate B per cost model, ONE continuous account each from
 #       2017-05, then ONE table written to data/reports/experiments_spy_trend_summary.md. Pre-registered in
 #       docs/prereg/spy_trend_filter.md. Reads only SPY (and BIL, if present, for the T-bill row) from the daily
@@ -85,19 +85,19 @@ awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; el
 mkdir -p logs data/reports
 
 if [ "${1:-}" = "oneshots" ]; then  # reads data/bars_1m, data/news, data/daily, data/earnings, data/filings: no .env
-  RUNS="${KAIBOT_ONESHOT_CONTROL_RUNS:-500}"
+  RUNS="${KAIBOT_ONESHOT_CONTROL_RUNS:-}"  # empty: the script takes its default from config/gate_v3.yaml (#560)
   SEEDS="${KAIBOT_ONESHOT_SEEDS:-200}"
   for r in orb_stocks_in_play news_continuation pullback_uptrend ath_breakout post_earnings_week \
       weekly_fall_rebound news_gap_week; do
     if "$PY" scripts/oneshots.py --has "$r" --start "$START" --end "$END" --universe-file "$UNIVERSE" \
-        --control-runs "$RUNS" --seeds "$SEEDS"; then
+        ${RUNS:+--control-runs "$RUNS"} --seeds "$SEEDS"; then
       echo "== $r: report exists, skipped"
       continue
     fi
     echo "== $r: running (log: logs/experiment_oneshot_$r.log)"
     set +e
     awake "$PY" scripts/oneshots.py --rule "$r" --start "$START" --end "$END" --universe-file "$UNIVERSE" \
-      --level "$LEVEL" --control-runs "$RUNS" --seeds "$SEEDS" > "logs/experiment_oneshot_$r.log" 2>&1
+      --level "$LEVEL" ${RUNS:+--control-runs "$RUNS"} --seeds "$SEEDS" > "logs/experiment_oneshot_$r.log" 2>&1
     rc=$?
     set -e
     if [ "$rc" = 3 ]; then
@@ -114,7 +114,7 @@ if [ "${1:-}" = "oneshots" ]; then  # reads data/bars_1m, data/news, data/daily,
   exit 0
 fi
 if [ "${1:-}" = "core_pit" ]; then  # reads only data/daily, data/news and the committed membership log
-  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-500}"
+  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-}"  # empty: the script takes its default from config/gate_v3.yaml (#560)
   COSTS="${KAIBOT_CORE_COSTS:-v1}"
   [ -f data/daily/bars/symbol=SPY.parquet ] \
     || { echo "No daily store at data/daily: run ./scripts/fetch_daily.sh first (docs/m0/reproduce.md)"; exit 1; }
@@ -122,13 +122,13 @@ if [ "${1:-}" = "core_pit" ]; then  # reads only data/daily, data/news and the c
     || echo "WARNING: no data/universe/former_members.csv: former index members are probably missing from the store"
   for v in trend_momentum mom_12_1_band mom_12_1_band_nofilter; do
     if "$PY" scripts/momentum_core.py --has "$v" --level "$LEVEL" --start "$START" --end "$END" \
-        --universe pit --universe-file "$UNIVERSE" --control-runs "$RUNS" --costs "$COSTS"; then
+        --universe pit --universe-file "$UNIVERSE" ${RUNS:+--control-runs "$RUNS"} --costs "$COSTS"; then
       echo "== $v (point-in-time): report exists, skipped"
       continue
     fi
     echo "== $v (point-in-time): running (log: logs/experiment_core_pit_$v.log)"
     awake "$PY" scripts/momentum_core.py --universe pit --universe-file "$UNIVERSE" --start "$START" --end "$END" \
-      --level "$LEVEL" --version "$v" --control-runs "$RUNS" --costs "$COSTS" > "logs/experiment_core_pit_$v.log" 2>&1 \
+      --level "$LEVEL" --version "$v" ${RUNS:+--control-runs "$RUNS"} --costs "$COSTS" > "logs/experiment_core_pit_$v.log" 2>&1 \
       || { echo "$v failed: see logs/experiment_core_pit_$v.log, then run this again (finished ones are skipped)"
            exit 1; }
     tail -n 1 "logs/experiment_core_pit_$v.log"
@@ -138,17 +138,17 @@ if [ "${1:-}" = "core_pit" ]; then  # reads only data/daily, data/news and the c
   exit 0
 fi
 if [ "${1:-}" = "core" ]; then  # reads only data/bars_1m, data/news and the daily-bar cache: no .env needed
-  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-500}"
+  RUNS="${KAIBOT_CORE_CONTROL_RUNS:-}"  # empty: the script takes its default from config/gate_v3.yaml (#560)
   COSTS="${KAIBOT_CORE_COSTS:-v1}"
   for v in trend_momentum mom_12_1_band mom_12_1_band_nofilter; do
     if "$PY" scripts/momentum_core.py --has "$v" --level "$LEVEL" --start "$START" --end "$END" \
-        --universe "$UNIVERSE" --control-runs "$RUNS" --costs "$COSTS"; then
+        --universe "$UNIVERSE" ${RUNS:+--control-runs "$RUNS"} --costs "$COSTS"; then
       echo "== $v: report exists, skipped"
       continue
     fi
     echo "== $v: running (log: logs/experiment_core_$v.log)"
     awake "$PY" scripts/momentum_core.py --universe "$UNIVERSE" --start "$START" --end "$END" --level "$LEVEL" \
-      --version "$v" --control-runs "$RUNS" --costs "$COSTS" > "logs/experiment_core_$v.log" 2>&1 \
+      --version "$v" ${RUNS:+--control-runs "$RUNS"} --costs "$COSTS" > "logs/experiment_core_$v.log" 2>&1 \
       || { echo "$v failed: see logs/experiment_core_$v.log, then run this again (finished ones are skipped)"
            exit 1; }
     tail -n 1 "logs/experiment_core_$v.log"
@@ -158,14 +158,14 @@ if [ "${1:-}" = "core" ]; then  # reads only data/bars_1m, data/news and the dai
   exit 0
 fi
 if [ "${1:-}" = "spy_trend" ]; then  # reads only data/daily (SPY, and BIL when present): no .env needed
-  RUNS="${KAIBOT_SPY_TREND_CONTROL_RUNS:-500}"
+  RUNS="${KAIBOT_SPY_TREND_CONTROL_RUNS:-}"  # empty: the script takes its default from config/gate_v3.yaml (#560)
   [ -f data/daily/bars/symbol=SPY.parquet ] \
     || { echo "No SPY in the daily store at data/daily: run ./scripts/fetch_daily.sh first (docs/m0/reproduce.md)"; exit 1; }
-  if "$PY" scripts/spy_trend.py --has --start "$START" --end "$END" --control-runs "$RUNS"; then
+  if "$PY" scripts/spy_trend.py --has --start "$START" --end "$END" ${RUNS:+--control-runs "$RUNS"}; then
     echo "== spy_trend_filter: report exists, skipped"
   else
     echo "== spy_trend_filter: running (log: logs/experiment_spy_trend.log)"
-    awake "$PY" scripts/spy_trend.py --start "$START" --end "$END" --control-runs "$RUNS" \
+    awake "$PY" scripts/spy_trend.py --start "$START" --end "$END" ${RUNS:+--control-runs "$RUNS"} \
       > logs/experiment_spy_trend.log 2>&1 \
       || { echo "spy_trend failed: see logs/experiment_spy_trend.log, then run this again"; exit 1; }
     tail -n 1 logs/experiment_spy_trend.log
@@ -175,16 +175,16 @@ if [ "${1:-}" = "spy_trend" ]; then  # reads only data/daily (SPY, and BIL when 
   exit 0
 fi
 if [ "${1:-}" = "spy" ]; then  # reads only data/bars_1m/symbol=SPY: no .env needed
-  RUNS="${KAIBOT_SPY_CONTROL_RUNS:-500}"
+  RUNS="${KAIBOT_SPY_CONTROL_RUNS:-}"  # empty: the script takes its default from config/gate_v3.yaml (#560)
   for v in spy_noise_band spy_noise_band_carry; do
     if "$PY" scripts/spy_noise_band.py --has "$v" --level "$LEVEL" --start "$START" --end "$END" \
-        --control-runs "$RUNS"; then
+        ${RUNS:+--control-runs "$RUNS"}; then
       echo "== $v: report exists, skipped"
       continue
     fi
     echo "== $v: running (log: logs/experiment_spy_$v.log)"
     awake "$PY" scripts/spy_noise_band.py --start "$START" --end "$END" --level "$LEVEL" --version "$v" \
-      --control-runs "$RUNS" > "logs/experiment_spy_$v.log" 2>&1 \
+      ${RUNS:+--control-runs "$RUNS"} > "logs/experiment_spy_$v.log" 2>&1 \
       || { echo "$v failed: see logs/experiment_spy_$v.log, then run this again (finished ones are skipped)"
            exit 1; }
     tail -n 1 "logs/experiment_spy_$v.log"
@@ -194,21 +194,21 @@ if [ "${1:-}" = "spy" ]; then  # reads only data/bars_1m/symbol=SPY: no .env nee
   exit 0
 fi
 if [ "${1:-}" = "spy_engine" ]; then  # issue #202: reads data/bars_1m/symbol=SPY (+ data/daily, VIX cache): no .env
-  RUNS="${KAIBOT_SPY_CONTROL_RUNS:-500}"
+  RUNS="${KAIBOT_SPY_CONTROL_RUNS:-}"  # empty: the script takes its default from config/gate_v3.yaml (#560)
   JOBS="${KAIBOT_SPY_ENGINE_JOBS:-$("$PY" -c 'import os; print(max(1, (os.cpu_count() or 2) // 2))')}"
   # the harness numbers for the side-by-side (a few minutes; skipped when its report exists)
   if ! "$PY" scripts/spy_noise_band.py --has spy_noise_band --level "$LEVEL" --start "$START" --end "$END" \
-      --control-runs "$RUNS"; then
+      ${RUNS:+--control-runs "$RUNS"}; then
     echo "== harness spy_noise_band: running (log: logs/experiment_spy_spy_noise_band.log)"
     awake "$PY" scripts/spy_noise_band.py --start "$START" --end "$END" --level "$LEVEL" --version spy_noise_band \
-      --control-runs "$RUNS" > logs/experiment_spy_spy_noise_band.log 2>&1 \
+      ${RUNS:+--control-runs "$RUNS"} > logs/experiment_spy_spy_noise_band.log 2>&1 \
       || { echo "harness run failed: see logs/experiment_spy_spy_noise_band.log"; exit 1; }
   fi
-  if "$PY" scripts/spy_engine.py --has --level "$LEVEL" --start "$START" --end "$END" --control-runs "$RUNS"; then
+  if "$PY" scripts/spy_engine.py --has --level "$LEVEL" --start "$START" --end "$END" ${RUNS:+--control-runs "$RUNS"}; then
     echo "== spy_engine: report exists, skipped"
   else
     echo "== spy_engine: 11 engine runs, $JOBS at a time (log: logs/experiment_spy_engine.log)"
-    awake "$PY" scripts/spy_engine.py --start "$START" --end "$END" --level "$LEVEL" --control-runs "$RUNS" \
+    awake "$PY" scripts/spy_engine.py --start "$START" --end "$END" --level "$LEVEL" ${RUNS:+--control-runs "$RUNS"} \
       --jobs "$JOBS" > logs/experiment_spy_engine.log 2>&1 \
       || { echo "spy_engine failed: see logs/experiment_spy_engine.log, then run this again"; exit 1; }
   fi
