@@ -195,6 +195,28 @@ with the broker (`engine/reconcile.py`):
   - cash in lieu and dividend amounts rounded by the broker;
   - dividend withholding.
 - **Tolerance (shares):** none.
+- **Fills (live since M9 1.13, #438).** With the daily path on (`KAIBOT_MULTIDAY=on`), each check also reads the
+  account's fill activities and reports:
+  - `foreign_fill`: a fill on an order the engine does not know (an order placed by hand, or by another program
+    with the same keys). It shows even when the shares and the cash agree again, for example a buy and a sale by
+    hand. Buys in that stock wait; sales and buys in other stocks go out.
+  - `unbooked`: an order of the daily path whose filled shares at the broker exceed the fills booked (the
+    activity has not arrived yet). It clears at the next check after the activity is booked.
+  - Both stop buys **in their own stock only** (QA-Ops review of #522): the rest of the rebalance goes out. A
+    share or cash difference, or a failed read, still stops every buy.
+  - `unbooked` cannot be accepted; it heals at the next check (every 15 minutes while a difference is open).
+  - A `foreign_fill` clears when the owner accepts it or when the fill is older than 3 days (`FOREIGN_MAX_AGE`).
+    Accepting: an acceptance (dashboard, command or command line, below) also accepts the fills on unknown orders
+    that were in the same check, each by its activity id (`reconcile_resolved`, `foreign`); a later fill on an
+    unknown order is a new difference. When only such fills are open there is no number to accept on the
+    dashboard: use `python -m kaibot.engine.reconcile --accept "reason"`, or let them clear after 3 days.
+  - The engine's own orders outside the order manager (intraday entries, their bracket legs and exits, the
+    full-flatten sales) are never foreign: their broker order ids are kept in the journal (`own_order_ids`,
+    `md_exit`). The fail-safes' stops are adopted by the order manager and booked there.
+  - Fills from before the first check on a journal are not judged (`recon_fills_since`, journalled once): at
+    the release that switched this on, and on a new journal after a takeover, the recent activities hold fills
+    of orders that journal never saw. The share and cash checks cover that time, as before.
+  - Without the daily path there is no order manager, and these two checks do not run.
 - **While a difference is open:**
   - entries (buys) are blocked; on the daily path, buys in the affected symbol, and every buy on a cash difference;
   - a sale that only reduces exposure goes out: at most min(ledger, broker) shares in a symbol whose shares differ;
