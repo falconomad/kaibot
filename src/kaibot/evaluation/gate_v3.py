@@ -233,6 +233,32 @@ def control_numbers(control: Any) -> dict | None:
             "drawdown_percentile": c.get("drawdown_percentile", inner.get("drawdown_percentile"))}
 
 
+def control_runs_for(gate: GateV3, rule: str) -> int:
+    """#547: the control runs S3 needs for `rule` (decision 16 section 15): `random_runs_min_several_rules` (2,000)
+    when its family lists two or more rules, `random_runs_min` (500) for a one-rule family or a rule in no family.
+    The research command and `daily_report.report` take their default from here (scripts/ keep their own)."""
+    c = gate.cfg["sleeve"]["s3_control"]
+    fam = gate.family_of(rule)
+    if fam is not None and len(gate.families[fam]["rules"]) > 1:
+        return int(c.get("random_runs_min_several_rules", c["random_runs_min"]))
+    return int(c["random_runs_min"])
+
+
+def book_budget_problems(gate: GateV3, book: str, ran: Mapping[str, float]) -> list[str]:
+    """#547: the budgets the engine ran (sleeve -> % of the book) against the book's pre-registered entry under
+    `books:`. Empty when they match; otherwise one line per difference. A book not listed is a difference too."""
+    entry = gate.book(book)
+    if entry is None:
+        return [f"{book} is not listed under `books:` of config/gate_v3.yaml"]
+    want = {k: float(v) for k, v in (entry.get("sleeves") or {}).items()}
+    got = {k: float(v) for k, v in ran.items()}
+    out = [f"{k}: pre-registered {want[k]:g}% of the book, the engine ran {got[k]:g}%"
+           for k in sorted(set(want) & set(got)) if abs(want[k] - got[k]) > 1e-9]
+    out += [f"{k}: pre-registered at {want[k]:g}%, not in the run" for k in sorted(set(want) - set(got))]
+    out += [f"{k}: in the run at {got[k]:g}%, not pre-registered" for k in sorted(set(got) - set(want))]
+    return out
+
+
 def family_p(gate: GateV3, rule_p: Mapping[str, float | None]) -> dict[str, float | None]:
     """One p-value per family from the p-values of its rules: the smallest, times the number of rules the family
     lists (Bonferroni inside the family, whether or not every member has a p-value). None when no member has
@@ -723,7 +749,8 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                   prereg: Prereg | None = None, source: Mapping[str, Any] | None = None,
                   registry: Registry | None = None, first_run_at: datetime | None = None,
                   tbill: pd.Series | None = None, as_of: datetime | None = None,
-                  budgets: Mapping[str, float] | None = None) -> dict:
+                  budgets: Mapping[str, float] | None = None,
+                  ran_budgets: Mapping[str, float] | None = None) -> dict:
     """The book test: marks B1 to B6 for the whole account that would trade.
 
     account: the combined book's run through the engine (one account: shared cash, one per-name cap), not a
@@ -774,6 +801,10 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
         have = dict((listed.get("sleeves") or {}) if listed is not None else (budgets or {}))
         bad, eb = {}, {}
         for k, v in sleeves.items():
+            if listed is not None and k not in have:
+                # QA #553: a listed book's return sleeve needs a pre-registered budget, whatever its verdict
+                bad[k] = f"{v}, but the book gives it no budget (none pre-registered under `books:`)"
+                continue
             if v == "pass":
                 continue
             if v == "evidence_based" and gate.tier(k) != "evidence_based":
@@ -801,6 +832,21 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                             limit6, "; ".join(why))
     checks, reasons = _gate_a(gate, book, prereg, registry, first_run_at, source,
                               gate.cfg["book"]["final_requires"], role="book")
+    # #547: the budgets the engine actually ran must be the pre-registered ones; a book run at other weights is
+    # another book, so B6 fails and the run cannot carry a verdict
+    if ran_budgets is None and gate.book(book) is not None:
+        # QA #553: a listed book cannot carry a verdict until the budgets it ran are checked against its record
+        checks["budgets_as_pre_registered"] = None
+        reasons.append("the budgets the engine ran were not supplied (`ran_budgets`), so they are not checked "
+                       "against the book's pre-registered ones")
+    if ran_budgets is not None:
+        problems = book_budget_problems(gate, book, ran_budgets)
+        checks["budgets_as_pre_registered"] = not problems
+        if problems:
+            reasons.append("the engine ran other sleeve budgets than the pre-registered ones: " + "; ".join(problems))
+            m6 = marks["b6"]
+            marks["b6"] = _mark(False, {**m6["numbers"], "ran_budgets": dict(ran_budgets)}, m6["limit"],
+                                "; ".join(x for x in (m6["why"], *problems) if x))
     kw = gate.stats_kw
     stats = {"window": [net.index[0].date().isoformat(), net.index[-1].date().isoformat()],
              "book": mtm.curve(net, **kw), "spy": mtm.curve(spy, **kw),
