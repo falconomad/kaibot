@@ -103,6 +103,14 @@ def test_a_refusal_is_not_poison_before_both_the_count_and_the_time_are_reached(
     'POST {t} -> 401: {{"message":"JWT expired"}}',  # the key, not the row: every row would be dropped
     'POST {t} -> 403: {{"message":"permission denied for table {t}"}}',
     'POST {t} -> 429: {{"message":"rate limit"}}',
+    # QA-Ops (#516): a 4xx that refuses EVERY row is not a row's fault; skipping would empty the whole backlog
+    'POST {t} -> 405: {{"code":"25006","message":"cannot execute INSERT in a read-only transaction"}}',
+    'POST {t} -> 402: {{"message":"Service for this project is restricted due to exceeding usage limits"}}',
+    'POST {t} -> 404: <html><body>Not Found</body></html>',
+    'POST {t} -> 400: Bad Request',
+    'POST {t} -> 406: {{"code":"PGRST106","message":"The schema must be one of the following: public"}}',
+    'POST {t} -> 409: {{"code":"55P03","message":"could not obtain lock on relation"}}',
+    'POST {t} -> 409: {{"code":"40001","message":"could not serialize access due to concurrent update"}}',
 ])
 def test_an_outage_or_a_refused_key_never_makes_a_row_poison(tmp_path, text):
     remote, js, run, rep, t = _setup(tmp_path)
@@ -210,3 +218,40 @@ def test_the_engine_turns_a_poison_row_and_a_backlog_into_events_a_halt_row_and_
     ev = [e for e in js.tables["event"] if e["type"] == "replica_backlog"]
     assert len(ev) == 1 and ev[0]["payload"]["pending"] >= 1
     assert caplog.text.count("replica backlog") == 1
+
+
+def test_a_cause_that_still_skips_rows_an_hour_later_is_announced_again(tmp_path):
+    """QA-Ops (#516): the engine runs for days. Rows of a known cause follow at once, with no second wait; they
+    must not also follow in silence for ever. One alarm per cause per hour while rows are being skipped."""
+    from kaibot.engine.journal import POISON_REALARM_S
+
+    remote, js, run, rep, t = _setup(tmp_path)
+    remote.refuse["gate_run"] = (lambda r: True, COLUMN_400)
+    js.insert("gate_run", {"run_id": run["id"], "brand_new": 0}, returning=False)
+    _refuse_for_good(rep, t)
+    assert len(rep.take_poisons()) == 1
+    t.now += POISON_REALARM_S / 2
+    js.insert("gate_run", {"run_id": run["id"], "brand_new": 1}, returning=False)
+    assert rep.pump() == 1 and rep.take_poisons() == [], "inside the hour: skipped at once, journalled, no alarm"
+    t.now += POISON_REALARM_S
+    js.insert("gate_run", {"run_id": run["id"], "brand_new": 2}, returning=False)
+    js.insert("gate_run", {"run_id": run["id"], "brand_new": 3}, returning=False)
+    assert rep.pump() == 2
+    (again,) = rep.take_poisons()
+    assert again["table"] == "gate_run" and again["first_of_its_kind"] is False
+    assert len(js.journal.entries(kinds=("replica_poison",))) == 4 and rep.status()["poisons"] == 4
+
+
+def test_the_documented_rebuild_sends_the_skipped_row_once_the_cause_is_fixed_and_duplicates_nothing(tmp_path):
+    """QA-Ops (#516): docs/ops/ledger.md says "fix the cause, stop the engine, run --rebuild". Proven here."""
+    remote, js, run, rep, t = _setup(tmp_path)
+    remote.refuse["halt"] = (lambda r: r["kind"] == "bad", CHECK_400)
+    js.insert("halt", {"run_id": run["id"], "kind": "bad", "reason": "was refused"}, returning=False)
+    js.insert("halt", {"run_id": run["id"], "kind": "drift", "reason": "fine"}, returning=False)
+    _refuse_for_good(rep, t)
+    assert [h["kind"] for h in remote.tables["halt"]] == ["drift"]
+    remote.refuse.clear()  # the migration was applied
+    again = Replicator(js.journal, remote)  # `python -m kaibot.engine.journal --rebuild`, the engine stopped
+    again.rebuild()
+    assert sorted(h["kind"] for h in remote.tables["halt"]) == ["bad", "drift"]
+    assert len(remote.tables["run"]) == 1 and again.pending() == 0 and again.status()["poisons"] == 0
