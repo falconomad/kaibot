@@ -122,7 +122,8 @@ class TrendMomentumBand:
             else:
                 dropped[s] = why
         buy: list[str] = []
-        if not self.market_filter or market_on(v.close(SMA_MARKET)[:, v.spy]):
+        buying = not self.market_filter or market_on(v.close(SMA_MARKET)[:, v.spy])
+        if buying:
             for j in order[:math.ceil(self.enter_top * n)].tolist():
                 if len(keep) + len(buy) >= self.per_tranche:
                     break
@@ -137,7 +138,9 @@ class TrendMomentumBand:
                 count[s] = count.get(s, 0) + 1
         rank = {s: place.get(col.get(s, -1), n) for s in count}
         held = [s for s in ctx.held if s in count]
-        new = sorted((s for s in count if s not in ctx.held), key=lambda s: (rank[s], s))
+        # row 4: no new buys while the market filter is off, also not of a stock a tranche chose earlier and the
+        # builder could not buy (Amendment 1, item 3: it stays in the tranche's list, and is listed again once on)
+        new = sorted((s for s in count if s not in ctx.held), key=lambda s: (rank[s], s)) if buying else []
         weights = {s: count[s] / self.n_tranches for s in [*held, *new]}
         sell = {s: "rank" for s in ctx.held if s not in count}
         return TargetList(self.name, ctx.fill_session, weights, sizing="atr_risk", resize=True,

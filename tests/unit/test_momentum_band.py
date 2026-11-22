@@ -102,6 +102,44 @@ def test_weights_count_the_tranches_and_names_dropped_by_every_tranche_are_sold(
     assert list(t.weights)[:2] == ["P01", "P02"]  # held names first
 
 
+def test_no_new_buys_while_the_market_filter_is_off_not_even_of_a_stock_a_tranche_kept(fx, monkeypatch):
+    """QA-Ops (#573), row 4: a stock a tranche chose but the builder could not buy stays in its list (Amendment 1,
+    item 3); while SPY is not above its 200-day average it is not listed for purchase. Held names stay."""
+    import kaibot.strategies.momentum_band as mb
+
+    data, i0, i1 = fx
+    r = TrendMomentumBand()
+    k = next(k for k in range(i0, i1) if r.decision_day(data.day(k), data.day(k + 1)))
+    v = data.view(k)
+    score, ok, sell_if = r.signals(v)
+    order = [j for j in ranking(score, ok).tolist() if sell_if(j) is None]
+    top = [v.symbols[j] for j in order[:2]]
+    t = r.tranche_of(data.day(k + 1))
+    other = (t + 1) % 4
+    r.tranches = {other: [top[1]], t: [top[0]]}
+    monkeypatch.setattr(mb, "market_on", lambda spy: False)
+    off = decide(r, data, k, {top[0]: 10.0})
+    assert top[1] in r.tranches[other] and top[1] not in off.weights  # kept in its tranche, not bought
+    assert top[0] in off.weights and set(off.weights) <= {top[0]}
+    monkeypatch.setattr(mb, "market_on", lambda spy: True)
+    r.tranches = {other: [top[1]], t: [top[0]]}
+    on = decide(r, data, k, {top[0]: 10.0})
+    assert top[1] in on.weights  # listed again once the filter is on
+    off_rule = TrendMomentumBand(market_filter=False)  # the neighbour nofilter buys regardless
+    off_rule.tranches = {other: [top[1]], t: [top[0]]}
+    monkeypatch.setattr(mb, "market_on", lambda spy: False)
+    assert top[1] in decide(off_rule, data, k, {top[0]: 10.0}).weights
+
+
+def test_nothing_live_can_switch_it_on():
+    """QA-Ops (#573): research only, in no live registry."""
+    from kaibot.strategies import registry
+
+    for reg in (getattr(registry, "MULTI_DAY", {}), getattr(registry, "STRATEGIES", {})):
+        names = set(reg) | {getattr(x, "name", None) for x in (reg.values() if hasattr(reg, "values") else reg)}
+        assert "trend_momentum_band" not in names
+
+
 def test_through_the_engine_with_simbroker_on_the_fixture(fx):
     from kaibot.engine.daily import run_daily
     from kaibot.risk.profiles import load_profiles
