@@ -95,8 +95,46 @@ def test_an_allowlist_entry_needs_a_reason(tmp_path):
         rs.load_allowlist(p)
 
 
+@pytest.mark.parametrize("entry, why", [
+    ('journal = "pre_m9_*"\nkey = "ledger cash"\nwas = "0.0"\nnow = "1.0"\n', "no globs"),
+    ('journal = "pre_m9_late_start"\nkey = "ledger *"\nwas = "0.0"\nnow = "1.0"\n', "no globs"),
+    ('journal = "pre_m9_late_start"\nkey = "ledger cash"\n', "was"),
+    ('journal = "pre_m9_late_start"\nkey = "ledger cash"\nwas = "0.0"\nnow = "{"\n', "not JSON"),
+])
+def test_an_allowlist_entry_names_one_difference_and_its_values(tmp_path, entry, why):
+    p = tmp_path / "a.toml"
+    p.write_text("[[ack]]\n" + entry + 'reason = "M9 1.3 (#428)"\n')
+    with pytest.raises(ValueError, match=why):
+        rs.load_allowlist(p)
+
+
+def _acks_with(tmp_path, edit):
+    text = (HERE / "allowlist.toml").read_text()
+    p = tmp_path / "a.toml"
+    p.write_text(edit(text))
+    return rs.load_allowlist(p)
+
+
+def test_an_acknowledged_key_with_another_value_fails(tmp_path):
+    """The entry pins the replayed value: a later change to the same decision is not hidden by the M9 entry."""
+    acks = _acks_with(tmp_path, lambda t: t.replace("now = '-2256.58'", "now = '-2256.59'"))
+    o = rs.replay(FIXTURES / "pre_m9_late_start.jsonl", acks)
+    assert not o.ok and [k for k, _a, _b in o.diffs] == ["ledger cash"]
+
+
+def test_an_acknowledged_difference_that_no_longer_happens_fails():
+    """Undoing an M9 change makes the replay match the pre-M9 recording again: the entries of that change then match
+    nothing, and that fails (a revert of the fix must not pass silently)."""
+    acks = rs.load_allowlist(HERE / "allowlist.toml")
+    acks.append({"journal": "pre_m9_missed_window", "key": "send 2026-08-09", "was": "null", "now": "null",
+                 "_was": None, "_now": None, "reason": "a difference that does not happen"})
+    o = rs.replay(FIXTURES / "pre_m9_missed_window.jsonl", acks)
+    assert not o.diffs and [a["key"] for a in o.stale] == ["send 2026-08-09"] and not o.ok
+    assert "no longer happens" in rs.report([o], acks)
+
+
 def test_a_stale_allowlist_entry_is_reported():
-    acks = [{"journal": "nothing", "key": "decision *", "reason": "gone"}]
+    acks = [{"journal": "nothing", "key": "decision 2026-08-03", "reason": "gone"}]
     assert "matched nothing" in rs.report([], acks)
 
 
@@ -165,3 +203,10 @@ def test_a_live_session_is_checked_by_folding_its_ledger(journal, tmp_path):
     out.write_text("\n".join(lines) + "\n")
     o = rs.replay(out, [])
     assert not o.ok and o.diffs[0][0].startswith("ledger shares")
+
+
+def test_the_export_hashes_the_brokers_activity_ids_and_drops_the_retirement_id():
+    fee = rs.sanitise("fee", {"run_id": 1, "amount": -0.02, "date": "2026-08-05", "ref": "alpaca:20260805::abc"})
+    assert fee["ref"].startswith("h") and "alpaca" not in json.dumps(fee)
+    retired = rs.sanitise("md_retired", {"rule": "trend_momentum", "run_id": 1, "retirement_id": "2026-08-05.a1b2c3"})
+    assert "retirement_id" not in retired and retired["rule"] == "trend_momentum"

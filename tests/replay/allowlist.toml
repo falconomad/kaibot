@@ -1,9 +1,12 @@
 # Differences the session replay (scripts/replay_session.py, M12 ticket 3.4, #466) acknowledges.
 #
 # A replay of a recorded session through today's code that differs from the recording fails, unless an entry here
-# names the session file (`journal`, its file name without .jsonl; a glob) and the difference (`key`, as the report
-# prints it; a glob) and says why. Add the entry in the same pull request as the change that causes the difference,
-# with the issue it implements. An entry that matches nothing is listed in the report: remove it.
+# names the session file (`journal`, its file name without .jsonl), the difference (`key`, as the report prints it),
+# the value recorded (`was`) and the value replayed now (`now`), both as JSON (`null`: absent), and says why. No
+# globs: an entry acknowledges exactly one difference, so another difference, or the same key with another value,
+# still fails. An entry whose difference no longer happens fails the replay as well (the change it acknowledges was
+# undone): when a fixture is recorded again, remove its entries. Add an entry in the same pull request as the change
+# that causes the difference, with the issue it implements.
 #
 # The pre_m9_* fixtures were recorded by the engine of 84250c7 (the last commit before milestone M9 changed it) on
 # the hand-written scenarios of tests/dst; every difference below is one of M9's intended behaviour changes.
@@ -12,66 +15,113 @@
 [[ack]]
 journal = "pre_m9_late_start"
 key = "decision 2026-08-03"
+was = 'null'
+now = '{"late": true, "names": ["B"], "note": null, "session": "2026-07-31"}'
 reason = "M9 1.3 (#428, PR #517): a late start still takes the session's decision (late = true, at the open)"
 
 [[ack]]
 journal = "pre_m9_late_start"
 key = "send 2026-08-03"
+was = '{"late_of": null, "targets": []}'
+now = '{"late_of": null, "targets": [["B", 23, "buy"]]}'
 reason = "M9 1.3 (#428): the late decision is sent in D1's window (before M9: an empty send)"
 
 [[ack]]
 journal = "pre_m9_late_start"
 key = "order kb-trend_momentum-B-20260803-buy-1"
+was = 'null'
+now = '{"filled": 23.0, "purpose": "buy", "qty": 23.0, "side": "buy", "state": "filled", "type": "market"}'
 reason = "M9 1.3 (#428): the buy of the late decision"
 
 [[ack]]
 journal = "pre_m9_late_start"
-key = "ledger *"
+key = "ledger shares B"
+was = 'null'
+now = '23.0'
+reason = "M9 1.3 (#428): the book holds the late decision's buy"
+
+[[ack]]
+journal = "pre_m9_late_start"
+key = "ledger cash"
+was = '0.0'
+now = '-2256.58'
 reason = "M9 1.3 (#428): the book holds the late decision's buy"
 
 # ---- pre_m9_missed_window: the engine dies at 15:40 on D1 and is back after the close
 [[ack]]
 journal = "pre_m9_missed_window"
 key = "decision 2026-08-03"
+was = 'null'
+now = '{"late": true, "names": ["B"], "note": null, "session": "2026-07-31"}'
 reason = "M9 1.3 (#428): the late start's decision is taken (this fixture's run also starts after D0's close)"
 
 [[ack]]
 journal = "pre_m9_missed_window"
 key = "send 2026-08-04"
+was = '{"late_of": null, "targets": []}'
+now = '{"late_of": "2026-08-03", "targets": [["B", 23, "buy"]]}'
 reason = "M9 1.4 (#429, PR #518): a decision whose window was missed is sent on the next session, once (late_of)"
 
 [[ack]]
 journal = "pre_m9_missed_window"
 key = "order kb-trend_momentum-B-20260804-buy-1"
+was = 'null'
+now = '{"filled": 23.0, "purpose": "buy", "qty": 23.0, "side": "buy", "state": "filled", "type": "market"}'
 reason = "M9 1.4 (#429): the buy of the late send"
 
 [[ack]]
 journal = "pre_m9_missed_window"
-key = "ledger *"
+key = "ledger shares B"
+was = 'null'
+now = '23.0'
+reason = "M9 1.4 (#429): the book holds the late send's buy"
+
+[[ack]]
+journal = "pre_m9_missed_window"
+key = "ledger cash"
+was = '0.0'
+now = '-2272.03'
 reason = "M9 1.4 (#429): the book holds the late send's buy"
 
 # ---- pre_m9_flatten_partial: B bought on D2; the owner flattens on D3 and half of the sale fills
 [[ack]]
 journal = "pre_m9_flatten_partial"
 key = "order kb-trend_momentum-B-20260805-flatten-1"
+was = 'null'
+now = '{"filled": 11.0, "purpose": "flatten", "qty": 23.0, "side": "sell", "state": "expired", "type": "market"}'
 reason = "M9 1.8 (#433, PR #506): the flatten sale goes through the order manager, with a deterministic id"
 
 [[ack]]
 journal = "pre_m9_flatten_partial"
-key = "ledger *"
+key = "ledger shares B"
+was = '23.0'
+now = '12.0'
+reason = "M9 1.8 (#433): the half that filled is booked (before M9 the book kept all 23 shares)"
+
+[[ack]]
+journal = "pre_m9_flatten_partial"
+key = "ledger cash"
+was = '-2272.03'
+now = '-1186.65'
 reason = "M9 1.8 (#433): the half that filled is booked (before M9 the book kept all 23 shares)"
 
 [[ack]]
 journal = "pre_m9_flatten_partial"
 key = "decision 2026-08-03"
+was = 'null'
+now = '{"late": true, "names": [], "note": "not a decision day", "session": "2026-07-31"}'
 reason = "M9 1.3 (#428): a run started after the close journals its first session's decision (not a decision day)"
 
 [[ack]]
 journal = "pre_m9_flatten_partial"
 key = "decision 2026-08-06"
+was = 'null'
+now = '{"late": false, "names": [], "note": "not a decision day", "session": "2026-08-05"}'
 reason = "M9 1.2 (#427, PR #525): Flatten and stop stays pending until the book is flat, so the run goes on deciding"
 
 [[ack]]
 journal = "pre_m9_flatten_partial"
 key = "send 2026-08-05"
+was = 'null'
+now = '{"late_of": null, "targets": []}'
 reason = "M9 1.2 (#427): the run is still open on D3 (the flatten is pending), so its window journals a send"

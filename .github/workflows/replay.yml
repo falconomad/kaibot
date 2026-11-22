@@ -29,8 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      issues: write  # nightly only: to open the issue with the difference; the only thing this job writes
+      contents: read  # a pull request's run holds a read-only token; only the nightly `report` job below writes
+    outputs:
+      outcome: ${{ steps.replay.outcome }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}
@@ -51,8 +52,20 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with: {name: replay-report, path: replay.md, if-no-files-found: ignore, retention-days: 30}
+  report:
+    # nightly only: the replay found a difference; opens an issue (or comments on the open one). Runs no repository
+    # code: it reads the replay's report from its artifact.
+    needs: replay
+    if: always() && github.event_name == 'schedule' && needs.replay.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with the difference: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: replay-report}
+        continue-on-error: true
       - name: open an issue with the difference
-        if: failure() && steps.replay.outcome == 'failure' && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -69,6 +82,7 @@ jobs:
             echo "Run it again: \`PYTHONHASHSEED=0 PYTHONPATH=src python scripts/replay_session.py replay <file>\`."
             echo "An intended change: acknowledge it in \`tests/replay/allowlist.toml\` with the issue that made it."
             echo "Otherwise: an engine defect; an issue with the minimal case and a strict xfail."
+            echo "\"Acknowledged difference no longer happens\": the change an entry acknowledges was undone (a revert?)."
           } > issue.md
           title="Nightly session replay found a difference"
           open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')

@@ -34,7 +34,6 @@ Exit codes: 0 no unacknowledged difference, 1 a difference, 2 the file cannot be
 from __future__ import annotations
 
 import argparse
-import fnmatch
 import hashlib
 import json
 import re
@@ -87,10 +86,12 @@ def sanitise(kind: str, body: dict) -> dict | None:
         return None
     cols = KEEP[kind]
     out = dict(body) if cols is None else {k: body[k] for k in cols if k in body}
-    for k in ("order_id", "ids", "account", "account_id", "broker_order_id"):
-        out.pop(k, None)
+    for k in ("order_id", "ids", "account", "account_id", "broker_order_id", "retirement_id"):
+        out.pop(k, None)  # retirement_id: the single-use key a re-enable accepts (#211), not needed to compare
     if kind == "fill" and "activity" in out:
         out["activity"] = _hash(out["activity"])
+    if kind in ("dividend", "split", "spinoff", "symbol_change", "fee") and out.get("ref"):
+        out["ref"] = _hash(out["ref"])  # the broker's activity id ("alpaca:<id>"): only its identity is needed
     if kind == "md_decision" and isinstance(out.get("target"), dict):
         t = out["target"]
         out["target"] = {k: t.get(k) for k in ("weights", "sell", "resize", "session", "strategy") if k in t}
@@ -269,11 +270,12 @@ class Outcome:
     header: dict
     diffs: list[tuple[str, object, object]] = field(default_factory=list)  # key, recorded, replayed
     acked: list[tuple[str, object, object, str]] = field(default_factory=list)
+    stale: list[dict] = field(default_factory=list)  # entries for this file whose difference no longer happens
     notes: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
-        return not self.diffs
+        return not self.diffs and not self.stale
 
 
 def compare(recorded: dict, replayed: dict) -> list[tuple[str, object, object]]:
@@ -305,12 +307,17 @@ def replay(path: str | Path, acks: list[dict] | None = None) -> Outcome:
                          "decisions); the ledger is folded by today's code and compared with what was published")
     else:
         raise ValueError(f"{path}: unknown inputs {header.get('inputs')!r}")
+    used: set[int] = set()
     for key, a, b in compare(recorded, replayed):
-        why = acknowledged(acks or [], name, key, a, b)
-        if why is None:
+        hit = acknowledged(acks or [], name, key, a, b)
+        if hit is None:
             out.diffs.append((key, a, b))
         else:
-            out.acked.append((key, a, b, why))
+            used.add(id(hit))
+            out.acked.append((key, a, b, str(hit["reason"]).strip()))
+    # an acknowledged difference that no longer happens fails too: the change it acknowledges was reverted (or the
+    # file was recorded again and the entry is to be removed)
+    out.stale = [a for a in acks or [] if a["journal"] == name and id(a) not in used]
     return out
 
 
@@ -444,7 +451,18 @@ def _engine_sha() -> str | None:
 
 
 # ---------------------------------------------------------------- the allowlist
+GLOB = re.compile(r"[*?\[\]]")
+
+
+def _norm(v):
+    """A value as JSON reads it back (so 23 == 23.0 and a tuple is a list)."""
+    return json.loads(json.dumps(v, sort_keys=True, default=str))
+
+
 def load_allowlist(path: str | Path | None) -> list[dict]:
+    """Every entry names one session file (`journal`), one difference (`key`, as the report prints it), the value
+    recorded (`was`) and the value replayed (`now`), both as JSON (`null`: absent), and a `reason`. No globs: an entry
+    acknowledges exactly one difference, so any other difference, or the same one with another value, still fails."""
     if path is None or not Path(path).exists():
         return []
     import tomllib
@@ -453,14 +471,24 @@ def load_allowlist(path: str | Path | None) -> list[dict]:
     for a in acks:
         if not str(a.get("reason") or "").strip() or not a.get("key") or not a.get("journal"):
             raise ValueError(f"{path}: every [[ack]] needs journal, key and a reason: {a}")
+        if GLOB.search(str(a["journal"])) or GLOB.search(str(a["key"])):
+            raise ValueError(f"{path}: no globs in an [[ack]]: name one session file and one difference: {a}")
+        if not isinstance(a.get("was"), str) or not isinstance(a.get("now"), str):
+            raise ValueError(f"{path}: every [[ack]] needs `was` and `now` (the values, as JSON): {a}")
+        try:
+            a["_was"], a["_now"] = json.loads(a["was"]), json.loads(a["now"])
+        except json.JSONDecodeError as err:
+            raise ValueError(f"{path}: `was`/`now` is not JSON ({err}): {a}") from None
     return acks
 
 
-def acknowledged(acks: list[dict], name: str, key: str, recorded, replayed) -> str | None:
+def acknowledged(acks: list[dict], name: str, key: str, recorded, replayed) -> dict | None:
+    """The entry that acknowledges this difference: same file, same key, same recorded and replayed values."""
     for a in acks:
-        if fnmatch.fnmatchcase(name, a["journal"]) and fnmatch.fnmatchcase(key, a["key"]):
+        if (a["journal"] == name and a["key"] == key and _norm(recorded) == a.get("_was", object())
+                and _norm(replayed) == a.get("_now", object())):
             a["_used"] = True
-            return str(a["reason"]).strip()
+            return a
     return None
 
 
@@ -470,19 +498,25 @@ def _short(v) -> str:
 
 
 def report(outcomes: list[Outcome], acks: list[dict]) -> str:
-    lines = ["| session file | recorded by | differences | acknowledged |", "|---|---|---|---|"]
+    lines = ["| session file | recorded by | differences | acknowledged | acknowledged, gone |",
+             "|---|---|---|---|---|"]
     for o in outcomes:
-        lines.append(f"| `{o.name}` | `{o.header.get('code_sha') or '?'}` | {len(o.diffs)} | {len(o.acked)} |")
+        lines.append(f"| `{o.name}` | `{o.header.get('code_sha') or '?'}` | {len(o.diffs)} | {len(o.acked)} "
+                     f"| {len(o.stale)} |")
     for o in outcomes:
-        if not (o.diffs or o.acked or o.notes):
+        if not (o.diffs or o.acked or o.stale or o.notes):
             continue
         lines += ["", f"#### `{o.name}`", *[f"- {n}" for n in o.notes]]
         for k, a, b in o.diffs:
             lines.append(f"- **difference** `{k}`: recorded {_short(a)}, now {_short(b)}")
         for k, a, b, why in o.acked:
             lines.append(f"- acknowledged `{k}`: recorded {_short(a)}, now {_short(b)} ({why})")
+        for a in o.stale:
+            lines.append(f"- **acknowledged difference no longer happens** `{a['key']}`: expected now "
+                         f"{a.get('now')} ({a.get('reason', '').strip()}); the change it acknowledges was undone, "
+                         "or the file was recorded again and the entry is to be removed")
     stale = [a for a in acks if not a.get("_used")]
-    if stale:
+    if stale:  # the ones for a replayed file fail it (above); this also lists those for files not replayed
         lines += ["", "Allowlist entries that matched nothing (remove them once the fixture is recorded again):",
                   *[f"- `{a['journal']}` `{a['key']}`" for a in stale]]
     return "\n".join(lines) + "\n"

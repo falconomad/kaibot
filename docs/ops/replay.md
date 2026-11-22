@@ -24,6 +24,11 @@ given the journal file itself, opens it with today's `Journal` and verifies ever
 path: today's code reads yesterday's book the same way. Re-deriving a live session's decisions needs that day's
 daily store and minute bars beside the journal; that is not built.
 
+> **Limitation: a live (Mac) session is checked by the ledger fold and the checksums only.** Its decisions, sends
+> and orders are listed but not run again, so a change in what the engine *decides* is caught only by the
+> simulator fixtures, never by a live session file. A live session file passes as long as today's `Ledger` folds
+> its book to the shares the engine published and today's `Journal` accepts its checksums.
+
 Run it locally:
 
 ```bash
@@ -49,16 +54,21 @@ cd ~/Projects/kaibot && python3 scripts/replay_session.py export data/live/journ
 - It opens the journal **read-only** (SQLite `mode=ro`; `immutable` when no engine has it open, so not even the
   two empty side files are created). The engine's file is never written, locked for writing or moved.
 - It keeps the last session (`--sessions N` for more): the run, the decisions, the sends, order intents and states,
-  fills and the published ledger positions. It drops every other Supabase row (events, heartbeats, run rows), the
-  broker's order ids and the engine's fingerprint, and replaces execution ids with a hash. If anything in what it
+  fills, the other book entries and the published ledger positions. It drops every other Supabase row (events,
+  heartbeats, run rows), the broker's order ids, the engine's fingerprint and the retirement ids, and replaces the
+  broker's execution and activity ids with a hash. No account number or account id is in what it keeps. If anything in what it
   would write looks like a key (an Alpaca key id, a Supabase secret, an Anthropic key, a token), it writes nothing.
 - The file contains symbols, share counts, prices and the paper run's cash: open it in any text editor before
-  deciding. **Whether to upload it is the stakeholder's decision.** To have it replayed every night, it goes into
+  deciding. **Whether to upload it is the stakeholder's decision.** The repository is public: a file added to it can be read by anyone. To have it replayed every night, it goes into
   `tests/replay/sessions/` in a pull request; nothing in CI fetches anything from the Mac.
 
 ## When the replay fails
 
-- An intended change (a fix that changes what the engine does): add an `[[ack]]` with `journal`, `key` (as the
-  report prints it; globs allowed) and a `reason` naming the issue. The report lists entries that matched nothing:
-  remove them.
+- An intended change (a fix that changes what the engine does): add an `[[ack]]` with `journal` (the file name
+  without `.jsonl`), `key` (as the report prints it), `was` and `now` (the recorded and the replayed value as JSON,
+  `null` for absent; the report prints both) and a `reason` naming the issue. No globs: an entry acknowledges one
+  difference with one value, so a later change to the same key still fails.
+- "acknowledged difference no longer happens": the change an entry acknowledges was undone (a revert of an M9 fix
+  shows up this way: the replay then matches the pre-M9 recording again). If that is intended, or the fixture was
+  recorded again, remove the entry.
 - Not intended: an engine defect. Open an issue with the session file and the report; do not acknowledge it.
