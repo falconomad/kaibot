@@ -239,6 +239,24 @@ def test_a_start_from_a_snapshot_gives_the_state_of_a_full_fold(tmp_path, fixed_
     assert snap.state() == full.state()
 
 
+def test_the_previews_read_only_journal_folds_everything_and_never_reads_a_snapshot(tmp_path, fixed_now):
+    """QA-Ops on #534: scripts/preview_next_send.py builds a JournalStore on its read-only journal, whose `last` is
+    a number (the last entry it reads), not `Journal.last()`. On a journal that holds a snapshot it folds every
+    entry and gets the state of a full fold (the preview tests failed with "'int' object is not callable")."""
+    spec = importlib.util.spec_from_file_location("preview_next_send", ROOT / "scripts" / "preview_next_send.py")
+    pv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pv)
+    st = fresh(tmp_path, "j.sqlite", False)
+    run(st, snapshots=True)
+    want, path = st.state(), st.journal.path
+    st.journal.close()
+    ro = pv.ReadOnlyJournal(path)
+    assert isinstance(ro.last, int) and [k for _, _, k, _ in ro.entries(kinds=("snapshot",))]
+    got = JournalStore(ro, None)
+    assert got.snapshot_from is None and got.snapshot_problem is None
+    assert got.state() == want
+
+
 def test_no_snapshot_is_written_when_memory_differs_from_the_journal(tmp_path, fixed_now):
     st = fresh(tmp_path, "j.sqlite")
     run(st, snapshots=False)

@@ -568,8 +568,8 @@ class JournalStore:
         """Take the newest snapshot's state; returns the entry number the fold goes on from (0: no snapshot, or
         one that cannot be used: then everything is folded, as before snapshots, and `snapshot_problem` says why).
         The entry is checked like every other (#496); its own digest and the store's settings are checked here."""
-        last = getattr(self.journal, "last", None)
-        got = last("snapshot") if last is not None else None
+        last = getattr(self.journal, "last", None)  # a read-only journal (scripts/preview_next_send.py) has no
+        got = last("snapshot") if callable(last) else None  # `last()`; its `last` is a number: no snapshot read
         if got is None:
             return 0
         seq, _, _, b = got
@@ -623,8 +623,8 @@ class JournalStore:
     def snapshot_due(self, now: datetime) -> str | None:
         """Why a snapshot should be written now, or None: there is none yet, the newest one is of an earlier
         month (UTC), or of another run than the active one."""
-        last = getattr(self.journal, "last", None)
-        got = last("snapshot") if last is not None else None
+        last = getattr(self.journal, "last", None)  # a read-only journal (scripts/preview_next_send.py) has no
+        got = last("snapshot") if callable(last) else None  # `last()`; its `last` is a number: no snapshot read
         if got is None:
             return "first" if self.journal.last_seq() else None
         _, ts, _, b = got
