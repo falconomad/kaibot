@@ -1,0 +1,118 @@
+# M12 ticket 3.5 (#467): nightly coverage-guided fuzzing (Atheris, Linux) of the decoders the engine trusts:
+# Alpaca's order and fill payloads, the news provider's articles, and the journal (its checksum chain of #515 and
+# its file). The targets and their properties are in tests/fuzz/targets.py; the ordinary `ci` run already runs each
+# on its corpus and on Hypothesis inputs (tests/fuzz/test_fuzz_targets.py). A finding is uploaded as an artifact
+# (the input that breaks the property) and opens an issue (or comments on the open one): the `report` job, which runs
+# no repository code (it reads the finding from its artifact); the job that fuzzes holds a read-only token. No secret.
+name: fuzz
+on:
+  schedule:
+    - cron: "53 1 * * *"  # every night 01:53 UTC
+  workflow_dispatch:
+    inputs:
+      seconds: {description: "seconds per target", default: "480"}
+permissions:
+  contents: read
+concurrency:
+  group: fuzz
+  cancel-in-progress: true
+env:
+  PYTHONHASHSEED: "0"
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read  # runs the decoders on generated input: read-only; only the `report` job below writes
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [broker_payloads, news_payloads, journal_entries, journal_file]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked --group fuzz
+      - name: Atheris
+        id: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_EACH: ${{ inputs.seconds || '480' }}
+        run: |
+          set -o pipefail
+          cp -r "tests/fuzz/corpus/$TARGET" corpus
+          uv run python tests/fuzz/run_fuzz.py "$TARGET" -t "$SECONDS_EACH" --corpus corpus --crashes crashes \
+            2>&1 | tail -200 | tee fuzz.log
+      - name: summary
+        if: always()
+        env: {TARGET: "${{ matrix.target }}"}
+        run: |
+          {
+            echo "### Fuzzing: $TARGET"
+            echo '```'; grep -E 'stat::|Done|crash-|Violation|Error' fuzz.log | tail -20; echo '```'
+            echo "corpus: $(ls corpus | wc -l) inputs; findings: $(ls crashes 2>/dev/null | wc -l)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: "fuzz-${{ matrix.target }}"
+          path: |
+            crashes/
+            fuzz.log
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: write the finding's issue text
+        if: failure() && steps.fuzz.outcome == 'failure'
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p finding
+          {
+            echo "The nightly fuzzing (\`tests/fuzz/\`) found an input that breaks the property of \`$TARGET\`."
+            echo
+            echo "- commit: \`$COMMIT\`"
+            echo "- run: $RUN_URL (artifact \`fuzz-$TARGET\`: the input, \`crashes/crash-*\`)"
+            echo
+            echo '```'; grep -E -B2 -A25 'Violation|Traceback|==ERROR' fuzz.log | head -60; echo '```'
+            echo
+            echo "Run it again: \`PYTHONPATH=src python tests/fuzz/run_fuzz.py $TARGET --replay crash-<sha1>\`."
+            echo "An engine defect: an issue in the engine's milestone with the minimal case, a strict xfail in"
+            echo "\`tests/fuzz/test_fuzz_targets.py\` and an entry in \`KNOWN\` (\`tests/fuzz/targets.py\`). The input"
+            echo "goes into \`tests/fuzz/corpus/$TARGET/\` once the property holds again."
+          } > "finding/$TARGET.md"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: failure() && steps.fuzz.outcome == 'failure'
+        with: {name: "fuzz-finding-${{ matrix.target }}", path: finding/, retention-days: 30}
+  report:
+    # a target found an input: opens an issue per target (or comments on the open one). Runs no repository code:
+    # it reads the issue text the fuzzing job wrote from its artifact.
+    needs: target
+    if: always() && needs.target.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with a finding: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {pattern: "fuzz-finding-*", path: findings, merge-multiple: true}
+        continue-on-error: true
+      - name: open an issue with each finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          for f in findings/*.md; do
+            target=$(basename "$f" .md)
+            [[ "$target" =~ ^[a-z_]+$ ]] || { echo "skipping $f"; continue; }
+            title="Nightly fuzzing found an input: $target"
+            open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file "$f"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$f" \
+                --label bug --label team:qa-ops
+            fi
+          done

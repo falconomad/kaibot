@@ -1,0 +1,39 @@
+# Mutation testing targets of M12 ticket 3.5 (#467): the money-critical modules and the tests that guard them.
+# scripts/mutation_run.py runs mutmut on one target at a time; the weekly `mutation` workflow runs them all, each in
+# its own job with its own time budget. The tests are the fast, focused ones (mutmut runs only the tests that reach
+# the mutated function, for every mutant): no simulation soak, no subprocess kill tests.
+
+[ledger]
+source = "src/kaibot/engine/ledger.py"
+tests = ["tests/test_ledger.py", "tests/unit/test_ledger_corporate.py", "tests/unit/test_cash_drift.py",
+         "tests/stateful"]
+
+[orders]
+source = "src/kaibot/engine/orders.py"
+tests = ["tests/unit/test_order_manager.py", "tests/unit/test_lost_resend.py", "tests/unit/test_replace_client_id.py",
+         "tests/unit/test_unbooked_wait_bound.py", "tests/test_flatten_via_om.py", "tests/stateful"]
+
+[journal]
+source = "src/kaibot/engine/journal.py"
+tests = ["tests/test_journal.py", "tests/test_journal_followups.py", "tests/test_journal_identity.py",
+         "tests/test_journal_pre0018.py", "tests/unit/test_journal_checksum.py", "tests/unit/test_journal_durability.py",
+         "tests/unit/test_journal_kind_index.py", "tests/test_replica_poison.py", "tests/crash/test_crash_points.py",
+         "tests/fuzz"]
+
+[risk_caps]
+source = "src/kaibot/risk/gate.py"
+tests = ["tests/unit/test_gate.py", "tests/unit/test_gate_book.py", "tests/unit/test_gate_book_drawdown.py",
+         "tests/test_limits_one_source.py"]
+
+[reconcile]
+source = "src/kaibot/engine/reconcile.py"
+tests = ["tests/test_reconcile_engine.py", "tests/test_recon_fill_checks.py", "tests/test_accept_reconcile_command.py"]
+
+[lease]
+source = "src/kaibot/engine/lease.py"
+tests = ["tests/test_engine_lease.py"]
+
+[watchdog]
+source = "src/kaibot/engine/watchdog.py"
+tests = ["tests/test_watchdog.py", "tests/test_watchdog_local_liveness.py", "tests/unit/test_failsafe.py",
+         "tests/test_failsafe_drills.py"]
