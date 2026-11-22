@@ -110,6 +110,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.broker.protocol import Broker
+from kaibot.engine import failsafe
 from kaibot.engine.daily import (
     CARRY,
     CASH_RESERVE,
@@ -1456,7 +1457,8 @@ class LiveDaily:
         if fill not in set(data.dates.astype(object)):
             return [], {}
         ended = ended_buys(self.om, r.name, str(fill), str(session),
-                           base={s: float(q) for s, q in (last.get("held") or {}).items()}, held=now_held)
+                           base={s: float(q) for s, q in (last.get("held") or {}).items()}, held=now_held,
+                           failsafe_cancels=self._watchdog_cancels())
         out, got = carry_targets(r.strategy, r.name, plan, now_held, data, data.index_of(fill),
                                  data.index_of(prev), ended)
         note = {**note, **got}
@@ -1465,6 +1467,14 @@ class LiveDaily:
                 early = {s: "market filter off" for s in early}
             note["skipped"] = {**note["skipped"], **early}
         return out, note
+
+    def _watchdog_cancels(self) -> set[str]:
+        """M9 1.6: the buys the watchdog cancelled (its local record, next to the journal file): carried like lost
+        ones. An in-memory journal (tests, research) has no such file."""
+        path = str(getattr(self.journal, "path", "") or "")
+        if not path or path == ":memory:":
+            return set()
+        return failsafe.watchdog_cancels(Path(path).parent / failsafe.CANCELS_FILE)
 
     def _carry_room(self, r: Rule, prev: date, carry: Sequence[Target],
                     held: Mapping[str, tuple[float, float | None]]) -> dict[str, str]:
