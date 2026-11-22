@@ -1073,6 +1073,17 @@ class Engine:
                 self.journal.append("md_exit_done", {"order_id": oid, "state": o["status"]})
                 self._md_exits.pop(oid)  # not sold: the next full flatten tries again
 
+    def _md_exits_closed(self) -> None:
+        """M9 1.9: the multi-day flatten sales with the market closed (they are DAY orders: filled before the close,
+        or expired at it). Never raises: an unreadable order is tried again at the next tick, and the closed
+        branch's other steps (the daily decision, the preparation of the next session) still run."""
+        if not self._md_exits:
+            return
+        try:
+            self._sync_md_exits()
+        except Exception:
+            log.exception("multi-day flatten sales not synced (market closed); tried again at the next tick")
+
     def _attach_ledger(self) -> None:
         """A run the ledger has not seen (it began before the ledger, or the journal is new) is imported from the
         store: its pot, its reported daily results so far (the old start equity, to the last bit), the cash its
@@ -1422,6 +1433,7 @@ class Engine:
         now = self.now()
         clk = self.broker.clock()
         if not clk["is_open"]:
+            self._md_exits_closed()  # M9 1.9: a flatten sale that filled before the close is booked after it too
             self._daily_step("sync", lambda: self.daily.sync())  # #206: the closing auction's fills, before the close
             if self.day and not self.day.finalized:
                 self._sync_orders()
@@ -1441,6 +1453,11 @@ class Engine:
             self._start_day(now)
         d = self.day
         if d is None:
+            # M9 1.9 (audit M8): no run and no session (the run ended, then a restart) with a multi-day flatten sale
+            # still to book. `_sync_orders` is never reached from here, so the sale is booked here: else it stays in
+            # `_md_exits` for good and a `new_run` command waits for it for ever (`apply_commands`).
+            if self._md_exits:
+                self._sync_md_exits()
             return self._daily_status({"state": "idle", "account_clean": self.account_clean})
         self.market.update(now)
         m = self.market.last_complete_minute(now)
