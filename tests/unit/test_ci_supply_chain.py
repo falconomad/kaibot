@@ -25,7 +25,7 @@ WRITE_ALLOWED = {("labeler.yml", "label"): {"pull-requests": "write"},
                  ("replay.yml", "report"): {"issues": "write"},  # the same, for a nightly replay's difference
                  ("fuzz.yml", "report"): {"issues": "write"},  # the same, for a fuzzing finding
                  ("mutation.yml", "report"): {"issues": "write"},  # rewrites the mutation tracking issue
-                 ("drills.yml", "drills"): {"issues": "write"}}  # the same, for a failing fail-safe drill
+                 ("drills.yml", "report"): {"issues": "write"}}  # the same, for a failing fail-safe drill
 PINNED = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\s+#\s*v?\d[\w.]*\s*$")
 PRODUCTION_KEYS = re.compile(r"APCA|ALPACA|SERVICE_ROLE|SERVICE_KEY|ANTHROPIC_API_KEY|SUPABASE_ACCESS|VERCEL_TOKEN",
                              re.I)

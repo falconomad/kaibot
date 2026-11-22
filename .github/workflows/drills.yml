@@ -23,8 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30  # all drills take about 4 minutes
     permissions:
-      contents: read
-      issues: write  # to open the issue with a failing drill: the only thing this job writes
+      contents: read  # runs the repository's code: read-only; only the `report` job below writes (#549)
+    outputs:
+      outcome: ${{ steps.drills.outcome }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}
@@ -48,8 +49,20 @@ jobs:
             drills.json
           if-no-files-found: ignore
           retention-days: 90
+  report:
+    # a drill failed: opens an issue (or comments on the open one). Runs no repository code: it reads the drills'
+    # record from its artifact.
+    needs: drills
+    if: always() && needs.drills.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with a failing drill: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: drills-record}
+        continue-on-error: true
       - name: open an issue with the failing drill
-        if: failure() && steps.drills.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
