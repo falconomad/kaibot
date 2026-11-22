@@ -14,7 +14,7 @@ import os
 import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
-from om_machine import DAYS, KNOWN, FusedJournal, FusedVenue, Kill, OrdersAndLedger, et, replay
+from om_machine import DAYS, FusedJournal, FusedVenue, Kill, OrdersAndLedger, et, replay
 from reference_ledger import ReferenceLedger, dec
 
 from kaibot.broker.protocol import BrokerError, OrderRequest
@@ -223,9 +223,7 @@ def _cancel_again_later(m: OrdersAndLedger, coid: str) -> None:
     m.om.sync()
 
 
-@pytest.mark.xfail(strict=True, reason="#491: a cancel that never reached the venue is never sent again")
 def test_491_a_cancel_lost_to_a_network_error_is_sent_again():
-    assert KNOWN["cancel_unanswered"] == 491
     m, coid = _resting_buy()
     try:
         m.sim.down = True
@@ -238,15 +236,15 @@ def test_491_a_cancel_lost_to_a_network_error_is_sent_again():
         m.teardown()
 
 
-@pytest.mark.xfail(strict=True, reason="#491: a cancel that never reached the venue is never sent again")
 def test_491_a_cancel_cut_by_a_kill_before_the_venue_call_is_sent_again():
     m, coid = _resting_buy()
     try:
         m.fuse.arm(1, "after")  # the pending_cancel entry is journalled, then the process dies
         with pytest.raises(Kill):
             m.om.cancel(coid)
-        m._restart()
-        assert m.om.get(coid).state is St.PENDING_CANCEL
+        assert m.sim.order_by_client_id(coid)["status"] == "new"  # the request was never made
+        m._restart()  # the recovery finds the order still working and asks again at once
+        assert m.om.get(coid).state is St.CANCELED
         _cancel_again_later(m, coid)
         venue_order = m.sim.order_by_client_id(coid)
         assert venue_order["status"] == "canceled", f"still {venue_order['status']} at the venue"
@@ -276,12 +274,10 @@ def test_the_fuse_kills_before_and_after_the_numbered_effect():
         m.teardown()
 
 
-@pytest.mark.xfail(strict=True, reason="#507: a fill not booked yet on a previous session's order is bought again")
-def test_507_an_unbooked_fill_of_yesterdays_order_is_not_bought_again(monkeypatch):
-    """The target loop waits while a finished order's fill is not booked (#333), but only for orders of today's
-    session. Yesterday's order filled, the venue's order status says so, the account activities cannot be read:
-    the loop sees no shares held, nothing working and nothing unbooked, and buys the target a second time."""
-    monkeypatch.delitem(KNOWN, "unbooked_other_session")  # here the machine must not step around it
+def test_507_an_unbooked_fill_of_yesterdays_order_is_not_bought_again():
+    """#507: the target loop waited while a finished order's fill was not booked (#333), but only for orders of
+    today's session. Yesterday's order filled, the venue's order status says so, the account activities cannot be
+    read: the loop saw no shares held, nothing working and nothing unbooked, and bought the target a second time."""
     m = OrdersAndLedger()
     try:
         m.clock.set(et(DAYS[0], "15:50", 7))
