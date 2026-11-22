@@ -828,8 +828,12 @@ class LiveDaily:
         om = self._manager()
         if om is None:
             return []
-        self.journal.append("md_cancel", {"run_id": om.run_id, "day": str(self.now().astimezone(NY).date()),
-                                          "sides": sorted(set(sides)), "reason": reason})
+        day = str(self.now().astimezone(NY).date())
+        had = {s for b in self._entries("md_cancel") if b.get("run_id") == om.run_id and b.get("day") == day
+               for s in b.get("sides") or ()}
+        if not set(sides) <= had:  # M9 1.2: a pending "Flatten and stop" flattens on every loop pass: journalled once
+            self.journal.append("md_cancel", {"run_id": om.run_id, "day": day, "sides": sorted(set(sides)),
+                                              "reason": reason})
         return self._cancel_due()
 
     def _cancel_sides(self) -> set[str]:

@@ -215,12 +215,15 @@ def test_flatten_and_stop_command(tmp_path):
     run_day(eng, broker, clock, open_utc, until=58)
     assert "A" in eng.pos
     store.insert("command", {"kind": "flatten_and_stop", "payload": {}, "idempotency_key": "k3", "applied_at": None})
-    eng.apply_commands()
+    clock.t = open_utc + timedelta(minutes=58, seconds=7)  # in the session (run_day leaves the clock after the close;
+    eng.apply_commands()  # M9 1.2: a command's sales go out only while the market is open)
     for k in range(58, 62):
         bar = open_utc + timedelta(minutes=k)
         broker.advance(pd.Timestamp(bar))
         clock.t = bar + timedelta(minutes=1, seconds=7)
         eng.tick()
+    assert store.tables["run"][0]["status"] == "running"  # M9 1.2: until a pass finds the book flat
+    eng.apply_commands()
     assert broker.pos == {} and store.tables["run"][0]["status"] == "stopped"
     assert store.tables["trade"][0]["exit_reason"] == "manual"
 
