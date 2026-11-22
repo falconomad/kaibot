@@ -665,6 +665,7 @@ def test_the_worker_is_restarted_when_it_dies_and_never_fails_the_engine(checks)
     (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 1, code=4))
     x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "FAKE_WORKER_EXIT": "0"})
     assert x.returncode == 1 and "exited with code 4" in x.stdout
+    assert "refused its journal" in x.stdout  # QA-Ops (#511): code 4 is named, not just "restarting"
 
 
 def test_a_worker_that_cannot_start_leaves_the_engine_alone(checks):

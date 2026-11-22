@@ -74,15 +74,7 @@ FAULTS = ("none", "none", "reject", "timeout_lost", "timeout_at_venue", "partial
 
 # Engine defects this machine found, as {name: issue}. The machine avoids the one step that trips each, so that
 # everything else stays checked; the strict xfail tests fail (and tell us to drop the entry) once the fix lands.
-KNOWN: dict[str, int] = {
-    # a cancel that never reached the venue (network error, or a kill between the journal write and the call) leaves
-    # the order `pending_cancel` for good: nothing asks again. The `cancel` rule therefore runs with the network up
-    # and the fuse held.
-    "cancel_unanswered": 491,
-    # the target loop waits for a finished order's unbooked fill only when the order is of today's session; with
-    # yesterday's it buys the target again. `_send` therefore does not run the loop while such a fill is open.
-    "unbooked_other_session": 507,
-}
+KNOWN: dict[str, int] = {}  # none open: #491 and #507 are fixed
 
 # Invariant 4: the legal graph. A state may always be written again (the venue's fields changed); nothing leaves a
 # terminal state.
@@ -366,9 +358,6 @@ class OrdersAndLedger(RuleBasedStateMachine):
     def _send(self, style: str, fit: bool, fault: str, part: int) -> None:
         """The daily path's pre-send step: targets less (ledger + working orders), through the order manager.
         `fit`: usually a style whose window is open now; otherwise whichever was drawn (the policy must refuse)."""
-        stale = any(r.session != self._session() for r in self.om.settling.values())
-        if stale and "unbooked_other_session" in KNOWN:
-            return
         fitting = self._open_styles()
         if fit and fitting and style not in fitting:
             style = fitting[STYLES.index(style) % len(fitting)]
@@ -413,19 +402,12 @@ class OrdersAndLedger(RuleBasedStateMachine):
     @rule(i=st.integers(0, 7))
     def cancel(self, i: int) -> None:
         r = self._pick(i)
-        held = None
-        if "cancel_unanswered" in KNOWN:
-            if self.sim.down:
-                return
-            held, self.fuse.left = self.fuse.left, None
 
         def step() -> None:
             with contextlib.suppress(OrderBlocked):  # an order nobody has confirmed cannot be cancelled yet
                 self.om.cancel(r.coid)
 
         self._run(step)
-        if held is not None:
-            self.fuse.left = held
 
     @precondition(lambda self: any(r.type == "limit" for r in self.om.working()))
     @rule(i=st.integers(0, 7), cents=st.sampled_from([-150, -5, 5, 150]))
@@ -495,8 +477,6 @@ class OrdersAndLedger(RuleBasedStateMachine):
             want = VENUE[at_venue["status"]]
             if want is St.ACCEPTED and float(at_venue.get("filled_qty") or 0) > 0:
                 want = St.PARTIAL
-            if r.state is St.PENDING_CANCEL and "cancel_unanswered" in KNOWN:
-                continue  # the target loop's own cancels can still trip it
             assert r.state is want, f"{r.coid} is {r.state} here and {at_venue['status']} at the venue"
         positions = self.sim.positions()
         rec = compare(book.qty_by_symbol(), positions, om=om, ledger_cash=book.cash, ledger_cash0=START_CASH,

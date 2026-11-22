@@ -40,7 +40,7 @@ EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
 # M9's command_waiting (#427), command_rejected (#440), multi_day_book_unchecked and multi_day_book_unconfirmed (#426)
-# are health events; they stood in ROUTINE only until a migration listed them (#512). 0039 lists them.
+# and multi_day_unbooked_aged (#507) are health events; they stood in ROUTINE only until a migration listed them (#512). 0039 lists them.
 
 # Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
 # missed). Each dynamic call site below, and where its names come from; a new dynamic call fails

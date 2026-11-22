@@ -13,11 +13,12 @@
 --                      they agree; a second event with state ok when they do (1.10, #435)
 --   calendar_expiring  the macro calendar's covers_until, or the last row of kaibot.market_calendar_exception, is
 --                      within 30 days (1.17, #442)
--- Four more M9 health events merged since, which waited for a migration (#512; added by QA-Ops on #523):
+-- Five more health events merged since, which waited for a migration (#512; added by QA-Ops on #523):
 --   command_waiting             a "Flatten and stop" or a new run is waiting for a flat book (1.2, #427)
 --   command_rejected            a command row the engine refused, with the reason (1.15, #440)
 --   multi_day_book_unchecked    the book's run end does not see today's prices of some holdings (1.1, #426)
 --   multi_day_book_unconfirmed  those holdings had no confirmed price for the alarm time (1.1, #426)
+--   multi_day_unbooked_aged     a sale stopped waiting for an earlier day's fill that was never booked (#507)
 -- Nothing else changes: 0036's text with these types added at the end of the list
 -- (tests/test_kb_health_m9_events_sql.py checks the files against each other).
 --
@@ -64,7 +65,8 @@ begin
           'multi_day_column_missing', 'multi_day_review', 'command_accept_reconcile',
           -- 0039: M9 engine safety (tickets 1.12, 1.10, 1.17): the replica, the clock, the hand-kept calendars
           'replica_poison', 'replica_backlog', 'clock_skew', 'calendar_expiring',
-          'command_waiting', 'command_rejected', 'multi_day_book_unchecked', 'multi_day_book_unconfirmed')
+          'command_waiting', 'command_rejected', 'multi_day_book_unchecked', 'multi_day_book_unconfirmed',
+          'multi_day_unbooked_aged')
         order by ts desc limit 80) e), '[]'::jsonb),
     'deadman', jsonb_build_object(
       'armed', (select count(*) = 2 from vault.secrets

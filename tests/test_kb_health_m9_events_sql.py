@@ -21,7 +21,8 @@ ROOT = Path(__file__).resolve().parents[1]
 M36 = ROOT / "migrations" / "0036_kb_health_dynamic_events.sql"
 M39 = ROOT / "migrations" / "0039_kb_health_m9_events.sql"
 NEW = ("replica_poison", "replica_backlog", "clock_skew", "calendar_expiring",
-       "command_waiting", "command_rejected", "multi_day_book_unchecked", "multi_day_book_unconfirmed")  # last 4: #512
+       "command_waiting", "command_rejected", "multi_day_book_unchecked", "multi_day_book_unconfirmed",
+       "multi_day_unbooked_aged")  # last 5: #512
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0039 applied")
 
 

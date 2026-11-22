@@ -94,6 +94,7 @@ const EV: Record<string, string> = {
   command_rejected: "A command from the dashboard was refused by the engine",
   multi_day_book_unchecked: "Today's prices for some holdings can't be read (the last close is used)",
   multi_day_book_unconfirmed: "Some holdings have had no confirmed price for a while (the last close is used)",
+  multi_day_unbooked_aged: "A sale stopped waiting for an earlier day's trade that never reached the books",
 };
 
 
