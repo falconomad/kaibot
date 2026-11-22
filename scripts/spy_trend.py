@@ -33,7 +33,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from kaibot.evaluation import gate_v2  # noqa: E402
+from kaibot.evaluation import gate_v2, holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.replay import spy_trend as st  # noqa: E402
@@ -407,11 +407,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--start", default="2016-01-01")
-    ap.add_argument("--end", default="2026-11-06")
+    ap.add_argument("--end", default="2024-12-31", help="last session; the default is the last one before the "
+                    "hold-out (config/holdout.yaml)")
     ap.add_argument("--control-runs", type=int, default=st.CONTROL_RUNS)
     ap.add_argument("--control-seed", type=int, default=st.CONTROL_SEED)
     ap.add_argument("--has", action="store_true", help="exit 0 if a report for these dates and control runs exists")
     ap.add_argument("--summary", action="store_true", help="print and write the one table")
+    holdout.add_argument(ap)
     a = ap.parse_args(argv)
     data = Path(a.data)
     if a.has:
@@ -419,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     if a.summary:
         print(summary(data))
         return 0
+    holdout.enforce(script=__file__, end=a.end, rule=st.RULE, opening=a.open_holdout, data=a.data)
     run(a)
     return 0
 

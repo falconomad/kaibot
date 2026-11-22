@@ -10,6 +10,8 @@ without touching the venue's rules or the live code (live code never imports cos
   print pays the close venue's half-spread and half the impact; an opening print twice the midday half-spread
   (`opg` orders, not used by the noise band). Fees: v2's 2026 SEC and TAF on every sale. `mult` scales spread and
   impact (2x / 3x cost runs), never the fees, as scripts/momentum_core.py scales them.
+  With `params` from `costs_v2.index_params()` (scenario "v2idx") a fill in an index fund pays the measured
+  index-fund bucket instead of its ADV bucket; the symbol is passed to the model for that and for nothing else.
 - `FixedBpCosts`: the pre-registration's all-in scenarios (0.5 / 1 / 2 bp a side, the noise-band pre-registration,
   section 4): every buy pays and every sale gives up `bp`, no separate fee (the percentage includes it).
 
@@ -90,12 +92,13 @@ class V2SimCosts(_Logged):
             raise ValueError("V2SimCosts prices market fills of a one-symbol run: give adv for one symbol and clock")
         symbol = next(iter(self.adv))
         day = self.clock().astimezone(ZoneInfo(ET)).date()
-        ctx = FillCtx(price, qty, sigma_1m, vol_1m, self._adv(symbol, day), "continuous")
+        ctx = FillCtx(price, qty, sigma_1m, vol_1m, self._adv(symbol, day), "continuous", symbol=symbol)
         return self._note(side, price, self._price(side, ctx), qty, "continuous")
 
     def auction_fill(self, side: str, price: float, qty: float, symbol: str, day: date, vol: float) -> float:
         venue = "close"  # SimBroker calls this for `cls` and `opg`; the noise band sends `cls` only
-        ctx = FillCtx(price, qty, 0.0, vol if math.isfinite(vol) and vol > 0 else 1.0, self._adv(symbol, day), venue)
+        ctx = FillCtx(price, qty, 0.0, vol if math.isfinite(vol) and vol > 0 else 1.0, self._adv(symbol, day), venue,
+                      symbol=symbol)
         return self._note(side, price, self._price(side, ctx), qty, venue)
 
     def auction(self, side: str, price: float) -> float:  # pragma: no cover - auction_fill is always used
@@ -133,7 +136,13 @@ class FixedBpCosts(_Logged):
 
 
 def costs_for(scenario: str, adv: dict | None = None, clock: Callable[[], datetime] | None = None):
-    """"v2", "v2x2", "v2x3" or a bp figure ("0", "0.5", "1", "2"). `clock` can also be set later (`.clock = `)."""
+    """"v2", "v2x2", "v2x3", "v2idx" (v2 with the measured index-fund bucket of config/costs_index_bucket.yaml,
+    M11 ticket 2.3; refused until that file holds a value) or a bp figure ("0", "0.5", "1", "2"). `clock` can
+    also be set later (`.clock = `)."""
+    if scenario == "v2idx":
+        from kaibot.broker.costs_v2 import index_params
+
+        return V2SimCosts(adv=adv or {}, params=index_params(), clock=clock)
     if scenario.startswith("v2"):
         mult = float(scenario[3:]) if "x" in scenario else 1.0
         return V2SimCosts(adv=adv or {}, mult=mult, clock=clock)

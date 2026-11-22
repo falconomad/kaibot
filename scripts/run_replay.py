@@ -24,6 +24,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.common import http  # noqa: E402
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
 from kaibot.replay.events import events, events_digest, input_digest  # noqa: E402
@@ -71,7 +72,9 @@ def main() -> None:
     ap.add_argument("--universe", default=str(ROOT / "config" / "universe_seed.yaml"))
     ap.add_argument("--data-from", default="", help="first bar date to load (default: start - 120 days)")
     ap.add_argument("--refresh-vix", action="store_true", help="re-download VIXCLS instead of the cached copy")
+    holdout.add_argument(ap)
     a = ap.parse_args()
+    holdout.enforce(script=__file__, end=a.end, rule="dip_reversal", opening=a.open_holdout, data=a.data)
     env = load_env(a.env)
     data = Path(a.data)
     cfg = yaml.safe_load(Path(a.universe).read_text())

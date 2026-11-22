@@ -68,7 +68,11 @@ cd "$(dirname "$0")/.."
 ENV_FILE="${KAIBOT_ENV_FILE:-$HOME/Projects/kaibot-secrets/.env}"
 UNIVERSE="${KAIBOT_EXP_UNIVERSE:-config/universe_history.yaml}"
 START="${KAIBOT_EXP_START:-2016-01-01}"
-END="${KAIBOT_EXP_END:-2026-11-06}"
+# The hold-out (M11 2.6, config/holdout.yaml): every session from 2025-01-01 on is held back, so the default end
+# is the last research session. A later KAIBOT_EXP_END is refused by every script unless KAIBOT_HOLDOUT_OPENING
+# names an opening committed to config/holdout.yaml (docs/ops/holdout.md). Reports to 2026-11-06 made before the
+# freeze stay where they are; a run to the new end is a new report and counts as a new trial.
+END="${KAIBOT_EXP_END:-2024-12-31}"
 LEVEL=balanced
 PY=.venv/bin/python
 

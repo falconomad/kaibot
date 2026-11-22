@@ -44,7 +44,7 @@ from run_replay import load_env, vix_prev_close  # noqa: E402
 from walk_forward import logged_trials, peak_rss_mb  # noqa: E402
 
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
-from kaibot.evaluation import prereg  # noqa: E402
+from kaibot.evaluation import holdout, prereg  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
@@ -332,12 +332,14 @@ def main() -> None:
     ap.add_argument("--refresh-vix", action="store_true")
     ap.add_argument("--costs", default="v1", choices=list(MODELS),
                     help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
+    holdout.add_argument(ap)
     a = ap.parse_args()
     try:
         prereg_sha = prereg.require(a.rule, ROOT)
     except prereg.PreregError as e:
         sys.exit(f"no run: {e}")
     gate_sha = GateV2.load(ROOT).sha
+    holdout.enforce(script=__file__, end=a.end, rule=a.rule, opening=a.open_holdout, data=a.data)
     print(f"pre-registration docs/prereg/{a.rule}.md sha256 {prereg_sha[:12]}; config/gate_v2.yaml sha256 "
           f"{gate_sha[:12]}", flush=True)
     costs = None if a.costs == "v1" else get_model(a.costs)

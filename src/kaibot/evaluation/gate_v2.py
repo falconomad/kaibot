@@ -265,10 +265,15 @@ def mark_6(gate: GateV2, neighbours: Mapping[str, pd.Series] | None, declared: t
 
 def statistics(gate: GateV2, net: pd.Series, spy: pd.Series, *, costs: pd.Series | None = None,
                registry: Registry | None = None, rule: str | None = None, traded: pd.Series | None = None,
-               exposure: pd.Series | None = None) -> dict:
+               exposure: pd.Series | None = None, tbill: pd.Series | None = None) -> dict:
     """The numbers every gate v2 report shows for one daily series against SPY total return: return, CAGR,
     mark-to-market drawdown, Sharpe with Newey-West error and haircut, alpha and beta, calendar years, cost
-    multiples, turnover and the deflated Sharpe against the trial registry."""
+    multiples, turnover and the deflated Sharpe against the trial registry.
+
+    tbill: the 3-month Treasury-bill rate in percent by observation date (FRED DTB3). When given, `cash_yield`
+    holds both versions of the account (`mtm.cash_views`): idle cash at 0% as simulated, and idle cash at the
+    point-in-time bill rate with the Sharpe and alpha in excess of it (M11 ticket 2.4). Everything else in this
+    block, and every Gate B mark, stays on the simulated zero-cash series: gate v2's marks are not changed."""
     kw = gate.stats_kw
     net, spy = mtm.align(net, spy)
     out = {"window": [net.index[0].date().isoformat(), net.index[-1].date().isoformat()],
@@ -276,7 +281,13 @@ def statistics(gate: GateV2, net: pd.Series, spy: pd.Series, *, costs: pd.Series
            "alpha_beta": asdict(mtm.alpha_beta(net, spy, periods=kw["periods"])),
            "calendar_years": [{**y, "counted": gate.counted(y)} for y in mtm.calendar_years(net, spy)],
            "turnover": mtm.turnover(mtm.align(net, traded)[1], kw["periods"]) if traded is not None else None,
-           "costs": None, "exposure_matched_spy": None, "deflated_sharpe": None}
+           "costs": None, "exposure_matched_spy": None, "deflated_sharpe": None, "cash_yield": None}
+    if tbill is not None:
+        rf = mtm.tbill_daily(tbill, net.index)
+        out["cash_yield"] = {"series": "FRED DTB3, 3-month Treasury bill, secondary market, discount basis; each "
+                                       "session uses the last rate dated before it",
+                             **mtm.cash_views(net, spy, mtm.align(net, exposure)[1] if exposure is not None else None,
+                                              rf, **kw)}
     if costs is not None:
         multiples = gate.cfg["gate_b"]["mark_4"]["reported_multiples"]
         out["costs"] = mtm.cost_table(net, mtm.align(net, costs)[1], multiples, **kw)
@@ -300,7 +311,8 @@ def statistics(gate: GateV2, net: pd.Series, spy: pd.Series, *, costs: pd.Series
 def evaluate_gate_b(gate: GateV2, *, rule: str, run: Run, pit_run: Run | None = None,
                     neighbours: Mapping[str, pd.Series] | None = None, prereg: Prereg | None = None,
                     source: Mapping[str, Any] | None = None, registry: Registry | None = None,
-                    first_run_at: datetime | None = None, as_of: datetime | None = None) -> dict:
+                    first_run_at: datetime | None = None, as_of: datetime | None = None,
+                    tbill: pd.Series | None = None) -> dict:
     """Gate B for one rule: each mark with pass / fail / unknown and its numbers, as JSON-ready data.
 
     run: the account under test. pit_run: the same rule on the point-in-time universe when `run` is on today's
@@ -309,6 +321,7 @@ def evaluate_gate_b(gate: GateV2, *, rule: str, run: Run, pit_run: Run | None = 
     False, "benchmark": "spy_price_only"}; compared with `gate_b.final_requires`. registry: the trial registry
     (deflated Sharpe; and the `prereg_sha256` its rows carry for this rule must be the hash of `prereg`).
     first_run_at: when the rule was first run (earliest trial row), for Gate A.
+    tbill: the Treasury-bill rate (see `statistics`); it adds the `cash_yield` block and changes no mark.
 
     verdict: "fail" (a mark is false), "incomplete" (a mark could not be computed), "provisional" (all marks
     hold but the run or the pre-registration cannot carry a pass), "pass"."""
@@ -365,7 +378,7 @@ def evaluate_gate_b(gate: GateV2, *, rule: str, run: Run, pit_run: Run | None = 
         "marks": marks, "provisional": bool(reasons), "provisional_reasons": reasons, "verdict": verdict,
         "can_pass": not reasons,
         "statistics": statistics(gate, net, spy, costs=costs, registry=registry, rule=rule, traded=run.traded,
-                                 exposure=run.exposure),
+                                 exposure=run.exposure, tbill=tbill),
     })
 
 
@@ -642,6 +655,7 @@ def render_gate_b(rep: dict) -> str:
     if e:
         out.append(f"- SPY held at the rule's own exposure (mean {_pct(e['mean_exposure'], 0)}): CAGR "
                    f"{_pct(e['cagr'])}, max drawdown {_pct(e['max_drawdown'])}, Sharpe {_sharpe_cell(e, share)}.")
+    out += _cash_lines(st.get("cash_yield"), bench, share)
     if st["costs"]:
         out += ["", "| Costs | Total return | CAGR | Max drawdown | Sharpe |", "|---|---|---|---|---|"]
         out += [f"| {k} | {_pct(v['total_return'])} | {_pct(v['cagr'])} | {_pct(v['max_drawdown'])} | "
@@ -661,6 +675,33 @@ def render_gate_b(rep: dict) -> str:
 
 
 # ---------------------------------------------------------------- helpers
+
+
+def _cash_lines(c: dict | None, bench: str, share: float) -> list[str]:
+    """Both versions of the account (ticket 2.4): idle cash at 0% and at the Treasury-bill rate."""
+    if not c:
+        return ["", "- Idle cash at the Treasury-bill rate: not computed (no bill-rate file; "
+                    "`python scripts/fetch_tbill.py`). Every number here has idle cash at 0%."]
+    z, b = c["zero_cash"], c["tbill_cash"]
+
+    def row(name: str, zc: dict | None, bc: dict | None) -> str:
+        cells = [f"{_pct(x['cagr'])} / {_sharpe_cell(x, share)}" if x else "n/a (no exposure series)"
+                 for x in (zc, bc)]
+        return f"| {name} | {cells[0]} | {cells[1]} |"
+
+    out = ["", f"Idle cash: both versions. Treasury bills paid {_pct(c['rf']['mean_ann'])} a year over the window"
+           + (f"; the rule held {_pct(c['mean_idle_share'], 0)} of the account in cash on average"
+              if c["mean_idle_share"] is not None else "") + ". The marks above use the 0% version.", "",
+           "| CAGR / Sharpe | Cash at 0%, Sharpe against 0 | Cash in bills, Sharpe above bills |", "|---|---|---|",
+           row("Rule", z["rule"], b["rule"]), row(bench, z["benchmark"], b["benchmark"]),
+           row("SPY at the rule's exposure", z["exposure_matched"], b["exposure_matched"])]
+    za, ba = z["alpha_beta"], b["alpha_beta"]
+    out.append(f"| Alpha a year (t) | {_pct(za['alpha'])} ({za['alpha_t']:.2f}) | "
+               + (f"{_pct(ba['alpha'])} ({ba['alpha_t']:.2f})" if ba else "n/a") + " |")
+    if b["rule"] is None:
+        out += ["", f"- Without an exposure series the cash interest cannot be added. The simulated curve's Sharpe "
+                    f"above bills is {_sharpe_cell(b['simulated_excess'], share)}."]
+    return out
 
 
 def _year_note(y: dict, min_months: int) -> str:

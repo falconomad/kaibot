@@ -219,7 +219,8 @@ def test_the_experiment_runs_from_the_daily_store_and_writes_one_table(market, t
     write_store(tmp_path / "daily", panel)
     store = DailyStore(tmp_path / "daily")
     assert np.allclose(store.panel(["SPY"]).div[:, 0], panel.div[:, 0]), "the fixture store reads back"
-    args = ["--data", str(tmp_path), "--control-runs", "20"]
+    # the script's default end is the last session before the hold-out (M11 2.6); the fixture runs to 2026
+    args = ["--data", str(tmp_path), "--control-runs", "20", "--end", "2026-11-06"]
     assert script.main(["--has", *args]) == 1
     assert script.main(args) == 0
     assert script.main(["--has", *args]) == 0

@@ -81,6 +81,7 @@ import walk_forward_multiday as wfm  # noqa: E402
 from walk_forward import peak_rss_mb  # noqa: E402
 
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.replay import earnings  # noqa: E402
@@ -839,6 +840,7 @@ def main() -> None:
     ap.add_argument("--refresh-daily", action="store_true", help="rebuild the daily-bar cache")
     ap.add_argument("--costs", default="v1", choices=list(MODELS),
                     help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
+    holdout.add_argument(ap)
     a = ap.parse_args()
     data = Path(a.data)
     if a.has:
@@ -855,6 +857,7 @@ def main() -> None:
         return
     if not a.version or not a.end:
         ap.error("--version and --end are required for a run")
+    holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
     run_version(a)
 
 

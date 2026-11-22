@@ -58,6 +58,8 @@ create function realtime.topic() returns text language sql stable as
   $f$ select nullif(current_setting('test.topic', true), '') $f$;
 grant usage on schema realtime to anon, authenticated;
 grant select on realtime.messages to anon, authenticated;
+grant insert on realtime.messages to authenticated;  -- as Supabase: the policies decide (0038's INSERT policy)
+grant usage on sequence realtime.messages_id_seq to authenticated;
 create schema net;
 create table net.calls (id bigserial primary key, method text, url text, params jsonb, body jsonb,
   done boolean not null default false);
