@@ -1,0 +1,9 @@
+# Seeds of the deterministic simulation (tests/dst/) that once failed. One per line: the seed, then why it is here.
+# They run on every pull request, for ever: a seed is never removed, also not when the generator has changed and
+# the seed no longer draws the scenario that failed (then the hand-written scenario named here is what guards it).
+# The nightly soak's issue names the seed to add.
+4    # first run of the suite: a submit without an answer, then a kill at md_sent with the watchdog acting
+54   # the missed window's late send bought nothing: the test's own bars had left the name "not buyable: trend"
+66   # found #533 (Flatten and stop with a fill activity a day late); now test_flatten_and_stop_sells_a_filled_buy...
+196  # a partly filled sale stays a sale although a newer decision wants the name (by design, builder_sizing)
+796328380  # the soak's first night: an engine down from before a decision until after its fill session (the oracle)
