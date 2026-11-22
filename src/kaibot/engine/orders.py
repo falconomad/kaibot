@@ -22,7 +22,20 @@ notes_engine_architecture.md section 4):
   in that symbol is accepted (`blocked`) until a lookup BY CLIENT ORDER ID resolves it. A lookup that finds the
   order adopts it; an order not found on `LOST_LOOKUPS` lookups (at least `LOOKUP_GAP_S` apart) at least
   `LOST_AFTER_S` after the intent never
-  reached the venue (`rejected`, reason `lost`), and only then may a new attempt (a new client id) go out;
+  reached the venue (`rejected`, reason `lost`), and only then may a new attempt (a new client id) go out.
+  M9 1.11 (issue #436): before that word the venue is read three more ways (`_lost_evidence`), because a lookup by
+  client id that lags behind an accepted order would otherwise end in two orders: the open orders (the order
+  found there is adopted), the fills since the intent (a fill on an order the manager does not know, in the
+  symbol and on the order's side: adopted when it is this order, evidence when that order cannot be read), and the
+  venue's position against the ledger plus the fills the manager's other orders still have to book (shares the
+  ledger cannot explain, in the order's direction). Evidence, or a venue that cannot be read, keeps the order
+  `unknown` (reason `not lost: ...`, the symbol stays blocked) and everything is read again at the next miss.
+  The hold is bounded (QA-Ops on #495): an `unknown` order blocks every new order in its symbol, sales included,
+  and a position difference or an unreadable fill can stand for days for reasons that have nothing to do with the
+  order. So from the New York day after the intent on (`_day_over`: a lookup cannot lag overnight) only the
+  order itself counts: found among the open orders or by its fill it is adopted, a venue that cannot be read
+  still keeps it `unknown`, and otherwise it is lost. Shares the ledger does not have are then a reconciliation
+  difference, which refuses buys in the stock and never a sale;
 - `recover()` runs those lookups for every open record before anything else, at start-up;
 - fills come from the account activities (FILL rows), each booked once by its activity id: a duplicate event
   is ignored, a partial fill is booked at its own quantity and price (D3), a fill on an order the manager does
@@ -48,12 +61,14 @@ from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from zoneinfo import ZoneInfo
 
 from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 
 OM_KINDS = ("om_intent", "om_terms", "om_state", "om_fill", "fill")
 COID_MAX = 128  # Alpaca's limit on client_order_id
 LOST_LOOKUPS, LOST_AFTER_S = 2, 60.0
+_NY = ZoneInfo("America/New_York")  # the day an order belongs to (`_day_over`)
 LOOKUP_GAP_S = 30.0  # a miss counts only this long after the previous one (two lookups with real time between)
 REFUSED = (403, 422)
 FILL_LOOKBACK = timedelta(minutes=10)  # activities are read from a little before the last one seen (ids dedupe)
@@ -169,9 +184,12 @@ class OrderManager:
     manager writes `om_fill` and the caller books its own ledger from `on_fill`."""
 
     def __init__(self, broker: Broker, journal, now: Callable[[], datetime], *, run_id: int | None = None,
-                 on_fill: Callable[[Fill, OrderRecord], None] | None = None) -> None:
+                 on_fill: Callable[[Fill, OrderRecord], None] | None = None,
+                 position: Callable[[str], float | None] | None = None) -> None:
+        """`position(symbol)`: the ledger's shares in the symbol, all sleeves together (None: not known now), for
+        the check before an order is called lost (M9 1.11). Without it that check reads the orders and fills only."""
         self.broker, self.journal, self.now, self.run_id = broker, journal, now, run_id
-        self.on_fill = on_fill
+        self.on_fill, self.position = on_fill, position
         self.orders: dict[str, OrderRecord] = {}
         self.live: dict[str, OrderRecord] = {}  # the open ones (index: ten-year research runs make many orders)
         self.bases: dict[str, int] = {}  # client id without its attempt number -> orders made for it
@@ -455,10 +473,62 @@ class OrderManager:
         misses = r.misses + 1
         age = (now - _ts(r.created)).total_seconds() if r.created else 1e9
         if r.state in UNCONFIRMED and misses >= LOST_LOOKUPS and age >= LOST_AFTER_S:
-            self._state(r, St.REJECTED, reason="lost: never reached the venue", misses=misses,
-                        last_miss=now.isoformat())
+            found, why = self._lost_evidence(r, over=_day_over(r, now))
+            if found is not None:  # the venue has it after all (the lookup lags): this record's order
+                self._adopt(r, found)
+            elif why:
+                self._state(r, St.UNKNOWN, reason=f"not lost: {why}"[:200], misses=misses, last_miss=now.isoformat())
+                self.errors.append((r.coid, f"not lost: {why}"[:200]))
+            else:
+                self._state(r, St.REJECTED, reason="lost: never reached the venue", misses=misses,
+                            last_miss=now.isoformat())
         else:
             self._state(r, r.state, misses=misses, last_miss=now.isoformat())
+
+    def _lost_evidence(self, r: OrderRecord, *, over: bool = False) -> tuple[dict | None, str | None]:
+        """M9 1.11 (#436): the last reads before an unconfirmed order is called lost. (order, None): the venue has
+        it, adopt it. (None, why): it may have reached the venue, or the venue could not be read: not lost.
+        (None, None): no trace of it anywhere. `over` (the New York day of the intent has ended): circumstantial
+        evidence no longer holds the order (a fill on an order that cannot be read, the position against the
+        ledger); the order itself is still looked for, and a venue that cannot be read is still not lost."""
+        ids = {r.coid, *r.client_ids}
+        try:
+            for o in self.broker.open_orders():
+                if o.get("client_order_id") in ids:
+                    return o, None
+            after = _ts(r.created) - FILL_LOOKBACK if r.created else None
+            checked: set[str] = set()
+            for a in self.broker.activities(after, types=("FILL",)):
+                oid = str(a.get("order_id") or "")
+                if not oid or oid in self.by_id or oid in checked or a.get("symbol") != r.symbol \
+                        or a.get("side") != r.side:
+                    continue
+                checked.add(oid)
+                try:
+                    o = self.broker.order(oid)
+                except BrokerError as e:
+                    if e.status != 404:
+                        raise
+                    o = None
+                if o is not None and o.get("client_order_id") in ids:
+                    return o, None
+                if (o is None or not o.get("client_order_id")) and not over:  # a fill nobody can name: maybe its
+                    return None, f"a {r.side} fill in {r.symbol} since the intent on order {oid}, which cannot be read"
+            want = self.position(r.symbol) if self.position is not None and not over else None
+            if want is not None:
+                p = self.broker.positions().get(r.symbol)
+                have = float((p or {}).get("qty") or 0.0)
+                late = sum((x.cum - x.booked) * (1 if x.side == "buy" else -1) for x in self.orders.values()
+                           if x.symbol == r.symbol and x is not r and x.cum > x.booked + 1e-9)
+                extra = have - float(want) - late  # shares the ledger and the known orders do not explain
+                if (extra > 1e-9 and r.side == "buy") or (extra < -1e-9 and r.side == "sell"):
+                    return None, (f"the venue's position in {r.symbol} is {have:g}, the ledger and the known "
+                                  f"fills give {float(want) + late:g}")
+        except BrokerError as e:
+            return None, f"the venue could not be read ({e.status}: {_reason(e)})"
+        except Exception as e:
+            return None, f"the venue could not be read ({type(e).__name__}: {str(e)[:120]})"
+        return None, None
 
     def resolve(self) -> list[OrderRecord]:
         """Look up every order the venue has not confirmed, BY CLIENT ORDER ID, before anything else."""
@@ -548,6 +618,13 @@ def _base(coid: str) -> str:
 
 def _reason(e: BrokerError) -> str:
     return str(e.body or e)[:160]
+
+
+def _day_over(r: OrderRecord, now: datetime) -> bool:
+    """The New York calendar day of the order's intent has ended (an intent without a time: long ago)."""
+    if not r.created:
+        return True
+    return now.astimezone(_NY).date() > _ts(r.created).astimezone(_NY).date()
 
 
 def _ts(v) -> datetime:

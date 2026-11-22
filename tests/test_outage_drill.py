@@ -259,8 +259,10 @@ def _raise(*a, **k):
 @pytest.mark.parametrize("what", ["data", "broker"])
 @pytest.mark.parametrize("seconds", [20, 120, 600])
 def test_c_api_outage_fails_closed_and_recovers(tmp_path, what, seconds):
-    """The loop retries every 10 s, so an outage of 30 s or more is 3 failed iterations in a row: the kill switch
-    trips and entries stay off for the rest of the session (fail closed). Exits keep being managed either way."""
+    """The loop retries every 10 s, so a broker outage of 30 s or more is 3 failed iterations in a row: the kill
+    switch trips (fail closed; since M9 1.7 it clears after five clean ticks). Exits keep being managed either way.
+    Market data alone (M9 1.5, #430): the minute read is contained, so the loop does not fail and no kill trips; the
+    heartbeat says `market_data`, no entry is scanned on a minute without new bars, and nothing is sent."""
     sim, eng, broker, store = start(tmp_path)
     sim.run_until(sim.at(60, 2))
     leg = dict(stop_leg(broker))
@@ -276,7 +278,12 @@ def test_c_api_outage_fails_closed_and_recovers(tmp_path, what, seconds):
         setattr(o, n, _raise)
     end = sim.clock() + timedelta(seconds=seconds)
     sim.run_until(end)
-    assert sim.status["state"] == "error"
+    if what == "data":
+        assert sim.status["state"] != "error" and eng.error_streak == 0
+        if seconds >= 60:  # a tick fell inside the outage: the heartbeat says so
+            assert str(sim.status.get("market_data", "")).startswith("read failed")
+    else:
+        assert sim.status["state"] == "error"
     assert len(broker.orders) == n_orders and stop_leg(broker) == leg  # nothing new, protection untouched
     for o, n, f in saved:
         setattr(o, n, f)
@@ -286,10 +293,11 @@ def test_c_api_outage_fails_closed_and_recovers(tmp_path, what, seconds):
     first_ok = next(i for i, d in enumerate(ticks) if healthy_with("A")(d))
     assert first_ok == 0  # bounded: healthy on the first tick after the outage
     assert eng.error_streak == 0 and len(buys(broker)) == 1
-    if seconds >= 30:
+    if seconds >= 30 and what == "broker":
         assert eng.kill == "engine_errors" and not eng._may_enter(eng.day.last_m)
     else:
         assert eng.kill is None
+    assert "market_data" not in sim.status  # the read works again
 
 
 def test_c_long_outage_still_flattens_at_1555(tmp_path):
