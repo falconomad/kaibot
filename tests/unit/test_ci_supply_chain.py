@@ -23,7 +23,7 @@ WRITE_ALLOWED = {("labeler.yml", "label"): {"pull-requests": "write"},
                  ("stateful.yml", "weekly-random-seeds"): {"issues": "write"},  # opens the issue with the seed
                  ("dst.yml", "nightly-soak"): {"issues": "write"},  # the same, for the simulation's failing seed
                  ("replay.yml", "report"): {"issues": "write"},  # the same, for a nightly replay's difference
-                 ("fuzz.yml", "target"): {"issues": "write"},  # the same, for a fuzzing finding
+                 ("fuzz.yml", "report"): {"issues": "write"},  # the same, for a fuzzing finding
                  ("mutation.yml", "report"): {"issues": "write"}}  # rewrites the mutation tracking issue
 PINNED = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40}\s+#\s*v?\d[\w.]*\s*$")
 PRODUCTION_KEYS = re.compile(r"APCA|ALPACA|SERVICE_ROLE|SERVICE_KEY|ANTHROPIC_API_KEY|SUPABASE_ACCESS|VERCEL_TOKEN",
@@ -68,6 +68,28 @@ def test_the_token_is_read_only_by_default(path):
         assert isinstance(perms, dict), f"{path.name}:{job}: permissions must be listed, not `{perms}`"
         writes = {k: v for k, v in perms.items() if v != "read" and v != "none"}
         assert writes == WRITE_ALLOWED.get((path.name, job), {}), f"{path.name}:{job}: write permissions {writes}"
+
+
+# Jobs that write and still run the repository's code: they predate the rule below (follow-up: split them like
+# replay.yml). Nothing may be added here.
+WRITES_AND_RUNS_CODE = {("stateful.yml", "weekly-random-seeds"), ("dst.yml", "nightly-soak")}
+
+
+@pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
+def test_a_job_that_writes_runs_no_repository_code(path):
+    """A token that can write never sits next to the repository's code: no checkout, no install, no `uv run`."""
+    doc = _load(path)
+    for job, spec in doc["jobs"].items():
+        perms = spec.get("permissions") or {}
+        if not any(v == "write" for v in perms.values()) or (path.name, job) in WRITES_AND_RUNS_CODE:
+            continue
+        for step in spec.get("steps") or []:
+            uses, run = str(step.get("uses", "")), str(step.get("run", ""))
+            assert not uses.startswith(("actions/checkout@", "astral-sh/setup-uv@", "./")), \
+                f"{path.name}:{job}: a job with a write token uses {uses.split('@')[0]}"
+            code = [ln for ln in run.splitlines() if not ln.strip().startswith("echo")]  # issue text may name them
+            assert not any(re.search(r"\b(uv|python3?|pytest|pip3?|bash|sh)\b|(^|\s)\./|\b(scripts|tests|src)/", ln)
+                           for ln in code), f"{path.name}:{job}: a job with a write token runs {run[:80]}"
 
 
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)

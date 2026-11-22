@@ -2,7 +2,7 @@
 # One job per module of tests/mutation/targets.toml (ledger, orders, journal, risk caps, reconcile, lease,
 # watchdog), each with a 40-minute budget for mutmut on a 4-vCPU runner: a module not finished in time reports the
 # mutants it tried. Then one job folds the results into the tracking issue (#546, rewritten each week) and uploads
-# every survivor's diff. No secret; the only write is that issue.
+# every survivor's diff. No secret; the only write is that issue, by a job that runs no repository code.
 name: mutation
 on:
   schedule:
@@ -46,14 +46,13 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: always()
         with: {name: "mutation-${{ matrix.target }}", path: results/, if-no-files-found: warn, retention-days: 60}
-  report:
+  summarize:
     needs: module
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
-      issues: write  # rewrites the tracking issue's body: the only thing this job writes
+      contents: read  # runs scripts/mutation_run.py: read-only; only the `report` job below writes
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}
@@ -64,6 +63,19 @@ jobs:
       - run: cat summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with: {name: mutation-results, path: all/, retention-days: 60}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with: {name: mutation-summary, path: summary.md, retention-days: 60}
+  report:
+    # rewrites the tracking issue from the summary's artifact. Runs no repository code.
+    needs: summarize
+    if: always() && needs.summarize.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # rewrites the tracking issue's body: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: mutation-summary}
       - name: update the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}

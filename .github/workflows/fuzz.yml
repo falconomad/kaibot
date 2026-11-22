@@ -2,7 +2,8 @@
 # Alpaca's order and fill payloads, the news provider's articles, and the journal (its checksum chain of #515 and
 # its file). The targets and their properties are in tests/fuzz/targets.py; the ordinary `ci` run already runs each
 # on its corpus and on Hypothesis inputs (tests/fuzz/test_fuzz_targets.py). A finding is uploaded as an artifact
-# (the input that breaks the property) and opens an issue (or comments on the open one). No secret.
+# (the input that breaks the property) and opens an issue (or comments on the open one): the `report` job, which runs
+# no repository code (it reads the finding from its artifact); the job that fuzzes holds a read-only token. No secret.
 name: fuzz
 on:
   schedule:
@@ -22,8 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: read
-      issues: write  # to open the issue with a finding: the only thing this job writes
+      contents: read  # runs the decoders on generated input: read-only; only the `report` job below writes
     strategy:
       fail-fast: false
       matrix:
@@ -62,14 +62,14 @@ jobs:
             fuzz.log
           if-no-files-found: ignore
           retention-days: 30
-      - name: open an issue with the finding
+      - name: write the finding's issue text
         if: failure() && steps.fuzz.outcome == 'failure'
         env:
-          GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT: ${{ github.sha }}
           TARGET: ${{ matrix.target }}
         run: |
+          mkdir -p finding
           {
             echo "The nightly fuzzing (\`tests/fuzz/\`) found an input that breaks the property of \`$TARGET\`."
             echo
@@ -82,12 +82,37 @@ jobs:
             echo "An engine defect: an issue in the engine's milestone with the minimal case, a strict xfail in"
             echo "\`tests/fuzz/test_fuzz_targets.py\` and an entry in \`KNOWN\` (\`tests/fuzz/targets.py\`). The input"
             echo "goes into \`tests/fuzz/corpus/$TARGET/\` once the property holds again."
-          } > issue.md
-          title="Nightly fuzzing found an input: $TARGET"
-          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
-          if [ -n "$open" ]; then
-            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file issue.md
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file issue.md \
-              --label bug --label team:qa-ops
-          fi
+          } > "finding/$TARGET.md"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: failure() && steps.fuzz.outcome == 'failure'
+        with: {name: "fuzz-finding-${{ matrix.target }}", path: finding/, retention-days: 30}
+  report:
+    # a target found an input: opens an issue per target (or comments on the open one). Runs no repository code:
+    # it reads the issue text the fuzzing job wrote from its artifact.
+    needs: target
+    if: always() && needs.target.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with a finding: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {pattern: "fuzz-finding-*", path: findings, merge-multiple: true}
+        continue-on-error: true
+      - name: open an issue with each finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          for f in findings/*.md; do
+            target=$(basename "$f" .md)
+            [[ "$target" =~ ^[a-z_]+$ ]] || { echo "skipping $f"; continue; }
+            title="Nightly fuzzing found an input: $target"
+            open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file "$f"
+            else
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$f" \
+                --label bug --label team:qa-ops
+            fi
+          done
