@@ -89,6 +89,11 @@ const EV: Record<string, string> = {
   replica_backlog: "The dashboard's copy is falling behind the engine's record",
   clock_skew: "The engine's clock against the broker's (new orders wait while they differ)",
   calendar_expiring: "A yearly calendar runs out within 30 days and needs extending",
+  // 0039: M9 commands and the book's run end (#427, #440, #426)
+  command_waiting: "Flatten and stop, or a new run, is waiting until every position is sold",
+  command_rejected: "A command from the dashboard was refused by the engine",
+  multi_day_book_unchecked: "Today's prices for some holdings can't be read (the last close is used)",
+  multi_day_book_unconfirmed: "Some holdings have had no confirmed price for a while (the last close is used)",
 };
 
 
