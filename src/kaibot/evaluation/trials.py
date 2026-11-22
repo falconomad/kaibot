@@ -158,15 +158,46 @@ def registry_file(root: Path | str, env: Mapping[str, str] | None = None) -> Pat
     return default
 
 
-def append(path: Path | str, row: Mapping[str, Any]) -> dict:
+REGISTRATIONS = ("prereg", "screen", "proposal")
+
+
+def registration(row: Mapping[str, Any]) -> str | None:
+    """#472 (M12 ticket 3.10): what registered this run, or None. A run is registered by its rule's
+    pre-registration (`prereg_sha256`, the committed file's hash), by a committed screen batch (`variant: screen`
+    with its `batch`), or by an entry of the proposals ledger (`variant: proposal` with its `proposal_id`)."""
+    if str(row.get("prereg_sha256") or "").strip():
+        return "prereg"
+    if row.get("variant") == "screen" and str(row.get("batch") or "").strip():
+        return "screen"
+    if row.get("variant") == "proposal" and str(row.get("proposal_id") or "").strip():
+        return "proposal"
+    return None
+
+
+def append(path: Path | str, row: Mapping[str, Any], *, verify_prereg: bool = False,
+           root: Path | str | None = None) -> dict:
     """Append one run to the registry file and return the row as written. Never rewrites the file.
 
     `strategy` is required; `n_trials` must be a whole number >= 0 when given (default 1; 0 for a
     report of a configuration that another row counts). A file whose last
-    line was cut off (a crashed run) gets a newline first, so the new row is not glued to the damaged one."""
+    line was cut off (a crashed run) gets a newline first, so the new row is not glued to the damaged one.
+
+    #472: an UNREGISTERED run is refused (`registration`): no row without a pre-registration hash, a screen batch
+    or a proposal id. `verify_prereg` also checks the hash against the rule's committed pre-registration
+    (`evaluation.prereg`, which asks git; off by default so the engine's own imports stay standard-library)."""
     row = dict(row)
     if not isinstance(row.get("strategy"), str) or not row["strategy"].strip():
         raise ValueError("a trial row needs the rule's name in `strategy`")
+    if registration(row) is None:
+        raise ValueError(f"unregistered run of {row['strategy']!r}: a trial row needs its pre-registration's "
+                         "`prereg_sha256`, a screen `batch` or a `proposal_id` (#472)")
+    if verify_prereg and registration(row) == "prereg":
+        from kaibot.evaluation import prereg as prereg_mod
+
+        p = prereg_mod.load(row["strategy"], root)
+        if not p.accepts(str(row["prereg_sha256"])):
+            raise ValueError(f"{row['strategy']}: prereg_sha256 {row['prereg_sha256']!r} is not a committed "
+                             "version of its pre-registration")
     n = row.get("n_trials", 1)
     if isinstance(n, bool) or not isinstance(n, int) or n < 0:
         raise ValueError(f"n_trials must be a whole number >= 0 (configurations searched), got {n!r}")
