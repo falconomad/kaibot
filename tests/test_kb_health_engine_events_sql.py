@@ -35,8 +35,6 @@ AWAITING_KB_HEALTH: set[str] = set()
 # S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
 # nothing and a failure stops nothing, so neither is a health event
 ROUTINE |= {"market_alarm", "market_alarm_error"}
-# M9 1.12 (#437): a row Supabase refuses for good was skipped; rows waiting for ten minutes and not getting fewer
-AWAITING_KB_HEALTH |= {"replica_poison", "replica_backlog"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
@@ -64,8 +62,6 @@ DYNAMIC_SITES = {
     ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),
 }
 FALLBACK_RE = re.compile(r'"event":\s*"([a-z_0-9]+)"')
-# M9 1.17 (#442): the macro calendar or the dead-man's holiday table ends within 30 days
-AWAITING_KB_HEALTH |= {"calendar_expiring"}
 AGENT_EVENT_RE = re.compile(r'^EVENT\s*=\s*"([a-z_0-9]+)"', re.M)
 QUEUED_RE = re.compile(r'_events\.append\(\(\s*"([a-z_0-9]+)"')
 COMMAND_RE = re.compile(r'\bkind == (?:"([a-z_]+)"|([A-Z_]+))')
