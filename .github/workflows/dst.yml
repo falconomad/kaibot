@@ -1,0 +1,92 @@
+# M12 ticket 3.2 (#464): the deterministic simulation with injected faults (tests/dst/): whole engine sessions under
+# a seed, against a faulty venue, a faulty Supabase, kills, pauses and the watchdog, with the audit's invariants
+# checked after every pass. The ordinary `ci` run pays for three seeds, the regression seeds and the planted bugs;
+# this workflow is the search:
+#   seeds        every pull request and main: seeds 1 to 200 (the same for everyone: a pull request is never turned
+#                red by a draw another did not get) on four processes, about three minutes
+#   nightly-soak fresh seeds for 20 minutes, then the hunt for the planted bugs with random seeds; a failing seed
+#                opens an issue (or adds a comment to the open one) with the seed and the command that runs it again
+# A seed that fails is added to tests/dst/regression_seeds.txt and stays there.
+name: dst
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "41 2 * * *"  # every night 02:41 UTC (job `nightly-soak`)
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: dst-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  PYTHONHASHSEED: "0"  # the faults do not depend on it (they are hashed by name); the trace's order of events may
+jobs:
+  seeds:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # the bound: 200 seeds take about three minutes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: 200 seeds, the regression seeds, the planted bugs
+        env: {KAIBOT_DST_SEEDS: "200"}
+        run: uv run pytest tests/dst -q -p no:cacheprovider -n 4 --dist worksteal --durations=5
+  nightly-soak:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write  # to open the issue with the failing seed: the only thing this job writes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: fresh seeds for 20 minutes, then the hunt for the planted bugs
+        id: soak
+        env: {PYTHONPATH: src}
+        run: |
+          set -o pipefail
+          uv run python tests/dst/soak.py --minutes 20 --jobs 4 --hunt 40 --out soak.md 2>&1 | tee soak.log
+      - name: summary
+        if: always()
+        run: |
+          { echo '### Deterministic simulation: nightly soak'; cat soak.md 2>/dev/null || tail -40 soak.log; } \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: open an issue with the failing seed
+        if: failure() && steps.soak.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "The nightly soak of the deterministic simulation (\`tests/dst/\`) found a seed that breaks an invariant."
+            echo
+            echo "- commit: \`$COMMIT\`"
+            echo "- run: $RUN_URL"
+            echo
+            if [ -s soak.md ]; then cat soak.md; else echo '```'; tail -60 soak.log; echo '```'; fi
+            echo
+            echo "Run a seed again: \`PYTHONHASHSEED=0 PYTHONPATH=src python tests/dst/run_seed.py <seed> --trace\`"
+            echo
+            echo "Then: add the seed to \`tests/dst/regression_seeds.txt\` (it stays there for ever). If it is an"
+            echo "engine defect: an issue in the engine's milestone with a hand-written scenario as the minimal case,"
+            echo "a strict xfail in \`tests/dst/test_dst.py\` and an entry in \`KNOWN\` (\`tests/dst/world.py\`). If it is"
+            echo "the simulation's own mistake (its oracle, its bars): fix it there."
+          } > issue.md
+          title="DST nightly soak found a failing seed"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file issue.md \
+              --label bug --label team:qa-ops
+          fi
