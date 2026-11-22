@@ -274,3 +274,19 @@ def test_the_momentum_band_run_refuses_the_hold_out(tmp_path: Path, monkeypatch)
     with pytest.raises(SystemExit) as e:
         trend_momentum_band.main(["--data", str(tmp_path), "--end", "2025-02-28", "--trials", ""])
     assert str(e.value.code).startswith("hold-out: trend_momentum_band.py would read to 2025-02-28")
+
+
+def test_the_screen_refuses_the_hold_out(tmp_path: Path, monkeypatch):
+    """#462: scripts/screen_batch.py never reads 2025 on."""
+    import yaml
+
+    monkeypatch.delenv(ho.ENV_OPENING, raising=False)
+    sys.path.insert(0, str(SCRIPTS))
+    import screen_batch
+
+    f = tmp_path / "b.yaml"
+    f.write_text(yaml.safe_dump({"id": "h", "date": "2026-11-22", "family": "cross_sectional_momentum",
+                                 "candidates": [{"name": "screen_x", "signal": "momentum"}]}))
+    with pytest.raises(SystemExit) as e:
+        screen_batch.main(["--batch", str(f), "--data", str(tmp_path / "d"), "--end", "2025-06-30", "--trials", ""])
+    assert str(e.value.code).startswith("hold-out: screen_batch.py would read to 2025-06-30")
