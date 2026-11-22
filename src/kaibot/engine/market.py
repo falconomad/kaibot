@@ -51,8 +51,12 @@ class LiveMarket:
         spy: str,
         cache_dir: Path,
         vix_loader: Callable[[], pd.Series],
+        minute_data=None,
     ):
         self.data = data
+        # M9 1.5: the per-minute read (`update`) runs inside the engine's loop, so the engine gives it a client with
+        # a deadline (engine/__main__.bounded_data); the history load keeps `data` (long retries, before the open)
+        self.minute_data = minute_data if minute_data is not None else data
         self.symbols = symbols
         self.etf_of = etf_of
         self.spy = spy
@@ -152,7 +156,7 @@ class LiveMarket:
 
     def update(self, now: datetime) -> None:
         start = self._last_fetch or self.open_utc
-        got = self.data.bars(self.all, start, now, feed="iex")
+        got = self.minute_data.bars(self.all, start, now, feed="iex")
         for s, df in got.items():
             if df is None or not len(df):
                 continue

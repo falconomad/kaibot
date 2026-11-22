@@ -16,6 +16,10 @@ Paper only. Fail-safe layers: [failsafe.md](failsafe.md). Running the engine: [r
 
 All of these run on fakes in `tests/test_outage_drill.py`. Its `Sim` mirrors the engine loop in `kaibot.engine.__main__` (10 s iterations, a tick at second ≥ 7, a heartbeat each iteration) and the watchdog's 15 s poll. The fake venue keeps filling legs while the engine is down.
 
+Market data only (M9 1.5, #430): a failed read of the minute's bars is not a loop error. It is one `engine_error`
+event (step `market_update`) per distinct failure; the tick goes on without new bars, no intraday entry is scanned on
+that minute, and the multi-day send still runs. Row (c) is about the broker API and about data reads elsewhere.
+
 ## What the Engine health page shows
 
 | Moment | Header pill | Processes card | Events / halts |
