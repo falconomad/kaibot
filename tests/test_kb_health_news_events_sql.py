@@ -65,8 +65,8 @@ def test_the_engine_sends_exactly_these_types():
     if src.exists():  # #355 may merge after this PR
         sent = set(re.findall(r'"(news_feed_[a-z_]+)"', src.read_text()))
         assert sent == set(NEW)
-    health = (ROOT / "apps" / "web" / "src" / "pages" / "Health.tsx").read_text()
-    m = re.search(r"const EV: Record<string, string> = \{(.*?)\n\};", health, re.S)
+    health = (ROOT / "apps" / "web" / "src" / "lib" / "eventNames.ts").read_text()  # #447: generated labels
+    m = re.search(r"export const EVENT_LABELS: Record<string, string> = \{(.*?)\n\};", health, re.S)
     assert m and all(re.search(rf"\b{t}:\s*\"", m.group(1)) for t in NEW)
 
 
