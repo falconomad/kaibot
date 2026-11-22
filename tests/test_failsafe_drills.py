@@ -227,8 +227,9 @@ def test_flatten_and_stop_still_sells_everything(tmp_path):
     a.store.insert("command", {"kind": "flatten_and_stop", "payload": {}, "idempotency_key": "k9",
                                "applied_at": None})
     a.eng.apply_commands()
-    assert a.store.tables["run"][0]["status"] == "stopped"
     a.ticks(a.open2, 10, 13)
+    a.eng.apply_commands()  # M9 1.2: the run ends when the sale is booked, not when it is sent
+    assert a.store.tables["run"][0]["status"] == "stopped"
     assert "B" not in a.broker.pos and not a.stop_b()
     b = a.eng.ledger.book(a.rid)
     assert (MD, "B") not in b.sleeves and any(e["type"] == "multi_day_sold" for e in a.store.tables["event"])
