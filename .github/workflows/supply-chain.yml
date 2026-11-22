@@ -2,7 +2,7 @@
 # can appear without any change here).
 #   lock      uv.lock and the hash-pinned requirements exports agree (that every requirement carries a hash, and the
 #             rules below for the workflows, are also pinned by tests/unit/test_ci_supply_chain.py in the `ci` run)
-#   pip-audit known vulnerabilities in what the engine image installs, in the research set and in the dev tools
+#   pip-audit known vulnerabilities in what the engine image installs, in the research and ml sets and in the dev tools
 #   zizmor    the workflows themselves: actions pinned by commit, read-only token, no credentials left behind
 # The two tools are locked with hashes in .github/audit/uv.lock. No job here, or anywhere in CI, has a secret.
 name: supply-chain
@@ -33,7 +33,7 @@ jobs:
       - name: pip-audit (engine image, research set, dev tools)
         run: |
           uv export --frozen --all-groups --all-extras --no-emit-project --format requirements-txt --quiet > /tmp/requirements-dev.txt
-          for f in requirements-engine.txt requirements-research.txt /tmp/requirements-dev.txt; do
+          for f in requirements-engine.txt requirements-research.txt requirements-ml.txt /tmp/requirements-dev.txt; do
             echo "::group::pip-audit $f"
             uv run --project .github/audit --locked pip-audit -r "$f" --require-hashes --disable-pip \
               --progress-spinner off --desc on

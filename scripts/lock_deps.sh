@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # One locked dependency set (#122). pyproject.toml lists what Kaibot needs; uv.lock pins every package (all platforms,
-# Python 3.12+); the two requirements files are hash-pinned exports of uv.lock for pip (Dockerfile, Mac scripts).
+# Python 3.12+); the three requirements files are hash-pinned exports of uv.lock for pip (Dockerfile, Mac scripts):
+# engine (the image), research (+ scipy), ml (research + scikit-learn, #474: the rank overlay's runs only).
 #   ./scripts/lock_deps.sh            re-export the requirements files from uv.lock (after `uv lock` or `uv lock --upgrade`)
 #   ./scripts/lock_deps.sh --check    exit 1 if uv.lock or either export is out of date (CI runs this)
 # Needs uv (https://docs.astral.sh/uv/). Never edit the requirements files by hand.
@@ -15,7 +16,8 @@ if [ "${1:-}" = --check ]; then
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   export_to "$tmp/requirements-engine.txt"
   export_to "$tmp/requirements-research.txt" --extra research
-  for f in requirements-engine.txt requirements-research.txt; do
+  export_to "$tmp/requirements-ml.txt" --extra research --extra ml
+  for f in requirements-engine.txt requirements-research.txt requirements-ml.txt; do
     diff -q "$tmp/$f" "$f" >/dev/null || { echo "$f is not the export of uv.lock: run ./scripts/lock_deps.sh"; exit 1; }
   done
   echo "uv.lock and the requirements exports agree"
@@ -23,4 +25,5 @@ else
   uv lock
   export_to requirements-engine.txt           # engine: Dockerfile, run_engine.sh, fetch_*.sh
   export_to requirements-research.txt --extra research   # engine + research: run_experiments.sh, replay scripts
+  export_to requirements-ml.txt --extra research --extra ml   # + scikit-learn: scripts/trend_momentum_gbm.py only
 fi
