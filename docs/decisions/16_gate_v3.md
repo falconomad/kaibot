@@ -362,3 +362,22 @@ before (section 8), and none can now. A new verdict for one of these rules needs
 runs.
 
 The simulation of section 9 was run with the strict default spread (1/(T-1)); its table is unchanged by item 1.
+
+## 16. Amendment note (22 Nov 2026): the family table of section 6 as pre-registrations add rules
+
+- **Written by:** Quant research, at Product's request. **Status:** a note, not a change of any mark. Section 6 is
+  left as written on 21 Nov 2026. It records the twelve families and their rules **as of that date**.
+- **What is authoritative:** `config/gate_v3.yaml` `families`. A new pre-registration adds its rule there in the same
+  pull request, before its first run (section 6), and the gate scores from the config, not from this text. The
+  number of families, twelve, is unchanged by the rules below. Holm still counts twelve.
+- **`cross_sectional_momentum`, five rules** once #550 (ticket 2.8) is merged:
+
+| Family | Rules | Kind | Added by |
+|---|---|---|---|
+| `cross_sectional_momentum` | trend_momentum, mom_12_1_band, mom_12_1_band_nofilter, rel_strength, trend_momentum_sleeve | selection | the first four: section 6. `trend_momentum_sleeve`: docs/prereg/trend_momentum_sleeve.md (#459, PR #550), trend_momentum frozen and declared for gate v3 under the evidence-based tier |
+
+- **Effect:** inside the family the Bonferroni factor is the number of rules it lists, so it becomes 5 for every later
+  verdict in it (section 4, "Inside a family"). Verdicts already given are not reopened (section 6).
+- **Pending:** `trend_momentum_band` (docs/prereg/trend_momentum_band.md, #460, PR #556) joins the same family
+  when it is merged. The family then lists six rules, and the config says so. This note will not be edited for it:
+  the next addition is recorded by the next note, in the same way.
