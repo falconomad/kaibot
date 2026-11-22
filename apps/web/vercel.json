@@ -1,4 +1,5 @@
 {
+  "ignoreCommand": "bash scripts/vercel_ignore.sh",
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
   "functions": { "api/summary.ts": { "maxDuration": 30 }, "api/check-ticker.ts": { "maxDuration": 20 }, "api/logo-domain.ts": { "maxDuration": 10 }, "api/marks.ts": { "maxDuration": 10 } },
   "headers": [{ "source": "/(.*)", "headers": [
