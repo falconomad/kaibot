@@ -557,3 +557,106 @@ def test_179_a_failed_read_at_the_session_start_expires_nothing():
     with pytest.raises(RuntimeError):
         rc.check("session_start")
     assert rc.accepted
+
+
+# ---------------------------------------------------------------- #491: a cancel the venue never got is sent again
+def _resting(b, clock):
+    om, journal, _ = manager(b, clock)
+    r = om.submit(OrderRequest("A", "buy", 10, "limit", "day", client_order_id("1", "rule", "A", DAY, "buy"),
+                               limit_price=90), strategy="rule", purpose="buy", session=DAY)
+    return om, journal, r
+
+
+def _cancels(b):
+    return [c for c in b.calls if c.startswith("cancel ")]
+
+
+def test_491_a_cancel_lost_to_the_network_is_sent_again_by_a_later_sync():
+    from kaibot.engine.orders import CANCEL_RESEND_S
+
+    b, clock = venue()
+    om, _, r = _resting(b, clock)
+    b.down = True
+    om.cancel(r.coid)
+    assert r.state is St.PENDING_CANCEL and _cancels(b) == [] and any("cancel: 0" in e for _, e in om.errors)
+    b.down = False
+    om.sync()  # too soon after the request: a request in flight is not doubled
+    assert _cancels(b) == [] and r.state is St.PENDING_CANCEL
+    clock.advance(seconds=CANCEL_RESEND_S)
+    om.sync()
+    assert len(_cancels(b)) == 1 and b.orders[r.order_id]["status"] == "canceled" and r.state is St.CANCELED
+    clock.advance(minutes=5)
+    om.sync()
+    assert len(_cancels(b)) == 1  # ended: nothing more is asked
+
+
+def test_491_a_restart_asks_again_at_once():
+    b, clock = venue()
+    om, journal, r = _resting(b, clock)
+    om._state(r, St.PENDING_CANCEL)  # the journal entry of a cancel whose venue call the kill prevented
+    om2 = OrderManager(b, journal, clock, run_id="1")
+    assert om2.get(r.coid).state is St.PENDING_CANCEL and _cancels(b) == []
+    om2.recover()
+    assert len(_cancels(b)) == 1 and om2.get(r.coid).state is St.CANCELED
+
+
+def test_491_a_venue_that_shows_pending_cancel_is_not_asked_again():
+    b, clock = venue()
+    om, _, r = _resting(b, clock)
+    real = b.cancel
+
+    def slow(order_id):  # the venue takes the request and has not finished it (Alpaca's `pending_cancel`)
+        b.calls.append(f"cancel {order_id}")
+        b.orders[order_id]["status"] = "pending_cancel"
+
+    b.cancel = slow
+    om.cancel(r.coid)
+    for _ in range(3):
+        clock.advance(minutes=1)
+        om.sync()
+    assert len(_cancels(b)) == 1 and r.state is St.PENDING_CANCEL
+    b.orders[r.order_id]["status"] = "new"  # (only so the simulated venue's own cancel accepts it)
+    b.cancel = real
+    clock.advance(minutes=1)
+    om.sync()
+    assert r.state is St.CANCELED
+
+
+def test_491_a_fill_that_beat_the_lost_cancel_is_booked_and_nothing_is_cancelled():
+    b, clock = venue()
+    om, _, r = _resting(b, clock)
+    b.down = True
+    om.cancel(r.coid)
+    b.down = False
+    b.orders[r.order_id]["limit_price"] = 1000.0  # the order fills at the venue before the cancel is asked again
+    clock.advance(minutes=2)
+    b.advance(clock())
+    om.sync()
+    if r.state is not St.FILLED:
+        clock.advance(minutes=1)
+        b.advance(clock())
+        om.sync()
+    assert r.state is St.FILLED and r.booked == 10 and b.orders[r.order_id]["status"] == "filled"
+
+
+def test_491_a_venue_that_never_acts_on_the_cancel_is_asked_less_and_less_often():
+    """QA-Ops second key on #521: the repeat is bounded. The venue reads the order (still `new`) and ignores every
+    cancel: the wait doubles from CANCEL_RESEND_S to CANCEL_RESEND_MAX_S, so an hour of this is about 15 requests
+    for the order, not 240, and every repeat is noted for the caller."""
+    from kaibot.engine.orders import CANCEL_RESEND_MAX_S, CANCEL_RESEND_S
+
+    b, clock = venue()
+    om, _, r = _resting(b, clock)
+    b.cancel = lambda order_id: b.calls.append(f"cancel {order_id}")  # taken, never acted on
+    om.cancel(r.coid)
+    at = []
+    for k in range(360):  # an hour of syncs ten seconds apart
+        clock.advance(seconds=10)
+        n = len(_cancels(b))
+        om.sync()
+        if len(_cancels(b)) > n:
+            at.append(k * 10 + 10)
+    gaps = [b_ - a_ for a_, b_ in zip(at, at[1:], strict=False)]
+    assert at[0] <= CANCEL_RESEND_S + 10 and gaps[:3] == [30, 60, 120]
+    assert max(gaps) <= CANCEL_RESEND_MAX_S + 10 and 10 <= len(at) <= 20, at
+    assert r.state is St.PENDING_CANCEL and any("cancel sent again" in e for _, e in om.errors)

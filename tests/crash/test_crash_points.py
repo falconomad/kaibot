@@ -20,7 +20,6 @@ from crash_world import STEPS, Engine, Fuse, Kill, World, fingerprint, run, s_op
 from kaibot.engine.journal import Journal
 
 PHASES = ("before", "after")
-KNOWN_491 = "#491"  # a cancel that never reached the venue is never sent again (found by ticket 3.1's machine)
 
 
 @pytest.fixture(scope="module")
@@ -31,10 +30,9 @@ def baseline():
     o.world.close()
 
 
-def _sweep(baseline, phase: str, damage: str | None) -> tuple[dict, dict]:
-    """Every crash point of one phase: {point: what broke} and {point: the known defect it hit}."""
+def _sweep(baseline, phase: str, damage: str | None) -> dict:
+    """Every crash point of one phase: {point: what broke}."""
     broken: dict[str, list[str]] = {}
-    known: dict[str, list[str]] = {}
     for k, what in enumerate(baseline["effects"], start=1):
         name = f"{k} {phase} {what}"
         o = run(k, phase, damage)
@@ -44,16 +42,12 @@ def _sweep(baseline, phase: str, damage: str | None) -> tuple[dict, dict]:
                 found.append(f"killed {o.restarts} times at {o.killed_at!r}, expected once at {what!r}")
             if fingerprint(o) != baseline["end"]:
                 found.append(f"ended with {fingerprint(o)}, the uninterrupted run with {baseline['end']}")
-            mine = [v for v in found if v.startswith(KNOWN_491)]
-            rest = [v for v in found if not v.startswith(KNOWN_491)]
-            if mine:
-                known[name] = mine
-            if rest:
-                broken[name] = rest
+            if found:
+                broken[name] = found
         finally:
             o.engine.abandon()
             o.world.close()
-    return broken, known
+    return broken
 
 
 def _report(title: str, lines: list[str]) -> None:
@@ -85,13 +79,11 @@ def test_a_kill_at_every_crash_point_recovers(baseline, phase):
     """Process-crash consistency: whatever was written is on disk. After the restart the venue holds what the
     uninterrupted run holds, the ledger equals the venue, every execution is booked once, no decision has two
     orders, no order is unknown, and the replica has every row once."""
-    broken, known = _sweep(baseline, phase, None)
-    _report(f"kill {phase} each write: {len(baseline['effects']) - len(broken) - len(known)} of "
-            f"{len(baseline['effects'])} crash points pass, {len(known)} hit a known defect, {len(broken)} fail",
-            [f"{k}: {v}" for k, v in {**known, **broken}.items()])
+    broken = _sweep(baseline, phase, None)
+    _report(f"kill {phase} each write: {len(baseline['effects']) - len(broken)} of "
+            f"{len(baseline['effects'])} crash points pass, {len(broken)} fail",
+            [f"{k}: {v}" for k, v in broken.items()])
     assert not broken, broken
-    # the known defect is hit only where a kill separates the cancel's journal entry from its venue call
-    assert all("pending_cancel" in k or "venue.cancel" in k for k in known), known
 
 
 @pytest.mark.parametrize("damage", ["torn", "flipped"])
@@ -102,10 +94,10 @@ def test_a_kill_with_a_damaged_last_record_recovers(baseline, phase, damage):
     earlier, although the dead process had already acted on that record (the venue may hold its order). The
     restart must still converge: deterministic client order ids and the activity ids make every lost record
     recoverable from the venue."""
-    broken, known = _sweep(baseline, phase, damage)
-    _report(f"kill {phase} each write, last record {damage}: {len(baseline['effects']) - len(broken) - len(known)} "
-            f"of {len(baseline['effects'])} crash points pass, {len(known)} hit a known defect, {len(broken)} fail",
-            [f"{k}: {v}" for k, v in {**known, **broken}.items()])
+    broken = _sweep(baseline, phase, damage)
+    _report(f"kill {phase} each write, last record {damage}: {len(baseline['effects']) - len(broken)} "
+            f"of {len(baseline['effects'])} crash points pass, {len(broken)} fail",
+            [f"{k}: {v}" for k, v in broken.items()])
     assert not broken, broken
 
 
@@ -189,13 +181,12 @@ def test_a_record_corrupted_into_valid_json_is_noticed():
         w.close()
 
 
-@pytest.mark.xfail(strict=True, reason="#491: a cancel that never reached the venue is never sent again")
 def test_491_a_kill_between_the_cancels_journal_entry_and_its_venue_call_still_cancels(baseline):
-    """The one crash point of the sweep that does not recover (tolerated there by name, pinned here)."""
+    """#491: the one crash point of the sweep that did not recover before the cancel was sent again."""
     k = baseline["effects"].index("venue.cancel") + 1
     o = run(k, "before")
     try:
-        assert not [v for v in violations(o) if v.startswith(KNOWN_491)]
+        assert not violations(o)
     finally:
         o.engine.abandon()
         o.world.close()

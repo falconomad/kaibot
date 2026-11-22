@@ -223,9 +223,7 @@ def _cancel_again_later(m: OrdersAndLedger, coid: str) -> None:
     m.om.sync()
 
 
-@pytest.mark.xfail(strict=True, reason="#491: a cancel that never reached the venue is never sent again")
 def test_491_a_cancel_lost_to_a_network_error_is_sent_again():
-    assert KNOWN["cancel_unanswered"] == 491
     m, coid = _resting_buy()
     try:
         m.sim.down = True
@@ -238,15 +236,15 @@ def test_491_a_cancel_lost_to_a_network_error_is_sent_again():
         m.teardown()
 
 
-@pytest.mark.xfail(strict=True, reason="#491: a cancel that never reached the venue is never sent again")
 def test_491_a_cancel_cut_by_a_kill_before_the_venue_call_is_sent_again():
     m, coid = _resting_buy()
     try:
         m.fuse.arm(1, "after")  # the pending_cancel entry is journalled, then the process dies
         with pytest.raises(Kill):
             m.om.cancel(coid)
-        m._restart()
-        assert m.om.get(coid).state is St.PENDING_CANCEL
+        assert m.sim.order_by_client_id(coid)["status"] == "new"  # the request was never made
+        m._restart()  # the recovery finds the order still working and asks again at once
+        assert m.om.get(coid).state is St.CANCELED
         _cancel_again_later(m, coid)
         venue_order = m.sim.order_by_client_id(coid)
         assert venue_order["status"] == "canceled", f"still {venue_order['status']} at the venue"
