@@ -41,6 +41,7 @@ from kaibot.engine.journal import (
     DurabilityError,
     IdentityError,
     Journal,
+    JournalCorrupt,
     JournalStore,
     Replicator,
     journal_path,
@@ -233,7 +234,7 @@ def open_journal(path) -> Journal:
     `fullfsync` on macOS). Before the lease and before anything is read from the broker: nothing was done."""
     try:
         return Journal(path)
-    except DurabilityError as e:
+    except (DurabilityError, JournalCorrupt) as e:  # #496: an entry that fails its checksum is never folded
         log.error("%s", e)
         raise SystemExit(EXIT_JOURNAL) from None
 
@@ -457,6 +458,14 @@ def main() -> None:
             log.error("%s", e)
             stop.update(now=True, lease_lost=True)
             break
+        except JournalCorrupt as e:
+            # #496: the book is a fold of the journal, so nothing more is decided on it. The engine stops; the
+            # broker-held stops stay, the watchdog covers the rest, and the next start refuses the file (code 4).
+            log.error("%s", e)
+            with contextlib.suppress(Exception):
+                eng.store.event("engine_error", {"error": f"JournalCorrupt: {e}"[:300]}, eng._rid())
+            stop.update(now=True, journal_corrupt=True)
+            break
         except Exception as e:
             log.exception("loop error (will retry)")
             with contextlib.suppress(Exception):
@@ -498,6 +507,9 @@ def main() -> None:
         pass
     replicator.stop()
     lease.release()  # clean stop: another machine may start at once
+    if stop.get("journal_corrupt"):
+        log.error("engine stopped: the journal is damaged (docs/ops/ledger.md, 'Checksums')")
+        raise SystemExit(EXIT_JOURNAL)
     log.info("engine stopped")
 
 

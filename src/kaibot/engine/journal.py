@@ -9,6 +9,9 @@ opened, and a journal without them is refused: M9 1.18) before the call that fol
 - `intent` / `ack` entries: every broker call, written BEFORE the call and answered after it;
 - `import` / `bootstrap`: rows copied from Supabase the first time a journal is started on an existing run.
 
+Every entry carries a checksum over its number, time, kind and text, chained to the entry before it (#496). It is
+checked when the file is opened and on every read; an entry that fails is never folded (JournalCorrupt names it).
+
 State is a fold over it: `JournalStore` materialises the engine's tables from the `row` and `import` entries when it
 opens, and the engine folds the ledger from the ledger entries. A restart reads the file and is where it was.
 
@@ -82,7 +85,8 @@ create table if not exists entry (
   seq  integer primary key autoincrement,
   ts   text not null,
   kind text not null,
-  body text not null
+  body text not null,
+  sum  text
 );
 create trigger if not exists entry_no_update before update on entry
   begin select raise(abort, 'the journal is append-only'); end;
@@ -97,6 +101,32 @@ create table if not exists idmap (name text not null, tbl text not null, engine_
 -- No row, trigger, identity or cursor changes.
 create index if not exists entry_kind_seq on entry (kind, seq);
 """
+
+
+def entry_sum(prev: str | None, seq: int, ts: str, kind: str, body: str) -> str:
+    """#496: an entry's checksum, chained to the checksum of the entry before it ("" when that one has none)."""
+    return hashlib.sha256(f"{prev or ''}|{seq}|{ts}|{kind}|{body}".encode()).hexdigest()
+
+
+def check_entry(prev: str | None, seq: int, ts: str, kind: str, body: str, sum_: str | None, sum_from: int) -> None:
+    """Raise JournalCorrupt unless the entry is what was appended. An entry without a checksum is accepted only
+    below the recorded cut-over (`meta.checksum_from`: what an older journal held when checksums began)."""
+    if sum_ is None:
+        if seq >= sum_from:
+            raise JournalCorrupt(
+                f"journal entry {seq} has no checksum (every entry from {sum_from} on must carry one): written by "
+                "an older release or damaged. Not folded. See docs/ops/ledger.md, 'Checksums'.")
+        return
+    if entry_sum(prev, seq, ts, kind, body) != sum_:
+        raise JournalCorrupt(
+            f"journal entry {seq} fails its checksum: it was changed after it was written, or the entry before it "
+            "was changed or is missing (a damaged disk or a bad copy). Not folded. See docs/ops/ledger.md, "
+            "'Checksums'.")
+
+
+# an entry with its checksum and the checksum of the entry before it (None: the first one)
+SUM_COLUMNS = ("seq, ts, kind, body, sum, "
+               "(select p.sum from entry p where p.seq < entry.seq order by p.seq desc limit 1)")
 
 
 def _json(o):
@@ -115,7 +145,9 @@ def canon(x):
 
 
 class Journal:
-    def __init__(self, path: str | Path = ":memory:", now: Callable[[], datetime] = lambda: datetime.now(UTC)):
+    def __init__(self, path: str | Path = ":memory:", now: Callable[[], datetime] = lambda: datetime.now(UTC),
+                 verify: bool = True):
+        """`verify`: check every entry's checksum now (#496); False only for `reseal` (the command line)."""
         self.path = str(path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +163,7 @@ class Journal:
                 self.db.execute("pragma checkpoint_fullfsync=1")
             self._assert_durable()
             self.db.executescript(SCHEMA)
+            self._sum_from = self._checksum_cutover()
             if self.meta("journal_id") is None:  # a new file: a new identity, written once
                 jid = uuid.uuid4()
                 self.db.execute("insert or ignore into meta (k, v) values ('journal_id', ?), ('epoch', ?), "
@@ -139,6 +172,65 @@ class Journal:
         self.journal_id: str = str(self.meta("journal_id"))
         self.epoch: int = int(str(self.meta("epoch")))
         self.id_base: int = self.epoch * ID_SPAN
+        if verify:
+            try:
+                self.verify()
+            except JournalCorrupt:
+                self.db.close()
+                raise
+
+    def _checksum_cutover(self) -> int:
+        """#496: the first entry number that must carry a checksum, recorded once in `meta.checksum_from`. A file
+        written before checksums gets the column now and keeps its entries as they are: they are accepted without
+        one, and every entry appended from here on is protected. Column and record are one transaction."""
+        if "sum" not in {r[1] for r in self.db.execute("pragma table_info(entry)")}:
+            self.db.execute("begin immediate")
+            try:
+                self.db.execute("alter table entry add column sum text")
+                self._set_cutover(self.last_seq() + 1)
+                self.db.execute("commit")
+            except BaseException:
+                self.db.execute("rollback")
+                raise
+        elif self.meta("checksum_from") is None:  # a new file (no entries yet)
+            r = self.db.execute("select coalesce(max(seq), 0) from entry where sum is null").fetchone()
+            self._set_cutover(int(r[0]) + 1)
+        return int(str(self.meta("checksum_from")))
+
+    def _set_cutover(self, seq: int) -> None:
+        self.db.execute("insert into meta (k, v) values ('checksum_from', ?) on conflict(k) do update set v = ?",
+                        (str(seq), str(seq)))
+
+    def verify(self) -> int:
+        """#496: every entry is what was appended, or JournalCorrupt naming the first one that is not. Returns how
+        many entries carried a checksum. One pass in journal order."""
+        n, prev = 0, None
+        with self.lock:
+            for seq, ts, kind, body, sum_ in self.db.execute("select seq, ts, kind, body, sum from entry "
+                                                             "order by seq"):
+                check_entry(prev, seq, ts, kind, body, sum_, self._sum_from)
+                prev = sum_
+                n += sum_ is not None
+        return n
+
+    def reseal(self) -> dict:
+        """The owner's explicit word (`python -m kaibot.engine.journal --reseal`) after an older release wrote
+        entries without a checksum (a roll-back): they are accepted as they are and the cut-over moves past them.
+        Every entry that has a checksum must still pass; one that does not is never accepted."""
+        with self.lock:
+            lo, hi = self.db.execute("select min(seq), max(seq) from entry where sum is null and seq >= ?",
+                                     (self._sum_from,)).fetchone()
+            old = self._sum_from
+            if hi is not None:
+                self._sum_from = int(hi) + 1
+            try:
+                self.verify()
+            except JournalCorrupt:
+                self._sum_from = old
+                raise
+            if hi is not None:
+                self._set_cutover(self._sum_from)
+        return {"accepted": [lo, hi] if hi is not None else None, "checksum_from": self._sum_from}
 
     def durability(self) -> dict:
         """The settings "durable when `append` returns" rests on, as SQLite reports them for this connection."""
@@ -182,14 +274,29 @@ class Journal:
                 self.db.execute("update sqlite_sequence set seq = ? where name = 'entry' and seq < ?", (seq, seq))
 
     def append(self, kind: str, body: dict) -> int:
-        """Durable when it returns (autocommit, synchronous=FULL)."""
+        """Durable when it returns (one transaction, synchronous=FULL). #496: the entry carries a checksum over
+        its number, time, kind and text, chained to the checksum of the entry before it."""
         text = json.dumps(body, default=_json, sort_keys=True, separators=(",", ":"))
         with self.lock:
-            return int(self.db.execute("insert into entry (ts, kind, body) values (?, ?, ?)",
-                                       (self.now().astimezone(UTC).isoformat(), kind, text)).lastrowid)
+            ts = self.now().astimezone(UTC).isoformat()
+            self.db.execute("begin immediate")
+            try:
+                r = self.db.execute("select seq from sqlite_sequence where name = 'entry'").fetchone()
+                seq = max(int(r[0]) if r else 0, self.last_seq()) + 1
+                p = self.db.execute("select sum from entry order by seq desc limit 1").fetchone()
+                self.db.execute("insert into entry (seq, ts, kind, body, sum) values (?, ?, ?, ?, ?)",
+                                (seq, ts, kind, text, entry_sum(p[0] if p else None, seq, ts, kind, text)))
+                self.db.execute("commit")
+            except BaseException:
+                with contextlib.suppress(sqlite3.Error):
+                    self.db.execute("rollback")
+                raise
+            return seq
 
     def entries(self, after: int = 0, kinds: tuple[str, ...] | None = None, limit: int | None = None) -> list:
-        q, args = "select seq, ts, kind, body from entry where seq > ?", [after]
+        """#496: every entry returned was checked against its checksum (JournalCorrupt names the first that fails;
+        nothing after it is returned)."""
+        q, args = f"select {SUM_COLUMNS} from entry where seq > ?", [after]
         if kinds:
             q += f" and kind in ({','.join('?' * len(kinds))})"
             args += list(kinds)
@@ -198,7 +305,7 @@ class Journal:
             q += f" limit {int(limit)}"
         with self.lock:
             rows = self.db.execute(q, args).fetchall()
-        return [(s, ts, k, json.loads(b)) for s, ts, k, b in rows]
+        return checked(rows, self._sum_from)
 
     def last_seq(self) -> int:
         with self.lock:
@@ -233,6 +340,19 @@ class Journal:
     def close(self) -> None:
         with self.lock:
             self.db.close()
+
+
+def checked(rows: list, sum_from: int) -> list:
+    """Rows of SUM_COLUMNS as `(seq, ts, kind, body)` with the body parsed, each one checked first (#496)."""
+    out = []
+    for s, ts, k, b, sum_, prev in rows:
+        check_entry(prev, s, ts, k, b, sum_, sum_from)
+        out.append((s, ts, k, json.loads(b)))
+    return out
+
+
+class JournalCorrupt(RuntimeError):
+    """#496: an entry is not what was appended (its checksum fails, or it has none after the cut-over)."""
 
 
 class BootstrapError(RuntimeError):
@@ -733,8 +853,10 @@ class Replicator:
     def start(self, every_s: float = 2.0) -> None:
         def loop():
             while not self._stop.is_set():
-                with contextlib.suppress(Exception):
+                try:
                     self.pump()
+                except Exception as e:  # #496: e.g. an entry that fails its checksum: not sent, and said so
+                    self.last_error = f"{type(e).__name__}: {e}"[:300]
                 self._stop.wait(every_s)
 
         self._thread = threading.Thread(target=loop, name="journal-replicator", daemon=True)
@@ -1021,6 +1143,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="the engine's local journal")
     ap.add_argument("--path", type=Path, default=None)
     ap.add_argument("--status", action="store_true")
+    ap.add_argument("--reseal", action="store_true",
+                    help="#496: accept the entries an older release wrote without a checksum (after a roll-back) "
+                         "and move the cut-over past them; an entry whose checksum is wrong is never accepted")
     ap.add_argument("--rebuild", action="store_true",
                     help="send every row to Supabase again: only into an empty project or from the newest journal "
                          "(an older file's updates revert newer values; never after restoring a backup)")
@@ -1029,7 +1154,14 @@ def main(argv: list[str] | None = None) -> int:
     from kaibot.engine.store import Store
 
     s = Settings.from_env()
-    j = Journal(a.path or journal_path(s.data_dir))
+    try:
+        j = Journal(a.path or journal_path(s.data_dir), verify=not a.reseal)
+        if a.reseal:
+            print(json.dumps(j.reseal()))
+            return 0
+    except JournalCorrupt as e:
+        print(str(e), file=sys.stderr)
+        return 2
     rep = Replicator(j, Store(s.supabase_url, s.supabase_service_key))
     if a.rebuild:
         try:
