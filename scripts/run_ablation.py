@@ -28,6 +28,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.ablation import SESSION_TZ, parse_config, run_ablation  # noqa: E402
 from kaibot.features.alt import alt_features  # noqa: E402
 from kaibot.ingest.alt import store as alt_store  # noqa: E402
@@ -133,13 +134,15 @@ def main(argv: list[str] | None = None) -> dict:
     src.add_argument("--supabase", action="store_true", help="read closed trades from kaibot.trade (read-only)")
     ap.add_argument("--env", default=None, help="env file with SUPABASE_* (only for --supabase)")
     ap.add_argument("--run-id", type=int, default=None)
-    ap.add_argument("--strategy", default=None)
+    ap.add_argument("--strategy", default="dip_reversal",
+                    help="the rule whose closed trades are ablated (#472: it must be pre-registered)")
     ap.add_argument("--data", default=str(ROOT / "data"), help="output root (ablation/, trials.jsonl)")
     ap.add_argument("--alt-root", default=None, help="root holding alt/<source>/ (default: --data)")
     ap.add_argument("--config", default=str(ROOT / "config" / "ablation.yaml"))
     ap.add_argument("--decision-lag-min", type=float, default=1.0,
                     help="features are read as of entry minus this many minutes")
     a = ap.parse_args(argv)
+    pre_sha = trials_mod.guard(a.strategy)  # #472: registered before any data is read
     data = Path(a.data)
     alt_root = Path(a.alt_root) if a.alt_root else data
     cfg_path = Path(a.config)
@@ -174,9 +177,9 @@ def main(argv: list[str] | None = None) -> dict:
     path = out / f"{now.date().isoformat()}.json"
     path.write_text(json.dumps(res, indent=1, allow_nan=False))
     trial_id = f"ablation_{now.strftime('%Y%m%dT%H%M%S')}"
-    with (data / "trials.jsonl").open("a") as fh:
-        fh.write(json.dumps({
-            "ts": res["run_at"], "trial_id": trial_id, "kind": "ablation", "strategy": ",".join(strategies) or None,
+    trials_mod.append(data / "trials.jsonl", json.loads(json.dumps({
+            "ts": res["run_at"], "trial_id": trial_id, "kind": "ablation", "strategy": a.strategy,
+            "prereg_sha256": pre_sha, "strategies_in_trades": strategies,
             "code_sha": res["git_sha"], "params": f"pre-registered {cfg_path.name} sha256={cfg.sha256[:12]}",
             "config_sha256": cfg.sha256, "source": source, "window": res["window"],
             # every rule actually tested is a filtered variant of the strategy: it counts against the DSR
@@ -185,7 +188,7 @@ def main(argv: list[str] | None = None) -> dict:
                         "admitted": res["admitted"],
                         "rules": {p["name"]: {"verdict": p["verdict"], "percentile": p["percentile"],
                                               "coverage": p["coverage"]} for p in res["rules"]}},
-        }, default=str) + "\n")
+        }, default=str)))
     print(json.dumps({k: res[k] for k in ("trades", "trading_days", "window", "summary", "admitted")}, default=str))
     print(f"wrote {path}")
     return res

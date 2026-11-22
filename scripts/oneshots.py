@@ -52,6 +52,7 @@ from walk_forward import peak_rss_mb  # noqa: E402
 
 from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.replay import multiday_core as mc  # noqa: E402
 from kaibot.replay import oneshots_daily as od  # noqa: E402
@@ -121,9 +122,7 @@ def trial_row(ctx: dict, label: str, version: str, params: dict, fill: str, cost
 
 
 def write_trials(data: Path, trials: list[dict]) -> None:
-    with (data / "trials.jsonl").open("a") as fh:
-        for t in trials:
-            fh.write(json.dumps(t, default=str) + "\n")
+    trials_mod.append_many(data / "trials.jsonl", [json.loads(json.dumps(t, default=str)) for t in trials])
 
 
 # ---------------------------------------------------------------- daily rules
@@ -712,6 +711,7 @@ def main() -> None:
     if not a.rule or not a.end:
         ap.error("--rule and --end are required for a run")
     holdout.enforce(script=__file__, end=a.end, rule=a.rule, opening=a.open_holdout, data=a.data)
+    trials_mod.guard(a.rule)  # #472: registered before any data is read
     skip_f = data / "reports" / f"oneshots_{a.rule}_skipped.json"
     try:
         (run_intraday_rule if a.rule in INTRADAY else run_daily_rule)(a, a.rule)

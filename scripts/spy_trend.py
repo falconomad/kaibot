@@ -223,15 +223,14 @@ def run(a: argparse.Namespace) -> Path:
     res = evaluate(d, tr, i0, i1, cash=cash, control_runs=0, prereg_obj=pobj)  # accounts only, to log the trials
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
-    with (data / "trials.jsonl").open("a") as fh:
-        for r in res["rows"]:
-            row = trial_row(r, tag, ts, pre, res["gate_sha"], input_sha, code, res["window"])
-            fh.write(json.dumps(row, default=str) + "\n")
-            if r["n_trials"]:
-                b = res["books"][r["label"]]
-                rr = st.returns(b)
-                pd.DataFrame({"date": rr.index.strftime("%Y-%m-%d"), "ret": rr.to_numpy()}).to_csv(
-                    tdir / f"{row['trial_id']}.csv", index=False)
+    for r in res["rows"]:
+        row = trial_row(r, tag, ts, pre, res["gate_sha"], input_sha, code, res["window"])
+        trials_mod.append(data / "trials.jsonl", json.loads(json.dumps(row, default=str)))
+        if r["n_trials"]:
+            b = res["books"][r["label"]]
+            rr = st.returns(b)
+            pd.DataFrame({"date": rr.index.strftime("%Y-%m-%d"), "ret": rr.to_numpy()}).to_csv(
+                tdir / f"{row['trial_id']}.csv", index=False)
     print(f"accounts done ({len(res['rows'])} runs), {time.time() - t0:.0f}s; random-timing control "
           f"{a.control_runs} runs per cost model ...", flush=True)
     registry = trials_mod.load(None, data / "trials.jsonl")
@@ -422,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
         print(summary(data))
         return 0
     holdout.enforce(script=__file__, end=a.end, rule=st.RULE, opening=a.open_holdout, data=a.data)
+    trials_mod.guard(st.RULE)  # #472: registered before any data is read
     run(a)
     return 0
 

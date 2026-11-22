@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from kaibot.engine.userconfig import ConfigError, tighten  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.replay.config_replay import DESIGN, NoData, replay_config  # noqa: E402
 from kaibot.risk.profiles import load_profiles, load_strategies  # noqa: E402
 
@@ -76,9 +77,11 @@ def process(store, data_dir: Path, *, replay=replay_config, now=None) -> list[di
         store.insert("trial", trial, returning=False)
         trials = data_dir / "trials.jsonl"
         trials.parent.mkdir(parents=True, exist_ok=True)
-        with trials.open("a") as fh:
-            fh.write(json.dumps({"ts": now(), "trial_id": f"config_r{j['run_id']}_v{j['config_version']}", **trial},
-                                default=str) + "\n")
+        # Product, 22 Nov 2026 (#472): the config-panel replay is not refused; its row says variant config_replay,
+        # counts as a trial and is never eligible for a gate verdict (trials.verdict_eligible)
+        trials_mod.append(trials, json.loads(json.dumps(
+            {"ts": now(), "trial_id": f"config_r{j['run_id']}_v{j['config_version']}", **trial,
+             "variant": trials_mod.CONFIG_REPLAY}, default=str)))
         store.update("replay_job", key, {"status": "done", "result": res, "updated_at": now()})
         out.append({"id": j["id"], "status": "done", "trades": res["trades"]})
     return out

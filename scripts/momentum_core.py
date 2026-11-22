@@ -83,6 +83,7 @@ from walk_forward import peak_rss_mb  # noqa: E402
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.replay import earnings  # noqa: E402
 from kaibot.replay import multiday_core as mc  # noqa: E402
@@ -531,9 +532,7 @@ def run_version(a: argparse.Namespace) -> None:
         "files": {"spy_daily": f"{tag}/spy_daily.csv"},
         "caveats": caveats(mode, bars_src, spy_tr is not None, a.costs, variant),
     }
-    with (data / "trials.jsonl").open("a") as fh:
-        for t in trials:
-            fh.write(json.dumps(t, default=str) + "\n")
+    trials_mod.append_many(data / "trials.jsonl", [json.loads(json.dumps(t, default=str)) for t in trials])
     # the report is written last: scripts/run_experiments.sh treats it as "this version is finished"
     (out / f"{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
     print(build_summary({a.version: (out / f"{tag}.json", rep)}))
@@ -863,6 +862,8 @@ def main() -> None:
     if not a.version or not a.end:
         ap.error("--version and --end are required for a run")
     holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
+    # #472: registered before any data is read
+    trials_mod.guard(mc.VERSIONS[a.version].rule if a.version in mc.VERSIONS else a.version)
     run_version(a)
 
 

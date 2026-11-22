@@ -45,6 +45,7 @@ from walk_forward import logged_trials, peak_rss_mb  # noqa: E402
 
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation import holdout, prereg  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
@@ -447,30 +448,29 @@ def main() -> None:
     print(f"SPY per session: {rep['files']['spy_daily']} ({spy_info['ret']})", flush=True)
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
-    with trials_f.open("a") as fh:
-        for which, book, n_tr in (("tuned", wf.tuned, len(wf.grid) * len(wf.folds)), ("default", wf.fixed, 1)):
-            trades = pd.DataFrame([dataclasses.asdict(t) for t in book.trades],
-                                  columns=[f.name for f in dataclasses.fields(MTrade)])
-            daily = pd.DataFrame(book.daily)
-            trades.to_csv(out / rep["files"][which]["trades"], index=False)
-            daily.to_csv(out / rep["files"][which]["daily"], index=False)
-            tid = f"{a.level}_{tag}_{which}"
-            pd.DataFrame({"date": daily["date"].astype(str), "ret": daily["pnl"] / daily["start"]}).to_csv(
-                tdir / f"{tid}.csv", index=False)
-            s = summary[which]
-            fh.write(json.dumps({
-                "ts": rep["run_at"], "trial_id": tid, "strategy": a.rule, "variant": "multiday",
-                "label": f"multiday walkforward {which} {a.rule}{'' if a.costs == 'v1' else ' costs ' + a.costs}",
-                "level": a.level, "cost_model": a.costs, "universe": rep["universe"],
-                "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": rep["input_sha256"],
-                "code_sha": code_sha, "n_trials": n_tr, "experiment": a.rule, "prereg_sha256": prereg_sha,
-                "gate_v2_sha256": gate_sha,
-                "params": (f"walk-forward grid ({len(wf.grid)}) x {len(wf.folds)} folds" if which == "tuned"
-                           else f"pre-registered {exp.default.label}"),
-                "window": summary["oos_window"],
-                "metrics": {"trades": s["trades"], "net_return_pct": s["net_return_pct"],
-                            "t_stat_per_trade": s["t_stat_per_trade"], "daily_sharpe_ann": s["daily_sharpe_ann"]},
-            }, default=str) + "\n")
+    for which, book, n_tr in (("tuned", wf.tuned, len(wf.grid) * len(wf.folds)), ("default", wf.fixed, 1)):
+        trades = pd.DataFrame([dataclasses.asdict(t) for t in book.trades],
+                              columns=[f.name for f in dataclasses.fields(MTrade)])
+        daily = pd.DataFrame(book.daily)
+        trades.to_csv(out / rep["files"][which]["trades"], index=False)
+        daily.to_csv(out / rep["files"][which]["daily"], index=False)
+        tid = f"{a.level}_{tag}_{which}"
+        pd.DataFrame({"date": daily["date"].astype(str), "ret": daily["pnl"] / daily["start"]}).to_csv(
+            tdir / f"{tid}.csv", index=False)
+        s = summary[which]
+        trials_mod.append(trials_f, json.loads(json.dumps({
+            "ts": rep["run_at"], "trial_id": tid, "strategy": a.rule, "variant": "multiday",
+            "label": f"multiday walkforward {which} {a.rule}{'' if a.costs == 'v1' else ' costs ' + a.costs}",
+            "level": a.level, "cost_model": a.costs, "universe": rep["universe"],
+            "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": rep["input_sha256"],
+            "code_sha": code_sha, "n_trials": n_tr, "experiment": a.rule, "prereg_sha256": prereg_sha,
+            "gate_v2_sha256": gate_sha,
+            "params": (f"walk-forward grid ({len(wf.grid)}) x {len(wf.folds)} folds" if which == "tuned"
+                       else f"pre-registered {exp.default.label}"),
+            "window": summary["oos_window"],
+            "metrics": {"trades": s["trades"], "net_return_pct": s["net_return_pct"],
+                        "t_stat_per_trade": s["t_stat_per_trade"], "daily_sharpe_ann": s["daily_sharpe_ann"]},
+        }, default=str)))
     # the report is written last: scripts/run_experiments.sh treats it as "this experiment is finished"
     (out / f"walkforward_{a.level}_{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
     md = markdown(rep)

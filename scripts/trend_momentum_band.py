@@ -87,6 +87,8 @@ def main(argv: list[str] | None = None) -> dict:
     default = int(c.get("random_runs_min_several_rules", c["random_runs_min"]) if several else c["random_runs_min"])
     runs_ctl = default if a.control_runs is None else a.control_runs
     data_dir = Path(a.data)
+    trials_mod.guard(RULE)  # #472: registered before any data is read
+    ref_sha = trials_mod.guard("trend_momentum")  # the reference run for the turnover mark is registered too
     holdout.enforce(script=__file__, end=a.end, rule=RULE, opening=a.open_holdout, data=data_dir)
     pre = prereg_mod.load(RULE)
     t0 = time.time()
@@ -171,7 +173,7 @@ def main(argv: list[str] | None = None) -> dict:
                 "strategy": RULE if not label.startswith("reference") else "trend_momentum",
                 "variant": "engine_simbroker", "label": f"engine {label}", "level": LEVEL, "cost_model": COST_MODEL,
                 "universe_mode": universe, "code_sha": code_sha,
-                "prereg_sha256": pre.sha256 if not label.startswith("reference") else None, "gate_sha": gate.sha,
+                "prereg_sha256": pre.sha256 if not label.startswith("reference") else ref_sha, "gate_sha": gate.sha,
                 "n_trials": row["n_trials"], "params": {"spec": row["spec"], "fill": row["fill"],
                                                         "cost_multiple": row["cost"]},
                 "window": out["window"],

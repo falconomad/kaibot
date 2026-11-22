@@ -44,6 +44,7 @@ from run_replay import load_env, vix_prev_close  # noqa: E402
 
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
 from kaibot.evaluation import holdout  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.evaluation.trials import count_file  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
@@ -236,6 +237,7 @@ def main() -> None:
                     help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
     holdout.add_argument(ap)
     a = ap.parse_args()
+    pre_sha = trials_mod.guard("dip_reversal")  # #472: registered before any data is read
     holdout.enforce(script=__file__, end=a.end, rule=a.experiment or "dip_reversal", opening=a.open_holdout,
                     data=a.data)
     ensure_ca_bundle()  # python.org's macOS Python has no root certificates; before the first request (FRED VIX)
@@ -326,30 +328,30 @@ def main() -> None:
                     for w in ("tuned", "default")}
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
-    with trials_f.open("a") as fh:
-        for which, n_tr in (("tuned", len(grid) * len(folds)), ("default", 1)):
-            books = [f.tuned if which == "tuned" else f.default for f in wf.folds]
-            trades = pd.DataFrame([t.__dict__ for b in books for t in b.trades],
-                                  columns=[f.name for f in dataclasses.fields(Trade)])  # header even with 0 trades
-            daily = pd.DataFrame([r for b in books for r in b.daily])
-            trades.to_csv(out / f"trades_{a.level}_{tag}_{which}.csv", index=False)
-            daily.to_csv(out / f"daily_{a.level}_{tag}_{which}.csv", index=False)
-            tid = f"{a.level}_{tag}_{which}"
-            pd.DataFrame({"date": daily["date"].astype(str), "ret": daily["pnl"] / daily["start"]}).to_csv(
-                tdir / f"{tid}.csv", index=False)
-            s = summary[which]
-            fh.write(json.dumps({
-                "ts": rep["run_at"], "trial_id": tid, "strategy": "dip_reversal", "variant": a.variant,
-                "label": f"walkforward {which} {a.label}".strip(), "level": a.level, "universe": rep["universe"],
-                "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": wf.input_sha256,
-                "code_sha": code_sha, "n_trials": n_tr, "cost_model": a.costs,
-                "experiment": a.experiment or None,
-                "params": (f"walk-forward grid {grid_name} ({len(grid)}) x {len(folds)} folds" if which == "tuned"
-                           else f"pre-registered {default.label}"),
-                "window": summary["oos_window"],
-                "metrics": {"trades": s["trades"], "net_return_pct": s["net_return_pct"],
-                            "t_stat_per_trade": s["t_stat_per_trade"], "daily_sharpe_ann": s["daily_sharpe_ann"]},
-            }, default=str) + "\n")
+    for which, n_tr in (("tuned", len(grid) * len(folds)), ("default", 1)):
+        books = [f.tuned if which == "tuned" else f.default for f in wf.folds]
+        trades = pd.DataFrame([t.__dict__ for b in books for t in b.trades],
+                              columns=[f.name for f in dataclasses.fields(Trade)])  # header even with 0 trades
+        daily = pd.DataFrame([r for b in books for r in b.daily])
+        trades.to_csv(out / f"trades_{a.level}_{tag}_{which}.csv", index=False)
+        daily.to_csv(out / f"daily_{a.level}_{tag}_{which}.csv", index=False)
+        tid = f"{a.level}_{tag}_{which}"
+        pd.DataFrame({"date": daily["date"].astype(str), "ret": daily["pnl"] / daily["start"]}).to_csv(
+            tdir / f"{tid}.csv", index=False)
+        s = summary[which]
+        trials_mod.append(trials_f, json.loads(json.dumps({
+            "ts": rep["run_at"], "trial_id": tid, "strategy": "dip_reversal", "prereg_sha256": pre_sha,
+            "variant": a.variant,
+            "label": f"walkforward {which} {a.label}".strip(), "level": a.level, "universe": rep["universe"],
+            "events_sha256": rep[f"events_sha256_{which}"], "input_sha256": wf.input_sha256,
+            "code_sha": code_sha, "n_trials": n_tr, "cost_model": a.costs,
+            "experiment": a.experiment or None,
+            "params": (f"walk-forward grid {grid_name} ({len(grid)}) x {len(folds)} folds" if which == "tuned"
+                       else f"pre-registered {default.label}"),
+            "window": summary["oos_window"],
+            "metrics": {"trades": s["trades"], "net_return_pct": s["net_return_pct"],
+                        "t_stat_per_trade": s["t_stat_per_trade"], "daily_sharpe_ann": s["daily_sharpe_ann"]},
+        }, default=str)))
     # the report is written last: scripts/run_experiments.sh treats it as "this experiment is finished"
     (out / f"walkforward_{a.level}_{tag}.json").write_text(json.dumps(rep, indent=1, default=str))
     (out / f"walkforward_{a.level}_{tag}.md").write_text(markdown(rep))

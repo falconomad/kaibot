@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.common import http  # noqa: E402
 from kaibot.evaluation import holdout  # noqa: E402
+from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import load_news_times, load_symbol  # noqa: E402
 from kaibot.replay.events import events, events_digest, input_digest  # noqa: E402
@@ -74,6 +75,7 @@ def main() -> None:
     ap.add_argument("--refresh-vix", action="store_true", help="re-download VIXCLS instead of the cached copy")
     holdout.add_argument(ap)
     a = ap.parse_args()
+    pre_sha = trials_mod.guard("dip_reversal")  # #472: registered before any data is read
     holdout.enforce(script=__file__, end=a.end, rule="dip_reversal", opening=a.open_holdout, data=a.data)
     env = load_env(a.env)
     data = Path(a.data)
@@ -191,14 +193,14 @@ def main() -> None:
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"date": daily["date"].astype(str), "ret": daily_ret}).to_csv(tdir / f"{trial_id}.csv", index=False)
-    with (data / "trials.jsonl").open("a") as fh:
-        fh.write(json.dumps({"ts": rep["run_at"], "trial_id": trial_id, "strategy": "dip_reversal",
-                             "variant": a.variant, "label": a.label, "level": a.level,
-                             "universe": rep["universe"], "events_sha256": ev_sha, "input_sha256": in_sha,
-                             "code_sha": rep["code_sha"], "params": f"pre-registered {a.variant} {a.label}".strip(),
-                             "window": [a.start, str(daily["date"].max()) if len(daily) else None],
-                             "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade",
-                                                             "daily_sharpe_ann")}}, default=str) + "\n")
+    trials_mod.append(data / "trials.jsonl", json.loads(json.dumps({
+        "ts": rep["run_at"], "trial_id": trial_id, "strategy": "dip_reversal", "prereg_sha256": pre_sha,
+        "variant": a.variant, "label": a.label, "level": a.level,
+        "universe": rep["universe"], "events_sha256": ev_sha, "input_sha256": in_sha,
+        "code_sha": rep["code_sha"], "params": f"pre-registered {a.variant} {a.label}".strip(),
+        "window": [a.start, str(daily["date"].max()) if len(daily) else None],
+        "metrics": {k: rep[k] for k in ("trades", "net_return_pct", "t_stat_per_trade", "daily_sharpe_ann")}},
+        default=str)))
     print(json.dumps(rep, indent=1, default=str))
 
 

@@ -111,3 +111,15 @@ def test_the_intake_script_writes_the_ledger_and_a_trial_row(tmp_path):
         propose.main(["--formula", "ret(5)", "--family", "cross_sectional_momentum", "--proposer", "human:me",
                       "--ledger", str(led), "--trials", ""])
     assert len(pr.read_proposals(led)) == 1 and len(reg.read_text().splitlines()) == 1
+
+
+def test_a_config_panel_replay_is_counted_and_never_eligible_for_a_verdict(tmp_path):
+    """Product, 22 Nov 2026: the config-panel replay worker is not refused; its rows are their own kind."""
+    row = {"strategy": "dip_reversal", "variant": trials.CONFIG_REPLAY, "n_trials": 1}
+    assert trials.registration(row) == "config_replay" and not trials.verdict_eligible(row)
+    trials.append(tmp_path / "t.jsonl", row)
+    assert trials.count_file(tmp_path / "t.jsonl") == 1
+    assert trials.verdict_eligible({"strategy": "x", "prereg_sha256": "ab"})
+    for kind in ({"strategy": "s", "variant": "screen", "batch": "b"},
+                 {"strategy": "p", "variant": "proposal", "proposal_id": "p1"}):
+        assert not trials.verdict_eligible(kind)
