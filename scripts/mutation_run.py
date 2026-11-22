@@ -105,8 +105,17 @@ def _codes(meta: Path) -> dict | None:
 
 
 def _snapshot(meta: Path) -> None:
-    if _codes(meta) is not None:
-        shutil.copyfile(meta, meta.with_name(meta.name + ".good"))
+    """Keep the text that was read and checked whole (a second read could catch mutmut mid-rewrite), written to a
+    temporary name and moved into place, so the copy itself is never torn either."""
+    try:
+        text = meta.read_text()
+        json.loads(text)
+    except (OSError, ValueError):
+        return
+    good = meta.with_name(meta.name + ".good")
+    tmp = good.with_name(good.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, good)
 
 
 def run_mutmut(work: Path, minutes: float, jobs: int, log, meta: Path | None = None) -> tuple[bool, float]:
