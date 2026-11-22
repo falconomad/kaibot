@@ -28,9 +28,15 @@ ROUTINE = {"cash_merger_booked", "dividend_booked", "split_booked", "config_appl
            "multi_day_canceled", "multi_day_decision", "multi_day_fill", "multi_day_orders", "multi_day_plan",
            "multi_day_review_applied", "multi_day_sold", "multi_day_stops_cancelled", "multi_day_view_dropped",
            "positions_rewritten", "session_restored"}
+# Health events of M9 tickets whose kb_health migration is not written yet: three open PRs add events, and each
+# cannot bring its own migration (one number, and 0038 is in an open PR). One migration lists them all once they are
+# merged, and empties this set. Until then the events are written and replicated; the Health page does not show them.
+AWAITING_KB_HEALTH: set[str] = set()
 # S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
 # nothing and a failure stops nothing, so neither is a health event
 ROUTINE |= {"market_alarm", "market_alarm_error"}
+# M9 1.12 (#437): a row Supabase refuses for good was skipped; rows waiting for ten minutes and not getting fewer
+AWAITING_KB_HEALTH |= {"replica_poison", "replica_backlog"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
@@ -121,11 +127,13 @@ def test_the_engine_still_sends_every_type_0033_adds():
 
 
 def test_every_event_the_engine_sends_is_listed_or_left_out_on_purpose():
-    """A new event name must be added to kb_health (a migration) or to ROUTINE here, with its reason."""
+    """A new event name must be added to kb_health (a migration) or to ROUTINE here, with its reason; a health event
+    whose migration is still to come waits in AWAITING_KB_HEALTH."""
     listed = set(_types(_sql(_latest_kb_health())))
-    unknown = _emitted() - listed - ROUTINE
+    unknown = _emitted() - listed - ROUTINE - AWAITING_KB_HEALTH
     assert not unknown, sorted(unknown)
     assert not ROUTINE & listed
+    assert not AWAITING_KB_HEALTH & (listed | ROUTINE), "listed by a migration now: take it out of the waiting set"
 
 
 def test_every_dynamic_event_call_is_known():
