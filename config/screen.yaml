@@ -1,0 +1,20 @@
+# The tier-one screen (M11 ticket 2.11, issue #462; docs/research/tier_one_screen/design.md). Read by
+# kaibot.evaluation.screen. Research only: the screen never gives a go/no-go number (decision 15); a survivor only
+# earns a pre-registration and an engine run. Changing a value here is a change of the design: by pull request,
+# with a line in docs/research/tier_one_screen/budget.md when it touches the budget.
+version: 1
+statistic:
+  decision: first_session_of_month     # one rank IC per monthly decision day
+  horizon_sessions: 21                 # the next 21 sessions' return, minus SPY's
+  charge_bp_a_side: 10                 # a stock entering the top quintile pays 2 x 10 bp in its forward return
+  top_fraction: 0.20                   # the quintile whose turnover the charge follows
+  min_stocks: 30                       # a decision day with fewer ranked stocks is skipped
+  periods_per_year: 12
+budget:                                # alpha-investing over batches (design section 4)
+  mfdr: 0.10                           # the programme-wide marginal false discovery rate
+  initial_wealth: 0.09                 # W_0 = mfdr x (1 - mfdr)
+  spend_fraction: 0.5                  # a batch runs at half the wealth left ...
+  max_level: 0.10                      # ... never above this
+  payout: 0.10                         # per survivor the engine later confirms (a gate v3 pass only)
+  floor: 0.005                         # below this wealth no batch may run
+ledger: docs/research/tier_one_screen/budget.md

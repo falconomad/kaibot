@@ -91,7 +91,7 @@ budget sets (section 4). Candidates are still logged as trials (above), so the r
 A survivor that becomes a rule is listed in its family with its pre-registration, and from then on its engine runs
 count in S4 like any rule's. No mark changes, so no decision record is needed.
 
-## 7. What the code will be (the next pull request; not written yet)
+## 7. The code (built by the pull request of ticket 2.11 that follows this design)
 
 | File | What |
 |---|---|
@@ -114,7 +114,11 @@ PYTHONPATH=src python scripts/screen_batch.py --batch docs/research/tier_one_scr
    candidates. The proposal: required for every new **signal**, and not for a re-scaled or re-packaged rule that was
    already judged (such as `trend_momentum_sleeve`, #550).
 3. Who may reset the budget (proposal: Product, by decision record).
-4. Whether an `evidence_based` verdict should also earn the payout. Not proposed here (section 4 pays on `pass`
-   only, QA on #569).
+Settled:
 
-Settled: screen candidates do not count in S4 (Product, 22 Nov 2026; section 6).
+- Screen candidates do not count in S4 (Product, 22 Nov 2026; section 6).
+- The budget pays out on a gate v3 `pass` only, never on `evidence_based` (Product, 22 Nov 2026; section 4).
+- A candidate that comes from the counted proposer (ticket 3.10, #575) names its `proposal_id` in the batch file,
+  and its screen row counts **0** trials, because its proposal row already counted it (Product, 22 Nov 2026).
+  The run refuses a `proposal_id` with no counted proposal row (`variant: proposal`, n_trials at least 1) in the
+  trial registry, and a proposal screened in an earlier batch counts 1 again (QA-Ops on #574).
