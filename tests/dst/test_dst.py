@@ -133,3 +133,14 @@ def test_an_order_called_lost_that_fills_later_is_booked():
                              forced=(Forced("submit_timeout_accepted", "|B|buy"), Forced("lookup_lag", "|B|buy", 12),
                                      Forced("listing_lag", "|B|buy"), Forced("hold", "|B|buy", 4))))
     assert res.ok, res.report()
+
+
+@pytest.mark.xfail(strict=True, reason="engine bug #529 (seed 190's case): a fill activity a day late; the sale the "
+                                       "decision taken meanwhile wants is never sent")
+def test_a_buy_booked_a_day_late_is_sold_by_the_decision_taken_meanwhile():
+    """QA-Ops on #537: the finding added to #529 had no strict xfail. B is bought at D1's close and its activity is
+    hidden for 1500 minutes (past D2's window, where the world is healed only from D3); D2's decision wants nothing.
+    The engine plans D2 from the ledger, which has no B, so nothing sells it, and D3 is no decision day."""
+    assert 529 in KNOWN
+    res = run_scenario(quiet({D1: ("B",), D2: ()}, forced=(Forced("fill_dropped", "|B|buy", 1500),)))
+    assert res.ok, res.report()
