@@ -38,6 +38,9 @@ export function lateSend(plan: Pick<Plan, "rule" | "fillsAt">, carries: Carry[])
   return (due && carries.find((c) => c.rule === plan.rule && c.lateOf === due && c.session > due)) || null;
 }
 
+/** The send window ends at 15:57 ET (live_daily.SEND_UNTIL): a decision caught up later missed this close. An early-close
+ *  day's window ends earlier; the page does not know those days, so on them it can still say "at this close". */
+const SEND_UNTIL = "15:57";
 const short = (d: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(d + "T00:00:00Z"));
 
 export interface PlanNote { key: string; rule: string; title: string; text: string; skipped: { symbol: string; text: string }[] }
@@ -49,7 +52,8 @@ export function planNotes(plans: Plan[], carries: Carry[], today: string): PlanN
     const time = lateDecision(pl);
     if (time && pl.fillsAt && pl.fillsAt >= today)
       out.push({ key: `${pl.rule}-decision`, rule: pl.rule, title: `Decided late, at ${time} ET`,
-        text: `This decision is normally taken after the close${pl.decidedAfter ? ` of ${short(pl.decidedAfter)}` : ""}. It was taken during the session instead. Its orders go out at this close as usual.`,
+        text: `This decision is normally taken after the close${pl.decidedAfter ? ` of ${short(pl.decidedAfter)}` : ""}. It was taken during the session instead. ${
+          time < SEND_UNTIL ? "Its orders go out at this close as usual." : "It came after this close's send window, so its orders did not go out at this close."}`,
         skipped: [] });
     const c = lateSend(pl, carries);
     if (c && pl.fillsAt)

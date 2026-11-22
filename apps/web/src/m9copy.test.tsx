@@ -121,6 +121,11 @@ describe("a decision taken late (#517): from kb_multiday_plan's decided_at and f
     expect(planNotes(plans, [], MON)).toMatchObject([{ title: "Decided late, at 10:01 ET" }]);
     expect(planNotes(plans, [], MON)[0].text).toBe("This decision is normally taken after the close of Fri, Nov 20. It was taken during the session instead. Its orders go out at this close as usual.");
     expect(planNotes(plans, [], TUE)).toEqual([]);
+    // caught up after the 15:50-15:57 ET send window: its orders did not go out at this close (QA-Ops on #532)
+    const after = (t: string) => planNotes(parsePlan(rawPlan({ decided_at: t })), [], MON)[0].text;
+    expect(after("2026-11-23T20:56:00Z")).toContain("Its orders go out at this close as usual.");
+    expect(after("2026-11-23T20:57:00Z")).toContain("It came after this close's send window, so its orders did not go out at this close.");
+    expect(after("2026-11-23T20:57:00Z")).not.toContain("as usual");
     expect(planNotes(parsePlan(rawPlan()), [], MON)).toEqual([]);
   });
 });
