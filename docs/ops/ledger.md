@@ -153,8 +153,14 @@ with the broker (`engine/reconcile.py`):
     hand. Buys in that stock wait; sales and buys in other stocks go out.
   - `unbooked`: an order of the daily path whose filled shares at the broker exceed the fills booked (the
     activity has not arrived yet). It clears at the next check after the activity is booked.
-  - Neither can be accepted (no `offset`). A `foreign_fill` clears when the fill is older than 3 days
-    (`FOREIGN_MAX_AGE`); until then the difference is checked again every 15 minutes and stays.
+  - Both stop buys **in their own stock only** (QA-Ops review of #522): the rest of the rebalance goes out. A
+    share or cash difference, or a failed read, still stops every buy.
+  - `unbooked` cannot be accepted; it heals at the next check (every 15 minutes while a difference is open).
+  - A `foreign_fill` clears when the owner accepts it or when the fill is older than 3 days (`FOREIGN_MAX_AGE`).
+    Accepting: an acceptance (dashboard, command or command line, below) also accepts the fills on unknown orders
+    that were in the same check, each by its activity id (`reconcile_resolved`, `foreign`); a later fill on an
+    unknown order is a new difference. When only such fills are open there is no number to accept on the
+    dashboard: use `python -m kaibot.engine.reconcile --accept "reason"`, or let them clear after 3 days.
   - The engine's own orders outside the order manager (intraday entries, their bracket legs and exits, the
     full-flatten sales) are never foreign: their broker order ids are kept in the journal (`own_order_ids`,
     `md_exit`). The fail-safes' stops are adopted by the order manager and booked there.

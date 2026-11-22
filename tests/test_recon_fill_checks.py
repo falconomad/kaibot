@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pandas as pd
+import pytest
 from test_engine import fake_candidate
 from test_live_daily_engine import DailyAccount
 
@@ -149,3 +150,87 @@ def test_fill_activities_that_cannot_be_read_count_as_a_failed_check(tmp_path, m
     a.broker.activities = real
     a.eng._recheck_reconcile(force=True)
     assert a.eng.recon.last.ok and a.eng.entry_block() is None
+
+
+# ---- QA-Ops review of #522: a fill difference must not stop the rebalance, and the owner can accept it ----
+def test_a_foreign_fill_in_one_stock_does_not_stop_the_next_sessions_buys_in_another(tmp_path, monkeypatch):
+    """Someone traded A by hand on day 1. Before the fix every buy asked `entry_block`, which said "ledger and
+    broker differ" for any open difference: the near-close buy of B never went out, for three days, and nothing
+    could be accepted. Now the fill difference stops buys in A only."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 30)
+    _manual_round_trip(a, 30)
+    a.ticks(a.open1, 34, 390)
+    a.after_close(a.open1)
+    eng = a.restart()
+    assert _kinds(eng) == {"foreign_fill"} and eng.entry_block() is None
+    assert eng.recon.allows("A", "buy") == "unresolved foreign_fill difference in A"
+    a.ticks(a.open2, 0, 390)
+    assert _kinds(a.eng) == {"foreign_fill"}, "still open: it was not accepted and is younger than three days"
+    assert [o["status"] for o in a.md_orders()] == ["filled"], "the buy of B went out and filled"
+
+
+def test_a_share_or_cash_difference_or_a_failed_read_still_stops_every_buy(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 30)
+    a.broker.submit(OrderRequest("A", "buy", 2, client_order_id="by-hand-kept"))  # bought by hand and kept
+    a.ticks(a.open1, 30, 32)
+    a.eng._startup_reconcile("recheck")
+    assert {"quantity", "foreign_fill"} <= _kinds(a.eng)
+    assert a.eng.entry_block() == "ledger and broker differ (reconciliation)"
+
+
+def test_the_owners_acceptance_covers_the_foreign_fills_that_were_shown_and_no_later_one(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 30)
+    a.broker.submit(OrderRequest("A", "buy", 2, client_order_id="by-hand-kept"))
+    a.ticks(a.open1, 30, 32)
+    a.eng._startup_reconcile("recheck")
+    cash = [d for d in a.eng._recon_status()["diffs"] if d["offset"] is not None]
+    assert {d["kind"] for d in cash} >= {"quantity"}
+    # the dashboard's command: what the screen showed (the acceptable rows); the fill on the unknown order was on
+    # that screen too and is accepted with them
+    a.eng._accept_reconcile({"reason": "my own test buy", "shown": [
+        {"kind": d["kind"], "symbol": d["symbol"], "offset": d["offset"]} for d in cash]})
+    assert a.eng.recon.last.ok, a.eng.recon.last.summary()  # (the drift halt for the shares held is its own)
+    (res,) = [b for *_, b in a.eng.journal.entries(kinds=("reconcile_resolved",))]
+    assert len(res["foreign"]) == 1 and res["offsets"]
+    assert {d.kind for d in a.eng.recon.last.accepted} >= {"quantity", "foreign_fill"}
+    # a later fill on an unknown order is a new difference: the acceptance named the fill, not the stock
+    a.broker.submit(OrderRequest("A", "buy", 1, client_order_id="by-hand-again"))
+    a.ticks(a.open1, 32, 34)
+    a.eng._startup_reconcile("recheck")
+    assert [float(d.detail["qty"]) for d in a.eng.recon.last.diffs if d.kind == "foreign_fill"] == [1.0]
+
+
+def test_foreign_fills_alone_are_accepted_from_the_command_line_and_stay_accepted_after_a_restart(tmp_path,
+                                                                                                  monkeypatch):
+    from kaibot.engine import reconcile
+
+    a = DailyAccount(tmp_path, monkeypatch)
+    a.ticks(a.open1, 0, 30)
+    _manual_round_trip(a, 30)
+    a.eng._startup_reconcile("recheck")
+    assert _kinds(a.eng) == {"foreign_fill"}
+    # the dashboard's command cannot: it carries only rows with a number, and none is open
+    with pytest.raises(ValueError, match="nothing accepted"):
+        a.eng._accept_reconcile({"reason": "tap", "shown": [{"kind": "quantity", "symbol": "A", "offset": 3}]})
+    assert _kinds(a.eng) == {"foreign_fill"}
+    assert reconcile.main(["--accept", "my own round trip in A"], journal=a.eng.journal) == 0
+    a.eng._startup_reconcile("recheck")  # the engine folds the acceptance at its next check
+    assert a.eng.recon.last.ok and a.eng.recon.allows("A", "buy") is None
+    eng = a.restart()
+    assert eng.recon.last.ok and len(eng.recon.last.accepted) == 2
+    # nothing left to accept: a second acceptance says so
+    assert reconcile.main(["--accept", "again"], journal=a.eng.journal) == 2
+
+
+def test_an_unbooked_fill_stops_buys_in_its_own_stock_only():
+    from kaibot.engine.reconcile import Difference, Reconciler, Reconciliation
+
+    r = Reconciler(lambda: {})
+    r.checked, r.last = True, Reconciliation([Difference("unbooked", "B", {"coid": "c", "venue": 5, "booked": 2})])
+    assert not r.blocks_every_buy()
+    assert r.allows("B", "buy") and r.allows("C", "buy") is None and r.allows("B", "sell", qty=1) is None
+    r.last = Reconciliation([Difference("foreign_fill", None, {"activity": "x"})])
+    assert r.blocks_every_buy(), "a fill that names no stock cannot be scoped: every buy waits"

@@ -906,7 +906,9 @@ class Engine:
             return "no running run"
         if not self.account_clean:
             return "account not clean"
-        if not self._reconciled():
+        # QA-Ops (#522): a fill difference alone (a fill on an unknown order, a fill not booked yet) stops buys in
+        # its own stock (`Reconciler.allows`, asked per order by the daily path), not the whole rebalance
+        if not self._reconciled() and self.recon.blocks_every_buy():
             return "ledger and broker differ (reconciliation)"
         if self.kill:
             return f"halted: {self.kill}"
