@@ -1,0 +1,77 @@
+# Differences the session replay (scripts/replay_session.py, M12 ticket 3.4, #466) acknowledges.
+#
+# A replay of a recorded session through today's code that differs from the recording fails, unless an entry here
+# names the session file (`journal`, its file name without .jsonl; a glob) and the difference (`key`, as the report
+# prints it; a glob) and says why. Add the entry in the same pull request as the change that causes the difference,
+# with the issue it implements. An entry that matches nothing is listed in the report: remove it.
+#
+# The pre_m9_* fixtures were recorded by the engine of 84250c7 (the last commit before milestone M9 changed it) on
+# the hand-written scenarios of tests/dst; every difference below is one of M9's intended behaviour changes.
+
+# ---- pre_m9_late_start: the paper run starts after D0's close; D1 opens without its decision record
+[[ack]]
+journal = "pre_m9_late_start"
+key = "decision 2026-08-03"
+reason = "M9 1.3 (#428, PR #517): a late start still takes the session's decision (late = true, at the open)"
+
+[[ack]]
+journal = "pre_m9_late_start"
+key = "send 2026-08-03"
+reason = "M9 1.3 (#428): the late decision is sent in D1's window (before M9: an empty send)"
+
+[[ack]]
+journal = "pre_m9_late_start"
+key = "order kb-trend_momentum-B-20260803-buy-1"
+reason = "M9 1.3 (#428): the buy of the late decision"
+
+[[ack]]
+journal = "pre_m9_late_start"
+key = "ledger *"
+reason = "M9 1.3 (#428): the book holds the late decision's buy"
+
+# ---- pre_m9_missed_window: the engine dies at 15:40 on D1 and is back after the close
+[[ack]]
+journal = "pre_m9_missed_window"
+key = "decision 2026-08-03"
+reason = "M9 1.3 (#428): the late start's decision is taken (this fixture's run also starts after D0's close)"
+
+[[ack]]
+journal = "pre_m9_missed_window"
+key = "send 2026-08-04"
+reason = "M9 1.4 (#429, PR #518): a decision whose window was missed is sent on the next session, once (late_of)"
+
+[[ack]]
+journal = "pre_m9_missed_window"
+key = "order kb-trend_momentum-B-20260804-buy-1"
+reason = "M9 1.4 (#429): the buy of the late send"
+
+[[ack]]
+journal = "pre_m9_missed_window"
+key = "ledger *"
+reason = "M9 1.4 (#429): the book holds the late send's buy"
+
+# ---- pre_m9_flatten_partial: B bought on D2; the owner flattens on D3 and half of the sale fills
+[[ack]]
+journal = "pre_m9_flatten_partial"
+key = "order kb-trend_momentum-B-20260805-flatten-1"
+reason = "M9 1.8 (#433, PR #506): the flatten sale goes through the order manager, with a deterministic id"
+
+[[ack]]
+journal = "pre_m9_flatten_partial"
+key = "ledger *"
+reason = "M9 1.8 (#433): the half that filled is booked (before M9 the book kept all 23 shares)"
+
+[[ack]]
+journal = "pre_m9_flatten_partial"
+key = "decision 2026-08-03"
+reason = "M9 1.3 (#428): a run started after the close journals its first session's decision (not a decision day)"
+
+[[ack]]
+journal = "pre_m9_flatten_partial"
+key = "decision 2026-08-06"
+reason = "M9 1.2 (#427, PR #525): Flatten and stop stays pending until the book is flat, so the run goes on deciding"
+
+[[ack]]
+journal = "pre_m9_flatten_partial"
+key = "send 2026-08-05"
+reason = "M9 1.2 (#427): the run is still open on D3 (the flatten is pending), so its window journals a send"
