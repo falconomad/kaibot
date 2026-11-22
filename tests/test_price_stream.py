@@ -373,7 +373,10 @@ def test_only_two_paper_paths_can_be_read():
 def test_the_script_cannot_trade():
     src = (ROOT / "scripts" / "price_stream.py").read_text()
     imports = set(re.findall(r"^\s*(?:from|import) (kaibot[\w.]*)", src, re.M))
-    assert imports == {"kaibot.engine.config"}
+    # M10 1.26 (#451): plus the helpers' Supabase client, which itself imports nothing of kaibot
+    assert imports == {"kaibot.engine.config", "kaibot.common.helper_session"}
+    client = (ROOT / "src" / "kaibot" / "common" / "helper_session.py").read_text()
+    assert not re.findall(r"^\s*(?:from|import) (kaibot[\w.]*)", client, re.M)
     for word in ("/v2/orders", "AlpacaPaper", "BrokerAdapter", "ledger_", "method=\"DELETE\"", "PATCH"):
         assert word not in src
     assert src.count('method="POST"') == 1 and "realtime/v1/api/broadcast" in src and "rest/v1/heartbeat" in src
