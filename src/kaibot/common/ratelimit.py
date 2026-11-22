@@ -16,7 +16,6 @@ the provider limits.
 from __future__ import annotations
 
 import math
-import os
 import threading
 import time
 from collections import deque
@@ -126,7 +125,9 @@ class Budget:
 
 def load_specs(path: str | Path | None = None) -> dict[str, BudgetSpec]:
     """Flatten sources.yaml (sections -> sources) into {source_name: BudgetSpec}. Raises on malformed budgets."""
-    p = Path(path or os.environ.get("KAIBOT_SOURCES_FILE") or SOURCES_FILE)
+    from kaibot.common import switches  # M10 1.23 (#448)
+
+    p = Path(path or switches.get("KAIBOT_SOURCES_FILE") or SOURCES_FILE)
     doc = yaml.safe_load(p.read_text()) or {}
     if not isinstance(doc, dict):
         raise ValueError(f"{p}: expected a mapping of sections")

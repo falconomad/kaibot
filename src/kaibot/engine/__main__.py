@@ -160,12 +160,20 @@ def bounded_data_get(data):
     return lambda path, params: http.call("GET", f"{DATA_URL}{path}", params)
 
 
+def _switch(name: str, env=None):
+    """M10 1.23 (#448): an engine switch, parsed by kaibot.common.switches (imported here, not at the top, to stay
+    clear of the import block the book-loop rewrite #538 changes)."""
+    from kaibot.common import switches
+
+    return switches.get(name, env)
+
+
 def market_alarm_from_env(env) -> object | None:
     """S103 (#377): the market-event alarm's (session, now) -> flags, or None unless KAIBOT_MARKET_ALARM=on.
 
     It reads the committed calendars and the research files under <repo>/data (earnings, alarm/top10.csv); a missing
     file makes its flag unknown. The engine only writes the result as an event: no order path reads it."""
-    if str(env.get("KAIBOT_MARKET_ALARM", "off")).strip().lower() != "on":
+    if not _switch("KAIBOT_MARKET_ALARM", env):
         return None
     from kaibot.features.market_alarm import live_alarm
 
@@ -186,11 +194,10 @@ def daily_path(data=None, review=None, shadow=None, note=None):
 
     if not enabled_multi_day():
         return None
-    from pathlib import Path
 
     from kaibot.engine import live_daily
 
-    root = Path(os.environ.get("KAIBOT_DAILY_DATA") or ROOT / "data")
+    root = _switch("KAIBOT_DAILY_DATA") or ROOT / "data"
     load = live_daily.StoreLoader(root, ROOT / "config" / "universe_history.yaml")
     log.info("multi-day daily path: ON (%s; daily store %s)", ", ".join(enabled_multi_day()), root / "daily")
     from kaibot.engine.corp_guard import CorporateActionGuard
@@ -219,7 +226,7 @@ def daily_path(data=None, review=None, shadow=None, note=None):
 def filing_flags_from_env(env):
     """#375: the 8-K filing-flag observer (kaibot.features.filing_flag), or None unless KAIBOT_FILING_FLAG=shadow.
     Imported only when switched on; the daily path writes its answer as an event and reads nothing back."""
-    if str(env.get("KAIBOT_FILING_FLAG", "off")).strip().lower() != "shadow":
+    if _switch("KAIBOT_FILING_FLAG", env) != "shadow":
         return None
     from kaibot.features.filing_flag import from_env
 
@@ -260,11 +267,10 @@ def multi_day_state(remote=None) -> dict:
 
 def daily_store_state() -> dict:
     """#206: where the daily path reads its daily view, and the last session the store holds (SPY)."""
-    from pathlib import Path
 
     from kaibot.engine.live_daily import store_state
 
-    return store_state(Path(os.environ.get("KAIBOT_DAILY_DATA") or ROOT / "data"))
+    return store_state(_switch("KAIBOT_DAILY_DATA") or ROOT / "data")
 
 
 def report_conflicts(eng: Engine, replicator: Replicator) -> None:

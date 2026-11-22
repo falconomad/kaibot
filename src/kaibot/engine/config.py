@@ -35,7 +35,10 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> Settings:
-        load_env_file(os.environ.get("KAIBOT_ENV_FILE"))
+        from kaibot.common import switches  # M10 1.23 (#448)
+
+        env_file = switches.get("KAIBOT_ENV_FILE")
+        load_env_file(str(env_file) if env_file else None)
         os.environ.setdefault("SUPABASE_URL", DEFAULT_SUPABASE_URL)
         for alias, name in (
             ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_KEY"),
@@ -50,6 +53,10 @@ class Settings:
         ]
         if missing:
             raise SystemExit(f"missing settings: {', '.join(missing)} (put them in the .env file)")
+        try:  # M10 1.23 (#448): every KAIBOT_* switch parsed and validated here, at start (fail closed)
+            sw = switches.load()
+        except switches.SwitchError as e:
+            raise SystemExit(str(e)) from None
         base = os.environ.get("ALPACA_BASE_URL", PAPER_TRADING_URL).rstrip("/")
         if base != PAPER_TRADING_URL:
             raise SystemExit("Kaibot is paper-only: ALPACA_BASE_URL must be the paper endpoint")
@@ -59,6 +66,6 @@ class Settings:
             supabase_url=os.environ["SUPABASE_URL"].rstrip("/"),
             supabase_service_key=os.environ["SUPABASE_SERVICE_KEY"],
             fred_key=os.environ["FRED_API_KEY"],
-            data_dir=Path(os.environ.get("KAIBOT_DATA_DIR", ROOT / "data" / "live")),
-            engine_name=os.environ.get("KAIBOT_ENGINE_NAME", "engine"),
+            data_dir=sw.data_dir or ROOT / "data" / "live",
+            engine_name=sw.engine_name,
         )

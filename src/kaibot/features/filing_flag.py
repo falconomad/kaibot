@@ -137,6 +137,8 @@ class ShadowFilingFlags:
 
 def from_env(env: Mapping[str, str]) -> ShadowFilingFlags | None:
     """`KAIBOT_FILING_FLAG=shadow` -> the observer; anything else (the default) -> None."""
-    if str(env.get(FLAG_ENV, "off")).strip().lower() != "shadow":
+    from kaibot.common import switches  # M10 1.23 (#448)
+
+    if switches.get(FLAG_ENV, env) != "shadow":
         return None
     return ShadowFilingFlags()

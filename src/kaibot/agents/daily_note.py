@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 from collections.abc import Callable, Mapping
@@ -64,8 +63,9 @@ NOTE_TOOL = tool_for("submit_daily_note", DailyNote, "The day's report: one shor
 
 
 def enabled(env: Mapping[str, str] | None = None) -> bool:
-    env = os.environ if env is None else env
-    return (env.get(FLAG_ENV) or "").strip().lower() in ON
+    from kaibot.common import switches  # M10 1.23 (#448): one parser per switch
+
+    return switches.get(FLAG_ENV, env)
 
 
 # ---------------------------------------------------------------- the facts

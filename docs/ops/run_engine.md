@@ -49,6 +49,18 @@ Stop the engine on the Mac first: two engines on one paper account would trade t
 section) now refuses the second one, but stopping the first cleanly is still the right order: it hands the lease over at once.
 A 1 GB VM is enough (pandas + ~70 symbols × 70 sessions of minute bars).
 
+## Switches (KAIBOT_* variables)
+
+Every `KAIBOT_*` variable is declared once in `src/kaibot/common/switches.py` (M10 1.23, #448): its values, its
+default, the team that owns it and a review date. At start (`Settings.from_env`, so also `--check`) every engine
+switch is parsed together; a value the switch does not have stops the start with one line naming every bad
+variable, for example `invalid settings (nothing was started): KAIBOT_MULTIDAY='1': use on or off (...)`. Before
+#448 such a value silently meant the default. Values that worked keep their meaning: flags take
+`1/on/true/yes` and `0/off/false/no` (any case), `KAIBOT_MULTIDAY` and `KAIBOT_MARKET_ALARM` take `on`/`off`,
+`KAIBOT_PREOPEN` and `KAIBOT_FILING_FLAG` take `off`/`shadow`; empty means unset, except `KAIBOT_DATA_DIR` and
+`KAIBOT_ENGINE_NAME`, which are refused when set but empty. Check your `.env` with `./scripts/run_engine.sh --check`
+before you deploy this release.
+
 ## Engine lease (one engine, whatever the machine)
 
 `scripts/engine_guard.sh` stops a second engine on the **same** machine. The lease stops one on **another**
