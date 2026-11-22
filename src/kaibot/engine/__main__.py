@@ -36,7 +36,15 @@ from kaibot.engine.core import Engine
 from kaibot.engine.corp_guard import RecentActions
 from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
-from kaibot.engine.journal import BootstrapError, IdentityError, Journal, JournalStore, Replicator, journal_path
+from kaibot.engine.journal import (
+    BootstrapError,
+    DurabilityError,
+    IdentityError,
+    Journal,
+    JournalStore,
+    Replicator,
+    journal_path,
+)
 from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
 from kaibot.engine.m3glue import (
     LockedDesk,
@@ -89,7 +97,7 @@ def build(settings: Settings) -> Engine:
     )
     remote = Store(settings.supabase_url, settings.supabase_service_key)
     # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
-    store = JournalStore(Journal(journal_path(settings.data_dir)), remote, live=True)
+    store = JournalStore(open_journal(journal_path(settings.data_dir)), remote, live=True)
     events, covers_until = load_calendar(ROOT / "config" / "macro_calendar.yaml")
     fomc = {np.datetime64(d, "D") for d, evs in events.items() if any(e == "fomc_statement_1400" for e, _ in evs)}
     gw = gateway_from_env(remote, os.environ)  # S32/S34: the room runs only with ANTHROPIC_API_KEY and KAIBOT_ROOM=on
@@ -218,6 +226,16 @@ def filing_flags_from_env(env):
 
 
 EXIT_JOURNAL = 4
+
+
+def open_journal(path) -> Journal:
+    """M9 1.18 (#443): the journal, or exit code 4 when its file is not durable (write-ahead mode, full sync,
+    `fullfsync` on macOS). Before the lease and before anything is read from the broker: nothing was done."""
+    try:
+        return Journal(path)
+    except DurabilityError as e:
+        log.error("%s", e)
+        raise SystemExit(EXIT_JOURNAL) from None
 
 
 def multi_day_state(remote=None) -> dict:

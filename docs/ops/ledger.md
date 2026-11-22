@@ -24,6 +24,17 @@ yet; a position is only held over a close when the engine was off at 15:55.
 
 - File: `$KAIBOT_DATA_DIR/journal.sqlite` (default `data/live/journal.sqlite`), SQLite in WAL mode with
   `synchronous=FULL`. One table `entry(seq, ts, kind, body)`; triggers refuse every update and delete.
+- **Durability** (M9 1.18, #443). Every time the file is opened the settings are read back: `journal_mode` must be
+  `wal` and `synchronous` must be FULL; on macOS `fullfsync` and `checkpoint_fullfsync` are switched on and must
+  read 1 (without them macOS's fsync stops at the drive's cache). SQLite does not raise when a setting is not
+  taken (a network or FAT volume answers `delete` to write-ahead mode), so a file without them is refused: the
+  engine exits with **code 4** before it takes the lease or reads the broker, and the log line names the setting.
+  Fix: keep `$KAIBOT_DATA_DIR` on a local disk (APFS on the Mac, ext4 or xfs on a server, a Docker volume and not
+  a network share). Under the service (`scripts/service_run.sh`) launchd starts the engine again every minute and
+  it is refused each time until the cause is fixed: the service log and the alarm say "refused its journal (exit
+  code 4)", nothing is sent to the broker meanwhile, and the broker-held stops, the watchdog and the dead-man keep
+  working. In Docker on a Mac the engine is a Linux process on a bind mount of `data/live`: write-ahead mode is
+  asserted there too, but `fullfsync` is a macOS setting and does not apply (the Python mode gets it).
 - Entries: `row` (an insert, update or upsert of an engine table), the ledger's `run`, `position`, `fill`,
   `dividend`, `split`, `mark`, the broker trail `intent` (written before every order call: entry, cancel,
   replace, sell, MOC, close) and `ack` (its answer), and `import` / `bootstrap` (rows copied from Supabase once).

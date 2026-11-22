@@ -1,7 +1,8 @@
 """The local journal (S77, #117; decision 15: "local journal first, Supabase asynchronously"; audit D5, H2).
 
 One SQLite file (`data/live/journal.sqlite` for the paper engine) with one append-only table. Everything the engine
-records goes into it first and is durable (WAL, synchronous=FULL) before the call that follows it returns:
+records goes into it first and is durable (WAL, synchronous=FULL, `fullfsync` on macOS; read back when the file is
+opened, and a journal without them is refused: M9 1.18) before the call that follows it returns:
 
 - `row` entries: every write the engine used to send to Supabase (insert, update, upsert), in order;
 - ledger entries (engine/ledger.py: run, fill, mark, dividend, split, position): the accounting;
@@ -125,6 +126,10 @@ class Journal:
             if self.path != ":memory:":
                 self.db.execute("pragma journal_mode=wal")
             self.db.execute("pragma synchronous=full")
+            if sys.platform == "darwin":  # M9 1.18: on macOS fsync stops at the drive's cache without it
+                self.db.execute("pragma fullfsync=1")
+                self.db.execute("pragma checkpoint_fullfsync=1")
+            self._assert_durable()
             self.db.executescript(SCHEMA)
             if self.meta("journal_id") is None:  # a new file: a new identity, written once
                 jid = uuid.uuid4()
@@ -134,6 +139,30 @@ class Journal:
         self.journal_id: str = str(self.meta("journal_id"))
         self.epoch: int = int(str(self.meta("epoch")))
         self.id_base: int = self.epoch * ID_SPAN
+
+    def durability(self) -> dict:
+        """The settings "durable when `append` returns" rests on, as SQLite reports them for this connection."""
+        with self.lock:
+            return {k: self.db.execute(f"pragma {k}").fetchone()[0]
+                    for k in ("journal_mode", "synchronous", "fullfsync", "checkpoint_fullfsync")}
+
+    def _assert_durable(self) -> None:
+        """M9 1.18 (#443): SQLite does not raise when a pragma is not taken (a file system that cannot do
+        write-ahead mode answers `delete`), so the settings are read back and a journal without them is refused."""
+        d = self.durability()
+        want: dict = {"synchronous": 2}  # FULL
+        if self.path != ":memory:":
+            want["journal_mode"] = "wal"
+        if sys.platform == "darwin":
+            want.update(fullfsync=1, checkpoint_fullfsync=1)
+        wrong = {k: d[k] for k, v in want.items() if str(d[k]).lower() != str(v)}
+        if wrong:
+            self.db.close()
+            raise DurabilityError(
+                f"The journal {self.path} is not durable: " + ", ".join(
+                    f"{k} is {v!r}, must be {want[k]!r}" for k, v in sorted(wrong.items()))
+                + ". An entry could be lost in a crash or a power cut after the engine acted on it. Not starting "
+                  "(docs/ops/ledger.md, 'Durability').")
 
     def meta(self, k: str) -> str | None:
         with self.lock:
@@ -208,6 +237,10 @@ class Journal:
 
 class BootstrapError(RuntimeError):
     pass
+
+
+class DurabilityError(RuntimeError):
+    """The journal file is not in write-ahead mode with synchronous=FULL (and `fullfsync` on macOS)."""
 
 
 class IdentityError(RuntimeError):

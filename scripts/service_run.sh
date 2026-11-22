@@ -12,6 +12,8 @@
 # (KeepAlive restarts only after a non-zero exit; the worker never changes them):
 #   0  clean stop (service.sh stop, logout) or on hold (data/HOLD): launchd leaves it stopped
 #   1  failed, refused or waiting for something (Docker, another engine): launchd tries again after 60 s
+#      (an engine that refused its journal, its exit code 4, is tried again too and says so each time: the alarm
+#      names the journal; it starts by itself once the journal is fixed)
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO="$PWD"
@@ -331,6 +333,12 @@ run_engine() {
   rm -f "$lock"
   if [ "$stopping" = 1 ]; then say "engine stopped (on request)"; exit 0; fi
   if [ "$code" = 0 ]; then say "engine exited cleanly"; exit 0; fi
+  if [ "$code" = 4 ]; then  # QA-Ops (#511): the journal was refused; a restart does not cure it, so say what it is
+    say "engine exited with code 4: it refused its journal (the reason is the last ERROR line of engine.log;" \
+        "docs/ops/ledger.md). launchd tries again every minute; it is refused until that is fixed"
+    hc fail "kaibot engine refused its journal (exit code 4) on $(hostname -s): not trading until fixed; see engine.log and docs/ops/ledger.md"
+    exit 1
+  fi
   say "engine exited with code $code: launchd starts it again in about a minute"
   hc fail "kaibot engine exited with code $code on $(hostname -s); restarting"
   exit 1
