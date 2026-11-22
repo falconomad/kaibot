@@ -1,4 +1,9 @@
 {
+  "ignoreCommand": "bash scripts/vercel_ignore.sh",
+  "git": { "deploymentEnabled": {
+    "team/backend-quant/**": false, "team/quant/**": false, "team/platform/**": false, "team/data/**": false,
+    "team/agents-ai/**": false, "team/qa-ops/**": false, "team/test-eng/**": false
+  } },
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
   "functions": { "api/summary.ts": { "maxDuration": 30 }, "api/check-ticker.ts": { "maxDuration": 20 }, "api/logo-domain.ts": { "maxDuration": 10 }, "api/marks.ts": { "maxDuration": 10 } },
   "headers": [{ "source": "/(.*)", "headers": [
