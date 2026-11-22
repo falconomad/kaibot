@@ -557,7 +557,8 @@ class LiveDaily:
             return self.om  # no run: the open orders and fills are still managed
         if self.om is None or self._rid != rid:
             self._rid = rid
-            self.om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill)
+            self.om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
+                                   position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
             self.stops = ProtectiveStops(self.om, run=rid)
         return self.om
 
@@ -1737,6 +1738,16 @@ class EngineAccount:
         if b is None:
             return {}
         return {sym: (float(s.qty), s.mark) for (st, sym), s in b.sleeves.items() if st == strategy and s.qty > 1e-9}
+
+    def ledger_qty(self, symbol: str) -> float | None:
+        """M9 1.11 (#436): the ledger's shares in the symbol, all sleeves together, for the order manager's check
+        before an order is called lost. None (no check on the position) without a run, and while an intraday entry
+        or exit in the symbol is under way (the ledger books it when it settles, as `_recon_inputs` leaves it out)."""
+        b = self._book()
+        if b is None or any(p.symbol == symbol and (p.status != "open" or p.exit_order_id)
+                            for p in self.e.pos.values()):
+            return None
+        return float(b.qty_by_symbol().get(symbol, 0.0))
 
     def book_fill(self, body: dict) -> None:
         self.e._md_realized(body)  # today's realised P&L of a sale (before the fold changes the sleeve)
