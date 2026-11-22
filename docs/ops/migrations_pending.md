@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0036 applied; 0037-0039 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0039 applied; none pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -35,9 +35,9 @@ Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0036 applie
 - 0034: **applied by Product on 21 Nov 2026, about 02:xx UTC** (step 21 below; dashboard only, any time; the PR for #384). Independent of 0033 (#401, step 20).
 - 0035: **applied by Product on 21 Nov 2026** (checked: kb_market_notices not executable by anon; market_notice not readable by authenticated; RLS on) (step 22 below; dashboard read only, any time; the market notices of #378). 0034 and step 21 are #410's.
 - 0036: **applied by Product on 21 Nov 2026** (checked: step 23 query true; not executable by anon) (step 23 below; dashboard read only, any time; kb_health's dynamically named events: `multi_day_column_missing` of #410, `multi_day_review`, `command_accept_reconcile`). After 0033.
-- 0037: **pending** (step 24 below; the PR for #439, M9 ticket 1.14: the owner accepts a ledger/broker difference from the dashboard). Changes live trading behaviour when used: an accepted difference lifts the stop on new buys. The stakeholder's to apply.
-- 0038: **pending** (step 25 below; M10 ticket 1.26, #451: the helpers' narrow key path). Independent of 0037. Any time, also while the engine runs; then the one-time setup of `docs/ops/helper_role.md`.
-- 0039: **pending** (step 26 below; dashboard read only, any time; kb_health's M9 events: `replica_poison` and `replica_backlog` of #437, `clock_skew` of #435, `calendar_expiring` of #442; and the four that waited for a migration (#512): `command_waiting` of #427, `command_rejected` of #440, `multi_day_book_unchecked` and `multi_day_book_unconfirmed` of #426, `multi_day_unbooked_aged` of #507). After 0036. Independent of 0037 and 0038. Changes no trading behaviour.
+- 0037: **applied by Product on 22 Nov 2026, after the engine restarted on e949400** (checked: command_kind_check lists accept_reconcile; kb_command not executable by anon) (step 24 below; the PR for #439, M9 ticket 1.14: the owner accepts a ledger/broker difference from the dashboard). Changes live trading behaviour when used: an accepted difference lifts the stop on new buys. The stakeholder's to apply.
+- 0038: **applied by Product on 22 Nov 2026, after the engine restarted on e949400** (checked: kaibot.helper RLS on, not readable by authenticated; owner_not_helper trigger present; kb_helper_* not executable by anon; realtime policy 'kb helper sends prices' present) (step 25 below; M10 ticket 1.26, #451: the helpers' narrow key path). Independent of 0037. Any time, also while the engine runs; then the one-time setup of `docs/ops/helper_role.md`.
+- 0039: **applied by Product on 22 Nov 2026, after the engine restarted on e949400** (checked: kb_health lists multi_day_unbooked_aged; not executable by anon) (step 26 below; dashboard read only, any time; kb_health's M9 events: `replica_poison` and `replica_backlog` of #437, `clock_skew` of #435, `calendar_expiring` of #442; and the four that waited for a migration (#512): `command_waiting` of #427, `command_rejected` of #440, `multi_day_book_unchecked` and `multi_day_book_unconfirmed` of #426, `multi_day_unbooked_aged` of #507). After 0036. Independent of 0037 and 0038. Changes no trading behaviour.
 
 ## Apply in this order
 
