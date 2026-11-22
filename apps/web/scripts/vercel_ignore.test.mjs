@@ -107,4 +107,24 @@ describe("the ignored build step", () => {
     const config = JSON.parse(readFileSync(resolve(here, "../vercel.json"), "utf8"));
     expect(config.ignoreCommand).toBe("bash scripts/vercel_ignore.sh");
   });
+
+  // git.deploymentEnabled: a branch that matches a `false` pattern gets no deployment at all, so it cannot use up the
+  // day's deployments. Every rule here is `team/<name>/**: false`, which is why a prefix check is a faithful reading.
+  describe("the branches Vercel does not deploy", () => {
+    const rules = JSON.parse(readFileSync(resolve(here, "../vercel.json"), "utf8")).git.deploymentEnabled;
+    const off = (branch) => Object.keys(rules).some((pattern) => branch.startsWith(pattern.slice(0, -2)));
+
+    it("are listed only as whole team folders switched off", () => {
+      for (const [pattern, on] of Object.entries(rules)) {
+        expect(pattern).toMatch(/^team\/[a-z-]+\/\*\*$/);
+        expect(on).toBe(false);
+      }
+    });
+    it.each(["main", "team/frontend/health-labels", "team/design/logo", "team/product/status", "fe/night-pot"])("%s is still deployed", (branch) => {
+      expect(off(branch)).toBe(false);
+    });
+    it.each(["team/backend-quant/m9-1.2", "team/quant/x", "team/platform/y", "team/data/383", "team/agents-ai/360", "team/qa-ops/drill", "team/test-eng/z"])("%s is not deployed", (branch) => {
+      expect(off(branch)).toBe(true);
+    });
+  });
 });
