@@ -41,7 +41,7 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 
 from kaibot.broker.alpaca import CANCEL_POLL_S, CANCEL_POLLS, CANCEL_WAIT_S
-from kaibot.broker.protocol import Broker, OrderRequest
+from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import (
     shadow,  # S14 shadow strategies: never trade, never raise
@@ -89,7 +89,9 @@ log = logging.getLogger("kaibot.engine")
 
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
-MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch trips for the session
+MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switch (`engine_errors`) trips
+# M9 1.7: clean ticks in a row (one a minute) after which the `engine_errors` kill is cleared; the halt row stays
+CLEAN_TICKS_TO_CLEAR = 5
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
 # M9 1.15 (audit S1): a command row is checked in code before anything is done. The pot of a paper run has the
@@ -351,6 +353,7 @@ class Engine:
         # replays). When set, entries need a lease that is provably ours right now.
         self.lease = None
         self.error_streak = 0
+        self.clean_ticks = 0  # M9 1.7: ticks in a row that did not raise while the `engine_errors` kill is set
         self._drift_seen: dict = {}
         self.run: dict | None = None
         self.day: Day | None = None
@@ -514,7 +517,10 @@ class Engine:
 
     # ================= fail-closed halts =================
     def _halt_entries(self, kind: str, reason: str, detail: dict | None = None) -> None:
-        if self.kill:
+        # QA-Ops (#483): `engine_errors` is the one kill that clean ticks clear (`on_tick_ok`), so it must not hide
+        # another halt raised while it is set (drift, broker rejects, the LLM budget): that halt takes over, with
+        # its own row and event, and stays until the next session as it always did.
+        if self.kill and not (self.kill == "engine_errors" and kind != "engine_errors"):
             return
         self.kill = kind
         log.error("entries halted: %s (%s)", kind, reason)
@@ -529,11 +535,27 @@ class Engine:
     def on_tick_error(self, err: Exception) -> None:
         """Called by the main loop when an iteration raises. Repeated failures trip the kill switch."""
         self.error_streak += 1
+        self.clean_ticks = 0
         if self.error_streak >= MAX_ERROR_STREAK:
             self._halt_entries("engine_errors", f"{self.error_streak} loop errors in a row: {str(err)[:120]}")
 
     def on_tick_ok(self) -> None:
+        """Called by the main loop after a tick that did not raise (one a minute). M9 1.7 (audit M5): the
+        `engine_errors` kill is cleared after CLEAN_TICKS_TO_CLEAR such ticks in a row, so a minute of API trouble
+        in the morning no longer blocks the 15:50 buys. Its halt row stays for the record; a `halt_cleared` event
+        says why. A failed pass in between starts the count again. No other kill is ever cleared here."""
         self.error_streak = 0
+        if self.kill != "engine_errors":
+            self.clean_ticks = 0
+            return
+        self.clean_ticks += 1
+        if self.clean_ticks < CLEAN_TICKS_TO_CLEAR:
+            return
+        self.kill, self.clean_ticks = None, 0
+        log.warning("halt engine_errors cleared after %d clean ticks in a row", CLEAN_TICKS_TO_CLEAR)
+        self.store.event("halt_cleared", {"kind": "engine_errors", "clean_ticks": CLEAN_TICKS_TO_CLEAR,
+                                          "day": str(self.day.day) if self.day else None,
+                                          "why": f"{CLEAN_TICKS_TO_CLEAR} clean ticks in a row"}, self._rid())
 
     def lease_ok(self) -> bool:
         """Issue #81: no lease object means the lease is not enforced; otherwise it must be verified and fresh."""
@@ -985,8 +1007,32 @@ class Engine:
                 log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
                 failed[sym] = e
 
+    def _md_om(self, rid):
+        """M9 1.8 (#433): the daily path's order manager for run `rid` (None without the daily path or a run id:
+        then a flatten sale goes the older way below, straight to the broker)."""
+        if self.daily is None or rid is None:
+            return None
+        return self.daily.manager_for(rid)
+
     def _md_exit_submit(self, sym: str, keys: list, coid: str, reason: str, rid) -> None:
-        """The sale, with its intent journalled BEFORE the call (`md_exit_intent`: client id, run, keys, reason)."""
+        """The sale, with its intent journalled BEFORE the call. M9 1.8 (#433): through the order manager, one sale
+        per sleeve under the manager's deterministic id `kb<run>-<rule>-<symbol>-<day>-flatten-<n>` (an open sale
+        of the same day is reused, never doubled; a sale without an answer is `unknown` and looked up by its id);
+        the manager books every fill from the account activities at its own quantity and price, so a sale
+        cancelled after a partial fill has its filled shares in the ledger. `_md_exits` holds the sale under its
+        client id (`om`) until the manager has finished it (`_sync_md_exits`). A sale the venue refuses raises, as
+        a refused broker call did. Without the daily path: the older way (`md_exit_intent`, `coid` as given)."""
+        om = self._md_om(rid)
+        if om is not None:
+            session = str(self.now().astimezone(_et()).date())
+            for k, q in keys:
+                c = om.next_coid(rid, k[0], sym, session, "flatten")
+                self._md_exits[c] = {"run_id": rid, "keys": [(k, q)], "reason": reason, "om": c}
+                r = om.submit(OrderRequest(sym, "sell", q, "market", "day", c), strategy=k[0], purpose="flatten",
+                              session=session, meta={"reason": reason}, override_block=True)
+                if str(r.state) == "rejected":
+                    raise BrokerError(403, f"{sym}: the venue refused the flatten sale {c} ({r.reason})")
+            return
         qty = sum(q for _, q in keys)
         self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
                                                "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
@@ -1029,6 +1075,18 @@ class Engine:
                 continue
             self._md_exits[b["order_id"]] = {"run_id": b.get("run_id"), "reason": b.get("reason"),
                                              "keys": [((k[0], k[1]), float(q)) for k, q in b.get("keys") or []]}
+        # M9 1.8 (#433): the flatten sales the order manager holds (purpose `flatten`) that have no `md_exit_done`
+        # yet: in flight, or finished while the engine was down. Each is held under its client id until
+        # `_sync_md_exits` has seen the manager finish it; the manager itself looks an unconfirmed one up by its id
+        from kaibot.engine.failsafe import COID
+
+        for _, _, _, b in self.journal.entries(kinds=("om_intent",)):
+            m = COID.match(str(b.get("coid") or ""))
+            if b.get("purpose") != "flatten" or m is None or b["coid"] in closed or self.daily is None:
+                continue
+            self._md_exits[b["coid"]] = {"run_id": int(m.group(1)), "om": b["coid"],
+                                         "keys": [((b.get("strategy"), b.get("symbol")), float(b["qty"]))],
+                                         "reason": str((b.get("meta") or {}).get("reason") or "flatten")}
         # QA-Ops (#279): a sleeve's own market sale (`kbfl-` client id) whose intent is journalled but whose md_exit
         # is not (the process died between the broker call and the entry) is found at the venue by its client id
         # and rebuilt, so it is booked when it fills and the next flatten does not send it again. (A close_position
@@ -1054,7 +1112,28 @@ class Engine:
                    and b.get("symbol") == symbol for _, _, _, b in self.journal.entries(kinds=("fill",)))
 
     def _sync_md_exits(self) -> None:
+        synced = set()
         for oid, x in list(self._md_exits.items()):
+            if x.get("om"):  # M9 1.8 (#433): the order manager's sale; it books the fills, this only closes it
+                om = self._md_om(x["run_id"])
+                if om is None:
+                    continue
+                if id(om) not in synced:  # once per pass: unconfirmed orders looked up, fills booked, orders polled
+                    synced.add(id(om))
+                    om.sync()
+                r = om.get(oid)
+                if r is not None and (r.open or r.cum > r.booked + 1e-9):
+                    continue  # working, or a fill the venue reported is not booked yet
+                state = "never_sent" if r is None else "booked" if str(r.state) == "filled" else str(r.state)
+                if r is not None and r.booked > 1e-9:
+                    self.store.event("multi_day_sold", {"order_id": r.order_id, "coid": oid, "px": r.avg,
+                                                        "qty": r.booked, "reason": x["reason"],
+                                                        "keys": [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]},
+                                     self._rid() or x["run_id"])
+                self.journal.append("md_exit_done", {"order_id": r.order_id if r is not None else None, "coid": oid,
+                                                     "state": state, "filled": r.booked if r is not None else 0.0})
+                self._md_exits.pop(oid)  # what is left unsold: the next full flatten sells it (a new attempt)
+                continue
             o = self.broker.order(oid)
             if o["status"] == "filled":
                 px, ts = float(o["filled_avg_price"]), o.get("filled_at")
@@ -1077,6 +1156,17 @@ class Engine:
             elif o["status"] in ("canceled", "expired", "rejected"):
                 self.journal.append("md_exit_done", {"order_id": oid, "state": o["status"]})
                 self._md_exits.pop(oid)  # not sold: the next full flatten tries again
+
+    def _md_exits_closed(self) -> None:
+        """M9 1.9: the multi-day flatten sales with the market closed (they are DAY orders: filled before the close,
+        or expired at it). Never raises: an unreadable order is tried again at the next tick, and the closed
+        branch's other steps (the daily decision, the preparation of the next session) still run."""
+        if not self._md_exits:
+            return
+        try:
+            self._sync_md_exits()
+        except Exception:
+            log.exception("multi-day flatten sales not synced (market closed); tried again at the next tick")
 
     def _attach_ledger(self) -> None:
         """A run the ledger has not seen (it began before the ledger, or the journal is new) is imported from the
@@ -1456,6 +1546,7 @@ class Engine:
         now = self.now()
         clk = self.broker.clock()
         if not clk["is_open"]:
+            self._md_exits_closed()  # M9 1.9: a flatten sale that filled before the close is booked after it too
             self._daily_step("sync", lambda: self.daily.sync())  # #206: the closing auction's fills, before the close
             if self.day and not self.day.finalized:
                 self._sync_orders()
@@ -1475,11 +1566,26 @@ class Engine:
             self._start_day(now)
         d = self.day
         if d is None:
+            # M9 1.9 (audit M8): no run and no session (the run ended, then a restart) with a multi-day flatten sale
+            # still to book. `_sync_orders` is never reached from here, so the sale is booked here: else it stays in
+            # `_md_exits` for good and a `new_run` command waits for it for ever (`apply_commands`).
+            if self._md_exits:
+                self._sync_md_exits()
             return self._daily_status({"state": "idle", "account_clean": self.account_clean})
-        self.market.update(now)
         m = self.market.last_complete_minute(now)
+        # M9 1.5 (audit M3): the multi-day sync and send run first, before any market-data read or intraday step.
+        # They were the tenth step; a step before them that raised on each tick of 15:50-15:57 ET lost the
+        # decision's orders. The send then reads the engine's state as the last completed minute left it.
+        # QA-Ops (#484): only when that minute is the one just before (`done_m == m - 1`). On the first tick after a
+        # (re)start, or after a minute whose checks raised, the state is older than a minute or was never checked
+        # (a daily stop, a book end or a drift first seen now): there the send keeps its old place behind the
+        # checks, exactly as before M9 1.5 (fail closed).
+        first = m >= 0 and d.done_m == m - 1
+        if first:
+            self._md_send_steps(d, sync=True)
+        fresh = self._market_update(now)
         if m < 0 or m == d.done_m:
-            return self._status(m)  # this minute's work is complete: it is never run twice
+            return self._data_status(self._status(m), fresh)  # this minute's work is complete: never run twice
         # S74 (#114, audit D6): `last_m` says the minute was started, `done_m` that it was finished. A step below
         # that raises leaves `done_m` behind, so the main loop's retry (about 10 s later) runs the minute again
         # instead of getting "already done" and resetting the error streak. Every failed attempt therefore counts
@@ -1487,7 +1593,8 @@ class Engine:
         # an entry decision that has acted: `decided` (set below and in _entries) keeps a retry from repeating it.
         d.last_m = m
         self._sync_orders()
-        self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
+        if not first:
+            self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
         self._md_positions_after_fills(d.day)  # #333: near-close fills land before the fail-safes' flatten window
         self._recheck_reconcile(m)
         self._late_actions(m)  # #266: a split or spin-off Alpaca credits after the session start
@@ -1497,10 +1604,11 @@ class Engine:
                 self._exit(p, "carried_over")
         eq, unreal = self.equity_now()
         self._risk_halts(m, eq)
-        self._manage_stops(m)
-        if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
-            self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
-        self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
+        intraday = self.intraday_live()  # M9 1.5: no intraday rule and no intraday position: none of its steps
+        if intraday:
+            self._manage_stops(m)
+        if not first:
+            self._md_send_steps(d)
         if m >= d.flatten_m and not d.flattened:
             self.flatten_all("time")  # S78: intraday sleeves only (holding policy per rule); see flatten_all
             d.flattened = True
@@ -1508,16 +1616,62 @@ class Engine:
             self._quotes = self.broker_quotes(sorted(self.roomflow.jobs))
             self._bp_read, self._bp_added = self._broker_buying_power(), 0.0
             self.roomflow.collect(m)
-        for strat in self.live_strategies():  # S76: every live strategy the session runs, in registry order
+        # S76: every live strategy the session runs, in registry order. M9 1.5: not on a minute whose bars could not
+        # be read (a rule would decide on stale bars: fail closed, for that minute only)
+        for strat in self.live_strategies() if intraday and fresh else ():
             if due(strat.schedule, Event.BAR_CLOSE, m, d.n_min) and d.decided.get(strat.name) != m \
                     and self._may_enter(m):
                 self._entries(strat, m)
                 d.decided[strat.name] = m
-        self._close_outs(m)
+        if intraday:
+            self._close_outs(m)
         self._ledger(eq)
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
         d.done_m = m
-        return self._status(m)
+        return self._data_status(self._status(m), fresh)
+
+    def _md_send_steps(self, d: Day, sync: bool = False) -> None:
+        """The daily path's steps of a minute: its order sync (`sync`: when they run first in the tick), the pre-open
+        review and the send. Each is contained (`_daily_step`): a failure never stops the tick."""
+        if sync:
+            self._daily_step("sync", lambda: self.daily.sync())  # #206: the daily path's orders and fills
+        if getattr(self.daily, "review", None) is not None:  # #131: off by default (review None)
+            self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
+        self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
+
+    def intraday_live(self) -> bool:
+        """M9 1.5: whether the session has anything intraday to manage: a live rule that is flat by the close, an
+        intraday position, or a room job. False when only multi-day rules are on (their path is `self.daily`)."""
+        if len(self.pos) or (self.roomflow is not None and self.roomflow.jobs):
+            return True
+        return any(flatten_at_close(s.holding) for s in self.live_strategies())
+
+    def _data_status(self, st: dict, fresh: bool) -> dict:
+        """QA-Ops (#484): a failed market-data read is no loop error any more, so the heartbeat says it itself
+        (`market_data`), every minute it lasts."""
+        return st if fresh else {**st, "market_data": f"read failed: {getattr(self, '_market_error', None)}"[:160]}
+
+    def _market_update(self, now: datetime) -> bool:
+        """M9 1.5 (audit M3): the minute's market-data read, which no longer stops the tick. A failed read leaves
+        the bars as they were: the multi-day steps, the order sync, the drift check, the risk halts and the time
+        flatten go on, and no intraday entry is scanned that minute (the caller). One `engine_error` event per
+        distinct failure (step `market_update`), not one a minute. Returns whether the read worked."""
+        try:
+            self.market.update(now)
+        except Exception as e:
+            why = f"{type(e).__name__}: {e}"[:200]
+            if getattr(self, "_market_error", None) == why:
+                log.warning("market data: the minute read is still failing: %s", why)
+                return False
+            self._market_error = why
+            log.exception("market data: the minute read failed (the tick goes on without new bars)")
+            try:
+                self.store.event("engine_error", {"step": "market_update", "error": why}, self._rid())
+            except Exception:  # the event must never be what stops the tick
+                log.exception("market data: the engine_error event was not written")
+            return False
+        self._market_error = None
+        return True
 
     def _maybe_prepare(self, clk: dict, now: datetime) -> None:
         """Load history ahead of the open (the first load takes a few minutes; later ones are incremental)."""
@@ -1583,7 +1737,7 @@ class Engine:
                          and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today)
         if self.kill:
             self.store.event("halt_cleared", {"kind": self.kill, "day": str(today)}, self._rid())
-        self.kill, self.error_streak = None, 0
+        self.kill, self.error_streak, self.clean_ticks = None, 0, 0
         self._check_recent_stops(today)
         if self.calendar_until is not None and today > self.calendar_until:
             self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),

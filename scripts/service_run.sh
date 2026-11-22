@@ -193,8 +193,14 @@ stream_cmd() {  # S_CMD and S_KIND; 1 when it cannot run yet. Needs Python 3.11+
     fi
   done
   if [ "$MODE" = docker ] && docker image inspect kaibot-engine >/dev/null 2>&1; then
-    S_KIND=docker; S_CMD=(docker run --rm --init --name "$STREAM_BOX"
-      -v "$ENV_FILE:/secrets/.env:ro" -v "$REPO/scripts/price_stream.py:/app/scripts/price_stream.py:ro"
+    # M10 1.26 (#451): the relay's Supabase client comes from the repo like the script (an older image lacks it),
+    # and with the helpers' env file the box gets ONLY that file: the engine's .env (the service key) stays out
+    local henv="${KAIBOT_HELPER_ENV_FILE:-$HOME/Projects/kaibot-secrets/helper.env}"
+    local secrets=(-v "$ENV_FILE:/secrets/.env:ro")
+    [ -f "$henv" ] && secrets=(-v "$henv:/secrets/helper.env:ro" -e KAIBOT_HELPER_ENV_FILE=/secrets/helper.env)
+    S_KIND=docker; S_CMD=(docker run --rm --init --name "$STREAM_BOX" "${secrets[@]}"
+      -v "$REPO/scripts/price_stream.py:/app/scripts/price_stream.py:ro"
+      -v "$REPO/src/kaibot/common/helper_session.py:/app/src/kaibot/common/helper_session.py:ro"
       kaibot-engine python -u scripts/price_stream.py --env /secrets/.env)
     return 0
   fi

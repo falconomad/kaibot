@@ -11,7 +11,7 @@ and stop" sell everything.
 | Engine halts | engine | bad state | no new entries for the session (exits keep being managed); `Engine.entry_block()` says why, for the multi-day target path too |
 | Daily stop | engine | a bad day, overnight gaps included | the day's change in mark-to-market equity (start = yesterday's close mark) at the level's stop: entries blocked for the day, intraday sleeves flattened, multi-day sleeves keep their stops |
 | Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)) |
-| Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s: cancel open Kaibot buys (`kb...`) not yet completely filled, halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
+| Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s (one that cannot be read counts only if this machine does not show the engine alive, see below): cancel open Kaibot buys (`kb...`) not yet completely filled, halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
 | Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | with 0019: heartbeat > 3 min old while the market is open: the same plan as the watchdog (cancel entries, verify and re-create stops, alarm); from close minus 4 min to the close: sell the intraday shares only. Before 0019 (0006/0017): `DELETE /v2/positions?cancel_orders=true` at close minus 4 min, i.e. the whole account |
 
 Restart and recovery (crash, 10-minute outage, API outage, half-written order, two engines): see
@@ -42,15 +42,40 @@ Restart and recovery (crash, 10-minute outage, API outage, half-written order, t
   Check after applying: `select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';` shows four
   jobs, and `select kaibot.deadman_flatten();` outside the due minutes returns `not 15:56 ET` (or `not 12:56 ET`).
 
+## A heartbeat the watchdog cannot read (M9 1.6)
+The heartbeat lives in Supabase. When the watchdog cannot **read** it (Supabase unreachable from the Mac), it asks
+the Mac itself before acting, because three minutes without Supabase used to cancel a healthy engine's working buys:
+- **The process.** The engine writes `engine.pid` (pid and host name) into its data folder at every start. A pid
+  file of this host whose process is gone: the engine is dead, at once. A process that exists proves nothing (it may
+  hang). In Docker the engine's pid is in another container and is not checked.
+- **The journal.** `journal.sqlite` is on the same disk and every tick of a session writes its minute row. The engine
+  counts as alive only while the last write is younger than 150 s (`LOCAL_ALIVE_S`: one tick period on top of the
+  90 s). No journal, a silent journal, an engine with no run: stale, as before.
+- **Alive:** nothing is cancelled, sold or halted on that poll (log line "heartbeat unreadable, but ... the engine
+  is alive"). **Not alive:** exactly the old path. A dead engine is therefore acted on at most 150 s after its last
+  journal write instead of 90 s after its last heartbeat, and only while Supabase is unreadable too.
+- **The end of the outage (QA-Ops, #485).** The first good read after unreadable ones usually shows the engine's
+  last beat from before the outage (the watchdog polls every 15 s, the engine beats about every 10 s). For 90 s
+  (`STALE_S`) from that first good read a stale row is judged by the Mac in the same way; a fresh beat ends it.
+- Otherwise a heartbeat that **was read** and is stale, or no heartbeat row at all, is acted on whatever the journal says. The
+  dead-man in Supabase is unchanged: if the Mac is cut off for more than 3 minutes while Supabase is up, it still
+  cancels the entries from its side.
+- **Carried, not lost.** Before each entry cancel the watchdog appends the order's ids to `watchdog_cancels.jsonl`
+  in the data folder. The carry-over (#363) reads it: a buy the watchdog cancelled is sent again at the next
+  session like one that never reached the venue. A buy the dead-man cancelled is not recognised yet (its record is
+  in Supabase) and stays "order canceled" until the next decision.
+
 ## Engine halts (fail closed)
-Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume).
+Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume)
+and `engine_errors`, which also clears after 5 clean ticks in a row (M9 1.7, #432: the halt row stays, a `halt_cleared` event says why).
+Another halt raised while `engine_errors` is set takes the kill over (its own row and event) and is not cleared by clean ticks.
 
 | Kind | Trigger |
 |---|---|
 | `daily_stop` | day P&L at the level's daily stop: flatten and halt |
 | `run_drawdown` | drawdown from the run's peak at the level's cap: flatten and end the run |
 | `drift` | engine positions differ from the broker's on two consecutive minutes |
-| `engine_errors` | 3 loop iterations in a row raised |
+| `engine_errors` | 3 loop iterations in a row raised; cleared after 5 ticks in a row that did not raise (about 5 minutes) |
 | `calendar_stale` | today is after `covers_until` in `config/macro_calendar.yaml` |
 | `three_stops` | 3 daily stops within 14 calendar days (~10 sessions): run paused |
 | lease unverified (no halt row) | the engine lease could not be renewed: entries blocked until a renewal succeeds; shown as `lease: unverified` in the heartbeat |
@@ -118,7 +143,10 @@ accounts and checks that they agree.
 - **Engine side:** the close-minus-5 flatten and the daily stop take intraday sleeves only; only intraday positions
   are "carried" (sold at the next open); the account guard and the drift check count the ledger's multi-day sleeves as
   the engine's own; equity counts them from their last close mark (the overnight gap is in the day's change); run
-  drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills.
+  drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills. Since M9 ticket 1.8 (#433) that sale goes through the
+  order manager, one per sleeve, under `kb<run>-<rule>-<symbol>-<day>-flatten-<n>`: every fill is booked at its own
+  quantity (a sale cancelled after a partial fill too), and a sale without an answer is looked up by its id, never
+  sent again blind. Without the daily path (KAIBOT_MULTIDAY off) the older direct sale (`kbfl-...`) is still used.
 - **Turning multi-day rules on:** `KAIBOT_MULTIDAY=on` in the engine's environment (the `.env`); default off, and the
   engine refuses to load a multi-day rule without it. It is the explicit switch for the first paper start (#133,
   after Gate B) and needs #188 (done) and #197 first. It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level
@@ -131,7 +159,7 @@ accounts and checks that they agree.
 | Engine killed at 15:50 | watchdog | the closing-auction buy is cancelled; the resting stop is kept (a missing one re-created, whole shares, at the journal's stop price); 15:55 sells the intraday position only; the restarted engine knows the sleeve |
 | Engine killed at 15:50, laptop gone | dead-man (SQL) | the same from Supabase: entry cancelled, stop re-created (`kbdm-`), intraday legs cancelled then the position closed in the 15:56-16:00 window, the multi-day position kept; one `deadman` halt |
 | Network cut overnight | dead-man, then the engine | the engine and the watchdog cannot reach Alpaca (loop errors, kill switch); the dead-man reads the account at 09:35, finds the stop resting and sells nothing; when the network is back the engine counts the overnight gap, the daily stop blocks entries and the stop stays |
-| Supabase down at the open | watchdog | the heartbeat is unreadable (stale): entries cancelled, the missing stop re-created from the local journal; at 15:55 nothing multi-day is sold. With the journal unreadable too: kept through its own stop, or sold if it has none (fail closed) |
+| Supabase down at the open | watchdog | the heartbeat is unreadable and the engine is dead (its journal is silent): stale, entries cancelled, the missing stop re-created from the local journal; at 15:55 nothing multi-day is sold. With the journal unreadable too: kept through its own stop, or sold if it has none (fail closed) |
 
 The dead-man drills run the migration in a throwaway local Postgres (`tests/pg_harness.py`: stand-ins for pg_net,
 Vault and pg_cron; never Supabase). They are skipped where no PostgreSQL binaries are installed.

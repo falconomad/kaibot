@@ -359,3 +359,176 @@ result is affected (item 3).
    carried (Amendment 9, item 4), and the same bit-identity test passes for both momentum rules. A test finds, on
    the fixture, a session where one planned stock is in the ranked universe and another is outside the universe
    filter: only the first is carried, for this rule and for trend_momentum (Amendment 13 there).
+
+## Amendment 12 (21 Nov 2026, platform, issue #441, M9 ticket 1.16, before its first live paper session): a pre-send check that can withhold a near-close order
+
+Written on 21 Nov 2026, before the check's first use. It changes whether and when a live order goes out, so it is
+recorded here. It can only withhold an order for a session: it never adds an order, and it never changes a share
+count, a rank or a target. No research result is affected (item 6). The same text is Amendment 14 of
+trend_momentum.
+
+1. **The gap.** Amendment 8's near-close market orders go out with the share counts sized at the previous
+   close. Nothing read the stock's quote, whether it was trading, or how far it had moved that day (engine audit of
+   21 Nov 2026, "confirmed absent"; reproduced by a failing test before the change).
+2. **The check (live path only).** Just before an order would be sent, the engine reads the stock's latest IEX
+   quote (one request per tick for the whole plan, ended after 8 seconds) and the close its shares were sized at
+   (the previous session's raw close, on today's share basis). The order is withheld when:
+   - the quote is older than 300 seconds (the stock is halted or not trading; a limit-up/limit-down pause lasts
+     five minutes);
+   - both the bid and the ask are more than 10% away from the sizing close (the side nearer the close is read,
+     because IEX is one exchange's book and one side can sit far from the market);
+   - a buy's value at that price is above the book's per-name cap plus 10% (a wrong quantity; a sale is exempt: it
+     only reduces exposure and can never be larger than the shares held).
+   The constants are fixed here and are not tuned on results.
+3. **No quote: the prior close.** When the quote cannot be read, or the feed has none for the stock, the order is
+   checked at the sizing close and goes out. A market-data outage must not become one more way to miss a rebalance;
+   the read failure is one `multi_day_error` event (step `presend_quotes`) per session.
+4. **Withheld, not dropped.** The check is asked again on every tick of the send window, so an order goes out the
+   minute its quote is fresh and inside the collar. What is still withheld when the window ends is sent again at
+   the next session, checked against that session's previous close: a buy by the carry-over of Amendments
+   9 to 11 and under their limits (it never had an order, so nothing in the order history is against
+   it); a sale to zero as a pending sale, as an unfilled sale already is; a reduction (a resize down) as the same
+   reduction to the same target shares while the sleeve still holds more. The last is new: a reduction that the
+   venue let expire is still not sent again (section 4); only one this check withheld is.
+5. **Journal.** One `md_withheld` entry per (rule, session, stock, side) with the reason, and the reasons in the
+   session's `multi_day_orders` event (`withheld`). No new event name.
+6. **Research and Gate B unchanged.** The research venue has no quotes and fills at the closing print; the check
+   exists only where a quote source is given, and only the live engine's market-data client is one (a replay's
+   stored bars are not). Tests: with fresh quotes at the previous close the live path on the simulator sends the
+   same orders as without the check; with the feed down for the whole run, too; a stock without a fresh quote and
+   a stock 20% from its sizing close are withheld and bought at the next session at the plan's own shares.
+7. **What this can cost.** A stock that really moves more than 10% in a day (an earnings day) is not traded that
+   session: a sale is a day late, a buy waits for the carry-over's conditions. IEX quotes of a thinly traded stock may be older than
+   300 seconds without a halt; the reasons in `md_withheld` are to be reviewed after the first ten live sessions.
+
+## Amendment 13 (21 Nov 2026, QA-Ops second key on issue #441, PR #490, before the first use of Amendment 12): the pre-send check never withholds a sale
+
+Written on 21 Nov 2026, with Amendment 12 and before its first use. It only narrows Amendment 12: the check
+withholds fewer orders, never more; it adds no order and changes no share count, rank or target. No research result
+is affected (item 4). The same text is Amendment 15 of trend_momentum.
+
+1. **Sales are exempt.** The check of Amendment 12 (item 2) applies to buys and resizes up only. A sale to zero
+   and a reduction go out in their own session whatever the quote says: stale, far from the sizing close, or
+   missing. Where Amendment 12 says "the order is withheld", read "the buy is withheld".
+2. **Why.** Decision 15 (section 12) lets sales go out even when entries are blocked, so that the book is never
+   locked in. A sale only takes risk off and is never larger than the shares held. A stock whose IEX quote is
+   stale or far from the close day after day could otherwise never be sold.
+3. **What falls away.** Item 4 of Amendment 12 carried a withheld sale to zero as a pending sale and a withheld
+   reduction as the same reduction. Neither can happen now, and the carry of a withheld reduction is removed from
+   the code. A buy still withheld at the end of the window is carried as that item says. In item 7, "a sale is a
+   day late" no longer applies. A sale of a halted stock is sent and may expire unfilled; a sale to zero is then
+   sent again at the next session, as before (decision 15, section 12).
+4. **Research and Gate B unchanged.** As Amendment 12, item 6. Added tests: the check gives no reason for a sale
+   with any quote; every sale of the fixture run, with a stale quote or a quote 20% under its sizing close, goes
+   out in its own session exactly as without the check; a sale does not wait for the quote read, which is made
+   only when a buy is about to go out.
+
+## Amendment 14 (21 Nov 2026, platform, issue #436, M9 ticket 1.11, before its first live paper session): an order is called lost only after the venue's orders, fills and position were read
+
+Written on 21 Nov 2026, before the change's first use. It can change whether a second attempt of an order goes
+out, so it is recorded here. It can only hold a second attempt back: it never adds an order and changes no share
+count. No research result is affected (item 4). The same text is Amendment 16 of trend_momentum. (The number follows
+the pre-send check of issue #441, written the same day in another change.)
+
+1. **The gap.** An order whose submission got no answer is looked up by its client order id. After two lookups
+   that find nothing, at least 30 seconds apart and 60 seconds after the intent, it was called lost and the same
+   decision's order went out again under the next attempt number. If the venue had accepted the order and only
+   that lookup lagged, two orders existed (engine audit of 21 Nov 2026, "suspected": the code path is reproduced
+   by a failing test; whether Alpaca's lookup can lag is not known and is measured by
+   `scripts/probe_alpaca_idempotency.py`).
+2. **The rule.** Before an order is called lost the engine also reads the open orders, the fills since the intent,
+   and the venue's position in the stock against the ledger plus the fills its other orders have not booked yet.
+   An order found is taken over as the same order (its fills are booked once, as always). A fill in the stock, on
+   the order's side, on an order that cannot be read; shares at the venue that the ledger and the known orders do
+   not explain, in the order's direction; or a read that fails: the order stays unconfirmed, nothing new is sent
+   in that stock, and everything is read again at the next lookup (30 seconds later or more).
+3. **What this can cost.** While such evidence stands, the stock's order of that decision is not sent again in
+   that session; a buy is then carried under Amendments 11 to 13 of trend_momentum (9 to 11 of mom_12_1_band) once
+   the order is resolved. Shares at the venue that the ledger does not have are a reconciliation difference in
+   any case, and that already refuses buys in the stock.
+4. **Research and Gate B unchanged.** The research venue answers every submission; no order is unconfirmed there,
+   so the new reads never run. Tests: an accepted order whose lookup lags is found in the open orders (one order
+   at the venue); a filled one is found by its fill and booked once; an order that never arrived is lost as before.
+
+## Amendment 15 (21 Nov 2026, QA-Ops second key on issue #436, PR #495, before the first use of Amendment 14): the hold of an unconfirmed order ends with the order's day
+
+Written on 21 Nov 2026, with Amendment 14 and before its first use. It only bounds Amendment 14: it adds no
+order and changes no share count. No research result is affected (item 4). The same text is Amendment 17 of
+trend_momentum. (The numbers follow those of the pre-send check of issue #441 once both are on main.)
+
+1. **The gap.** Under Amendment 14 (item 2) an order with evidence against "lost" stays unconfirmed. An
+   unconfirmed order holds back every order in its stock, sales included. A position difference, or a fill on an
+   order that cannot be read, can stand for days for a reason that has nothing to do with the order, so the hold
+   had no end and a sale of the stock could wait for days.
+2. **The rule.** On the order's own New York day Amendment 14 applies unchanged. From the next New York day on,
+   only the order itself counts: found among the open orders or by its fill, it is taken over as the same order;
+   a venue that cannot be read still keeps it unconfirmed; otherwise it is lost and the stock is free again. A
+   lookup cannot lag overnight.
+3. **What this can cost.** While the evidence stands, no other order in the stock goes out that day: a sale is at
+   most one session late. Shares the ledger does not have stay a reconciliation difference afterwards, which
+   refuses buys in the stock and never a sale (decision 15).
+4. **Research and Gate B unchanged.** As Amendment 14, item 4. Added tests: a buy and a sale held by a position
+   difference stay unconfirmed through their day and are lost the day after, with the stock free again; after its
+   day an order the venue has is still taken over, and an unreadable venue still keeps it unconfirmed.
+
+## Amendment 16 (21 Nov 2026, platform, issue #433, M9 ticket 1.8, before its first live paper session): the sale of a full flatten goes through the order manager
+
+Written on 21 Nov 2026, before the change's first use. It changes how the sales of a full flatten are sent (the
+book's run end of section 2, a new run, "Flatten and stop"), so it is recorded here. It changes no rule, no trigger,
+no share count and no price. No research result is affected (item 4). The same text is Amendment 18 of trend_momentum.
+(The number follows the amendments for issues #441 and #436, written the same day in other changes.)
+
+1. **The gap.** These sales were sent beside the order manager, under a client id with a timestamp, and booked
+   only when completely filled. A sale the venue cancelled or let expire after a partial fill left its filled
+   shares out of the ledger (engine audit of 21 Nov 2026, confirmed; reproduced by a failing test). A sale whose
+   answer was lost was unknown to the engine until the next restart: its fill was not booked, or, while it was
+   still open, the next flatten cancelled it and sent another (the audit's "suspected" double send; no second fill
+   was reproduced).
+2. **The rule.** With the live daily path on, each sleeve's sale is one DAY market order sent by the order
+   manager under `kb<run>-<rule>-<symbol>-<day>-flatten-<n>`. An open sale of the same day is reused, never doubled;
+   a sale without an answer is looked up by its client id before anything else is sent in that stock; every fill is
+   booked from the account activities at its own quantity and price. What a cancelled or expired sale left unsold
+   is sold by the next flatten under the next attempt number, as before.
+3. **Unchanged.** When a flatten happens, what it sells, the cancel of the stock's open orders before the sale, the
+   limit to the shares the venue holds, the time budget, and that a new run waits until the sales are booked.
+4. **Research and Gate B unchanged.** The research runner ends a run inside the simulator and never calls this
+   path. Tests: a partial fill then a cancel books the filled shares and the rest is sold by the next flatten; a
+   kill between the submission and its record, and a lost answer, each end in one sale booked once.
+
+## Amendment 17 (22 Nov 2026, backend-quant, issue #428, before the session of Mon 23 Nov 2026): a decision the engine missed overnight is taken during the session
+
+Written on 22 Nov 2026 (a Sunday), after the engine audit of 21 Nov (finding M1) and before any session that
+uses it. On 20 Nov the Mac started late. A session that opens without a decision record carries nothing
+(Amendment 9, item 1: "A session with no decision taken after the last close carries nothing"), and the same
+late start on a fill day skips the rule's whole rebalance. No research result is
+affected (item 4). This amendment changes when the record of a decision is written on the live path, not the rule,
+its decision, its targets or its sizing. The same text is Amendment 19 of trend_momentum.
+
+1. **The late decision.** On the live path, when a session is open and the rule has no decision record for it
+   (the engine was not running between the previous close and this open), the after-close step of the previous
+   session is taken during the session, by the same code, as soon as the engine is up and again in the send
+   window. It reads the daily view of the previous close: rows up to that close only, once that close's bars are
+   available, which is all a decision may read (section 2). The decision is therefore
+   the one an engine running on time would have journalled. The record carries `late: true` and its own
+   `decided_at`. Code: `engine/live_daily.LiveDaily.catch_up`.
+2. **What follows from it.** After a decision day, the decision's orders go out in that session's near-close
+   window as decided, sized as on any fill session (they were skipped before). After a session that was not a
+   decision day, the record "not a decision day" is written late, and the session's pending sales and carry-over
+   run as they do after an on-time start, under every limit of the carry-over amendments.
+   A paper run started during a session that has no decision record is the same case (QA-Ops second key on
+   PR #517): it takes the previous close's decision under its own run and, after a decision day, buys in that
+   session's window, sized on its starting amount, as a run started the evening before does. Section 2 is
+   kept (a decision for session i reads sessions <= i - 1; the account starts flat), and so is Amendment 10,
+   item 1 (the new run buys at its own first decision).
+3. **Fail closed, as before.** If the daily store does not hold the previous close, or fails its check, or the
+   step fails, no decision is taken, nothing is bought and nothing is carried that session. The heartbeat says why
+   and the try is repeated (at most every five minutes before the window, on every tick inside it). The shares
+   held are read when the late decision is taken, so a stock sold since the close is not counted as held.
+4. **Research and Gate B unchanged.** The research runner decides after every close, so it never takes a late
+   decision; `engine/daily.py` is not changed. No trial row, report or Gate B mark changes, and no configuration
+   is added (`n_trials` unchanged).
+5. **Known deviation, live against research.** None in the orders when the store is unchanged since the close: a
+   test starts the live path at 10:00 ET on a fill day and finds the decision record, the orders and the fills of
+   an on-time start. If the daily store was corrected between the close and the late decision (a split row
+   verified overnight), the late decision reads the corrected store, as a decision taken late the same evening
+   would. Paper only.

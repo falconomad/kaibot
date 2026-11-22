@@ -51,6 +51,23 @@ cash less the reserve or the book's caps at the previous close (`_carry_room`: t
 checks). A failure in the carry-over carries nothing and never holds back the session's sales. No decision record for
 the session, no send of the decision, or no daily view of the previous close: nothing is carried that session.
 
+Pre-send gate (M9 ticket 1.16, #441; Amendments 14-15 of trend_momentum, 12-13 of mom_12_1_band). With a quote source
+(`quotes`: the engine's IEX latest quotes; None on the research path and in replays: no gate, nothing read), each
+BUY the target loop is about to send is checked by engine/execution.PreSendGate against the stock's latest quote
+and its sizing close (the previous session's raw close, on today's share basis): a quote that is not fresh (halted or
+not trading), a move outside the collar, or a value above the book's per-name cap is WITHHELD: no order, one
+`md_withheld` record per (rule, session, stock, side), and the reason in the `multi_day_orders` event. The loop asks
+again on every tick of the window. A buy still withheld when the window ends is carried to the next session by the
+carry-over above (it has no order, so `ended_buys` has nothing against it). A sale (to zero or a reduction) is
+never withheld: it goes out whatever its quote says (QA-Ops on #490; decision 15: sales go out, the book is never
+locked in). Without a quote (the read failed or timed out, or the feed has none for the stock) the buy is checked
+at the prior close and goes out.
+
+Late start (M9 1.3; Amendment 19 of trend_momentum, 17 of mom_12_1_band). A session that is open without its decision
+record (no tick ran between the last close and the open) takes the after-close step during the session (`catch_up`,
+from `send` at any time of the session and from `_plan` in the window): the same code on the same daily view, the
+record marked `late`. Only when that fails (the daily store not refreshed) does the session go without a decision.
+
 Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
 every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the
 review (agents/preopen_daily.PreopenDesk, a worker thread); its outcome is journalled (`md_review`) before the send;
@@ -98,6 +115,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.broker.protocol import Broker
+from kaibot.engine import failsafe
 from kaibot.engine.daily import (
     CARRY,
     CASH_RESERVE,
@@ -108,7 +126,15 @@ from kaibot.engine.daily import (
     momentum_limits,
     plan_session,
 )
-from kaibot.engine.execution import NEAR_CLOSE_MIN, NY, REGULAR_CLOSE, ExecutionPolicy, minus
+from kaibot.engine.execution import (
+    NEAR_CLOSE_MIN,
+    NY,
+    REGULAR_CLOSE,
+    ExecutionPolicy,
+    PreSendGate,
+    minus,
+    quote_from_alpaca,
+)
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
 from kaibot.engine.targets import Target, reconcile_targets
@@ -132,6 +158,9 @@ RETIRE_KINDS = ("md_retired", "md_reenabled")
 REENABLE_FLAG = "KAIBOT_REENABLE"
 FOREIGN_MAX_AGE = timedelta(days=3)  # see LiveDaily._prune
 AUCTION, POLL_EVERY = time(15, 59), timedelta(minutes=15)  # see LiveDaily.sync
+# M9 1.3: a session that opened without its decision record (the engine was off after the last close) takes it
+# during the session; before the send window a failed try (the daily store not refreshed) is repeated this often
+LATE_EVERY = timedelta(minutes=5)
 # The protective stop each rule's pre-registration declares, in ATR(20) below the entry (None: the rule has none).
 PREREG_STOP_ATR: dict[str, float | None] = {"trend_momentum": None, "mom_12_1_band": None,
                                             "mom_12_1_band_nofilter": None}
@@ -473,7 +502,8 @@ class LiveDaily:
                  known_order_ids: Callable[[], set[str]] = set,
                  session_close: Callable[[date], time | None] = lambda d: None,
                  store=None, reenable: str | None = None, ca=None, review=None,
-                 shadow=None, note=None, filing_flags=None) -> None:
+                 shadow=None, note=None, filing_flags=None,
+                 quotes: Callable[[Sequence[str]], Mapping[str, dict]] | None = None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps). `ca`: the live-safety exclusion of
         announced corporate actions (engine/corp_guard.CorporateActionGuard; #266, Amendment 6); None: none."""
@@ -504,6 +534,8 @@ class LiveDaily:
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
+        self._caught_up: date | None = None  # M9 1.3: the session whose decision records are all there
+        self._late_tried: tuple[date, datetime] | None = None  # (session, when its late decision was last tried)
         self.ca = ca
         self._ca_unread: dict[str, tuple[str, str]] = {}  # rule -> (session, why the read failed): no buys then
         self._ca_evening: date | None = None  # the decision evening whose held names the heartbeat notes cover
@@ -515,6 +547,10 @@ class LiveDaily:
         # #375: (symbols, as_of, session) -> a `filing_flag_shadow` event body, or None (KAIBOT_FILING_FLAG=shadow).
         # A logged observer: nothing on this path reads its answer, so targets and orders are the same on or off
         self.filing_flags = filing_flags
+        # M9 1.16 (#441): symbols -> Alpaca latest-quote rows, for the pre-send gate. None: no gate (research, replays)
+        self.quotes = quotes
+        self.presend_gate = PreSendGate()
+        self._withheld: set[tuple] | None = None  # (rule, session, symbol, side) already journalled (md_withheld)
 
     # ---------------------------------------------------------------- state
     @property
@@ -532,9 +568,22 @@ class LiveDaily:
             return self.om  # no run: the open orders and fills are still managed
         if self.om is None or self._rid != rid:
             self._rid = rid
-            self.om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill)
+            self.om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
+                                   position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
             self.stops = ProtectiveStops(self.om, run=rid)
         return self.om
+
+    def manager_for(self, rid: int) -> OrderManager:
+        """M9 1.8 (#433): the order manager for the engine's flatten sales of run `rid`: this path's own manager;
+        when the path has none because the run has ended and the engine restarted since, one for that run, so a
+        flatten sale still in flight is looked up and its fills are booked to the run it belongs to."""
+        om = self._manager()
+        if om is None:
+            self._rid = rid
+            self.om = om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
+                                        position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
+            self.stops = ProtectiveStops(om, run=rid)
+        return om
 
     def _on_fill(self, f: Fill, r: OrderRecord) -> None:
         """The manager journalled the ledger's `fill` entry; fold the same body into the engine's ledger."""
@@ -793,7 +842,9 @@ class LiveDaily:
         sides = self._cancel_sides()
         out = []
         for r in om.working():
-            if r.purpose == "stop" or r.side not in sides or r.state is St.PENDING_CANCEL:
+            # a protective stop is not this path's; nor is the engine's own flatten sale (M9 1.8, #433): the flatten
+            # that asked for this cancel sends it
+            if r.purpose in ("stop", "flatten") or r.side not in sides or r.state is St.PENDING_CANCEL:
                 continue
             try:
                 om.cancel(r.coid)
@@ -823,9 +874,11 @@ class LiveDaily:
             if str(a.get("order_id")) in known or old:
                 om.foreign.pop(aid, None)
 
-    def after_close(self, closed: date) -> list[str]:
+    def after_close(self, closed: date, late: bool = False) -> list[str]:
         """After the close of session `closed`: each rule that has not decided for it decides once the daily view of
-        that evening is available, and the target list is journalled (`md_decision`). Returns the rules decided now."""
+        that evening is available, and the target list is journalled (`md_decision`). Returns the rules decided now.
+        `late` (M9 1.3, `catch_up`): the same step taken during the next session; the record says so."""
+        mark = {"late": True} if late else {}
         rid = self.account.run_id()
         if rid is None or self.account.book_ended():
             return []
@@ -839,7 +892,7 @@ class LiveDaily:
             if day is not None and not day(closed, fill):  # not its decision day: no target list, no data needed
                 self.journal.append("md_decision", {"run_id": rid, "strategy": r.name, "session": str(closed),
                                                     "fill_session": str(fill), "decided_at": now.isoformat(),
-                                                    "target": None, "note": "not a decision day"})
+                                                    "target": None, "note": "not a decision day", **mark})
                 self._waiting.pop(r.name, None)
                 done.append(r.name)
                 continue
@@ -875,12 +928,12 @@ class LiveDaily:
                 self._dropped.pop(r.name, None)
             tl = decide_after_close(r.strategy, data, data.index_of(closed), fill, held)
             body = {"run_id": rid, "strategy": r.name, "session": str(closed), "fill_session": str(fill),
-                    "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl)}
+                    "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl), **mark}
             self.journal.append("md_decision", body)
             buy = list(tl.features.get("buy") or []) if tl else []
             self._ca_prewarm(closed, fill, set(held) | set((tl.weights if tl else {}) or {}))
             self.event("multi_day_decision", {"strategy": r.name, "session": str(closed), "fill_session": str(fill),
-                                              "decides": tl is not None,
+                                              "decides": tl is not None, **mark,
                                               "buy": buy[:10],
                                               "sell": dict(tl.features.get("sell") or {}) if tl else {},
                                               # #229, reporting only: the dashboard's plan, sell readings, sectors
@@ -891,6 +944,36 @@ class LiveDaily:
                                               "sectors": {s: data.sector.get(s) for s in [*held, *buy[:60]]}})
             self._filing_observe(r.name, closed, now, [*held, *buy])
             done.append(r.name)
+        return done
+
+    def catch_up(self, session: date, force: bool = False) -> list[str]:
+        """M9 1.3 (audit M1): `session` is open and a rule has no decision record for it, because the engine was
+        not running between the last close and this open (a late start; 20 Nov 2026). The after-close step of the
+        previous session is taken now, by the same code (`after_close`): the daily view of that close holds rows up
+        to it only, so the decision is the one an on-time engine would have journalled, marked `late`. A session
+        that was not the rule's decision day gets its "not a decision day" record, as on time. Tried at every call
+        with `force` (the send window), else at most every LATE_EVERY; nothing once every rule has its record.
+        Never raises: a failure is an event (`multi_day_error`, step `late_decision`) and the session goes on
+        without the decision, as before. Returns the rules decided now."""
+        if self._caught_up == session and not force:  # `force` reads the records again (a rule re-enabled today)
+            return []
+        now = self.now()
+        if not force and self._late_tried is not None and self._late_tried[0] == session \
+                and now - self._late_tried[1] < LATE_EVERY:
+            return []
+        self._late_tried = (session, now)
+        try:
+            if all(self._decision_for(r.name, session) is not None for r in self.active()):
+                self._caught_up = session
+                return []
+            done = self.after_close(self.prev_session(session), late=True)
+        except Exception as e:
+            log.exception("late decision failed: the session goes on without it")
+            self.event("multi_day_error", {"step": "late_decision", "session": str(session),
+                                           "error": f"{type(e).__name__}: {e}"[:200]})
+            return []
+        if done:
+            log.warning("late decision for %s taken during the session: %s", session, ", ".join(done))
         return done
 
     def _filing_observe(self, rule: str, session: date, now: datetime, symbols: list[str]) -> None:
@@ -957,7 +1040,15 @@ class LiveDaily:
         through the target loop. Returns the rules whose send step completed now."""
         om = self._manager()
         rid = self.account.run_id()
-        if om is None or rid is None or not self.in_window(self.now()) or self.account.book_ended():
+        if om is None or rid is None:
+            return []
+        window = self.in_window(self.now())
+        if not window and self._caught_up == session:
+            return []
+        if self.account.book_ended():
+            return []
+        self.catch_up(session)  # M9 1.3: a late start takes the session's decision as soon as it is up
+        if not window:
             return []
         done = []
         for r in self.active():
@@ -1013,25 +1104,114 @@ class LiveDaily:
             self._before_send(r.name, session, targets, held_now)
             res = reconcile_targets(om, self.policy_for(session), targets, held_now, now=self.now(),
                                     session=str(session), run=rid, reconciler=self.gate, stops=self.stops,
-                                    sells_first=False)
+                                    sells_first=False, presend=self._gate_check(r, session, targets))
+            withheld = self._note_withheld(r.name, session, rid, res.withheld)
             sent = [{"coid": x.coid, "symbol": x.symbol, "side": x.side, "qty": x.qty, "state": str(x.state),
                      "reason": x.reason} for x in res.sent]
             skipped = [[k[1], why[:160]] for k, why in res.skipped]
             # complete unless something may still go out today: an order nobody has confirmed yet, a stop still
             # holding the shares, a cancel under way, or a target the loop skipped (entries blocked, an unresolved
             # reconciliation difference): the next tick runs the loop again on the same journalled targets
-            retry = bool(res.deferred or res.canceled or skipped) or any(x.state in UNCONFIRMED for x in res.sent)
-            said = repr((sent, skipped, res.deferred, res.canceled))
+            retry = bool(res.deferred or res.canceled or skipped or withheld) \
+                or any(x.state in UNCONFIRMED for x in res.sent)
+            said = repr((sent, skipped, res.deferred, res.canceled, withheld))
             if self._said.get(r.name) != said:
                 self._said[r.name] = said
                 self.event("multi_day_orders", {"strategy": r.name, "session": str(session), "sent": sent,
                                                 "skipped": skipped, "deferred": [k[1] for k in res.deferred],
-                                                "canceled": res.canceled, "retry": retry})
+                                                "canceled": res.canceled, "retry": retry,
+                                                **({"withheld": withheld} if withheld else {})})
             if not retry:
                 self.journal.append("md_sent", {"run_id": rid, "strategy": r.name, "session": str(session),
                                                 "sent": [x["coid"] for x in sent], "skipped": skipped})
                 done.append(r.name)
         return done
+
+    # ---------------------------------------------------------------- the pre-send gate (M9 1.16, issue #441)
+    def _sizing_closes(self, rule: str, session: date, symbols: Sequence[str]) -> dict[str, float]:
+        """The close each order's shares were sized at: the previous session's raw close from the evening's daily
+        view, on today's share basis (a split the ledger booked for today divides it), else the ledger's mark of a
+        held name. A stock without either has no entry (the gate then has no move to check). Never raises."""
+        out: dict[str, float] = {}
+        try:
+            prev = self.prev_session(session)
+            data = self._view(prev, self.now())
+            k, splits = data.index_of(prev), self.account.splits(session)
+            for s in symbols:
+                j = data._col.get(s)
+                px = float(data.raw_c[k, j]) if j is not None else math.nan
+                if math.isfinite(px) and px > 0:
+                    out[s] = px / float(splits.get(s) or 1.0)
+        except Exception as e:
+            log.warning("pre-send gate: no daily view of the sizing close (%s): the ledger's marks", e)
+        try:
+            for s, (_, mark) in self.account.held(rule).items():
+                if s in symbols and s not in out and mark is not None and math.isfinite(mark) and mark > 0:
+                    out[s] = float(mark)
+        except Exception:
+            log.exception("pre-send gate: the ledger's marks are unreadable")
+        return out
+
+    def _gate_check(self, r: Rule, session: date, targets: Sequence[Target]):
+        """The target loop's `presend` for this tick, or None without a quote source. The quotes are read once,
+        only when the loop has a BUY to send (sales go out first and never wait for the read), for every stock of
+        the plan in one request; a failed read is one
+        `multi_day_error` event (step `presend_quotes`) and every order is then checked at its prior close."""
+        if self.quotes is None:
+            return None
+        symbols = sorted({t.symbol for t in targets})
+        state: dict = {}
+
+        def check(t: Target, side: str, qty: float) -> str | None:
+            if side != "buy":
+                return None  # a sale is never withheld, and it never waits for the quote read either (QA-Ops, #490)
+            if not state:
+                state["closes"] = self._sizing_closes(r.name, session, symbols)
+                state["cap"] = None
+                try:
+                    lim = r.builder.limits
+                    state["cap"] = float(self.account.equity()) * float(lim.max_name_pct) / 100 \
+                        * (1 + self.presend_gate.collar)
+                except Exception:
+                    log.exception("pre-send gate: no value cap (the book's limits or equity are unreadable)")
+                try:
+                    state["quotes"] = dict(self.quotes(symbols) or {})
+                    self._said.pop(f"{r.name}:quotes", None)
+                except Exception as e:
+                    state["quotes"] = {}
+                    why = f"{type(e).__name__}: {e}"[:200]
+                    if self._said.get(f"{r.name}:quotes") != str(session):  # once per session, not per tick
+                        self._said[f"{r.name}:quotes"] = str(session)
+                        self.event("multi_day_error", {"step": "presend_quotes", "strategy": r.name,
+                                                       "session": str(session), "error": why,
+                                                       "action": "orders are checked at the prior close"})
+            return self.presend_gate.check(side, qty, close=state["closes"].get(t.symbol),
+                                           quote=quote_from_alpaca(state["quotes"].get(t.symbol)), now=self.now(),
+                                           max_value=state["cap"])
+
+        return check
+
+    def _note_withheld(self, rule: str, session: date, rid: int, withheld) -> list[list]:
+        """Journal each withheld buy once per (rule, session, stock, side) (`md_withheld`: the record for the
+        review of the gate's reasons) and return [[symbol, why]] for the orders event."""
+        out = [[k[1], why[:160]] for k, _, why in withheld]
+        if not out:
+            return out
+        if self._withheld is None:
+            self._withheld = {(b.get("strategy"), b.get("session"), b.get("symbol"), b.get("side"))
+                              for b in self._entries("md_withheld")}
+        plan = self._send_entry(rule, session) or {}
+        for (_, sym), side, why in withheld:
+            held = float(self.account.held(rule).get(sym, (0.0, None))[0])
+            target = next((int(q) for s, q, _, _ in plan.get("targets", []) if s == sym), None)
+            key = (rule, str(session), sym, side)
+            if key in self._withheld:
+                continue
+            self._withheld.add(key)
+            self.journal.append("md_withheld", {"run_id": rid, "strategy": rule, "session": str(session),
+                                                "symbol": sym, "side": side, "target": target, "held": held,
+                                                "why": why[:160]})
+        return out
 
     # ---------------------------------------------------------------- the pre-open review (#131, off by default)
     def _window_left(self, now: datetime) -> float:
@@ -1216,6 +1396,8 @@ class LiveDaily:
         """The builder's targets for `session` from the decision taken after the previous close."""
         prev = self.prev_session(session)
         dec = self._decision_for(r.name, session)
+        if dec is None and self.catch_up(session, force=True):  # M9 1.3: no decision yet: take it before giving up
+            dec = self._decision_for(r.name, session)
         held = self.account.held(r.name)
         pending = {**self._pending(r.name, session, held),
                    **{s: w for s, w in self._adopted(r.name).items() if s in held}}
@@ -1342,7 +1524,8 @@ class LiveDaily:
         if fill not in set(data.dates.astype(object)):
             return [], {}
         ended = ended_buys(self.om, r.name, str(fill), str(session),
-                           base={s: float(q) for s, q in (last.get("held") or {}).items()}, held=now_held)
+                           base={s: float(q) for s, q in (last.get("held") or {}).items()}, held=now_held,
+                           failsafe_cancels=self._watchdog_cancels())
         out, got = carry_targets(r.strategy, r.name, plan, now_held, data, data.index_of(fill),
                                  data.index_of(prev), ended)
         note = {**note, **got}
@@ -1351,6 +1534,14 @@ class LiveDaily:
                 early = {s: "market filter off" for s in early}
             note["skipped"] = {**note["skipped"], **early}
         return out, note
+
+    def _watchdog_cancels(self) -> set[str]:
+        """M9 1.6: the buys the watchdog cancelled (its local record, next to the journal file): carried like lost
+        ones. An in-memory journal (tests, research) has no such file."""
+        path = str(getattr(self.journal, "path", "") or "")
+        if not path or path == ":memory:":
+            return set()
+        return failsafe.watchdog_cancels(Path(path).parent / failsafe.CANCELS_FILE)
 
     def _carry_room(self, r: Rule, prev: date, carry: Sequence[Target],
                     held: Mapping[str, tuple[float, float | None]]) -> dict[str, str]:
@@ -1624,6 +1815,16 @@ class EngineAccount:
             return {}
         return {sym: (float(s.qty), s.mark) for (st, sym), s in b.sleeves.items() if st == strategy and s.qty > 1e-9}
 
+    def ledger_qty(self, symbol: str) -> float | None:
+        """M9 1.11 (#436): the ledger's shares in the symbol, all sleeves together, for the order manager's check
+        before an order is called lost. None (no check on the position) without a run, and while an intraday entry
+        or exit in the symbol is under way (the ledger books it when it settles, as `_recon_inputs` leaves it out)."""
+        b = self._book()
+        if b is None or any(p.symbol == symbol and (p.status != "open" or p.exit_order_id)
+                            for p in self.e.pos.values()):
+            return None
+        return float(b.qty_by_symbol().get(symbol, 0.0))
+
     def book_fill(self, body: dict) -> None:
         self.e._md_realized(body)  # today's realised P&L of a sale (before the fold changes the sleeve)
         self.e.ledger.apply("fill", body)
@@ -1681,7 +1882,7 @@ def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Call
 
 def for_engine(engine, load: Callable[[date, datetime], DailyData],
                rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None,
-               review=None, shadow=None, note=None, filing_flags=None) -> LiveDaily:
+               review=None, shadow=None, note=None, filing_flags=None, quotes=None) -> LiveDaily:
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
@@ -1708,7 +1909,19 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
                      store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review,
-                     shadow=shadow, note=note, filing_flags=filing_flags)
+                     shadow=shadow, note=note, filing_flags=filing_flags,
+                     quotes=quotes if quotes is not None else presend_quotes(engine))
+
+
+PRESEND_QUOTE_DEADLINE_S = 8.0  # the gate's one quote read per tick ends by then (the send window is seven ticks)
+
+
+def presend_quotes(engine) -> Callable[[Sequence[str]], Mapping[str, dict]] | None:
+    """M9 1.16 (#441): the pre-send gate's quote source for the live engine: the market-data client's latest IEX
+    quotes with a deadline (`AlpacaData.quotes_within`). None for any other data client (a replay's stored bars, a
+    test fake): no gate there, so research and replay results cannot change."""
+    fn = getattr(getattr(getattr(engine, "market", None), "data", None), "quotes_within", None)
+    return (lambda symbols: fn(list(symbols), PRESEND_QUOTE_DEADLINE_S)) if callable(fn) else None
 
 
 def calendar_close(cal: dict | None) -> time | None:

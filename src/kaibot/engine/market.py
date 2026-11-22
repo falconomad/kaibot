@@ -10,18 +10,36 @@ turnover filter is applied. VWAP is IEX-based.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+import os
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from kaibot.ingest.data_checks import Finding, check_all
 from kaibot.replay.data import ET, N_MIN, SymbolDays, from_frame
 from kaibot.replay.features import candidates, daily_stats, regime
 
+log = logging.getLogger("kaibot.engine.market")
+
 HISTORY_SESSIONS = 70
 EMPTY_NEWS = np.array([], dtype="datetime64[s]")
+DATA_CHECKS_ENV = "KAIBOT_DATA_CHECKS"  # M12 3.11 (#473): report-only data checks; off unless set to 1/true/yes/on
+
+
+def data_checks_on(env: Mapping[str, str] | None = None) -> bool:
+    """Whether the report-only data checks run (M12 3.11). Off by default: only KAIBOT_DATA_CHECKS=1 (or true,
+    yes, on) turns them on."""
+    return (os.environ if env is None else env).get(DATA_CHECKS_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def new_findings(findings: list[Finding], seen: frozenset[tuple[str, str]]) -> list[Finding]:
+    """The findings whose (symbol, check) was not in the last report, so a lasting fault is logged once and not
+    every minute."""
+    return [f for f in findings if (f.symbol, f.check) not in seen]
 
 
 class LiveMarket:
@@ -33,8 +51,12 @@ class LiveMarket:
         spy: str,
         cache_dir: Path,
         vix_loader: Callable[[], pd.Series],
+        minute_data=None,
     ):
         self.data = data
+        # M9 1.5: the per-minute read (`update`) runs inside the engine's loop, so the engine gives it a client with
+        # a deadline (engine/__main__.bounded_data); the history load keeps `data` (long retries, before the open)
+        self.minute_data = minute_data if minute_data is not None else data
         self.symbols = symbols
         self.etf_of = etf_of
         self.spy = spy
@@ -58,6 +80,9 @@ class LiveMarket:
         self.day: date | None = None
         self.open_utc: datetime | None = None
         self._last_fetch: datetime | None = None
+        # M12 3.11 (#473): what the data checks found at the last update. Filled only when KAIBOT_DATA_CHECKS is on,
+        # and read by nothing that decides: this is a report, entries are not blocked by it.
+        self.last_data_findings: list[Finding] = []
 
     # ---------- custom tickers (S68) ----------
     def set_custom(self, custom: dict[str, str]) -> bool:
@@ -131,7 +156,7 @@ class LiveMarket:
 
     def update(self, now: datetime) -> None:
         start = self._last_fetch or self.open_utc
-        got = self.data.bars(self.all, start, now, feed="iex")
+        got = self.minute_data.bars(self.all, start, now, feed="iex")
         for s, df in got.items():
             if df is None or not len(df):
                 continue
@@ -143,6 +168,27 @@ class LiveMarket:
                 else df.reset_index(drop=True)
             )
         self._last_fetch = now.replace(second=0, microsecond=0) - timedelta(minutes=2)  # re-read late bars
+        if data_checks_on():
+            self._report_data_findings(now)
+
+    # ---------- data checks (M12 3.11, #473): report only ----------
+    def data_findings(self, now: datetime) -> list[Finding]:
+        """Stale, missing, zero or negative, gappy or index-unmatched bars among the scanned symbols and SPY at
+        `now` (kaibot.ingest.data_checks). Reads today's bars and changes nothing."""
+        if self.open_utc is None:
+            return []
+        return check_all(self.today_bars, self.symbols, self.spy, self.open_utc, now)
+
+    def _report_data_findings(self, now: datetime) -> None:
+        """Log what is newly wrong and keep the list. Never raises: a fault in a check must not cost a tick."""
+        try:
+            found = self.data_findings(now)
+            seen = frozenset((f.symbol, f.check) for f in self.last_data_findings)
+            for f in new_findings(found, seen):
+                log.warning("data check (report only): %s %s: %s", f.symbol, f.check, f.detail)
+            self.last_data_findings = found
+        except Exception:
+            log.exception("data check (report only) failed; nothing is blocked")
 
     def symbol_days(self, s: str, upto_m: int) -> SymbolDays | None:
         """History plus today's bars up to minute `upto_m`, as per-session arrays.
