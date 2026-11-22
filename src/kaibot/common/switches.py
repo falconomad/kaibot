@@ -39,7 +39,7 @@ class SwitchError(ValueError):
 @dataclass(frozen=True)
 class Switch:
     name: str
-    kind: str  # flag | on_off | choice | path | text
+    kind: str  # flag | on_off | choice | checks | path | text
     owner: str  # the team (docs/teams.md)
     review: date  # declared again or removed by then (tests/test_switches.py)
     what: str
@@ -86,6 +86,9 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_NEWS_POLL", "flag", "data", "#354: the engine's news poller (on unless switched off)", default=True),
     _s("KAIBOT_DATA_CHECKS", "flag", "data", "M12 3.11 (#473): the minute-bar data checks, report only",
        default=False, readers=("src/kaibot/engine/market.py",)),
+    _s("KAIBOT_DATA_CHECKS_BLOCK", "checks", "backend-quant", "M12 3.11 (#473): which minute-bar data checks block "
+       "entries: off, on (all but bar_gap) or a comma list", default=(),
+       choices=("stale", "no_bars", "bad_price", "unmatched_move", "bar_gap")),
     _s("KAIBOT_REENABLE", "text", "backend-quant", "the owner's word to switch a retired multi-day rule back on "
        "(read once at start)", readers=("src/kaibot/engine/live_daily.py",)),
     _s("KAIBOT_TESTWRITER", "flag", "qa-ops", "M12 3.8 (#470): the test-writing agent (spends API credit)",
@@ -184,6 +187,17 @@ def value(name: str, env: Mapping[str, str] | None = None):
         if low in s.choices:
             return low
         raise SwitchError(f"{name}={raw!r}: use one of {', '.join(s.choices)} ({s.what})")
+    if s.kind == "checks":  # off -> (), on -> every choice but the last (bar_gap), or a comma list of choices
+        if low in OFF:
+            return ()
+        if low in ON:
+            return s.choices[:-1]
+        names = tuple(sorted({x.strip() for x in low.split(",") if x.strip()}))
+        unknown = [x for x in names if x not in s.choices]
+        if unknown or not names:
+            raise SwitchError(f"{name}={raw!r}: unknown check(s) {unknown}; use on, off or a comma list of "
+                              f"{', '.join(s.choices)} ({s.what})")
+        return names
     raise AssertionError(s.kind)
 
 
@@ -201,6 +215,7 @@ class Switches:
     market_alarm: bool
     news_poll: bool
     data_checks: bool
+    data_checks_block: tuple[str, ...]
     reenable: str | None
     test_writer: bool
     env_file: Path | None

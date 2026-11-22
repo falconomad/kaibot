@@ -96,6 +96,21 @@ def vix_loader(fred_key: str):
     return load
 
 
+def refuse_unchecked_block(market) -> None:
+    """M12 3.11 (#473), Product's ruling: KAIBOT_DATA_CHECKS_BLOCK on, and this engine's market has no data checks
+    (the multi-day book's loop alone reads the minute bars of its holdings only, engine/book_market.py): the switch
+    could block nothing, so the engine does not start (fail closed) rather than run believing it is on."""
+    from kaibot.common import switches  # not engine/market.py: the book's loop imports no intraday module
+
+    checks = switches.value("KAIBOT_DATA_CHECKS_BLOCK")
+    if checks and getattr(market, "data_block", None) is None:
+        raise SystemExit(
+            f"KAIBOT_DATA_CHECKS_BLOCK is on ({', '.join(sorted(checks))}), but this engine's market has no data "
+            "checks: the intraday path is off (config/profiles.yaml intraday.enabled), so the engine reads only the "
+            "minute bars of its holdings and could block nothing. Not starting. Set KAIBOT_DATA_CHECKS_BLOCK=off, or "
+            "turn the intraday path on (docs/ops/failsafe.md, 'market data checks').")
+
+
 def build(settings: Settings) -> Engine:
     cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
     etf_of = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}
@@ -118,6 +133,7 @@ def build(settings: Settings) -> Engine:
         market = BookMarket(data, {*etf_of, *etf_of.values()}, cfg["market"], minute_data=bounded_data(data))
     log.info("intraday path: %s", "ON (config/profiles.yaml intraday.enabled)" if intraday
              else "off (the multi-day book's loop only)")
+    refuse_unchecked_block(market)  # M12 3.11 (#473), Product: fail closed before anything else is built
     remote = Store(settings.supabase_url, settings.supabase_service_key)
     # S77: the engine's own tables live in the local journal, written before any broker call; Supabase is a replica
     # M10 1.24 (#449): the minute rows are not kept in memory, and the fold starts at the newest snapshot

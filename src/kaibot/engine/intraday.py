@@ -422,6 +422,8 @@ class IntradayEngine(Engine):
         decision = self.now()
         if not (s in self.market.base or s == self.market.spy or s in d.custom_ok):
             veto = "not an accepted ticker today"  # S68: a refused or unchecked custom ticker can never be entered
+        if veto is None:
+            veto = self.data_block(s)  # M12 3.11 (#473): None unless KAIBOT_DATA_CHECKS_BLOCK is on
         if veto is None and s in self._md_symbols():
             # #206 (QA-Ops): Alpaca refuses an order while an opposite-side market or stop order is open in the
             # symbol, and one position per symbol holds both books' shares. An intraday entry in a stock the

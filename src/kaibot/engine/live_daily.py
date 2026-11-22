@@ -145,7 +145,7 @@ from kaibot.engine.execution import (
 )
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
-from kaibot.engine.reconcile import accepted_foreign
+from kaibot.engine.reconcile import NEVER_BLOCKED, accepted_foreign
 from kaibot.engine.standing import Standing
 from kaibot.engine.targets import Target, reconcile_targets
 from kaibot.risk.gate import BOOK_FLOORS, BOOK_HARD_CEILINGS, BookLimits, RiskPolicy, validate_book
@@ -2006,6 +2006,13 @@ class EngineAccount:
         return self.e.entry_block()
 
     def allows(self, symbol: str, side: str, purpose: str = "target", qty: float | None = None) -> str | None:
+        if side == "buy" and purpose not in NEVER_BLOCKED:
+            # M12 3.11 (#473): a buy of a stock whose minute bars fail a blocking data check (a bad print, a move the
+            # index does not share, no or stale bars) waits; None unless KAIBOT_DATA_CHECKS_BLOCK is on. Only the
+            # stock's own findings: the index feed's health is the intraday path's business (sales never ask)
+            why = self.e.data_block(symbol, index=False)
+            if why:
+                return f"entries blocked: {why}"
         return self.e.recon.allows(symbol, side, purpose, qty)
 
     def book_ended(self) -> bool:
