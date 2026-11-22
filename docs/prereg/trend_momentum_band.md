@@ -102,3 +102,26 @@ the report says "fails its own turnover mark". Then comes the final check of sec
 hold-out. As an over-weight inside a book, the book test of its own pre-registration applies.
 
 **Trials.** Six configurations count (n_trials 1): the rule and its five neighbours. Cost and fill reports count 0.
+
+## Amendment 1 (22 Nov 2026, quant research, before any code and any run): the tranches' calendar and the resize, made exact
+
+Written before the code that runs this rule exists and before any run. It settles two settings that rows 7 and 9
+left open to interpretation. Nothing else changes.
+
+1. **Calendar (row 7 and the neighbours `onetranche`, `twotranches`).** There are four weekly slots, the weeks with
+   `week_number % 4` = 0, 1, 2, 3, decided on their weekly decision day (`momentum.is_weekly_decision`). With n
+   tranches (n = 1, 2 or 4), tranche t (t = 0 .. n - 1) decides in the slot `t x 4 / n`. So the rule (n = 4) uses
+   slots 0, 1, 2 and 3, `twotranches` slots 0 and 2, and `onetranche` slot 0: every tranche rebalances once every
+   four weeks. This replaces "the first weekly decision day of each month" for `onetranche`, so that the three
+   versions differ only in the number of tranches.
+2. **Sizing and resize (rows 8 and 9).** The book holds one position per stock, as the venue does (one net order per
+   symbol and close). A stock's target weight is the number of tranches that hold it divided by n. Its size is
+   equity x 0.1% x weight / ATR(20), so each tranche adds a quarter of `trend_momentum`'s risk at n = 4. On every
+   tranche decision day the whole book is sized at once by the portfolio builder's ranked fill: held stocks are
+   resized outside the 10% buffer (`TargetList.resize` true), and new stocks are bought best first. Row 9's "resized
+   on its own decision days only" is replaced by this, because the engine keeps one position per symbol and cannot
+   resize one tranche's share of it alone. At most `ceil(30 / n)` stocks a tranche, and at most 30 in the book.
+3. **What a tranche remembers.** Each tranche keeps the list of stocks it chose, in its rank order, from one of its
+   decisions to the next. A stock leaves a tranche only at that tranche's decision (row 6, or row 3's conditions on
+   that day). A stock that the builder could not buy stays in the tranche's list and is listed again for purchase
+   at every decision until the tranche drops it.
