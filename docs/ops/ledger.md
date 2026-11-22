@@ -24,9 +24,40 @@ yet; a position is only held over a close when the engine was off at 15:55.
 
 - File: `$KAIBOT_DATA_DIR/journal.sqlite` (default `data/live/journal.sqlite`), SQLite in WAL mode with
   `synchronous=FULL`. One table `entry(seq, ts, kind, body)`; triggers refuse every update and delete.
+- **Durability** (M9 1.18, #443). Every time the file is opened the settings are read back: `journal_mode` must be
+  `wal` and `synchronous` must be FULL; on macOS `fullfsync` and `checkpoint_fullfsync` are switched on and must
+  read 1 (without them macOS's fsync stops at the drive's cache). SQLite does not raise when a setting is not
+  taken (a network or FAT volume answers `delete` to write-ahead mode), so a file without them is refused: the
+  engine exits with **code 4** before it takes the lease or reads the broker, and the log line names the setting.
+  Fix: keep `$KAIBOT_DATA_DIR` on a local disk (APFS on the Mac, ext4 or xfs on a server, a Docker volume and not
+  a network share). Under the service (`scripts/service_run.sh`) launchd starts the engine again every minute and
+  it is refused each time until the cause is fixed: the service log and the alarm say "refused its journal (exit
+  code 4)", nothing is sent to the broker meanwhile, and the broker-held stops, the watchdog and the dead-man keep
+  working. In Docker on a Mac the engine is a Linux process on a bind mount of `data/live`: write-ahead mode is
+  asserted there too, but `fullfsync` is a macOS setting and does not apply (the Python mode gets it).
 - Entries: `row` (an insert, update or upsert of an engine table), the ledger's `run`, `position`, `fill`,
   `dividend`, `split`, `mark`, the broker trail `intent` (written before every order call: entry, cancel,
   replace, sell, MOC, close) and `ack` (its answer), and `import` / `bootstrap` (rows copied from Supabase once).
+- **Checksums** (#496). Every entry carries a checksum (column `sum`: SHA-256 over the checksum of the entry
+  before it, its number, time, kind and text). It is checked when the file is opened and on every read, by the
+  engine and by the watchdog's read-only reader. An entry that fails, or one that has none where it must, is never
+  folded: the error names the entry (`journal entry 4711 fails its checksum`).
+  - At start: the engine logs the line and exits with **code 4** before it takes the lease or reads the broker.
+  - While running: the engine writes an `engine_error` event with the line, stops (broker-held stops stay; the
+    watchdog takes over as for any stop) and exits with code 4; every later start refuses the file the same way.
+    The watchdog, on a journal it cannot trust, reads the ledger rows in Supabase instead.
+  - What to do: the file is damaged (disk, or a bad copy). Move it aside and restore last night's backup, or start
+    a fresh journal from Supabase ("Taking over" below). Do not edit the file.
+  - **Older journals stay readable.** A file written before checksums gets the column when it is first opened
+    and keeps its entries as they are; `meta.checksum_from` records the first entry number that must carry a
+    checksum (the cut-over). Entries below it are accepted without one and are not protected; a new file's
+    cut-over is 1.
+  - **After a roll-back to a release from before checksums**, that release appends entries without a checksum.
+    The next start of a newer release refuses them (`journal entry N has no checksum`). If the roll-back explains
+    them, accept them once, with the engine stopped: `python -m kaibot.engine.journal --reseal` prints the range
+    it accepted and moves the cut-over past it. It never accepts an entry whose checksum is wrong.
+  - Not covered: the last entries cut off the end of the file (the start check below catches that against
+    Supabase: "restored backup"), and a change to an entry from before the cut-over.
 - State is a fold: `JournalStore` rebuilds the engine's tables from the `row` and `import` entries when it opens;
   the engine folds the ledger from the ledger entries. Kill the engine at any point and the next start is where
   the last durable entry left it.

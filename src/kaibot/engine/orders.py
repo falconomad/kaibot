@@ -71,6 +71,13 @@ LOST_LOOKUPS, LOST_AFTER_S = 2, 60.0
 _NY = ZoneInfo("America/New_York")  # the day an order belongs to (`_day_over`)
 LOOKUP_GAP_S = 30.0  # a miss counts only this long after the previous one (two lookups with real time between)
 REFUSED = (403, 422)
+# #491: a cancel request the venue has not acted on is sent again when a poll still finds the order working this
+# long after the last request (at once after a restart: nothing says the request before the kill was ever made)
+CANCEL_RESEND_S = 15.0
+# QA-Ops second key on #521: the wait doubles after every repeat (15 s, 30 s, 60 s, ...) up to this, so a venue that
+# reads orders but does not act on cancels is asked a few times a minute at first and then once every five minutes
+# per order, not four times a minute per order for as long as it lasts (the order path has a rate budget)
+CANCEL_RESEND_MAX_S = 300.0
 FILL_LOOKBACK = timedelta(minutes=10)  # activities are read from a little before the last one seen (ids dedupe)
 
 
@@ -201,6 +208,8 @@ class OrderManager:
         # booked yet. Such an order is no longer working and its shares are not yet held: the target loop must wait
         self.settling: dict[str, OrderRecord] = {}
         self.last_fill: datetime | None = None
+        # #491: coid -> this process's last cancel request and how many it made (not folded)
+        self.cancel_asked: dict[str, tuple[datetime, int]] = {}
         self.errors: list[tuple[str, str]] = []  # (coid, what failed) of the last calls, for the caller's events
         for _, _t, kind, body in journal.entries(kinds=OM_KINDS):
             self._fold(kind, body)
@@ -271,6 +280,17 @@ class OrderManager:
         status can show the fill before the account activities do)."""
         return sum(r.cum - r.booked for r in list(self.settling.values()) if r.symbol == symbol
                    and (strategy is None or r.strategy == strategy) and (session is None or r.session == session))
+
+    def unbooked_sold(self, symbol: str, strategy: str, now: datetime) -> float | None:
+        """QA-Ops second key on #524: the bound of the target loop's wait for an unbooked fill. None while an
+        unbooked finished order of the sleeve is of today (New York): its activity is on its way, wait. Otherwise
+        every unbooked order of the sleeve is from an earlier day (an activity that old may never come), and the
+        answer is the shares its unbooked SALES took at the venue: the ledger still counts them, the venue does
+        not hold them, so a sale must not count on them."""
+        rs = [r for r in list(self.settling.values()) if r.symbol == symbol and r.strategy == strategy]
+        if not rs or any(not _day_over(r, now) for r in rs):
+            return None
+        return sum(r.cum - r.booked for r in rs if r.side == "sell")
 
     def _append(self, kind: str, body: dict) -> None:
         body = {k: v for k, v in body.items() if v is not None}
@@ -389,12 +409,18 @@ class OrderManager:
         if r.order_id is None:
             raise OrderBlocked(f"{coid} is {r.state}: resolve it before cancelling")
         self._state(r, St.PENDING_CANCEL)
+        self._ask_cancel(r)
+        self._poll(r)
+        return r
+
+    def _ask_cancel(self, r: OrderRecord) -> None:
+        """The cancel request itself. Cancelling twice is harmless (the adapters answer an order that is gone
+        without an error: the broker contract), so it may be repeated."""
+        self.cancel_asked[r.coid] = (self.now(), self.cancel_asked.get(r.coid, (None, 0))[1] + 1)
         try:
             self.broker.cancel(r.order_id)
         except BrokerError as e:
-            self.errors.append((coid, f"cancel: {e.status}: {_reason(e)}"))
-        self._poll(r)
-        return r
+            self.errors.append((r.coid, f"cancel: {e.status}: {_reason(e)}"))
 
     def replace(self, coid: str, *, stop: float | None = None, limit: float | None = None,
                 qty: float | None = None) -> OrderRecord:
@@ -446,7 +472,7 @@ class OrderManager:
         self._state(r, state, order_id=o.get("id"), venue=o.get("status"), cum=float(o.get("filled_qty") or 0),
                     ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0, client_id=cid, **terms)
 
-    def _poll(self, r: OrderRecord) -> None:
+    def _poll(self, r: OrderRecord, again: bool = False) -> None:
         try:
             o = self.broker.order(r.order_id) if r.order_id else self.broker.order_by_client_id(r.coid)
         except BrokerError as e:
@@ -462,7 +488,20 @@ class OrderManager:
             self._adopt(r, o)
             return
         if r.state is St.PENDING_CANCEL and o.get("status") not in ("canceled", "filled", "expired", "rejected"):
-            return  # still being cancelled
+            # #491: still working. The venue's own `pending_cancel` says it has the request. Otherwise the request
+            # may never have arrived (a network error, or a kill between the journal entry and the call, after
+            # which this process has no request of its own): it is sent again, then read once more.
+            asked, n = self.cancel_asked.get(r.coid, (None, 0))
+            wait = min(CANCEL_RESEND_S * 2 ** max(n - 1, 0), CANCEL_RESEND_MAX_S)
+            due = asked is None or (self.now() - asked).total_seconds() >= wait
+            if o.get("status") == "pending_cancel" or not due or again:
+                return  # still being cancelled
+            self.errors.append((r.coid, f"cancel sent again (request {n + 1}): the venue still shows the order "
+                                        f"{o.get('status')}"))
+            self._ask_cancel(r)
+            self._poll(r, again=True)
+            return
+        self.cancel_asked.pop(r.coid, None)
         self._adopt(r, o)
 
     def _miss(self, r: OrderRecord) -> None:
@@ -568,6 +607,9 @@ class OrderManager:
         pending = [_ts(a["transaction_time"]) for a in self.foreign.values() if a.get("transaction_time")]
         if after is not None and pending:  # a fill not yet attributed is read again until it is
             after = min(after, min(pending) - FILL_LOOKBACK)
+        waiting = [_ts(r.created) for r in list(self.settling.values()) if r.created]
+        if after is not None and waiting:  # #507: a finished order's unbooked fill may be older than the last fill
+            after = min(after, min(waiting) - FILL_LOOKBACK)  # booked: read from its order's start until it is
         try:
             rows = self.broker.activities(after, types=("FILL",))
         except BrokerError as e:
