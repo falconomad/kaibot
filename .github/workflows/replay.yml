@@ -1,0 +1,94 @@
+# M12 ticket 3.4 (#466): replay recorded sessions through the code of the commit and compare decisions, sends,
+# orders and ledger (scripts/replay_session.py). A difference fails unless tests/replay/allowlist.toml acknowledges
+# it with a reason, in the same change that causes it.
+#   on a pull request and on main   the fixtures in tests/replay/fixtures (the ordinary `ci` run also replays them
+#                                   in tests/replay/test_replay_session.py) and every session the stakeholder chose to
+#                                   add under tests/replay/sessions/ (docs/ops/replay.md); under a minute
+#   nightly                         the same against main, a report in the summary and as an artifact; a failure opens
+#                                   an issue (or comments on the open one)
+# No secret, no key, no network beyond the checkout and the locked install: a session file holds no key (the export
+# refuses to write one) and the replay runs against the simulated venue only.
+name: replay
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 3 * * *"  # every night 03:23 UTC, after the dst soak
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: replay-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  PYTHONHASHSEED: "0"
+  PYTHONPATH: src
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read  # a pull request's run holds a read-only token; only the nightly `report` job below writes
+    outputs:
+      outcome: ${{ steps.replay.outcome }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: replay the fixtures and the recorded sessions
+        id: replay
+        run: |
+          shopt -s nullglob
+          files=(tests/replay/fixtures/*.jsonl tests/replay/sessions/*.jsonl)
+          uv run python scripts/replay_session.py replay "${files[@]}" --report replay.md
+      - name: summary
+        if: always()
+        run: |
+          { echo '### Session replay'; cat replay.md 2>/dev/null || echo 'no report (the replay did not run)'; } \
+            >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with: {name: replay-report, path: replay.md, if-no-files-found: ignore, retention-days: 30}
+  report:
+    # nightly only: the replay found a difference; opens an issue (or comments on the open one). Runs no repository
+    # code: it reads the replay's report from its artifact.
+    needs: replay
+    if: always() && github.event_name == 'schedule' && needs.replay.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with the difference: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: replay-report}
+        continue-on-error: true
+      - name: open an issue with the difference
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "The nightly session replay (\`scripts/replay_session.py\`) found a difference nobody acknowledged."
+            echo
+            echo "- commit: \`$COMMIT\`"
+            echo "- run: $RUN_URL"
+            echo
+            cat replay.md 2>/dev/null || echo "(no report)"
+            echo
+            echo "Run it again: \`PYTHONHASHSEED=0 PYTHONPATH=src python scripts/replay_session.py replay <file>\`."
+            echo "An intended change: acknowledge it in \`tests/replay/allowlist.toml\` with the issue that made it."
+            echo "Otherwise: an engine defect; an issue with the minimal case and a strict xfail."
+            echo "\"Acknowledged difference no longer happens\": the change an entry acknowledges was undone (a revert?)."
+          } > issue.md
+          title="Nightly session replay found a difference"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file issue.md \
+              --label bug --label team:qa-ops
+          fi
