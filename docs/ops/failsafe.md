@@ -152,7 +152,10 @@ accounts and checks that they agree.
 - **Engine side:** the close-minus-5 flatten and the daily stop take intraday sleeves only; only intraday positions
   are "carried" (sold at the next open); the account guard and the drift check count the ledger's multi-day sleeves as
   the engine's own; equity counts them from their last close mark (the overnight gap is in the day's change); run
-  drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills.
+  drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills. Since M9 ticket 1.8 (#433) that sale goes through the
+  order manager, one per sleeve, under `kb<run>-<rule>-<symbol>-<day>-flatten-<n>`: every fill is booked at its own
+  quantity (a sale cancelled after a partial fill too), and a sale without an answer is looked up by its id, never
+  sent again blind. Without the daily path (KAIBOT_MULTIDAY off) the older direct sale (`kbfl-...`) is still used.
 - **Turning multi-day rules on:** `KAIBOT_MULTIDAY=on` in the engine's environment (the `.env`); default off, and the
   engine refuses to load a multi-day rule without it. It is the explicit switch for the first paper start (#133,
   after Gate B) and needs #188 (done) and #197 first. It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level

@@ -521,3 +521,27 @@ mom_12_1_band. (The numbers follow those of the pre-send check of issue #441 onc
 4. **Research and Gate B unchanged.** As Amendment 16, item 4. Added tests: a buy and a sale held by a position
    difference stay unconfirmed through their day and are lost the day after, with the stock free again; after its
    day an order the venue has is still taken over, and an unreadable venue still keeps it unconfirmed.
+
+## Amendment 18 (21 Nov 2026, platform, issue #433, M9 ticket 1.8, before its first live paper session): the sale of a full flatten goes through the order manager
+
+Written on 21 Nov 2026, before the change's first use. It changes how the sales of a full flatten are sent (the
+book's run end of section 2, a new run, "Flatten and stop"), so it is recorded here. It changes no rule, no trigger,
+no share count and no price. No research result is affected (item 4). The same text is Amendment 16 of mom_12_1_band.
+(The number follows the amendments for issues #441 and #436, written the same day in other changes.)
+
+1. **The gap.** These sales were sent beside the order manager, under a client id with a timestamp, and booked
+   only when completely filled. A sale the venue cancelled or let expire after a partial fill left its filled
+   shares out of the ledger (engine audit of 21 Nov 2026, confirmed; reproduced by a failing test). A sale whose
+   answer was lost was unknown to the engine until the next restart: its fill was not booked, or, while it was
+   still open, the next flatten cancelled it and sent another (the audit's "suspected" double send; no second fill
+   was reproduced).
+2. **The rule.** With the live daily path on, each sleeve's sale is one DAY market order sent by the order
+   manager under `kb<run>-<rule>-<symbol>-<day>-flatten-<n>`. An open sale of the same day is reused, never doubled;
+   a sale without an answer is looked up by its client id before anything else is sent in that stock; every fill is
+   booked from the account activities at its own quantity and price. What a cancelled or expired sale left unsold
+   is sold by the next flatten under the next attempt number, as before.
+3. **Unchanged.** When a flatten happens, what it sells, the cancel of the stock's open orders before the sale, the
+   limit to the shares the venue holds, the time budget, and that a new run waits until the sales are booked.
+4. **Research and Gate B unchanged.** The research runner ends a run inside the simulator and never calls this
+   path. Tests: a partial fill then a cancel books the filled shares and the rest is sold by the next flatten; a
+   kill between the submission and its record, and a lost answer, each end in one sale booked once.
