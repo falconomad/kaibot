@@ -98,3 +98,18 @@ def _synthetic_bars_have_no_holdout(request: pytest.FixtureRequest, monkeypatch:
     from kaibot.evaluation import holdout
 
     monkeypatch.setattr(holdout, "check", lambda *args, **kwargs: None)
+
+
+# ---------------------------------------------------------------- #514: no environment variable leaks between tests
+
+
+@pytest.fixture(autouse=True)
+def _no_environment_leak():
+    """`kaibot.engine.config.load_env_file` fills os.environ with `setdefault`, so a test that loads a `.env` (or
+    any code that sets a variable) used to leave ALPACA_BASE_URL and the other keys set for every later test
+    (QA on #499; decision 16 section 15, item 6). After each test, every variable it ADDED is removed again.
+    Variables set before the test (the CI's own, pytest_configure's, a module fixture's) are left as they are."""
+    before = set(os.environ)
+    yield
+    for key in set(os.environ) - before:
+        os.environ.pop(key, None)
