@@ -1455,7 +1455,7 @@ class Engine:
             self._md_send_steps(d, sync=True)
         fresh = self._market_update(now)
         if m < 0 or m == d.done_m:
-            return self._status(m)  # this minute's work is complete: it is never run twice
+            return self._data_status(self._status(m), fresh)  # this minute's work is complete: never run twice
         # S74 (#114, audit D6): `last_m` says the minute was started, `done_m` that it was finished. A step below
         # that raises leaves `done_m` behind, so the main loop's retry (about 10 s later) runs the minute again
         # instead of getting "already done" and resetting the error streak. Every failed attempt therefore counts
@@ -1498,7 +1498,7 @@ class Engine:
         self._ledger(eq)
         shadow.on_minute(self, m)  # S14: shadow ORB / news continuation (signal rows only; exceptions contained)
         d.done_m = m
-        return self._status(m)
+        return self._data_status(self._status(m), fresh)
 
     def _md_send_steps(self, d: Day, sync: bool = False) -> None:
         """The daily path's steps of a minute: its order sync (`sync`: when they run first in the tick), the pre-open
@@ -1515,6 +1515,11 @@ class Engine:
         if len(self.pos) or (self.roomflow is not None and self.roomflow.jobs):
             return True
         return any(flatten_at_close(s.holding) for s in self.live_strategies())
+
+    def _data_status(self, st: dict, fresh: bool) -> dict:
+        """QA-Ops (#484): a failed market-data read is no loop error any more, so the heartbeat says it itself
+        (`market_data`), every minute it lasts."""
+        return st if fresh else {**st, "market_data": f"read failed: {getattr(self, '_market_error', None)}"[:160]}
 
     def _market_update(self, now: datetime) -> bool:
         """M9 1.5 (audit M3): the minute's market-data read, which no longer stops the tick. A failed read leaves
