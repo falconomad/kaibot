@@ -25,14 +25,22 @@ the same accounts and compares them.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from kaibot.risk.gate import GAP_SCENARIO_PCT
+
+log = logging.getLogger("kaibot.failsafe")
+
+# M9 1.6, both in the engine's data directory (next to journal.sqlite):
+CANCELS_FILE = "watchdog_cancels.jsonl"  # the watchdog appends a line before each entry cancel; the engine reads it
+PID_FILE = "engine.pid"  # the engine writes {"pid", "host"} at start; the watchdog checks the process
 
 EMERGENCY_STOP_PCT = GAP_SCENARIO_PCT  # 10%: the gap the book is sized to survive (risk/gate.py)
 OPEN_STATES = frozenset({"new", "accepted", "pending_new", "partially_filled", "held", "accepted_for_bidding",
@@ -308,6 +316,48 @@ class ReadOnlyJournal:
         finally:
             db.close()
         return [(s, ts, k, json.loads(b)) for s, ts, k, b in rows]
+
+    def last_ts(self) -> datetime | None:
+        """When the engine last appended an entry (M9 1.6): its sign of life on this disk, with Supabase or without.
+        None: no file, no entry, or unreadable."""
+        if not self.path.exists():
+            return None
+        try:
+            db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=2.0)
+            try:
+                row = db.execute("select ts from entry order by seq desc limit 1").fetchone()
+            finally:
+                db.close()
+            if not row or not row[0]:
+                return None
+            t = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
+            return t if t.tzinfo else t.replace(tzinfo=UTC)
+        except Exception:
+            log.exception("journal's last write unreadable")
+            return None
+
+
+def watchdog_cancels(path: str | Path | None) -> set[str]:
+    """M9 1.6: the venue order ids and client order ids of the buys the watchdog cancelled, from the local file it
+    appends to before each cancel (engine/watchdog.py, CANCELS_FILE). A cancel of ours, not the venue's: the
+    carry-over sends such a buy again (engine/daily.ended_buys). No file, or a torn last line: what can be read."""
+    import json
+
+    out: set[str] = set()
+    if path is None:
+        return out
+    try:
+        lines = Path(path).read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            b = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(b, dict):
+            out.update(str(b[k]) for k in ("order_id", "client_order_id") if b.get(k))
+    return out
 
 
 def stops_from_journal(journal) -> dict[tuple[str, str], float]:

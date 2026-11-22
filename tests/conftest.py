@@ -82,3 +82,19 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             tr.write_line(f"{n} tests skipped, more than the {limit} docs/ops/skipped_tests.md accounts for: "
                           "write the new skip down there (or make it run)", red=True)
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+# ---------------------------------------------------------------- M11 2.6: the hold-out and synthetic test data
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_bars_have_no_holdout(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests run the research scripts on SYNTHETIC bars dated up to 2026. There is nothing to hold back in made-up
+    data, so for them the guard lets every window through. This is a patch inside the test process only: the
+    code has no switch, no environment variable and no flag that turns the guard off. `tests/unit/test_holdout.py`
+    runs against the real `config/holdout.yaml` and is left alone."""
+    if request.module.__name__.rsplit(".", 1)[-1] == "test_holdout":
+        return
+    from kaibot.evaluation import holdout
+
+    monkeypatch.setattr(holdout, "check", lambda *args, **kwargs: None)

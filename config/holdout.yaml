@@ -1,0 +1,36 @@
+# The hold-out window (M11 ticket 2.6, issue #457; Product's decision D5 of 21 Nov 2026,
+# docs/research/engine_audit/decisions.md). Read by kaibot.evaluation.holdout; how it works: docs/ops/holdout.md.
+#
+# Every session on or after `holdout_from` is held back. A research run whose window reaches it FAILS, unless it
+# names an opening listed below, and then the read is logged. New sessions after today fall inside the window as
+# they arrive: the hold-out only grows.
+#
+# Length: the history ends in November 2026, so the window opens with 22.6 months (D5 asked for 18 to 24). A
+# calendar-year boundary was chosen so that the research window ends with a whole year.
+#
+# Changing `holdout_from` to a LATER date gives research runs data that was held back: that needs a decision in
+# docs/decisions/ first. An earlier date only holds back more.
+version: 1
+holdout_from: 2025-01-01
+research_window_end: 2024-12-31   # the last date a research run may name as its end
+frozen_on: 2026-11-21
+decided_in: docs/research/engine_audit/decisions.md   # D5
+
+# Openings. APPEND ONLY: an entry is never edited or removed, a new read needs a new entry, and each entry is
+# committed by pull request BEFORE the run. A run names its opening with --open-holdout <id> (or
+# KAIBOT_HOLDOUT_OPENING=<id>) and is refused unless every field below matches.
+#
+#   - id: 2027-02-01.my_rule.final        # date decided, rule, purpose
+#     rule: my_rule                        # the pre-registration name (docs/prereg/my_rule.md)
+#     purpose: final_check                 # final_check | gate_c_tracking | data_check
+#     scripts: [momentum_core.py]          # the scripts that may read under it
+#     max_runs: 12                         # reads allowed in all (one script call that reads data = one read)
+#     decided_by: Product
+#     decided_on: 2027-02-01
+#     reason: "passed gate v3 on the research window (issue #...); one final check, declared in the pre-registration"
+#
+# purpose final_check: the one look at the hold-out for a rule that has passed everything else (decision 16).
+# purpose gate_c_tracking: the SimBroker replay of sessions the paper engine already traded (Gate C compares the
+#   two); it judges tracking, not the rule.
+# purpose data_check: a data-quality run whose output holds no rule result.
+openings: []
