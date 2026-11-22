@@ -278,6 +278,21 @@ The stakeholder's words: **"option A, as tested"**. What that decides:
      check is not a breach (`md_book_breach_clear`), so one bad print can never retire the rule. The first
      breach is read back from the journal after a restart, so a restart (or a crash loop) never delays the end
      (QA-Ops second key on #213).
+   - **Confirmed prices and peak (M9 ticket 1.1, #426, engine audit R1):** for this check a holding's minute bar
+     counts by itself only when it ended at most 5 minutes ago and is within 10% of the holding's last close mark;
+     an older or further bar counts only when the broker's own price for the position, read at the same tick, is
+     within 2% of it; otherwise the holding is measured at its last close mark (the heartbeat's `book_line` names it
+     under `unconfirmed`). A holding without minute bars is measured at the broker's price. The peak is raised at
+     once only at the close marks; during the session only by two readings above it at least a minute apart (the
+     lower of the two). A held symbol whose shares differ between the ledger and the broker, or that has a
+     corporate action today (an unbooked split reads as a fall), is measured at its last close mark
+     (`md_book_check_skipped`, `book_line.unchecked`, event `multi_day_book_unchecked`); the check goes on for
+     every other holding. A fall that the bars and the broker both show still ends the book at the second check.
+   - **The other direction (QA-Ops second key on #527):** the check is never switched off for the whole book. A
+     bar more than 15 minutes old that the broker's price does not agree with is no price any more, and the
+     broker's price of that tick counts alone (market data down while the broker shows a fall: the book ends at
+     most 15 minutes and two checks later). A holding measured at its last close mark for 5 minutes on end raises
+     the event `multi_day_book_unconfirmed`, once per day and holding.
    - At the end (`risk/gate.book_run_ended`; `engine/core.Engine._book_end`), exactly this happens, once: the end is
      journalled (`md_book_end`); a `book_drawdown` halt row and a `multi_day_book_ended` event are written; the daily
      path's working orders are cancelled; every multi-day sleeve is sold **at market** (retried each tick until none
