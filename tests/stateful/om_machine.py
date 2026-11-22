@@ -74,11 +74,7 @@ FAULTS = ("none", "none", "reject", "timeout_lost", "timeout_at_venue", "partial
 
 # Engine defects this machine found, as {name: issue}. The machine avoids the one step that trips each, so that
 # everything else stays checked; the strict xfail tests fail (and tell us to drop the entry) once the fix lands.
-KNOWN: dict[str, int] = {
-    # the target loop waits for a finished order's unbooked fill only when the order is of today's session; with
-    # yesterday's it buys the target again. `_send` therefore does not run the loop while such a fill is open.
-    "unbooked_other_session": 507,
-}
+KNOWN: dict[str, int] = {}  # none open: #491 and #507 are fixed
 
 # Invariant 4: the legal graph. A state may always be written again (the venue's fields changed); nothing leaves a
 # terminal state.
@@ -362,9 +358,6 @@ class OrdersAndLedger(RuleBasedStateMachine):
     def _send(self, style: str, fit: bool, fault: str, part: int) -> None:
         """The daily path's pre-send step: targets less (ledger + working orders), through the order manager.
         `fit`: usually a style whose window is open now; otherwise whichever was drawn (the policy must refuse)."""
-        stale = any(r.session != self._session() for r in self.om.settling.values())
-        if stale and "unbooked_other_session" in KNOWN:
-            return
         fitting = self._open_styles()
         if fit and fitting and style not in fitting:
             style = fitting[STYLES.index(style) % len(fitting)]

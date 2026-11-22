@@ -35,6 +35,10 @@ needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Po
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
+# #507 (QA-Ops second key on #524): a sale that no longer waits for an earlier day's unbooked fill. A health event,
+# left out only until a migration lists it and the Health page names it (#512); the open "unbooked" difference
+# (`reconcile_blocked`) is on the Health page meanwhile
+ROUTINE |= {"multi_day_unbooked_aged"}
 # M9 1.2 (#427, QA-Ops second key on #525): a "Flatten and stop" or a new run is waiting for a flat book. A health
 # event, left out only until a migration lists it and the Health page names it (#512); the heartbeat's entry block
 # says the same meanwhile

@@ -281,6 +281,17 @@ class OrderManager:
         return sum(r.cum - r.booked for r in list(self.settling.values()) if r.symbol == symbol
                    and (strategy is None or r.strategy == strategy) and (session is None or r.session == session))
 
+    def unbooked_sold(self, symbol: str, strategy: str, now: datetime) -> float | None:
+        """QA-Ops second key on #524: the bound of the target loop's wait for an unbooked fill. None while an
+        unbooked finished order of the sleeve is of today (New York): its activity is on its way, wait. Otherwise
+        every unbooked order of the sleeve is from an earlier day (an activity that old may never come), and the
+        answer is the shares its unbooked SALES took at the venue: the ledger still counts them, the venue does
+        not hold them, so a sale must not count on them."""
+        rs = [r for r in list(self.settling.values()) if r.symbol == symbol and r.strategy == strategy]
+        if not rs or any(not _day_over(r, now) for r in rs):
+            return None
+        return sum(r.cum - r.booked for r in rs if r.side == "sell")
+
     def _append(self, kind: str, body: dict) -> None:
         body = {k: v for k, v in body.items() if v is not None}
         self.journal.append(kind, body)
@@ -596,6 +607,9 @@ class OrderManager:
         pending = [_ts(a["transaction_time"]) for a in self.foreign.values() if a.get("transaction_time")]
         if after is not None and pending:  # a fill not yet attributed is read again until it is
             after = min(after, min(pending) - FILL_LOOKBACK)
+        waiting = [_ts(r.created) for r in list(self.settling.values()) if r.created]
+        if after is not None and waiting:  # #507: a finished order's unbooked fill may be older than the last fill
+            after = min(after, min(waiting) - FILL_LOOKBACK)  # booked: read from its order's start until it is
         try:
             rows = self.broker.activities(after, types=("FILL",))
         except BrokerError as e:
