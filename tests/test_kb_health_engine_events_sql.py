@@ -63,6 +63,8 @@ DYNAMIC_SITES = {
     ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),
 }
 FALLBACK_RE = re.compile(r'"event":\s*"([a-z_0-9]+)"')
+# M9 1.17 (#442): the macro calendar or the dead-man's holiday table ends within 30 days
+AWAITING_KB_HEALTH |= {"calendar_expiring"}
 AGENT_EVENT_RE = re.compile(r'^EVENT\s*=\s*"([a-z_0-9]+)"', re.M)
 QUEUED_RE = re.compile(r'_events\.append\(\(\s*"([a-z_0-9]+)"')
 COMMAND_RE = re.compile(r'\bkind == (?:"([a-z_]+)"|([A-Z_]+))')
