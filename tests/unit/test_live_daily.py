@@ -973,7 +973,9 @@ def test_a_name_an_emergency_stop_sold_since_the_decision_is_not_bought_back(dat
 
 def test_nothing_is_carried_without_the_decisions_own_send_or_without_last_evenings_record(data, tmp_path):
     """Engine down on the decision's fill day (no `md_send` of it): nothing is carried on the days after, the buys
-    wait for the next decision. Engine down in the evening (no record for the next session): nothing either."""
+    wait for the next decision. Engine down in the evening (no record for the next session): since M9 1.3 the
+    record is taken late, in the session (tests/unit/test_m9_late_decision.py), and the carry-over runs as after an
+    on-time start; a session that still has no record carries nothing."""
     (tmp_path / "a").mkdir()
     s, h = _guarded(data, tmp_path / "a")
     day = _to_the_carry_day(h, expire=False, sessions={FILL_DAY: {"send": False}})
@@ -983,6 +985,14 @@ def test_nothing_is_carried_without_the_decisions_own_send_or_without_last_eveni
     (tmp_path / "b").mkdir()
     s, h = _guarded(data, tmp_path / "b")
     day = _to_the_carry_day(h, sessions={FILL_DAY: {"decide": False}})
+    planned = h.live._plan(h.live.rules[0], day, RID)
+    rec = h.live._decision_for(s.name, day)
+    assert rec["late"] is True and rec["target"] is None and rec["note"] == "not a decision day"
+    assert len(planned["carry"]["carried"]) == 2 and planned.get("note") is None
+    (tmp_path / "c").mkdir()
+    s, h = _guarded(data, tmp_path / "c")
+    day = _to_the_carry_day(h, sessions={FILL_DAY: {"decide": False}})
+    h.live.after_close = lambda *a, **k: []  # the late step takes no record (as when the daily store is not ready)
     planned = h.live._plan(h.live.rules[0], day, RID)
     assert planned["targets"] == [] and planned.get("note") == "no decision" and "carry" not in planned
 

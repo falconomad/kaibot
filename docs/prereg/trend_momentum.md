@@ -545,3 +545,41 @@ no share count and no price. No research result is affected (item 4). The same t
 4. **Research and Gate B unchanged.** The research runner ends a run inside the simulator and never calls this
    path. Tests: a partial fill then a cancel books the filled shares and the rest is sold by the next flatten; a
    kill between the submission and its record, and a lost answer, each end in one sale booked once.
+
+## Amendment 19 (22 Nov 2026, backend-quant, issue #428, before the session of Mon 23 Nov 2026): a decision the engine missed overnight is taken during the session
+
+Written on 22 Nov 2026 (a Sunday), after the engine audit of 21 Nov (finding M1) and before any session that
+uses it. On 20 Nov the Mac started late. A session that opens without a decision record carries nothing
+(Amendment 11, item 1: "A session with no decision taken after the last close carries nothing"), and the same
+late start on a fill day skips the rule's whole rebalance. No research result is
+affected (item 4). This amendment changes when the record of a decision is written on the live path, not the rule,
+its decision, its targets or its sizing. The same text is Amendment 17 of mom_12_1_band.
+
+1. **The late decision.** On the live path, when a session is open and the rule has no decision record for it
+   (the engine was not running between the previous close and this open), the after-close step of the previous
+   session is taken during the session, by the same code, as soon as the engine is up and again in the send
+   window. It reads the daily view of the previous close: rows up to that close only, once that close's bars are
+   available, which is all a decision may read (section 2). The decision is therefore
+   the one an engine running on time would have journalled. The record carries `late: true` and its own
+   `decided_at`. Code: `engine/live_daily.LiveDaily.catch_up`.
+2. **What follows from it.** After a decision day, the decision's orders go out in that session's near-close
+   window as decided, sized as on any fill session (they were skipped before). After a session that was not a
+   decision day, the record "not a decision day" is written late, and the session's pending sales and carry-over
+   run as they do after an on-time start, under every limit of the carry-over amendments.
+   A paper run started during a session that has no decision record is the same case (QA-Ops second key on
+   PR #517): it takes the previous close's decision under its own run and, after a decision day, buys in that
+   session's window, sized on its starting amount, as a run started the evening before does. Section 2 is
+   kept (a decision for session i reads sessions <= i - 1; the account starts flat), and so is Amendment 12,
+   item 1 (the new run buys at its own first decision).
+3. **Fail closed, as before.** If the daily store does not hold the previous close, or fails its check, or the
+   step fails, no decision is taken, nothing is bought and nothing is carried that session. The heartbeat says why
+   and the try is repeated (at most every five minutes before the window, on every tick inside it). The shares
+   held are read when the late decision is taken, so a stock sold since the close is not counted as held.
+4. **Research and Gate B unchanged.** The research runner decides after every close, so it never takes a late
+   decision; `engine/daily.py` is not changed. No trial row, report or Gate B mark changes, and no configuration
+   is added (`n_trials` unchanged).
+5. **Known deviation, live against research.** None in the orders when the store is unchanged since the close: a
+   test starts the live path at 10:00 ET on a fill day and finds the decision record, the orders and the fills of
+   an on-time start. If the daily store was corrected between the close and the late decision (a split row
+   verified overnight), the late decision reads the corrected store, as a decision taken late the same evening
+   would. Paper only.
