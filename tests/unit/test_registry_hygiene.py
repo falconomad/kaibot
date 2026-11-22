@@ -35,9 +35,25 @@ def _append_mode(call: ast.Call) -> bool:
     return any(isinstance(m, str) and ("a" in m or "w" in m) for m in modes)
 
 
+REGISTRY_MARKS = ("trials.jsonl", "registry_file(", "TRIALS_ENV", "KAIBOT_TRIALS_FILE")
+
+
+def _registry_names(tree: ast.AST) -> set[str]:
+    """Names bound to the registry file's path (`REG = data / "trials.jsonl"`), so a writer cannot hide behind a
+    variable whose name says nothing about trials (QA on #575)."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None \
+                and any(m in ast.unparse(node.value) for m in REGISTRY_MARKS):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names |= {n.id for tg in targets for n in ast.walk(tg) if isinstance(n, ast.Name)}
+    return names
+
+
 def direct_writes(path: Path) -> list[str]:
     tree = ast.parse(path.read_text())
     where = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+    reg = _registry_names(tree)
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -45,7 +61,9 @@ def direct_writes(path: Path) -> list[str]:
         f = node.func
         name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
         text = ast.unparse(node)
-        if name == "open" and _append_mode(node) and "trial" in text.lower():
+        used = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)} & reg
+        if name == "open" and _append_mode(node) and (
+                "trial" in text.lower() or used or any(m in text for m in REGISTRY_MARKS)):
             out.append(f"{where}:{node.lineno}: {text[:80]}")
         if name in ("write_text", "write_bytes") and "trials.jsonl" in text:
             out.append(f"{where}:{node.lineno}: {text[:80]}")
@@ -65,6 +83,15 @@ def test_the_scan_catches_a_planted_direct_writer(tmp_path):
     sneaky.write_text('from pathlib import Path\ntrials_f = Path("data") / "trials.jsonl"\n'
                       'with trials_f.open("a") as fh:\n    fh.write("{}")\n')
     assert direct_writes(rogue) and direct_writes(sneaky)
+
+
+def test_the_scan_catches_a_writer_behind_an_unrelated_variable_name(tmp_path):
+    # QA on #575: the first scan only looked for "trial" in the open() call itself
+    hidden = tmp_path / "hidden.py"
+    hidden.write_text('import json\nfrom pathlib import Path\nREG = Path("data") / "trials.jsonl"\n'
+                      'with open(REG, "a") as fh:\n    fh.write(json.dumps({"strategy": "my_idea"}))\n'
+                      'with REG.open(mode="a") as fh:\n    fh.write("{}")\n')
+    assert len(direct_writes(hidden)) == 2
 
 
 def test_every_trial_writer_registers_its_run_first():
@@ -135,3 +162,31 @@ def test_the_intraday_research_path_is_refused_before_it_reads_bars(tmp_path, mo
     monkeypatch.setattr(research, "run", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran")))
     with pytest.raises(SystemExit, match="no run"):
         research.main(["--strategy", "orb_stocks_in_play", "--bars", str(tmp_path)])
+
+
+HOLDOUT_ENTRY_POINTS = [e for e in ENTRY_POINTS if e[0] != "run_ablation"]  # run_ablation reads no bars
+
+
+@pytest.mark.parametrize("name, argv, takes_argv", HOLDOUT_ENTRY_POINTS, ids=[e[0] for e in HOLDOUT_ENTRY_POINTS])
+def test_an_unregistered_run_is_refused_before_the_holdout_check(name, argv, takes_argv, tmp_path, monkeypatch):
+    """QA on #575: the hold-out check logs (and uses up) one read of an opening, so it must not run for a run that
+    is refused. The conftest makes `holdout.check` a no-op; here it fails the test if it is reached first."""
+    from kaibot.evaluation import holdout
+
+    def refuse(rule, root=None, **kw):
+        raise prereg.PreregError(f"no pre-registration for rule '{rule}' (test)")
+
+    def checked(*a, **k):
+        raise AssertionError("the hold-out was checked (and an opening's read logged) before the registration")
+
+    monkeypatch.setattr(prereg, "require", refuse)
+    monkeypatch.setattr(holdout, "check", checked)
+    mod = _module(name)
+    if hasattr(mod, "prereg_mod"):
+        monkeypatch.setattr(mod.prereg_mod, "require", refuse)
+    args = [a.replace("{d}", str(tmp_path)) for a in argv]
+    monkeypatch.setattr(sys, "argv", [name, *args])
+    with pytest.raises(SystemExit) as e:
+        mod.main(args) if takes_argv else mod.main()
+    assert "no run" in str(e.value.code) or "no pre-registration" in str(e.value.code), e.value.code
+    assert not any(tmp_path.rglob("*")), sorted(tmp_path.rglob("*"))

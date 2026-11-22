@@ -372,8 +372,9 @@ def main() -> None:
         return
     if not a.version or not a.end:
         ap.error("--version and --end are required for a run")
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard("spy_noise_band")
     holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
-    trials_mod.guard("spy_noise_band")  # #472: registered before any data is read
     run_version(a)
 
 

@@ -710,6 +710,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not a.end:
         ap.error("--end is required for a run")
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard(RULE)
     holdout.enforce(script=__file__, end=a.end, rule=RULE, opening=a.open_holdout, data=a.data)
     rep = run(a)
     f = write(rep, data)

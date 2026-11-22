@@ -261,6 +261,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rankings-only", action="store_true", help="refresh data/alarm/top10.csv and stop")
     holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    if not (a.flags_only or a.rankings_only):
+        # #472 (QA): the study run is registered before it reads SPY or writes rankings (the two read-only modes
+        # that feed the live alarm stay open, as before)
+        trials_mod.guard(STUDY)
     data = Path(a.data)
     start = date.fromisoformat(a.start)
     have_daily = (data / "daily").exists()

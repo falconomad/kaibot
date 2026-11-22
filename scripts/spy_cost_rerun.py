@@ -198,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
     if holdout is not None:
         holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard(se.RULE)
     if holdout is not None:
         holdout.enforce(script=__file__, end=a.end, rule=se.RULE, opening=a.open_holdout, data=a.data)
     run(a)

@@ -710,8 +710,9 @@ def main() -> None:
         return
     if not a.rule or not a.end:
         ap.error("--rule and --end are required for a run")
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard(a.rule)
     holdout.enforce(script=__file__, end=a.end, rule=a.rule, opening=a.open_holdout, data=a.data)
-    trials_mod.guard(a.rule)  # #472: registered before any data is read
     skip_f = data / "reports" / f"oneshots_{a.rule}_skipped.json"
     try:
         (run_intraday_rule if a.rule in INTRADAY else run_daily_rule)(a, a.rule)

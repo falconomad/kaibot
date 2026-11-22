@@ -861,9 +861,9 @@ def main() -> None:
         return
     if not a.version or not a.end:
         ap.error("--version and --end are required for a run")
-    holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
-    # #472: registered before any data is read
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
     trials_mod.guard(mc.VERSIONS[a.version].rule if a.version in mc.VERSIONS else a.version)
+    holdout.enforce(script=__file__, end=a.end, rule=a.version, opening=a.open_holdout, data=a.data)
     run_version(a)
 
 

@@ -420,8 +420,9 @@ def main(argv: list[str] | None = None) -> int:
     if a.summary:
         print(summary(data))
         return 0
+    # #472 (QA): registered before the hold-out check too, so an unregistered run never uses a hold-out read
+    trials_mod.guard(st.RULE)
     holdout.enforce(script=__file__, end=a.end, rule=st.RULE, opening=a.open_holdout, data=a.data)
-    trials_mod.guard(st.RULE)  # #472: registered before any data is read
     run(a)
     return 0
 
