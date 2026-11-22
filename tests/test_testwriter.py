@@ -437,6 +437,56 @@ def test_qa_the_sandbox_cannot_touch_the_checkout_home_or_any_env(tmp_path):
     assert (r / ".env").read_text() == "SECRET=planted-by-qa\n"
 
 
+def test_qa_a_chroot_climb_or_a_remount_does_not_leave_the_sandbox(tmp_path):
+    """QA (second round on #470): with a plain chroot the test was root of its user namespace with every capability:
+    os.chroot into a subfolder, fchdir back and chdir("..") reached the host, read a planted .env and wrote the
+    checkout; `mount -o remount,rw` could undo the read-only binds. The guard can be walked round (operator.attrgetter,
+    typing.get_type_hints), so the boundary itself must hold with the import check off."""
+    mode = _sandbox()
+    r = _root(tmp_path)
+    (r / ".env").write_text("SECRET=planted-by-qa\n")
+    code = textwrap.dedent(f"""\
+        import ctypes
+        import os
+
+
+        def _climb():
+            os.makedirs("/tmp/jail", exist_ok=True)
+            fd = os.open("/", os.O_RDONLY)
+            os.chroot("/tmp/jail")
+            os.fchdir(fd)
+            for _ in range(64):
+                os.chdir("..")
+            os.chroot(".")
+
+
+        def _remounts():  # mount(8) needs /proc: the syscall, MS_REMOUNT | MS_BIND without MS_RDONLY
+            libc = ctypes.CDLL(None, use_errno=True)
+            return [t for t in (b"/usr", b"/work") if libc.mount(None, t, None, 32 | 4096, None) == 0]
+
+
+        def test_isolated():
+            assert ctypes.CDLL(None, use_errno=True).chroot(b"/tmp") != 0  # no capability left
+            assert _remounts() == []
+            try:
+                _climb()
+            except OSError:
+                pass
+            assert not os.path.exists({str(r / ".env")!r})
+            assert not os.path.exists({str(ROOT / "CLAUDE.md")!r})
+            assert not os.path.exists("/.old")
+            # a nested user namespace gets capabilities back, but only over this tree, whose binds are locked
+            os.unshare(os.CLONE_NEWUSER | os.CLONE_NEWNS)
+            assert _remounts() == []
+            _climb()
+            assert not os.path.exists({str(r / ".env")!r})
+            assert not os.path.exists({str(ROOT / "CLAUDE.md")!r})
+        """)
+    res = sandbox.run_test(code, module="kaibot.engine.toy", root=r, mode=mode, resolve_imports=False)
+    assert res.outcome == "passed", res.output
+    assert (r / ".env").read_text() == "SECRET=planted-by-qa\n" and not (r / "jail").exists()
+
+
 def test_qa_the_ledger_keeps_only_the_verdict_and_a_hash(tmp_path):
     """QA: raw sandbox output went into the committed ledger. Now the ledger keeps the result and the output's
     sha256; the output, scrubbed, goes to tests/candidates/runs/ (ignored by git)."""

@@ -5,8 +5,9 @@ and holds nothing:
 
 - a fresh temporary directory with a copy of `src/kaibot` and the YAML files of `config/` (no `.env`, no `data/`,
   no journal, no git checkout), plus the one test file; a surviving mutant's diff is applied to that copy only;
-- an isolated filesystem. Linux: `unshare -rmn` (new user, mount and network namespaces) and a `chroot` into a
-  fresh tmpfs that holds only `/usr` and the Python installation (read-only binds), the copy at `/work`
+- an isolated filesystem. Linux: `unshare -rmn` (new user, mount and network namespaces), `pivot_root` into a
+  fresh tmpfs with the old root unmounted, and every capability dropped (`setpriv`); the tmpfs holds only
+  `/usr` and the Python installation (read-only binds), the copy at `/work`
   (read-only), a writable `/tmp` and four device nodes. The checkout, `$HOME`, `/etc`, every `.env` and the rest
   of the machine do not exist inside. macOS: `sandbox-exec` with a profile that denies the network, every write
   outside the run's scratch folder, and every read under `$HOME`, under the checkout and of any `.env`, then
@@ -69,9 +70,24 @@ for d in null zero urandom random; do
   touch "$NR/dev/$d"
   mount --bind "/dev/$d" "$NR/dev/$d"
 done
-exec chroot "$NR" /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp PYTHONHASHSEED=0 \
+mkdir "$NR/.old"
+cd "$NR"
+pivot_root . .old
+cd /
+# umount(8) needs /proc, which does not exist in here: the interpreter detaches the old root with umount2(MNT_DETACH)
+"$1" -I -S -c 'import ctypes, sys; sys.exit(ctypes.CDLL(None, use_errno=True).umount2(b"/.old", 2) != 0)'
+rmdir /.old
+exec /usr/bin/setpriv --no-new-privs --inh-caps=-all --ambient-caps=-all --bounding-set=-all \
+  /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp TMPDIR=/tmp PYTHONHASHSEED=0 \
   PYTHONDONTWRITEBYTECODE=1 LANG=C.UTF-8 "$@"
 """
+# QA on #470 (second round): a plain `chroot` kept the host's root in the mount namespace, and the test ran as root of
+# its user namespace with every capability. `os.chroot` into a subfolder, `fchdir` back and `chdir("..")` reached the
+# real filesystem (a planted .env was read and the checkout written); `mount -o remount,rw` could undo the read-only
+# binds. Now `pivot_root` makes the tmpfs the namespace's root and the old root is unmounted, so nothing of the host is
+# left to climb back to, and `setpriv` drops every capability (no chroot, no mount, no remount) and sets
+# no_new_privs before Python starts. A nested user namespace gets its capabilities back, but only over this tree,
+# whose binds are then locked read-only.
 
 # Inside the sandbox. argv: src dir, test file, rootdir, scratch dir, the import spec (JSON)
 BOOTSTRAP = r"""
@@ -199,7 +215,7 @@ def mac_profile(work: str, scratch: str, home: str, root: str, pydirs: list[str]
 
 
 def _linux_ok() -> bool:
-    if not (sys.platform.startswith("linux") and shutil.which("unshare") and shutil.which("chroot")):
+    if not (sys.platform.startswith("linux") and all(shutil.which(t) for t in ("unshare", "pivot_root", "setpriv"))):
         return False
     probe = tempfile.mkdtemp(prefix="kb-cand-probe-")
     try:
@@ -220,7 +236,7 @@ def isolation(platform: str | None = None) -> str:
     if platform == "darwin" and shutil.which("sandbox-exec"):
         return "darwin"
     raise SandboxUnavailable(f"no network and filesystem isolation on {platform}: needs unshare with mount "
-                             "namespaces and chroot (Linux) or sandbox-exec (macOS)")
+                             "namespaces, pivot_root and setpriv (Linux) or sandbox-exec (macOS)")
 
 
 def _limits():  # pragma: no cover - runs in the child
