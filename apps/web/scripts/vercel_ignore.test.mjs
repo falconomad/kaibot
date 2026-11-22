@@ -2,20 +2,30 @@
 // exit 1 builds. Each case makes a small repository, clones it the way Vercel does (--depth=10) and runs the script
 // in the clone's apps/web, which is the project's Root Directory.
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = resolve(here, "vercel_ignore.sh");
 const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, env, encoding: "utf8" }).trim();
+/** Every repository and clone made here, removed when the file is done. */
+const made = [];
+const tempDir = (prefix) => {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+};
+afterAll(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
 
 /** A repository with one first commit that has both an engine file and a dashboard file. */
 function repo() {
-  const dir = mkdtempSync(join(tmpdir(), "kb-ignore-"));
+  const dir = tempDir("kb-ignore-");
   git(dir, "init", "-q", "-b", "main");
   commit(dir, { "src/engine.py": "1", "apps/web/src/a.ts": "1", "apps/web/vercel.json": "{}", "apps/web/api/marks.ts": "1" });
   return dir;
@@ -32,7 +42,7 @@ function commit(dir, files) {
 }
 /** Clones as Vercel does and runs the script in apps/web. `prev` is VERCEL_GIT_PREVIOUS_SHA (undefined: not set). */
 function run(dir, prev) {
-  const clone = mkdtempSync(join(tmpdir(), "kb-ignore-clone-"));
+  const clone = tempDir("kb-ignore-clone-");
   git(clone, "clone", "-q", "--depth=10", pathToFileURL(dir).href, ".");
   const e = { ...env };
   delete e.VERCEL_GIT_PREVIOUS_SHA;
