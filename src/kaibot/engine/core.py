@@ -379,6 +379,11 @@ class Engine:
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
+        # M9 1.13 (#438): venue order ids of orders this engine placed outside the order manager (intraday entries,
+        # their legs and exits; full-flatten sales), kept in the journal so their fills are never taken for fills on
+        # unknown orders (`foreign_fill`) once the position is gone, also after a restart
+        self._own_ids: set[str] = {str(i) for *_, b in self.journal.entries(kinds=("own_order_ids", "md_exit"))
+                                   for i in (b.get("ids") or [b.get("order_id")]) if i}
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
         self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
@@ -433,6 +438,22 @@ class Engine:
             log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
 
+    def _remember_ids(self, *ids) -> None:
+        """M9 1.13: these venue order ids are the engine's own (journalled once each)."""
+        new = sorted({str(i) for i in ids if i} - self._own_ids)
+        if new:
+            self.journal.append("own_order_ids", {"ids": new})
+            self._own_ids.update(new)
+
+    def own_order_ids(self) -> set[str]:
+        """Every venue order id the engine knows as its own outside the order manager: the open intraday positions'
+        orders and legs (remembered here, so a leg cancelled or replaced later stays known), the full-flatten sales
+        and everything remembered before."""
+        self._remember_ids(*(x for p in self.pos.values()
+                             for x in (p.order_id, p.stop_order_id, p.target_order_id, p.exit_order_id)),
+                           *self._md_exits)
+        return self._own_ids
+
     def _recon_inputs(self) -> dict:
         """What `reconcile.compare` needs: the ledger's shares per settled symbol against the broker's, and the cash
         change since the run began against the ledger's, net of dividends accrued and not yet paid. A symbol with
@@ -444,8 +465,11 @@ class Engine:
         acct = self.broker.account()
         bpos = {s: p for s, p in self.broker.positions().items() if s not in unsettled}
         cash = acct.get("cash")
+        # M9 1.13 (#438, audit D2): the order manager's view, so the fill checks run live (a fill on an order the
+        # engine does not know, an order with more filled shares than booked). None without a daily path.
+        om = self.daily.recon_view() if self.daily is not None else None
         return {"ledger_qty": {s: q for s, q in b.qty_by_symbol().items() if q and s not in unsettled},
-                "broker_positions": bpos, "ledger_cash": b.cash, "ledger_cash0": b.amount,
+                "om": om, "broker_positions": bpos, "ledger_cash": b.cash, "ledger_cash0": b.amount,
                 "broker_cash": float(cash) if cash is not None and b.broker_cash0 is not None else None,
                 "broker_cash0": b.broker_cash0,
                 "receivable": receivable(self.journal.entries(kinds=("div_accrual", "div_paid"))),
@@ -2381,6 +2405,7 @@ class Engine:
 
     # ================= order sync =================
     def _sync_orders(self) -> None:
+        self.own_order_ids()  # M9 1.13: each tick, before a leg's id can be dropped (cancel, replace)
         if self._md_exits:
             self._sync_md_exits()
         for p in list(self.pos.values()):
@@ -2550,6 +2575,7 @@ class Engine:
                 "features": {**p.features(), **(extra or {})},
             },
         )
+        self._remember_ids(p.order_id, p.stop_order_id, p.target_order_id, p.exit_order_id)  # M9 1.13
         self.pos.pop(p)
 
     # ================= exits =================

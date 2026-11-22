@@ -90,7 +90,7 @@ import os
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -504,6 +504,7 @@ class LiveDaily:
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
+        self._fills_since: datetime | None = None  # M9 1.13: fills before it are not judged (recon_view)
         self.ca = ca
         self._ca_unread: dict[str, tuple[str, str]] = {}  # rule -> (session, why the read failed): no buys then
         self._ca_evening: date | None = None  # the decision evening whose held names the heartbeat notes cover
@@ -822,6 +823,38 @@ class LiveDaily:
                 old = t < cut
             if str(a.get("order_id")) in known or old:
                 om.foreign.pop(aid, None)
+
+    def recon_view(self):
+        """M9 1.13 (#438, audit D2): what `reconcile.compare` reads of the order manager (`foreign`, `orders`), for
+        the live reconciliation. The account's fills are read first, also when this path has no open order (a
+        fill on an unknown order must not wait for the next order of ours), and the engine's own fills are
+        dropped (`_prune`). Fills from before the first look on this journal are not judged: at the release that
+        switched the checks on, and on a new journal after a takeover, the account's recent activities hold fills
+        of orders this journal never saw (`recon_fills_since`, journalled once). None without a run. A failed
+        read of the activities raises: the reconciliation then counts as a failed read, as for the positions."""
+        om = self._manager()
+        if om is None:
+            return None
+        if self._fills_since is None:
+            got = self.journal.entries(kinds=("recon_fills_since",))
+            if not got:
+                self.journal.append("recon_fills_since", {"ts": self.now().isoformat()})
+                got = self.journal.entries(kinds=("recon_fills_since",))
+            self._fills_since = datetime.fromisoformat(got[0][3]["ts"])
+        n = len(om.errors)
+        om.read_fills()
+        if len(om.errors) > n:  # the activities were not read: the check cannot say "no such fill" (fail closed)
+            raise RuntimeError(f"fill activities not read ({om.errors[-1][1]})")
+        self._prune()
+
+        def judged(a: dict) -> bool:
+            ts = a.get("transaction_time")
+            if not ts:
+                return True
+            t = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            return (t if t.tzinfo else t.replace(tzinfo=UTC)) >= self._fills_since
+
+        return _ReconView({aid: a for aid, a in om.foreign.items() if judged(a)}, om.orders)
 
     def after_close(self, closed: date) -> list[str]:
         """After the close of session `closed`: each rule that has not decided for it decides once the daily view of
@@ -1701,7 +1734,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
     def known_ids() -> set[str]:
         ids = {str(x) for p in engine.pos.values() for x in (p.order_id, p.stop_order_id, p.target_order_id,
                                                              p.exit_order_id) if x}
-        return ids | set(engine._md_exits)
+        return ids | set(engine._md_exits) | engine.own_order_ids()  # M9 1.13: closed trades' orders too
 
     return LiveDaily(engine.broker, engine.journal, engine.now, rules if rules is not None else current, load,
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
@@ -1709,6 +1742,14 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
                      store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review,
                      shadow=shadow, note=note, filing_flags=filing_flags)
+
+
+@dataclass(frozen=True)
+class _ReconView:
+    """The two things `reconcile.compare` reads of an order manager."""
+
+    foreign: dict
+    orders: dict
 
 
 def calendar_close(cal: dict | None) -> time | None:
