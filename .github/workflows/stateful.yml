@@ -38,15 +38,18 @@ jobs:
           { echo '### Stateful test: branch coverage of the modules under test'; echo '```'; cat coverage.txt; echo '```'; } \
             >> "$GITHUB_STEP_SUMMARY"
   # QA's suggestion on #494: once a week a search nobody has run before. A fresh seed, not derandomised, a larger
-  # budget, and the Hypothesis search for the planted bugs (a measure of the search's reach). A failure opens an
-  # issue with the seed and the shrunk program, or adds a comment to the open one.
+  # budget, and the Hypothesis search for the planted bugs (a measure of the search's reach). This job runs the
+  # repository's code with a read-only token and hands its log to `weekly-report` as an artifact (#561); that job,
+  # which runs no repository code, opens an issue with the seed and the shrunk program, or comments on the open one.
   weekly-random-seeds:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
-      issues: write  # to open the issue with the failing seed: the only thing this job writes
+    outputs:
+      outcome: ${{ steps.search.outcome }}
+      seed: ${{ steps.search.outputs.seed }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}
@@ -63,14 +66,30 @@ jobs:
           echo "seed $seed" | tee -a "$GITHUB_STEP_SUMMARY"
           set -o pipefail
           uv run pytest tests/stateful -q -p no:cacheprovider --hypothesis-seed="$seed" 2>&1 | tee stateful.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with: {name: stateful-log, path: stateful.log, if-no-files-found: ignore, retention-days: 30}
+  weekly-report:
+    # the weekly search failed: opens an issue (or comments on the open one). Runs no repository code: it reads the
+    # search's log from its artifact and the seed from the job's output.
+    needs: weekly-random-seeds
+    if: always() && needs.weekly-random-seeds.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with the failing seed: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: stateful-log}
+        continue-on-error: true
       - name: open an issue with the failing seed
-        if: failure() && steps.search.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
-          SEED: ${{ steps.search.outputs.seed }}
+          SEED: ${{ needs.weekly-random-seeds.outputs.seed }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT: ${{ github.sha }}
         run: |
+          touch stateful.log
           {
             echo "The weekly random-seed run of the stateful test (\`tests/stateful/\`) failed."
             echo

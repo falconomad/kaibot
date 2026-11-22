@@ -21,6 +21,7 @@ it is not reported again.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -92,41 +93,80 @@ def mutmut_bin() -> list[str]:
     return [exe]
 
 
-def run_mutmut(work: Path, minutes: float, jobs: int, log) -> tuple[bool, float]:
-    """True: every mutant was tried; False: the budget ran out first."""
+SNAPSHOT_S = 30.0  # how often the results file is copied while mutmut runs (see `results`)
+
+
+def _codes(meta: Path) -> dict | None:
+    """mutmut's results (exit code by mutant), or None while the file is being written or is damaged."""
+    try:
+        return json.loads(meta.read_text()).get("exit_code_by_key", {})
+    except (OSError, ValueError):
+        return None
+
+
+def _snapshot(meta: Path) -> None:
+    if _codes(meta) is not None:
+        shutil.copyfile(meta, meta.with_name(meta.name + ".good"))
+
+
+def run_mutmut(work: Path, minutes: float, jobs: int, log, meta: Path | None = None) -> tuple[bool, float]:
+    """True: every mutant was tried; False: the budget ran out first. While it runs, the results file (`meta`) is
+    copied every SNAPSHOT_S seconds when it reads whole: #561's dispatch showed that the stop at the end of the budget
+    can land while mutmut rewrites it, leaving it empty. The stop is an interrupt first (mutmut finishes the write),
+    then SIGTERM, then SIGKILL."""
     env = {**os.environ, "PYTHONPATH": "src"}  # inside the copy: `src` is the copy's, never an installed kaibot
     t0 = time.monotonic()
     p = subprocess.Popen([*mutmut_bin(), "run", "--max-children", str(jobs)], cwd=work, env=env, stdout=log,
                          stderr=subprocess.STDOUT, start_new_session=True)
-    try:
-        p.wait(timeout=minutes * 60)
-        return p.returncode == 0, time.monotonic() - t0
-    except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGTERM)
+    end = t0 + minutes * 60
+    while True:
         try:
-            p.wait(timeout=30)
+            p.wait(timeout=max(0.1, min(SNAPSHOT_S, end - time.monotonic())))
+            return p.returncode == 0, time.monotonic() - t0
         except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)
-            p.wait()
-        return False, time.monotonic() - t0
+            if meta is not None:
+                _snapshot(meta)
+            if time.monotonic() >= end:
+                break
+    for sig, wait in ((signal.SIGINT, 30), (signal.SIGTERM, 30), (signal.SIGKILL, None)):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(p.pid, sig)
+        try:
+            p.wait(timeout=wait)
+            break
+        except subprocess.TimeoutExpired:
+            continue
+    return False, time.monotonic() - t0
 
 
 SURVIVING = ("survived", "no tests")  # nothing noticed the change: both are survivors
 
 
+# mutmut 3.8.1's own reading (mutmut.stats.status_by_exit_code), for where mutmut is not installed (the ordinary
+# test run); with mutmut installed its map is used
+_STATUS = {1: "killed", 3: "killed", 0: "survived", 5: "no tests", 2: "check was interrupted by user",
+           None: "not checked", 33: "no tests", 34: "skipped", 35: "suspicious", 36: "timeout",
+           37: "caught by type check", -24: "timeout", 24: "timeout", 152: "timeout", 255: "timeout", -11: "segfault",
+           -9: "segfault"}
+
+
 def status_of(code) -> str:
     """mutmut's own reading of a mutant's exit code (mutmut.stats.status_by_exit_code)."""
-    from mutmut.stats import status_by_exit_code
-
+    try:
+        from mutmut.stats import status_by_exit_code
+    except ImportError:
+        return _STATUS.get(code, "suspicious")
     return status_by_exit_code[code]
 
 
 def results(work: Path, source: str) -> dict[str, str]:
+    """Each mutant's status. The results file as mutmut left it, or, when the stop left it unreadable, the last whole
+    copy `run_mutmut` took (a few mutants fewer)."""
     meta = work / "mutants" / (source + ".meta")
-    if not meta.exists():
-        return {}
-    codes = json.loads(meta.read_text()).get("exit_code_by_key", {})
-    return {k: status_of(v) for k, v in sorted(codes.items())}
+    codes = _codes(meta)
+    if codes is None:
+        codes = _codes(meta.with_name(meta.name + ".good"))
+    return {k: status_of(v) for k, v in sorted((codes or {}).items())}
 
 
 def diff_of(work: Path, mutant: str) -> str:
@@ -150,7 +190,7 @@ def run(name: str, minutes: float, jobs: int, out: Path, work: Path | None = Non
     try:
         prepare(name, target, work)
         with open(out / f"{name}.log", "w") as log:
-            complete, took = run_mutmut(work, minutes, jobs, log)
+            complete, took = run_mutmut(work, minutes, jobs, log, work / "mutants" / (target["source"] + ".meta"))
         res = results(work, target["source"])
         if not res or all(v == "not checked" for v in res.values()) and took < minutes * 60 - 5:
             tail = (out / f"{name}.log").read_text()[-3000:]

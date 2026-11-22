@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.y*ml"))
 # the only write permissions any job may hold: (workflow file, job) -> {scope: "write"}
 WRITE_ALLOWED = {("labeler.yml", "label"): {"pull-requests": "write"},
-                 ("stateful.yml", "weekly-random-seeds"): {"issues": "write"},  # opens the issue with the seed
-                 ("dst.yml", "nightly-soak"): {"issues": "write"},  # the same, for the simulation's failing seed
+                 ("stateful.yml", "weekly-report"): {"issues": "write"},  # opens the issue with the seed
+                 ("dst.yml", "soak-report"): {"issues": "write"},  # the same, for the simulation's failing seed
                  ("replay.yml", "report"): {"issues": "write"},  # the same, for a nightly replay's difference
                  ("fuzz.yml", "report"): {"issues": "write"},  # the same, for a fuzzing finding
                  ("mutation.yml", "report"): {"issues": "write"},  # rewrites the mutation tracking issue
@@ -71,18 +71,14 @@ def test_the_token_is_read_only_by_default(path):
         assert writes == WRITE_ALLOWED.get((path.name, job), {}), f"{path.name}:{job}: write permissions {writes}"
 
 
-# Jobs that write and still run the repository's code: they predate the rule below (follow-up: split them like
-# replay.yml). Nothing may be added here.
-WRITES_AND_RUNS_CODE = {("stateful.yml", "weekly-random-seeds"), ("dst.yml", "nightly-soak")}
-
-
 @pytest.mark.parametrize("path", WORKFLOWS, ids=lambda p: p.name)
 def test_a_job_that_writes_runs_no_repository_code(path):
-    """A token that can write never sits next to the repository's code: no checkout, no install, no `uv run`."""
+    """A token that can write never sits next to the repository's code: no checkout, no install, no `uv run`.
+    No exceptions (#561 split the last two jobs that did: stateful.yml and dst.yml)."""
     doc = _load(path)
     for job, spec in doc["jobs"].items():
         perms = spec.get("permissions") or {}
-        if not any(v == "write" for v in perms.values()) or (path.name, job) in WRITES_AND_RUNS_CODE:
+        if not any(v == "write" for v in perms.values()):
             continue
         for step in spec.get("steps") or []:
             uses, run = str(step.get("uses", "")), str(step.get("run", ""))
