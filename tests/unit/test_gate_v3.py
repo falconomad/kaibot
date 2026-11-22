@@ -22,13 +22,14 @@ from kaibot.evaluation.prereg import Prereg
 from kaibot.evaluation.trials import Registry
 
 GATE = g3.GateV3.load(ROOT)
+MOMENTUM = len(GATE.families["cross_sectional_momentum"]["rules"])  # grows with each new pre-registration
 IDX = pd.bdate_range("2017-05-01", "2026-11-06")  # reaches into the hold-out on purpose
 RESEARCH = IDX[IDX <= "2024-12-31"]
 FINAL = {"engine": "simbroker", "cost_model": "v2", "data_repairs": True, "benchmark": "spy_total_return"}
 RNG = np.random.default_rng(16)
 SPY = pd.Series(RNG.normal(0.0005, 0.011, len(IDX)), index=IDX)
 BILLS = pd.Series(4.0, index=pd.bdate_range("2017-01-02", "2026-11-06"))
-RULE = "trend_momentum"  # in the family cross_sectional_momentum (four rules)
+RULE = "trend_momentum"  # in the family cross_sectional_momentum (its size: MOMENTUM below)
 # amendment 1 (decision 16 s.15): a family of several rules needs 2,000 runs
 GOOD_CONTROL = {"percentile": 99.95, "runs": 2000, "matched": True, "p_value": 1 / 2001, "pool": "candidate_pool",
                 "drawdown_percentile": 71.0}
@@ -204,7 +205,7 @@ def test_the_stored_percentile_gives_the_same_p_value_as_the_runs():
 
 def test_family_p_is_bonferroni_inside_the_family():
     p = g3.family_p(GATE, {"trend_momentum": 0.01, "mom_12_1_band": 0.2, "spy_trend_filter": 0.03})
-    assert p["cross_sectional_momentum"] == pytest.approx(0.04)  # four rules listed, the best is 0.01
+    assert p["cross_sectional_momentum"] == pytest.approx(MOMENTUM * 0.01)  # every listed rule counts
     assert p["index_trend_timing"] == pytest.approx(0.03) and p["news_drift"] is None
 
 
@@ -303,13 +304,13 @@ def test_s3_needs_a_matched_control_from_the_pool_and_survives_the_correction(co
 
 
 def test_s3_a_93rd_percentile_passed_gate_v2_and_fails_gate_v3():
-    """93rd percentile: gate v2's mark 3 passes it. Under gate v3 the family has four rules and there are twelve
+    """93rd percentile: gate v2's mark 3 passes it. Under gate v3 the family has four rules or more and there are twelve
     families: the family p is 4 x 0.072 = 0.29, far above 0.10 / 12."""
     control = {"percentile": 93.0, "runs": 2000, "matched": True, "pool": "candidate_pool"}
     assert g2.mark_3(g2.GateV2.load(ROOT), control)["met"] is True
     m = judge(sleeve(0.03, control=control))["marks"]["s3"]
-    assert m["met"] is False and m["numbers"]["family_p"] == pytest.approx(4 * 141 / 2001)
-    assert m["numbers"]["holm_threshold"] == pytest.approx(0.10 / 12) and m["numbers"]["family_members"] == 4
+    assert m["met"] is False and m["numbers"]["family_p"] == pytest.approx(MOMENTUM * 141 / 2001)
+    assert m["numbers"]["holm_threshold"] == pytest.approx(0.10 / 12) and m["numbers"]["family_members"] == MOMENTUM
     assert m["numbers"]["bh_adjusted"] >= m["numbers"]["family_p"]
 
 
