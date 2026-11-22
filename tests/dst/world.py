@@ -451,6 +451,8 @@ class World:
         # later session makes that decision up: an outage of a whole session, not a defect of the engine.
         self.decidable: set[str] = set()
         self._first_ok: dict[str, datetime] = {}
+        self._run_seen: datetime | None = None  # the first pass that saw the run (see _could_decide)
+        self._first_due: dict[str, datetime] = {}
         self.replica.insert("command", {"kind": "new_run", "payload": {"amount_usd": AMOUNT, "level": "balanced"},
                                         "idempotency_key": "dst-run", "applied_at": None})
 
@@ -580,6 +582,23 @@ class World:
         self.check.after_pass()
 
     def _could_decide(self, now: datetime) -> None:
+        # #577: a run the owner starts after a close is "scheduled" until the next open, and a scheduled run decides
+        # nothing (engine/core._daily_after_close); its first decision is the late one at that open (M9 1.3). A pass
+        # with no running run is therefore no chance to decide.
+        # The run's status is the engine's own word, so it is checked against the world's: a run seen first before a
+        # session's open must be running by that session (the first open tick starts it, core._start_day). Else an
+        # engine that never starts its run would decide nothing and the oracle would expect nothing.
+        run = self.eng.run if self.eng is not None else None
+        if run and self._run_seen is None:
+            self._run_seen = now
+        if run and run.get("status") == "scheduled":
+            for day in SESSIONS:  # a session in progress that opened after the run was first seen
+                if self._run_seen <= session_open(day) <= now < et(day, "16:00"):
+                    first = self._first_due.setdefault(day, now)
+                    if now - first >= ld.LATE_EVERY + timedelta(minutes=1):
+                        self.bad(f"the run is still scheduled in the session of {day}, an open after it was started")
+        if not run or run.get("status") not in ("running", "paused"):
+            return
         for prev, fill in zip(EVENINGS, SESSIONS, strict=False):
             if fill in self.decidable or not (self.s.ready[prev] <= now < et(fill, "16:00")):
                 continue
