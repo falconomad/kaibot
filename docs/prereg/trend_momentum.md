@@ -583,3 +583,39 @@ its decision, its targets or its sizing. The same text is Amendment 17 of mom_12
    an on-time start. If the daily store was corrected between the close and the late decision (a split row
    verified overnight), the late decision reads the corrected store, as a decision taken late the same evening
    would. Paper only.
+
+## Amendment 20 (22 Nov 2026, backend-quant, issue #429, before the session of Mon 23 Nov 2026): a decision whose send window was missed is sent on the next session
+
+Written on 22 Nov 2026 (a Sunday), after the engine audit of 21 Nov (finding M2) and before any session that
+uses it. The decision's orders go out in the near-close window of its fill session. When the engine was down in
+that window, no send was journalled, and the carry-over (Amendment 11) reads its plan from that send: so neither
+the decision's sales nor its buys went out before the next decision. No research result is affected (item 5).
+This amendment changes when a decision's orders are sent on the live path, not the rule or its decision. The
+same text is Amendment 18 of mom_12_1_band.
+
+1. **The late send.** On the live path, on a session that has a decision record and is not a decision's fill
+   session, when the latest decision of the running paper run has no journalled send of its plan, that plan is
+   built on this session, in its near-close window: the portfolio builder sizes the decision's target list as on
+   a fill session, at this session's prices (the previous close), equity and cash, under every cap of sections
+   2 and 4. The send record carries `late_of` (the fill session that was missed). It is built once: from then on
+   it is the decision's plan, and the carry-over reads it. A newer decision replaces an unsent older one, which
+   is then never sent. Only a decision of the running run counts (Amendment 12, item 1). Code:
+   `engine/live_daily.LiveDaily._unsent` and `_plan`.
+2. **Its sales** go out as on a fill session, whatever happens to its buys.
+3. **Its buys are buys of their own session,** so the limits of the carry-over hold for them, read at the
+   previous close: none while SPY is below its 200-day average; none of a stock outside the rule's ranked
+   universe or that the rule could not buy (Amendments 11 and 13); none of a stock without a bar at that close,
+   or that lost shares since the decision by any path (Amendment 12, item 2); none with an announced corporate
+   action (Amendment 6, live path only); and the overnight cap. Each stock left out is in the send record
+   (`late.skipped`, with its reason) and in the `multi_day_carry` event. A buy left out by the first four of these
+   stays due (`late.due`, at the builder's shares) and is tried again on the next sessions by the carry-over,
+   under all of its limits, the cash and cap check of Amendment 12 (item 4) included, until the next decision.
+4. **Fail closed, as before.** Without a decision record for the session (Amendment 19), or without the daily
+   view of the previous close, or when a name of the decision fails the daily check, nothing is built that
+   session and only the pending sales go out; the late send is tried again on the next session.
+5. **Research and Gate B unchanged.** The research runner sends on every fill session, so it never builds a late
+   send; `engine/daily.py` is not changed. No trial row, report or Gate B mark changes, and no configuration is
+   added (`n_trials` unchanged).
+6. **Known deviation, live against research.** A decision sent late trades one or more sessions after its fill
+   day, at those sessions' prices and with that session's sizing. That is a deviation of operations (the engine
+   was down), counted by Gate C as such, like the carry-over's (Amendment 11, item 5). Paper only.
