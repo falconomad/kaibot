@@ -38,6 +38,26 @@ yet; a position is only held over a close when the engine was off at 15:55.
 - Entries: `row` (an insert, update or upsert of an engine table), the ledger's `run`, `position`, `fill`,
   `dividend`, `split`, `mark`, the broker trail `intent` (written before every order call: entry, cancel,
   replace, sell, MOC, close) and `ack` (its answer), and `import` / `bootstrap` (rows copied from Supabase once).
+- **Checksums** (#496). Every entry carries a checksum (column `sum`: SHA-256 over the checksum of the entry
+  before it, its number, time, kind and text). It is checked when the file is opened and on every read, by the
+  engine and by the watchdog's read-only reader. An entry that fails, or one that has none where it must, is never
+  folded: the error names the entry (`journal entry 4711 fails its checksum`).
+  - At start: the engine logs the line and exits with **code 4** before it takes the lease or reads the broker.
+  - While running: the engine writes an `engine_error` event with the line, stops (broker-held stops stay; the
+    watchdog takes over as for any stop) and exits with code 4; every later start refuses the file the same way.
+    The watchdog, on a journal it cannot trust, reads the ledger rows in Supabase instead.
+  - What to do: the file is damaged (disk, or a bad copy). Move it aside and restore last night's backup, or start
+    a fresh journal from Supabase ("Taking over" below). Do not edit the file.
+  - **Older journals stay readable.** A file written before checksums gets the column when it is first opened
+    and keeps its entries as they are; `meta.checksum_from` records the first entry number that must carry a
+    checksum (the cut-over). Entries below it are accepted without one and are not protected; a new file's
+    cut-over is 1.
+  - **After a roll-back to a release from before checksums**, that release appends entries without a checksum.
+    The next start of a newer release refuses them (`journal entry N has no checksum`). If the roll-back explains
+    them, accept them once, with the engine stopped: `python -m kaibot.engine.journal --reseal` prints the range
+    it accepted and moves the cut-over past it. It never accepts an entry whose checksum is wrong.
+  - Not covered: the last entries cut off the end of the file (the start check below catches that against
+    Supabase: "restored backup"), and a change to an entry from before the cut-over.
 - State is a fold: `JournalStore` rebuilds the engine's tables from the `row` and `import` entries when it opens;
   the engine folds the ledger from the ledger entries. Kill the engine at any point and the next start is where
   the last durable entry left it.

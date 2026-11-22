@@ -17,7 +17,7 @@ from collections import Counter
 import pytest
 from crash_world import STEPS, Engine, Fuse, Kill, World, fingerprint, run, s_open_run, violations
 
-from kaibot.engine.journal import Journal
+from kaibot.engine.journal import Journal, JournalCorrupt
 
 PHASES = ("before", "after")
 
@@ -155,18 +155,17 @@ def test_a_record_corrupted_into_invalid_json_stops_the_start():
         at = raw.rindex(b'"qty":5')
         raw[at] = ord("x")  # `"qty":5` -> `xqty":5`
         path.write_bytes(bytes(raw))
-        with pytest.raises(ValueError):
+        with pytest.raises(JournalCorrupt, match="checksum"):  # #496: refused when the file is opened
             Journal(path).entries()
     finally:
         e.abandon()
         w.close()
 
 
-@pytest.mark.xfail(strict=True, reason="#496: a journal record has no checksum; a flipped digit is folded")
 def test_a_record_corrupted_into_valid_json_is_noticed():
-    """One byte of the last record changes `"qty":5` into `"qty":7`. Nothing in the file says so: SQLite keeps no
-    checksum of a page in the database file and the journal keeps none of its entries, so the ledger folds seven
-    shares. The start should notice (and refuse, or hand the difference to reconciliation by name)."""
+    """One byte of the last record changes `"qty":5` into `"qty":7`. SQLite keeps no checksum of a page in the
+    database file; since #496 the journal keeps one of every entry, so the start refuses the file and names the
+    entry instead of folding seven shares."""
     w, e = _journal_with_a_fill()
     try:
         path = _checkpointed_copy(e)
