@@ -728,3 +728,32 @@ research result is affected (item 5). The same text is Amendment 22 of mom_12_1_
    keep the rule from ever selling that stock through its own decisions.
 5. **Research and Gate B unchanged.** The research venue lists a fill's activity with the fill, so nothing waits
    there; the bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over
+
+Written on 22 Nov 2026. It records a change made by PR #485 (issue #431, merged on 21 Nov 2026) that this file did not
+state: it changes which buys the carry-over sends again. It changes no decision, target or share count, and it sizes
+nothing again. No research result is affected (item 4). The same text is Amendment 23 of mom_12_1_band.
+
+1. **What the file said.** Amendment 11 (item 2, "Order history") leaves out of the carry-over a stock whose last
+   order was cancelled or refused by the venue. Until #485 the code read this as any cancel, including one the
+   engine's own watchdog made while it held the engine for dead.
+2. **The rule since #485.** A buy cancelled by the watchdog is carried like any other unfilled buy of the plan: at
+   the next session's near-close window, for the plan's target shares minus the shares held minus open orders. That
+   cancel was ours (the engine looked dead), not the venue's answer to the order. The watchdog writes the order's
+   venue id and client order id to `watchdog_cancels.jsonl` in the engine's data folder before it asks the venue to
+   cancel. `engine/daily.ended_buys` reads that record (`failsafe_cancels`) and does not count such a cancel as the
+   buy's end, as it already did not count an order called lost (never reached the venue). Shares the buy filled
+   before the cancel stay counted.
+3. **What is still not carried.** Everything else in Amendments 11 to 13 holds for such a buy: the market filter,
+   "not buyable", no bar, corporate actions, a cancel or refusal by the venue, a cancel by the engine's own order
+   manager (unless the watchdog cancelled the same order too), a stock sold since the decision by any path (so a
+   stock the watchdog went on to flatten is not bought back), a fill not booked yet, and the cash and the book's
+   limits at the previous close. A buy the dead-man (the Supabase-side check, docs/ops/failsafe.md) cancelled is not
+   in the local record and is still not carried; a follow-up is named in PR #485. A cancel whose record line could
+   not be written (the cancel itself is never stopped by that) is not carried either.
+4. **Research and Gate B unchanged.** The research venue has no watchdog, and only the live path passes the record,
+   so nothing changes there; the bit-identity test of the momentum rules passes unchanged. No trial row, report or
+   Gate B mark changes, and no configuration is added (`n_trials` unchanged). Tests:
+   `tests/test_watchdog_local_liveness.py` (a watchdog cancel is carried at the plan's shares; a cancel without the
+   record is not).
