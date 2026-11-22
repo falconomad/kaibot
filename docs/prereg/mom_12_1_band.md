@@ -422,3 +422,51 @@ is affected (item 4). The same text is Amendment 15 of trend_momentum.
    with any quote; every sale of the fixture run, with a stale quote or a quote 20% under its sizing close, goes
    out in its own session exactly as without the check; a sale does not wait for the quote read, which is made
    only when a buy is about to go out.
+
+## Amendment 14 (21 Nov 2026, platform, issue #436, M9 ticket 1.11, before its first live paper session): an order is called lost only after the venue's orders, fills and position were read
+
+Written on 21 Nov 2026, before the change's first use. It can change whether a second attempt of an order goes
+out, so it is recorded here. It can only hold a second attempt back: it never adds an order and changes no share
+count. No research result is affected (item 4). The same text is Amendment 16 of trend_momentum. (The number follows
+the pre-send check of issue #441, written the same day in another change.)
+
+1. **The gap.** An order whose submission got no answer is looked up by its client order id. After two lookups
+   that find nothing, at least 30 seconds apart and 60 seconds after the intent, it was called lost and the same
+   decision's order went out again under the next attempt number. If the venue had accepted the order and only
+   that lookup lagged, two orders existed (engine audit of 21 Nov 2026, "suspected": the code path is reproduced
+   by a failing test; whether Alpaca's lookup can lag is not known and is measured by
+   `scripts/probe_alpaca_idempotency.py`).
+2. **The rule.** Before an order is called lost the engine also reads the open orders, the fills since the intent,
+   and the venue's position in the stock against the ledger plus the fills its other orders have not booked yet.
+   An order found is taken over as the same order (its fills are booked once, as always). A fill in the stock, on
+   the order's side, on an order that cannot be read; shares at the venue that the ledger and the known orders do
+   not explain, in the order's direction; or a read that fails: the order stays unconfirmed, nothing new is sent
+   in that stock, and everything is read again at the next lookup (30 seconds later or more).
+3. **What this can cost.** While such evidence stands, the stock's order of that decision is not sent again in
+   that session; a buy is then carried under Amendments 11 to 13 of trend_momentum (9 to 11 of mom_12_1_band) once
+   the order is resolved. Shares at the venue that the ledger does not have are a reconciliation difference in
+   any case, and that already refuses buys in the stock.
+4. **Research and Gate B unchanged.** The research venue answers every submission; no order is unconfirmed there,
+   so the new reads never run. Tests: an accepted order whose lookup lags is found in the open orders (one order
+   at the venue); a filled one is found by its fill and booked once; an order that never arrived is lost as before.
+
+## Amendment 15 (21 Nov 2026, QA-Ops second key on issue #436, PR #495, before the first use of Amendment 14): the hold of an unconfirmed order ends with the order's day
+
+Written on 21 Nov 2026, with Amendment 14 and before its first use. It only bounds Amendment 14: it adds no
+order and changes no share count. No research result is affected (item 4). The same text is Amendment 17 of
+trend_momentum. (The numbers follow those of the pre-send check of issue #441 once both are on main.)
+
+1. **The gap.** Under Amendment 14 (item 2) an order with evidence against "lost" stays unconfirmed. An
+   unconfirmed order holds back every order in its stock, sales included. A position difference, or a fill on an
+   order that cannot be read, can stand for days for a reason that has nothing to do with the order, so the hold
+   had no end and a sale of the stock could wait for days.
+2. **The rule.** On the order's own New York day Amendment 14 applies unchanged. From the next New York day on,
+   only the order itself counts: found among the open orders or by its fill, it is taken over as the same order;
+   a venue that cannot be read still keeps it unconfirmed; otherwise it is lost and the stock is free again. A
+   lookup cannot lag overnight.
+3. **What this can cost.** While the evidence stands, no other order in the stock goes out that day: a sale is at
+   most one session late. Shares the ledger does not have stay a reconciliation difference afterwards, which
+   refuses buys in the stock and never a sale (decision 15).
+4. **Research and Gate B unchanged.** As Amendment 14, item 4. Added tests: a buy and a sale held by a position
+   difference stay unconfirmed through their day and are lost the day after, with the stock free again; after its
+   day an order the venue has is still taken over, and an unreadable venue still keeps it unconfirmed.
