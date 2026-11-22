@@ -27,6 +27,7 @@ Safety:
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -34,7 +35,7 @@ import math
 import subprocess
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 
@@ -94,6 +95,11 @@ MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switc
 CLEAN_TICKS_TO_CLEAR = 5
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
+# M9 1.15 (audit S1): a command row is checked in code before anything is done. The pot of a paper run has the
+# database's own limits (migrations 0001/0002: `amount_usd between 1000 and 100000`), which a local-first run row
+# would otherwise meet only when the replicator sends it; a kind outside COMMAND_KINDS is rejected, never applied.
+RUN_AMOUNT_MIN_USD, RUN_AMOUNT_MAX_USD = 1_000.0, 100_000.0
+COMMAND_KINDS = ("new_run", "pause", "resume", "flatten_and_stop", ACCEPT_COMMAND, "set_level")
 # S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
 # candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
 # accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
@@ -115,6 +121,16 @@ CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": alread
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
 RECHECK_MINUTES = 15  # S78: a blocking reconciliation difference is checked again this often
 BREACH_CONFIRM_S = 60.0  # #211: a book breach must hold on two checks at least this far apart
+# M9 1.1 (audit R1): the prices the book's run end is measured on. A minute bar counts by itself only when it ended
+# at most MD_BAR_MAX_AGE_MIN minutes ago and its close is within MD_FAR_PCT % of the holding's last close mark;
+# otherwise only when the broker's own price for the position, read at this tick (at most MD_BROKER_MAX_AGE_S ago),
+# is within MD_AGREE_PCT % of it. A price that is neither is not used: the holding is measured at its last close mark.
+MD_BAR_MAX_AGE_MIN, MD_FAR_PCT, MD_AGREE_PCT, MD_BROKER_MAX_AGE_S = 5.0, 10.0, 2.0, 120.0
+# QA-Ops second key on #527: the other direction, a real fall must still end the book. A bar older than
+# MD_BAR_DEAD_MIN minutes is no price any more (the market data is down, or the symbol is silent on IEX): the
+# broker's price of this tick is then used alone, as for a holding without bars. A holding measured at its last
+# close mark for MD_UNCONFIRMED_ALARM_MIN minutes on end raises an event (`multi_day_book_unconfirmed`).
+MD_BAR_DEAD_MIN, MD_UNCONFIRMED_ALARM_MIN = 15.0, 5.0
 
 
 class FlattenIncomplete(RuntimeError):
@@ -381,6 +397,19 @@ class Engine:
         self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
         self.sleep = time.sleep  # QA-Ops (#282): the short wait for a cancel inside a flatten (a no-op in tests)
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
+        # M9 1.2: a `flatten_and_stop` / `new_run` command waiting for a flat book: id -> why no position is opened
+        self._cmd_waiting: dict[str, str] = {}
+        self._cmd_note: dict[str, str] = {}  # id -> the last logged reason it waits (logged once per change)
+        self._closed_seen: datetime | None = None  # when the broker's clock last said "closed" (_market_open_now)
+        # M9 1.1: the book's run end. A reading above the peak waiting for its second (run, when, equity); the last
+        # journalled reason the check was skipped; the splits booked today (day, symbols)
+        self._peak_try: tuple[int, datetime, float] | None = None
+        self._book_skip: tuple | None = None
+        self._splits_booked: tuple[str, set[str]] = ("", set())
+        # QA-Ops (#527): holdings measured at their last close mark: since when (run, symbol -> first check), and
+        # the ones already named in an event today (run, day, symbols)
+        self._unconf_since: tuple[int | None, dict[str, datetime]] = (None, {})
+        self._unconf_alarmed: tuple[int | None, str, set[str]] = (None, "", set())
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
@@ -403,6 +432,7 @@ class Engine:
         self._restore_positions()
         self._attach_ledger()
         self._rebuild_md_exits()  # #252: a flatten sale sent before a restart is still booked when it fills
+        self._restore_cmd_waiting()  # M9 1.2 (QA-Ops, #525): a flatten command that was waiting still blocks entries
         try:
             self._adopt_orphans()
         except Exception:  # adoption is best effort: if it fails the order stays unknown and blocks entries
@@ -696,6 +726,130 @@ class Engine:
                         prices[k] = px
         return b.strategy_pnl(names, prices)
 
+    def _book_pnl_checked(self, at_mark: Sequence[str] = ()) -> tuple[float, list[str]]:
+        """M9 1.1: the book's P&L for its run-end check, on confirmed prices only (`_md_price_checked`), and the
+        symbols whose live price was not used (measured at the last close mark instead). `_book_pnl` is unchanged:
+        the run's intraday end subtracts it from the run's equity, and both must be at the same prices.
+        `at_mark`: symbols measured at their last close mark whatever their price says (their shares are in
+        doubt, `_book_doubt`); they are not in the returned list."""
+        if self.daily is None:
+            return 0.0, []
+        rid = self._rid() or (self.day.run_id if self.day else None)
+        b = self.ledger.book(rid) if rid is not None else None
+        if b is None:
+            return 0.0, []
+        from kaibot.engine.failsafe import multi_day_names
+
+        names = set(multi_day_names())
+        prices, rejected = {}, set()
+        for k, sl in b.sleeves.items():
+            if k[0] in names and sl.qty > 1e-9 and k[1] not in at_mark:
+                px, ok = self._md_price_checked(k[1], sl)
+                if px:
+                    prices[k] = px
+                if not ok:
+                    rejected.add(k[1])
+        return b.strategy_pnl(names, prices), sorted(rejected)
+
+    def _md_price_checked(self, symbol: str, sl) -> tuple[float | None, bool]:
+        """M9 1.1 (audit R1): the price of a multi-day holding for the book's run end, and whether a live price was
+        accepted (False: there was one and it is not used; the caller measures at the last close mark).
+
+        - A minute bar that ended at most MD_BAR_MAX_AGE_MIN minutes ago, within MD_FAR_PCT % of the last close
+          mark: used.
+        - A bar that is older or further away: used only when the broker's price of this tick agrees with it
+          (MD_AGREE_PCT %). An old bar is one print read again and again; a far one may be a bad print, or a real
+          move, which the broker then shows too.
+        - No minute bar at all (a holding outside the live universe): the broker's price of this tick is the only
+          one there is and is used; the two checks of the book end then read it twice, a minute apart.
+        - A bar older than MD_BAR_DEAD_MIN minutes that the broker's price of this tick does not agree with is no
+          price any more: the broker's price is used alone, as for a holding without bars (QA-Ops, #527: with the
+          market data down, a fall the broker shows must still be counted).
+        - Otherwise nothing (the last close mark). That includes a holding with no live price at all: it is
+          named too (QA-Ops, #527), because the check does not see what it does today."""
+        px = self._md_price(symbol)
+        if not px:
+            return None, False
+        fresh_read = self._bpos_ts is not None and \
+            abs((self.now() - self._bpos_ts).total_seconds()) <= MD_BROKER_MAX_AGE_S
+        cp = (self._bpos.get(symbol) or {}).get("current_price") if fresh_read else None
+        cp = float(cp) if cp else None
+        if not self.market.last_close(symbol):  # no bar: `px` is the broker's price as last read
+            return (float(px), True) if cp else (None, False)
+        ref = sl.mark if sl.mark is not None else sl.avg_cost
+        end = getattr(self.market, "last_bar_end", None)
+        t = end(symbol) if end is not None else None
+        age_ok = t is not None and (self.now() - t).total_seconds() <= MD_BAR_MAX_AGE_MIN * 60
+        near = bool(ref) and abs(px / ref - 1) * 100 <= MD_FAR_PCT
+        if age_ok and near:
+            return float(px), True
+        if cp and abs(cp / px - 1) * 100 <= MD_AGREE_PCT:
+            return float(px), True
+        if cp and t is not None and (self.now() - t).total_seconds() > MD_BAR_DEAD_MIN * 60:
+            return cp, True
+        return None, False
+
+    def _book_actions_today(self, symbols) -> dict:
+        """Held symbols with a corporate action today: an announced split, reverse split, spin-off, merger or symbol
+        change with today's date (what the corporate-action guard already read: no call is made here), and a split
+        the engine booked today."""
+        today = str(self.day.day) if self.day else str(self.now().astimezone(_et()).date())
+        out: dict = {}
+        ca, ev = getattr(self.daily, "ca", None), getattr(self.daily, "_ca_evening", None)
+        if ca is not None and ev is not None:
+            try:
+                out = {s: a for s, a in ca.known(ev, symbols).items() if str(a.on) == today}
+            except Exception:
+                log.exception("book end: the announced corporate actions could not be read from the guard")
+        if self._splits_booked[0] == today:
+            for s in self._splits_booked[1] & set(symbols):
+                out.setdefault(s, "a split booked today")
+        return out
+
+    def _book_check_blocked(self, b) -> str | None:
+        """M9 1.1: why holdings of the book are not measured at today's prices at this tick (None: all are)."""
+        return self._book_doubt(b)[0]
+
+    def _book_doubt(self, b) -> tuple[str | None, list[str]]:
+        """M9 1.1: the held symbols whose live price says nothing about the book at this tick, and why (None, []:
+        none). A split the ledger has not booked yet reads as a fall (the old share count at the new price), in the
+        bars and at the broker alike. So a held symbol is in doubt while its shares differ between the ledger and
+        the broker's positions of this tick (a difference the owner accepted aside; a symbol with an order under
+        way is compared once that settled, as the drift check does), or while it has a corporate action today.
+
+        QA-Ops second key on #527: the check is NOT skipped for the whole book while a symbol is in doubt (a
+        difference that stays open for days would leave the book without its run end for days). The symbols in
+        doubt are measured at their last close mark, which a split booked today has already divided, and every
+        other holding at its confirmed price: `_book_end_check`."""
+        from kaibot.engine.failsafe import multi_day_names
+
+        names = set(multi_day_names())
+        held = sorted({k[1] for k, sl in b.sleeves.items() if k[0] in names and sl.qty > 1e-9})
+        if not held:
+            return None, []
+        acts = self._book_actions_today(held)
+        why = ["a corporate action today: " + ", ".join(
+            f"{s} ({getattr(a, 'action', a)})" for s, a in sorted(acts.items()))] if acts else []
+        if self._bpos_ts is None or abs((self.now() - self._bpos_ts).total_seconds()) > MD_BROKER_MAX_AGE_S:
+            return ("; ".join(why) or None), sorted(acts)  # no positions read of this tick to compare with
+        unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
+        unsettled |= {k[1] for x in self._md_exits.values() for k, _ in x["keys"]}
+        with contextlib.suppress(Exception):
+            unsettled |= set(self.daily.working_symbols())
+        mine, intraday = b.qty_by_symbol(), {}
+        for p in self.pos.values():
+            intraday[p.symbol] = intraday.get(p.symbol, 0.0) + p.qty
+        diff = {s: float((self._bpos.get(s) or {}).get("qty") or 0) - intraday.get(s, 0.0) - mine.get(s, 0.0)
+                for s in held if s not in unsettled and s not in acts}
+        diff = {s: d for s, d in diff.items() if abs(d) > 1e-6}
+        if diff:
+            accepted = self.recon.accepted
+            diff = {s: d for s, d in diff.items() if abs(d - accepted.get(("quantity", s), 0.0)) > 1e-6}
+        if diff:
+            why.append("shares differ between the ledger and the broker: " + ", ".join(
+                f"{s} ({d:+g})" for s, d in sorted(diff.items())))
+        return ("; ".join(why) or None), sorted(set(acts) | set(diff))
+
     def _book_peak(self, rid: int) -> float | None:
         peak = None
         for _, _, _, e in self.journal.entries(kinds=("md_book_peak",)):
@@ -715,7 +869,7 @@ class Engine:
         except Exception:
             log.exception("book line at the close marks not computed")
 
-    def _book_end_check(self, book_pnl: float, at_close: bool = False) -> None:
+    def _book_end_check(self, book_pnl: float, at_close: bool = False, *, unconfirmed: Sequence[str] = ()) -> None:
         """#206 (stakeholder decision 13 Nov 2026, decision 15 section 11): the multi-day book's own run end.
         Book equity = the run's pot + the book's P&L since the run began; its peak is journalled (`md_book_peak`),
         so a restart measures from the same peak. At `BookLimits.run_drawdown_end_pct` below the peak (the level's
@@ -739,16 +893,61 @@ class Engine:
         if not rules:
             return
         end = min(r.builder.limits.run_drawdown_end_pct for r in rules)
+        now = self.now()
+        why = None
+        if not at_close:  # M9 1.1: holdings whose shares are in doubt (an unbooked split) are not measured live
+            why, doubt = self._book_doubt(b)
+            if why is not None:
+                # QA-Ops second key on #527: the check goes on for the rest of the book. The symbols in doubt
+                # stand at their last close mark; journalled and raised as an event once per run, day and reason
+                book_pnl, unconfirmed = self._book_pnl_checked(at_mark=doubt)
+                key = (rid, str(now.astimezone(_et()).date()), tuple(doubt))
+                if self._book_skip != key:
+                    self._book_skip = key
+                    log.warning("the multi-day book's run end does not see today's prices of %s: %s",
+                                ", ".join(doubt), why)
+                    self.journal.append("md_book_check_skipped", {"run_id": rid, "why": why, "symbols": doubt,
+                                                                  "ts": now.isoformat()})
+                    self.store.event("multi_day_book_unchecked", {
+                        "run_id": rid, "why": why, "symbols": doubt, "ts": now.isoformat(),
+                        "action": "these holdings are measured at their last close mark until the difference is "
+                                  "cleared; the book's run end is still checked on every other holding"}, rid)
+            self._unconfirmed_alarm(rid, now, unconfirmed)
         equity = float(b.amount) + book_pnl
         peak = self._book_peak(rid)
-        if peak is None or equity > peak + 0.005:
-            peak = max(peak or float(b.amount), equity)
-            self._book_peak_ts = self.now().isoformat()
+        if peak is None:  # the pot: the book's equity before its first trade
+            peak = float(b.amount)
+            self._book_peak_ts = now.isoformat()
             self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self._book_peak_ts})
+        if equity > peak + 0.005:
+            # M9 1.1 (audit R1): the peak never comes down, so one high reading must not set it. At the close
+            # marks it is taken at once; during the session only from two readings above it at least
+            # BREACH_CONFIRM_S apart (the lower of the two), as the breach itself needs two checks.
+            t = self._peak_try if self._peak_try is not None and self._peak_try[0] == rid else None
+            new = None
+            if at_close:
+                new = equity
+            elif t is None:
+                self._peak_try = (rid, now, equity)
+            elif (now - t[1]).total_seconds() >= BREACH_CONFIRM_S:
+                new = min(t[2], equity)
+            else:
+                self._peak_try = (rid, t[1], min(t[2], equity))
+            if new is not None:
+                peak, self._peak_try = new, None
+                self._book_peak_ts = now.isoformat()
+                self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2),
+                                                     "ts": self._book_peak_ts})
+        elif not at_close:
+            self._peak_try = None  # a reading at or below the peak in between: start over
         # #229, reporting only: the book's distance to its stop line, repeated in every heartbeat (`_daily_status`)
         self.book_line = {"run_id": rid, "equity": round(equity, 2), "peak": round(peak, 2),
                           "peak_ts": self._book_peak_ts, "drawdown_pct": round(drawdown_pct(peak, equity), 2),
                           "end_pct": end, "ended": False}
+        if unconfirmed and not at_close:  # M9 1.1: holdings whose live price was not used (at the last close mark)
+            self.book_line["unconfirmed"] = list(unconfirmed)
+        if why is not None:
+            self.book_line["unchecked"] = why
         if self._breach_rid != rid:  # QA-Ops second key on #213: an unconfirmed breach survives a restart
             self._breach, self._breach_rid = self._journalled_breach(rid), rid
         if at_close:  # after the close: the line and the peak only (see `_book_line_marked`)
@@ -778,6 +977,32 @@ class Engine:
             return
         self._breach = None
         self._book_end(rid, peak, equity, end, [r.name for r in rules])
+
+    def _unconfirmed_alarm(self, rid: int, now: datetime, unconfirmed: Sequence[str]) -> None:
+        """QA-Ops second key on #527: a holding measured at its last close mark (its live price was rejected, or it
+        has none) is a holding whose fall the book's run end does not see. The heartbeat names it at once; after
+        MD_UNCONFIRMED_ALARM_MIN minutes of checks on end it is an event, once per run, day and symbol."""
+        if self._unconf_since[0] != rid:
+            self._unconf_since = (rid, {})
+        since = self._unconf_since[1]
+        for s in [s for s in since if s not in unconfirmed]:
+            del since[s]
+        for s in unconfirmed:
+            since.setdefault(s, now)
+        day = str(now.astimezone(_et()).date())
+        if self._unconf_alarmed[:2] != (rid, day):
+            self._unconf_alarmed = (rid, day, set())
+        due = sorted(s for s, t in since.items() if s not in self._unconf_alarmed[2]
+                     and (now - t).total_seconds() >= MD_UNCONFIRMED_ALARM_MIN * 60)
+        if not due:
+            return
+        self._unconf_alarmed[2].update(due)
+        log.error("the multi-day book's run end measures %s at the last close mark: no confirmed price for %g "
+                  "minutes", ", ".join(due), MD_UNCONFIRMED_ALARM_MIN)
+        self.store.event("multi_day_book_unconfirmed", {
+            "run_id": rid, "symbols": due, "since": {s: since[s].isoformat() for s in due}, "ts": now.isoformat(),
+            "action": "measured at the last close mark: no minute bar that counts and no broker price that "
+                      "agrees; the book's run end does not see today's move of these holdings"}, rid)
 
     def _journalled_breach(self, rid: int) -> tuple[int, datetime] | None:
         """The run's unconfirmed book breach from the journal (`md_book_breach` not followed by a
@@ -873,6 +1098,8 @@ class Engine:
         d = self.day
         if self.run is None or self.run.get("status") != "running":
             return "no running run"
+        if self._cmd_waiting:  # M9 1.2: "Flatten and stop" (or a new run) is selling the book
+            return next(iter(self._cmd_waiting.values()))
         if not self.account_clean:
             return "account not clean"
         if not self._reconciled():
@@ -1307,17 +1534,25 @@ class Engine:
         for c in self.store.pending_commands():
             kind, pl = c["kind"], c.get("payload") or {}
             try:
+                why = self._command_refusal(kind, pl)
+            except Exception as e:  # QA-Ops (#513): a row the check itself cannot read is refused, never applied,
+                log.exception("command %r: the check failed", kind)  # and never raises out of the tick
+                why = f"the command could not be checked: {str(e)[:120]}"
+            if why is not None:  # M9 1.15: refused before anything is done (a bad new_run sells nothing)
+                self._reject_command(c, why)
+                continue
+            try:
                 if kind == "new_run":
-                    if self.pos or self._md_sleeves() or self._md_exits:  # close the old run's positions first
-                        self.flatten_all("manual")  # (multi-day sleeves too, S80); the command waits until flat
-                        continue
+                    if not self._flat_for_command(c, kind):  # close the old run's positions first (multi-day
+                        continue  # sleeves too, S80); the command waits until flat
                     self._new_run(float(pl["amount_usd"]), pl["level"])
                 elif kind == "pause" and self.run:
                     self._set_run_status("paused")
                 elif kind == "resume" and self.run:
                     self._set_run_status("running")
                 elif kind == "flatten_and_stop" and self.run:
-                    self.flatten_all("manual")
+                    if not self._flat_for_command(c, kind):  # M9 1.2: pending until nothing is left to sell
+                        continue
                     self._end_run("stopped", "stopped by user")
                 elif kind == ACCEPT_COMMAND and self.run:  # S78: the owner accepts the open differences
                     self._accept_reconcile(pl)
@@ -1334,14 +1569,144 @@ class Engine:
                         returning=False,
                     )
                 self.store.mark_applied(c["id"])
+                self._cmd_done(str(c["id"]))
                 self.store.event(f"command_{kind}", pl, self._rid())
             except Exception as e:  # a bad command must never stop the engine
                 log.exception("command %s failed", kind)
+                self._cmd_done(str(c.get("id")))
                 self.store.mark_applied(c["id"], {**pl, "error": str(e)[:200]})
 
+    def _cmd_wait(self, cid: str, kind: str, why: str) -> None:
+        """QA-Ops second key on #525: the entry block of a waiting flatten command is journalled when it starts
+        (and raised as one `command_waiting` event), so that a restart keeps it. Without it, an engine that came
+        back while Supabase was unreachable (`pending_commands` answers none) would open positions in a book the
+        owner had told it to sell."""
+        if cid not in self._cmd_waiting:
+            rid = self._rid()
+            self.journal.append("command_waiting", {"id": cid, "kind": kind, "why": why, "run_id": rid,
+                                                    "ts": self.now().isoformat()})
+            self.store.event("command_waiting", {"command_id": cid, "kind": kind, "why": why,
+                                                 "action": "no position is opened until the book is flat; the "
+                                                           "sales are sent while the market is open and tried "
+                                                           "again on every pass"}, rid)
+        self._cmd_waiting[cid] = why
+
+    def _cmd_done(self, cid: str) -> None:
+        self._cmd_note.pop(cid, None)
+        if self._cmd_waiting.pop(cid, None) is not None:
+            self.journal.append("command_done", {"id": cid, "ts": self.now().isoformat()})
+
+    def _restore_cmd_waiting(self) -> None:
+        """The waiting flatten commands of the running run, from the journal (`command_waiting` without its
+        `command_done`). The command itself is read again from the store; until it is, the block stands. It ends
+        with the command (applied, or failed) or with the run."""
+        rid = self._rid()
+        waiting: dict[str, str] = {}
+        if rid is not None:
+            for _, _t, kind, b in self.journal.entries(kinds=("command_waiting", "command_done")):
+                if kind == "command_done":
+                    waiting.pop(str(b.get("id")), None)
+                elif b.get("run_id") == rid:
+                    waiting[str(b.get("id"))] = str(b.get("why") or "a flatten command is pending")
+        self._cmd_waiting = waiting
+        if waiting:
+            log.warning("a flatten command was waiting before the restart (%s): no position is opened until it "
+                        "is completed", ", ".join(sorted(waiting)))
+
+    def _flat_for_command(self, c: dict, kind: str) -> bool:
+        """M9 1.2 (audit R2): is the book flat, so that this `flatten_and_stop` or `new_run` can be completed?
+
+        While it is not, the command stays pending and every loop pass (about 10 s) comes back here: the flatten is
+        run again (`_exit` skips a position that has its exit order, `_flatten_md` a sleeve whose sale is out), and
+        what it could not close (`FlattenIncomplete`) is tried again by the next pass instead of being written on
+        the command as an error. Sales are sent only while the market is open: a DAY market order sent after the
+        close would wait for the next open (`_book_end_check` avoids the same); with the clock unreadable nothing
+        is sent. As long as the command waits no position is opened (`entry_block`, `_may_enter`); the block is
+        kept in memory until the command is completed, so a pass that could not read the commands (Supabase
+        unreachable: `pending_commands` answers none) does not lift it."""
+        cid = str(c.get("id"))
+        new = kind == "new_run"
+        flat = not (self.pos or self._md_sleeves() or self._md_exits) if new else self._nothing_to_sell()
+        if flat and not new:  # nothing to sell: the flatten still cancels the daily path's working orders (#207),
+            try:  # once, at any hour (it sends no sale), before the run is ended
+                self.flatten_all("manual")
+            except Exception as e:
+                log.warning("command %s (id %s): the last flatten failed (%s): tried again", kind, cid, e)
+                flat = False
+        if flat:
+            return True  # the caller completes the command (`_cmd_done` lifts the block)
+        self._cmd_wait(cid, kind, "new run pending: the old book is being sold" if new else "flatten and stop pending")
+        note = "the market is closed (or its clock could not be read): the sales wait for the open"
+        if self._market_open_now():
+            note = "sales sent, waiting for their fills"
+            try:
+                self.flatten_all("manual")
+            except FlattenIncomplete as e:
+                note = str(e)[:300]
+            except Exception as e:  # nothing here may lose the command
+                note = f"flatten failed: {type(e).__name__}: {e}"[:300]
+        if self._cmd_note.get(cid) != note:  # once per change, not every 10 s
+            self._cmd_note[cid] = note
+            log.warning("command %s (id %s) stays pending: %s", kind, cid, note)
+        return False
+
+    def _nothing_to_sell(self) -> bool:
+        """For "Flatten and stop": no intraday position, no multi-day sale still to book, and no multi-day sleeve
+        the venue still holds shares of. A sleeve the venue holds nothing of (a ledger/broker difference, which
+        `_flatten_md` does not sell either) does not keep the run from ending; an unreadable venue does."""
+        if self.pos or self._md_exits:
+            return False
+        symbols = {k[1] for k in self._md_sleeves()}
+        if not symbols:
+            return True
+        try:
+            have = self.broker.positions()
+        except Exception as e:
+            log.warning("flatten and stop: the broker's positions could not be read (%s): not ended yet", e)
+            return False
+        return all(float((have.get(s) or {}).get("qty") or 0) <= 0 for s in symbols)
+
+    def _market_open_now(self) -> bool:
+        """The broker's clock, for a command's sales. A "closed" answer is kept for 30 s (a pending command asks on
+        every loop pass, all weekend); an "open" one is never kept, so no sale follows the close by a stale read."""
+        now = self.now()
+        if self._closed_seen is not None and timedelta(0) <= now - self._closed_seen < timedelta(seconds=30):
+            return False
+        try:
+            is_open = bool(self.broker.clock()["is_open"])
+        except Exception as e:
+            log.warning("the broker's clock could not be read (%s): no sale is sent", e)
+            return False
+        self._closed_seen = None if is_open else now
+        return is_open
+    def _command_refusal(self, kind, pl) -> str | None:
+        """M9 1.15 (audit S1): why this command row is not applied (None: it is). The command table is written with
+        the service-role key by more than the dashboard's RPC, so the engine checks the row itself: the kind against
+        COMMAND_KINDS, and a `new_run`'s pot and level (`run_refusal`) BEFORE the old run's book is sold."""
+        if not isinstance(kind, str) or kind not in COMMAND_KINDS:
+            return "unknown command kind"
+        if not isinstance(pl, Mapping):
+            return "the payload is not an object"
+        if kind == "new_run":
+            return run_refusal(pl.get("amount_usd"), pl.get("level"), self.policies)
+        return None
+
+    def _reject_command(self, c: dict, why: str) -> None:
+        """A refused command: marked applied with the reason (it is never looked at again) and one
+        `command_rejected` event. The event's type never carries the row's own kind."""
+        kind, pl = c.get("kind"), c.get("payload")
+        log.error("command %r (id %s) rejected: %s", kind, c.get("id"), why)
+        try:
+            self.store.mark_applied(c["id"], {**(pl if isinstance(pl, Mapping) else {}), "error": why[:200]})
+            self.store.event("command_rejected", {"command_id": c.get("id"), "kind": str(kind)[:40], "reason": why,
+                                                  "payload": _brief(pl)}, self._rid())
+        except Exception:  # a bad command must never stop the engine
+            log.exception("command %r: the rejection could not be recorded", kind)
+
     def _new_run(self, amount: float, level: str) -> None:
-        if level not in self.policies:
-            raise ValueError(f"unknown level {level}")
+        why = run_refusal(amount, level, self.policies)  # M9 1.15: never a run outside the limits, whoever calls
+        if why is not None:
+            raise ValueError(why)
         if self.run:
             self._end_run("ended", "replaced by a new run")
         run = self.store.insert(
@@ -2177,6 +2542,10 @@ class Engine:
         if a.kind == "dividend" and self.day is not None:
             self.day.adjust += b.dividends_total - div0
         if a.kind == "split" and b.qty_by_symbol().get(a.symbol, 0.0) != qty0:
+            today = str(self.day.day) if self.day else str(self.now().astimezone(_et()).date())
+            if self._splits_booked[0] != today:
+                self._splits_booked = (today, set())
+            self._splits_booked[1].add(a.symbol)  # M9 1.1: no book-end check on that symbol's prices today
             r = float(a.ratio)
             for p in self.pos.on(a.symbol):
                 s = b.sleeves.get(p.key)
@@ -2243,7 +2612,8 @@ class Engine:
         # intraday end (unchanged: RiskPolicy.run_drawdown_end_pct, the same formula) is measured without the book's
         # P&L. Without the daily path the book's P&L is 0 and this is exactly the check it always was.
         book_pnl = self._book_pnl()
-        self._book_end_check(book_pnl)
+        checked, unconfirmed = self._book_pnl_checked()  # M9 1.1: the book's end on confirmed prices only
+        self._book_end_check(checked, unconfirmed=unconfirmed)
         eq_i = intraday_equity(eq, book_pnl)
         self.peak = max(self.peak or eq_i, eq_i)
         if self.peak and run_drawdown_reached(self.peak, eq_i, pol.run_drawdown_end_pct):
@@ -2262,6 +2632,8 @@ class Engine:
     def _may_enter(self, m: int) -> bool:
         d = self.day
         if self.run is None or self.run["status"] != "running" or not self.account_clean or self.kill:
+            return False
+        if self._cmd_waiting:  # M9 1.2: nothing is opened while a flatten command waits
             return False
         if not self._reconciled():  # S78: an open ledger/broker difference blocks entries (exits go on)
             return False
@@ -3200,6 +3572,29 @@ class Engine:
         if self.run is None and d is not None and d.run_id:
             st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
         return st
+
+
+def run_refusal(amount, level, policies) -> str | None:
+    """M9 1.15: why a paper run with this pot and level may not be started (None: it may). The pot is a finite
+    number from RUN_AMOUNT_MIN_USD to RUN_AMOUNT_MAX_USD (the database's own constraint on `run.amount_usd`), the
+    level one of the loaded profiles."""
+    if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
+        return f"amount_usd is not a number: {_brief(amount)}"
+    try:
+        x = float(amount)
+    except (ValueError, OverflowError):  # OverflowError: a whole number too large for a float (QA-Ops, #513)
+        return f"amount_usd is not a number: {_brief(amount)}"
+    if not math.isfinite(x) or not RUN_AMOUNT_MIN_USD <= x <= RUN_AMOUNT_MAX_USD:
+        return (f"amount_usd {_brief(amount)} is outside the limits "
+                f"({RUN_AMOUNT_MIN_USD:,.0f} to {RUN_AMOUNT_MAX_USD:,.0f} dollars)")
+    if not isinstance(level, str) or level not in policies:
+        return f"unknown level {_brief(level)}"
+    return None
+
+
+def _brief(v) -> str:
+    """A command's own value for a log line or an event: its text, cut short (it is not trusted)."""
+    return repr(v)[:120]
 
 
 def _refused(err: Exception) -> bool:

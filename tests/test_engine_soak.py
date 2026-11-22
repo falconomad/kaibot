@@ -444,9 +444,10 @@ def test_d7_a_manual_flatten_reports_what_is_still_open(tmp_path):
     step(eng, broker, clock, open_utc, 0, 57)
     refuse_close(broker, {"A"})
     store.insert("command", {"kind": "flatten_and_stop", "payload": {}, "idempotency_key": "k9", "applied_at": None})
-    eng.apply_commands()  # a bad command never stops the engine: the error goes on the command
+    eng.apply_commands()  # a bad command never stops the engine
     cmd = store.tables["command"][-1]
-    assert cmd["applied_at"] and cmd["payload"]["error"].startswith("flatten (manual) incomplete, still open: A")
+    assert cmd["applied_at"] is None and "error" not in cmd["payload"]  # M9 1.2: it stays pending and is retried
+    assert eng._cmd_note[str(cmd["id"])].startswith("flatten (manual) incomplete, still open: A")
     assert eng.pos["B"].exit_order_id and eng.pos["A"].exit_order_id is None
 
 

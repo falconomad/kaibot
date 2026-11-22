@@ -13,15 +13,16 @@ def _sells(a):
 
 
 def _stopped_and_restarted(tmp_path, k: int) -> Account:
-    """The book holds B; "Flatten and stop" at minute `k` of DAY2 ends the run and sends B's sale; the engine dies
-    before the sale fills and comes back with no run, no session and the sale rebuilt from the journal."""
+    """The book holds B; the run ends at minute `k` of DAY2 with B's sale sent and not filled, as the run's drawdown
+    end does it (`_risk_halts`: the flatten, then the run's end). The engine dies before the sale fills and comes
+    back with no run, no session and the sale rebuilt from the journal. (Until M9 1.2 "Flatten and stop" ended the
+    run this way too; it now waits for the sale to be booked.)"""
     a = Account(tmp_path)
     a.day1()
     a.ticks(a.open2, 0, k)
-    a.store.insert("command", {"kind": "flatten_and_stop", "payload": {}, "idempotency_key": "k9",
-                               "applied_at": None})
-    a.eng.apply_commands()
-    assert a.store.tables["run"][0]["status"] == "stopped" and _sells(a) == []
+    a.eng.flatten_all("run_drawdown")
+    a.eng._end_run("ended", "drawdown 8% from peak")
+    assert a.store.tables["run"][0]["status"] == "ended" and _sells(a) == []
     a.restart()
     assert a.eng.run is None and a.eng.day is None and len(a.eng._md_exits) == 1
     return a
