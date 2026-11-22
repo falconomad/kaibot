@@ -91,6 +91,7 @@ class DailyAccount(Account):
         """The daily path's orders at the venue (near-close DAY market orders since #333)."""
         return [o for o in self.broker.orders.values()
                 if str(o.get("client_order_id")).startswith(f"kb{self.rid}-{MD}-")
+                and "-flatten-" not in str(o.get("client_order_id"))  # M9 1.8 (#433): the engine's flatten sale
                 and (o["type"], o["time_in_force"]) == ("market", "day")]
 
 

@@ -564,6 +564,18 @@ class LiveDaily:
             self.stops = ProtectiveStops(self.om, run=rid)
         return self.om
 
+    def manager_for(self, rid: int) -> OrderManager:
+        """M9 1.8 (#433): the order manager for the engine's flatten sales of run `rid`: this path's own manager;
+        when the path has none because the run has ended and the engine restarted since, one for that run, so a
+        flatten sale still in flight is looked up and its fills are booked to the run it belongs to."""
+        om = self._manager()
+        if om is None:
+            self._rid = rid
+            self.om = om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
+                                        position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
+            self.stops = ProtectiveStops(om, run=rid)
+        return om
+
     def _on_fill(self, f: Fill, r: OrderRecord) -> None:
         """The manager journalled the ledger's `fill` entry; fold the same body into the engine's ledger."""
         body = {"run_id": self.om.run_id, "coid": f.coid, "activity": f.activity, "strategy": f.strategy,
@@ -821,7 +833,9 @@ class LiveDaily:
         sides = self._cancel_sides()
         out = []
         for r in om.working():
-            if r.purpose == "stop" or r.side not in sides or r.state is St.PENDING_CANCEL:
+            # a protective stop is not this path's; nor is the engine's own flatten sale (M9 1.8, #433): the flatten
+            # that asked for this cancel sends it
+            if r.purpose in ("stop", "flatten") or r.side not in sides or r.state is St.PENDING_CANCEL:
                 continue
             try:
                 om.cancel(r.coid)
