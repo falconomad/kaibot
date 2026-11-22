@@ -33,22 +33,24 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--why", default="")
     ap.add_argument("--date", default=None, help="the proposal's date (default today)")
     ap.add_argument("--ledger", default=str(LEDGER))
-    ap.add_argument("--trials", default=str(ROOT / "data" / "trials.jsonl"), help="the registry file ('' = none)")
+    ap.add_argument("--trials", default=str(ROOT / "data" / "trials.jsonl"),
+                    help="the registry file; required: every accepted proposal is counted (#472)")
     a = ap.parse_args(argv)
     if not (a.proposer.startswith("model:") or a.proposer.startswith("human:")) or len(a.proposer) < 7:
         raise SystemExit("propose: --proposer is model:<pinned model id> or human:<name>")
     if a.family not in g3.GateV3.load().families:
         raise SystemExit(f"propose: family {a.family!r} is not in config/gate_v3.yaml")
+    if not str(a.trials).strip():
+        raise SystemExit("propose: --trials is required: an accepted proposal is always counted in the registry")
     on = date.fromisoformat(a.date) if a.date else date.today()
     try:
         row = pr.intake(a.ledger, a.formula, proposer=a.proposer, family=a.family, on=on, why=a.why)
     except pr.FormulaError as e:
         raise SystemExit(f"propose: refused: {e}") from None
-    if a.trials:
-        trials_mod.append(a.trials, {"trial_id": f"proposal_{row['id']}", "strategy": f"proposal_{row['id']}",
-                                     "variant": "proposal", "proposal_id": row["id"], "family": a.family,
-                                     "n_trials": 1, "params": {"formula": row["canonical"]},
-                                     "duplicate_of": row["duplicate_of"], "proposer": a.proposer})
+    trials_mod.append(a.trials, {"trial_id": f"proposal_{row['id']}", "strategy": f"proposal_{row['id']}",
+                                 "variant": "proposal", "proposal_id": row["id"], "family": a.family,
+                                 "n_trials": 1, "params": {"formula": row["canonical"]},
+                                 "duplicate_of": row["duplicate_of"], "proposer": a.proposer})
     print(f"proposal {row['id']} accepted: {row['canonical']}" + (f" (duplicate of {row['duplicate_of']}, counted)"
                                                                   if row["duplicate_of"] else ""))
     return row

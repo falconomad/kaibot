@@ -102,7 +102,12 @@ def test_the_intake_script_writes_the_ledger_and_a_trial_row(tmp_path):
     assert t["variant"] == "proposal" and t["proposal_id"] == row["id"] and t["n_trials"] == 1
     with pytest.raises(SystemExit, match="refused"):
         propose.main(["--formula", "open('x')", "--family", "cross_sectional_momentum", "--proposer", "human:me",
-                      "--ledger", str(led), "--trials", ""])
+                      "--ledger", str(led), "--trials", str(reg)])
     with pytest.raises(SystemExit, match="not in config"):
         propose.main(["--formula", "ret(5)", "--family", "astrology", "--proposer", "human:me", "--ledger", str(led),
-                      "--trials", ""])
+                      "--trials", str(reg)])
+    # QA (#575): no proposal without its trial row; `--trials ''` is refused before the ledger is touched
+    with pytest.raises(SystemExit, match="--trials is required"):
+        propose.main(["--formula", "ret(5)", "--family", "cross_sectional_momentum", "--proposer", "human:me",
+                      "--ledger", str(led), "--trials", ""])
+    assert len(pr.read_proposals(led)) == 1 and len(reg.read_text().splitlines()) == 1
