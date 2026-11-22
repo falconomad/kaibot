@@ -203,6 +203,13 @@ def test_the_stored_percentile_gives_the_same_p_value_as_the_runs():
     assert n["percentile"] == 94.6 and n["p_value"] == pytest.approx((1 + 27) / 501)
 
 
+def test_the_momentum_family_only_grows():
+    """QA-Ops (#556): the family size is read from the config, so a rule taken out of the list would quietly shrink
+    the Bonferroni factor of every verdict in it. The list is append-only: every rule it has named stays."""
+    named = {"trend_momentum", "mom_12_1_band", "mom_12_1_band_nofilter", "rel_strength", "trend_momentum_band"}
+    assert named <= set(GATE.families["cross_sectional_momentum"]["rules"]) and len(named) <= MOMENTUM
+
+
 def test_family_p_is_bonferroni_inside_the_family():
     p = g3.family_p(GATE, {"trend_momentum": 0.01, "mom_12_1_band": 0.2, "spy_trend_filter": 0.03})
     assert p["cross_sectional_momentum"] == pytest.approx(MOMENTUM * 0.01)  # every listed rule counts
