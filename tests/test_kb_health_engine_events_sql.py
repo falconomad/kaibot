@@ -28,21 +28,17 @@ ROUTINE = {"cash_merger_booked", "dividend_booked", "split_booked", "config_appl
            "multi_day_canceled", "multi_day_decision", "multi_day_fill", "multi_day_orders", "multi_day_plan",
            "multi_day_review_applied", "multi_day_sold", "multi_day_stops_cancelled", "multi_day_view_dropped",
            "positions_rewritten", "session_restored"}
-# Health events of M9 tickets whose kb_health migration is not written yet: three open PRs add events, and each
-# cannot bring its own migration (one number, and 0038 is in an open PR). One migration lists them all once they are
-# merged, and empties this set. Until then the events are written and replicated; the Health page does not show them.
+# Health events whose kb_health migration is still to come (several open PRs cannot each bring one: one free number).
+# Empty since 0039 listed M9's replica_poison, replica_backlog, clock_skew and calendar_expiring. A name here is
+# written and replicated, but the Health page does not show it: keep it empty.
 AWAITING_KB_HEALTH: set[str] = set()
 # S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
 # nothing and a failure stops nothing, so neither is a health event
 ROUTINE |= {"market_alarm", "market_alarm_error"}
-# M9 1.12 (#437): a row Supabase refuses for good was skipped; rows waiting for ten minutes and not getting fewer
-AWAITING_KB_HEALTH |= {"replica_poison", "replica_backlog"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
-# M9 1.10 (#435): the host clock and the broker's disagree by more than five seconds (and "ok" when it is over)
-AWAITING_KB_HEALTH |= {"clock_skew"}
 
 # Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
 # missed). Each dynamic call site below, and where its names come from; a new dynamic call fails
@@ -63,8 +59,6 @@ DYNAMIC_SITES = {
     ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),
 }
 FALLBACK_RE = re.compile(r'"event":\s*"([a-z_0-9]+)"')
-# M9 1.17 (#442): the macro calendar or the dead-man's holiday table ends within 30 days
-AWAITING_KB_HEALTH |= {"calendar_expiring"}
 AGENT_EVENT_RE = re.compile(r'^EVENT\s*=\s*"([a-z_0-9]+)"', re.M)
 QUEUED_RE = re.compile(r'_events\.append\(\(\s*"([a-z_0-9]+)"')
 COMMAND_RE = re.compile(r'\bkind == (?:"([a-z_]+)"|([A-Z_]+))')

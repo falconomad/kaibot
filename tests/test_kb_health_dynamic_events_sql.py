@@ -34,10 +34,12 @@ def test_0036_is_0033_with_only_the_new_types_added():
     assert "grant execute on function public.kb_health() to authenticated;" in tail_new
 
 
-def test_0036_is_the_latest_definition_of_kb_health():
-    later = sorted(p.name for p in (ROOT / "migrations").glob("*.sql")
+def test_every_later_definition_of_kb_health_keeps_0036s_types():
+    """0039 redefines kb_health after 0036; every later definition must still list 0036's types."""
+    later = sorted(p for p in (ROOT / "migrations").glob("*.sql")
                    if p.name > M36.name and "function public.kb_health()" in p.read_text())
-    assert later == []
+    for p in later:
+        assert set(_types(_sql(M36))) <= set(_types(_sql(p))), p.name
 
 
 def test_0036_has_no_destructive_statement():

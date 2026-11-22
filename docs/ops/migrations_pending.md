@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0036 applied; 0037 and 0038 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0036 applied; 0037-0039 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -37,6 +37,7 @@ Owner: backend-quant. Last checked against main on 21 Nov 2026 (0001-0036 applie
 - 0036: **applied by Product on 21 Nov 2026** (checked: step 23 query true; not executable by anon) (step 23 below; dashboard read only, any time; kb_health's dynamically named events: `multi_day_column_missing` of #410, `multi_day_review`, `command_accept_reconcile`). After 0033.
 - 0037: **pending** (step 24 below; the PR for #439, M9 ticket 1.14: the owner accepts a ledger/broker difference from the dashboard). Changes live trading behaviour when used: an accepted difference lifts the stop on new buys. The stakeholder's to apply.
 - 0038: **pending** (step 25 below; M10 ticket 1.26, #451: the helpers' narrow key path). Independent of 0037. Any time, also while the engine runs; then the one-time setup of `docs/ops/helper_role.md`.
+- 0039: **pending** (step 26 below; dashboard read only, any time; kb_health's M9 events: `replica_poison` and `replica_backlog` of #437, `clock_skew` of #435, `calendar_expiring` of #442). After 0036. Independent of 0037 and 0038. Changes no trading behaviour.
 
 ## Apply in this order
 
@@ -70,6 +71,7 @@ run it again. Do not reorder them.
 | 23 | `migrations/0036_kb_health_dynamic_events.sql` (whole file; the PR for kb_health's dynamically named events). After 0033. Any time, also while the engine runs: dashboard read only | `kb_health` also returns three health events the engine sends under a name not written at the call, which 0033's grep missed: `multi_day_column_missing` (0034 not applied: the minute rows go without `multi_day`, retried hourly; #384, PR #410), `multi_day_review` (the pre-open review's verdicts when it is on, #131) and `command_accept_reconcile` (the owner accepted the open ledger differences, S78). 0033's function otherwise, owner-only; the engine does not call it | No: one `create or replace function`, then the revoke/grant of 0021 |
 | 24 | `migrations/0037_accept_reconcile_command.sql` (whole file; the PR for #439, M9 ticket 1.14). After 0005. **Outside 09:30-16:00 ET** (the engine reads `kaibot.command` every loop) | The dashboard can queue the owner's `accept_reconcile` command: `kaibot.command`'s kind check allows it, and `kb_command` takes it with a reason (3 to 200 characters) and the differences the owner's screen showed (`shown`: kind, symbol, offset). The engine accepts only when `shown` is exactly what it finds at the broker when it reads again; otherwise it refuses and buys stay stopped. The other kinds are 0005's, unchanged. Applying it queues nothing; it changes trading only when the owner then accepts a difference (new buys resume) | **Yes**: `alter table ... drop constraint if exists` (the kind check, re-added at once with one more value; no row changes), then `create or replace function`, `revoke` and `grant` |
 | 25 | `migrations/0038_helper_role.sql` (whole file; the PR for #451). Independent of every other pending file. Any time, also while the engine runs: additive, no engine object changes. Then `docs/ops/helper_role.md` (create the helper user, list it in `kaibot.helper`, write `helper.env`, run `scripts/helper_check.py`) | A narrow key path for the price relay, the market-notice job and `run_ablation.py`: table `kaibot.helper` (RLS on, no policy), `kaibot.is_helper()`, the helper-only definer functions `kb_helper_whoami`, `kb_helper_heartbeat` (the row `price_stream` only), `kb_helper_publish_notices`, `kb_helper_trades` (read-only), and one INSERT policy on `realtime.messages` so the helper may send on `kb:prices`. The helper is the `authenticated` role: no right on any kaibot table, no command, no lease. Until the setup is done the helpers keep using the service key, unchanged | No: no delete, drop or truncate (the `update`s are inside the new functions: a heartbeat upsert and a notice upsert / withdrawal) |
+| 26 | `migrations/0039_kb_health_m9_events.sql` (whole file; the PR for kb_health's M9 events). After 0036. Any time, also while the engine runs: dashboard read only | `kb_health` also returns four health events the engine sends since M9 tickets 1.12, 1.10 and 1.17: `replica_poison` (a row Supabase refuses for good was skipped), `replica_backlog` (rows waiting for ten minutes), `clock_skew` (the engine's clock and the broker's differ by more than five seconds: no new orders) and `calendar_expiring` (the macro calendar or the dead-man's holiday table ends within 30 days). 0036's function otherwise, byte for byte. Until it is applied the events are written and the Health page does not show them | No: one `create or replace function`, a revoke and a grant |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -139,6 +141,9 @@ select relrowsecurity from pg_class where oid = 'kaibot.market_notice'::regclass
 -- step 23 (0036): kb_health returns the dynamically named events
 select prosrc like '%multi_day_column_missing%' and prosrc like '%''multi_day_review''%' and prosrc like '%multi_day_shorting_on%'
   from pg_proc where proname = 'kb_health';                                                          -- true
+-- step 26 (0039): kb_health returns M9's replica, clock and calendar events
+select prosrc like '%replica_poison%' and prosrc like '%clock_skew%' and prosrc like '%calendar_expiring%'
+   and prosrc like '%multi_day_column_missing%' from pg_proc where proname = 'kb_health';              -- true
 -- step 24 (0037): the dashboard may queue accept_reconcile; one kind check, with it; anon cannot call kb_command
 select count(*), bool_and(pg_get_constraintdef(oid) like '%accept_reconcile%') from pg_constraint
  where conrelid = 'kaibot.command'::regclass and contype = 'c';                                    -- 1 | true
