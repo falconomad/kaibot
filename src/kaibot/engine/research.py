@@ -132,7 +132,9 @@ def main(argv: list[str] | None = None) -> int:
     md.add_argument("--test-start", default="2017-05-01", help="first test session (decision 15: 2017-05 onward)")
     md.add_argument("--end", default=None)
     md.add_argument("--control-runs", type=int, default=None,
-                    help="exposure-matched random portfolios (Gate B mark 3; default 500, 0 on the fixture)")
+                    help="exposure-matched random portfolios (the control of Gate B mark 3 and gate v3's S3; "
+                         "default from config/gate_v3.yaml: 2,000 for a rule whose family has several rules, 500 "
+                         "otherwise; 0 on the fixture)")
     md.add_argument("--grid", choices=("gate", "full"), default="gate")
     md.add_argument("--open-holdout", default=None, metavar="ID",
                     help="read the hold-out under this opening of config/holdout.yaml (docs/ops/holdout.md)")
@@ -182,7 +184,12 @@ def multi_day(a: argparse.Namespace) -> int:
         end = a.end or str(np.datetime64("today", "D"))
         market, info = dr.load_store(a.data, a.universe_file, a.universe, a.start, end)
         info["window"] = [a.test_start, end]
-        runs = 500 if a.control_runs is None else a.control_runs
+        if a.control_runs is None:  # #547: never fewer than S3 needs (decision 16 section 15)
+            from kaibot.evaluation import gate_v3
+
+            runs = gate_v3.control_runs_for(gate_v3.GateV3.load(ROOT), strat.rule)
+        else:
+            runs = a.control_runs
         out_dir, trials = a.data / "reports", a.data / "trials.jsonl"
     rep = dr.report(a.strategy, market, info, universe=a.universe, level=a.level, control_runs=runs,
                     grid=a.grid, out_dir=out_dir, trials=trials, prereg=pre)

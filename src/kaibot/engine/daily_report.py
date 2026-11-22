@@ -1,7 +1,7 @@
 """The Gate B report of a multi-day rule from the engine's own fills (issue #161; decision 15 sections 5, 7, 10).
 
     python -m kaibot.engine.research --strategy trend_momentum --universe pit
-    python -m kaibot.engine.research --strategy mom_12_1_band --universe pit --control-runs 500
+    python -m kaibot.engine.research --strategy mom_12_1_band --universe pit     # 2,000 control runs (#547)
     python -m kaibot.engine.research --strategy trend_momentum            # the committed fixture (seconds)
 
 Runtime (measured 12 Nov 2026 on 2 shared CPUs, a synthetic store of 730 stocks x 2,730 sessions, 2017-05 to
@@ -175,7 +175,8 @@ def label(name: str, fill: str, cost: float, cap: float) -> str:
 
 
 def report(version: str, market, info: dict, *, universe: str, level: str = "balanced", start: str | None = None,
-           end: str | None = None, equity0: float = 100_000.0, control_runs: int = 500, control_seed: int = 127,
+           end: str | None = None, equity0: float = 100_000.0, control_runs: int | None = None,
+           control_seed: int = 127,
            grid: str = "gate", out_dir: Path | None = None, trials: Path | None = None, prereg: dict | None = None,
            log=print) -> dict:
     """Every run Gate B needs (or the full pre-registered grid), the marks, the benchmarks. Writes the report,
@@ -183,6 +184,10 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
     from kaibot.replay import multiday_core as mc
 
     t0 = time.time()
+    if control_runs is None:  # #547: the runs gate v3's S3 needs for this rule (config/gate_v3.yaml)
+        from kaibot.evaluation import gate_v3
+
+        control_runs = gate_v3.control_runs_for(gate_v3.GateV3.load(ROOT), mom.VERSIONS[version].rule)
     pol = load_profiles()[level]
     data = DailyData.from_market(market)
     w = info.get("window") or [start or "2017-05-01", end or str(data.dates[-1])]
