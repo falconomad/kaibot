@@ -41,7 +41,7 @@ from datetime import UTC, date, datetime, timedelta
 import numpy as np
 
 from kaibot.broker.alpaca import CANCEL_POLL_S, CANCEL_POLLS, CANCEL_WAIT_S
-from kaibot.broker.protocol import Broker, OrderRequest
+from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import (
     shadow,  # S14 shadow strategies: never trade, never raise
@@ -1002,8 +1002,32 @@ class Engine:
                 log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
                 failed[sym] = e
 
+    def _md_om(self, rid):
+        """M9 1.8 (#433): the daily path's order manager for run `rid` (None without the daily path or a run id:
+        then a flatten sale goes the older way below, straight to the broker)."""
+        if self.daily is None or rid is None:
+            return None
+        return self.daily.manager_for(rid)
+
     def _md_exit_submit(self, sym: str, keys: list, coid: str, reason: str, rid) -> None:
-        """The sale, with its intent journalled BEFORE the call (`md_exit_intent`: client id, run, keys, reason)."""
+        """The sale, with its intent journalled BEFORE the call. M9 1.8 (#433): through the order manager, one sale
+        per sleeve under the manager's deterministic id `kb<run>-<rule>-<symbol>-<day>-flatten-<n>` (an open sale
+        of the same day is reused, never doubled; a sale without an answer is `unknown` and looked up by its id);
+        the manager books every fill from the account activities at its own quantity and price, so a sale
+        cancelled after a partial fill has its filled shares in the ledger. `_md_exits` holds the sale under its
+        client id (`om`) until the manager has finished it (`_sync_md_exits`). A sale the venue refuses raises, as
+        a refused broker call did. Without the daily path: the older way (`md_exit_intent`, `coid` as given)."""
+        om = self._md_om(rid)
+        if om is not None:
+            session = str(self.now().astimezone(_et()).date())
+            for k, q in keys:
+                c = om.next_coid(rid, k[0], sym, session, "flatten")
+                self._md_exits[c] = {"run_id": rid, "keys": [(k, q)], "reason": reason, "om": c}
+                r = om.submit(OrderRequest(sym, "sell", q, "market", "day", c), strategy=k[0], purpose="flatten",
+                              session=session, meta={"reason": reason}, override_block=True)
+                if str(r.state) == "rejected":
+                    raise BrokerError(403, f"{sym}: the venue refused the flatten sale {c} ({r.reason})")
+            return
         qty = sum(q for _, q in keys)
         self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
                                                "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
@@ -1046,6 +1070,18 @@ class Engine:
                 continue
             self._md_exits[b["order_id"]] = {"run_id": b.get("run_id"), "reason": b.get("reason"),
                                              "keys": [((k[0], k[1]), float(q)) for k, q in b.get("keys") or []]}
+        # M9 1.8 (#433): the flatten sales the order manager holds (purpose `flatten`) that have no `md_exit_done`
+        # yet: in flight, or finished while the engine was down. Each is held under its client id until
+        # `_sync_md_exits` has seen the manager finish it; the manager itself looks an unconfirmed one up by its id
+        from kaibot.engine.failsafe import COID
+
+        for _, _, _, b in self.journal.entries(kinds=("om_intent",)):
+            m = COID.match(str(b.get("coid") or ""))
+            if b.get("purpose") != "flatten" or m is None or b["coid"] in closed or self.daily is None:
+                continue
+            self._md_exits[b["coid"]] = {"run_id": int(m.group(1)), "om": b["coid"],
+                                         "keys": [((b.get("strategy"), b.get("symbol")), float(b["qty"]))],
+                                         "reason": str((b.get("meta") or {}).get("reason") or "flatten")}
         # QA-Ops (#279): a sleeve's own market sale (`kbfl-` client id) whose intent is journalled but whose md_exit
         # is not (the process died between the broker call and the entry) is found at the venue by its client id
         # and rebuilt, so it is booked when it fills and the next flatten does not send it again. (A close_position
@@ -1071,7 +1107,28 @@ class Engine:
                    and b.get("symbol") == symbol for _, _, _, b in self.journal.entries(kinds=("fill",)))
 
     def _sync_md_exits(self) -> None:
+        synced = set()
         for oid, x in list(self._md_exits.items()):
+            if x.get("om"):  # M9 1.8 (#433): the order manager's sale; it books the fills, this only closes it
+                om = self._md_om(x["run_id"])
+                if om is None:
+                    continue
+                if id(om) not in synced:  # once per pass: unconfirmed orders looked up, fills booked, orders polled
+                    synced.add(id(om))
+                    om.sync()
+                r = om.get(oid)
+                if r is not None and (r.open or r.cum > r.booked + 1e-9):
+                    continue  # working, or a fill the venue reported is not booked yet
+                state = "never_sent" if r is None else "booked" if str(r.state) == "filled" else str(r.state)
+                if r is not None and r.booked > 1e-9:
+                    self.store.event("multi_day_sold", {"order_id": r.order_id, "coid": oid, "px": r.avg,
+                                                        "qty": r.booked, "reason": x["reason"],
+                                                        "keys": [f"{k[0]}|{k[1]}" for k, _ in x["keys"]]},
+                                     self._rid() or x["run_id"])
+                self.journal.append("md_exit_done", {"order_id": r.order_id if r is not None else None, "coid": oid,
+                                                     "state": state, "filled": r.booked if r is not None else 0.0})
+                self._md_exits.pop(oid)  # what is left unsold: the next full flatten sells it (a new attempt)
+                continue
             o = self.broker.order(oid)
             if o["status"] == "filled":
                 px, ts = float(o["filled_avg_price"]), o.get("filled_at")
