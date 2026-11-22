@@ -305,14 +305,22 @@ class ReadOnlyJournal:
 
         if not self.path.exists():
             raise FileNotFoundError(self.path)
+        from kaibot.engine.journal import SUM_COLUMNS, checked
+
         db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=2.0)
         try:
-            q, args = "select seq, ts, kind, body from entry where seq > ?", [after]
+            # #496: a journal with checksums is checked here too (a changed entry raises, and the watchdog reads
+            # the ledger rows in Supabase instead); a file from before them reads as it always did
+            sums = "sum" in {r[1] for r in db.execute("pragma table_info(entry)")}
+            q, args = f"select {SUM_COLUMNS if sums else 'seq, ts, kind, body'} from entry where seq > ?", [after]
             if kinds:
                 q += f" and kind in ({','.join('?' * len(kinds))})"
                 args += list(kinds)
             q += " order by seq"
             rows = db.execute(q, args).fetchall()
+            if sums:
+                r = db.execute("select v from meta where k = 'checksum_from'").fetchone()
+                return checked(rows, int(r[0]) if r else 1)
         finally:
             db.close()
         return [(s, ts, k, json.loads(b)) for s, ts, k, b in rows]

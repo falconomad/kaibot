@@ -54,6 +54,7 @@ class LoopResult:
     skipped: list[tuple[Key, str]] = field(default_factory=list)
     deferred: list[Key] = field(default_factory=list)  # a sale waiting for its protective stop to free the shares
     withheld: list[tuple[Key, str, str]] = field(default_factory=list)  # (key, side, why): the pre-send gate (1.16)
+    aged: list[tuple[Key, str]] = field(default_factory=list)  # a sale no longer waiting for an old unbooked fill
 
 
 def targets_from_plan(plan, purposes: Mapping[Key, str] | None = None) -> list[Target]:
@@ -87,9 +88,21 @@ def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequen
     if sells_first:
         todo.sort(key=lambda x: x[1] > 0)  # stable: the caller's order within sales and within purchases
     for t, diff in todo:
-        if om.unbooked(t.symbol, t.strategy, session) > 1e-9:  # #333 (QA-Ops): filled at the venue, not booked yet
-            res.skipped.append((t.key, "a fill the venue reported is not booked yet: waiting"))
-            continue
+        # #333 (QA-Ops): filled at the venue, not booked yet. #507: whatever session the finished order belongs to
+        # (yesterday's fill still unbooked today is not in `held` either: the target would be bought, or sold, twice)
+        if om.unbooked(t.symbol, t.strategy) > 1e-9:
+            # QA-Ops second key on #524: the wait must not freeze a sleeve's SALES for good when the activity never
+            # arrives. A buy always waits (and the reconciliation's "unbooked" difference blocks it anyway). A sale
+            # waits while the unbooked order is of today; from the next day on it goes out for the shares the
+            # ledger holds less what the unbooked sales already took at the venue, and the result says so (`aged`).
+            gone = om.unbooked_sold(t.symbol, t.strategy, now) if diff < 0 else None
+            if gone is not None:
+                diff = min(diff + gone, 0.0)
+            if gone is None or diff > -1e-9:
+                res.skipped.append((t.key, "a fill the venue reported is not booked yet: waiting"))
+                continue
+            res.aged.append((t.key, f"a fill of an earlier day is still not booked: the sale of {abs(diff):g} "
+                                    f"shares goes out without it ({gone:g} shares of unbooked sales left out)"))
         working = [r for r in om.working(symbol=t.symbol, strategy=t.strategy) if r.purpose != "stop"]
         if any(r.state in UNCONFIRMED for r in working):  # never cancel or add to an order nobody has confirmed
             res.skipped.append((t.key, om.blocked(t.symbol) or "unconfirmed order"))
