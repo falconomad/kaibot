@@ -269,7 +269,8 @@ def daily_store_state() -> dict:
 
 def report_conflicts(eng: Engine, replicator: Replicator) -> None:
     """Rows Supabase refused as duplicates that are not the engine's (B2 of the #117 review): replication went on;
-    each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local)."""
+    each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local).
+    M9 1.12: also the poison rows (refused for good, skipped) and a backlog that grows for ten minutes."""
     for f in replicator.take_fallbacks():  # QA-Ops on #339: migration 0028 not applied yet (rows say "missing")
         with contextlib.suppress(Exception):
             eng.store.event(f.get("event", "stop_state_fallback"), {k: f[k] for k in ("seq", "error", "action")},
@@ -282,6 +283,23 @@ def report_conflicts(eng: Engine, replicator: Replicator) -> None:
                                       "reason": f"Supabase holds another row for {c['table']} {c['key']}: "
                                                 "the journal keeps the engine's (docs/ops/ledger.md)"},
                              returning=False)
+    for p in replicator.take_poisons():  # M9 1.12 (#437): a row Supabase refuses for good was skipped
+        log.error("replica poison: Supabase refuses %s entry %s for good (%s); skipped, the journal keeps it",
+                  p["table"], p["seq"], str(p["error"])[:160])
+        with contextlib.suppress(Exception):
+            eng.store.event("replica_poison", {k: p[k] for k in ("seq", "table", "op", "code", "error", "attempts",
+                                                                 "action")}, eng._rid())
+            eng.store.insert("halt", {"run_id": eng._rid(), "kind": "replica_poison",
+                                      "reason": f"Supabase refuses {p['table']} rows ({p['code']}): skipped, the "
+                                                "journal keeps them (docs/ops/ledger.md)"}, returning=False)
+    b = None
+    with contextlib.suppress(Exception):
+        b = replicator.backlog_alarm()
+    if b:  # M9 1.12: rows waiting for ten minutes and not getting fewer
+        log.error("replica backlog: %d rows waiting for %.0f minutes (%s): the dashboard and the dead-man's book "
+                  "are stale", b["pending"], b["minutes"], b["error"] or "no error")
+        with contextlib.suppress(Exception):
+            eng.store.event("replica_backlog", b, eng._rid())
 
 
 def report_news(eng: Engine, poller) -> None:

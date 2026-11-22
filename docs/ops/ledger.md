@@ -111,6 +111,24 @@ yet; a position is only held over a close when the engine was off at 15:55.
   `replication.conflicts`, turned by the engine into a `replica_conflict` event and halt row (shown on the
   dashboard), and replication goes on with the next entry. It never stops for good on one row. Trading is not
   affected: the engine's state is the journal. Before and after 0018 alike.
+- **A poison row** (M9 1.12, #437). A row Supabase refuses for what it is (HTTP 4xx: a check constraint, a type,
+  a foreign key, a column or table the database does not have yet) used to stop replication for good. Now, after
+  5 refusals of the same entry spread over at least 2 minutes, the entry is **poison**: recorded in the journal
+  (`replica_poison`, with the row), counted in the heartbeat's `replication.poisons`, turned by the engine into a
+  `replica_poison` event, a halt row and an ERROR log line (`replica poison: ...`), and skipped; the rows behind
+  it go out. Later rows of the same table refused with the same error code follow at once, each journalled, with
+  one alarm for the cause, repeated every hour while rows are still being skipped. Never poison: no answer, a 5xx
+  answer, 401 / 403 (the key), 408, 429, and any 4xx that is not about the row itself (no database error code
+  in the answer, a database in read-only mode, a lock): those refuse every row, so replication waits on them as
+  before and the backlog alarm below says so. Trading is not affected. **Supabase then lacks those rows**, and
+  what reads Supabase is wrong by them until they are sent: the dashboard, and the dead-man's book if the row was
+  a `ledger_position` (a holding it does not find there is kept only through its own resting stop). Fix the cause (usually a migration not applied),
+  stop the engine and run `--rebuild` below: the journal still holds every row.
+- **Backlog alarm** (M9 1.12). When rows have been waiting for 10 minutes and were not fewer at any look (the
+  engine looks every loop, about 10 s), the engine writes a `replica_backlog` event and an ERROR log line
+  (`replica backlog: ...`), once per stall; the heartbeat shows `replication.backlog_alarm: true` until the
+  backlog shrinks. The event itself reaches Supabase only when replication works again, so the heartbeat (sent
+  straight to Supabase) and the log line are what say it while it lasts.
 - Status: `.venv/bin/python -m kaibot.engine.journal --status`.
 - **Rebuild Supabase from the journal** (after a restore, or into a fresh project with the migrations applied):
   stop the engine, then `.venv/bin/python -m kaibot.engine.journal --rebuild`. Sends every row again; rows already

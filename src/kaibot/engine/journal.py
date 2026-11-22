@@ -20,6 +20,8 @@ outage only makes the replica late. Every send is idempotent (engine-assigned id
 point to, a `jseq` column with the journal sequence number elsewhere, natural keys for the rest), so a retry after
 an unknown outcome and a full `rebuild()` never duplicate a row. A "duplicate key" answer is checked against the
 stored row: the same row is done; another row is a conflict, recorded and reported, and replication goes on.
+A row Supabase refuses for what it is (a constraint, a column it does not have), again and again, is poison: it is
+journalled (`replica_poison`), reported and skipped, and the rows behind it go out (M9 1.12).
 Migration 0018 makes the ids and `jseq` acceptable to the database.
 
 Every journal has an identity (a uuid and an epoch, in its `meta` table); its ids and `jseq` values live in its own
@@ -79,6 +81,12 @@ LEDGER_TABLES = frozenset({"ledger_day", "ledger_position"})  # created by 0018:
 FK_COLUMNS = {"run_id": "run", "signal_id": "signal", "order_id": "order", "trade_id": "trade"}
 SCHEMA_0018, SCHEMA_PRE_0018 = "0018", "pre-0018"
 MULTI_DAY_RETRY_S = 3600.0  # #384: how often a missing `ledger.multi_day` column is tried again
+# M9 1.12 (#437, audit D1): a row Supabase answers with a refusal of the row itself (HTTP 4xx, see `_refusal`) on
+# POISON_AFTER_N passes spread over at least POISON_AFTER_S is poison: journalled, reported, skipped. Both, so a
+# passing state (PostgREST reloading its schema right after a migration) is waited out, not skipped.
+POISON_AFTER_N, POISON_AFTER_S = 5, 120.0
+POISON_REALARM_S = 3600.0  # QA-Ops (#516): a cause still skipping rows is announced again this long after its alarm
+BACKLOG_ALARM_S = 600.0  # rows waiting, and not fewer at any look, for this long: an alarm
 
 SCHEMA = """
 create table if not exists entry (
@@ -780,6 +788,15 @@ class Replicator:
         self.multi_day_fallback = False
         self._md_retry_at = 0.0
         self.clock: Callable[[], float] = time.monotonic
+        # M9 1.12: the entry being refused (seq, refusals, time of the first), the poison rows not yet reported,
+        # their count, and the (table, error code) pairs already found poison (rows behind one follow at once)
+        self._refused: tuple[int, int, float] | None = None
+        self._poisons: list[dict] = []
+        self.poisons = 0
+        self._poison_kinds: dict[tuple[str, str], float] = {}  # cause -> when its alarm was last queued
+        self._backlog_since: float | None = None  # since when rows have been waiting without getting fewer
+        self._backlog_last = 0
+        self._backlog_alarmed = False
         self._lock = threading.Lock()
         self._pump_lock = threading.Lock()
         self._stop = threading.Event()
@@ -826,10 +843,11 @@ class Replicator:
                 try:
                     self._send(seq, op)
                 except Exception as e:
-                    if self.last_error is None:
-                        log.warning("replication to %s paused at entry %d: %s", self.name, seq, str(e)[:200])
-                    self.last_error = f"{type(e).__name__}: {e}"[:300]
-                    return done
+                    if not self._poison(seq, op, e):
+                        if self.last_error is None:
+                            log.warning("replication to %s paused at entry %d: %s", self.name, seq, str(e)[:200])
+                        self.last_error = f"{type(e).__name__}: {e}"[:300]
+                        return done
                 self.journal.set_cursor(self.name, seq)
                 done += 1
                 self.sent += 1
@@ -839,6 +857,67 @@ class Replicator:
             log.info("replication to %s resumed", self.name)
             self.last_error = None
         return done
+
+    def _poison(self, seq: int, op: dict, err: Exception) -> bool:
+        """M9 1.12 (#437): is this entry poison, i.e. refused by Supabase for what the row is, again and again? Then
+        it is journalled (`replica_poison`, with the row), queued for the engine's alarm (`take_poisons`) and
+        skipped, and the rows behind it go out. The journal keeps the row; Supabase lacks it until the cause is
+        fixed and the journal is sent again (`--rebuild`, docs/ops/ledger.md). An outage, a 5xx answer or a refused
+        key is never poison: replication waits, as before."""
+        code = _refusal(err)
+        if code is None:
+            self._refused = None
+            return False
+        t, now = str(op.get("table")), self.clock()
+        n, first = (self._refused[1] + 1, self._refused[2]) if self._refused and self._refused[0] == seq else (1, now)
+        self._refused = (seq, n, first)
+        last = self._poison_kinds.get((t, code))
+        known = last is not None  # the same refusal of the same table was poison before: no second wait
+        if not known and (n < POISON_AFTER_N or now - first < POISON_AFTER_S):
+            return False
+        part = "row" if op.get("op") in ("insert", "upsert") else "values"
+        p = {"seq": seq, "table": t, "op": op.get("op"), "error": str(err)[:300], "code": code, "attempts": n,
+             "first_of_its_kind": not known, part: op.get(part), **({"match": op["match"]} if "match" in op else {}),
+             "action": "Supabase lacks this row; fix the cause (a migration not applied, a constraint), then "
+                       "send the journal again with the engine stopped: python -m kaibot.engine.journal --rebuild"}
+        self.journal.append("replica_poison", p)
+        with self._lock:
+            self.poisons += 1
+            # one alarm per cause, not one per row; again when rows are still being skipped an hour later (the
+            # engine runs for days: a skipped row must not go unannounced because its cause was named on Monday)
+            if last is None or now - last >= POISON_REALARM_S:
+                self._poisons.append(p)
+                self._poison_kinds[(t, code)] = now
+        self._refused = None
+        log.error("replica poison in %s at entry %d (%s): skipped after %d refusals; the journal holds the row",
+                  t, seq, str(err)[:160], n)
+        return True
+
+    def take_poisons(self) -> list[dict]:
+        """Poison rows since the last call, the first of each cause (the engine turns each into a `replica_poison`
+        event and a halt row)."""
+        with self._lock:
+            out, self._poisons[:] = list(self._poisons), []
+        return out
+
+    def backlog_alarm(self) -> dict | None:
+        """M9 1.12: called once per engine loop. Rows have been waiting, and were not fewer at any look, for
+        BACKLOG_ALARM_S: the alarm, once per stall (None otherwise). A backlog that is being worked off, however
+        large, is not one; it re-arms as soon as the backlog shrinks or clears."""
+        p, now = self.pending(), self.clock()
+        with self._lock:
+            if p == 0:
+                self._backlog_since, self._backlog_alarmed = None, False
+            elif self._backlog_since is None or p < self._backlog_last:
+                self._backlog_since, self._backlog_alarmed = now, False
+            self._backlog_last = p
+            if p == 0 or self._backlog_alarmed or now - self._backlog_since < BACKLOG_ALARM_S:
+                return None
+            self._backlog_alarmed = True
+            return {"pending": p, "minutes": round((now - self._backlog_since) / 60, 1),
+                    "cursor": self.journal.cursor(self.name), "error": self.last_error,
+                    "action": "Supabase is behind the journal: the dashboard and the dead-man's book are stale; "
+                              "trading goes on from the journal"}
 
     def rebuild(self) -> int:
         """Send the whole journal again: inserts are idempotent, updates are not ordered against newer rows. So only
@@ -873,7 +952,8 @@ class Replicator:
     def status(self) -> dict:
         return {"cursor": self.journal.cursor(self.name), "last_seq": self.journal.last_seq(),
                 "pending": self.pending(), "error": self.last_error, "schema": self.schema,
-                "conflicts": self.conflicts, "journal": self.journal.journal_id,
+                "conflicts": self.conflicts, "poisons": self.poisons, "backlog_alarm": self._backlog_alarmed,
+                "journal": self.journal.journal_id,
                 "stop_state_fallback": self.stop_state_fallback, "multi_day_fallback": self.multi_day_fallback}
 
     def _db_id(self, table: str, v):
@@ -1106,9 +1186,33 @@ def _schema_missing(e: Exception) -> bool:
 
 def _duplicate(e: Exception) -> bool:
     """A unique violation only (23505). PostgREST answers 409 for a foreign-key violation (23503) too: that is a
-    real error, so replication pauses on the entry and retries it, it is never dropped as a conflict (#165 N2)."""
+    real error, so replication pauses on the entry and retries it, it is never dropped as a conflict (#165 N2).
+    M9 1.12: if it is still refused after POISON_AFTER_N passes over POISON_AFTER_S it is poison (`_poison`):
+    journalled, reported and skipped, so the rows behind it are not held for ever."""
     text = str(e)
     return "23505" in text or "duplicate key" in text
+
+
+def _refusal(e: Exception) -> str | None:
+    """M9 1.12: Supabase answered and refused THIS row (a constraint, a type, a column or table it does not have, a
+    foreign key): the Postgres or PostgREST error code. None for everything that says nothing about the row: no
+    answer, 5xx, 401 / 403 (the key: every row would be dropped), 408, 429.
+
+    QA-Ops (#516): and None for a 4xx that is about the database or the gateway, not the row, because it refuses
+    EVERY row and the whole backlog would be skipped two minutes into it: an answer without a database code (a
+    proxy's 400 / 404, a quota's 402), a database in read-only mode (25006, HTTP 405: Supabase does that when the
+    disk is full), a lock or a serialization failure (55xxx, 40xxx), a schema PostgREST does not expose
+    (PGRST106). Only these are a row's own fault (`_ROW_CODES`): bad data (22xxx), a constraint (23xxx), a column,
+    table, type or function the database does not have (42703, 42P01, 42804, 42883; PGRST204, PGRST205), a body
+    PostgREST cannot read (PGRST102). Anything else waits, as before, and the backlog alarm says so."""
+    m = re.search(r"-> (\d{3}):", str(e))
+    if not m or not 400 <= int(m.group(1)) < 500 or int(m.group(1)) in (401, 403, 408, 429):
+        return None
+    c = re.search(r'"code"\s*:\s*"([A-Za-z0-9]+)"', str(e))
+    return c.group(1) if c and _ROW_CODES.fullmatch(c.group(1)) else None
+
+
+_ROW_CODES = re.compile(r"(22|23)[0-9A-Z]{3}|42(703|P01|804|883)|PGRST(102|204|205)")
 
 
 def _stop_state_missing(op: dict, err: Exception) -> dict | None:

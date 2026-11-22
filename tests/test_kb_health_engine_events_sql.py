@@ -35,6 +35,8 @@ AWAITING_KB_HEALTH: set[str] = set()
 # S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
 # nothing and a failure stops nothing, so neither is a health event
 ROUTINE |= {"market_alarm", "market_alarm_error"}
+# M9 1.12 (#437): a row Supabase refuses for good was skipped; rows waiting for ten minutes and not getting fewer
+AWAITING_KB_HEALTH |= {"replica_poison", "replica_backlog"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # M9 1.10 (#435): the host clock and the broker's disagree by more than five seconds (and "ok" when it is over)
