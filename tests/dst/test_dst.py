@@ -97,6 +97,21 @@ def test_the_simulation_finds_the_finding_when_its_fix_is_taken_away(name, monke
     assert any(word in v for v in res.violations), res.report()
 
 
+def test_a_run_that_never_leaves_scheduled_is_a_violation(monkeypatch):
+    """#577: the oracle expects no decision from a scheduled run, so it checks the engine's word: a run started
+    after D0's close that is still scheduled in D1's session (the planted bug: it never starts) is a violation,
+    not a run with nothing to decide."""
+    from kaibot.engine.core import Engine
+
+    set_status = Engine._set_run_status
+    monkeypatch.setattr(Engine, "_set_run_status",
+                        lambda self, status, reason=None: None if status == "running" else set_status(self, status,
+                                                                                                       reason))
+    res = run_scenario(quiet({D1: ("B",)}))
+    assert not res.ok
+    assert any(f"still scheduled in the session of {D1}" in v for v in res.violations), res.report()
+
+
 def test_a_lost_order_the_open_orders_list_shows_is_adopted_not_sent_again():
     """M9 1.11 at work: the lookup by client order id misses for minutes, the open-orders read finds the order."""
     scenario, _, _ = FINDINGS["lost order sent again"]
