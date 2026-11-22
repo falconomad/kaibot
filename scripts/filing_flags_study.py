@@ -26,6 +26,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.features import filing_flag as ff  # noqa: E402
@@ -169,7 +170,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--start", default="2017-05-01")
     ap.add_argument("--data", type=Path, default=ROOT / "data")
+    holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    # the study reads the daily store to its newest bar (it has no --end): that is inside the hold-out
+    holdout.enforce(script=__file__, end=None, rule=STUDY, opening=a.open_holdout, data=a.data)
     data, start = Path(a.data), date.fromisoformat(a.start)
     sha = prereg_mod.require(STUDY, ROOT)
     fpath = data / "filings" / "filings_8k.parquet"

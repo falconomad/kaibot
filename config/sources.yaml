@@ -44,6 +44,7 @@ fundamentals_filings:
   finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET", limit: "static CDN files", min_seconds_between_requests: 1}
   fred:             {use: regime, auth: key, limit: "120 req/min per key", budget_per_min: 30}
   fred_vixcls:      {use: regime, schedule: daily, note: "VIX via FRED (Cboe CSV unreachable from our network, 10 Nov 2026); requests count against fred"}
+  fred_dtb3:        {use: research_cash_yield, schedule: "on demand", note: "3-month Treasury-bill rate (DTB3) for evaluation reports (M11 2.4, scripts/fetch_tbill.py): one request a run, counts against fred; research input only, never in the live path"}
   gdelt_pacing:     {min_seconds_between_requests: 6, note: "GDELT returns 429 when called faster (one every 5 s); enforced on gdelt_doc"}
 news:
   alpaca_news_ws:   {use: primary_stream, auth: key, note: "Benzinga feed; verify free status + latency day 1"}

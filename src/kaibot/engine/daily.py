@@ -48,7 +48,7 @@ they are sent first, so a rotation funds its purchases. The venue's cash and the
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 
@@ -343,12 +343,16 @@ NOT_CARRIED = ("canceled", "rejected", "sold", UNBOOKED)  # a buy is not sent ag
 
 
 def ended_buys(om: OrderManager, strategy: str, since: str, before: str, *,
-               base: Mapping[str, float] | None = None, held: Mapping[str, float] | None = None) -> dict[str, str]:
+               base: Mapping[str, float] | None = None, held: Mapping[str, float] | None = None,
+               failsafe_cancels: Collection[str] = ()) -> dict[str, str]:
     """symbol -> how the last buy order of `strategy` from session `since` up to (not including) `before` ended
     (the order manager's state word), oldest first so the latest wins; "sold" when any sale of the symbol went out
     in that time (a forced sale before a disputed split, a sale pending from the decision): such a name is never
     bought back before the next decision. An order refused as `lost` (it never reached the venue) does not count:
-    it is sent again under a new attempt.
+    it is sent again under a new attempt. Nor does a buy the watchdog cancelled (M9 1.6: `failsafe_cancels`, the
+    order ids and client ids in the watchdog's local record, engine/failsafe.watchdog_cancels): that cancel was
+    ours, not the venue's answer to the order, so the buy is carried like a lost one. What it filled before the
+    cancel stays counted, and the live path alone passes the record (the research venue has no watchdog).
 
     QA-Ops on #366:
     - `base` (shares held when the plan was made) and `held` (shares held now): a sleeve that holds less than its
@@ -365,6 +369,7 @@ def ended_buys(om: OrderManager, strategy: str, since: str, before: str, *,
     sold: set[str] = set()
     unbooked: set[str] = set()
     bought: dict[str, float] = {}
+    marks = frozenset(failsafe_cancels)
     for r in sorted(om.orders.values(), key=lambda r: (r.session, r.created or "")):
         if r.strategy != strategy:
             continue
@@ -381,6 +386,8 @@ def ended_buys(om: OrderManager, strategy: str, since: str, before: str, *,
         if not r.open and r.cum > r.booked + 1e-9:
             unbooked.add(r.symbol)
         if r.state is St.REJECTED and str(r.reason or "").startswith("lost"):
+            continue
+        if r.state is St.CANCELED and marks and not marks.isdisjoint((r.coid, r.order_id, *r.ids, *r.client_ids)):
             continue
         out[r.symbol] = str(r.state)
     if base is not None and held is not None:

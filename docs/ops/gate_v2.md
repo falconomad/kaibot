@@ -217,3 +217,39 @@ Points 1 to 3 and 7 were settled by decision 15 section 10 (Product, 12 Nov 2026
    exposure caps and the earnings versions do count, one configuration each.
 10. **"Same universe, liquidity filter" in mark 3** is read as the harness's price and dollar-volume filter,
    not the rule's own trend or score filters. Exposure is matched per position, resizes included.
+
+## Idle cash at the Treasury-bill rate (M11 ticket 2.4, issue #455)
+
+Every simulated account holds its idle cash at 0%. Since ticket 2.4 a report can show a second version in which
+idle cash earns the 3-month Treasury-bill rate, and the Sharpe and the alpha are measured above that rate.
+
+| Step | Command (on the research Mac) | Result |
+|---|---|---|
+| Fetch the rate, once and after new sessions | `.venv/bin/python scripts/fetch_tbill.py --env ~/Projects/kaibot-secrets/.env` | `data/inputs/fred_dtb3.json` (FRED series DTB3, one request under the `fred` budget) |
+| Check the file, offline | `.venv/bin/python scripts/fetch_tbill.py --status` | first and last date, last rate |
+| A Gate B report | `scripts/gate_v2_report.py` as before | reads the file when it is there; `--no-tbill` leaves it out |
+
+How it is computed (`kaibot.evaluation.mtm`):
+
+- **Point in time.** A session uses the last rate dated before it. The rate of a day is published after that
+  day's close, and cash lent at one close earns that day's rate until the next close. A newer file does not change
+  an older session.
+- **Rate to return.** The bill is quoted at a bank discount; it is converted to its investment yield
+  (`365 d / (360 - 91 d)`) and paid for the calendar days since the previous session, so a weekend pays three days.
+- **Idle cash.** `1 - exposure` at the previous close, never below zero. A report without an exposure column
+  cannot add interest; it shows only the Sharpe of the simulated curve above bills.
+- **The benchmark.** SPY is fully invested, so its return is the same in both versions. Its Sharpe is measured
+  above bills in the second version. "SPY at the rule's exposure" holds the rest in bills in the second version.
+- **First order.** Interest is added to each day's return; it is not reinvested in positions.
+
+What it does not change: **no Gate B mark of gate v2**. The marks are judged on the simulated 0% version, as
+decision 15 wrote them. The second version is a block in the report (`statistics.cash_yield`). Gate v3 (ticket 2.5,
+decision 16) says which version its marks use.
+
+Alpaca pays no interest on a paper account's cash. The second version says what a real cash sweep into bills would
+have added. It is not what the paper account shows.
+
+"Every report shows both versions once, then the new one": the Gate B report shows both from now on. The result
+pages in `docs/research/results/` (tickets 2.1 and 2.2) show both for every existing run, computed from each run's
+daily file without re-running it. The per-family summary scripts (`momentum_core.py`, `oneshots.py`, `spy_engine.py`,
+`spy_trend.py`, `spy_noise_band.py`) still print the 0% version only.

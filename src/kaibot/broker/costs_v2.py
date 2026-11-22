@@ -49,6 +49,21 @@ taken on it. Until #124 merges the bars are split-adjusted and callers pass the 
 the half-cent floor then still overstates costs for names that split heavily later (audit E4), exactly as in v1,
 although much less (the bp spread now dominates above about $3 for the largest bucket).
 
+INDEX-FUND BUCKET (M11 ticket 2.3, issue #454): OFF in `V2Params()`, so "v2" is unchanged to the last bit.
+The ADV buckets above were written for single stocks: every name over $500M a day pays 1.75 bp a side. SPY trades
+tens of billions of dollars a day at a quoted spread of about one cent, so the bucket overstates its cost. The
+model "v2_index" is v2 plus one more bucket, chosen by SYMBOL and checked before the ADV buckets:
+
+    `index_symbols` (for example ("SPY",))  ->  `index_half_bp` per side
+
+Everything else is v2's: the venue multipliers, the tick floor on the raw price (half a cent is about 0.08 bp
+at $600, so it does not bind), the impact terms and the fees. A fill priced without a symbol (`FillCtx.symbol`
+None) falls back to the ADV buckets: the index bucket is never applied by guesswork.
+The value is NOT pre-declared here, because no number for it is in the research notes. It is measured
+(`scripts/calibrate_index_costs.py`: the paper account's own fills against quotes, or quotes at the rule's check
+times) and committed to `config/costs_index_bucket.yaml` with its table; until that file holds a measured value
+`get_model("v2_index")` refuses to build. Using it is a parameter change of the cost model: the run logs a trial.
+
 Round trip at the defaults, $14k market in / market out, 2% daily volatility, ample minute volume, fees
 included (pinned by tests/unit/test_costs_v2.py): over $500M ($1bn) about 3.8 bp, $100M-$500M ($250M) about 8.0 bp,
 $50M-$100M ($75M) about 14.2 bp; the report's ranges are 3-6, 6-11 and 11-18 bp. v1 charges the same 4.1 to 5.5 bp
@@ -60,6 +75,7 @@ from __future__ import annotations
 import hashlib
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol
 
 from kaibot.broker import shadow_costs
@@ -79,6 +95,7 @@ class FillCtx:
     adv: float = math.nan  # 20-session average dollar volume known at the decision; NaN = unknown
     venue: str = "continuous"  # continuous | open | close
     raw_mid: float | None = None  # unadjusted price of the same moment; None = `mid` (adjusted, audit E4)
+    symbol: str | None = None  # only read by the index-fund bucket; None = price by ADV
 
 
 @dataclass(frozen=True)
@@ -147,8 +164,14 @@ class V2Params:
     round_fees_up: bool = True  # each fee to the next cent, as Alpaca debits them
     limit_fill_prob: float = 0.8
     tick: float = 0.01  # a limit fills only when the bar trades through it by this much
+    index_symbols: tuple[str, ...] = ()  # the index-fund bucket: off by default (see the top)
+    index_half_bp: float | None = None  # its half-spread in bp per side; needed when `index_symbols` is set
 
     def __post_init__(self) -> None:
+        if self.index_symbols and (self.index_half_bp is None or not 0.0 < self.index_half_bp <= 10.0):
+            raise ValueError("the index-fund bucket needs index_half_bp in bp per side (above 0, at most 10)")
+        if self.index_half_bp is not None and not self.index_symbols:
+            raise ValueError("index_half_bp without index_symbols: name the funds the bucket is for")
         if not 0.6 <= self.spread_charge <= 1.0:
             raise ValueError("spread_charge must be within 0.6 to 1.0 of the quoted half-spread (report range)")
         if not 0.0 <= self.limit_fill_prob <= 1.0:
@@ -169,8 +192,11 @@ class CostV2:
 
     # -- components
 
-    def half_spread_bp(self, adv: float) -> float:
-        """Quoted half-spread per side in bp for a 20-session ADV in $ (NaN / <= 0: unknown)."""
+    def half_spread_bp(self, adv: float, symbol: str | None = None) -> float:
+        """Quoted half-spread per side in bp for a 20-session ADV in $ (NaN / <= 0: unknown). A symbol in the
+        index-fund bucket pays that bucket's figure, whatever its ADV."""
+        if symbol is not None and symbol in self.p.index_symbols:
+            return float(self.p.index_half_bp)
         if math.isfinite(adv) and adv > 0:
             for lo, bp in self.p.buckets:
                 if adv >= lo:
@@ -189,7 +215,7 @@ class CostV2:
     def half_spread(self, ctx: FillCtx) -> float:
         """$ per share charged for the spread at this venue (tick floor on the raw price)."""
         raw = ctx.raw_mid if ctx.raw_mid is not None and ctx.raw_mid > 0 else ctx.mid
-        quoted = max(self.half_spread_bp(ctx.adv) / 1e4 * raw, self.p.tick_half)  # on the raw price
+        quoted = max(self.half_spread_bp(ctx.adv, ctx.symbol) / 1e4 * raw, self.p.tick_half)  # on the raw price
         return quoted / raw * ctx.mid * self.venue_mult(ctx.venue)
 
     def impact_frac(self, ctx: FillCtx) -> float:
@@ -245,10 +271,12 @@ class CostV2:
         sigma, ADV and raw price; its `mid`, `venue` and `vol` are replaced here (`vol` is kept for the
         continuous case and also used at the open)."""
         if open_ <= stop:
-            return self.fill("sell", FillCtx(open_, ctx.qty, ctx.sigma_1m, ctx.vol, ctx.adv, "open", ctx.raw_mid))
+            return self.fill("sell", FillCtx(open_, ctx.qty, ctx.sigma_1m, ctx.vol, ctx.adv, "open", ctx.raw_mid,
+                                             ctx.symbol))
         if low <= stop:
             raw = None if ctx.raw_mid is None else ctx.raw_mid * stop / ctx.mid
-            return self.fill("sell", FillCtx(stop, ctx.qty, ctx.sigma_1m, ctx.vol, ctx.adv, "continuous", raw))
+            return self.fill("sell", FillCtx(stop, ctx.qty, ctx.sigma_1m, ctx.vol, ctx.adv, "continuous", raw,
+                                             ctx.symbol))
         return None
 
 
@@ -257,19 +285,56 @@ def _uniform(key: str) -> float:
     return int.from_bytes(h, "big") / 2**64
 
 
-MODELS = ("v1", "v2")
+MODELS = ("v1", "v2")  # the choices of the research scripts' --costs; "v2_index" is opt-in per run (below)
+INDEX_BUCKET_FILE = Path("config") / "costs_index_bucket.yaml"
+ROOT = Path(__file__).resolve().parents[3]
+
+
+class NotCalibrated(ValueError):
+    """The index-fund bucket has no measured value yet."""
+
+
+def load_index_bucket(root: Path | str | None = None) -> dict:
+    """The committed index-fund bucket: {"symbols": (...), "half_bp": float, "sha256": ..., "source": {...}}.
+    Raises `NotCalibrated` while `half_spread_bp` is empty: a cost is measured, never assumed."""
+    import yaml  # research only: the engine never calls this
+
+    raw = (Path(root or ROOT) / INDEX_BUCKET_FILE).read_bytes()
+    cfg = yaml.safe_load(raw) or {}
+    symbols = tuple(str(s) for s in cfg.get("symbols") or ())
+    bp = cfg.get("half_spread_bp")
+    if not symbols:
+        raise ValueError(f"{INDEX_BUCKET_FILE}: `symbols` is empty")
+    if bp is None:
+        raise NotCalibrated(f"{INDEX_BUCKET_FILE}: half_spread_bp is not set. Measure it with "
+                            "scripts/calibrate_index_costs.py and commit the value with its table (ticket 2.3)")
+    source = cfg.get("source") if isinstance(cfg.get("source"), dict) else {}
+    if source.get("method") not in ("fills", "quotes"):
+        raise NotCalibrated(f"{INDEX_BUCKET_FILE}: half_spread_bp is set without `source.method` (fills | quotes). "
+                            "A value goes in with the block scripts/calibrate_index_costs.py printed (ticket 2.3)")
+    return {"symbols": symbols, "half_bp": float(bp), "sha256": hashlib.sha256(raw).hexdigest(),
+            "source": dict(source)}
+
+
+def index_params(root: Path | str | None = None, **params) -> V2Params:
+    """`V2Params` with the committed index-fund bucket switched on."""
+    b = load_index_bucket(root)
+    return V2Params(index_symbols=b["symbols"], index_half_bp=b["half_bp"], **params)
 
 
 def get_model(name: str = "v1", **params) -> CostModel:
-    """`v1` (the default everywhere, and the only model the live engine uses) or `v2` with optional overrides of
-    `V2Params` (each override is a parameter change: log a trial)."""
+    """`v1` (the default everywhere, and the only model the live engine uses), `v2` with optional overrides of
+    `V2Params` (each override is a parameter change: log a trial), or `v2_index`: v2 plus the measured
+    index-fund bucket of config/costs_index_bucket.yaml (a parameter change too: log a trial)."""
     if name == "v1":
         if params:
             raise ValueError("v1 takes no parameters")
         return CostV1()
     if name == "v2":
         return CostV2(V2Params(**params))
-    raise ValueError(f"unknown cost model {name!r}; choose one of {MODELS}")
+    if name == "v2_index":
+        return CostV2(index_params(**params), name="v2_index")
+    raise ValueError(f"unknown cost model {name!r}; choose one of {(*MODELS, 'v2_index')}")
 
 
 def round_trip_bp(model: CostModel, *, order: float = 13_907.0, price: float = 100.0, adv: float = 1e9,

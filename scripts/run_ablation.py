@@ -60,9 +60,20 @@ def normalize_trades(df: pd.DataFrame, lag_min: float = 1.0) -> pd.DataFrame:
 
 
 def supabase_trades(env: str | None, run_id: int | None, strategy: str | None) -> pd.DataFrame:
+    from kaibot.common.helper_session import HelperSession, helper_env
     from kaibot.engine.config import DEFAULT_SUPABASE_URL, load_env_file
     from kaibot.engine.store import Store
 
+    henv = helper_env()
+    if henv is not None:  # M10 1.26 (#451): the helper sign-in reads the closed trades; no service key
+        session, rows, after = HelperSession.from_env(henv, DEFAULT_SUPABASE_URL, timeout_s=30.0), [], 0
+        while True:
+            batch = session.rpc("kb_helper_trades", {"p_run": run_id, "p_strategy": strategy, "p_after": after,
+                                                     "p_limit": 1000}) or []
+            rows += batch
+            if len(batch) < 1000:
+                return pd.DataFrame(rows, columns=TRADE_COLS.split(","))
+            after = int(batch[-1]["id"])
     load_env_file(env)
     key = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not key:
