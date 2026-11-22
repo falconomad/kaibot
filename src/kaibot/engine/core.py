@@ -115,6 +115,7 @@ FLATTEN_TRIES = 2  # a close the venue refused is tried once more inside the sam
 # bounded cancel wait (CANCEL_WAIT_S) plus its reads. What is left when the budget runs out is reported and retried
 # by the next loop pass, never dropped. The heartbeat is written between positions (Engine.on_progress).
 FLATTEN_BUDGET_S = 30.0
+CALENDAR_ALERT_DAYS = 30  # M9 1.17 (#442): a hand-kept calendar ending within this many days is announced
 CLOSE_MAX_S = CANCEL_WAIT_S + 3.0
 CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": already waited, so not retried at once
 # S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
@@ -2053,6 +2054,46 @@ class Engine:
         self._market_error = None
         return True
 
+    def _calendar_alerts(self, today: date) -> None:
+        """M9 1.17 (#442): the two calendars someone extends by hand every autumn, announced CALENDAR_ALERT_DAYS
+        before they run out, at every session start until they are extended (one `calendar_expiring` event and an
+        ERROR log line each, once per session):
+
+        - `macro_calendar`: `covers_until` of config/macro_calendar.yaml. After it every session halts new entries
+          (`calendar_stale`), multi-day buys included.
+        - `deadman_holidays`: the last row of `kaibot.market_calendar_exception` (migration 0017), read from
+          Supabase. After it the off-box dead-man knows no holiday and no early close.
+
+        An alert only: nothing is halted or blocked here. A table that cannot be read, or has no row, is not an
+        expiry: it is logged and read again at the next session start; the session starts either way."""
+        ends: dict[str, tuple[date | None, str]] = {
+            "macro_calendar": (self.calendar_until, "extend config/macro_calendar.yaml (next year's FOMC and CPI "
+                               "dates) and move covers_until: after it every session halts new entries")}
+        try:
+            rows = self.store.select("market_calendar_exception", {"select": "day"})  # a few dozen rows
+            days = [date.fromisoformat(str(r["day"])[:10]) for r in rows or [] if r.get("day")]
+            ends["deadman_holidays"] = (max(days) if days else None, "add next year's holidays and early closes to "
+                                        "kaibot.market_calendar_exception (docs/ops/failsafe.md): after its last "
+                                        "row the dead-man knows no holiday and no early close")
+        except Exception as e:
+            log.warning("calendar check: the dead-man's holiday table could not be read (%s); read again at the "
+                        "next session start", f"{type(e).__name__}: {e}"[:160])
+        seen = getattr(self, "_calendar_alerted", None)
+        if seen is None:
+            seen = self._calendar_alerted = set()
+        for name, (until, action) in ends.items():
+            if until is None or (until - today).days > CALENDAR_ALERT_DAYS or (name, today) in seen:
+                continue
+            seen.add((name, today))
+            left = (until - today).days
+            log.error("calendar expiring: %s ends %s (%s): %s", name, until,
+                      f"in {left} days" if left >= 0 else f"{-left} days ago", action)
+            try:
+                self.store.event("calendar_expiring", {"calendar": name, "until": str(until), "days_left": left,
+                                                       "action": action}, self._rid())
+            except Exception:  # the alert must never be what stops the session start
+                log.exception("calendar_expiring event not written")
+
     def _maybe_prepare(self, clk: dict, now: datetime) -> None:
         """Load history ahead of the open (the first load takes a few minutes; later ones are incremental)."""
         if self.run is None:
@@ -2123,6 +2164,7 @@ class Engine:
             self.store.event("calendar_stale", {"day": str(today), "covers_until": str(self.calendar_until),
                                                 "action": "update config/macro_calendar.yaml"}, self._rid())
             self._halt_entries("calendar_stale", f"event calendar ends {self.calendar_until}")
+        self._calendar_alerts(today)  # M9 1.17: said 30 days before, not found out on 1 January
         # #333: the daily path's near-close orders can fill while the engine is down (a restart inside 15:50-16:00):
         # their fills are booked before the account check and the reconciliation compare the ledger with the venue
         self._daily_step("sync", lambda: self.daily.sync(force=True))

@@ -99,6 +99,14 @@ and the paper account's own figure), the ±30 min event blackout (FOMC 14:00; CP
   paper positions; with the engine running it returns `engine alive`.
 - Every autumn, extend `config/macro_calendar.yaml` (Fed tentative schedule ~September, BLS CPI schedule) and
   bump `covers_until`, or entries stop on 1 January.
+- **The engine says so 30 days ahead** (M9 1.17, #442). At every session start it checks both hand-kept calendars
+  and, when one ends within 30 days (or has ended), writes a `calendar_expiring` event and an ERROR log line
+  `calendar expiring: ...`, every session until it is extended:
+  - `macro_calendar`: `covers_until` of `config/macro_calendar.yaml`;
+  - `deadman_holidays`: the last row of `kaibot.market_calendar_exception` (read from Supabase; today's rows end
+    on the last listed day of 2028).
+  It is an alert only: nothing is halted before `covers_until` passes. If the holiday table cannot be read, the
+  session starts as usual and the table is read again at the next session start.
 
 ## Overnight-safe fail-safes (S80, #120)
 
