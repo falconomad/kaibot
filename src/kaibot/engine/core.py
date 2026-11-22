@@ -334,6 +334,7 @@ class Engine:
         self.market_alarm = market_alarm
         self.policies, self.fomc, self.process, self.now = policies, fomc, process, now
         self.calendar_until = calendar_until  # last date the event calendar covers; None = not checked
+        self.clock_skew: dict | None = None  # M9 1.10: set while the host clock and the broker's disagree
         self.events = events if events is not None else from_fomc_dates(fomc)  # {day: [(event, minute)]}
         self.strategies = strategies or {}  # {level: [live strategies]}; missing level -> registry.DEFAULT_LIVE
         for names in self.strategies.values():  # #161: a multi-day rule never loads on the live path
@@ -381,7 +382,6 @@ class Engine:
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
-        self.clock_skew: dict | None = None  # M9 1.10: set while the host clock and the broker's disagree
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
         self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
