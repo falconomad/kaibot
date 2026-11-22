@@ -619,3 +619,39 @@ same text is Amendment 18 of mom_12_1_band.
 6. **Known deviation, live against research.** A decision sent late trades one or more sessions after its fill
    day, at those sessions' prices and with that session's sizing. That is a deviation of operations (the engine
    was down), counted by Gate C as such, like the carry-over's (Amendment 11, item 5). Paper only.
+
+## Amendment 21 (22 Nov 2026, backend-quant, issue #426, M9 ticket 1.1, before its first live paper session): the book's run end is measured on confirmed prices
+
+Written on 22 Nov 2026, before the change's first use. It changes when the book's run end (the retirement trigger)
+can fire on the live path, so it is recorded here. The trigger's level, the two checks a minute apart and what
+happens at the end are unchanged. No research result is affected (item 6). The same text is Amendment 19 of mom_12_1_band.
+
+1. **Why.** The run end sells every position at market and retires the rule. It was measured on the last minute
+   bar of each holding, however old, with no second source; both checks could read the same bar; the peak went up
+   on a single reading and never comes down; and a split the ledger had not booked yet read as a fall (engine
+   audit, finding R1). One wrong price could end the book.
+2. **Which price counts.** A holding's last minute bar counts by itself when it ended at most 5 minutes ago and its
+   close is within 10% of the holding's last close mark. A bar that is older or further away counts only when the
+   broker's own price for the position, read at the same tick, is within 2% of it. A price that does not count is
+   not used: the holding is measured at its last close mark for that check, and the heartbeat names it. A holding
+   that has no minute bars is measured at the broker's price. A bar more than 15 minutes old that the broker's
+   price does not agree with is treated as no bar: the broker's price of that tick counts alone (QA-Ops second
+   key, PR #527: with the market data down, a fall the broker shows is counted after 15 minutes at the latest).
+3. **The peak.** After the close the peak is taken from the close marks at once. During the session a new peak
+   needs two readings above the old one at least a minute apart, and it is the lower of the two.
+4. **Holdings in doubt.** A held symbol whose share count differs between the ledger and the broker at that tick
+   (a difference the owner accepted aside), or that has a split, reverse split, spin-off, merger or symbol change
+   dated today, or a split booked today, is measured at its last close mark, not at today's prices. The check
+   itself is not switched off: every other holding is measured as in item 2, so a difference that stays open
+   for days never leaves the book without its run end (QA-Ops second key, PR #527; the first version skipped
+   the whole check). It is journalled (`md_book_check_skipped`) and raised as an event
+   (`multi_day_book_unchecked`) once per day and set of symbols, and shown in the heartbeat.
+5. **A real fall still ends the book.** A fall that the minute bars and the broker both show is counted as before:
+   the first check journals the breach, the second, a minute later, ends the book. Tested with a 30% overnight
+   fall against the 27% end, a fall after a half-hour silence of both sources, a fall the broker shows while the
+   bars have stopped, and a fall in one holding while another has an open share difference. A holding that
+   stands at its last close mark for 5 minutes on end (no price that counts) raises the event
+   `multi_day_book_unconfirmed`, once per day and holding: the check does not see that holding's move of today.
+6. **Research and Gate B unchanged.** The book's run end is checked by the live engine only, on its minute
+   ticks; the research runs do not go through it. No trial row, report or Gate B mark changes, and the
+   bit-identity test of the momentum rules passes unchanged.

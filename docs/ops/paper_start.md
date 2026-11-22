@@ -230,6 +230,11 @@ Start at least 30 minutes before the open.
   on the same day, gets a new id.
 - **One bad price does not retire the rule:** the book's drawdown must be past its end on two checks at least a
   minute apart.
+  A price that is old (a bar more than 5 minutes back) or far from the last close (more than 10%) counts only when
+  Alpaca's own price for the position agrees with it; after 15 minutes without a new bar Alpaca's price counts
+  alone. A holding whose share count differs from Alpaca's, or that has a split or similar action that day, is
+  counted at its last close until that is cleared; the other holdings are still checked (M9 ticket 1.1). The
+  events `multi_day_book_unchecked` and `multi_day_book_unconfirmed` name a holding the check cannot see today.
   The run whose book hit its end keeps its book closed: the rule trades again from the next run on (dashboard,
   new run), not in that run.
 - **Stop it for good** (you decide): dashboard, **Flatten and stop**. This first cancels the rule's orders that have

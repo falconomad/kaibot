@@ -38,6 +38,10 @@ ROUTINE |= {"filing_flag_shadow"}
 # M9 1.15 (#440): a command row the engine refused. A health event, left out only until a migration lists it and the
 # Health page names it (#512); it is logged as an error and written to the event table meanwhile
 ROUTINE |= {"command_rejected"}
+# M9 1.1 (#426, QA-Ops second key on #527): the book's run end does not see a holding's prices of today. Health
+# events, left out only until a migration lists them and the Health page names them (#512); they are logged as
+# a warning or an error, shown in the heartbeat's book line and written to the event table meanwhile
+ROUTINE |= {"multi_day_book_unchecked", "multi_day_book_unconfirmed"}
 
 # Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
 # missed). Each dynamic call site below, and where its names come from; a new dynamic call fails

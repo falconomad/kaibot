@@ -471,9 +471,24 @@ def test_a_stale_reenable_line_never_reenables_a_same_date_retirement(tmp_path, 
     assert second in why
 
 
+def _broker_falls_too(a, bad):
+    """M9 1.1: a price far from the last close counts for the book end only when the broker's own price agrees.
+    While `bad["on"]`, the broker marks B 50% down as well (a fall seen in both sources, as a real one is)."""
+    real = a.broker.positions
+
+    def positions():
+        out = real()
+        if bad["on"] and "B" in out and out["B"].get("current_price"):
+            out["B"] = {**out["B"], "current_price": str(float(out["B"]["current_price"]) * 0.5)}
+        return out
+
+    a.broker.positions = positions
+
+
 def test_one_bad_print_never_retires_the_rule(tmp_path, monkeypatch):
-    """#211 (QA-Ops 1): a breach seen on one check only (a bad print) is journalled and dropped; the book ends only
-    when the breach holds on two checks at least a minute apart."""
+    """#211 (QA-Ops 1): a breach seen on one check only is journalled and dropped; the book ends only when the
+    breach holds on two checks at least a minute apart. M9 1.1: a bad print in the minute bars alone (the broker's
+    price did not move) is not even a breach."""
     a = DailyAccount(tmp_path, monkeypatch, book_end=5.0)
     _book_b(a)
     real = a.eng._md_price
@@ -481,9 +496,15 @@ def test_one_bad_print_never_retires_the_rule(tmp_path, monkeypatch):
     a.eng._md_price = lambda sym: real(sym) * 0.5 if bad["on"] else real(sym)  # a bad print of B
     a.ticks(a.open1, 30, 40)
     bad["on"] = True
-    a.ticks(a.open1, 40, 41)  # one tick with a bad price
+    a.ticks(a.open1, 40, 42)  # two ticks with a bad bar price, the broker's price normal
     bad["on"] = False
-    a.ticks(a.open1, 41, 45)
+    assert not [b for *_, b in a.eng.journal.entries(kinds=("md_book_breach",))]
+    assert not a.eng.daily.account.book_ended()
+    _broker_falls_too(a, bad)
+    bad["on"] = True
+    a.ticks(a.open1, 42, 43)  # one tick with a price both sources show
+    bad["on"] = False
+    a.ticks(a.open1, 43, 45)
     assert [b for *_, b in a.eng.journal.entries(kinds=("md_book_breach",))]
     assert not a.eng.daily.account.book_ended() and a.eng.daily.retirement(MD) is None
     bad["on"] = True
@@ -547,6 +568,7 @@ def test_a_restart_between_the_two_checks_does_not_drop_a_real_breach(tmp_path, 
     _book_b(a)
     real = type(a.eng)._md_price.__get__(a.eng)
     bad = {"on": False}
+    _broker_falls_too(a, bad)  # M9 1.1: the fall is in the bars and at the broker
     a.ticks(a.open1, 30, 40)
     bad["on"] = True  # a one-off print, then a restart, then normal prices: dropped, not revived
     _crash_bad(a.eng, real, bad)
