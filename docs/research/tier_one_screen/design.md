@@ -120,3 +120,5 @@ Settled:
 - The budget pays out on a gate v3 `pass` only, never on `evidence_based` (Product, 22 Nov 2026; section 4).
 - A candidate that comes from the counted proposer (ticket 3.10, #575) names its `proposal_id` in the batch file,
   and its screen row counts **0** trials, because its proposal row already counted it (Product, 22 Nov 2026).
+  The run refuses a `proposal_id` with no counted proposal row (`variant: proposal`, n_trials at least 1) in the
+  trial registry, and a proposal screened in an earlier batch counts 1 again (QA-Ops on #574).

@@ -196,19 +196,50 @@ def test_the_batch_script_on_the_fixture(tmp_path):
         screen_batch.main(["--batch", str(bad), "--fixture", "--data", str(tmp_path), "--trials", ""])
 
 
-def test_a_screened_proposal_counts_zero_trials(tmp_path):
-    """Product, 22 Nov 2026: a candidate from the counted proposer (#575) was counted at intake."""
+def _proposal_batch(tmp_path, batch_id, proposal_id="p0001"):
+    f = tmp_path / f"{batch_id}.yaml"
+    f.write_text(yaml.safe_dump({"id": batch_id, "date": "2026-11-22", "family": "cross_sectional_momentum",
+                                 "candidates": [{"name": "prop_1", "signal": "momentum", "proposal_id": proposal_id,
+                                                 "params": {"back": 126, "skip": 21}},
+                                                {"name": "own_1", "signal": "reversal", "params": {"back": 5}}]}))
+    return f
+
+
+def _screen(tmp_path, f, trials):
     sys.path.insert(0, str(ROOT / "scripts"))
     import screen_batch
 
-    f = tmp_path / "b.yaml"
-    f.write_text(yaml.safe_dump({"id": "fixture_prop", "date": "2026-11-22", "family": "cross_sectional_momentum",
-                                 "candidates": [{"name": "prop_1", "signal": "momentum", "proposal_id": "p0001",
-                                                 "params": {"back": 126, "skip": 21}},
-                                                {"name": "own_1", "signal": "reversal", "params": {"back": 5}}]}))
+    return screen_batch.main(["--batch", str(f), "--fixture", "--data", str(tmp_path), "--out", str(tmp_path / "o"),
+                              "--trials", str(trials), "--committed", "no"])
+
+
+def test_a_screened_proposal_counts_zero_trials(tmp_path):
+    """Product, 22 Nov 2026: a candidate from the counted proposer (#575) was counted at intake, so its screen row
+    counts 0; the proposal's own row must be in the registry (else naming any id would skip the count)."""
     trials = tmp_path / "t.jsonl"
-    screen_batch.main(["--batch", str(f), "--fixture", "--data", str(tmp_path), "--out", str(tmp_path / "o"),
-                       "--trials", str(trials), "--committed", "no"])
-    rows = {r["candidate"]: r for r in map(json.loads, trials.read_text().splitlines())}
+    trials.write_text(json.dumps({"trial_id": "proposal_p0001", "strategy": "proposal_p0001", "variant": "proposal",
+                                  "proposal_id": "p0001", "family": "cross_sectional_momentum", "n_trials": 1}) + "\n")
+    _screen(tmp_path, _proposal_batch(tmp_path, "fixture_prop"), trials)
+    rows = {r["candidate"]: r for r in map(json.loads, trials.read_text().splitlines()) if r.get("variant") == "screen"}
     assert rows["prop_1"]["n_trials"] == 0 and rows["prop_1"]["proposal_id"] == "p0001"
     assert rows["own_1"]["n_trials"] == 1
+
+
+def test_a_proposal_id_the_registry_does_not_hold_is_refused(tmp_path):
+    trials = tmp_path / "t.jsonl"
+    with pytest.raises(SystemExit, match="p0001 has no counted proposal row"):
+        _screen(tmp_path, _proposal_batch(tmp_path, "fixture_fake"), trials)
+    assert not trials.exists()  # refused before a row is written
+    with pytest.raises(SystemExit, match="has no counted proposal row"):  # a proposal row counting 0 counts nothing
+        trials.write_text(json.dumps({"variant": "proposal", "proposal_id": "p0001", "n_trials": 0}) + "\n")
+        _screen(tmp_path, _proposal_batch(tmp_path, "fixture_zero"), trials)
+
+
+def test_a_proposal_screened_again_counts_again(tmp_path):
+    trials = tmp_path / "t.jsonl"
+    trials.write_text(json.dumps({"variant": "proposal", "proposal_id": "p0001", "n_trials": 1}) + "\n")
+    _screen(tmp_path, _proposal_batch(tmp_path, "fixture_a"), trials)
+    _screen(tmp_path, _proposal_batch(tmp_path, "fixture_b"), trials)
+    got = [(r["batch"], r["n_trials"]) for r in map(json.loads, trials.read_text().splitlines())
+           if r.get("candidate") == "prop_1"]
+    assert got == [("fixture_a", 0), ("fixture_b", 1)]

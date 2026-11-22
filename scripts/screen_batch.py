@@ -55,6 +55,26 @@ def load_batch(path: Path, gate: g3.GateV3) -> dict:
     return b
 
 
+def counted_proposals(batch: dict, trials_path: Path | None) -> set[str]:
+    """The proposal ids the batch names, each checked against the trial registry: a candidate may log 0 trials only
+    for a proposal whose own row (`variant: proposal`, n_trials at least 1, #575's `propose.py`) is already in the
+    registry. A proposal id the registry does not hold is refused: else any batch could skip its count by naming one."""
+    named = [str(c["proposal_id"]).strip() for c in batch["candidates"] if c.get("proposal_id") is not None]
+    if not named:
+        return set()
+    if any(not n for n in named) or len(set(named)) != len(named):
+        raise SystemExit("screen: a proposal_id must be non-empty and named by one candidate only")
+    rows, _ = trials_mod.read_jsonl(trials_path)
+    counted = {str(r.get("proposal_id")) for r in rows
+               if r.get("variant") == "proposal" and trials_mod.configurations_of(r) >= 1}
+    screened = {str(r.get("proposal_id")) for r in rows if r.get("variant") == "screen" and r.get("proposal_id")}
+    missing = sorted(set(named) - counted)
+    if missing:
+        raise SystemExit(f"screen: proposal_id {', '.join(missing)} has no counted proposal row in the trial registry "
+                         f"({trials_path or 'none given'}): log it with scripts/propose.py first")
+    return set(named) - screened  # a proposal screened before counts again in a later batch
+
+
 def decision_rows(data: DailyData, i0: int, i1: int, horizon: int) -> np.ndarray:
     d = pd.DatetimeIndex(data.dates.astype("datetime64[ns]"))
     rows = [k for k in range(max(i0, 1), i1 + 1) if d[k].month != d[k - 1].month and k + horizon <= i1]
@@ -86,6 +106,8 @@ def main(argv: list[str] | None = None) -> dict:
         except ValueError:
             raise SystemExit(f"screen: {path} is not in the repository: a batch file is committed before its run")\
                 from None
+    trials_path = None if a.trials == "" else Path(a.trials or data_dir / "trials.jsonl")
+    free = counted_proposals(batch, trials_path)
     cfg = sc.load_config()
     cfg_sha = hashlib.sha256(sc.CONFIG.read_bytes()).hexdigest()
     budget = sc.Budget.from_config(cfg)
@@ -114,7 +136,9 @@ def main(argv: list[str] | None = None) -> dict:
         ics = sc.rank_ics(score, fwd, top_fraction=float(st["top_fraction"]),
                           charge=2 * float(st["charge_bp_a_side"]) / 1e4, min_stocks=int(st["min_stocks"]))
         results[cand["name"]] = {**sc.statistic(ics, int(st["periods_per_year"])), "signal": cand["signal"],
-                                 "params": cand.get("params") or {}, "proposal_id": cand.get("proposal_id")}
+                                 "params": cand.get("params") or {},
+                                 "proposal_id": None if cand.get("proposal_id") is None
+                                 else str(cand["proposal_id"]).strip()}
     verdict = sc.screen_batch({k: v["p"] for k, v in results.items()}, level)
     for k in results:
         results[k].update(verdict[k])
@@ -132,7 +156,6 @@ def main(argv: list[str] | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     f = out_dir / f"screen_{batch['id']}_{run_at.strftime('%Y%m%dT%H%M%S')}.json"
     f.write_text(json.dumps(rep, indent=1, default=str))
-    trials_path = None if a.trials == "" else Path(a.trials or data_dir / "trials.jsonl")
     if trials_path is not None:
         for k, v in results.items():
             trials_mod.append(trials_path, {
@@ -140,7 +163,7 @@ def main(argv: list[str] | None = None) -> dict:
                 "candidate": k, "variant": "screen",
                 "family": batch["family"], "batch": batch["id"], "code_sha": code_sha,
                 # Product, 22 Nov 2026: a proposal (#575) was counted at its intake; its screen row counts 0
-                "n_trials": 0 if v.get("proposal_id") else 1, "proposal_id": v.get("proposal_id"),
+                "n_trials": 0 if v.get("proposal_id") in free else 1, "proposal_id": v.get("proposal_id"),
                 "config_sha256": cfg_sha,
                 "params": {"signal": v["signal"], **v["params"]}, "window": rep["window"],
                 "metrics": {"mean_ic": v["mean_ic"], "t": v["t"], "p": v["p"], "level": level,
