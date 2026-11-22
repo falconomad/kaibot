@@ -41,14 +41,14 @@ the 99% block-bootstrap band of the test", with the band drawn for a stretch as 
 | Setting | Value | Where from |
 |---|---|---|
 | Returns resampled | the daily mark-to-market returns of the book's own engine + `SimBroker` run, at the level it trades, on the **research window** (2017-05-01 to 2024-12-31; the hold-out is never read) | decision 16 section 3 |
-| Method | stationary bootstrap (Politis and Romano), mean block 20 sessions, **2,000 paths**, seed 17 | `gate_c.bootstrap`, as gate v2 |
+| Method | stationary bootstrap (Politis and Romano), mean block 20 sessions, **2,000 paths**, seed 15 | `gate_c.bootstrap` of `config/gate_v2.yaml`, the same settings (a test holds them equal) |
 | Statistic | the maximum drawdown of each path of h sessions | `mtm.bootstrap_max_drawdowns` |
 | Horizons | h = 5, 10, 20, 40, 60, 90, 126, 189, 252, 378, 504, 756, 1008, 1260, 1512, 1764 and the window's length | `book_stop.HORIZONS` |
 | Retire line | the **99%** quantile at each horizon | Gate C's retirement trigger |
 | Alert line | the **95%** quantile (an event and a dashboard note, nothing is sold) | Gate C's incubation mark |
 | Between horizons | the value at the largest listed horizon at or below h (the stricter neighbour). Beyond the last horizon, the last value | |
 | Monotone | a table whose 99% line falls as h grows is refused (resampled drawdowns over a longer stretch are never smaller in distribution) | `book_stop.BandTable` |
-| Ceiling | the retire line is never above **40%** (proposal; a level limit, the stakeholder's) | section 6 |
+| Ceiling | the retire line is never above `BOOK_HARD_CEILINGS.run_drawdown_end_pct` (**27%** today, decision 15 section 11); `ceiling_pct` may only lower it, and a config above 27% is refused | sections 5 and 6 |
 | Short records | before 20 live sessions the band at h = 20 is used, not a narrower one | `min_sessions` |
 
 The table is computed **once, on the Mac**, from the run named in the book's pre-registration
@@ -69,6 +69,10 @@ a new table, committed before it trades.
   end is confirmed today (`BREACH_CONFIRM_S`, the journalled first breach that survives a restart).
 - `risk/book_stop.verdict` gives one answer for both modes. In mode `fixed` it is `gate.book_run_ended` itself, and a
   property test checks the two agree on every input.
+- **Fail closed.** Only `mode: band`, a committed table and finite inputs give the band; anything else (another
+  mode, a missing table, a non-finite peak, equity or record drawdown, a bad session count) gives the fixed line.
+  A missing, unreadable or invalid `config/book_stop.yaml` means mode `fixed` (`book_stop.load_or_fixed`), never
+  "no stop". A band table whose 99% line is 0 anywhere (a run without variance) is refused.
 
 ## 4. What happens at the end, and what replaces "retired forever"
 
@@ -82,16 +86,20 @@ a new table, committed before it trades.
 
 - `BOOK_HARD_CEILINGS.run_drawdown_end_pct = 27` **stays** as the ceiling of the fixed line, and the fixed line stays
   the stop in mode `fixed` and for any book without a committed table.
-- In mode `band`, the band replaces the line for a book that has a table. The band's own ceiling (40%, proposed) is
-  a new level limit that the stakeholder confirms with the switch.
+- In mode `band`, the band replaces the line for a book that has a table, and it is capped at the same hard
+  ceiling (27%): the band can end a book earlier than the level's line, or later up to 27%, never past 27%. Profiles
+  still only tighten. This record does **not** amend decision 15 section 11 or `BOOK_HARD_CEILINGS`.
 - The intraday run end (4 / 8 / 12%, `HARD_CEILINGS`) is untouched, and so is the daily stop. With the daily path
   on, the intraday end is already measured without the book's P&L (`gate.intraday_equity`).
 
 ## 6. Decisions for the stakeholder
 
 1. **Switch.** `mode: band` in `config/book_stop.yaml`, after section 7.
-2. **Ceiling.** 40% proposed, so that a 97% SPY core is not sold at a 2020-like fall (about 34%). Lower is safer for
-   a book without a core and costlier for a book with one.
+2. **Ceiling.** 40% is proposed, so that a 97% SPY core is not sold at a 2020-like fall (about 34%). Lower is safer
+   for a book without a core and costlier for a book with one. 40% is above the hard ceiling of 27%
+   (`BOOK_HARD_CEILINGS.run_drawdown_end_pct`, the stakeholder's on 13 Nov 2026, decision 15 section 11), so it
+   needs its own stakeholder decision that amends decision 15 and raises that ceiling, with tests first and two
+   keys. Until then `ceiling_pct` is 27 and the code refuses more (QA-Ops, PR #552).
 3. **Keep the core at the end** (`keep_index_core: true` proposed).
 4. **What review means**: who reviews (Product), and in how many sessions (5 proposed).
 

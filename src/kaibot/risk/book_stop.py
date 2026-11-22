@@ -9,6 +9,12 @@ wiring is a later, separate change (decision 17 section 7, after #534 / #536 / #
 - In mode "band" it compares the live record's maximum drawdown (the current tick included) with the 99% line of
   the book's band table at the record's length in sessions (at least `min_sessions`), capped at `ceiling_pct`; the
   95% line is an alert. A book without a committed table falls back to the fixed line (and says so).
+- The band's end line is never above `BOOK_HARD_CEILINGS.run_drawdown_end_pct` (27%, decision 15 section 11): a
+  config whose `ceiling_pct` is above it is refused, and `verdict` caps the line there whatever config it is given.
+  Raising that ceiling is a stakeholder decision that amends decision 15; this record does not make it.
+- Fail closed: only `mode == "band"` with a table and finite inputs is judged by the band; any other mode, a
+  non-finite peak, equity or record drawdown, or a bad session count gets the fixed line. `load_or_fixed` reads the
+  config and gives the fixed mode (never "no stop") when the file is missing, unreadable or invalid.
 - `BandTable` holds the 95% and 99% quantiles of resampled maximum drawdowns by horizon. It refuses a table that is
   empty, out of order, outside 0..1, with a 95% line above the 99% one, or whose 99% line falls as the horizon grows.
 """
@@ -22,7 +28,7 @@ from pathlib import Path
 
 import yaml
 
-from kaibot.risk.gate import BookLimits, book_run_ended, drawdown_pct
+from kaibot.risk.gate import BOOK_HARD_CEILINGS, BookLimits, book_run_ended, drawdown_pct
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PATH = ROOT / "config" / "book_stop.yaml"
@@ -49,6 +55,8 @@ class BandTable:
         for v in (*a, *b):
             if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v) or not 0 <= v <= 1:
                 raise ValueError(f"a band value {v!r} is not a drawdown between 0 and 1")
+        if any(not v > 0 for v in b):  # a 99% line at 0 (e.g. a zero-volatility run) would end a book at its peak
+            raise ValueError("a 99% line of 0 is a degenerate band (no variance in the resampled returns)")
         if any(x > y + TOL for x, y in zip(a, b, strict=True)):
             raise ValueError("the 95% line is above the 99% line at some horizon")
         if any(b[i + 1] < b[i] - TOL for i in range(len(b) - 1)):
@@ -98,7 +106,25 @@ def load(path: Path | str = DEFAULT_PATH) -> BookStopConfig:
         raise ValueError("book_stop.yaml: need 0 < alert_quantile < retire_quantile < 1")
     if not 0 < out.ceiling_pct <= 100 or out.min_sessions < 1:
         raise ValueError("book_stop.yaml: ceiling_pct in (0, 100] and min_sessions >= 1")
+    if out.ceiling_pct > BOOK_HARD_CEILINGS.run_drawdown_end_pct:
+        raise ValueError(f"book_stop.yaml: ceiling_pct {out.ceiling_pct} loosens the hard ceiling "
+                         f"run_drawdown_end_pct={BOOK_HARD_CEILINGS.run_drawdown_end_pct}")
     return out
+
+
+# The config the stop falls back to when book_stop.yaml cannot be read: today's fixed line. The band settings are
+# never used in this mode.
+FIXED = BookStopConfig("fixed", 0.99, 0.95, 20, BOOK_HARD_CEILINGS.run_drawdown_end_pct, False, 5,
+                       {"method": "stationary", "mean_block_sessions": 20, "runs": 2000, "seed": 15}, {})
+
+
+def load_or_fixed(path: Path | str = DEFAULT_PATH) -> tuple[BookStopConfig, str | None]:
+    """`load`, failing closed: a missing, unreadable or invalid file gives the fixed mode (today's stop) and the
+    reason, never "no stop"."""
+    try:
+        return load(path), None
+    except Exception as e:  # any failure to read the switch means the fixed line
+        return FIXED, f"book_stop.yaml unusable, the fixed line: {type(e).__name__}: {e}"
 
 
 def table_for(cfg: BookStopConfig, rule: str, level: str, root: Path = ROOT) -> BandTable | None:
@@ -128,18 +154,29 @@ def verdict(peak: float, equity: float, lim: BookLimits, *, cfg: BookStopConfig,
     """The book's stop at one check (module docstring). `record_max_drawdown`: the live record's largest fall from
     its running peak so far (a fraction); `sessions`: sessions the book has traded since its start."""
     now = drawdown_pct(peak, equity) / 100
-    if cfg.mode == "fixed" or table is None:
-        why = "fixed line" if cfg.mode == "fixed" else "mode band, but no band table is committed: the fixed line"
+    why = None
+    if cfg.mode != "band":
+        why = "fixed line" if cfg.mode == "fixed" else f"mode {cfg.mode!r} is not 'band': the fixed line"
+    elif table is None:
+        why = "mode band, but no band table is committed: the fixed line"
+    elif not _finite(peak, equity, record_max_drawdown) or isinstance(sessions, bool) or not isinstance(sessions, int):
+        why = "mode band, but an input is not a finite number: the fixed line"
+    if why is not None:
         line = lim.run_drawdown_end_pct / 100
         return StopVerdict(book_run_ended(peak, equity, lim), False, "fixed", now, line, None, None, why)
+    assert table is not None
     dd = max(float(record_max_drawdown), now)
-    h = max(int(sessions), cfg.min_sessions)
+    h = max(sessions, cfg.min_sessions)
     q95, q99 = table.at(h)
-    cap = cfg.ceiling_pct / 100
+    cap = min(cfg.ceiling_pct, BOOK_HARD_CEILINGS.run_drawdown_end_pct) / 100  # never past the hard ceiling
     line, alert_line = min(q99, cap), min(q95, cap)
     end = dd >= line - TOL
     why = f"{dd:.2%} against the 99% line {line:.2%} at {h} sessions" + (" (ceiling)" if q99 > cap else "")
     return StopVerdict(end, dd >= alert_line - TOL, "band", dd, line, alert_line, h, why)
+
+
+def _finite(*xs) -> bool:
+    return all(not isinstance(x, bool) and isinstance(x, int | float) and math.isfinite(x) for x in xs)
 
 
 def end_action(cfg: BookStopConfig, has_index_core: bool) -> str:

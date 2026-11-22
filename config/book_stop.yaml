@@ -1,5 +1,5 @@
 # The multi-day book's stop (decision 17, docs/decisions/17_book_stop.md; M11 ticket 2.10, issue #461). Read by
-# kaibot.risk.book_stop.
+# kaibot.risk.book_stop (load_or_fixed: a missing or invalid file means mode fixed, never "no stop").
 #
 # mode: fixed  -> today's stop, unchanged: the book ends at BookLimits.run_drawdown_end_pct below its peak
 #                 (13 / 21 / 27% by level, decision 15 section 11; risk/gate.book_run_ended) and is retired.
@@ -14,10 +14,11 @@ band:
   retire_quantile: 0.99            # Gate C's retirement trigger
   alert_quantile: 0.95             # Gate C's incubation mark: an event, nothing is sold
   min_sessions: 20                 # before 20 live sessions the band at 20 sessions is used
-  ceiling_pct: 40                  # PROPOSAL (a level limit, the stakeholder's): the retire line never above this
+  ceiling_pct: 27                  # the retire line never above this; at most BOOK_HARD_CEILINGS (27%, refused
+                                   # above it). Decision 17 section 6 proposes 40%: that needs the hard ceiling raised
   keep_index_core: true            # PROPOSAL: at the end, a book with an index core sells its sleeves, keeps SPY
   review_sessions: 5               # PROPOSAL: Product reviews a paused book within this many sessions
-  bootstrap: {method: stationary, mean_block_sessions: 20, runs: 2000, seed: 17}
+  bootstrap: {method: stationary, mean_block_sessions: 20, runs: 2000, seed: 15}  # = config/gate_v2.yaml gate_c
 # Committed band tables, one per rule and level (scripts/book_stop_bands.py writes them on the Mac). Empty today:
 # a book without a table keeps the fixed line in either mode.
 #   <rule>:

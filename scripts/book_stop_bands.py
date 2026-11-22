@@ -7,9 +7,9 @@ daily CSV of an engine + SimBroker run, writes one JSON table; never touches a b
 The CSV is a run's daily ledger rows (`date`, `start`, `end`; every daily CSV the engine scripts write). Its returns
 are cut to the research window of config/gate_v3.yaml (2017-05-01 to 2024-12-31): a session in the hold-out is
 dropped and counted, never resampled. The bootstrap is the one of config/book_stop.yaml (stationary, mean block 20,
-2,000 paths, seed 17); the table holds the 95% and 99% quantiles of the maximum drawdown at each horizon of
-`risk.book_stop.HORIZONS` (and the window's own length). The file records the input's sha256, the report it came
-from, the window and the settings, so a table can be traced to its run.
+2,000 paths, seed 15, as `config/gate_v2.yaml` `gate_c`); the table holds the 95% and 99% quantiles of the
+maximum drawdown at each horizon of `risk.book_stop.HORIZONS` (and the window's own length). The file records
+the input's sha256, the report it came from, the window and the settings, so a table can be traced to its run.
 """
 
 from __future__ import annotations
