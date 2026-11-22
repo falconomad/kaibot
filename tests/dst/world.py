@@ -580,6 +580,12 @@ class World:
         self.check.after_pass()
 
     def _could_decide(self, now: datetime) -> None:
+        # #577: a run the owner starts after a close is "scheduled" until the next open, and a scheduled run decides
+        # nothing (engine/core._daily_after_close); its first decision is the late one at that open (M9 1.3). A pass
+        # with no running run is therefore no chance to decide.
+        run = self.eng.run if self.eng is not None else None
+        if not run or run.get("status") not in ("running", "paused"):
+            return
         for prev, fill in zip(EVENINGS, SESSIONS, strict=False):
             if fill in self.decidable or not (self.s.ready[prev] <= now < et(fill, "16:00")):
                 continue

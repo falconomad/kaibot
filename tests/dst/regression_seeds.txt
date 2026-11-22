@@ -7,3 +7,4 @@
 66   # found #533 (Flatten and stop with a fill activity a day late); now test_flatten_and_stop_sells_a_filled_buy...
 196  # a partly filled sale stays a sale although a newer decision wants the name (by design, builder_sizing)
 796328380  # the soak's first night: an engine down from before a decision until after its fill session (the oracle)
+796358683  # #577: a run started after the close is scheduled and decides nothing that evening; the oracle counted it (#561's dispatch)
