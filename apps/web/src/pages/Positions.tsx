@@ -35,6 +35,7 @@ import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
 import { DayChange, FreshLine, useMarks } from "../components/Marks";
 import { type BuyState, buyState, buyStateText, carriesFrom, pastBuys } from "../lib/carry";
+import { planNotes } from "../lib/planlate";
 import { markOf, potLive } from "../lib/marks";
 
 const PAGE = 50;
@@ -78,6 +79,8 @@ export function Positions() {
   // next decision (multi_day_carry events, kb_health); each planned buy says where it stands (lib/carry.ts)
   const carries = carriesFrom(health.data?.events, run.id);
   const earlier = plans.flatMap((pl) => (pastBuys(pl, carries, b, today) ?? []).map(({ o, s }) => ({ ...o, rule: pl.rule, fillsAt: pl.fillsAt, carry: s })));
+  // M9 1.3 / 1.4 (#517, #518): a decision taken late, and a decision sent late (lib/planlate.ts)
+  const notes = planNotes(plans, carries, today);
   const withCarry = tonight.map((o) => {
     const pl = current.find((x) => x.rule === o.rule);
     return pl && (o.action === "buy" || o.action === "resize") ? { ...o, carry: buyState(pl, o, carries, b, today) } : o;
@@ -159,6 +162,11 @@ export function Positions() {
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
           )}
           {/* below the list: the plan arrives after the rows, and must not push them down */}
+          {notes.map((n) => (
+            <div key={n.key} className="banner" role="status"><b>{ruleName(n.rule)}: {n.title}.</b> {n.text}
+              {n.skipped.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{n.skipped.map((x) => <li key={x.symbol}><b>{x.symbol}</b> was left out: {x.text}</li>)}</ul>}
+            </div>
+          ))}
           {(tonight.length > 0 || unmatched.length > 0) && <NextClose orders={withCarry.map((o) => ({ ...o, unfilled: matchU(o.rule, o.symbol, o.fillsAt) }))}
             extra={unmatched} today={today} />}
           {earlier.length > 0 && <NextClose orders={earlier} past />}
