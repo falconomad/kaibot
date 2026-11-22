@@ -176,6 +176,8 @@ families:
     idea: stocks that rose most over the past months keep outperforming (Jegadeesh and Titman)
     rules:
       trend_momentum: {kind: selection, v3_declared: false, existing_control: candidate_pool}
+      # docs/prereg/trend_momentum_gbm.md (#474): a gradient-boosted order of trend_momentum's own buy candidates
+      trend_momentum_gbm: {kind: selection, v3_declared: true, existing_control: candidate_pool}
       mom_12_1_band: {kind: selection, v3_declared: false, existing_control: candidate_pool}
       # docs/prereg/trend_momentum_band.md (#460): enter top 10%, exit below top 20%, monthly in four tranches
       trend_momentum_band: {kind: selection, v3_declared: true, existing_control: candidate_pool,
