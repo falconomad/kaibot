@@ -415,6 +415,10 @@ class Engine:
         self._unconf_alarmed: tuple[int | None, str, set[str]] = (None, "", set())
         # S80 (#120): sales of multi-day sleeves sent by a full flatten: venue order id -> {run_id, keys, reason}
         self._md_exits: dict[str, dict] = {}
+        # M9 1.13 (#438): venue order ids of orders this engine placed outside the order manager (intraday entries,
+        # their legs and exits; full-flatten sales), kept in the journal so their fills are never taken for fills on
+        # unknown orders (`foreign_fill`) once the position is gone, also after a restart. Folded at the first use.
+        self._own_ids: set[str] | None = None
         self._bpos: dict = {}  # the broker's positions as last read (drift check): a price for multi-day sleeves
         self._bpos_ts: datetime | None = None
         # #206: the live daily path (engine/live_daily.LiveDaily: multi-day rules through engine/daily.py's decision
@@ -470,6 +474,31 @@ class Engine:
             log.warning("account not clean: %s", msg)
             self.store.event("account_not_clean", msg, self._rid())
 
+    def _own(self) -> set[str]:
+        """M9 1.13: the remembered ids, folded from the journal the first time they are asked for."""
+        ids = getattr(self, "_own_ids", None)
+        if ids is None:
+            ids = self._own_ids = {str(i) for *_, b in self.journal.entries(kinds=("own_order_ids", "md_exit"))
+                                   for i in (b.get("ids") or [b.get("order_id")]) if i}
+        return ids
+
+    def _remember_ids(self, *ids) -> None:
+        """M9 1.13: these venue order ids are the engine's own (journalled once each)."""
+        own = self._own()
+        new = sorted({str(i) for i in ids if i} - own)
+        if new:
+            self.journal.append("own_order_ids", {"ids": new})
+            own.update(new)
+
+    def own_order_ids(self) -> set[str]:
+        """Every venue order id the engine knows as its own outside the order manager: the open intraday positions'
+        orders and legs (remembered here, so a leg cancelled or replaced later stays known), the full-flatten sales
+        and everything remembered before."""
+        self._remember_ids(*(getattr(p, a, None) for p in self.pos.values()
+                             for a in ("order_id", "stop_order_id", "target_order_id", "exit_order_id")),
+                           *self._md_exits)
+        return self._own()
+
     def _recon_inputs(self) -> dict:
         """What `reconcile.compare` needs: the ledger's shares per settled symbol against the broker's, and the cash
         change since the run began against the ledger's, net of dividends accrued and not yet paid. A symbol with
@@ -481,8 +510,11 @@ class Engine:
         acct = self.broker.account()
         bpos = {s: p for s, p in self.broker.positions().items() if s not in unsettled}
         cash = acct.get("cash")
+        # M9 1.13 (#438, audit D2): the order manager's view, so the fill checks run live (a fill on an order the
+        # engine does not know, an order with more filled shares than booked). None without a daily path.
+        om = self.daily.recon_view() if self.daily is not None else None
         return {"ledger_qty": {s: q for s, q in b.qty_by_symbol().items() if q and s not in unsettled},
-                "broker_positions": bpos, "ledger_cash": b.cash, "ledger_cash0": b.amount,
+                "om": om, "broker_positions": bpos, "ledger_cash": b.cash, "ledger_cash0": b.amount,
                 "broker_cash": float(cash) if cash is not None and b.broker_cash0 is not None else None,
                 "broker_cash0": b.broker_cash0,
                 "receivable": receivable(self.journal.entries(kinds=("div_accrual", "div_paid"))),
@@ -1107,7 +1139,9 @@ class Engine:
             return next(iter(self._cmd_waiting.values()))
         if not self.account_clean:
             return "account not clean"
-        if not self._reconciled():
+        # QA-Ops (#522): a fill difference alone (a fill on an unknown order, a fill not booked yet) stops buys in
+        # its own stock (`Reconciler.allows`, asked per order by the daily path), not the whole rebalance
+        if not self._reconciled() and self.recon.blocks_every_buy():
             return "ledger and broker differ (reconciliation)"
         if self.kill:
             return f"halted: {self.kill}"
@@ -3000,6 +3034,7 @@ class Engine:
 
     # ================= order sync =================
     def _sync_orders(self) -> None:
+        self.own_order_ids()  # M9 1.13: each tick, before a leg's id can be dropped (cancel, replace)
         if self._md_exits:
             self._sync_md_exits()
         for p in list(self.pos.values()):
@@ -3169,6 +3204,7 @@ class Engine:
                 "features": {**p.features(), **(extra or {})},
             },
         )
+        self._remember_ids(p.order_id, p.stop_order_id, p.target_order_id, p.exit_order_id)  # M9 1.13
         self.pos.pop(p)
 
     # ================= exits =================

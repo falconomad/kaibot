@@ -69,10 +69,10 @@ export function diffView(d: ReconDiff): DiffView {
   }
   if (d.kind === "foreign_fill") return { head: d.symbol ?? "A stock", canAccept: false,
     rows: d.qty !== null ? [["Filled at the broker", `${d.side === "sell" ? "sold" : d.side === "buy" ? "bought" : "traded"} ${shares(d.qty)}`]] : [],
-    note: `The broker filled an order ${NAME} doesn't know. It can't be accepted here: it clears when the books and the broker agree again.` };
+    note: `The broker filled an order ${NAME} doesn't know, placed by hand or by another program. New buys in this stock wait. If you accept a difference on this page, this one is accepted with it; otherwise it clears by itself after three days.` };
   if (d.kind === "unbooked") return { head: d.symbol ?? "A stock", canAccept: false,
     rows: d.qty !== null ? [["Filled, not in the books yet", shares(d.qty)]] : [],
-    note: "A fill hasn't reached the books yet. It usually clears by itself within minutes and can't be accepted here." };
+    note: "A fill hasn't reached the books yet. New buys in this stock wait. It usually clears by itself within minutes and can't be accepted here." };
   if (d.kind === "unavailable") return { head: "The broker's account couldn't be read", canAccept: false, rows: [],
     note: `${NAME} couldn't compare its books with the broker, so it treats that as a difference. It tries again every 15 minutes; nothing to accept.` };
   return { head: d.symbol ?? "A difference", canAccept: false, rows: [],

@@ -60,6 +60,9 @@ QTY_EPS = 1e-6
 NEVER_BLOCKED = ("stop", "cancel", "exit", "flatten")
 ACCEPT_COMMAND = "accept_reconcile"
 SESSION_CHECKS = ("startup", "session_start")  # checks at which accepted offsets are re-evaluated (and expire)
+# QA-Ops (#522): the fill differences name one stock and say nothing about the rest of the book, so they stop buys
+# in that stock only (`Difference.blocks`); every other difference stops every buy (`Reconciler.blocks_every_buy`)
+SYMBOL_ONLY = ("foreign_fill", "unbooked")
 Key = tuple[str, str | None]
 
 
@@ -117,8 +120,9 @@ def cash_tolerance(equity: float | None) -> float:
 def compare(ledger_qty: Mapping[str, float], broker_positions: Mapping[str, dict], *, om=None,
             ledger_cash: float | None = None, ledger_cash0: float | None = None, broker_cash: float | None = None,
             broker_cash0: float | None = None, receivable: float = 0.0, equity: float | None = None,
-            accepted: Mapping[Key, float] | None = None) -> Reconciliation:
-    """`accepted`: owner-accepted offsets per (kind, symbol), broker minus ledger."""
+            accepted: Mapping[Key, float] | None = None, accepted_fills=()) -> Reconciliation:
+    """`accepted`: owner-accepted offsets per (kind, symbol), broker minus ledger. `accepted_fills`: the activity
+    ids of the foreign fills the owner accepted (`accepted_foreign`)."""
     out = Reconciliation()
     acc = accepted or {}
     tol = cash_tolerance(equity)
@@ -137,9 +141,9 @@ def compare(ledger_qty: Mapping[str, float], broker_positions: Mapping[str, dict
             add(Difference("quantity", s, {"ledger": mine, "broker": theirs}), QTY_EPS)
     if om is not None:
         for aid, a in sorted(om.foreign.items()):
-            out.diffs.append(Difference("foreign_fill", a.get("symbol"), {"activity": aid,
-                                                                          "order_id": a.get("order_id"),
-                                                                          "qty": a.get("qty"), "side": a.get("side")}))
+            d = Difference("foreign_fill", a.get("symbol"), {"activity": aid, "order_id": a.get("order_id"),
+                                                             "qty": a.get("qty"), "side": a.get("side")})
+            (out.accepted if str(aid) in accepted_fills else out.diffs).append(d)
         for r in sorted(om.orders.values(), key=lambda r: r.coid):
             if r.cum > r.booked + QTY_EPS:
                 out.diffs.append(Difference("unbooked", r.symbol, {"coid": r.coid, "venue": r.cum,
@@ -165,6 +169,19 @@ def accepted_offsets(journal) -> dict[Key, float]:
             else:
                 out[(d["kind"], d.get("symbol"))] = float(d["offset"])
     return out
+
+
+def accepted_foreign(journal) -> set[str]:
+    """QA-Ops (#522): the activity ids of the foreign fills an owner's acceptance covered (`reconcile_resolved`,
+    `foreign`). A fill is one event that never changes, so its acceptance does not expire; a later fill on an
+    unknown order has another id and is a new difference."""
+    if journal is None:
+        return set()
+    return {str(i) for *_, b in journal.entries(kinds=("reconcile_resolved",)) for i in b.get("foreign") or []}
+
+
+def _foreign_ids(diffs) -> set[str]:
+    return {str(d.detail.get("activity")) for d in diffs if d.kind == "foreign_fill"}
 
 
 def _same(a: Difference, b: Difference) -> bool:
@@ -213,12 +230,13 @@ def resolve_last(journal, reason: str, by: str = "owner") -> list[dict]:
         raise ValueError("nothing to accept: the last check found no difference (it has healed)")
     offsets = [{"kind": x.kind, "symbol": x.symbol, "offset": x.offset} for x in map(_diff, diffs)
                if x.offset is not None]
-    if not offsets:
+    foreign = sorted(_foreign_ids(map(_diff, diffs)))  # QA-Ops (#522): the fills on unknown orders that were shown
+    if not offsets and not foreign:
         raise ValueError("nothing to accept: these differences cannot be accepted (" +
                          ", ".join(sorted({d["kind"] for d in diffs})) + "); they heal only when the books agree")
     journal.append("reconcile_resolved", {"reason": str(reason).strip(), "by": by, "offsets": offsets,
-                                          "diffs": diffs})
-    return offsets
+                                          "foreign": foreign, "diffs": diffs})
+    return offsets + [{"kind": "foreign_fill", "activity": i} for i in foreign]
 
 
 class Reconciler:
@@ -232,16 +250,29 @@ class Reconciler:
         self.last = Reconciliation()
         self.checked = False
         self._mem: dict[Key, float] = {}  # accepted offsets when there is no journal
+        self._mem_fills: set[str] = set()  # accepted foreign fills when there is no journal
         self._was_dirty: bool | None = None
 
     @property
     def accepted(self) -> dict[Key, float]:
         return accepted_offsets(self.journal) if self.journal is not None else dict(self._mem)
 
+    @property
+    def accepted_fills(self) -> set[str]:
+        return accepted_foreign(self.journal) if self.journal is not None else set(self._mem_fills)
+
+    def _compare(self) -> Reconciliation:
+        return compare(**self.read(), accepted=self.accepted, accepted_fills=self.accepted_fills)
+
+    def blocks_every_buy(self) -> bool:
+        """QA-Ops (#522): a difference of the last check stops every buy (shares, cash, a failed read). False when
+        only fill differences are open: those stop buys in their own stock (`allows`)."""
+        return any(d.kind not in SYMBOL_ONLY or not d.symbol for d in self.last.diffs)
+
     def check(self, when: str = "periodic") -> Reconciliation:
         """`when` in SESSION_CHECKS: accepted offsets not matched by a difference of this check expire."""
         acc = self.accepted
-        self.last = compare(**self.read(), accepted=acc)
+        self.last = compare(**self.read(), accepted=acc, accepted_fills=self.accepted_fills)
         self.checked = True
         if when in SESSION_CHECKS:
             keep = {d.key for d in self.last.accepted}
@@ -289,22 +320,30 @@ class Reconciler:
 
     def resolve(self, reason: str, by: str = "owner", shown=None) -> None:
         """The owner looked at the differences and accepts them as they are (journalled with the reason).
-        `shown` (the dashboard's command): what the owner's screen displayed; anything else is refused."""
+        `shown` (the dashboard's command): what the owner's screen displayed; anything else is refused.
+        QA-Ops (#522): the fills on unknown orders (`foreign_fill`) of the last check are accepted with it, each
+        by its activity id, when they are still there; one that arrived since is a new difference. With nothing
+        else open they are accepted alone (the command line; the dashboard's command needs a `shown` row)."""
         if not str(reason or "").strip():
             raise ValueError("a resolution needs a reason")
         owner = shown
         shown = [d for d in self.last.diffs if d.offset is not None]
+        seen_fills = _foreign_ids(self.last.diffs)
         if owner is not None:
             why = _shown_mismatch(shown, owner)
             if why:
                 raise ValueError("nothing accepted: " + why)
-        if not shown:
+        if not shown and not seen_fills:
             return
         # issue #179: read the venue again; accept only what is still there at the value shown
-        fresh = compare(**self.read(), accepted=self.accepted)
+        fresh = self._compare()
         take = [d for d in fresh.diffs if any(_same(s, d) for s in shown)]
+        fills = [d for d in fresh.diffs if d.kind == "foreign_fill" and str(d.detail.get("activity")) in seen_fills]
         why = None
-        if not take:
+        if not shown:  # only fills on unknown orders were open
+            if not fills:
+                why = "nothing to accept: the difference has healed"
+        elif not take:
             healed = not any(d.key in {s.key for s in shown} for d in fresh.diffs)
             why = "nothing to accept: the difference " + ("has healed" if healed else
                   "has changed since it was shown: check again and accept the new value")
@@ -322,11 +361,13 @@ class Reconciler:
             self._was_dirty = bool(fresh.diffs)
             self.journal.append("reconcile_resolved", {
                 "reason": str(reason).strip(), "by": by, "diffs": [x for x in fresh.summary()["diffs"]
-                                                                   if _diff(x).key in {d.key for d in take}],
-                "offsets": [{"kind": d.kind, "symbol": d.symbol, "offset": d.offset} for d in take]})
+                                                                   if _diff(x).key in {d.key for d in take + fills}],
+                "offsets": [{"kind": d.kind, "symbol": d.symbol, "offset": d.offset} for d in take],
+                "foreign": sorted(_foreign_ids(fills))})
         else:
             self._mem.update({d.key: d.offset for d in take})
-        self.last = compare(**self.read(), accepted=self.accepted)
+            self._mem_fills.update(_foreign_ids(fills))
+        self.last = self._compare()
 
 
 # ---------------------------------------------------------------- the owner's command
