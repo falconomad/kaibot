@@ -106,7 +106,8 @@ def _vals(*extra):
 
 FLAGS = _vals(*sw.ON, *sw.OFF, "ON", " Yes ", "Off")
 OLD = {
-    "KAIBOT_ROOM": lambda v: (v or "").strip().lower() in sw.ON,  # agents/preopen.py; gateway had no strip
+    # agents/gateway.py, the room itself: no strip, so " on" was OFF (agents/preopen.py stripped; see PREOPEN_ROOM)
+    "KAIBOT_ROOM": lambda v: (v or "").lower() in sw.ON,
     "KAIBOT_PREOPEN_REVIEW": lambda v: (v or "").strip().lower() in sw.ON,
     "KAIBOT_DAILY_NOTE": lambda v: (v or "").strip().lower() in sw.ON,
     "KAIBOT_TESTWRITER": lambda v: (v or "").strip().lower() in sw.ON,
@@ -118,7 +119,11 @@ OLD = {
     "KAIBOT_FILING_FLAG": lambda v: "shadow" if str(v if v is not None else "off").strip().lower() == "shadow"
     else "off",
 }
-VALUES = {n: FLAGS for n in OLD} | {"KAIBOT_MULTIDAY": _vals("on", "off", "ON", " on "),
+# QA-Ops on #588: agents/preopen.py's old reading of KAIBOT_ROOM (stripped). The new one is never looser than it.
+PREOPEN_ROOM = lambda v: (v or "").strip().lower() in sw.ON  # noqa: E731
+PADDED = (" on", "on ", " 1", "\ton", " Yes ", "on\n")
+VALUES = {n: FLAGS for n in OLD} | {"KAIBOT_ROOM": _vals(*sw.ON, *sw.OFF, "ON", "Yes", "Off"),
+                                    "KAIBOT_MULTIDAY": _vals("on", "off", "ON", " on "),
                                     "KAIBOT_MARKET_ALARM": _vals("on", "off", "On"),
                                     "KAIBOT_PREOPEN": _vals("off", "shadow", "Shadow"),
                                     "KAIBOT_FILING_FLAG": _vals("off", "shadow", " SHADOW")}
@@ -154,6 +159,21 @@ def test_a_value_the_switch_does_not_have_is_refused(name, bad):
         sw.value(name, {name: bad})
 
 
+@pytest.mark.parametrize("bad", PADDED)
+def test_a_padded_room_value_is_refused_and_never_turns_the_room_on(bad):
+    """KAIBOT_ROOM is the stakeholder's switch (CLAUDE.md). The gateway read `" on"` as off; it must not become on."""
+    from kaibot.agents import gateway, preopen
+
+    with pytest.raises(sw.SwitchError, match="KAIBOT_ROOM"):
+        sw.value("KAIBOT_ROOM", {"KAIBOT_ROOM": bad})
+    with pytest.raises(sw.SwitchError, match="KAIBOT_ROOM"):
+        sw.load({"KAIBOT_ROOM": bad})
+    env = {"KAIBOT_ROOM": bad, "KAIBOT_PREOPEN_REVIEW": "on", "ANTHROPIC_API_KEY": "k"}
+    assert sw.get("KAIBOT_ROOM", env) is False
+    assert gateway.from_env(None, env).client is None
+    assert preopen.enabled(env) is False
+
+
 def test_the_defaults_are_todays():
     got = sw.load({})
     assert (got.multi_day, got.room, got.preopen, got.preopen_review, got.daily_note, got.filing_flag,
@@ -186,6 +206,9 @@ def test_the_engine_start_refuses_an_invalid_switch(monkeypatch):
     monkeypatch.delenv("KAIBOT_ENGINE_NAME", raising=False)
     assert Settings.from_env().engine_name == "engine"
     monkeypatch.setenv("KAIBOT_ROOM", "maybe")
+    with pytest.raises(SystemExit, match="KAIBOT_ROOM"):
+        Settings.from_env()
+    monkeypatch.setenv("KAIBOT_ROOM", " on")
     with pytest.raises(SystemExit, match="KAIBOT_ROOM"):
         Settings.from_env()
     monkeypatch.setenv("KAIBOT_ROOM", "on")
@@ -229,7 +252,8 @@ def test_the_readers_moved_to_the_registry_answer_as_before():
         e = {} if v is None else {"KAIBOT_DAILY_NOTE": v, "KAIBOT_ROOM": v, "KAIBOT_PREOPEN_REVIEW": v,
                                   "KAIBOT_NEWS_POLL": v}
         assert daily_note.enabled(e) == OLD["KAIBOT_DAILY_NOTE"](v)
-        assert preopen.enabled(e) == OLD["KAIBOT_ROOM"](v)
+        assert preopen.enabled(e) == (OLD["KAIBOT_ROOM"](v) and OLD["KAIBOT_PREOPEN_REVIEW"](v))
+        assert preopen.enabled(e) <= (PREOPEN_ROOM(v) and OLD["KAIBOT_PREOPEN_REVIEW"](v))  # never looser
         assert news_poll.enabled(e) == OLD["KAIBOT_NEWS_POLL"](v)
         g = gateway.from_env(None, {**e, "ANTHROPIC_API_KEY": "k"})
         assert (g.client is not None) == OLD["KAIBOT_ROOM"](v)
@@ -245,3 +269,28 @@ def test_the_readers_moved_to_the_registry_answer_as_before():
         e = {} if v is None else {"KAIBOT_MARKET_ALARM": v}
         if not OLD["KAIBOT_MARKET_ALARM"](v):
             assert engine_main.market_alarm_from_env(e) is None
+
+
+def test_the_watchdog_starts_on_a_bad_behaviour_switch_but_not_on_a_bad_data_dir(monkeypatch, caplog):
+    """QA-Ops on #588: a typo in a switch the watchdog never reads stops the engine, not the watchdog that protects
+    the open positions meanwhile. Its own two (KAIBOT_DATA_DIR, KAIBOT_ENGINE_NAME) stay strict."""
+    import logging
+
+    from kaibot.engine.config import Settings
+
+    for k, v in (("ALPACA_API_KEY", "qa-key-1"), ("ALPACA_SECRET", "qa-key-2"), ("SUPABASE_SERVICE_KEY", "qa-key-3"),
+                 ("FRED_API_KEY", "qa-key-4"), ("KAIBOT_ENV_FILE", "/nonexistent/.env"), ("KAIBOT_ROOM", " on"),
+                 ("KAIBOT_DATA_DIR", "/tmp/kb-live"), ("KAIBOT_ENGINE_NAME", "engine-vm")):
+        monkeypatch.setenv(k, v)
+    with pytest.raises(SystemExit, match="KAIBOT_ROOM") as e:
+        Settings.from_env()
+    assert "qa-key" not in str(e.value)  # no secret in the refusal
+    with caplog.at_level(logging.ERROR, logger="kaibot.engine"):
+        s = Settings.from_env(strict_switches=False)
+    assert (s.data_dir, s.engine_name) == (Path("/tmp/kb-live"), "engine-vm") and "KAIBOT_ROOM" in caplog.text
+    assert "qa-key" not in caplog.text
+    monkeypatch.setenv("KAIBOT_ENGINE_NAME", "")
+    with pytest.raises(SystemExit, match="KAIBOT_ENGINE_NAME"):
+        Settings.from_env(strict_switches=False)
+    src = (ROOT / "src" / "kaibot" / "engine" / "watchdog.py").read_text()
+    assert "Settings.from_env(strict_switches=False)" in src

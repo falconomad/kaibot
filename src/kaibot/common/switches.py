@@ -48,6 +48,7 @@ class Switch:
     empty_ok: bool = True  # "" means unset (the default); False: "" is refused
     scope: str = "engine"
     readers: tuple[str, ...] = field(default=())  # files outside this module that read it themselves (#538's)
+    padded_ok: bool = True  # False: a value with spaces around it is refused (it was never on where it mattered)
 
     field_name: str = ""  # the field of `Switches` when it is not the name in lower case without KAIBOT_
 
@@ -67,7 +68,10 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     # ---- the engine's behaviour switches
     _s("KAIBOT_MULTIDAY", "on_off", "backend-quant", "the multi-day daily path (#206); only 'on' turns it on",
        default=False, readers=("src/kaibot/strategies/registry.py",), field_name="multi_day"),
-    _s("KAIBOT_ROOM", "flag", "agents-ai", "the agent room (M3); also needed by the pre-open review", default=False),
+    # QA-Ops on #588: the room gateway never stripped, so " on" was OFF there (agents/preopen.py stripped). The room
+    # is a stakeholder-only switch (CLAUDE.md): a padded value must not turn it on, so it is refused (fail closed).
+    _s("KAIBOT_ROOM", "flag", "agents-ai", "the agent room (M3); also needed by the pre-open review", default=False,
+       padded_ok=False),
     _s("KAIBOT_PREOPEN", "choice", "agents-ai", "#310: 'shadow' = the observer pre-open review",
        default="off", choices=("off", "shadow")),
     _s("KAIBOT_PREOPEN_REVIEW", "flag", "agents-ai", "#131: the pre-open review that can veto or halve buys "
@@ -157,6 +161,8 @@ def value(name: str, env: Mapping[str, str] | None = None):
     if raw is None or (raw.strip() == "" and s.empty_ok):
         return s.default
     v = raw.strip()
+    if not s.padded_ok and v != raw:
+        raise SwitchError(f"{name}={raw!r}: spaces around the value are refused; write it without them ({s.what})")
     if s.kind in ("path", "text"):
         if not v:
             raise SwitchError(f"{name} is set but empty ({s.what})")

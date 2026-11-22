@@ -477,7 +477,7 @@ def main() -> None:
     from kaibot.engine.store import Store
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s watchdog %(message)s")
-    settings = Settings.from_env()
+    settings = Settings.from_env(strict_switches=False)  # #588: a bad behaviour switch must not stop the watchdog
     store = Store(settings.supabase_url, settings.supabase_service_key)
     wd = Watchdog(AlpacaPaper(settings.alpaca_key, settings.alpaca_secret), store, settings.engine_name,
                   book=book_reader(journal_path(settings.data_dir), store), local=LocalEngine(settings.data_dir),

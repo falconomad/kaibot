@@ -58,7 +58,9 @@ variable, for example `invalid settings (nothing was started): KAIBOT_MULTIDAY='
 #448 such a value silently meant the default. Values that worked keep their meaning: flags take
 `1/on/true/yes` and `0/off/false/no` (any case), `KAIBOT_MULTIDAY` and `KAIBOT_MARKET_ALARM` take `on`/`off`,
 `KAIBOT_PREOPEN` and `KAIBOT_FILING_FLAG` take `off`/`shadow`; empty means unset, except `KAIBOT_DATA_DIR` and
-`KAIBOT_ENGINE_NAME`, which are refused when set but empty. Check your `.env` with `./scripts/run_engine.sh --check`
+`KAIBOT_ENGINE_NAME`, which are refused when set but empty. `KAIBOT_ROOM` (the stakeholder's switch) refuses a value with spaces around it
+(`" on"`): the room never read that as on. A bad behaviour switch stops the engine but not the watchdog, which
+logs it and keeps protecting the positions (it reads only `KAIBOT_DATA_DIR` and `KAIBOT_ENGINE_NAME`, strictly). Check your `.env` with `./scripts/run_engine.sh --check`
 before you deploy this release.
 
 ## Engine lease (one engine, whatever the machine)
