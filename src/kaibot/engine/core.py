@@ -106,12 +106,12 @@ FLATTEN_TRIES = 2  # a close the venue refused is tried once more inside the sam
 # bounded cancel wait (CANCEL_WAIT_S) plus its reads. What is left when the budget runs out is reported and retried
 # by the next loop pass, never dropped. The heartbeat is written between positions (Engine.on_progress).
 FLATTEN_BUDGET_S = 30.0
+CALENDAR_ALERT_DAYS = 30  # M9 1.17 (#442): a hand-kept calendar ending within this many days is announced
 CLOSE_MAX_S = CANCEL_WAIT_S + 3.0
 CANCEL_UNCONFIRMED = 409  # the adapter's "cancel not confirmed in time": already waited, so not retried at once
 # S77: the ledger's cash change may differ from the broker's by fees the engine does not model; above this it says so
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
 RECHECK_MINUTES = 15  # S78: a blocking reconciliation difference is checked again this often
-CALENDAR_ALERT_DAYS = 30  # M9 1.17 (#442): a hand-kept calendar ending within this many days is announced
 BREACH_CONFIRM_S = 60.0  # #211: a book breach must hold on two checks at least this far apart
 
 
