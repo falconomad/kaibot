@@ -43,6 +43,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from run_replay import load_env, vix_prev_close  # noqa: E402
 
 from kaibot.broker.costs_v2 import MODELS, get_model  # noqa: E402
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, pbo_cscv, sharpe, t_stat  # noqa: E402
 from kaibot.evaluation.trials import count_file  # noqa: E402
 from kaibot.ingest.certs import ensure_ca_bundle  # noqa: E402
@@ -233,7 +234,10 @@ def main() -> None:
     ap.add_argument("--refresh-vix", action="store_true")
     ap.add_argument("--costs", default="v1", choices=list(MODELS),
                     help="cost model: v1 (default, reproduces earlier reports) or v2 (issue #111)")
+    holdout.add_argument(ap)
     a = ap.parse_args()
+    holdout.enforce(script=__file__, end=a.end, rule=a.experiment or "dip_reversal", opening=a.open_holdout,
+                    data=a.data)
     ensure_ca_bundle()  # python.org's macOS Python has no root certificates; before the first request (FRED VIX)
     t0 = time.time()
     env = load_env(a.env)

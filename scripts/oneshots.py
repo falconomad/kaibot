@@ -50,6 +50,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import momentum_core as core  # noqa: E402
 from walk_forward import peak_rss_mb  # noqa: E402
 
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
 from kaibot.evaluation.gate_v2 import GateV2  # noqa: E402
 from kaibot.replay import multiday_core as mc  # noqa: E402
@@ -687,6 +688,7 @@ def main() -> None:
     ap.add_argument("--equity", type=float, default=100_000.0)
     ap.add_argument("--control-runs", type=int, default=500)
     ap.add_argument("--seeds", type=int, default=200, help="ath_breakout: random signal subsets per setting")
+    holdout.add_argument(ap)
     a = ap.parse_args()
     data = Path(a.data)
     if a.has:
@@ -704,6 +706,7 @@ def main() -> None:
         return
     if not a.rule or not a.end:
         ap.error("--rule and --end are required for a run")
+    holdout.enforce(script=__file__, end=a.end, rule=a.rule, opening=a.open_holdout, data=a.data)
     skip_f = data / "reports" / f"oneshots_{a.rule}_skipped.json"
     try:
         (run_intraday_rule if a.rule in INTRADAY else run_daily_rule)(a, a.rule)
