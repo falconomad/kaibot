@@ -29,11 +29,12 @@ RNG = np.random.default_rng(16)
 SPY = pd.Series(RNG.normal(0.0005, 0.011, len(IDX)), index=IDX)
 BILLS = pd.Series(4.0, index=pd.bdate_range("2017-01-02", "2026-11-06"))
 RULE = "trend_momentum"  # in the family cross_sectional_momentum (four rules)
-GOOD_CONTROL = {"percentile": 99.8, "runs": 500, "matched": True, "p_value": 1 / 501, "pool": "candidate_pool",
+# amendment 1 (decision 16 s.15): a family of several rules needs 2,000 runs
+GOOD_CONTROL = {"percentile": 99.95, "runs": 2000, "matched": True, "p_value": 1 / 2001, "pool": "candidate_pool",
                 "drawdown_percentile": 71.0}
 
 
-def sleeve(edge_a_year=0.0, exposure=0.4, noise=0.002, seed=1, **kw) -> g3.Account:
+def sleeve(edge_a_year=0.0, exposure=0.4, noise=0.0015, seed=1, **kw) -> g3.Account:
     """A part-time account: `exposure` of SPY plus a daily edge and its own noise."""
     e = pd.Series(exposure, index=IDX)
     own = np.random.default_rng(seed).normal(edge_a_year / 252, noise, len(IDX))
@@ -92,7 +93,8 @@ def test_marks_are_those_of_decision_16():
     assert s["s1_active_return"]["annualised_above"] == 0.0 and s["s2_costs"]["costs_multiple"] == 2.0
     assert s["s3_control"]["random_runs_min"] == 500 and s["s3_control"]["across_families"] == "holm"
     assert s["s3_control"]["within_family"] == "bonferroni" and s["s3_control"]["pool"] == "candidate_pool"
-    assert s["s4_deflated_sharpe"] == {"series": "active_return", "trials": "family", "dsr_min": 0.90}
+    assert s["s4_deflated_sharpe"] == {"series": "active_return", "trials": "family", "dsr_min": 0.90,
+                                       "variance_floor": "one_over_t_minus_1"}  # amendment 1
     assert b["b1_return"]["positive_years_share_min"] == 0.6 and b["b1_return"]["years_min"] == 8
     # the absolute test is gate v2's mark 2, number for number
     assert b["b2_spy"] == g2.GateV2.load(ROOT).cfg["gate_b"]["mark_2"]
@@ -107,11 +109,20 @@ def test_marks_are_those_of_decision_16():
 
 
 def test_every_pre_registration_is_in_exactly_one_family():
+    """A rule's pre-registration is in one family; a book's (amendment 1) is listed under `books:` instead. Every
+    rule registered before decision 16 (21 Nov 2026) is marked as not declaring gate v3."""
+    from kaibot.evaluation import prereg as pr
+
     names = {p.stem for p in (ROOT / "docs" / "prereg").glob("*.md")} - {"TEMPLATE"}
     listed = {r for body in GATE.families.values() for r in body["rules"]}
-    assert names <= listed, f"pre-registrations in no family: {sorted(names - listed)}"
-    assert all(not r["v3_declared"] for body in GATE.families.values() for r in body["rules"].values()), \
-        "a rule registered before decision 16 cannot be marked as declaring gate v3"
+    books = set(GATE.cfg.get("books") or {})
+    assert names <= listed | books, f"pre-registrations in no family and no book: {sorted(names - listed - books)}"
+    assert not listed & books
+    for body in GATE.families.values():
+        for rule, r in body["rules"].items():
+            if r["v3_declared"]:
+                p = pr.load(rule, ROOT, committed=False)
+                assert p.date >= date(2026, 11, 21), f"{rule} predates decision 16 and cannot declare gate v3"
 
 
 def test_the_research_window_ends_where_the_hold_out_starts():
@@ -280,10 +291,11 @@ def test_no_edge_fails_s1_and_costs_can_fail_s2():
 
 @pytest.mark.parametrize("control, state, why", [
     (None, None, "no matched random control"),
-    ({**GOOD_CONTROL, "runs": 200}, None, "200 runs, 500 needed"),
+    ({**GOOD_CONTROL, "runs": 200}, None, "200 runs, 2000 needed"),
+    ({**GOOD_CONTROL, "runs": 500, "p_value": 1 / 501}, None, "500 runs, 2000 needed"),
     ({**GOOD_CONTROL, "matched": False}, None, "not matched"),
     ({**GOOD_CONTROL, "pool": "universe"}, True, ""),  # the rule's entry says its existing control is its pool
-    ({**GOOD_CONTROL, "percentile": 93.0, "p_value": 36 / 501}, False, "Holm, 12 families"),
+    ({**GOOD_CONTROL, "percentile": 93.0, "p_value": 141 / 2001}, False, "Holm, 12 families"),
 ])
 def test_s3_needs_a_matched_control_from_the_pool_and_survives_the_correction(control, state, why):
     m = judge(sleeve(0.03, control=control))["marks"]["s3"]
@@ -293,16 +305,16 @@ def test_s3_needs_a_matched_control_from_the_pool_and_survives_the_correction(co
 def test_s3_a_93rd_percentile_passed_gate_v2_and_fails_gate_v3():
     """93rd percentile: gate v2's mark 3 passes it. Under gate v3 the family has four rules and there are twelve
     families: the family p is 4 x 0.072 = 0.29, far above 0.10 / 12."""
-    control = {"percentile": 93.0, "runs": 500, "matched": True, "pool": "candidate_pool"}
+    control = {"percentile": 93.0, "runs": 2000, "matched": True, "pool": "candidate_pool"}
     assert g2.mark_3(g2.GateV2.load(ROOT), control)["met"] is True
     m = judge(sleeve(0.03, control=control))["marks"]["s3"]
-    assert m["met"] is False and m["numbers"]["family_p"] == pytest.approx(4 * 36 / 501)
+    assert m["met"] is False and m["numbers"]["family_p"] == pytest.approx(4 * 141 / 2001)
     assert m["numbers"]["holm_threshold"] == pytest.approx(0.10 / 12) and m["numbers"]["family_members"] == 4
     assert m["numbers"]["bh_adjusted"] >= m["numbers"]["family_p"]
 
 
 def test_s3_the_step_down_uses_the_other_families():
-    control = {"percentile": 99.6, "runs": 500, "matched": True, "pool": "candidate_pool"}  # p = 3/501, family 0.024
+    control = {"percentile": 99.6, "runs": 2000, "matched": True, "pool": "candidate_pool"}  # p 9/2001, family 0.018
     alone = judge(sleeve(0.03, control=control))["marks"]["s3"]
     assert alone["met"] is False  # 0.024 > 0.10 / 12
     others = {f: 0.0005 for f in GATE.families if f != "cross_sectional_momentum"}  # eleven clear rejections
@@ -312,7 +324,7 @@ def test_s3_the_step_down_uses_the_other_families():
 
 def test_s3_an_event_rule_scored_against_the_whole_universe_is_unknown():
     rep = g3.evaluate_sleeve(GATE, rule="news_gap_week", account=sleeve(0.03, control={
-        "kind": "exposure_matched", "runs": 500, "matched": True, "sharpe_percentile": 99.8}), tbill=BILLS)
+        "kind": "exposure_matched", "runs": 2000, "matched": True, "sharpe_percentile": 99.95}), tbill=BILLS)
     m = rep["marks"]["s3"]
     assert m["met"] is None and "drew from universe" in m["why"] and rep["verdict"] == "incomplete"
 

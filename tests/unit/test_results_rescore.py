@@ -175,13 +175,15 @@ def test_the_rescore_scores_existing_reports_without_running_anything(data: Path
     assert tm["report"].startswith("core_balanced_trend_momentum_pit_20261113"), "the newest report, not the older"
     assert g["statistics"]["window"] == ["2017-05-01", "2024-12-31"] and g["sessions_in_holdout_dropped"] > 400
     m = {k: v["met"] for k, v in g["marks"].items()}
-    assert m["s1"] is True and m["s2"] is True and m["s5"] is not None
+    # amendment 1 (decision 16 s.15): a 500-run control in a family of four rules is too small, so S3 (and S5,
+    # which asks S1 to S4 on the point-in-time universe) is unknown, no longer failed
+    assert m["s1"] is True and m["s2"] is True and m["s3"] is None and m["s5"] is None
     # the real pre-registration declares five neighbours and this folder holds two: the others are "not supplied"
     assert m["s6"] is None and "no result supplied" in g["marks"]["s6"]["why"]
     assert g["marks"]["s6"]["numbers"]["results"]["reg60"] is True
     assert g["marks"]["s1"]["numbers"]["annualised"] == pytest.approx(0.03, abs=0.01)
     assert g["marks"]["s4"]["numbers"]["configurations"] == 6  # the family's, not the 8,292 of the registry
-    assert g["marks"]["s3"]["numbers"]["family_p"] == pytest.approx(4 * 2 / 501)
+    assert "500 runs, 2000 needed" in g["marks"]["s3"]["why"]
     assert g["verdict"] in ("provisional", "fail", "incomplete") and not g["can_pass"]
     assert tm["gate_v2"] == [{"mark": 2, "verdict": "fail"}]
     assert g["statistics"]["cash"] == "Treasury bills on both sides"
