@@ -290,3 +290,15 @@ def test_the_screen_refuses_the_hold_out(tmp_path: Path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         screen_batch.main(["--batch", str(f), "--data", str(tmp_path / "d"), "--end", "2025-06-30", "--trials", ""])
     assert str(e.value.code).startswith("hold-out: screen_batch.py would read to 2025-06-30")
+
+
+def test_the_gbm_overlay_run_refuses_the_hold_out(tmp_path: Path, monkeypatch):
+    """#474: scripts/trend_momentum_gbm.py never reads 2025 on."""
+    pytest.importorskip("sklearn")
+    monkeypatch.delenv(ho.ENV_OPENING, raising=False)
+    sys.path.insert(0, str(SCRIPTS))
+    import trend_momentum_gbm
+
+    with pytest.raises(SystemExit) as e:
+        trend_momentum_gbm.main(["--data", str(tmp_path), "--end", "2025-03-31", "--trials", ""])
+    assert str(e.value.code).startswith("hold-out: trend_momentum_gbm.py would read to 2025-03-31")

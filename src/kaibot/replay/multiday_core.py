@@ -884,7 +884,8 @@ def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, bo
                              i0: int, i1: int, *, runs: int = 500, seed: int = 127, fill: str = "base",
                              cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
                              progress: Callable[[int], None] | None = None, costs=None,
-                             fills: Mapping[str, tuple[str, float]] | None = None) -> dict:
+                             fills: Mapping[str, tuple[str, float]] | None = None,
+                             pool: Callable[[int], np.ndarray] | None = None) -> dict:
     """Gate B mark 3 (decision 15 sections 7 and 10, docs/ops/gate_v2.md hand-off 4): `runs` seeded random
     portfolios that copy the rule's positions slot by slot and draw only the names, from the stocks that pass the
     price and volume filter on the decision's data (`Signals.ok` of the session before the fill: price >= $5,
@@ -893,7 +894,10 @@ def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, bo
     the two percentiles counts. Returns `kaibot.evaluation.random_control.ControlResult` as a dict plus the per-run
     numbers of the report (Sharpe, CAGR, drawdown, return, average exposure) and the CAGR percentile.
     `fills`: fill name -> (where, cost factor) of the rule's own runs (default `FILLS`; the one-shots of #112 whose
-    base fill is the next open pass their own)."""
+    base fill is the next open pass their own).
+    `pool` (#474): the columns the rule itself could buy for a fill on session e (its candidate pool, decision 16
+    section 4); the random names are drawn from those only, intersected with the filter above. None: every
+    eligible name, as before."""
     where, factor = (fills or FILLS)[fill]
     caps = Caps(max_positions=spec.max_names, max_exposure_pct=float(exposure_pct))
     slots = matched_schedule(book, rule, market.raw)
@@ -903,7 +907,8 @@ def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, bo
     record = [True]
 
     def eligible(e: int) -> np.ndarray:
-        return np.flatnonzero(sig.ok[e - 1] & np.isfinite(fill_px[e]) & np.isfinite(sig.px[e - 1]))
+        cols = np.flatnonzero(sig.ok[e - 1] & np.isfinite(fill_px[e]) & np.isfinite(sig.px[e - 1]))
+        return cols if pool is None else np.intersect1d(cols, np.asarray(pool(e), dtype=int))
 
     def simulate(selection) -> np.ndarray:
         ctl = SlotReplay(sig, slots, selection, where, caps)
@@ -926,6 +931,8 @@ def exposure_matched_control(market: Market, pol: RiskPolicy, spec: CoreSpec, bo
     schedule = [rc.Slot(sl.entry, sl.exit - sl.entry, sl.weight) for sl in slots]
     out = {"kind": "exposure_matched", "runs": int(runs), "seed": int(seed), "slots": len(slots),
            "resizes": int(sum(len(sl.resizes) for sl in slots)), "rule_avg_exposure_pct": round(rule_expo, 2)}
+    if pool is not None:
+        out["pool"] = "candidate_pool"
     if not slots:
         return {**out, "matched": False, "sharpe_percentile": None, "cagr_percentile": None, "median": {},
                 "note": "the rule opened no position: nothing to match"}

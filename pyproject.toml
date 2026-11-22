@@ -18,9 +18,12 @@ dependencies = [  # the engine image installs exactly these (requirements-engine
 
 [project.optional-dependencies]
 research = ["scipy>=1.14"]  # replay, walk-forward and report scripts; tests compare metrics.py with scipy
+# M12 3.12 (#474, docs/prereg/trend_momentum_gbm.md): the pre-registered rank overlay's model, pinned exactly.
+# Research only: never in the engine image (requirements-engine.txt), never imported by live code (a test checks).
+ml = ["scikit-learn==1.9.1"]
 
 [dependency-groups]
-dev = ["kaibot[research]", "pytest>=8", "pytest-xdist>=3.6", "hypothesis>=6.100", "coverage>=7.6", "ruff>=0.6", "mypy>=1.11", "types-PyYAML", "import-linter>=2.1"]
+dev = ["kaibot[research,ml]", "pytest>=8", "pytest-xdist>=3.6", "hypothesis>=6.100", "coverage>=7.6", "ruff>=0.6", "mypy>=1.11", "types-PyYAML", "import-linter>=2.1"]
 # M12 3.5 (#467): not installed by default; the weekly `mutation` and nightly `fuzz` workflows add them
 # (`uv sync --locked --group mutation`, `--group fuzz`). Atheris builds on Linux only.
 mutation = ["mutmut==3.8.1"]
