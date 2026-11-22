@@ -1,0 +1,25 @@
+# The multi-day book's stop (decision 17, docs/decisions/17_book_stop.md; M11 ticket 2.10, issue #461). Read by
+# kaibot.risk.book_stop.
+#
+# mode: fixed  -> today's stop, unchanged: the book ends at BookLimits.run_drawdown_end_pct below its peak
+#                 (13 / 21 / 27% by level, decision 15 section 11; risk/gate.book_run_ended) and is retired.
+# mode: band   -> the Gate C bootstrap band of decision 17: the book ends when its live drawdown reaches the 99% line
+#                 of its own engine + SimBroker run's resampled drawdowns over the same number of sessions.
+#
+# STAYS `fixed` until decision 17 section 7 is done: the band tables committed, the engine wiring merged with two
+# keys (after #534 / #536 / #538), and the stakeholder's go. Today no engine code reads this file.
+version: 1
+mode: fixed
+band:
+  retire_quantile: 0.99            # Gate C's retirement trigger
+  alert_quantile: 0.95             # Gate C's incubation mark: an event, nothing is sold
+  min_sessions: 20                 # before 20 live sessions the band at 20 sessions is used
+  ceiling_pct: 40                  # PROPOSAL (a level limit, the stakeholder's): the retire line never above this
+  keep_index_core: true            # PROPOSAL: at the end, a book with an index core sells its sleeves, keeps SPY
+  review_sessions: 5               # PROPOSAL: Product reviews a paused book within this many sessions
+  bootstrap: {method: stationary, mean_block_sessions: 20, runs: 2000, seed: 17}
+# Committed band tables, one per rule and level (scripts/book_stop_bands.py writes them on the Mac). Empty today:
+# a book without a table keeps the fixed line in either mode.
+#   <rule>:
+#     <level>: docs/research/results/book_bands/<rule>_<level>.json
+tables: {}
