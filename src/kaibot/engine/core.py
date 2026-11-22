@@ -94,6 +94,11 @@ MAX_ERROR_STREAK = 3  # consecutive failed loop iterations before the kill switc
 CLEAN_TICKS_TO_CLEAR = 5
 STOPS_TO_PAUSE, STOPS_WINDOW_DAYS = 3, 14  # 3 daily stops within ~10 sessions pause the run (PRD v2)
 LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "Hunter"}
+# M9 1.15 (audit S1): a command row is checked in code before anything is done. The pot of a paper run has the
+# database's own limits (migrations 0001/0002: `amount_usd between 1000 and 100000`), which a local-first run row
+# would otherwise meet only when the replicator sends it; a kind outside COMMAND_KINDS is rejected, never applied.
+RUN_AMOUNT_MIN_USD, RUN_AMOUNT_MAX_USD = 1_000.0, 100_000.0
+COMMAND_KINDS = ("new_run", "pause", "resume", "flatten_and_stop", ACCEPT_COMMAND, "set_level")
 # S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
 # candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
 # accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
@@ -1306,6 +1311,14 @@ class Engine:
         for c in self.store.pending_commands():
             kind, pl = c["kind"], c.get("payload") or {}
             try:
+                why = self._command_refusal(kind, pl)
+            except Exception as e:  # QA-Ops (#513): a row the check itself cannot read is refused, never applied,
+                log.exception("command %r: the check failed", kind)  # and never raises out of the tick
+                why = f"the command could not be checked: {str(e)[:120]}"
+            if why is not None:  # M9 1.15: refused before anything is done (a bad new_run sells nothing)
+                self._reject_command(c, why)
+                continue
+            try:
                 if kind == "new_run":
                     if self.pos or self._md_sleeves() or self._md_exits:  # close the old run's positions first
                         self.flatten_all("manual")  # (multi-day sleeves too, S80); the command waits until flat
@@ -1338,9 +1351,34 @@ class Engine:
                 log.exception("command %s failed", kind)
                 self.store.mark_applied(c["id"], {**pl, "error": str(e)[:200]})
 
+    def _command_refusal(self, kind, pl) -> str | None:
+        """M9 1.15 (audit S1): why this command row is not applied (None: it is). The command table is written with
+        the service-role key by more than the dashboard's RPC, so the engine checks the row itself: the kind against
+        COMMAND_KINDS, and a `new_run`'s pot and level (`run_refusal`) BEFORE the old run's book is sold."""
+        if not isinstance(kind, str) or kind not in COMMAND_KINDS:
+            return "unknown command kind"
+        if not isinstance(pl, Mapping):
+            return "the payload is not an object"
+        if kind == "new_run":
+            return run_refusal(pl.get("amount_usd"), pl.get("level"), self.policies)
+        return None
+
+    def _reject_command(self, c: dict, why: str) -> None:
+        """A refused command: marked applied with the reason (it is never looked at again) and one
+        `command_rejected` event. The event's type never carries the row's own kind."""
+        kind, pl = c.get("kind"), c.get("payload")
+        log.error("command %r (id %s) rejected: %s", kind, c.get("id"), why)
+        try:
+            self.store.mark_applied(c["id"], {**(pl if isinstance(pl, Mapping) else {}), "error": why[:200]})
+            self.store.event("command_rejected", {"command_id": c.get("id"), "kind": str(kind)[:40], "reason": why,
+                                                  "payload": _brief(pl)}, self._rid())
+        except Exception:  # a bad command must never stop the engine
+            log.exception("command %r: the rejection could not be recorded", kind)
+
     def _new_run(self, amount: float, level: str) -> None:
-        if level not in self.policies:
-            raise ValueError(f"unknown level {level}")
+        why = run_refusal(amount, level, self.policies)  # M9 1.15: never a run outside the limits, whoever calls
+        if why is not None:
+            raise ValueError(why)
         if self.run:
             self._end_run("ended", "replaced by a new run")
         run = self.store.insert(
@@ -3158,6 +3196,29 @@ class Engine:
         if self.run is None and d is not None and d.run_id:
             st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down
         return st
+
+
+def run_refusal(amount, level, policies) -> str | None:
+    """M9 1.15: why a paper run with this pot and level may not be started (None: it may). The pot is a finite
+    number from RUN_AMOUNT_MIN_USD to RUN_AMOUNT_MAX_USD (the database's own constraint on `run.amount_usd`), the
+    level one of the loaded profiles."""
+    if isinstance(amount, bool) or not isinstance(amount, (int, float, str)):
+        return f"amount_usd is not a number: {_brief(amount)}"
+    try:
+        x = float(amount)
+    except (ValueError, OverflowError):  # OverflowError: a whole number too large for a float (QA-Ops, #513)
+        return f"amount_usd is not a number: {_brief(amount)}"
+    if not math.isfinite(x) or not RUN_AMOUNT_MIN_USD <= x <= RUN_AMOUNT_MAX_USD:
+        return (f"amount_usd {_brief(amount)} is outside the limits "
+                f"({RUN_AMOUNT_MIN_USD:,.0f} to {RUN_AMOUNT_MAX_USD:,.0f} dollars)")
+    if not isinstance(level, str) or level not in policies:
+        return f"unknown level {_brief(level)}"
+    return None
+
+
+def _brief(v) -> str:
+    """A command's own value for a log line or an event: its text, cut short (it is not trusted)."""
+    return repr(v)[:120]
 
 
 def _refused(err: Exception) -> bool:
