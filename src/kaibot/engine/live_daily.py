@@ -63,6 +63,18 @@ never withheld: it goes out whatever its quote says (QA-Ops on #490; decision 15
 locked in). Without a quote (the read failed or timed out, or the feed has none for the stock) the buy is checked
 at the prior close and goes out.
 
+Late start (M9 1.3; Amendment 19 of trend_momentum, 17 of mom_12_1_band). A session that is open without its decision
+record (no tick ran between the last close and the open) takes the after-close step during the session (`catch_up`,
+from `send` at any time of the session and from `_plan` in the window): the same code on the same daily view, the
+record marked `late`. Only when that fails (the daily store not refreshed) does the session go without a decision.
+
+Late send (M9 1.4; Amendment 20 of trend_momentum, 18 of mom_12_1_band). The latest decision's targets stay due until
+they were sent or a newer decision exists. When the latest decision of this run has no send of its plan (its fill
+session's window was missed, or that session's view went away), the next session with a decision record builds the
+send (`_unsent`, `_plan`): the builder sizes the decision's target list at that session's prices, equity and cash,
+and the record carries `late_of` (the missed fill session), once. Its buys pass the carry-over's skip rules of that
+session (`late.skipped`); a buy left out by them stays due (`late.due`) and is carried like any short buy.
+
 Pre-open review (#131, OFF by default: `review` is None unless KAIBOT_ROOM=on and KAIBOT_PREOPEN_REVIEW=on, and then
 every step above is unchanged line for line). When on: from 08:30 ET `preopen` hands each rule's plan to the
 review (agents/preopen_daily.PreopenDesk, a worker thread); its outcome is journalled (`md_review`) before the send;
@@ -153,6 +165,9 @@ RETIRE_KINDS = ("md_retired", "md_reenabled")
 REENABLE_FLAG = "KAIBOT_REENABLE"
 FOREIGN_MAX_AGE = timedelta(days=3)  # see LiveDaily._prune
 AUCTION, POLL_EVERY = time(15, 59), timedelta(minutes=15)  # see LiveDaily.sync
+# M9 1.3: a session that opened without its decision record (the engine was off after the last close) takes it
+# during the session; before the send window a failed try (the daily store not refreshed) is repeated this often
+LATE_EVERY = timedelta(minutes=5)
 # The protective stop each rule's pre-registration declares, in ATR(20) below the entry (None: the rule has none).
 PREREG_STOP_ATR: dict[str, float | None] = {"trend_momentum": None, "mom_12_1_band": None,
                                             "mom_12_1_band_nofilter": None}
@@ -526,6 +541,8 @@ class LiveDaily:
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
+        self._caught_up: date | None = None  # M9 1.3: the session whose decision records are all there
+        self._late_tried: tuple[date, datetime] | None = None  # (session, when its late decision was last tried)
         self.ca = ca
         self._ca_unread: dict[str, tuple[str, str]] = {}  # rule -> (session, why the read failed): no buys then
         self._ca_evening: date | None = None  # the decision evening whose held names the heartbeat notes cover
@@ -864,9 +881,11 @@ class LiveDaily:
             if str(a.get("order_id")) in known or old:
                 om.foreign.pop(aid, None)
 
-    def after_close(self, closed: date) -> list[str]:
+    def after_close(self, closed: date, late: bool = False) -> list[str]:
         """After the close of session `closed`: each rule that has not decided for it decides once the daily view of
-        that evening is available, and the target list is journalled (`md_decision`). Returns the rules decided now."""
+        that evening is available, and the target list is journalled (`md_decision`). Returns the rules decided now.
+        `late` (M9 1.3, `catch_up`): the same step taken during the next session; the record says so."""
+        mark = {"late": True} if late else {}
         rid = self.account.run_id()
         if rid is None or self.account.book_ended():
             return []
@@ -880,7 +899,7 @@ class LiveDaily:
             if day is not None and not day(closed, fill):  # not its decision day: no target list, no data needed
                 self.journal.append("md_decision", {"run_id": rid, "strategy": r.name, "session": str(closed),
                                                     "fill_session": str(fill), "decided_at": now.isoformat(),
-                                                    "target": None, "note": "not a decision day"})
+                                                    "target": None, "note": "not a decision day", **mark})
                 self._waiting.pop(r.name, None)
                 done.append(r.name)
                 continue
@@ -916,12 +935,12 @@ class LiveDaily:
                 self._dropped.pop(r.name, None)
             tl = decide_after_close(r.strategy, data, data.index_of(closed), fill, held)
             body = {"run_id": rid, "strategy": r.name, "session": str(closed), "fill_session": str(fill),
-                    "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl)}
+                    "decided_at": now.isoformat(), "held": held, "target": target_to_json(tl), **mark}
             self.journal.append("md_decision", body)
             buy = list(tl.features.get("buy") or []) if tl else []
             self._ca_prewarm(closed, fill, set(held) | set((tl.weights if tl else {}) or {}))
             self.event("multi_day_decision", {"strategy": r.name, "session": str(closed), "fill_session": str(fill),
-                                              "decides": tl is not None,
+                                              "decides": tl is not None, **mark,
                                               "buy": buy[:10],
                                               "sell": dict(tl.features.get("sell") or {}) if tl else {},
                                               # #229, reporting only: the dashboard's plan, sell readings, sectors
@@ -932,6 +951,36 @@ class LiveDaily:
                                               "sectors": {s: data.sector.get(s) for s in [*held, *buy[:60]]}})
             self._filing_observe(r.name, closed, now, [*held, *buy])
             done.append(r.name)
+        return done
+
+    def catch_up(self, session: date, force: bool = False) -> list[str]:
+        """M9 1.3 (audit M1): `session` is open and a rule has no decision record for it, because the engine was
+        not running between the last close and this open (a late start; 20 Nov 2026). The after-close step of the
+        previous session is taken now, by the same code (`after_close`): the daily view of that close holds rows up
+        to it only, so the decision is the one an on-time engine would have journalled, marked `late`. A session
+        that was not the rule's decision day gets its "not a decision day" record, as on time. Tried at every call
+        with `force` (the send window), else at most every LATE_EVERY; nothing once every rule has its record.
+        Never raises: a failure is an event (`multi_day_error`, step `late_decision`) and the session goes on
+        without the decision, as before. Returns the rules decided now."""
+        if self._caught_up == session and not force:  # `force` reads the records again (a rule re-enabled today)
+            return []
+        now = self.now()
+        if not force and self._late_tried is not None and self._late_tried[0] == session \
+                and now - self._late_tried[1] < LATE_EVERY:
+            return []
+        self._late_tried = (session, now)
+        try:
+            if all(self._decision_for(r.name, session) is not None for r in self.active()):
+                self._caught_up = session
+                return []
+            done = self.after_close(self.prev_session(session), late=True)
+        except Exception as e:
+            log.exception("late decision failed: the session goes on without it")
+            self.event("multi_day_error", {"step": "late_decision", "session": str(session),
+                                           "error": f"{type(e).__name__}: {e}"[:200]})
+            return []
+        if done:
+            log.warning("late decision for %s taken during the session: %s", session, ", ".join(done))
         return done
 
     def _filing_observe(self, rule: str, session: date, now: datetime, symbols: list[str]) -> None:
@@ -998,7 +1047,15 @@ class LiveDaily:
         through the target loop. Returns the rules whose send step completed now."""
         om = self._manager()
         rid = self.account.run_id()
-        if om is None or rid is None or not self.in_window(self.now()) or self.account.book_ended():
+        if om is None or rid is None:
+            return []
+        window = self.in_window(self.now())
+        if not window and self._caught_up == session:
+            return []
+        if self.account.book_ended():
+            return []
+        self.catch_up(session)  # M9 1.3: a late start takes the session's decision as soon as it is up
+        if not window:
             return []
         done = []
         for r in self.active():
@@ -1031,6 +1088,7 @@ class LiveDaily:
                 self.event("multi_day_plan", {"strategy": r.name, "session": str(session),
                                               "decided": planned.get("decided"), "note": planned.get("note"),
                                               "skipped": planned.get("skipped"),
+                                              **({"late_of": planned["late_of"]} if planned.get("late_of") else {}),
                                               "targets": [[s, float(held.get(s, 0.0)), q, p, w]
                                                           for s, q, p, w in planned["targets"]]})
             self._shadow_observe(r.name, session, rid, planned)  # #310: a copy, to an observer; nothing comes back
@@ -1346,10 +1404,15 @@ class LiveDaily:
         """The builder's targets for `session` from the decision taken after the previous close."""
         prev = self.prev_session(session)
         dec = self._decision_for(r.name, session)
+        if dec is None and self.catch_up(session, force=True):  # M9 1.3: no decision yet: take it before giving up
+            dec = self._decision_for(r.name, session)
         held = self.account.held(r.name)
         pending = {**self._pending(r.name, session, held),
                    **{s: w for s, w in self._adopted(r.name).items() if s in held}}
         tl = target_from_json(dec["target"]) if dec is not None else None
+        late = self._unsent(r.name, session, rid) if dec is not None and tl is None else None
+        if late is not None:  # M9 1.4: the latest decision was never sent: it is still due, at this session's prices
+            tl = target_from_json(late["target"])
         if dec is None:
             self._no_decision(r.name, session, prev)
         if dec is None and not pending:
@@ -1416,9 +1479,72 @@ class LiveDaily:
         if adopted:  # #266: shares a spin-off credited are sold at this closing auction, whatever the rule decided
             targets = [t for t in targets if t.symbol not in adopted]
             targets = [Target(r.name, s, 0, "sell", {"why": w}) for s, w in adopted.items()] + targets
+        note = None
+        if late is not None:
+            targets, note = self._late_cut(r, session, prev, late, targets, held, data)
         targets = self._overnight_cut(r, session, targets, held)
         targets, ca = self._ca_cut(r.name, session, prev, targets, held)
-        return {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca}
+        body = {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca}
+        if late is not None:
+            body.update(decided=late["session"], late_of=late["fill_session"], late=note)
+            self.event("multi_day_carry", {"strategy": r.name, "session": str(session),
+                                           "late_of": late["fill_session"], "of": late["fill_session"],
+                                           "carried": [], "skipped": note["skipped"], "risk_off": note["risk_off"]})
+        return body
+
+    def _latest(self, rule: str, session: date, rid: int) -> dict | None:
+        """The latest decision of this run with a target list whose fill session is before `session`."""
+        last = None
+        for b in self._entries("md_decision"):
+            if b.get("run_id") == rid and b.get("strategy") == rule and b.get("target") is not None \
+                    and b.get("fill_session") < str(session):
+                last = b
+        return last
+
+    def _sent_plan(self, rule: str, rid: int, dec: dict) -> dict | None:
+        """The journalled send of decision `dec`'s plan, of this run: the `md_send` of its fill session that holds
+        the builder's plan (`equity`; a send of that day without it sent only pending sales, the view was gone),
+        or the late one (`late_of`, M9 1.4)."""
+        out = None
+        for b in self._entries("md_send"):
+            if b.get("strategy") != rule or b.get("run_id") != rid:
+                continue
+            if b.get("late_of") == dec["fill_session"] or (b.get("session") == dec["fill_session"]
+                                                           and "equity" in b):
+                out = b
+        return out
+
+    def _unsent(self, rule: str, session: date, rid: int) -> dict | None:
+        """M9 1.4 (audit M2): the latest decision of this run, when its plan was never sent (the engine was down
+        in its fill session's 15:50-15:57 ET window). None when it was sent, on its fill session or late: a late
+        send is built once. An older decision is never returned: the newer one replaced it."""
+        last = self._latest(rule, session, rid)
+        return last if last is not None and self._sent_plan(rule, rid, last) is None else None
+
+    def _late_cut(self, r: Rule, session: date, prev: date, dec: dict, targets: list[Target],
+                  held: Mapping[str, tuple[float, float | None]], data: DailyData) -> tuple[list[Target], dict]:
+        """M9 1.4: a late send's buys are buys of their own session, so the carry-over's skip rules hold for them
+        (engine/daily.carry_targets at the previous close: the market filter, the rule's ranked universe and buy
+        conditions, a bar at that close, shares lost since the decision). Sales and reductions are never touched.
+        Returns the targets left and the note the send journals: `skipped` (symbol -> why) and `due`, the buys
+        left out with the builder's shares, which the carry-over tries again on the next sessions."""
+        now_held = {s: float(q) for s, (q, _) in held.items()}
+        buys = [(t.symbol, int(t.shares), t.purpose) for t in targets
+                if t.purpose in ("buy", "resize") and t.shares > now_held.get(t.symbol, 0.0)]
+        note: dict = {"of": dec["fill_session"], "skipped": {}, "risk_off": False, "due": []}
+        if not buys:
+            return targets, note
+        k = data.index_of(prev)
+        ended = ended_buys(self.om, r.name, dec["fill_session"], str(session),
+                           base={s: float(q) for s, q in (dec.get("held") or {}).items()},
+                           held=now_held, failsafe_cancels=self._watchdog_cancels()) if self.om is not None else {}
+        _, got = carry_targets(r.strategy, r.name, buys, now_held, data, k, k, ended)
+        skipped = dict(got.get("skipped") or {})
+        skipped = {s: ("no bar at the last close" if why == "no bar on the fill day" else why)
+                   for s, why in skipped.items()}
+        note.update(skipped=skipped, risk_off=bool(got.get("risk_off")),
+                    due=[[s, q, p] for s, q, p in buys if s in skipped])
+        return [t for t in targets if t.symbol not in skipped], note
 
     def _overnight_cut(self, r: Rule, session: date, targets: list[Target],
                        held: Mapping[str, tuple[float, float | None]]) -> list[Target]:
@@ -1444,19 +1570,18 @@ class LiveDaily:
         for today is skipped (the plan's shares are on yesterday's basis); the shares held at the decision go to
         `ended_buys`, so a name that lost shares since (an emergency stop that fired while the engine was down) is
         not bought back."""
-        last = None
-        for b in self._entries("md_decision"):
-            if b.get("run_id") == rid and b.get("strategy") == r.name and b.get("target") is not None \
-                    and b.get("fill_session") < str(session):
-                last = b
-        plan_send = self._send_entry(r.name, date.fromisoformat(last["fill_session"])) if last else None
-        if plan_send is None or plan_send.get("run_id") != rid or self.om is None:
+        last = self._latest(r.name, session, rid)
+        plan_send = self._sent_plan(r.name, rid, last) if last else None
+        if plan_send is None or self.om is None:
             return [], {}
         now_held = {s: float(q) for s, (q, _) in held.items()}
         plan = [(s, int(q), p) for s, q, p, _ in plan_send["targets"] if s not in busy]
+        # M9 1.4: a late send's buys that its session's skip rules left out are still due, at the builder's shares
+        plan += [(s, int(q), p) for s, q, p in (plan_send.get("late") or {}).get("due") or [] if s not in busy]
         if not any(p in ("buy", "resize") and q > now_held.get(s, 0.0) for s, q, p in plan):
             return [], {}
-        note = {"of": last["fill_session"], "carried": [], "skipped": {}, "risk_off": False}
+        sent_on = plan_send["session"]  # the plan's own session: the decision's fill session, or its late send's
+        note = {"of": sent_on, "carried": [], "skipped": {}, "risk_off": False}
         try:
             data = self._view(prev, self.now())
         except DataNotReady as e:
@@ -1468,7 +1593,7 @@ class LiveDaily:
         splits = self.account.splits(session)
         early.update({s: "split today" for s in short if s in splits})
         plan = [x for x in plan if x[0] not in early]
-        fill = date.fromisoformat(last["fill_session"])
+        fill = date.fromisoformat(sent_on)
         if fill not in set(data.dates.astype(object)):
             return [], {}
         ended = ended_buys(self.om, r.name, str(fill), str(session),
