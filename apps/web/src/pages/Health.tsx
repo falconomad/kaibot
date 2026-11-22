@@ -87,7 +87,7 @@ const EV: Record<string, string> = {
   // 0039: M9 engine safety (#437, #435, #442)
   replica_poison: "A record the dashboard's database refuses was skipped (the engine keeps it)",
   replica_backlog: "The dashboard's copy is falling behind the engine's record",
-  clock_skew: "This computer's clock against the broker's (new orders wait while they differ)",
+  clock_skew: "The engine's clock against the broker's (new orders wait while they differ)",
   calendar_expiring: "A yearly calendar runs out within 30 days and needs extending",
 };
 

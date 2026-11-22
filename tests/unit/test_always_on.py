@@ -232,6 +232,15 @@ def test_success_pings_every_five_minutes_not_at_once():
     ("WARNING account not clean: {'foreign_positions': ['X']}", "account_not_clean"),
     ("ERROR watchdog engine heartbeat 120 s old: entries canceled ['AAPL']", "watchdog_tripped"),
     ("ERROR watchdog 15:55 with the engine down: closed ['AAPL']", "watchdog_flatten"),
+    # QA-Ops (#523): M9's alerts, as the engine logs them
+    ("ERROR replica poison: Supabase refuses halt entry 7 for good (POST halt -> 400: ...); skipped, the journal "
+     "keeps it", "replica_poison"),
+    ("ERROR replica backlog: 40 rows waiting for 10 minutes (no error): the dashboard and the dead-man's book are "
+     "stale", "replica_backlog"),
+    ("ERROR clock skew: the host clock and the broker's disagree ({'state': 'skewed', 'seconds': -240.0}): no new "
+     "orders until they agree", "clock_skew"),
+    ("ERROR calendar expiring: macro_calendar ends 2027-12-31 (in 29 days): extend config/macro_calendar.yaml",
+     "calendar_expiring"),
 ])
 def test_alarm_lines_send_fail(line, kind):
     p = Pings()
