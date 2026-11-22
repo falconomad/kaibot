@@ -134,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
     md.add_argument("--control-runs", type=int, default=None,
                     help="exposure-matched random portfolios (Gate B mark 3; default 500, 0 on the fixture)")
     md.add_argument("--grid", choices=("gate", "full"), default="gate")
+    md.add_argument("--open-holdout", default=None, metavar="ID",
+                    help="read the hold-out under this opening of config/holdout.yaml (docs/ops/holdout.md)")
     a = ap.parse_args(argv)
     if a.list or not a.strategy:
         for s in (*registry.STRATEGIES, *registry.MULTI_DAY):
@@ -171,6 +173,12 @@ def multi_day(a: argparse.Namespace) -> int:
         runs = 0 if a.control_runs is None else a.control_runs
         out_dir = trials = None
     else:
+        # The daily store reaches into the hold-out (M11 ticket 2.6): the same guard as the research scripts,
+        # before a bar is read. No --end means "to the newest bar", which is refused. Imported here, as the
+        # other evaluation modules are, so the engine's own import graph is unchanged.
+        from kaibot.evaluation import holdout
+
+        holdout.enforce(script=__file__, end=a.end, rule=strat.rule, opening=a.open_holdout, data=a.data)
         end = a.end or str(np.datetime64("today", "D"))
         market, info = dr.load_store(a.data, a.universe_file, a.universe, a.start, end)
         info["window"] = [a.test_start, end]

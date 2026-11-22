@@ -27,6 +27,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from kaibot.engine.shadow import ShadowBook, merged_stats, step  # noqa: E402
+from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation.metrics import max_drawdown, profit_factor, random_entry_percentile, sharpe, t_stat  # noqa: E402
 from kaibot.replay.data import ET, N_MIN, load_news_times, load_symbol  # noqa: E402
 from kaibot.risk.profiles import load_profiles  # noqa: E402
@@ -124,7 +125,9 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--equity", type=float, default=100_000.0)
     ap.add_argument("--label", default="")
     ap.add_argument("--symbols", default="", help="comma-separated override of config/universe_seed.yaml")
+    holdout.add_argument(ap)
     a = ap.parse_args(argv)
+    holdout.enforce(script=__file__, end=a.end, rule=a.strategy, opening=a.open_holdout, data=a.data)
     strategy = NAMES[a.strategy]
     data = Path(a.data)
     cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())

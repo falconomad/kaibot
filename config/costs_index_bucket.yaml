@@ -1,0 +1,23 @@
+# The index-fund bucket of cost model v2 (M11 ticket 2.3, issue #454). Read by kaibot.broker.costs_v2
+# (`get_model("v2_index")`, scenario "v2idx" of kaibot.replay.sim_costs). RESEARCH ONLY: nothing live reads it.
+#
+# NOT CALIBRATED YET. `half_spread_bp` stays empty until it has been MEASURED on the research Mac with
+#   ./scripts/calibrate_index_costs.sh
+# and the value is committed here together with the table the script wrote (docs/research/results/). While it is
+# empty the model refuses to build, so no run can use a guessed cost.
+#
+# The rule that turns the measurement into the value, fixed BEFORE any measurement was made:
+#   1. the measure is the QUOTED half-spread in bp at the moments the fund is traded: (ask - bid) / 2 / mid;
+#   2. from the paper account's own fills when there are at least 30 fills on at least 5 sessions, else from quotes
+#      sampled at the rule's check times (every half hour from 10:00 to 15:30 ET and at 15:50) on the last 20
+#      sessions;
+#   3. the value is the MEAN of that measure (not the median: wide moments count), rounded UP to the next 0.05 bp;
+#   4. the paper venue fills at the quote with no queue and no impact, so what a fill paid beyond the quote is
+#      reported but is not used; v2's impact term and tick floor still apply on top of the bucket.
+# Changing the rule, the symbols or the value later is a parameter change of the cost model: by pull request, and
+# every run that uses the new value logs a trial.
+version: 1
+symbols: [SPY]
+half_spread_bp:            # bp per side; empty = not calibrated
+source:                    # filled in with the value: method (fills | quotes), fills or quotes used, sessions,
+                           # window, feed, mean and median quoted half-spread, the script's code version, the date

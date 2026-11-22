@@ -11,7 +11,7 @@ A small process beside the engine, never inside it. It
   connection comes back after 1, 2, 4 ... seconds, at most 60;
 - coalesces the trades and broadcasts at most one message a second, and only when a price changed, on the private
   Supabase Realtime channel `kb:prices` (event `prices`, payload {as_of, feed: "iex", prices: {SYM: price}}) with the
-  service key. Only the owner may read the channel (migration 0032). No table row is written for prices;
+  helper sign-in (below). Only the owner may read the channel (migration 0032). No table row is written for prices;
 - streams only while the market is open by Alpaca's clock (09:30-16:00 ET, holidays and early closes included) and
   holds no connection otherwise;
 - writes its heartbeat to kaibot.heartbeat with process 'price_stream' once a minute.
@@ -19,6 +19,13 @@ A small process beside the engine, never inside it. It
 What it cannot do: it sends no order, cancels nothing, writes no ledger or trading table, and imports none of the
 engine's trading code (only kaibot.engine.config for the .env parsing and the paper URL). Its only HTTP calls are the
 two GETs above, the broadcast POST and the heartbeat upsert. Keys are read from the env file and never logged.
+
+Which Supabase key (M10 ticket 1.26, issue #451; docs/ops/helper_role.md). With the helpers' env file
+(--helper-env, $KAIBOT_HELPER_ENV_FILE or ~/Projects/kaibot-secrets/helper.env: the paper keys, the publishable
+key and the helper user's email and password) the relay reads ONLY that file, signs in as the helper and never has
+the service key: its broadcast is allowed by migration 0038's policy and its heartbeat goes through
+`kb_helper_heartbeat`, which writes the row 'price_stream' and no other. Without that file it runs as before, on
+the engine's .env with the service key, and says so once in its log.
 
     python scripts/price_stream.py --env ~/Projects/kaibot-secrets/.env
 
@@ -52,6 +59,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from kaibot.common.helper_session import HelperSession, helper_env  # noqa: E402
 from kaibot.engine.config import DEFAULT_SUPABASE_URL, PAPER_TRADING_URL, load_env_file  # noqa: E402
 
 log = logging.getLogger("price_stream")
@@ -329,14 +337,19 @@ class Http:
 
     ALPACA_PATHS = ("/v2/positions", "/v2/clock")
 
-    def __init__(self, alpaca_key: str, alpaca_secret: str, supabase_url: str, service_key: str,
-                 base: str = PAPER_TRADING_URL):
+    def __init__(self, alpaca_key: str, alpaca_secret: str, supabase_url: str, service_key: str | None,
+                 base: str = PAPER_TRADING_URL, helper: HelperSession | None = None):
+        """`helper`: the signed-in helper (1.26); then `service_key` is None and no call here can use one."""
+        if (helper is None) == (not service_key):
+            raise ValueError("the relay needs the helper sign-in or the service key, not both and not neither")
+        self.helper = helper
         self.base = paper_only(base)
         self.alpaca_h = {"APCA-API-KEY-ID": alpaca_key, "APCA-API-SECRET-KEY": alpaca_secret,
                          "Accept": "application/json"}
         self.sb = supabase_url.rstrip("/")
-        self.sb_h = {"apikey": service_key, "Content-Type": "application/json"}
-        if service_key.startswith("eyJ"):  # a legacy JWT key goes in Authorization too; an sb_secret_ key does not
+        self.sb_h = {"apikey": service_key or "", "Content-Type": "application/json"}
+        # a legacy JWT key goes in Authorization too; an sb_secret_ key does not
+        if service_key and service_key.startswith("eyJ"):
             self.sb_h["Authorization"] = f"Bearer {service_key}"
 
     def alpaca_get(self, path: str) -> Any:
@@ -355,10 +368,16 @@ class Http:
 
     def broadcast(self, payload: dict) -> int:
         """Realtime's REST broadcast, private channel: only clients the 0032 policy lets in receive it."""
+        if self.helper is not None:
+            self.helper.broadcast(TOPIC, EVENT, payload)
+            return 202
         return self._post(f"{self.sb}/realtime/v1/api/broadcast",
                           {"messages": [{"topic": TOPIC, "event": EVENT, "payload": payload, "private": True}]})
 
     def heartbeat(self, detail: dict) -> int:
+        if self.helper is not None:
+            self.helper.rpc("kb_helper_heartbeat", {"p_process": PROCESS, "p_detail": detail})
+            return 204
         row = {"process": PROCESS, "ts": datetime.now(UTC).isoformat(), "detail": detail}
         return self._post(f"{self.sb}/rest/v1/heartbeat?on_conflict=process", row,
                           {"Content-Profile": "kaibot", "Prefer": "resolution=merge-duplicates,return=minimal"})
@@ -631,12 +650,20 @@ def _messages(text: str) -> list[dict]:
     return [m for m in v if isinstance(m, dict)]
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--env", default=os.path.expanduser("~/Projects/kaibot-secrets/.env"))
-    a = ap.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    load_env_file(a.env)
+def build_http(env_file: str | None, helper_file: str | None = None) -> tuple[Http, str, str]:
+    """The relay's HTTP client and its paper keys. With the helpers' env file: only that file is read and the
+    relay signs in as the helper (no service key in this process). Without it: the engine's .env, as before."""
+    henv = helper_env(helper_file)
+    if henv is not None:
+        base = paper_only(henv.get("ALPACA_BASE_URL"))
+        key, secret = henv.get("ALPACA_API_KEY"), henv.get("ALPACA_SECRET") or henv.get("ALPACA_API_SECRET")
+        if not key or not secret:
+            raise SystemExit("missing settings: ALPACA_API_KEY, ALPACA_SECRET (put them in the helpers' env file)")
+        url = henv.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL
+        log.info("Supabase: signed in as the helper (no service key in this process)")
+        helper = HelperSession.from_env(henv, DEFAULT_SUPABASE_URL)
+        return Http(key, secret, url, None, base, helper=helper), key, secret
+    load_env_file(env_file)
     base = paper_only(os.environ.get("ALPACA_BASE_URL"))
     key = os.environ.get("ALPACA_API_KEY")
     secret = os.environ.get("ALPACA_SECRET") or os.environ.get("ALPACA_API_SECRET")
@@ -645,7 +672,17 @@ def main() -> None:
                if not v]
     if missing:
         raise SystemExit(f"missing settings: {', '.join(missing)} (put them in the .env file)")
-    http = Http(key, secret, os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL, service, base)
+    log.warning("Supabase: still on the service key (no helpers' env file; docs/ops/helper_role.md)")
+    return Http(key, secret, os.environ.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL, service, base), key, secret
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--env", default=os.path.expanduser("~/Projects/kaibot-secrets/.env"))
+    ap.add_argument("--helper-env", default=None, help="the helpers' env file (docs/ops/helper_role.md)")
+    a = ap.parse_args()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    http, key, secret = build_http(a.env, a.helper_env)
     stop = {"now": False}
 
     def on_signal(*_):

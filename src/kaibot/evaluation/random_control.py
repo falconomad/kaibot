@@ -19,6 +19,17 @@ draws the selections, calls it at least 500 times and reports where the rule's n
 Percentile = share of random portfolios whose Sharpe is strictly below the rule's, in percent. Ties count
 against the rule. Tests use a toy simulator in which the truth is known: a rule with no skill lands near the
 50th percentile on average, a rule with planted skill lands above the 90th.
+
+Gate v3 (decision 16) reads three more numbers from the same runs:
+- `p_value`: (1 + random portfolios with a Sharpe at or above the rule's) / (runs + 1). The "+ 1" counts the
+  rule itself as one draw, so the p-value of a no-skill rule is uniform and is never zero; this is the number
+  the correction across rule families is applied to.
+- `drawdown_percentile`: share of random portfolios whose maximum drawdown is strictly DEEPER than the rule's,
+  in percent (high is good, like the Sharpe percentile). Reported beside the Sharpe percentile.
+- `pool`: where the names were drawn from. "candidate_pool" = the names the rule itself could have bought on
+  that session before its own selection signal (for a headline rule: companies with a headline; for an earnings
+  rule: companies that reported); "universe" = every name that passes the price and volume filter. The caller
+  says which it supplied as `eligible`; gate v3 accepts only a control from the rule's candidate pool.
 """
 
 from __future__ import annotations
@@ -30,6 +41,7 @@ from dataclasses import dataclass
 import numpy as np
 
 PERIODS = 252
+POOLS = ("candidate_pool", "universe")
 UNFILLED = -1  # a slot for which no eligible name was free
 
 
@@ -124,6 +136,28 @@ def annual_sharpe(returns, periods: int = PERIODS) -> float:
     return float(r.mean() / sd * math.sqrt(periods)) if sd > 0 else 0.0
 
 
+def max_drawdown(returns) -> float:
+    """Largest peak-to-trough fall of the daily mark-to-market curve, as a positive share; the curve starts at 1."""
+    eq = np.cumprod(1.0 + np.asarray(returns, dtype=float))
+    if not eq.size:
+        return 0.0
+    return float((1.0 - eq / np.maximum(np.maximum.accumulate(eq), 1.0)).max())
+
+
+def p_value(random_sharpes, own: float) -> float:
+    """One-sided p-value of the rule's Sharpe among the random portfolios, the rule counted as one draw:
+    (1 + random Sharpes at or above the rule's) / (runs + 1). Ties count against the rule."""
+    x = np.asarray(random_sharpes, dtype=float)
+    return float((1 + int((x >= own).sum())) / (x.size + 1))
+
+
+def p_from_percentile(percentile: float, runs: int) -> float:
+    """The same p-value from a stored percentile (share strictly below, in %) and the number of runs, for
+    reports written before `p_value` was stored."""
+    at_or_above = round(runs * (1.0 - float(percentile) / 100.0))
+    return float((1 + max(0, min(runs, at_or_above))) / (runs + 1))
+
+
 @dataclass(frozen=True)
 class ControlResult:
     percentile: float  # share of random portfolios with a Sharpe strictly below the rule's, in %
@@ -139,6 +173,11 @@ class ControlResult:
     random_p95: float
     simulated_strategy_sharpe: float | None = None  # the rule's own names through `simulate`, when given
     percentile_simulated: float | None = None
+    p_value: float | None = None  # (1 + random Sharpes at or above the rule's) / (runs + 1)
+    drawdown_percentile: float | None = None  # share of random portfolios with a deeper max drawdown, in %
+    strategy_max_drawdown: float | None = None
+    random_median_max_drawdown: float | None = None
+    pool: str = "universe"  # "candidate_pool" | "universe": what `eligible` held (the caller's statement)
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -147,7 +186,7 @@ class ControlResult:
 def matched_random_control(strategy_returns, schedule: Sequence[Slot], eligible,
                            simulate: Callable[[np.ndarray], Sequence[float]], *, runs: int = 500, seed: int = 0,
                            periods: int = PERIODS, strategy_selection: Sequence[int] | None = None,
-                           ) -> ControlResult:
+                           pool: str = "universe") -> ControlResult:
     """Percentile of the rule's net Sharpe among `runs` random portfolios with the same schedule.
 
     strategy_returns: the rule's own daily net mark-to-market returns (from its real run).
@@ -155,14 +194,18 @@ def matched_random_control(strategy_returns, schedule: Sequence[Slot], eligible,
     Run k draws from its own stream seeded by (seed, k), so a run can be repeated on its own.
     strategy_selection: the names the rule really held, one per slot. When given, they are run through
     `simulate` too: `simulated_strategy_sharpe` should be close to `strategy_sharpe`, otherwise the control
-    simulator is not the rule's simulator and the percentile compares two different things."""
+    simulator is not the rule's simulator and the percentile compares two different things.
+    pool: "candidate_pool" when `eligible` holds the rule's own candidate pool, else "universe" (see the top)."""
+    if pool not in POOLS:
+        raise ValueError(f"pool must be one of {POOLS}, not {pool!r}")
     r = np.asarray(strategy_returns, dtype=float)
     if runs < 1:
         raise ValueError("runs must be at least 1")
     if not len(schedule):
         raise ValueError("the schedule is empty: a rule that never traded has nothing to match")
     own = annual_sharpe(r, periods)
-    sharpes = np.empty(runs)
+    own_dd = max_drawdown(r)
+    sharpes, drawdowns = np.empty(runs), np.empty(runs)
     unfilled = 0
     order, elig = _order(schedule), _Eligible(eligible)
     for k in range(runs):
@@ -173,10 +216,13 @@ def matched_random_control(strategy_returns, schedule: Sequence[Slot], eligible,
             raise ValueError(f"simulate returned {sim.shape[0] if sim.ndim else 0} daily returns, the rule has "
                              f"{r.size}: both must cover the same sessions")
         sharpes[k] = annual_sharpe(sim, periods)
+        drawdowns[k] = max_drawdown(sim)
     sim_own = pct_sim = None
     if strategy_selection is not None:
         sim_own = annual_sharpe(simulate(np.asarray(strategy_selection, dtype=int)), periods)
         pct_sim = float((sharpes < sim_own).mean() * 100.0)
     q = np.quantile(sharpes, [0.05, 0.5, 0.9, 0.95])
     return ControlResult(float((sharpes < own).mean() * 100.0), own, runs, seed, len(schedule), unfilled,
-                         unfilled == 0, float(q[0]), float(q[1]), float(q[2]), float(q[3]), sim_own, pct_sim)
+                         unfilled == 0, float(q[0]), float(q[1]), float(q[2]), float(q[3]), sim_own, pct_sim,
+                         p_value(sharpes, own), float((drawdowns > own_dd).mean() * 100.0), own_dd,
+                         float(np.median(drawdowns)), pool)
