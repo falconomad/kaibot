@@ -1,0 +1,90 @@
+# M12 ticket 3.7 (#469): the weekly fail-safe drills against the simulated venue (tests/drills/, docs/ops/drills.md):
+# watchdog takeover, dead-man stop placement (the watchdog and the SQL dead-man of migration 0019, in a throwaway
+# local Postgres: the runner has the binaries), lease lost, Supabase down at start, journal damaged at start and
+# while running. The pass or fail record goes into the summary and an artifact; a failing drill opens an issue (or
+# comments on the open one). The ordinary `ci` run checks on every pull request that each drill's documented
+# sentences are still in docs/ops (tests/drills/test_drill_docs.py). No secret, no broker, no Supabase.
+name: drills
+on:
+  schedule:
+    - cron: "41 5 * * 0"  # Sundays 05:41 UTC
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: drills
+  cancel-in-progress: false
+env:
+  PYTHONHASHSEED: "0"
+  PYTHONPATH: src
+  KAIBOT_DRILLS_REQUIRE_PG: "1"  # the dead-man part must run here; without PostgreSQL the drill fails
+jobs:
+  drills:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # all drills take about 4 minutes
+    permissions:
+      contents: read  # runs the repository's code: read-only; only the `report` job below writes (#549)
+    outputs:
+      outcome: ${{ steps.drills.outcome }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - name: play the drills
+        id: drills
+        run: uv run python scripts/run_drills.py --out drills.md --json drills.json
+      - name: summary
+        if: always()
+        run: |
+          { echo '### Fail-safe drills'; cat drills.md 2>/dev/null || echo 'no record (the drills did not run)'; } \
+            >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: always()
+        with:
+          name: drills-record
+          path: |
+            drills.md
+            drills.json
+          if-no-files-found: ignore
+          retention-days: 90
+  report:
+    # a drill failed: opens an issue (or comments on the open one). Runs no repository code: it reads the drills'
+    # record from its artifact.
+    needs: drills
+    if: always() && needs.drills.outputs.outcome == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write  # to open the issue with a failing drill: the only thing this job writes
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with: {name: drills-record}
+        continue-on-error: true
+      - name: open an issue with the failing drill
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          {
+            echo "The weekly fail-safe drills (\`tests/drills/\`, docs/ops/drills.md) have a failing drill."
+            echo
+            echo "- commit: \`$COMMIT\`"
+            echo "- run: $RUN_URL (artifact \`drills-record\`)"
+            echo
+            cat drills.md 2>/dev/null || echo "(no record)"
+            echo
+            echo "Play one again: \`PYTHONHASHSEED=0 PYTHONPATH=src python scripts/run_drills.py \"<drill>\"\`."
+            echo "An engine defect: an issue in the engine's milestone, then the drill names it (\`known\` in"
+            echo "\`tests/drills/drills.py\`). A changed promise: change the drill and its quoted sentence."
+          } > issue.md
+          title="Weekly fail-safe drills: a drill failed"
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --repo "$GITHUB_REPOSITORY" --body-file issue.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file issue.md \
+              --label bug --label team:qa-ops
+          fi
