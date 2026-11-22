@@ -263,3 +263,14 @@ def test_the_engine_research_command_on_the_store_is_guarded_too(tmp_path: Path,
         research.main(["--strategy", "trend_momentum", "--universe", "pit", "--data", str(tmp_path),
                        "--end", "2024-12-31"])
     assert "hold-out" not in str(getattr(e.value, "code", e.value))
+
+
+def test_the_momentum_band_run_refuses_the_hold_out(tmp_path: Path, monkeypatch):
+    """#460: scripts/trend_momentum_band.py never reads 2025 on."""
+    monkeypatch.delenv(ho.ENV_OPENING, raising=False)
+    sys.path.insert(0, str(SCRIPTS))
+    import trend_momentum_band
+
+    with pytest.raises(SystemExit) as e:
+        trend_momentum_band.main(["--data", str(tmp_path), "--end", "2025-02-28", "--trials", ""])
+    assert str(e.value.code).startswith("hold-out: trend_momentum_band.py would read to 2025-02-28")
