@@ -41,6 +41,8 @@ needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Po
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
 ROUTINE |= {"filing_flag_shadow"}
+# M9 1.10 (#435): the host clock and the broker's disagree by more than five seconds (and "ok" when it is over)
+AWAITING_KB_HEALTH |= {"clock_skew"}
 
 # Events sent under a name that is not written at the call (#410's `multi_day_column_missing` was the first one
 # missed). Each dynamic call site below, and where its names come from; a new dynamic call fails
