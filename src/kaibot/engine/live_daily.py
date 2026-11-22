@@ -1126,13 +1126,21 @@ class LiveDaily:
             # reconciliation difference): the next tick runs the loop again on the same journalled targets
             retry = bool(res.deferred or res.canceled or skipped or withheld) \
                 or any(x.state in UNCONFIRMED for x in res.sent)
-            said = repr((sent, skipped, res.deferred, res.canceled, withheld))
+            aged = [[k[1], why] for k, why in res.aged]  # QA-Ops (#524): a sale that no longer waits for an old fill
+            said = repr((sent, skipped, res.deferred, res.canceled, withheld, aged))
             if self._said.get(r.name) != said:
                 self._said[r.name] = said
                 self.event("multi_day_orders", {"strategy": r.name, "session": str(session), "sent": sent,
                                                 "skipped": skipped, "deferred": [k[1] for k in res.deferred],
                                                 "canceled": res.canceled, "retry": retry,
-                                                **({"withheld": withheld} if withheld else {})})
+                                                **({"withheld": withheld} if withheld else {}),
+                                                **({"aged": aged} if aged else {})})
+                if aged:
+                    self.event("multi_day_unbooked_aged", {"strategy": r.name, "session": str(session),
+                                                           "sales": aged,
+                                                           "action": "the account activity of an earlier day's "
+                                                                     "fill never arrived: check the open "
+                                                                     "'unbooked' difference"})
             if not retry:
                 self.journal.append("md_sent", {"run_id": rid, "strategy": r.name, "session": str(session),
                                                 "sent": [x["coid"] for x in sent], "skipped": skipped})

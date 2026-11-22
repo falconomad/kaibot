@@ -14,7 +14,7 @@ import os
 import pytest
 from hypothesis import HealthCheck, Phase, settings
 from hypothesis.stateful import run_state_machine_as_test
-from om_machine import DAYS, KNOWN, FusedJournal, FusedVenue, Kill, OrdersAndLedger, et, replay
+from om_machine import DAYS, FusedJournal, FusedVenue, Kill, OrdersAndLedger, et, replay
 from reference_ledger import ReferenceLedger, dec
 
 from kaibot.broker.protocol import BrokerError, OrderRequest
@@ -274,12 +274,10 @@ def test_the_fuse_kills_before_and_after_the_numbered_effect():
         m.teardown()
 
 
-@pytest.mark.xfail(strict=True, reason="#507: a fill not booked yet on a previous session's order is bought again")
-def test_507_an_unbooked_fill_of_yesterdays_order_is_not_bought_again(monkeypatch):
-    """The target loop waits while a finished order's fill is not booked (#333), but only for orders of today's
-    session. Yesterday's order filled, the venue's order status says so, the account activities cannot be read:
-    the loop sees no shares held, nothing working and nothing unbooked, and buys the target a second time."""
-    monkeypatch.delitem(KNOWN, "unbooked_other_session")  # here the machine must not step around it
+def test_507_an_unbooked_fill_of_yesterdays_order_is_not_bought_again():
+    """#507: the target loop waited while a finished order's fill was not booked (#333), but only for orders of
+    today's session. Yesterday's order filled, the venue's order status says so, the account activities cannot be
+    read: the loop saw no shares held, nothing working and nothing unbooked, and bought the target a second time."""
     m = OrdersAndLedger()
     try:
         m.clock.set(et(DAYS[0], "15:50", 7))

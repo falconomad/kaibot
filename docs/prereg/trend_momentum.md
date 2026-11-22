@@ -702,3 +702,29 @@ count. No research result is affected (item 4). The same text is Amendment 21 of
    as filled.
 4. **Research and Gate B unchanged.** The research venue answers every cancel at once, so no request is repeated
    there; the bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 24 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session
+
+Written on 22 Nov 2026, before the change's first use. It can change whether an order goes out, so it is recorded
+here. It can only hold an order back: it never adds an order and changes no decision, target or share count. No
+research result is affected (item 5). The same text is Amendment 22 of mom_12_1_band.
+
+1. **Why.** Since issue #333 the near-close send waits while a finished order of the sleeve has filled shares at
+   the venue that are not booked yet. It asked this for the day's own orders only. A fill of the previous session
+   still unbooked (the engine stopped, or the account activities could not be read) was not counted, and the target
+   was bought a second time (found by the stateful test of M12 ticket 3.1).
+2. **The rule.** The send waits for such a fill whatever session its order belongs to. This holds for a buy and for
+   a sale of that sleeve through the near-close send and the carry-over; a full flatten and the fail-safes' stops do
+   not wait.
+3. **So that the wait ends.** While such a fill is open, the account activities are read from before that order's
+   start, not only from the last booked fill, so a late activity is still found after later fills were booked.
+   A fill whose activity never arrives shows as an "unbooked" difference in the reconciliation, which blocks the
+   sleeve's buys as before.
+4. **The wait is bounded for sales (QA-Ops second key, PR #524).** A buy of the sleeve always waits. A sale waits
+   while the unbooked order is of the same New York day. From the next day on the sale goes out without the
+   missing fill: for the shares the ledger holds, less the shares the unbooked sales already took at the venue
+   (so it never sells more than the venue holds for the sleeve). The `multi_day_orders` event names it (`aged`) and
+   one event `multi_day_unbooked_aged` is raised. Without this bound a single activity that never arrives would
+   keep the rule from ever selling that stock through its own decisions.
+5. **Research and Gate B unchanged.** The research venue lists a fill's activity with the fill, so nothing waits
+   there; the bit-identity test of the momentum rules passes unchanged.

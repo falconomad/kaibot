@@ -559,6 +559,28 @@ def test_179_a_failed_read_at_the_session_start_expires_nothing():
     assert rc.accepted
 
 
+# ---------------------------------------------------------------- #507: an old order's unbooked fill
+def test_507_an_unbooked_fill_older_than_the_last_booked_one_is_still_read_and_booked():
+    """The activities are read from a little before the last booked fill. A finished order whose fill is still
+    unbooked (its activity came late) must pull that start back, or its fill is never read again once a later
+    fill of another order has been booked."""
+    b, clock = venue()
+    om, _, booked = manager(b, clock)
+    first = om.submit(mkt("A", qty=10), strategy="rule", purpose="buy", session=DAY)
+    run(b, clock, 30, 31)
+    real = b.activities
+    b.activities = lambda after=None, types=("FILL",): [a for a in real(after, types)
+                                                         if a.get("order_id") != first.order_id]  # A's is late
+    om.sync()
+    assert first.state is St.FILLED and om.unbooked("A", "rule") == 10 and not booked
+    clock.advance(minutes=45)
+    second = om.submit(mkt("B", qty=5), strategy="rule", purpose="buy", session=DAY)
+    run(b, clock, 80, 81)
+    om.sync()
+    assert second.state is St.FILLED and [f.symbol for f in booked] == ["B"]  # the last fill is now B's, 45 min on
+    b.activities = real
+    om.sync()
+    assert [f.symbol for f in booked] == ["B", "A"] and om.unbooked("A") == 0 and first.booked == 10
 # ---------------------------------------------------------------- #491: a cancel the venue never got is sent again
 def _resting(b, clock):
     om, journal, _ = manager(b, clock)
