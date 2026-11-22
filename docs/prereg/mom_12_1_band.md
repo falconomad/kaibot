@@ -359,3 +359,66 @@ result is affected (item 3).
    carried (Amendment 9, item 4), and the same bit-identity test passes for both momentum rules. A test finds, on
    the fixture, a session where one planned stock is in the ranked universe and another is outside the universe
    filter: only the first is carried, for this rule and for trend_momentum (Amendment 13 there).
+
+## Amendment 12 (21 Nov 2026, platform, issue #441, M9 ticket 1.16, before its first live paper session): a pre-send check that can withhold a near-close order
+
+Written on 21 Nov 2026, before the check's first use. It changes whether and when a live order goes out, so it is
+recorded here. It can only withhold an order for a session: it never adds an order, and it never changes a share
+count, a rank or a target. No research result is affected (item 6). The same text is Amendment 14 of
+trend_momentum.
+
+1. **The gap.** Amendment 8's near-close market orders go out with the share counts sized at the previous
+   close. Nothing read the stock's quote, whether it was trading, or how far it had moved that day (engine audit of
+   21 Nov 2026, "confirmed absent"; reproduced by a failing test before the change).
+2. **The check (live path only).** Just before an order would be sent, the engine reads the stock's latest IEX
+   quote (one request per tick for the whole plan, ended after 8 seconds) and the close its shares were sized at
+   (the previous session's raw close, on today's share basis). The order is withheld when:
+   - the quote is older than 300 seconds (the stock is halted or not trading; a limit-up/limit-down pause lasts
+     five minutes);
+   - both the bid and the ask are more than 10% away from the sizing close (the side nearer the close is read,
+     because IEX is one exchange's book and one side can sit far from the market);
+   - a buy's value at that price is above the book's per-name cap plus 10% (a wrong quantity; a sale is exempt: it
+     only reduces exposure and can never be larger than the shares held).
+   The constants are fixed here and are not tuned on results.
+3. **No quote: the prior close.** When the quote cannot be read, or the feed has none for the stock, the order is
+   checked at the sizing close and goes out. A market-data outage must not become one more way to miss a rebalance;
+   the read failure is one `multi_day_error` event (step `presend_quotes`) per session.
+4. **Withheld, not dropped.** The check is asked again on every tick of the send window, so an order goes out the
+   minute its quote is fresh and inside the collar. What is still withheld when the window ends is sent again at
+   the next session, checked against that session's previous close: a buy by the carry-over of Amendments
+   9 to 11 and under their limits (it never had an order, so nothing in the order history is against
+   it); a sale to zero as a pending sale, as an unfilled sale already is; a reduction (a resize down) as the same
+   reduction to the same target shares while the sleeve still holds more. The last is new: a reduction that the
+   venue let expire is still not sent again (section 4); only one this check withheld is.
+5. **Journal.** One `md_withheld` entry per (rule, session, stock, side) with the reason, and the reasons in the
+   session's `multi_day_orders` event (`withheld`). No new event name.
+6. **Research and Gate B unchanged.** The research venue has no quotes and fills at the closing print; the check
+   exists only where a quote source is given, and only the live engine's market-data client is one (a replay's
+   stored bars are not). Tests: with fresh quotes at the previous close the live path on the simulator sends the
+   same orders as without the check; with the feed down for the whole run, too; a stock without a fresh quote and
+   a stock 20% from its sizing close are withheld and bought at the next session at the plan's own shares.
+7. **What this can cost.** A stock that really moves more than 10% in a day (an earnings day) is not traded that
+   session: a sale is a day late, a buy waits for the carry-over's conditions. IEX quotes of a thinly traded stock may be older than
+   300 seconds without a halt; the reasons in `md_withheld` are to be reviewed after the first ten live sessions.
+
+## Amendment 13 (21 Nov 2026, QA-Ops second key on issue #441, PR #490, before the first use of Amendment 12): the pre-send check never withholds a sale
+
+Written on 21 Nov 2026, with Amendment 12 and before its first use. It only narrows Amendment 12: the check
+withholds fewer orders, never more; it adds no order and changes no share count, rank or target. No research result
+is affected (item 4). The same text is Amendment 15 of trend_momentum.
+
+1. **Sales are exempt.** The check of Amendment 12 (item 2) applies to buys and resizes up only. A sale to zero
+   and a reduction go out in their own session whatever the quote says: stale, far from the sizing close, or
+   missing. Where Amendment 12 says "the order is withheld", read "the buy is withheld".
+2. **Why.** Decision 15 (section 12) lets sales go out even when entries are blocked, so that the book is never
+   locked in. A sale only takes risk off and is never larger than the shares held. A stock whose IEX quote is
+   stale or far from the close day after day could otherwise never be sold.
+3. **What falls away.** Item 4 of Amendment 12 carried a withheld sale to zero as a pending sale and a withheld
+   reduction as the same reduction. Neither can happen now, and the carry of a withheld reduction is removed from
+   the code. A buy still withheld at the end of the window is carried as that item says. In item 7, "a sale is a
+   day late" no longer applies. A sale of a halted stock is sent and may expire unfilled; a sale to zero is then
+   sent again at the next session, as before (decision 15, section 12).
+4. **Research and Gate B unchanged.** As Amendment 12, item 6. Added tests: the check gives no reason for a sale
+   with any quote; every sale of the fixture run, with a stale quote or a quote 20% under its sizing close, goes
+   out in its own session exactly as without the check; a sale does not wait for the quote read, which is made
+   only when a buy is about to go out.
