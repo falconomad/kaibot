@@ -36,7 +36,6 @@ import dataclasses
 import json
 import logging
 import math
-import os
 import time
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -70,8 +69,9 @@ Reviewer = Callable[[date, list["ReviewCandidate"]], "PreopenVerdicts | dict | C
 
 def enabled(env: Mapping[str, str] | None = None) -> bool:
     """On only when the room is on (KAIBOT_ROOM) AND the pre-open review flag is on. Default: off."""
-    env = os.environ if env is None else env
-    return all((env.get(k) or "").strip().lower() in ON for k in ("KAIBOT_ROOM", FLAG_ENV))
+    from kaibot.common import switches  # M10 1.23 (#448): one parser per switch
+
+    return all(switches.get(k, env) for k in ("KAIBOT_ROOM", FLAG_ENV))
 
 
 @dataclass(frozen=True)

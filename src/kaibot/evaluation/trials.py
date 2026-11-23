@@ -147,14 +147,17 @@ def count_file(path: Path | str | None) -> int:
 def registry_file(root: Path | str, env: Mapping[str, str] | None = None) -> Path:
     """Where the registry file is on this machine: `$KAIBOT_TRIALS_FILE` when set, else the first that exists
     of `<root>/data/trials.jsonl` and `$KAIBOT_DATA_DIR/trials.jsonl`, else `<root>/data/trials.jsonl`."""
+    from kaibot.common import switches  # M10 1.23 (#448)
+
     env = os.environ if env is None else env
-    if env.get(TRIALS_ENV):
-        return Path(env[TRIALS_ENV])
+    if switches.get(TRIALS_ENV, env):
+        return switches.get(TRIALS_ENV, env)
     default = Path(root) / "data" / "trials.jsonl"
     if default.is_file():
         return default
-    if env.get(DATA_ENV) and (Path(env[DATA_ENV]) / "trials.jsonl").is_file():
-        return Path(env[DATA_ENV]) / "trials.jsonl"
+    data = switches.get(DATA_ENV, env)  # an empty one is refused at the engine's start; here "not set", as before
+    if data and (data / "trials.jsonl").is_file():
+        return data / "trials.jsonl"
     return default
 
 

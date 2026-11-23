@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import re
 import threading
 from collections.abc import Callable, Mapping
@@ -102,8 +101,9 @@ class _GuardedStore:
 
 
 def enabled(env: Mapping[str, str] | None = None) -> bool:
-    env = os.environ if env is None else env
-    return (env.get(FLAG_ENV) or "on").strip().lower() not in ("off", "0", "false", "no")
+    from kaibot.common import switches  # M10 1.23 (#448): one parser per switch
+
+    return switches.get(FLAG_ENV, env)
 
 
 @dataclass

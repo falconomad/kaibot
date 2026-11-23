@@ -28,7 +28,9 @@ def _gateway(env_file: str | None):
     from kaibot.engine.store import Store
 
     load_env_file(env_file)
-    if (os.environ.get(FLAG_ENV) or "").strip().lower() not in ("1", "on", "true", "yes"):
+    from kaibot.common import switches  # M10 1.23 (#448)
+
+    if not switches.get(FLAG_ENV):
         raise SystemExit(f"the test-writing agent is off: set {FLAG_ENV}=on (it spends API credit)")
     key = os.environ.get("ANTHROPIC_API_KEY")
     sb = os.environ.get("SUPABASE_SERVICE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")

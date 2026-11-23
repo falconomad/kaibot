@@ -30,7 +30,6 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import os
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -55,8 +54,9 @@ _REVIEW_ON = {"KAIBOT_ROOM": "on", preopen.FLAG_ENV: "on"}
 
 def enabled(env: Mapping[str, str] | None = None) -> bool:
     """On only with KAIBOT_PREOPEN=shadow. Default: off."""
-    env = os.environ if env is None else env
-    return (env.get(FLAG_ENV) or "").strip().lower() == SHADOW
+    from kaibot.common import switches  # M10 1.23 (#448): one parser per switch
+
+    return switches.get(FLAG_ENV, env) == SHADOW
 
 
 def _frozen(obj):

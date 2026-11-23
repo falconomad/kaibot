@@ -36,6 +36,8 @@ from typing import Any, Protocol
 
 import yaml
 
+from kaibot.common import switches  # M10 1.23 (#448)
+
 log = logging.getLogger("kaibot.llm")
 # #309: the most config/llm.yaml may set (tighten-only). Sized to $200 of credit: $150 lifetime leaves $50 spare.
 CEILINGS = {"daily_soft_usd": 1.0, "monthly_alert_usd": 20.0, "monthly_hard_usd": 25.0, "lifetime_hard_usd": 150.0}
@@ -284,7 +286,7 @@ class Gateway:
 def from_env(store, env: dict) -> Gateway:
     """Gateway with a real client only if ANTHROPIC_API_KEY is set and KAIBOT_ROOM=on; otherwise disabled."""
     key = env.get("ANTHROPIC_API_KEY") or ""
-    on = (env.get("KAIBOT_ROOM") or "").lower() in ("1", "on", "true", "yes")
+    on = switches.get("KAIBOT_ROOM", env)
     client = AnthropicClient(key) if key and on else None
     return Gateway(store, client)
 
@@ -294,7 +296,7 @@ def shadow_from_env(store, env: dict) -> Gateway:
     KAIBOT_PREOPEN=shadow; it never reads KAIBOT_ROOM (the room stays off). Same Postgres ledger and caps as every
     other call, so the shadow review is refused over the daily, monthly and lifetime caps like anything else."""
     key = env.get("ANTHROPIC_API_KEY") or ""
-    on = (env.get("KAIBOT_PREOPEN") or "").strip().lower() == "shadow"
+    on = switches.get("KAIBOT_PREOPEN", env) == "shadow"
     client = AnthropicClient(key) if key and on else None
     return Gateway(store, client)
 
@@ -303,6 +305,6 @@ def note_from_env(store, env: dict) -> Gateway:
     """#311: the gateway of the daily report in plain words. A real client only if ANTHROPIC_API_KEY is set and
     KAIBOT_DAILY_NOTE=on; it never reads KAIBOT_ROOM. Same ledger and caps as every other call."""
     key = env.get("ANTHROPIC_API_KEY") or ""
-    on = (env.get("KAIBOT_DAILY_NOTE") or "").strip().lower() in ("1", "on", "true", "yes")
+    on = switches.get("KAIBOT_DAILY_NOTE", env)
     client = AnthropicClient(key) if key and on else None
     return Gateway(store, client)

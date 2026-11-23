@@ -3,6 +3,7 @@ unchanged on a laptop, Google Cloud, Oracle or anywhere else. Paper trading only
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,8 +35,15 @@ class Settings:
     engine_name: str = "engine"
 
     @classmethod
-    def from_env(cls) -> Settings:
-        load_env_file(os.environ.get("KAIBOT_ENV_FILE"))
+    def from_env(cls, *, strict_switches: bool = True) -> Settings:
+        """`strict_switches=False` (the watchdog only): a bad behaviour switch is logged, not fatal. The watchdog reads
+        none of them, and a typo in one must not also stop the process that protects the open positions while the
+        engine refuses to start (QA-Ops on #588). The two it does read, KAIBOT_DATA_DIR and KAIBOT_ENGINE_NAME, stay
+        strict."""
+        from kaibot.common import switches  # M10 1.23 (#448)
+
+        env_file = switches.get("KAIBOT_ENV_FILE")
+        load_env_file(str(env_file) if env_file else None)
         os.environ.setdefault("SUPABASE_URL", DEFAULT_SUPABASE_URL)
         for alias, name in (
             ("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_KEY"),
@@ -50,6 +58,17 @@ class Settings:
         ]
         if missing:
             raise SystemExit(f"missing settings: {', '.join(missing)} (put them in the .env file)")
+        try:  # M10 1.23 (#448): every KAIBOT_* switch parsed and validated here, at start (fail closed)
+            sw = switches.load()
+            data_dir, engine_name = sw.data_dir, sw.engine_name
+        except switches.SwitchError as e:
+            if strict_switches:
+                raise SystemExit(str(e)) from None
+            try:
+                data_dir, engine_name = switches.value("KAIBOT_DATA_DIR"), switches.value("KAIBOT_ENGINE_NAME")
+            except switches.SwitchError as e2:
+                raise SystemExit(str(e2)) from None
+            logging.getLogger("kaibot.engine").error("%s (the watchdog starts anyway: it reads none of them)", e)
         base = os.environ.get("ALPACA_BASE_URL", PAPER_TRADING_URL).rstrip("/")
         if base != PAPER_TRADING_URL:
             raise SystemExit("Kaibot is paper-only: ALPACA_BASE_URL must be the paper endpoint")
@@ -59,6 +78,6 @@ class Settings:
             supabase_url=os.environ["SUPABASE_URL"].rstrip("/"),
             supabase_service_key=os.environ["SUPABASE_SERVICE_KEY"],
             fred_key=os.environ["FRED_API_KEY"],
-            data_dir=Path(os.environ.get("KAIBOT_DATA_DIR", ROOT / "data" / "live")),
-            engine_name=os.environ.get("KAIBOT_ENGINE_NAME", "engine"),
+            data_dir=data_dir or ROOT / "data" / "live",
+            engine_name=engine_name,
         )

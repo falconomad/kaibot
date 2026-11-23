@@ -37,7 +37,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -164,7 +163,9 @@ def check(end, *, script: str, rule: str | None, data: Path | str, opening: str 
     if not h.holds(last):
         return None
     asked = "to the newest bar" if last is None else f"to {last}"
-    opening = opening or os.environ.get(ENV_OPENING) or None
+    from kaibot.common import switches  # M10 1.23 (#448)
+
+    opening = opening or switches.get(ENV_OPENING) or None
     if not opening:
         raise HoldoutError(
             f"{name} would read {asked}, inside the hold-out (every session from {h.start} on is held back: "
