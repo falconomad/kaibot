@@ -32,8 +32,8 @@ def out(data: Path, tmp_path_factory) -> tuple[Path, Path, dict]:  # noqa: F811
 def test_a_page_exists_for_every_pre_registration(out):
     _, folder, res = out
     # #556: trend_momentum_band; #472: dip_reversal, spy_late_momentum (retroactive); #474: trend_momentum_gbm;
-    # #471: preopen_negative_news_veto
-    assert len(PREREGS) == 22
+    # #471: preopen_negative_news_veto; #458: index_core
+    assert len(PREREGS) == 23
     for rule in PREREGS:
         assert (folder / f"{rule}.md").is_file() and (folder / f"{rule}.json").is_file(), rule
     index = (folder / "README.md").read_text()

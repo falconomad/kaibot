@@ -208,6 +208,7 @@ def test_the_live_path_reproduces_the_research_runner_order_by_order_and_fill_by
         assert lim.max_gross_pct == 60 and lim.max_names == 30 and lim.max_sector_pct == 40  # #205, Balanced
         # #206: confirmed as pre-registered, so the live book is the tested sizing at the rule's 60% cap
         assert dataclasses.replace(lim, run_drawdown_end_pct=27.0) == momentum_limits(s, POL, 60.0)
+        assert lim.max_index_pct == 0.0  # #458: the live book holds no index fund
     b = ld.live_builder(s, lim)
     ref = reference(data, s, ld.live_builder(s, lim))
     h = Harness(data, s, b, tmp_path)

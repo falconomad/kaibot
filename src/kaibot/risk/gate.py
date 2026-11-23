@@ -69,6 +69,11 @@ class BookLimits:
     # #206: the multi-day book's own run end, % below the book's peak equity (the run's pot plus the book's P&L).
     # Separate from RiskPolicy.run_drawdown_end_pct (the intraday run end, unchanged); see `book_run_ended`.
     run_drawdown_end_pct: float = 13.0
+    # #458 (M11 2.7; design.md 2.9; stakeholder, 21 Nov 2026: index funds get their own cap): the share of equity
+    # the index fund (the universe's market symbol, SPY) may take in a book built with an index core
+    # (`PortfolioBuilder(index_symbol=...)`). It replaces the per-name cap for that one holding only. 0 = no index
+    # fund, which is every live profile: config/profiles.yaml sets no value, and no live builder names an index.
+    max_index_pct: float = 0.0
 
 
 # Ceilings for book limits; no profile or owner setting may loosen them (min_cash_pct is a floor).
@@ -76,13 +81,21 @@ BOOK_HARD_CEILINGS = BookLimits(atr_risk_pct=0.25, max_name_pct=HARD_CEILINGS.ma
                                 max_overnight_pct=100.0, max_sector_pct=40.0, max_names=30, min_cash_pct=1.0,
                                 max_gap_loss_pct=15.0,
                                 # stakeholder, 13 Nov 2026: 1.5 x the ten-year test's max drawdown at the 100% cap
-                                run_drawdown_end_pct=27.0)
+                                run_drawdown_end_pct=27.0,
+                                # #458: 100% less the builder's 3% cash reserve (design.md 2.9); the level values
+                                # (27 / 57 / 97% proposed) are the stakeholder's to confirm
+                                max_index_pct=97.0)
 BOOK_FLOORS = ("min_cash_pct",)
 
 # The gap scenario: every overnight position opens this far below its last price; a resting stop does not help
 # (a stop gapped through fills at the open, decision 15 section 5).
 GAP_SCENARIO_PCT = 10.0
 GAP_SCENARIO_ATR = 3.0
+
+
+def index_cap_dollars(equity: float, lim: BookLimits) -> float:
+    """#458: the most the index fund may hold, in dollars (`max_index_pct` of equity; 0 without an index core)."""
+    return max(float(equity), 0.0) * lim.max_index_pct / 100
 
 
 def drawdown_pct(peak: float, equity: float) -> float:

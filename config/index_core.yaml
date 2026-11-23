@@ -1,0 +1,27 @@
+# The index core (M11 ticket 2.7, issue #458): idle cash held in an index fund within the fund's OWN cap
+# (`BookLimits.max_index_pct`, separate from the per-name cap; stakeholder, 21 Nov 2026). The construction tested
+# is frozen in docs/prereg/index_core.md; the risk-rule design is docs/research/event_driven/design.md section 2.9.
+# Read by kaibot.risk.index_core.
+#
+# RESEARCH ONLY. `enabled: false`: no engine reads this file today, no live profile names an index fund
+# (config/profiles.yaml has no max_index_pct, so every live book has 0), and no live builder sets an index symbol.
+# Switching the core on for paper needs, in this order (decision D3 of docs/research/engine_audit/decisions.md):
+# the pre-registered engine + SimBroker run, its gate v3 book test, two keys (Backend-quant and QA-Ops), the
+# stakeholder's confirmation of the level values below, and a separate engine change behind its own flag.
+#
+# The level values are a PROPOSAL (design.md 2.9: the level's exposure cap less the builder's 3% cash reserve).
+# Level limits of multi-day books are the stakeholder's (decision 15 section 6); nothing here sets one for live.
+version: 1
+enabled: false
+index_symbols: [SPY]             # the universe's market symbol (config/universe_history.yaml `market`)
+cash_reserve_pct: 3              # the builder's reserve (Amendment 3 of the momentum pre-registrations)
+levels:
+  conservative:                  # Careful
+    exposure_pct: 30
+    max_index_pct: 27
+  balanced:                      # Balanced
+    exposure_pct: 60
+    max_index_pct: 57
+  aggressive:                    # Hunter
+    exposure_pct: 100
+    max_index_pct: 97
