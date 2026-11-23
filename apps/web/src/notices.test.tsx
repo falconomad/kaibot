@@ -156,7 +156,8 @@ describe("calm on a phone, and the colour check", () => {
     expect(rule(".nt-list li span:last-child")).toContain("overflow-wrap: anywhere");
   });
   it("Home loads the notices on demand: not in the first load", () => {
-    expect(live).toMatch(/lazy\(\(\) => import\("\.\.\/components\/Notices"\)\)/);
+    // through components/Lines.tsx, one lazy chunk with the headline line (migration 0043)
+    expect(live).toMatch(/lazy\(\(\) => import\("\.\.\/components\/Lines"\)\)/);
     expect(live).not.toMatch(/from "\.\.\/components\/Notices"|from "\.\.\/lib\/notices"/);
   });
 });

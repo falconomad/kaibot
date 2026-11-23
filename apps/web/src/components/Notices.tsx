@@ -1,7 +1,8 @@
 // #378 (M8 S104): "New on the market" and "Big day" on Home (docs/design/m8_market_notices.md). One calm row each (a
 // line that wraps to a second on a narrow phone, never cut),
 // details in a sheet. They inform only: no link, no order, no setting, no price, never a warning colour or a live
-// region. Lazy (pages/Live.tsx): this file, lib/notices.ts and notices.css are a chunk of their own, not first load.
+// region. Lazy (pages/Live.tsx, through components/Lines.tsx): this file, lib/notices.ts and notices.css are in that
+// chunk, not first load.
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useState } from "react";
 import { MIN, poll } from "../lib/poll";
