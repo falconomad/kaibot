@@ -1,0 +1,380 @@
+{
+ "n": 860,
+ "n_random": 560,
+ "years": [
+  "2012",
+  "2013",
+  "2014",
+  "2015",
+  "2016",
+  "2017",
+  "2018",
+  "2019",
+  "2020",
+  "2021",
+  "2022",
+  "2023",
+  "2024",
+  "2025",
+  "2026"
+ ],
+ "tags": {
+  "results": {
+   "positives": 66,
+   "fired": {
+    "tagged": 25,
+    "tp": 19,
+    "fp": 6,
+    "fn": 0,
+    "positives": 19,
+    "precision": 0.76,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 25,
+    "tp": 19,
+    "fp": 6,
+    "fn": 10,
+    "positives": 29,
+    "precision": 0.76,
+    "recall": 0.6551724137931034
+   },
+   "precision": 0.76,
+   "recall": 0.6551724137931034,
+   "established": true,
+   "ships": false
+  },
+  "guidance_up": {
+   "positives": 43,
+   "fired": {
+    "tagged": 50,
+    "tp": 41,
+    "fp": 9,
+    "fn": 0,
+    "positives": 41,
+    "precision": 0.82,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 3,
+    "tp": 2,
+    "fp": 1,
+    "fn": 0,
+    "positives": 2,
+    "precision": 0.6666666666666666,
+    "recall": 1.0
+   },
+   "precision": 0.82,
+   "recall": 1.0,
+   "established": true,
+   "ships": false,
+   "by_earnings_day": {
+    "earnings_day": {
+     "fired": {
+      "tagged": 25,
+      "tp": 25,
+      "fp": 0,
+      "fn": 0,
+      "positives": 25,
+      "precision": 1.0,
+      "recall": 1.0
+     },
+     "random": {
+      "tagged": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "positives": 2,
+      "precision": 1.0,
+      "recall": 1.0
+     }
+    },
+    "other_day": {
+     "fired": {
+      "tagged": 25,
+      "tp": 16,
+      "fp": 9,
+      "fn": 0,
+      "positives": 16,
+      "precision": 0.64,
+      "recall": 1.0
+     },
+     "random": {
+      "tagged": 1,
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "positives": 0,
+      "precision": 0.0,
+      "recall": null
+     }
+    }
+   }
+  },
+  "guidance_down": {
+   "positives": 39,
+   "fired": {
+    "tagged": 50,
+    "tp": 37,
+    "fp": 13,
+    "fn": 0,
+    "positives": 37,
+    "precision": 0.74,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 0,
+    "tp": 0,
+    "fp": 0,
+    "fn": 1,
+    "positives": 1,
+    "precision": null,
+    "recall": 0.0
+   },
+   "precision": 0.74,
+   "recall": 0.0,
+   "established": true,
+   "ships": false,
+   "by_earnings_day": {
+    "earnings_day": {
+     "fired": {
+      "tagged": 25,
+      "tp": 23,
+      "fp": 2,
+      "fn": 0,
+      "positives": 23,
+      "precision": 0.92,
+      "recall": 1.0
+     },
+     "random": {
+      "tagged": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "positives": 1,
+      "precision": null,
+      "recall": 0.0
+     }
+    },
+    "other_day": {
+     "fired": {
+      "tagged": 25,
+      "tp": 14,
+      "fp": 11,
+      "fn": 0,
+      "positives": 14,
+      "precision": 0.56,
+      "recall": 1.0
+     },
+     "random": {
+      "tagged": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "positives": 0,
+      "precision": null,
+      "recall": null
+     }
+    }
+   }
+  },
+  "analyst_up": {
+   "positives": 61,
+   "fired": null,
+   "random": {
+    "tagged": 54,
+    "tp": 54,
+    "fp": 0,
+    "fn": 4,
+    "positives": 58,
+    "precision": 1.0,
+    "recall": 0.9310344827586207
+   },
+   "precision": 1.0,
+   "recall": 0.9310344827586207,
+   "established": true,
+   "ships": true
+  },
+  "analyst_down": {
+   "positives": 70,
+   "fired": {
+    "tagged": 25,
+    "tp": 24,
+    "fp": 1,
+    "fn": 0,
+    "positives": 24,
+    "precision": 0.96,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 34,
+    "tp": 34,
+    "fp": 0,
+    "fn": 9,
+    "positives": 43,
+    "precision": 1.0,
+    "recall": 0.7906976744186046
+   },
+   "precision": 0.96,
+   "recall": 0.7906976744186046,
+   "established": true,
+   "ships": true
+  },
+  "deal": {
+   "positives": 46,
+   "fired": {
+    "tagged": 25,
+    "tp": 22,
+    "fp": 3,
+    "fn": 0,
+    "positives": 22,
+    "precision": 0.88,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 10,
+    "tp": 6,
+    "fp": 4,
+    "fn": 12,
+    "positives": 18,
+    "precision": 0.6,
+    "recall": 0.3333333333333333
+   },
+   "precision": 0.88,
+   "recall": 0.3333333333333333,
+   "established": true,
+   "ships": false
+  },
+  "offering": {
+   "positives": 37,
+   "fired": {
+    "tagged": 25,
+    "tp": 20,
+    "fp": 5,
+    "fn": 0,
+    "positives": 20,
+    "precision": 0.8,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 1,
+    "tp": 1,
+    "fp": 0,
+    "fn": 5,
+    "positives": 6,
+    "precision": 1.0,
+    "recall": 0.16666666666666666
+   },
+   "precision": 0.8,
+   "recall": 0.16666666666666666,
+   "established": true,
+   "ships": false
+  },
+  "buyback": {
+   "positives": 21,
+   "fired": {
+    "tagged": 25,
+    "tp": 19,
+    "fp": 6,
+    "fn": 0,
+    "positives": 19,
+    "precision": 0.76,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 1,
+    "tp": 1,
+    "fp": 0,
+    "fn": 0,
+    "positives": 1,
+    "precision": 1.0,
+    "recall": 1.0
+   },
+   "precision": 0.76,
+   "recall": 1.0,
+   "established": true,
+   "ships": false
+  },
+  "management_change": {
+   "positives": 30,
+   "fired": {
+    "tagged": 25,
+    "tp": 24,
+    "fp": 1,
+    "fn": 0,
+    "positives": 24,
+    "precision": 0.96,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 1,
+    "tp": 1,
+    "fp": 0,
+    "fn": 4,
+    "positives": 5,
+    "precision": 1.0,
+    "recall": 0.2
+   },
+   "precision": 0.96,
+   "recall": 0.2,
+   "established": true,
+   "ships": true
+  },
+  "legal_regulatory": {
+   "positives": 48,
+   "fired": {
+    "tagged": 25,
+    "tp": 22,
+    "fp": 3,
+    "fn": 0,
+    "positives": 22,
+    "precision": 0.88,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 10,
+    "tp": 9,
+    "fp": 1,
+    "fn": 15,
+    "positives": 24,
+    "precision": 0.9,
+    "recall": 0.375
+   },
+   "precision": 0.88,
+   "recall": 0.375,
+   "established": true,
+   "ships": false
+  },
+  "listing": {
+   "positives": 30,
+   "fired": {
+    "tagged": 25,
+    "tp": 24,
+    "fp": 1,
+    "fn": 0,
+    "positives": 24,
+    "precision": 0.96,
+    "recall": 1.0
+   },
+   "random": {
+    "tagged": 0,
+    "tp": 0,
+    "fp": 0,
+    "fn": 2,
+    "positives": 2,
+    "precision": null,
+    "recall": 0.0
+   },
+   "precision": 0.96,
+   "recall": 0.0,
+   "established": true,
+   "ships": true
+  }
+ },
+ "shipped": [
+  "analyst_down",
+  "analyst_up",
+  "listing",
+  "management_change"
+ ]
+}
