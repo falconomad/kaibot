@@ -15,6 +15,8 @@ from pathlib import Path
 import pytest
 from test_kb_health_news_events_sql import OTHER, PG, _sql, _types, owner, psql  # noqa: F401 (owner: autouse)
 
+from kaibot.engine import event_names
+
 ROOT = Path(__file__).resolve().parents[1]
 M31 = ROOT / "migrations" / "0031_kb_health_news_feed_events.sql"
 M33 = ROOT / "migrations" / "0033_kb_health_engine_health_events.sql"
@@ -22,29 +24,14 @@ NEW = ("multi_day_carry", "corporate_actions_error", "ledger_mismatch", "reconci
        "venue_fee_unread", "replica_conflict", "stop_state_fallback", "engine_lease_takeover", "journal_adopted",
        "order_adopted", "session_finalized_late", "watchdog_protect", "multi_day_exit_recovered",
        "multi_day_shorting_on")
-# Sent by the engine and left out on purpose: routine flow, not health. They would push the 80 rows' health events
-# out of the window (a 30-name book writes dozens of fills and orders a day).
-ROUTINE = {"cash_merger_booked", "dividend_booked", "split_booked", "config_applied", "custom_tickers",
-           "multi_day_canceled", "multi_day_decision", "multi_day_fill", "multi_day_orders", "multi_day_plan",
-           "multi_day_review_applied", "multi_day_sold", "multi_day_stops_cancelled", "multi_day_view_dropped",
-           "positions_rewritten", "session_restored"}
-# Health events whose kb_health migration is still to come (several open PRs cannot each bring one: one free number).
-# Empty since 0039 listed M9's replica_poison, replica_backlog, clock_skew and calendar_expiring. A name here is
-# written and replicated, but the Health page does not show it: keep it empty.
-AWAITING_KB_HEALTH: set[str] = set()
-# S103 (#377): the market-event alarm's logged notice and its failure row (KAIBOT_MARKET_ALARM=on); it gates
-# nothing and a failure stops nothing, so neither is a health event
-ROUTINE |= {"market_alarm", "market_alarm_error"}
-# M10 1.24 (#449): a journal snapshot that was not written (memory and a full fold differ) or not used at a start.
-# Health events waiting for a kb_health migration (0039 is taken; the next free number lists them)
-AWAITING_KB_HEALTH |= {"journal_snapshot_mismatch", "journal_snapshot_unused"}
-# M10 1.25 (#450): the engine started reducing only (Supabase down at start), and became fully active again.
-# Health events waiting for a kb_health migration (0039 is taken; the next free number lists them)
-AWAITING_KB_HEALTH |= {"engine_degraded_start", "engine_lease_confirmed"}
+# Sent by the engine and left out on purpose (routine flow, not health): since M10 1.22 (#447) the one list is
+# engine/event_names.ROUTINE, with each name's reason.
+ROUTINE = {e.name for e in event_names.ROUTINE}
+# Health events whose kb_health migration is still to come: event_names.PENDING (tests/test_event_names.py fails
+# while the latest kb_health migration differs from event_names.HEALTH).
+AWAITING_KB_HEALTH: set[str] = {e.name for e in event_names.PENDING}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
-# #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health
-ROUTINE |= {"filing_flag_shadow"}
 # M9's command_waiting (#427), command_rejected (#440), multi_day_book_unchecked and multi_day_book_unconfirmed
 # (#426), and multi_day_unbooked_aged (#507) are health events; they stood in ROUTINE only until a migration
 # listed them (#512). 0039 lists them.

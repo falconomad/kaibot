@@ -12,6 +12,8 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
+from kaibot.engine import event_names
+
 
 class StoreError(RuntimeError):
     pass
@@ -127,6 +129,7 @@ class Store:
 
     def event(self, kind: str, detail: dict, run_id: int | None = None) -> None:
         """Append to the hash-chained event log (append-only in Postgres)."""
+        event_names.note(kind)  # M10 1.22 (#447): one registry of names; never stops a write here
         if not self._chain_loaded:
             last = self.select("event", {"select": "hash", "order": "id.desc", "limit": "1"})
             self._prev_hash = last[0]["hash"] if last else None

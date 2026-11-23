@@ -72,8 +72,8 @@ def test_the_dashboard_reads_no_event_type_kb_health_leaves_out():
             continue
         t = f.read_text()
         read |= set(re.findall(r'\btype\s*===\s*"([a-z_]+)"', t))
-        m = re.search(r"const EV: Record<string, string> = \{(.*?)\n\};", t, re.S)
-        if m:
+        m = re.search(r"(?:const EV|export const EVENT_LABELS): Record<string, string> = \{(.*?)\n\};", t, re.S)
+        if m:  # #447: the labels live in the generated lib/eventNames.ts
             read |= set(re.findall(r"\b([a-z_]+):\s*\"", m.group(1)))
     assert read and sorted(read - listed) == []
 
@@ -84,8 +84,9 @@ def test_every_event_type_kb_health_returns_has_a_plain_word_label():
     latest = max(p for p in (ROOT / "migrations").glob("*.sql")
                  if "create or replace function public.kb_health()" in p.read_text())
     web = ROOT / "apps" / "web" / "src"
-    health = (web / "pages" / "Health.tsx").read_text()
-    ev = re.search(r"const EV: Record<string, string> = \{(.*?)\n\};", health, re.S)
+    # M10 1.22 (#447): Health.tsx's EV is the generated lib/eventNames.ts (from engine/event_names.py)
+    health = (web / "lib" / "eventNames.ts").read_text()
+    ev = re.search(r"export const EVENT_LABELS: Record<string, string> = \{(.*?)\n\};", health, re.S)
     labelled = set(re.findall(r"\b([a-z_]+):\s*\"", ev.group(1)))
     labelled |= set(re.findall(r'\be\.type === "([a-z_]+)"', (web / "lib" / "corpactions.ts").read_text()))
     labelled.add("halt")  # eventText: "Halt: <the halt's text>"

@@ -64,6 +64,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from kaibot.engine import event_names
+
 log = logging.getLogger("kaibot.journal")
 
 # Tables only the engine writes: answered from the journal. Everything else is read from (and written to) Supabase.
@@ -808,6 +810,7 @@ class JournalStore:
 
     def event(self, kind: str, detail: dict, run_id: int | None = None) -> None:
         """The hash-chained event log, chained in the journal (the chain is this engine's own)."""
+        event_names.note(kind)  # M10 1.22 (#447): one registry of names; never stops a write here
         payload = canon(detail)
         ts = datetime.now(UTC)
         h = hashlib.sha256(

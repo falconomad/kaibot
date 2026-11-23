@@ -39,6 +39,9 @@ def pytest_configure(config: pytest.Config) -> None:
     (KAIBOT_TEST_PG) get one: a private local cluster with every migration (tests/pg_scratch.py), one database per
     xdist worker. Never Supabase. Without Postgres binaries, or with KAIBOT_TEST_PG set already, nothing changes."""
     global _SCRATCH
+    from kaibot.engine import event_names
+
+    event_names.STRICT = True  # M10 1.22 (#447): an event name the registry lacks fails the test that writes it
     if os.environ.get("KAIBOT_TEST_PG_AUTO") != "1":
         return
     worker = getattr(config, "workerinput", None)

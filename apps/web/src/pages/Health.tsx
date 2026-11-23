@@ -22,6 +22,7 @@ import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevent
 import { clearedAt, clearedFrom, clockSkewText, commandEventText, haltClearedText } from "../lib/healthwords";
 import { reconLine, reconcileFrom } from "../lib/reconcile";
 import { ReconcileAccept } from "../components/ReconcileAccept";
+import { EVENT_LABELS } from "../lib/eventNames";
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },
@@ -50,53 +51,8 @@ function Proc({ h }: { h: Heartbeat }) {
   );
 }
 
-const EV: Record<string, string> = {
-  engine_start: "Engine started", engine_stop: "Engine stopped", engine_error: "Engine error (retrying)",
-  session_start: "Session started", session_end: "Session closed", shadow_session_end: "Shadow strategies scored",
-  halt: "Halt", halt_cleared: "Halt cleared", account_not_clean: "Paper account not clean",
-  calendar_stale: "Event calendar out of date", run_paused: "Run paused", moc_refused: "Market-on-close refused",
-  watchdog_flatten: "Watchdog flattened", watchdog_recovered: "Engine heartbeat back", shadow_error: "Shadow strategy error",
-  // #207: the live daily path (multi-day rules)
-  multi_day_book_ended: "Experiment ended: the multi-day book reached its stop line", multi_day_retired: "Experiment ended: rule retired",
-  multi_day_reenabled: "Multi-day rule switched back on by you", multi_day_reenable_refused: "Switching a rule back on was refused",
-  multi_day_no_decision: "Multi-day rule: no decision today", multi_day_waiting: "Multi-day rule waiting for the daily prices",
-  multi_day_error: "Multi-day step failed (no orders sent)", multi_day_overnight_off: "Overnight holding is off: buys skipped",
-  multi_day_unfilled: "Order not filled: expired at the close", daily_note: "Daily note written",
-  multi_day_review_shadow: "Pre-open reviewer (observer, no effect on trades)",
-  // #354: the engine's news poller (heartbeat `news`)
-  news_feed_unhealthy: "News feed down or empty (stock summaries and the reviewer see no new news)",
-  news_feed_ok: "News feed back",
-  // 0033: the engine's health events (#392 item 4)
-  multi_day_carry: "Unfilled buys carried to the next session, or skipped",
-  corporate_actions_error: "Couldn't read today's dividends and splits",
-  ledger_mismatch: "Books differ from the broker",
-  reconcile_blocked: "Books differ from the broker: new buys stopped",
-  dividend_difference: "Dividend paid differs from the one expected",
-  venue_fee_unread: "Couldn't read a trading fee",
-  replica_conflict: "The dashboard's copy differs from the engine's record (the engine's is kept)",
-  stop_state_fallback: "Stops shown as missing until a database update is applied",
-  engine_lease_takeover: "Engine took over from another computer",
-  journal_adopted: "Engine started from a damaged local record (you allowed it)",
-  order_adopted: "Order left by a crash taken back",
-  session_finalized_late: "Session closed late, after a restart",
-  watchdog_protect: "Watchdog put protective stops back",
-  multi_day_exit_recovered: "Sale sent before a crash found and booked",
-  multi_day_shorting_on: "Shorting is on at the broker: multi-day buys held back",
-  // 0036: sent under a dynamic name (#410, #131)
-  multi_day_column_missing: "Minute prices of multi-day holdings wait for a database update",
-  multi_day_review: "Pre-open reviewer (can veto or halve buys)",
-  // 0039: M9 engine safety (#437, #435, #442)
-  replica_poison: "A record the dashboard's database refuses was skipped (the engine keeps it)",
-  replica_backlog: "The dashboard's copy is falling behind the engine's record",
-  clock_skew: "The engine's clock differs from the broker's: new orders wait until they agree",
-  calendar_expiring: "A yearly calendar runs out within 30 days and needs extending",
-  // 0039: M9 commands and the book's run end (#427, #440, #426)
-  command_waiting: "Flatten and stop, or a new run, is waiting until every position is sold",
-  command_rejected: "A command from the dashboard was refused by the engine",
-  multi_day_book_unchecked: "Today's prices for some holdings can't be read (the last close is used)",
-  multi_day_book_unconfirmed: "Some holdings have had no confirmed price for a while (the last close is used)",
-  multi_day_unbooked_aged: "A sale stopped waiting for an earlier day's trade that never reached the books",
-};
+// M10 1.22 (#447): generated from src/kaibot/engine/event_names.py (one registry of event names)
+const EV: Record<string, string> = EVENT_LABELS;
 
 
 const STATE_TAG = { ok: ["allow", "ok"], rules_only: ["downgrade", "rules-only"], no_entries: ["veto", "no entries"] } as const;

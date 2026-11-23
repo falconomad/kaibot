@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.broker.sim import REGULAR_HOURS, SimBroker
+from kaibot.engine import event_names
 from kaibot.engine.clock import SimClock
 from kaibot.replay.data import ET, SymbolDays
 from kaibot.replay.history import HistoricalData
@@ -294,6 +295,7 @@ class FakeStore:
         self.beats[process] = detail
 
     def event(self, kind, detail, run_id=None):
+        event_names.note(kind)  # M10 1.22 (#447): strict in the tests (conftest): an unregistered name fails
         self.insert("event", {"type": kind, "payload": detail, "run_id": run_id}, returning=False)
 
     def pending_commands(self):
