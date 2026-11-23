@@ -221,8 +221,8 @@ def main(argv: list[str] | None = None) -> dict:
     res = rescore(Path(a.data), Path(a.root))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "gate_v3_rescore.json").write_text(json.dumps(res, indent=1, default=str))
-    text = render(res)
+    (out / "gate_v3_rescore.json").write_text(results.portable(json.dumps(res, indent=1, default=str), a.root))
+    text = results.portable(render(res), a.root)  # no path of this machine in a file of the repository (#594)
     (out / "gate_v3_rescore.md").write_text(text)
     print(text)
     print(f"wrote {out / 'gate_v3_rescore.md'} and .json: {len(res['rows'])} runs scored, "

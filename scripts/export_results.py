@@ -405,13 +405,14 @@ def main(argv: list[str] | None = None) -> dict:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for rule, page in res["pages"].items():
-        (out / f"{rule}.md").write_text(render_page(page, res["research_window"]))
-        (out / f"{rule}.json").write_text(json.dumps(page, indent=1, default=str))
+        (out / f"{rule}.md").write_text(results.portable(render_page(page, res["research_window"]), a.root))
+        (out / f"{rule}.json").write_text(results.portable(json.dumps(page, indent=1, default=str), a.root))
     if not a.rule:
-        (out / "README.md").write_text(render_index(res))
+        (out / "README.md").write_text(results.portable(render_index(res), a.root))
         (out / "as_reported").mkdir(exist_ok=True)
         for name, src in as_reported(Path(a.data) / "reports").items():
-            (out / "as_reported" / name).write_text(src.read_text())  # unchanged: what the run printed
+            # what the run printed, unchanged but for this machine's paths (#594)
+            (out / "as_reported" / name).write_text(results.portable(src.read_text(), a.root))
     with_runs = sum(bool(p["runs"]) for p in res["pages"].values())
     print(f"wrote {len(res['pages'])} pages to {out}: {with_runs} with a run on record, "
           f"{len(res['pages']) - with_runs} without; {res['reports_read']} reports read")
