@@ -158,3 +158,19 @@ break-even, and the stress fill is v2's opening venue (no second doubling, as #5
 trial row record `cost_model: v2`, which `final_requires` needs, so the result is no longer `provisional` on this
 count. The decision rule, the sessions, the volatility cap, the neighbours, the pass marks and the trial count are
 unchanged. The v1 print model is not run.
+
+## Amendment 3 (23 Nov 2026, quant research, before any run on real data)
+
+The stakeholder set the level values (issue #600, 23 Nov 2026). The index fund's cap `max_index_pct` is **27% at
+every level** (Careful, Balanced and Hunter), not the 27 / 57 / 97% proposal of row 2. As the introduction says, this
+is a new configuration, written down before it runs: `config/index_core.yaml` carries 27 for each level. Row 2,
+row 4 (Hunter: a 27% index cap under the 100% exposure cap) and the neighbours (each changes one setting of Hunter
+at 27%) are read with that value. The hard ceiling `BOOK_HARD_CEILINGS.max_index_pct` is lowered from 97% to 27%
+too (Product, 23 Nov 2026), so a config edit can never raise the cap above 27%. Every other row is unchanged, and so
+are the live profiles (no index fund) and `enabled: false`.
+
+**What this does to the expectation.** At most 27% of the book is in SPY at Hunter. The rest is cash, which earns 0%
+in the judged run. The hypothesis's range (SPY -3 to -1 points a year) was written for 97%, and it no longer holds:
+the book is expected to trail SPY by about two-thirds of SPY's return, with roughly a quarter of its drawdown. It
+is not expected to meet B2's return branch. A fail is reported as found. Any later change of the value is the
+stakeholder's, as a new configuration with its own amendment.

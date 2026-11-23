@@ -2,8 +2,8 @@
 sizing). docs/prereg/index_core.md is the frozen construction; docs/research/event_driven/design.md section 2.9 the
 risk-rule design.
 
-- `BookLimits.max_index_pct`: the index fund's own cap, separate from the per-name cap; hard ceiling 97%; 0 by
-  default, so every live profile holds no index fund;
+- `BookLimits.max_index_pct`: the index fund's own cap, separate from the per-name cap; hard ceiling 27% (the
+  stakeholder's cap of #600, so no config edit can raise it); 0 by default, so every live profile holds no index fund;
 - the portfolio builder's index mode (`PortfolioBuilder(index_symbol="SPY")`, ranked fill only): the index fund
   takes the rest of the book, never more than `max_index_pct`, the exposure cap, the cash less the reserve or the
   gap-scenario room; exempt from the per-name cap, the sector cap and volatility sizing; one name;
@@ -31,9 +31,11 @@ st = hyp.strategies
 
 D = date(2026, 11, 25)
 EQ = 100_000.0
-# Hunter's book for the core: the hard ceilings, 20% per name, 100% exposure, 97% index cap
+# Hunter's book for the core: the hard ceilings, 20% per name, 100% exposure, 27% index cap (#600)
 LIM = replace(BOOK_HARD_CEILINGS, max_name_pct=20.0, max_gross_pct=100.0, max_overnight_pct=100.0,
-              max_index_pct=97.0)
+              max_index_pct=27.0)
+# Careful's exposure cap under the same index cap: the exposure cap binds before the cash does
+TIGHT = replace(LIM, max_gross_pct=30.0, max_overnight_pct=30.0)
 
 
 def builder(lim=LIM, **kw) -> PortfolioBuilder:
@@ -60,18 +62,23 @@ def value(plan, market, pred) -> float:
 # ---------------------------------------------------------------- the limit and its ceiling
 
 
-def test_max_index_pct_is_its_own_cap_with_a_ceiling_of_97_and_off_by_default():
+def test_max_index_pct_is_its_own_cap_with_a_ceiling_of_27_and_off_by_default():
     assert BookLimits().max_index_pct == 0.0  # no index fund unless a book asks for one
-    assert BOOK_HARD_CEILINGS.max_index_pct == 97.0  # 100% less the builder's 3% cash reserve (design.md 2.9)
+    assert BOOK_HARD_CEILINGS.max_index_pct == 27.0  # the stakeholder, 23 Nov 2026 (#600): 27% at every level
     assert BOOK_HARD_CEILINGS.max_name_pct == 20.0  # the per-name cap is unchanged and separate
-    with pytest.raises(ValueError, match="max_index_pct"):
-        validate_book(replace(LIM, max_index_pct=97.5))
+    for above in (27.5, 28.0, 57.0, 97.0):
+        with pytest.raises(ValueError, match="max_index_pct"):
+            validate_book(replace(LIM, max_index_pct=above))
+        with pytest.raises(ValueError, match="max_index_pct"):
+            PortfolioBuilder(replace(LIM, max_index_pct=above), fill="ranked", cash_reserve=0.03, index_symbol="SPY")
     with pytest.raises(ValueError):
         validate_book(replace(LIM, max_index_pct=-1))
-    assert tighten_book(LIM, {"max_index_pct": 57}).max_index_pct == 57.0  # an owner may only lower it
+    assert tighten_book(LIM, {"max_index_pct": 20}).max_index_pct == 20.0  # an owner may only lower it
     with pytest.raises(ValueError):
-        tighten_book(replace(LIM, max_index_pct=57.0), {"max_index_pct": 60})
-    assert gate.index_cap_dollars(EQ, LIM) == pytest.approx(97_000.0)
+        tighten_book(replace(LIM, max_index_pct=20.0), {"max_index_pct": 25})
+    with pytest.raises(ValueError):
+        tighten_book(LIM, {"max_index_pct": 28})
+    assert gate.index_cap_dollars(EQ, LIM) == pytest.approx(27_000.0)
 
 
 def test_the_live_profiles_hold_no_index_fund():
@@ -89,8 +96,9 @@ def test_the_index_core_config_is_off_and_matches_the_preregistration():
 
     cfg = ic.load()
     assert cfg.enabled is False and cfg.index_symbols == ("SPY",)
-    assert {lv: c.max_index_pct for lv, c in cfg.levels.items()} == {"conservative": 27.0, "balanced": 57.0,
-                                                                      "aggressive": 97.0}
+    # the stakeholder, 23 Nov 2026 (#600): 27% at every level, not 27 / 57 / 97
+    assert {lv: c.max_index_pct for lv, c in cfg.levels.items()} == {"conservative": 27.0, "balanced": 27.0,
+                                                                      "aggressive": 27.0}
     assert {lv: c.exposure_pct for lv, c in cfg.levels.items()} == {"conservative": 30.0, "balanced": 60.0,
                                                                      "aggressive": 100.0}
     for lv, c in cfg.levels.items():
@@ -103,13 +111,32 @@ def test_a_bad_index_core_config_is_refused(tmp_path):
     from kaibot.risk import index_core as ic
 
     good = (ic.DEFAULT_PATH).read_text()
-    for bad, why in ((good.replace("max_index_pct: 97", "max_index_pct: 98"), "max_index_pct"),
+    hunter = good.rsplit("max_index_pct: 27", 1)
+    for bad, why in (("max_index_pct: 98".join(hunter), "max_index_pct"),
+                     ("max_index_pct: 28".join(hunter), "max_index_pct"),
                      (good.replace("enabled: false", "enabled: maybe"), "enabled"),
-                     (good.replace("max_index_pct: 57", "max_index_pct: 59"), "exposure")):
+                     (good.replace("exposure_pct: 30", "exposure_pct: 29"), "exposure")):
         f = tmp_path / "index_core.yaml"
         f.write_text(bad)
         with pytest.raises(ValueError, match=why):
             ic.load(f)
+
+
+@pytest.mark.parametrize("level", ["conservative", "balanced", "aggressive"])
+@pytest.mark.parametrize("value", [27.5, 28, 57, 97])
+def test_a_config_index_cap_above_27_is_refused_at_every_level(tmp_path, level, value):
+    """#600: the hard ceiling is the stakeholder's 27%, so an edit of config/index_core.yaml can never raise the
+    index cap above it, at any level and whatever the exposure cap leaves room for."""
+    import yaml
+
+    from kaibot.risk import index_core as ic
+
+    raw = yaml.safe_load(ic.DEFAULT_PATH.read_text())
+    raw["levels"][level]["max_index_pct"] = value
+    f = tmp_path / "index_core.yaml"
+    f.write_text(yaml.safe_dump(raw))
+    with pytest.raises(ValueError, match="max_index_pct"):
+        ic.load(f)
 
 
 # ---------------------------------------------------------------- the builder's index mode: worked examples
@@ -128,18 +155,19 @@ def test_index_mode_is_off_without_an_index_symbol_so_every_existing_plan_is_unc
 def test_the_core_alone_holds_spy_up_to_the_cap_less_the_reserve_in_whole_shares():
     market = {"SPY": spy(px=500.0)}
     p = builder().build([tl({"SPY": 1.0})], {}, market, equity=EQ, cash=EQ)
-    assert p.targets[("book", "SPY")] == 194  # floor(97,000 / 500)
+    assert p.targets[("book", "SPY")] == 54  # floor(27,000 / 500)
     assert p.binding[("book", "SPY")].startswith("index")
     half = builder().build([tl({"SPY": 0.5})], {}, market, equity=EQ, cash=EQ)
-    assert half.targets[("book", "SPY")] == 97  # floor(0.5 x 97,000 / 500)
-    bal = builder(replace(LIM, max_index_pct=57.0, max_gross_pct=60.0, max_overnight_pct=60.0))
-    assert bal.build([tl({"SPY": 1.0})], {}, market, equity=EQ, cash=EQ).targets[("book", "SPY")] == 114
+    assert half.targets[("book", "SPY")] == 27  # floor(0.5 x 27,000 / 500)
+    owner = builder(replace(TIGHT, max_index_pct=20.0))  # an owner's lower cap
+    assert owner.build([tl({"SPY": 1.0})], {}, market, equity=EQ, cash=EQ).targets[("book", "SPY")] == 40
 
 
 def test_the_index_is_exempt_from_the_name_cap_the_sector_cap_and_volatility_sizing():
-    # 97% in one symbol: far above the 20% per-name cap and the 40% sector cap; ATR would size it at 10%
-    p = builder().build([tl({"SPY": 1.0})], {}, {"SPY": spy(atr=5.0)}, equity=EQ, cash=EQ)
-    assert p.targets[("book", "SPY")] * 500.0 > 0.9 * EQ and not p.guarded
+    # 27% in one symbol: above the 20% per-name cap, and ATR would size it at 10%
+    p = builder(replace(LIM, max_sector_pct=20.0)).build([tl({"SPY": 1.0})], {}, {"SPY": spy(atr=5.0)}, equity=EQ,
+                                                         cash=EQ)
+    assert p.targets[("book", "SPY")] * 500.0 > 0.25 * EQ and not p.guarded
 
 
 def test_a_zero_index_cap_holds_no_index_and_sells_one_that_is_held():
@@ -149,34 +177,35 @@ def test_a_zero_index_cap_holds_no_index_and_sells_one_that_is_held():
 
 
 def test_the_gap_scenario_holds_less_spy_and_the_rest_stays_cash():
-    # a 2020-like market: SPY's ATR20 at 6% of its price -> gap 18% a share; 15% of equity / 18% = 83% of equity
-    p = builder().build([tl({"SPY": 1.0})], {}, {"SPY": spy(px=500.0, atr=30.0)}, equity=EQ, cash=EQ)
+    # an extreme market: SPY's ATR20 at 20% of its price -> gap 60% a share; 15% of equity / 60% = 25% of equity,
+    # below the 27% index cap
+    p = builder().build([tl({"SPY": 1.0})], {}, {"SPY": spy(px=500.0, atr=100.0)}, equity=EQ, cash=EQ)
     q = p.targets[("book", "SPY")]
-    assert q * gap_loss_ps(500.0, 30.0) <= 0.15 * EQ + 1e-6 and q == math.floor(0.15 * EQ / 90.0)
+    assert q * gap_loss_ps(500.0, 100.0) <= 0.15 * EQ + 1e-6 and q == math.floor(0.15 * EQ / 300.0)
     assert p.binding[("book", "SPY")] == "index_gap"
 
 
 def test_the_band_keeps_a_holding_within_ten_percent_that_fits():
     market = {"SPY": spy(px=500.0)}
-    near = builder().build([tl({"SPY": 1.0})], {("book", "SPY"): 185}, market, equity=EQ, cash=EQ - 185 * 500)
-    assert near.targets[("book", "SPY")] == 185 and not near.orders
-    far = builder().build([tl({"SPY": 1.0})], {("book", "SPY"): 150}, market, equity=EQ, cash=EQ - 150 * 500)
-    assert far.targets[("book", "SPY")] == 194
+    near = builder().build([tl({"SPY": 1.0})], {("book", "SPY"): 50}, market, equity=EQ, cash=EQ - 50 * 500)
+    assert near.targets[("book", "SPY")] == 50 and not near.orders
+    far = builder().build([tl({"SPY": 1.0})], {("book", "SPY"): 40}, market, equity=EQ, cash=EQ - 40 * 500)
+    assert far.targets[("book", "SPY")] == 54
 
 
 def test_the_swap_a_sleeve_buy_is_funded_by_selling_spy_first():
-    """The book is 97% SPY with 3% cash; the list adds a stock. SPY is cut at the same decision by what the stock
-    needs, the SPY sale comes first in the plan, and the cash never goes below the reserve."""
+    """The book is 27% SPY under a 30% exposure cap; the list adds a stock. SPY is cut at the same decision by what
+    the stock needs, the SPY sale comes first in the plan, and the cash never goes below the reserve."""
     market = {"SPY": spy(px=500.0), "AAA": stock(px=100.0, atr=2.0)}
-    held = {("book", "SPY"): 194}
-    cash = EQ - 194 * 500.0
-    p = builder().build([tl({"AAA": 1.0, "SPY": 1.0})], held, market, equity=EQ, cash=cash)
+    held = {("book", "SPY"): 54}
+    cash = EQ - 54 * 500.0
+    p = builder(TIGHT).build([tl({"AAA": 1.0, "SPY": 1.0})], held, market, equity=EQ, cash=cash)
     assert p.targets[("book", "AAA")] == 50  # its own volatility size: 100,000 x 0.001 / 2
     assert p.orders[("book", "SPY")] < 0 and p.orders[("book", "AAA")] == 50
     assert p.sequence.index(("book", "SPY")) < p.sequence.index(("book", "AAA"))
     after = cash - sum(q * market[s].px for (_, s), q in p.orders.items())
     assert after >= 0.03 * EQ - 1e-6
-    assert value(p, market, lambda s: True) <= 0.97 * EQ + 1e-6
+    assert value(p, market, lambda s: True) <= 0.30 * EQ + 1e-6
 
 
 def test_a_sleeve_budget_caps_everything_but_the_index():
@@ -184,8 +213,8 @@ def test_a_sleeve_budget_caps_everything_but_the_index():
     p = builder(sleeve_budget_pct=10.0).build([tl({**{f"S{i}": 1.0 for i in range(10)}, "SPY": 1.0})], {}, market,
                                               equity=EQ, cash=EQ)
     assert value(p, market, lambda s: s != "SPY") <= 0.10 * EQ + 1e-6
-    assert value(p, market, lambda s: True) <= 0.97 * EQ + 1e-6
-    assert value(p, market, lambda s: s == "SPY") >= 0.85 * EQ
+    assert value(p, market, lambda s: True) <= 0.37 * EQ + 1e-6
+    assert value(p, market, lambda s: s == "SPY") >= 0.26 * EQ
 
 
 def test_spy_counts_as_one_name():
@@ -207,7 +236,7 @@ def test_only_one_list_may_name_the_index():
 @hyp.settings(max_examples=250, deadline=None)
 @hyp.given(spy_px=st.floats(50, 800), spy_atr_pct=st.floats(0.003, 0.08), w=st.floats(0, 1),
            held_spy=st.floats(0, 1), n_stocks=st.integers(0, 6), held_stock=st.floats(0, 1),
-           cap=st.sampled_from([(27.0, 30.0), (57.0, 60.0), (97.0, 100.0)]),
+           cap=st.sampled_from([(27.0, 30.0), (27.0, 60.0), (27.0, 100.0), (10.0, 100.0)]),
            budget=st.sampled_from([None, 10.0, 25.0]), seed=st.integers(0, 10_000))
 def test_property_no_buy_beyond_the_caps(spy_px, spy_atr_pct, w, held_spy, n_stocks, held_stock, cap, budget, seed):
     """Whatever the book holds (inside its caps) and whatever the list asks: after the plan the index fund is at
@@ -264,7 +293,7 @@ def test_property_no_buy_beyond_the_caps(spy_px, spy_atr_pct, w, held_spy, n_sto
 
 @hyp.settings(max_examples=150, deadline=None)
 @hyp.given(stock_px=st.floats(5, 900), atr_pct=st.floats(0.005, 0.08), spy_px=st.floats(100, 700),
-           idx=st.sampled_from([27.0, 57.0, 97.0]))
+           idx=st.sampled_from([10.0, 20.0, 27.0]))
 def test_property_a_sleeve_buy_on_a_full_core_is_funded_by_spy_at_the_same_session(stock_px, atr_pct, spy_px, idx):
     """SPY holds the whole index cap; a sleeve buys one stock. The plan sells SPY at the same decision, never
     more SPY than the stock needs beyond the reserve, and the stock gets its full volatility size when it fits."""
@@ -340,11 +369,12 @@ def test_the_core_through_the_engine_holds_only_spy_inside_its_cap(fixture_data)
     run = run_daily(IndexCore(), data, pol, i0, i1, builder=b)
     assert {f["symbol"] for f in run.fills} <= {"SPY"} and run.fills
     assert not run.refused and not run.guards and not run.ledger.overdrafts and run.cash_gap < 0.01
-    # sized at the previous close at most 97%; a close mark above that is the market's move since (never a buy
-    # beyond the cap: the builder's property tests), and stays under the 1% cash floor
+    # sized at the previous close at most 27% at every level (#600); a close mark above that is the market's move
+    # since (never a buy beyond the cap: the builder's property tests)
+    assert b.limits.max_index_pct == 27.0
     for row in run.book.daily[5:-1]:
-        assert row["exposure"] <= 0.99
-    assert max(r["exposure"] for r in run.book.daily) > 0.5
+        assert row["exposure"] <= 0.30
+    assert max(r["exposure"] for r in run.book.daily) > 0.2
 
 
 def test_a_sleeve_buy_and_the_spy_sale_fill_at_the_same_close_through_the_engine(fixture_data):
@@ -378,9 +408,12 @@ def test_a_sleeve_buy_and_the_spy_sale_fill_at_the_same_close_through_the_engine
             return core.signals(v)
 
     pol = load_profiles()["aggressive"]
-    run = run_daily(CoreWithOneBuy(), data, pol, i0, i1, builder=ic.builder("aggressive"))
+    # a test-only book: Hunter's 27% index cap (#600, also the hard ceiling) under a 27% exposure cap, so the stock's
+    # buy needs SPY's room (Hunter's 100% exposure cap leaves enough room that SPY never has to be sold)
+    test_book = replace(ic.book_limits("aggressive"), max_gross_pct=27.0, max_overnight_pct=27.0)
+    run = run_daily(CoreWithOneBuy(), data, pol, i0, i1, builder=ic.builder("aggressive", limits=test_book))
     first = min(f["i"] for f in run.fills if f["symbol"] == stock_sym and f["side"] == "buy")
     assert any(f["i"] == first and f["symbol"] == "SPY" and f["side"] == "sell" for f in run.fills)
     assert not run.ledger.overdrafts and run.cash_gap < 0.01 and not run.refused
     for row in run.book.daily[5:-1]:
-        assert row["exposure"] <= 0.99
+        assert row["exposure"] <= 0.30
