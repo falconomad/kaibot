@@ -1,0 +1,15 @@
+{
+ "rule": "spy_late_momentum",
+ "preregistered": true,
+ "family": "spy_intraday_momentum",
+ "generated_at": "2026-11-23T12:27:50+00:00",
+ "trials": {
+  "rule": 0,
+  "registry": 10847,
+  "family": 14
+ },
+ "tbill": true,
+ "reports_of_this_rule": [],
+ "runs": [],
+ "as_reported": []
+}

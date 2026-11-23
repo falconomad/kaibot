@@ -1,0 +1,17 @@
+{
+ "rule": "filing_flags_study",
+ "preregistered": true,
+ "family": "filing_flags",
+ "generated_at": "2026-11-23T12:27:50+00:00",
+ "trials": {
+  "rule": 12,
+  "registry": 10847,
+  "family": 12
+ },
+ "tbill": true,
+ "reports_of_this_rule": [],
+ "runs": [],
+ "as_reported": [
+  "filing_flags_study.md"
+ ]
+}

@@ -1,0 +1,15 @@
+{
+ "rule": "trend_momentum_band",
+ "preregistered": true,
+ "family": "cross_sectional_momentum",
+ "generated_at": "2026-11-23T12:27:51+00:00",
+ "trials": {
+  "rule": 0,
+  "registry": 10847,
+  "family": 748
+ },
+ "tbill": true,
+ "reports_of_this_rule": [],
+ "runs": [],
+ "as_reported": []
+}

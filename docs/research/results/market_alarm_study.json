@@ -1,0 +1,17 @@
+{
+ "rule": "market_alarm_study",
+ "preregistered": true,
+ "family": "market_event_alarm",
+ "generated_at": "2026-11-23T12:27:50+00:00",
+ "trials": {
+  "rule": 3,
+  "registry": 10847,
+  "family": 3
+ },
+ "tbill": true,
+ "reports_of_this_rule": [],
+ "runs": [],
+ "as_reported": [
+  "market_alarm_backfill.md"
+ ]
+}
