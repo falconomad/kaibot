@@ -33,6 +33,7 @@ decided. Switching it on is the stakeholder's decision.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import logging
 import math
@@ -162,6 +163,7 @@ class ReviewOutcome:
     error: str | None = None
     latency_ms: int = 0
     cost_usd: float = 0.0
+    call: dict | None = None  # M12 3.9 (#471): model, served model, prompt hash, fingerprint and the input sent
 
     def multiplier(self, cid: str) -> float:
         """Share of the rules' increase that goes through: 1.0 when the review is off; per verdict when done; 0.0
@@ -177,7 +179,8 @@ class ReviewOutcome:
         """One record per session: both arms of every candidate, so the counterfactual (the rules' plan through
         SimBroker) can be run beside the reviewed plan. Keys are "<strategy>:<symbol>"."""
         keys = sorted(k for k in rules_plan if rules_plan[k] > float(current.get(k, 0) or 0))
-        return {"session": self.session.isoformat(), "status": self.status, "error": self.error,
+        extra = {"call": self.call} if self.call is not None else {}
+        return {**extra, "session": self.session.isoformat(), "status": self.status, "error": self.error,
                 "verdicts": dict(self.verdicts), "answer": self.answer, "latency_ms": self.latency_ms,
                 "cost_usd": round(self.cost_usd, 5),
                 "arms": {candidate_id(k): {"current": float(current.get(k, 0) or 0), "rules": int(rules_plan[k]),
@@ -253,6 +256,32 @@ Rules you must follow:
 PREOPEN_TOOL = tool_for("submit_preopen_review", PreopenVerdicts,
                         "One verdict (allow, downgrade or veto) per candidate for the session.")
 
+# M12 3.9 (#471): the review's identity. A record counts for the pre-registered veto
+# (docs/prereg/preopen_negative_news_veto.md) only under the fingerprint frozen there, and the golden set
+# (agents/evalset/golden.py) is re-run whenever it changes. Bump PROMPT_VERSION with any change to `render`,
+# `candidates`' shown view or the user line in `GatewayReviewer`: those do not show up in SYSTEM or the tool.
+PROMPT_VERSION = "preopen-v1"
+USER_SUFFIX = "\n\nReview every candidate above."
+
+
+def sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def fingerprint(model: str) -> str:
+    """sha256 of everything that fixes the review apart from the day's data: model id, system prompt, tool schema,
+    prompt version."""
+    return sha256(json.dumps({"model": model, "system": SYSTEM, "tool": PREOPEN_TOOL, "version": PROMPT_VERSION},
+                             sort_keys=True))
+
+
+def review_model(cfg) -> str:
+    """`models.preopen` from config/llm.yaml: the pinned model. Missing: ValueError (the review fails closed)."""
+    m = (getattr(cfg, "models", None) or {}).get("preopen")
+    if not isinstance(m, str) or not m.strip():
+        raise ValueError("config/llm.yaml has no models.preopen (the pinned pre-open review model)")
+    return m
+
 
 PROMPT_MAX_CHARS = 60_000  # the DATA block's limit (about 20 000 tokens by the gateway's estimate)
 
@@ -316,6 +345,7 @@ class Charged:
     answer: PreopenVerdicts | dict | None
     cost_usd: float = 0.0
     refused: str | None = None  # why the gateway gave no answer: refused, no_client, error, ...
+    call: dict | None = None  # M12 3.9 (#471): what was sent and who answered (see GatewayReviewer)
 
 
 def preopen_limits(gateway) -> tuple[dict | None, str | None]:
@@ -337,7 +367,12 @@ def preopen_limits(gateway) -> tuple[dict | None, str | None]:
 
 class GatewayReviewer:
     """The real reviewer: exactly one `Gateway.call()` per session (reserve the worst case, settle the actual), with
-    `limits.preopen` and a forced tool whose schema has no price, size, stop or exit fields."""
+    `limits.preopen` and a forced tool whose schema has no price, size, stop or exit fields.
+
+    M12 3.9 (#471): the model is the pinned `models.preopen`, and every call is recorded in `Charged.call`: the
+    model asked for, the model that answered (`served_model`, None when no answer came), the response id, the
+    sha256 of the whole prompt (system, user text and tool), the review's `fingerprint` and the user text itself
+    (`input`: the DATA block, which holds no shares, prices, keys or account data)."""
 
     def __init__(self, gateway):
         self.gw = gateway
@@ -346,13 +381,20 @@ class GatewayReviewer:
         lim, err = preopen_limits(self.gw)
         if lim is None:
             raise ValueError(err)
+        model = review_model(self.gw.cfg)
+        user = f"{render(session, cands)}{USER_SUFFIX}"
+        call = {"model": model, "served_model": None, "response_id": None, "prompt_version": PROMPT_VERSION,
+                "fingerprint": fingerprint(model),
+                "prompt_sha256": sha256(SYSTEM + "\n" + user + "\n" + json.dumps(PREOPEN_TOOL, sort_keys=True)),
+                "input": user}
         report: dict = {}
-        r = self.gw.call("preopen", self.gw.cfg.models["room"], SYSTEM,
-                         f"{render(session, cands)}\n\nReview every candidate above.", PREOPEN_TOOL,
-                         lim["max_tokens"], lim["timeout_s"], daily_soft_usd=lim["daily_usd"], report=report)
+        r = self.gw.call("preopen", model, SYSTEM, user, PREOPEN_TOOL, lim["max_tokens"], lim["timeout_s"],
+                         daily_soft_usd=lim["daily_usd"], report=report)
         if r is None:
-            return Charged(None, 0.0, report.get("reason") or "error")
-        return Charged(r.data, float(r.cost_usd))
+            return Charged(None, 0.0, report.get("reason") or "error", call)
+        call["served_model"] = getattr(r, "served_model", None)
+        call["response_id"] = getattr(r, "response_id", None)
+        return Charged(r.data, float(r.cost_usd), call=call)
 
 
 def _budget_block(gateway, lim: dict) -> tuple[str, str] | None:
@@ -379,15 +421,20 @@ def _budget_block(gateway, lim: dict) -> tuple[str, str] | None:
 def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int], current: Mapping[Key, float],
            reviewer: Reviewer | None, *, env: Mapping[str, str] | None = None, gateway=None,
            total_s: float = TOTAL_S, evidence: Mapping[str, Iterable[dict]] | None = None,
-           clock=time.monotonic) -> tuple[dict[Key, int | float], ReviewOutcome, list[ReviewCandidate]]:
+           clock=time.monotonic, transform: Callable[[list[ReviewCandidate]], list[ReviewCandidate]] | None = None
+           ) -> tuple[dict[Key, int | float], ReviewOutcome, list[ReviewCandidate]]:
     """Run the pre-open review on the builder's plan. Returns (reviewed plan, outcome, candidates).
     `gateway` is the LLM budget gateway: the budget state and the pre-open cap are read from it. `evidence`:
-    symbol -> news items shown with the candidate (see `candidates`)."""
+    symbol -> news items shown with the candidate (see `candidates`). `transform` (M12 3.9, the shadow's masked
+    arm only): rewrites the candidates before they are shown; the verdicts are then keyed by the rewritten ids, so
+    the reviewed plan vetoes every increase (an unknown id is a veto): the caller maps them back."""
     targets = list(targets)
     if not enabled(env):
         out = ReviewOutcome("off", session)
         return dict(plan), out, []
     cands = candidates(session, targets, plan, current, evidence)
+    if transform is not None:
+        cands = transform(cands)
     out = ReviewOutcome("done", session)
     if not cands:
         return dict(plan), out, cands
@@ -429,6 +476,7 @@ def review(session: date, targets: Iterable[TargetList], plan: Mapping[Key, int]
         out.latency_ms = int((clock() - t0) * 1000)
         if isinstance(answer, Charged):
             out.cost_usd = answer.cost_usd
+            out.call = answer.call
             if answer.refused in ("refused", "reserve_failed") and out.status == "done":
                 out.status = "budget"
                 out.error = f"LLM budget gateway {answer.refused} the reservation: every increase vetoed"

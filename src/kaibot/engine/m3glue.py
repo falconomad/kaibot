@@ -176,7 +176,8 @@ def make_preopen_shadow(store, desk, env: Mapping[str, str] | None = None, gatew
 
         gateway = shadow_from_env(store, dict(env))
     return preopen_shadow.ShadowDesk(preopen.GatewayReviewer(gateway), gateway,
-                                     evidence_fn=make_preopen_evidence(desk))
+                                     evidence_fn=make_preopen_evidence(desk),
+                                     masked=preopen_shadow.masked_enabled(env))  # M12 3.9: the masked arm
 
 
 def make_daily_note(store, env: Mapping[str, str] | None = None, gateway=None):

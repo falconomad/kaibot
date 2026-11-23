@@ -92,6 +92,8 @@ class LLMResult:
     output_tokens: int
     cache_read_tokens: int
     model: str
+    served_model: str | None = None  # M12 3.9 (#471): the model the API says answered (resp.model), as recorded
+    response_id: str | None = None
 
 
 class Client(Protocol):  # the subset of anthropic.Anthropic used here (a fake implements it in tests)
@@ -266,7 +268,10 @@ class Gateway:
             data = blocks[0].input if isinstance(blocks[0].input, dict) else json.loads(blocks[0].input)
             cost = cost_of(price, usage[0], usage[1], usage[2], usage[3])
             self._settle(call_id, cost, usage, None)
-            return LLMResult(data, cost, int((self.clock() - t0) * 1000), usage[0], usage[1], usage[2], model)
+            served = getattr(resp, "model", None)
+            rid = getattr(resp, "id", None)
+            return LLMResult(data, cost, int((self.clock() - t0) * 1000), usage[0], usage[1], usage[2], model,
+                             served if isinstance(served, str) else None, rid if isinstance(rid, str) else None)
         except Exception as e:
             cost = cost_of(price, usage[0], usage[1], usage[2], usage[3])
             self._settle(call_id, cost, usage, f"{type(e).__name__}: {str(e)[:200]}")
