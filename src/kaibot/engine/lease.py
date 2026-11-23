@@ -22,11 +22,20 @@ unverified"); `reducing_only` is the hook that state should read.
 The holder id is one random id per engine install, kept in the data directory, so a restart on the same machine
 gets its own lease back at once (a crash does not lock the machine out for `TTL_S`). Two engines on the SAME
 machine are `scripts/engine_guard.sh`'s job. Never copy the holder file to another machine.
+
+#562 (migration 0041): the lease is bound to the holder AND the machine (`machine_key`: the host name and the
+operating system's machine id, hashed, read once at start and never from the data folder). A data folder copied to
+another machine carries the holder id but not the machine: that machine's start is refused while the lease is live
+(`LeaseHeld`, exit code 3), and it can never renew or release this machine's lease.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import platform
+import re
+import subprocess
 import time
 import uuid
 from pathlib import Path
@@ -40,6 +49,7 @@ LEASE_KIND = "lease"  # the journal's record of the lease (local only)
 # the last record after which a degraded start is allowed, when it is this install's own
 OWN_STATES = ("acquired", "released", "degraded_start")
 EXIT_LEASE = 3  # process exit code when the lease stops this engine
+MACHINE_ID_FILES = ("/etc/machine-id", "/var/lib/dbus/machine-id")  # Linux (systemd, dbus)
 
 
 class LeaseError(RuntimeError):
@@ -77,14 +87,47 @@ def holder_id(data_dir: Path | str | None, host: str) -> str:
     return fresh
 
 
+def os_machine_id() -> str:
+    """The operating system's own id of this machine: macOS IOPlatformUUID, Linux /etc/machine-id; "" when none can
+    be read (then the host name alone tells machines apart)."""
+    try:
+        if platform.system() == "Darwin":
+            out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], capture_output=True, text=True,
+                                 timeout=5).stdout
+            m = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', out)
+            return m.group(1) if m else ""
+        for f in MACHINE_ID_FILES:
+            p = Path(f)
+            if p.exists():
+                got = p.read_text().strip()
+                if got:
+                    return got
+    except Exception:  # noqa: BLE001 - unknown: the host name alone
+        log.warning("the machine id could not be read: the engine lease is bound to the host name alone")
+    return ""
+
+
+def machine_key(host: str, os_id: str | None = None) -> str:
+    """#562: what binds the lease to this machine besides the holder id. The host name AND the OS machine id (a
+    Docker image may carry a baked /etc/machine-id, but every container has its own host name), hashed. Never read
+    from the data folder, so a copied folder does not carry it. Never empty."""
+    os_id = os_machine_id() if os_id is None else os_id
+    return hashlib.sha256(f"kaibot-engine\0{host}\0{os_id}".encode()).hexdigest()[:24]
+
+
 class EngineLease:
     def __init__(self, store, holder: str, host: str, ttl_s: int = TTL_S, mono=time.monotonic, wall=time.time,
-                 journal=None):
+                 journal=None, machine: str | None = None):
         """`journal`: the engine's local journal (append, entries); None: the lease is not recorded and a degraded
-        start is never allowed."""
+        start is never allowed. `machine`: `machine_key(host)` when None, computed ONCE here (#562): a host name
+        that changes while the engine runs does not take its lease away (the next start then waits out the old
+        lease, fail closed)."""
         self.store, self.holder, self.host, self.ttl_s, self.mono, self.wall = store, holder, host, ttl_s, mono, wall
         self.journal = journal
         self.degraded: str | None = None  # why this engine is reducing only (M10 1.25); None: not degraded
+        self.machine = machine_key(host) if machine is None else machine
+        if not self.machine:
+            raise ValueError("engine lease: the machine key must not be empty")
         self.held = False
         self.lost = False
         # Time of the last successful acquire / renewal on both clocks. The monotonic clock stops while a laptop
@@ -128,7 +171,7 @@ class EngineLease:
     # ---------- start-up ----------
     def acquire(self) -> dict:
         try:
-            out = self.store.lease_acquire(self.holder, self.host, self.ttl_s)
+            out = self.store.lease_acquire(self.holder, self.host, self.ttl_s, self.machine)
         except Exception as e:
             raise LeaseUnavailable(
                 f"The engine lease could not be checked ({str(e)[:200]}). Not starting: without the lease this "
@@ -138,6 +181,16 @@ class EngineLease:
             raise LeaseUnavailable(f"The engine lease answered something unexpected ({str(out)[:120]}). Not starting.")
         if out["acquired"] is not True:
             self._record("held_by_other", other_host=out.get("host"))
+            if out.get("reason") == "holder_on_other_machine" or out.get("holder") == self.holder:
+                raise LeaseHeld(
+                    f"The engine lease is held by THIS install's holder id on another machine or an older release "
+                    f"(host {out.get('host')!r}, started {out.get('started_at')}, live for about "
+                    f"{out.get('expires_in_s', '?')} s more). The data folder (its engine_holder_id file) was copied "
+                    "to this machine, or this machine's name changed, or an engine of a release before #562 still "
+                    "runs here. Two engines with one holder id would both trade, so this one is not starting. Stop "
+                    "the other engine; if it is this machine after a rename or an upgrade, wait 90 s and start "
+                    "again. On a machine that got a copied data folder, delete data/live/engine_holder_id there "
+                    "(docs/ops/run_engine.md, 'Engine lease').")
             raise LeaseHeld(
                 f"Another Kaibot engine holds the lease: host {out.get('host')!r}, started {out.get('started_at')}, "
                 f"lease live for about {out.get('expires_in_s', '?')} s more (it renews every 10 s while that "
@@ -159,6 +212,7 @@ class EngineLease:
             return
         try:
             self.journal.append(LEASE_KIND, {"state": state, "holder": self.holder, "host": self.host,
+                                             "machine": self.machine,  # #562: the record names the machine too
                                              **{k: v for k, v in kw.items() if v is not None}})
         except Exception:
             log.exception("lease record %r not journalled", state)
@@ -185,6 +239,12 @@ class EngineLease:
             # host name that changed refuses the degraded start, never allows one)
             return False, (f"the journal's last lease record was written on host {last.get('host')!r}, this is "
                            f"{self.host!r}: the data folder was copied, or the host name changed")
+        if last.get("machine") != self.machine:
+            # #562: the same host name on another machine (or a record written before #562, which names none): the
+            # machine key (host name and OS machine id) tells them apart; fail closed, as for the host
+            return False, ("the journal's last lease record was written on another machine with this host name"
+                           if last.get("machine") else "the journal's last lease record names no machine (written "
+                           "before #562): a degraded start needs one lease taken by this release first")
         if last.get("state") not in OWN_STATES:
             return False, (f"the journal's last lease record is {last.get('state')!r}: another engine took the "
                            "lease after this one, or traded the account")
@@ -214,7 +274,7 @@ class EngineLease:
             return self.ok
         self.last_try = now
         try:
-            ours = self.store.lease_renew(self.holder, self.ttl_s)
+            ours = self.store.lease_renew(self.holder, self.ttl_s, self.machine)
         except Exception as e:
             if self.last_error is None:
                 log.error("engine lease renewal failed (%s): no new entries until it works again", str(e)[:200])
@@ -225,8 +285,9 @@ class EngineLease:
             self._record("lost")
             raise LeaseLost(
                 "The engine lease is no longer ours: another engine took it over after ours expired, or it was "
-                "released by hand. Stopping so that two engines never trade one account. Open positions keep "
-                "their broker-held stops (docs/ops/run_engine.md, 'Engine lease').")
+                "released by hand, or it is this holder id's on another machine. Stopping so that two engines "
+                "never trade one account. Open positions keep their broker-held stops "
+                "(docs/ops/run_engine.md, 'Engine lease').")
         if self.last_error is not None:
             log.info("engine lease renewed again: entries allowed")
         self._mark_ok()
@@ -240,7 +301,7 @@ class EngineLease:
         self.held = False
         self._record("released")
         try:
-            return self.store.lease_release(self.holder) is True
+            return self.store.lease_release(self.holder, self.machine) is True
         except Exception:
             log.exception("engine lease release failed: it expires by itself in %d s", self.ttl_s)
             return False

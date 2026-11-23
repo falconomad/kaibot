@@ -108,16 +108,18 @@ class Store:
     def _lease_rpc(self, fn: str, args: dict) -> Any:
         return self._call("POST", f"rpc/{fn}", body=args, attempts=2, timeout=10)
 
-    def lease_acquire(self, holder: str, host: str, ttl_s: int) -> dict:
-        """Atomic compare-and-set: {acquired: true, ...} or {acquired: false, holder, host, expires_in_s, ...}."""
-        return self._lease_rpc("engine_lease_acquire", {"p_holder": holder, "p_host": host, "p_ttl_s": ttl_s})
+    # #562 (migration 0041): every call names the machine too; the lease matches on holder AND machine.
+    def lease_acquire(self, holder: str, host: str, ttl_s: int, machine: str) -> dict:
+        """Atomic compare-and-set: {acquired: true, ...} or {acquired: false, holder, host, expires_in_s, reason}."""
+        return self._lease_rpc("engine_lease_acquire", {"p_holder": holder, "p_host": host, "p_ttl_s": ttl_s,
+                                                        "p_machine": machine})
 
-    def lease_renew(self, holder: str, ttl_s: int) -> bool:
-        """True if the lease is still ours and was extended; False if another holder has it or it is gone."""
-        return self._lease_rpc("engine_lease_renew", {"p_holder": holder, "p_ttl_s": ttl_s})
+    def lease_renew(self, holder: str, ttl_s: int, machine: str) -> bool:
+        """True if the lease is still ours (holder and machine) and was extended; False otherwise."""
+        return self._lease_rpc("engine_lease_renew", {"p_holder": holder, "p_ttl_s": ttl_s, "p_machine": machine})
 
-    def lease_release(self, holder: str) -> bool:
-        return self._lease_rpc("engine_lease_release", {"p_holder": holder})
+    def lease_release(self, holder: str, machine: str) -> bool:
+        return self._lease_rpc("engine_lease_release", {"p_holder": holder, "p_machine": machine})
 
     def lease_row(self) -> dict | None:
         rows = self.select("engine_lease", {"limit": "1"})

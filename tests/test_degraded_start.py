@@ -222,6 +222,38 @@ def test_a_data_folder_copied_whole_to_another_machine_does_not_start_degraded(t
     assert "data folder was copied" in caplog.text
 
 
+@pytest.mark.parametrize("record_machine", ["other", "none"])
+def test_a_data_folder_copied_to_a_machine_with_the_same_host_name_does_not_start_degraded(tmp_path, caplog,
+                                                                                           record_machine):
+    """#562: the host name can be the same on two machines (or a record was written before #562 and names no
+    machine): the machine key in the lease record tells them apart; fail closed."""
+    w = World(tmp_path)
+    if record_machine == "other":
+        w.ran_once()  # written with this test host's machine key
+        machine = "a-different-machine-key"
+    else:
+        eng0 = w.engine()
+        eng0.journal.append("lease", {"state": "acquired", "holder": "holder-mac", "host": "host-mac"})
+        eng0.journal.close()
+        machine = None
+    w.db.down = True
+    eng = w.engine()
+    lease = EngineLease(eng.store, "holder-mac", "host-mac", mono=w.t.mono, wall=w.t.wall, journal=eng.journal,
+                        machine=machine)
+    with caplog.at_level("ERROR"), pytest.raises(SystemExit) as e:
+        engine_main.start_with_lease(eng, lease)
+    assert e.value.code == EXIT_LEASE and eng.started == 0
+    assert ("another machine with this host name" if record_machine == "other" else "names no machine") in caplog.text
+
+
+def test_the_lease_record_names_the_machine(tmp_path):
+    w = World(tmp_path)
+    w.ran_once()
+    eng = w.engine()
+    rec = [b for *_, b in eng.journal.entries(kinds=("lease",))][-1]
+    assert rec["machine"] == w.lease(eng).machine and rec["machine"]
+
+
 @pytest.mark.parametrize("how", ["lost", "held_by_other"])
 def test_a_record_that_another_engine_took_over_is_newer_evidence_and_no_degraded_start(tmp_path, how, caplog):
     w = World(tmp_path)

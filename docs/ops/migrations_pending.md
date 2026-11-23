@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 22 Nov 2026 (0001-0039 applied; 0040 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 22 Nov 2026 (0001-0039 applied; 0040-0041 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -39,6 +39,7 @@ Owner: backend-quant. Last checked against main on 22 Nov 2026 (0001-0039 applie
 - 0038: **applied by Product on 22 Nov 2026, after the engine restarted on e949400** (checked: kaibot.helper RLS on, not readable by authenticated; owner_not_helper trigger present; kb_helper_* not executable by anon; realtime policy 'kb helper sends prices' present) (step 25 below; M10 ticket 1.26, #451: the helpers' narrow key path). Independent of 0037. Any time, also while the engine runs; then the one-time setup of `docs/ops/helper_role.md`.
 - 0039: **applied by Product on 22 Nov 2026, after the engine restarted on e949400** (checked: kb_health lists multi_day_unbooked_aged; not executable by anon) (step 26 below; dashboard read only, any time; kb_health's M9 events: `replica_poison` and `replica_backlog` of #437, `clock_skew` of #435, `calendar_expiring` of #442; and the four that waited for a migration (#512): `command_waiting` of #427, `command_rejected` of #440, `multi_day_book_unchecked` and `multi_day_book_unconfirmed` of #426, `multi_day_unbooked_aged` of #507). After 0036. Independent of 0037 and 0038. Changes no trading behaviour.
 - 0040: **pending** (step 27 below; the PR for #529: the owner books or accepts a fill whose activity never came, from the Engine page's "Books and broker" sheet). After 0037. **Outside 09:30-16:00 ET**. Changes live trading behaviour when used: a booked fill puts the shares in the books; an accepted one lifts the wait for it. The stakeholder's to apply.
+- 0041: **pending** (the PR for #562; independent of 0040). Engine lease bound to holder AND machine. Apply BEFORE deploying the engine release that sends `p_machine`, outside 09:30-16:00 ET; the running engine keeps its lease (it acts as machine ''). The stakeholder's to apply.
 
 ## Apply in this order
 
@@ -74,6 +75,7 @@ run it again. Do not reorder them.
 | 25 | `migrations/0038_helper_role.sql` (whole file; the PR for #451). Independent of every other pending file. Any time, also while the engine runs: additive, no engine object changes. Then `docs/ops/helper_role.md` (create the helper user, list it in `kaibot.helper`, write `helper.env`, run `scripts/helper_check.py`) | A narrow key path for the price relay, the market-notice job and `run_ablation.py`: table `kaibot.helper` (RLS on, no policy), `kaibot.is_helper()`, the helper-only definer functions `kb_helper_whoami`, `kb_helper_heartbeat` (the row `price_stream` only), `kb_helper_publish_notices`, `kb_helper_trades` (read-only), and one INSERT policy on `realtime.messages` so the helper may send on `kb:prices`. The helper is the `authenticated` role: no right on any kaibot table, no command, no lease. Until the setup is done the helpers keep using the service key, unchanged | No: no delete, drop or truncate (the `update`s are inside the new functions: a heartbeat upsert and a notice upsert / withdrawal) |
 | 26 | `migrations/0039_kb_health_m9_events.sql` (whole file; the PR for kb_health's M9 events). After 0036. Any time, also while the engine runs: dashboard read only | `kb_health` also returns `command_waiting`, `command_rejected`, `multi_day_book_unchecked`, `multi_day_book_unconfirmed` and `multi_day_unbooked_aged` (M9 1.2, 1.15, 1.1, #507) and four health events the engine sends since M9 tickets 1.12, 1.10 and 1.17: `replica_poison` (a row Supabase refuses for good was skipped), `replica_backlog` (rows waiting for ten minutes), `clock_skew` (the engine's clock and the broker's differ by more than five seconds: no new orders) and `calendar_expiring` (the macro calendar or the dead-man's holiday table ends within 30 days). 0036's function otherwise, byte for byte. Until it is applied the events are written and the Health page does not show them | No: one `create or replace function`, a revoke and a grant |
 | 27 | `migrations/0040_accept_unbooked.sql` (whole file; the PR for #529). After 0037. **Outside 09:30-16:00 ET** (the engine reads `kaibot.command` every loop) | `kb_command`'s `accept_reconcile` also takes rows of kind `unbooked` (`symbol`, `coid`, `venue`, `booked`, `action` book or accept); 0037's function otherwise. The engine acts only on exactly the day-old unbooked fills it found, read again at the broker | No: one `create or replace function`, a revoke and a grant |
+| 28 | `migrations/0041_engine_lease_machine.sql` (whole file, one transaction; the PR for #562). After 0013. Outside 09:30-16:00 ET, BEFORE the engine release that sends `p_machine` | `kaibot.engine_lease.machine` (default ''); `engine_lease_acquire/_renew/_release` replaced by versions with `p_machine` that match on holder AND machine: a copied data folder on another machine is refused (`reason: holder_on_other_machine`) and can neither renew nor release. An older engine (no `p_machine`) acts as machine '' and keeps its lease until it stops; the new release's first start on that machine waits for it to be released (clean stop) or to expire (90 s) | Yes, but no data: the three 0013 functions are dropped and recreated in the same transaction |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -149,6 +151,12 @@ select has_function_privilege('anon', 'public.kb_command(text, text, jsonb)', 'e
 -- step 26 (0039): kb_health returns M9's replica, clock and calendar events
 select prosrc like '%replica_poison%' and prosrc like '%clock_skew%' and prosrc like '%calendar_expiring%'
    and prosrc like '%multi_day_column_missing%' from pg_proc where proname = 'kb_health';              -- true
+-- step 28 (0041): the lease has a machine column and three functions that take p_machine
+select count(*) from information_schema.columns
+ where table_schema = 'kaibot' and table_name = 'engine_lease' and column_name = 'machine';        -- 1
+select string_agg(p.oid::regprocedure::text, '; ' order by 1) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'kaibot' and p.proname like 'engine_lease_%';  -- acquire(text,text,integer,text); release(text,text); renew(text,integer,text)
+select has_function_privilege('authenticated', 'kaibot.engine_lease_renew(text, integer, text)', 'execute');  -- false
 -- step 24 (0037): the dashboard may queue accept_reconcile; one kind check, with it; anon cannot call kb_command
 select count(*), bool_and(pg_get_constraintdef(oid) like '%accept_reconcile%') from pg_constraint
  where conrelid = 'kaibot.command'::regclass and contype = 'c';                                    -- 1 | true
