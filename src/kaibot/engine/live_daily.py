@@ -761,8 +761,10 @@ class LiveDaily:
 
     def sync(self, force: bool = False) -> None:
         """Book the venue's fills of this path's orders (each once, by activity id) and poll its open orders. Only
-        while it has open orders; before the closing auction (15:59 ET) at most every POLL_EVERY (a `cls` order
-        does not change until the auction), from then on at every call."""
+        while it has open orders (or, every POLL_EVERY, while an order called lost is under watch: #535); before
+        the closing auction (15:59 ET) at most every POLL_EVERY (a `cls` order does not change until the
+        auction), from then on at every call.
+        """
         self._shadow_collect()  # #310: an observer's finished records (never read back by this path)
         self._sync(force)
         # #311: the day's plain-words report, from 16:10 ET, after this tick's fills are booked (also after the early
@@ -772,9 +774,14 @@ class LiveDaily:
 
     def _sync(self, force: bool) -> None:
         om = self._manager()
-        if om is None or not (om.live or force):
+        if om is None:
+            return
+        watch = not om.live and om.watching()  # #535: a fill of an order called lost is looked for, every POLL_EVERY
+        if not (om.live or force or watch):
             return
         now = self.now()
+        if watch and not force and self._synced is not None and now - self._synced < POLL_EVERY:
+            return
         # looked up at every call: an unconfirmed order, or any order that can fill before the closing auction (a
         # protective or fail-safe stop): its fill must be in the ledger before the next drift check
         urgent = any(r.state in UNCONFIRMED or r.tif != "cls" for r in om.live.values())

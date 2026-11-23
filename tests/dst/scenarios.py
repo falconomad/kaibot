@@ -59,8 +59,11 @@ def cancel_never_sent_again(mp) -> None:
 
 
 def lost_without_evidence(mp) -> None:
-    """M9 1.11 taken away: an order two lookups did not find is called lost, and the decision is sent again."""
+    """M9 1.11 taken away: an order two lookups did not find is called lost, and the decision is sent again. Since
+    #535 a fill of an order called lost is adopted, a second guard against the same hole: one guard gone is not
+    visible from outside (the point of having two), so the plant takes that away too."""
     mp.setattr(OrderManager, "_lost_evidence", lambda self, r, over=False: (None, None))
+    mp.setattr(OrderManager, "_claim", lambda self, a: None)
 
 
 def unbooked_fill_of_today_only(mp) -> None:
