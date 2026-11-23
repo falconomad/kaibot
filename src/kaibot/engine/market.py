@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.engine.clock import session_minutes  # noqa: F401 - its home since M10 1.19; imported from here too
-from kaibot.ingest.data_checks import Finding, check_all
+from kaibot.ingest.data_checks import BAD_PRICE, BAR_GAP, NO_BARS, STALE, UNMATCHED_MOVE, Finding, check_all
 from kaibot.replay.data import SymbolDays, from_frame
 from kaibot.replay.features import candidates, daily_stats, regime
 
@@ -29,12 +29,29 @@ log = logging.getLogger("kaibot.engine.market")
 HISTORY_SESSIONS = 70
 EMPTY_NEWS = np.array([], dtype="datetime64[s]")
 DATA_CHECKS_ENV = "KAIBOT_DATA_CHECKS"  # M12 3.11 (#473): report-only data checks; off unless set to 1/true/yes/on
+# M12 3.11 (#473), the blocking half: which checks block ENTRIES. Off (unset, empty, 0/no/off/false) by default: then
+# nothing is blocked and the engine trades exactly as without it. 1/true/yes/on: BLOCKING_DEFAULT; or a comma list of
+# check names. `bar_gap` is not in the default: on IEX a quiet stock has minutes without a bar and nothing is wrong.
+DATA_BLOCK_ENV = "KAIBOT_DATA_CHECKS_BLOCK"
+ALL_CHECKS = frozenset({STALE, NO_BARS, BAD_PRICE, BAR_GAP, UNMATCHED_MOVE})
+BLOCKING_DEFAULT = frozenset({STALE, NO_BARS, BAD_PRICE, UNMATCHED_MOVE})
+# the index's own findings that mean the minute feed cannot be trusted at all (the index has no move check)
+INDEX_BLOCKING = frozenset({STALE, NO_BARS, BAD_PRICE, BAR_GAP})
 
 
 def data_checks_on(env: Mapping[str, str] | None = None) -> bool:
     """Whether the report-only data checks run (M12 3.11). Off by default: only KAIBOT_DATA_CHECKS=1 (or true,
     yes, on) turns them on."""
     return (os.environ if env is None else env).get(DATA_CHECKS_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def data_block_checks(env: Mapping[str, str] | None = None) -> frozenset[str]:
+    """The checks whose findings block entries (M12 3.11). Empty (nothing blocks) unless KAIBOT_DATA_CHECKS_BLOCK is
+    set: 1/true/yes/on gives BLOCKING_DEFAULT, a comma list names the checks. Parsed by kaibot.common.switches
+    (M10 1.23): an unknown name is an error (SwitchError), at the engine's start already."""
+    from kaibot.common import switches
+
+    return frozenset(switches.value(DATA_BLOCK_ENV, env))
 
 
 def new_findings(findings: list[Finding], seen: frozenset[tuple[str, str]]) -> list[Finding]:
@@ -81,9 +98,12 @@ class LiveMarket:
         self.day: date | None = None
         self.open_utc: datetime | None = None
         self._last_fetch: datetime | None = None
-        # M12 3.11 (#473): what the data checks found at the last update. Filled only when KAIBOT_DATA_CHECKS is on,
-        # and read by nothing that decides: this is a report, entries are not blocked by it.
+        # M12 3.11 (#473): what the data checks found at the last update. Filled when KAIBOT_DATA_CHECKS or
+        # KAIBOT_DATA_CHECKS_BLOCK is on. Only the checks in `block_checks` block entries (`data_block`); with
+        # KAIBOT_DATA_CHECKS_BLOCK off (the default) nothing that decides reads them.
         self.last_data_findings: list[Finding] = []
+        self.block_checks: frozenset[str] = data_block_checks()
+        self._checks_failed: str | None = None  # the checks raised at the last update (blocking: fail closed)
 
     # ---------- custom tickers (S68) ----------
     def set_custom(self, custom: dict[str, str]) -> bool:
@@ -169,10 +189,10 @@ class LiveMarket:
                 else df.reset_index(drop=True)
             )
         self._last_fetch = now.replace(second=0, microsecond=0) - timedelta(minutes=2)  # re-read late bars
-        if data_checks_on():
+        if data_checks_on() or self.block_checks:
             self._report_data_findings(now)
 
-    # ---------- data checks (M12 3.11, #473): report only ----------
+    # ---------- data checks (M12 3.11, #473): report, and block entries when KAIBOT_DATA_CHECKS_BLOCK is on ----------
     def data_findings(self, now: datetime) -> list[Finding]:
         """Stale, missing, zero or negative, gappy or index-unmatched bars among the scanned symbols and SPY at
         `now` (kaibot.ingest.data_checks). Reads today's bars and changes nothing."""
@@ -181,15 +201,53 @@ class LiveMarket:
         return check_all(self.today_bars, self.symbols, self.spy, self.open_utc, now)
 
     def _report_data_findings(self, now: datetime) -> None:
-        """Log what is newly wrong and keep the list. Never raises: a fault in a check must not cost a tick."""
+        """Log what is newly wrong and keep the list. Never raises: a fault in a check must not cost a tick. With
+        blocking on, a check that fails blocks every intraday entry until it works again (fail closed)."""
         try:
             found = self.data_findings(now)
             seen = frozenset((f.symbol, f.check) for f in self.last_data_findings)
             for f in new_findings(found, seen):
-                log.warning("data check (report only): %s %s: %s", f.symbol, f.check, f.detail)
+                how = "blocks entries" if f.check in self.block_checks else "report only"
+                log.warning("data check (%s): %s %s: %s", how, f.symbol, f.check, f.detail)
             self.last_data_findings = found
-        except Exception:
-            log.exception("data check (report only) failed; nothing is blocked")
+            self._checks_failed = None
+        except Exception as e:
+            self.last_data_findings = []
+            if self.block_checks:
+                self._checks_failed = f"{type(e).__name__}: {e}"[:160]
+                log.exception("data check failed: every intraday entry is blocked until it works again")
+            else:
+                log.exception("data check (report only) failed; nothing is blocked")
+
+    def data_block(self, symbol: str, index: bool = True) -> str | None:
+        """Why an entry in `symbol` is blocked by the data checks now (None: it is not). Only with
+        KAIBOT_DATA_CHECKS_BLOCK on; always None otherwise. A blocking finding on the symbol blocks it; with `index`
+        a blocking finding on the index (SPY: the minute feed itself is stale, empty, bad or gappy) or a check that
+        failed blocks every symbol. A symbol this market does not scan has no bars to judge: None (the multi-day
+        path's buys have their own pre-send quote gate, M9 1.16). Exits, stops and sales never ask."""
+        if not self.block_checks:
+            return None
+        if index and self._checks_failed:
+            return f"data checks failed ({self._checks_failed})"
+        for f in self.last_data_findings:
+            if index and f.symbol == self.spy and f.check in INDEX_BLOCKING and f.check in self.block_checks:
+                return f"market data: index {f.symbol} {f.check} ({f.detail})"
+        for f in self.last_data_findings:
+            if f.symbol == symbol and f.check in self.block_checks:
+                return f"market data: {f.symbol} {f.check} ({f.detail})"
+        return None
+
+    def data_block_status(self) -> dict | None:
+        """For the heartbeat: the blocking findings now (None with blocking off)."""
+        if not self.block_checks:
+            return None
+        hits = [f for f in self.last_data_findings if f.check in self.block_checks]
+        out: dict = {"blocking": sorted(self.block_checks), "blocked": len(hits)}
+        if hits:
+            out["first"] = [f"{f.symbol} {f.check}" for f in hits[:5]]
+        if self._checks_failed:
+            out["failed"] = self._checks_failed
+        return out
 
     def symbol_days(self, s: str, upto_m: int) -> SymbolDays | None:
         """History plus today's bars up to minute `upto_m`, as per-session arrays.

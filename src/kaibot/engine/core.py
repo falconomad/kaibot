@@ -2143,6 +2143,18 @@ class Engine:
             self._daily_step("preopen", lambda: self.daily.preopen())  # 09:30: the review before the send window
         self._daily_step("send", lambda: self.daily.send(d.day))  # #206, #333: near-close orders, 15:50-15:57 ET
 
+    def data_block(self, symbol: str, index: bool = True) -> str | None:
+        """M12 3.11 (#473): why the minute-bar data checks block a new position in `symbol` now (None: they do
+        not). Always None unless KAIBOT_DATA_CHECKS_BLOCK is on (`LiveMarket.data_block`); a market without the
+        checks (a replay's) never blocks. Never blocks a sale, a stop or a flatten: only entries ask."""
+        fn = getattr(self.market, "data_block", None)
+        if fn is None:
+            return None
+        try:
+            why = fn(symbol, index=index)
+        except Exception as e:  # noqa: BLE001 - fail closed: an entry is not opened on data nobody could check
+            return f"data checks failed ({type(e).__name__})"
+        return why if isinstance(why, str) and why else None
 
     def _data_status(self, st: dict, fresh: bool) -> dict:
         """QA-Ops (#484): a failed market-data read is no loop error any more, so the heartbeat says it itself
@@ -3279,6 +3291,10 @@ class Engine:
         }
         if self.experiments:
             st["experiments"] = self.experiments  # #133: the dashboard's experiment label (heartbeat detail)
+        dc = getattr(self.market, "data_block_status", None)
+        dcs = dc() if dc is not None else None
+        if isinstance(dcs, dict):  # M12 3.11: only with KAIBOT_DATA_CHECKS_BLOCK on (absent otherwise: no change)
+            st["data_checks"] = dcs
         self._daily_status(st)
         if self.run is None and d is not None and d.run_id:
             st["run_ended"] = d.run_id  # S74b (#137): today's run has ended; the engine only winds it down

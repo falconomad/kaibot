@@ -13,10 +13,11 @@ findings, nothing is fetched, nothing is written, the clock is an argument.
 `check_symbol` and `check_all` run the four on bar frames shaped like `LiveMarket.today_bars` (columns ts, o, h, l,
 c; ts in UTC, the start of the minute) and return `Finding` rows.
 
-REPORT ONLY. Nothing here blocks an entry: `engine/market.py` calls `check_all` only when KAIBOT_DATA_CHECKS is
-set, and then only logs. The limits below are first guesses, not calibrated: today's bars are IEX, where a quiet
-symbol has no bar in a minute without anything being wrong. They must be set from what the report shows on real
-sessions before any check may block an order (the follow-up to this ticket).
+Nothing here blocks anything by itself: `engine/market.py` calls `check_all` when KAIBOT_DATA_CHECKS is set (it
+then only logs) or when KAIBOT_DATA_CHECKS_BLOCK is set (then the named checks block ENTRIES: `LiveMarket.data_block`,
+docs/ops/failsafe.md). Both are off by default. The limits below are first guesses, not calibrated: today's bars are
+IEX, where a quiet symbol has no bar in a minute without anything being wrong (so `bar_gap` is not in the blocking
+default). Turn the block on only after the report has shown them quiet on real sessions.
 """
 
 from __future__ import annotations

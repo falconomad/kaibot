@@ -29,6 +29,10 @@ venue (FaultyBroker)
 
 market data (FaultyData.quotes_within)
     quote_stale / quote_missing / quote_zero / quote_crossed
+market data (FaultyData.bars, today's IEX minute bars only; M12 3.11, #473; never in DEFAULT_FAULTS)
+    bar_zero                  one bar's prices are zero (a bad print)
+    bar_spike                 one bar's prices are 8 % off, the index unmoved (a bad print the index does not share)
+    bar_stale                 the feed has no new bar of the symbol for a ten-minute block (a stale symbol)
 
 store (FaultyStore)
     write_fail                the write is refused (503): nothing was written
@@ -50,6 +54,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime, timedelta
 
+import pandas as pd
+
 from kaibot.broker.protocol import BrokerBase, BrokerError, OrderRequest
 from kaibot.broker.sim import WORKING, SimBroker
 
@@ -57,6 +63,9 @@ VENUE_FAULTS = ("submit_timeout_accepted", "submit_timeout_lost", "lookup_lag", 
                 "cancel_late", "fill_duplicate", "fill_dropped", "partial_fill", "hold", "rate_limit", "clock_skew",
                 "mark_bad")
 DATA_FAULTS = ("quote_stale", "quote_missing", "quote_zero", "quote_crossed")
+BAR_FAULTS = ("bar_zero", "bar_spike", "bar_stale")
+BAR_STALE_BLOCK_MIN = 10
+BAR_SPIKE = 1.08
 STORE_FAULTS = ("write_fail", "write_timeout", "write_twice", "read_fail")
 
 
@@ -86,6 +95,9 @@ class FaultProfile:
     write_timeout: float = 0.0
     write_twice: float = 0.0
     read_fail: float = 0.0  # per (table, minute)
+    bar_zero: float = 0.0  # per (symbol, bar minute)
+    bar_spike: float = 0.0  # per (symbol, bar minute)
+    bar_stale: float = 0.0  # per (symbol, ten-minute block)
 
     def scaled(self, k: float) -> FaultProfile:
         return replace(self, **{f.name: min(getattr(self, f.name) * k, 1.0) for f in fields(self)})
@@ -410,6 +422,8 @@ class FaultyData:
         self.data, self.dice, self.profile = data, Dice(seed), profile
         self.armed = True
         self.log: list[tuple[str, str, str]] = []
+        # a hand-written scenario's bar faults: (symbol, fault, from, until) in UTC, on bars that start in [from, until)
+        self.bar_faults: list[tuple[str, str, datetime, datetime]] = []
 
     def __getattr__(self, name: str):
         if name.startswith("__"):
@@ -443,6 +457,40 @@ class FaultyData:
 
     def latest_quotes(self, symbols):
         return self._faulty(symbols)
+
+    def _bar_fault(self, fault: str, s: str, ts: datetime, key: str) -> bool:
+        if any(sym == s and f == fault and a <= ts < b for sym, f, a, b in self.bar_faults):
+            return True
+        return self.dice.hit(getattr(self.profile, fault), fault, s, key)
+
+    def bars(self, symbols, start, end, feed="iex", timeframe="1Min", adjustment="split"):
+        """Today's minute bars (feed IEX, 1Min) with the bar faults; anything else is the wrapped client's as it is.
+        A bar is faulted by its own start minute, so a re-read of late bars sees the same fault."""
+        out = self.data.bars(symbols, start, end, feed=feed, timeframe=timeframe, adjustment=adjustment)
+        if not self.armed or feed != "iex" or timeframe != "1Min" or not (
+                self.bar_faults or any(getattr(self.profile, f) for f in BAR_FAULTS)):
+            return out
+        for s in sorted(out):
+            df = out[s]
+            if df is None or not len(df):
+                continue
+            df = df.copy()
+            keep, cols = [], [c for c in ("o", "h", "l", "c", "vw") if c in df.columns]
+            for i, t in enumerate(pd.to_datetime(df["ts"], utc=True)):
+                ts = t.to_pydatetime()
+                block = _minute(ts.replace(minute=ts.minute - ts.minute % BAR_STALE_BLOCK_MIN))
+                if self._bar_fault("bar_stale", s, ts, block):
+                    self.log.append((_minute(ts), "bar_stale", s))
+                    continue
+                keep.append(i)
+                if self._bar_fault("bar_zero", s, ts, _minute(ts)):
+                    self.log.append((_minute(ts), "bar_zero", s))
+                    df.loc[df.index[i], cols] = 0.0
+                elif self._bar_fault("bar_spike", s, ts, _minute(ts)):
+                    self.log.append((_minute(ts), "bar_spike", s))
+                    df.loc[df.index[i], cols] = df.loc[df.index[i], cols] * BAR_SPIKE
+            out[s] = df.iloc[keep].reset_index(drop=True)
+        return out
 
     def quotes_within(self, symbols, deadline_s: float):
         return self._faulty(symbols)
