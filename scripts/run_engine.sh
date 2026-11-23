@@ -6,11 +6,36 @@
 # Trades the release pinned with scripts/release.sh (data/RELEASE, or KAIBOT_RELEASE=<tag|main>); nothing pinned:
 # pulls main as before. Always-on (launchd, alarms, backups): scripts/install_service.sh, docs/ops/always_on.md.
 # Stop with Ctrl-C. Open trades keep their stop-loss at Alpaca either way.
+# With the always-on service running it refuses (but --check): use ./scripts/service.sh restart (#613).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ENV_FILE="${KAIBOT_ENV_FILE:-$HOME/Projects/kaibot-secrets/.env}"
 MODE=auto; ARGS=()
 for a in "$@"; do case "$a" in --docker) MODE=docker;; --python) MODE=python;; *) ARGS+=("$a");; esac; done
+CHECK=0; for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = --check ] && CHECK=1; done
+
+# #613: while the always-on service runs (scripts/install_service.sh), it already runs the engine and the watchdog:
+# refuse a second start by hand, before touching the checkout. The service's own run (scripts/service_run.sh) passes
+# KAIBOT_SERVICE_RUN=<its pid>, the pid in data/live/service.pid. --check never starts an engine: always allowed.
+service_pid() {  # the pid of a live service run (from its pid lock), else nothing
+  local p; p="$(cat data/live/service.pid 2>/dev/null)"
+  [ -n "$p" ] && kill -0 "$p" 2>/dev/null && ps -p "$p" -o command= 2>/dev/null | grep -q service_run && echo "$p"
+  return 0
+}
+service_job_running() {  # launchd (macOS) says the installed com.kaibot.engine job is running
+  command -v launchctl >/dev/null 2>&1 &&
+    launchctl print "gui/$(id -u)/com.kaibot.engine" 2>/dev/null | grep -q 'state = running'
+}
+if [ "$CHECK" = 0 ]; then
+  SVC_PID="$(service_pid)"
+  if [ -z "${KAIBOT_SERVICE_RUN:-}" ] || [ "${KAIBOT_SERVICE_RUN}" != "$SVC_PID" ]; then
+    if [ -n "$SVC_PID" ] || service_job_running; then
+      echo "The always-on service is running${SVC_PID:+ (pid $SVC_PID)}: it already runs the engine and the watchdog." >&2
+      echo "Not starting a second one. Use ./scripts/service.sh restart (or status, logs, stop)." >&2
+      exit 1
+    fi
+  fi
+fi
 
 [ -f "$ENV_FILE" ] || { echo "No .env found at $ENV_FILE (set KAIBOT_ENV_FILE=/path/to/.env)"; exit 1; }
 for k in ALPACA_API_KEY ALPACA_SECRET FRED_API_KEY; do
@@ -33,7 +58,6 @@ mkdir -p data/live
 echo "$CODE_SHA $(date -u +%FT%TZ)" > data/live/running_release
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
-CHECK=0; for a in ${ARGS[@]+"${ARGS[@]}"}; do [ "$a" = --check ] && CHECK=1; done
 # Never two engines at once (one paper account would trade twice): refuse if one already runs on this machine.
 if [ "$CHECK" = 0 ]; then ./scripts/engine_guard.sh || exit 1; fi
 # The watchdog (separate process, own broker client) is left running when the engine stops or crashes:
@@ -69,7 +93,8 @@ else
   WD_PID=data/live/watchdog.pid
   # Restart a watchdog left over from an earlier start, so it runs today's code and settings.
   if [ "$CHECK" = 0 ] && [ -f "$WD_PID" ] && ps -p "$(cat "$WD_PID")" -o command= 2>/dev/null | grep -q kaibot.engine.watchdog; then
-    kill "$(cat "$WD_PID")" 2>/dev/null || true; sleep 1
+    OLD_WD="$(cat "$WD_PID")"; kill "$OLD_WD" 2>/dev/null || true
+    for _ in $(seq 30); do kill -0 "$OLD_WD" 2>/dev/null || break; sleep 1; done  # #613: let it release its lock
   fi
   if [ "$CHECK" = 0 ]; then
     LOG_DIR="${KAIBOT_LOG_DIR:-logs}"; mkdir -p "$LOG_DIR"  # the service sets ~/Library/Logs/kaibot

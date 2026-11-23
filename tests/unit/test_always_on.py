@@ -494,6 +494,89 @@ def test_run_engine_stops_on_a_missing_release(repo):
     assert x.returncode == 1 and not (tmp / "docker.calls").exists()
 
 
+# ---------------------------------------------------------------- #613: no hand start beside the service
+@pytest.fixture
+def fake_service(repo):
+    """A live process that looks like the service's run (`service_run.sh`), named in data/live/service.pid."""
+    r, env, tmp = repo
+    (r / "data/live").mkdir(parents=True)
+    holder = subprocess.Popen(["bash", "-c", "exec -a service_run_fake sleep 30"])
+    (r / "data/live/service.pid").write_text(str(holder.pid))
+    yield r, env, tmp, holder.pid
+    holder.kill()
+    holder.wait()
+
+
+def test_run_engine_refuses_while_the_service_runs(fake_service):
+    """22 Nov 2026 (#613): `run_engine.sh` by hand beside the service started a second engine and watchdog. Now it
+    refuses before it touches the checkout, starts nothing and names the command to use."""
+    r, env, tmp, pid = fake_service
+    head = rev(r)
+    for args in (["--docker"], ["--python"], []):
+        x = sh(["bash", "scripts/run_engine.sh", *args], r, env)
+        assert x.returncode == 1, x.stdout + x.stderr
+        assert f"service is running (pid {pid})" in x.stderr and "./scripts/service.sh restart" in x.stderr
+    assert not (tmp / "docker.calls").exists() and not (r / "data/live/running_release").exists()
+    assert not (r / "data/live/watchdog.pid").exists() and rev(r) == head
+
+
+def test_run_engine_check_is_allowed_beside_the_service(fake_service):
+    r, env, tmp, _ = fake_service
+    sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, env, check=True)
+    calls = (tmp / "docker.calls").read_text().splitlines()
+    assert [c for c in calls if c.endswith("python -m kaibot.engine --check")]
+    assert not [c for c in calls if "kaibot-watchdog" in c]
+
+
+def test_the_services_own_run_is_not_refused(fake_service):
+    r, env, tmp, pid = fake_service
+    sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_SERVICE_RUN": str(pid)}, check=True)
+    assert [c for c in (tmp / "docker.calls").read_text().splitlines() if c.startswith("run --rm --name kaibot-engine")]
+
+
+def test_a_stale_or_borrowed_service_marker_is_refused(fake_service):
+    """KAIBOT_SERVICE_RUN only counts when it names the live service run of the pid lock."""
+    r, env, tmp, pid = fake_service
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_SERVICE_RUN": str(pid + 1)})
+    assert x.returncode == 1 and "./scripts/service.sh restart" in x.stderr and not (tmp / "docker.calls").exists()
+
+
+def test_a_dead_service_pid_does_not_block_a_hand_start(repo):
+    r, env, tmp = repo
+    (r / "data/live").mkdir(parents=True)
+    gone = subprocess.Popen(["bash", "-c", "exec -a service_run_fake true"])
+    gone.wait()
+    (r / "data/live/service.pid").write_text(str(gone.pid))
+    sh(["bash", "scripts/run_engine.sh", "--docker"], r, env, check=True)
+
+
+def test_a_pid_lock_naming_another_program_does_not_block_a_hand_start(repo):
+    """A pid reused after a reboot by something that is not the service run."""
+    r, env, tmp = repo
+    (r / "data/live").mkdir(parents=True)
+    other = subprocess.Popen(["sleep", "30"])
+    try:
+        (r / "data/live/service.pid").write_text(str(other.pid))
+        sh(["bash", "scripts/run_engine.sh", "--docker"], r, env, check=True)
+    finally:
+        other.kill()
+        other.wait()
+
+
+@pytest.mark.parametrize("state, refused", [("running", True), ("not running", False)])
+def test_run_engine_asks_launchd_about_the_installed_service(repo, state, refused):
+    """No pid lock (the service run is between two starts, or was killed): launchd's word decides."""
+    r, env, tmp = repo
+    bin_ = Path(env["PATH"].split(":")[0])
+    (bin_ / "launchctl").write_text(
+        f'#!/bin/sh\n[ "$1 $2" = "print gui/$(id -u)/com.kaibot.engine" ] || exit 113\necho "\tstate = {state}"\n')
+    (bin_ / "launchctl").chmod(0o755)
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, env)
+    assert (x.returncode == 1) is refused, x.stdout + x.stderr
+    assert ("./scripts/service.sh restart" in x.stderr) is refused
+    assert (tmp / "docker.calls").exists() is not refused
+
+
 # ---------------------------------------------------------------- backup and wrapper
 def test_backup_archives_local_files_and_prunes_old_ones(tmp_path):
     r = tmp_path / "kaibot"
@@ -567,6 +650,16 @@ def test_wrapper_pid_lock_refuses_a_second_run(wrapper):
         assert x.returncode == 1 and "another service run" in x.stdout and not (tmp / "ran").exists()
     finally:
         holder.kill()
+
+
+def test_wrapper_tells_run_engine_it_is_the_service(wrapper):
+    """#613: the service's run passes its own pid (the one in its pid lock) so run_engine.sh lets it start."""
+    r, env, tmp = wrapper
+    (r / "scripts/run_engine.sh").write_text(
+        f"#!/bin/bash\necho \"$KAIBOT_SERVICE_RUN $(cat data/live/service.pid)\" >> {tmp}/ran\n")
+    sh(["bash", "scripts/service_run.sh", "engine"], r, env, check=True)
+    seen, lock = (tmp / "ran").read_text().split()
+    assert seen == lock and int(seen) > 0
 
 
 def test_wrapper_rotates_big_logs(wrapper):

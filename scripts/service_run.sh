@@ -289,7 +289,7 @@ run_engine() {
   case "$MODE" in docker) flag=(--docker);; python) flag=(--python);; esac
   say "starting the engine (mode $MODE)"
   set -m  # the engine gets its own process group, so a stop reaches caffeinate, python or docker in one signal
-  ./scripts/run_engine.sh ${flag[@]+"${flag[@]}"} </dev/null &
+  KAIBOT_SERVICE_RUN=$$ ./scripts/run_engine.sh ${flag[@]+"${flag[@]}"} </dev/null &  # #613: the service's own run
   child=$!
   if py="$(python_for_alarms)"; then
     "$py" scripts/healthcheck.py --env-file "$ENV_FILE" watch --pid "$child" \

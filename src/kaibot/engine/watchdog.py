@@ -57,6 +57,7 @@ import logging
 import os
 import signal
 import socket
+import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -102,6 +103,110 @@ def _pid_alive(pid: int) -> bool:
     except OSError:  # it exists and is not ours to signal
         return True
     return True
+
+
+WATCHDOG_LOCK = "watchdog.lock"  # #613: {"pid", "host"} of the one watchdog running for this data folder
+LOCK_WAIT_S = 20.0  # a watchdog being stopped (run_engine.sh restarts it) gets this long to let go before we refuse
+LOCK_SETTLE_S = 1.0  # two watchdogs started at the same moment: the last writer keeps the lock, the other one stops
+
+
+def _command_of(pid: int) -> str | None:
+    """The command line of `pid` ('' when there is no such process), or None when this machine cannot say."""
+    try:
+        return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
+    except FileNotFoundError:
+        if Path("/proc/self").exists():  # Linux: no entry means no process
+            return ""
+    except OSError:
+        pass
+    try:  # macOS: no /proc
+        r = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _is_watchdog(pid: int) -> bool:
+    """A live kaibot watchdog: the process exists and runs `kaibot.engine.watchdog`. A pid reused by anything else
+    (after a reboot, say) is not one, and neither is a process this machine cannot identify: then this watchdog
+    starts, because a missing watchdog is the worse failure."""
+    if pid <= 0 or not _pid_alive(pid):
+        return False
+    cmd = _command_of(pid)
+    return bool(cmd) and "kaibot.engine.watchdog" in cmd
+
+
+class WatchdogLock:
+    """#613: one watchdog per data folder. A pid file (`watchdog.lock`, {"pid", "host"}) plus a liveness check:
+    another watchdog is in the way only while its file is of this host and names a live kaibot watchdog process. A
+    file of another host (the Docker container's) cannot be checked and is left alone. `claim()` writes ours, waits
+    `settle_s` and reads it again (two started at once: the last writer keeps it); `in_the_way()` is asked on every
+    poll, so a watchdog that lost the file to a live one stops."""
+
+    def __init__(self, data_dir: str | Path, host: str | None = None, pid: int | None = None,
+                 is_watchdog: Callable[[int], bool] = _is_watchdog, settle_s: float = LOCK_SETTLE_S,
+                 sleep: Callable[[float], None] = time.sleep) -> None:
+        self.path = Path(data_dir) / WATCHDOG_LOCK
+        self.host = host if host is not None else socket.gethostname()
+        self.pid = pid if pid is not None else os.getpid()
+        self.is_watchdog, self.settle_s, self.sleep = is_watchdog, settle_s, sleep
+
+    def _read(self) -> tuple[int, str] | None:
+        try:
+            b = json.loads(self.path.read_text())
+            return int(b["pid"]), str(b.get("host"))
+        except Exception:  # no file, unreadable: nobody holds it
+            return None
+
+    def _write(self) -> None:
+        tmp = self.path.with_name(f"{WATCHDOG_LOCK}.{self.pid}.tmp")
+        tmp.write_text(json.dumps({"pid": self.pid, "host": self.host, "started": datetime.now(UTC).isoformat()}))
+        tmp.replace(self.path)
+
+    def in_the_way(self) -> int | None:
+        """The pid of another live watchdog of this host holding the file, else None."""
+        held = self._read()
+        if held is None:
+            return None
+        pid, host = held
+        if host != self.host or pid == self.pid:
+            return None
+        return pid if self.is_watchdog(pid) else None
+
+    def claim(self, wait_s: float = LOCK_WAIT_S) -> int | None:
+        """None: this watchdog holds the file and may run. Else the pid of the live watchdog in the way, after
+        `wait_s` for it to go (run_engine.sh stops the previous one just before it starts the next)."""
+        waited = 0.0
+        while (other := self.in_the_way()) is not None:
+            if waited >= wait_s:
+                return other
+            self.sleep(1.0)
+            waited += 1.0
+        try:
+            self._write()
+        except OSError:  # a data folder it cannot write: run unguarded rather than not at all
+            log.exception("watchdog lock not written: running without it")
+            return None
+        self.sleep(self.settle_s)
+        return self.in_the_way()
+
+    def keep(self) -> int | None:
+        """Every poll: the pid of a live watchdog that took the file (this one must stop), else None; a file that
+        went missing or names a dead process is written again."""
+        other = self.in_the_way()
+        if other is None:
+            held = self._read()
+            if held is None or (held[1] == self.host and held[0] != self.pid):
+                try:
+                    self._write()
+                except OSError:
+                    log.exception("watchdog lock not written")
+        return other
+
+    def release(self) -> None:
+        held = self._read()
+        if held is not None and held == (self.pid, self.host):
+            self.path.unlink(missing_ok=True)
 
 
 class LocalEngine:
@@ -478,6 +583,12 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s watchdog %(message)s")
     settings = Settings.from_env(strict_switches=False)  # #588: a bad behaviour switch must not stop the watchdog
+    lock = WatchdogLock(settings.data_dir)
+    other = lock.claim()
+    if other is not None:  # #613: never two watchdogs for one data folder
+        log.error("another kaibot watchdog (pid %d) already watches %s: not starting a second one", other,
+                  settings.data_dir)
+        raise SystemExit(3)
     store = Store(settings.supabase_url, settings.supabase_service_key)
     wd = Watchdog(AlpacaPaper(settings.alpaca_key, settings.alpaca_secret), store, settings.engine_name,
                   book=book_reader(journal_path(settings.data_dir), store), local=LocalEngine(settings.data_dir),
@@ -487,6 +598,10 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
     log.info("watchdog up: watching heartbeat of %r", settings.engine_name)
     while not stop["now"]:
+        other = lock.keep()
+        if other is not None:
+            log.error("another kaibot watchdog (pid %d) took over %s: this one stops", other, settings.data_dir)
+            break
         try:
             st = wd.step()
             if st["state"] not in ("ok", "market_closed", "heartbeat_unreadable_engine_alive"):
@@ -497,6 +612,7 @@ def main() -> None:
             if stop["now"]:
                 break
             time.sleep(1)
+    lock.release()
 
 
 if __name__ == "__main__":

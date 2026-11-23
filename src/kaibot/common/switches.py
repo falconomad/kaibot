@@ -110,6 +110,7 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     *(_s(n, "text", owner, what, scope="script") for n, owner, what in (
         ("KAIBOT_RELEASE", "qa-ops", "the pinned release (scripts/release.sh)"),
         ("KAIBOT_REEXEC", "qa-ops", "run_engine.sh's re-exec guard after a release switch"),
+        ("KAIBOT_SERVICE_RUN", "qa-ops", "#613: the service run's pid, so run_engine.sh lets the service start it"),
         ("KAIBOT_FAKE_ET", "qa-ops", "release.sh's test clock"),
         ("KAIBOT_SERVICE_MODE", "qa-ops", "the always-on service's mode (install_service.sh)"),
         ("KAIBOT_START_HOUR", "qa-ops", "the service's daily start hour"),
