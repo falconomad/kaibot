@@ -1,7 +1,7 @@
 // v4 Home (docs/design/mobile_first_v4.md, "Home" and mockups/v4/home.png): status rows that open sheets, the paper
 // pot, top holdings and a Details section. One thing per screen: the pot; the facts above it stay visible (a halt, the
 // engine being off, the experiment), and their explanations sit one tap away in a bottom sheet.
-import { memo, useState, type ReactNode } from "react";
+import { Suspense, lazy, memo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Overview, Run } from "../lib/api";
 import { type Book, bookChecks, holdingView } from "../lib/book";
@@ -38,6 +38,9 @@ export function StatusRow({ tone, text, title, children, phoneDup = false }: { t
   );
 }
 
+/** N2: the steps after a damaged-journal stop, in the lazy trading-state chunk (shown only inside the row's sheet). */
+const JournalSteps = lazy(() => import("./TradingState").then((m) => ({ default: m.JournalSteps })));
+
 /** True when the phone halt bar shows every item of the risk row (all of them are red kinds). */
 export const allRed = (risk: { items: string[]; red?: string[] }) =>
   risk.items.length > 0 && risk.items.every((t) => risk.red?.includes(t));
@@ -48,7 +51,7 @@ export function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
   run: Run; overview: Overview; risk: { severity: "ok" | "warn" | "breach"; items: string[]; red?: string[] } | undefined;
   engineLive: boolean; book: Book | undefined;
   /** The header chip's state (Shell.engineChip): asleep outside market hours is a calm row, not the warning. */
-  engine?: { asleep: boolean; note: string };
+  engine?: { asleep: boolean; note: string; journal?: boolean };
 }) {
   const active = run.kind === "paper" && ["scheduled", "running", "paused"].includes(run.status);
   const exps = experimentsFrom(engineDetail(overview.heartbeat)).filter((e) => e.experiment);
@@ -70,7 +73,14 @@ export function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
       </StatusRow>,
     );
   }
-  if (active && !engineLive && engine?.asleep)
+  if (active && engine?.journal)
+    rows.push(
+      <StatusRow key="off" tone="breach" phoneDup title="Stopped: its journal is damaged" text={engine.note}>
+        <Suspense fallback={null}><JournalSteps /></Suspense>
+        <p><Link to="/health">Engine health</Link></p>
+      </StatusRow>,
+    );
+  else if (active && !engineLive && engine?.asleep)
     rows.push(
       <StatusRow key="off" tone="neutral" title="The engine is asleep" text={engine.note}>
         <p>The market is closed, so nothing would trade now anyway. The Mac that runs the engine is off on purpose at night: it shuts down

@@ -18,6 +18,7 @@ import { anchorFor, useGlow } from "../lib/glow";
 import { BRAND, NAME } from "../brand/brand";
 import { Logo } from "./Logo";
 import { CREDIT_URL } from "../lib/logos";
+import { type HealthEvent, JOURNAL_REASON, journalDamaged } from "../lib/journalstop";
 
 /** Required attribution for the company logos (AllInvestView's free ticker-logo CDN, stakeholder 18 Nov 2026): one
  *  visible, plain link on every screen that shows logos, phones included. Never hidden, never rel nofollow, sponsored
@@ -114,11 +115,17 @@ export interface EngineChip { dot: string; text: string; sub: string; live: bool
   /** Not live, but on purpose: outside market hours (the Mac's night, lib/engineclock.ts). A calm, neutral state. */
   asleep: boolean;
   /** The Home row's words for an engine that is not live. */
-  note: string }
+  note: string;
+  /** N2 (ui_after_engine_v3): stopped by a damaged journal. Never "asleep": red, needs the owner at the Mac. */
+  journal?: boolean }
 
-export function engineChip(o: Overview | undefined, run: Run): EngineChip {
+/** `events`: kb_health's events when the page has them (a damaged-journal stop is only visible there). */
+export function engineChip(o: Overview | undefined, run: Run, events?: HealthEvent[]): EngineChip {
   const beat = o?.heartbeat.find((h) => h.process === "engine");
   if (run.kind === "replay") return { dot: "var(--ai)", text: "Replay", sub: "past data", live: false, asleep: false, note: "" };
+  if (journalDamaged(events, beat))
+    return { dot: "var(--fail)", text: "Stopped — journal damaged", sub: "needs you at the Mac", live: false, asleep: false,
+      note: `Stopped — ${JOURNAL_REASON}`, journal: true };
   const offline = "Engine offline · no new trades until it is back";
   if (!beat) return { dot: "var(--stale)", text: "Engine offline", sub: "never connected", live: false, asleep: false, note: offline };
   const now = new Date();
@@ -137,6 +144,17 @@ export function engineChip(o: Overview | undefined, run: Run): EngineChip {
 
 function ago(s: number) {
   return s < 120 ? `${Math.round(s)} s ago` : s < 7200 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
+}
+
+/** N1: the trading-state line is a lazy chunk (the first load has no room for it): the engine chip shows until it is
+ *  here, then the line replaces it. Kept once loaded, so later renders (and tests that load it first) are synchronous. */
+type TsMod = typeof import("./TradingState");
+let tsMod: TsMod | null = null;
+export const loadTradingState = () => import("./TradingState").then((m) => (tsMod = m));
+function useTradingState(want: boolean): TsMod | null {
+  const [, loaded] = useState(0);
+  useEffect(() => { if (want && !tsMod) void loadTradingState().then(() => loaded(1)); }, [want]);
+  return tsMod;
 }
 
 /** Paper runs: the pot marked to market (lib/book.ts potNow): the multi-day book's close_equity (kb_book) with the
@@ -181,6 +199,11 @@ export function Shell() {
   // that disagree with the broker), so the phone bar can show them on every page.
   const bookQ = useQuery({ queryKey: ["book", run?.id], queryFn: () => api.book(run!.id), enabled: !!run && run.kind === "paper",
     staleTime: STALE.daily, ...poll(300_000) });
+  // N2 (ui_after_engine_v3): kb_health's events only while the engine is not live, so a damaged-journal stop never
+  // reads "asleep"; the cache is the one Engine and Activity use, so Home reads the same answer.
+  const offline = !!run && run.kind === "paper" && !engineChip(overview.data, run).live;
+  const healthQ = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: offline, retry: false, ...poll(60_000) });
+  const tsm = useTradingState(run?.kind === "paper");
   // Focus order: after a navigation, move focus to the page so keyboard and screen-reader users start at the content.
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
@@ -202,7 +225,9 @@ export function Shell() {
 
   const lv = run.level ? LEVELS[run.level] : null;
   const o = overview.data;
-  const chip = engineChip(o, run);
+  const events = healthQ.data?.events;
+  const chip = engineChip(o, run, events);
+  const ts = run.kind === "paper" && tsm ? tsm.tradingState(run, o, events) : null;
   const last = o?.daily.at(-1);
   const c = o ? curve(run.amount_usd, o.daily) : [];
   const live = run.kind === "paper" ? livePot(run, o, bookQ.data) : null;
@@ -215,7 +240,8 @@ export function Shell() {
   const checks = bookQ.data?.session ? bookChecks(bookQ.data, exitKinds(multiDayFrom(engineDetail(o?.heartbeat)))) : null;
   const red = [...risk.red, ...(run.kind === "paper" ? runEndedRed(run) : []),
     ...(checks?.missing.length ? [`${checks.missing.length} stock${checks.missing.length === 1 ? " has" : "s have"} no safety stop (${checks.missing.join(", ")})`] : []),
-    ...(checks?.reconciled && !checks.reconciled.ok ? [`${NAME}'s books and the broker disagree`] : [])];
+    ...(checks?.reconciled && !checks.reconciled.ok ? [`${NAME}'s books and the broker disagree`] : []),
+    ...(chip.journal ? [chip.note] : [])];
   const dot: EngineDot = risk.severity === "breach" ? "breach" : active && !chip.live && !chip.asleep ? "offline" : null;
 
   return (
@@ -233,12 +259,18 @@ export function Shell() {
             {list.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
           </select>
         )}
-        <Link to="/health" className="chip engine-chip" title={chip.sub}>
-          <span className="sr-only">Engine: </span>
-          <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
-            style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
-          <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
-        </Link>
+        {ts && tsm ? (
+          <Link to="/health" className={`chip engine-chip ts-chip ${ts.tone}`} title={`${tsm.tradingLine(ts)} · ${chip.text} · ${chip.sub}`}>
+            <span className="sr-only">Trading: </span><tsm.TradingLine s={ts} />
+          </Link>
+        ) : (
+          <Link to="/health" className="chip engine-chip" title={chip.sub}>
+            <span className="sr-only">Engine: </span>
+            <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
+              style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
+            <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
+          </Link>
+        )}
       </header>
       {red.length > 0 && <PhoneHaltBar items={red} />}
       {risk.severity !== "ok" && pathname !== "/" && pathname !== "/health" && (

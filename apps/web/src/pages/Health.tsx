@@ -5,6 +5,7 @@ import { Accordion } from "../components/Accordion";
 import { StatusRow, allRed, noDecisionRows } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { engineChip, useRunCtx } from "../components/Shell";
+import { JournalSteps, TradingLine, tradingState } from "../components/TradingState";
 import { api, type Heartbeat } from "../lib/api";
 import { ageS, haltResolved, haltText, scanSummary, sessionTime } from "../lib/derive";
 import { engineVersion } from "../lib/engine";
@@ -19,7 +20,7 @@ import { findExperiment, multiDayFrom } from "../lib/experiment";
 import { NAME } from "../brand/brand";
 import { caEvent } from "../lib/corpactions";
 import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevents";
-import { clearedAt, clearedFrom, clockSkewText, commandEventText, haltClearedText } from "../lib/healthwords";
+import { clearedAt, clearedFrom, clockSkewText, commandEventText, haltClearedText, refusedPayloadText } from "../lib/healthwords";
 import { reconLine, reconcileFrom } from "../lib/reconcile";
 import { ReconcileAccept } from "../components/ReconcileAccept";
 import { EVENT_LABELS } from "../lib/eventNames";
@@ -156,6 +157,9 @@ type HealthData = Awaited<ReturnType<typeof api.health>>;
 export function Health() {
   const q = useQuery({ queryKey: ["health"], queryFn: api.health, ...poll(15_000) });
   const { run, overview, risk } = useRunCtx();
+  // N3: a refused broker answer links to the books sheet (the "Books and broker" check)
+  const [books, setBooks] = useState(false);
+  const openBooks = (ev: { preventDefault(): void }) => { ev.preventDefault(); setBooks(true); };
   if (q.isPending) return <Skeleton />;
   if (q.isError) return <ErrorState what="Engine health" error={q.error} retry={() => q.refetch()} />;
   const h = q.data;
@@ -166,7 +170,8 @@ export function Health() {
   const beatTs = engine?.ts;
   const recovered = h.events.filter((e) => e.type === "watchdog_recovered").map((e) => e.ts);
   const cleared = clearedFrom(h.events); // #483: a halt row stays on record after its halt was cleared
-  const chip = engineChip({ ...(overview ?? {}), heartbeat: h.heartbeat } as never, run);
+  const chip = engineChip({ ...(overview ?? {}), heartbeat: h.heartbeat } as never, run, h.events);
+  const ts = run.kind === "paper" ? tradingState(run, { pending_commands: [], halts_today: [], ...(overview ?? {}), heartbeat: h.heartbeat }, h.events) : null;
   const d = (engine?.detail ?? {}) as Record<string, unknown>;
   const wd = (watchdog?.detail ?? {}) as Record<string, unknown>;
   const wdOk = !!watchdog && ageS(watchdog.ts) <= PROC.watchdog.staleS;
@@ -179,9 +184,17 @@ export function Health() {
     <>
       <h1 className="page-title">Engine</h1>
       <div className="headline">
-        <i className={chip.live ? "ok-dot live-dot" : "ok-dot"} style={{ background: chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
+        <i className={chip.live ? "ok-dot live-dot" : "ok-dot"} style={{ background: chip.journal ? "var(--fail)" : chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
         <span><b>{chip.text}</b><br /><span className="muted">{beatTs ? `Checked in ${ageText(ageS(beatTs))}` : "Has not checked in yet"}</span></span>
       </div>
+      {ts && <p className="trading-state" role={ts.tone === "red" ? "alert" : undefined}><span className="sr-only">Trading: </span><TradingLine s={ts} /></p>}
+      {chip.journal && (
+        <div className="status-rows">
+          <StatusRow tone="breach" title="Stopped: its journal is damaged" text={<>{NAME} stopped because its journal is damaged · needs you at the Mac</>}>
+            <JournalSteps />
+          </StatusRow>
+        </div>
+      )}
       <div className="status-rows">
         {risk && risk.severity !== "ok" && (
           <StatusRow tone={risk.severity === "breach" || risk.red?.length ? "breach" : "warn"} phoneDup={allRed(risk)}
@@ -218,10 +231,15 @@ export function Health() {
           <p>{d.account_clean === false ? `The paper account holds positions or orders ${NAME} didn't place. Entries stay off until it is clean.`
             : `The paper account holds only what ${NAME} placed.`}</p>
         </CheckRow>
-        {recon && (
-          <CheckRow ok={recon.ok} name="Books and broker" line={reconLine(recon)}>
+        {recon ? (
+          <CheckRow id="books" ok={recon.ok} name="Books and broker" line={reconLine(recon)} open={books} setOpen={setBooks}>
             <ReconcileAccept state={recon} engineLive={chip.live} waiting={h.pending_commands.some((c) => c.kind === "accept_reconcile")} />
           </CheckRow>
+        ) : (
+          <Sheet open={books} onClose={() => setBooks(false)} title="Books and broker">
+            <p>{NAME} hasn't reported a check of its books against the broker yet. The engine checks again at its next start
+              and shows any difference here.</p>
+          </Sheet>
         )}
       </ul>
 
@@ -264,7 +282,8 @@ export function Health() {
             <tbody>{!h.events.length && <tr><td colSpan={3} className="muted">Nothing logged yet.</td></tr>}{h.events.map((e, i) => (
               <tr key={i}>
                 <td className="num" title={timeBoth(e.ts)}>{dateEt(e.ts)} {timeEt(e.ts)}</td>
-                <td title={`code: ${e.type}`}>{eventText(e)}</td>
+                <td title={`code: ${e.type}`}>{eventText(e)}
+                  {refusedPayloadText(e.type, e.payload) && <> <a href="#books" onClick={openBooks}>Check the books</a></>}</td>
                 <td className="muted num" style={{ fontSize: 13, maxWidth: 560, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {summary(e.payload)}</td>
               </tr>))}</tbody>
@@ -276,10 +295,12 @@ export function Health() {
 }
 
 /** One safety check: a dot, the name, one line; the detail opens in a sheet. */
-function CheckRow({ ok, name, line, children }: { ok: boolean; name: string; line: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+function CheckRow({ ok, name, line, children, id, ...ctl }: { ok: boolean; name: string; line: string; children: ReactNode; id?: string;
+  open?: boolean; setOpen?: (v: boolean) => void }) {
+  const [own, setOwn] = useState(false);
+  const open = ctl.open ?? own, setOpen = ctl.setOpen ?? setOwn;
   return (
-    <li>
+    <li id={id}>
       <button type="button" className="row" aria-haspopup="dialog" onClick={() => setOpen(true)}>
         <i className="ok-dot" style={{ width: 10, height: 10, borderRadius: 999, flex: "none", background: ok ? "var(--up)" : "var(--down)" }} aria-hidden="true" />
         <span className="row-mid"><b>{name}</b><span className="muted">{line}</span></span>
@@ -338,6 +359,8 @@ function eventText(e: HealthData["events"][number]): string {
   const cmd = commandEventText(e.type, e.payload);
   if (cmd) return cmd;
   if (e.type.startsWith("command_")) return `You asked to ${commandText(e.type.slice("command_".length))}`;
+  const refused = refusedPayloadText(e.type, e.payload);
+  if (refused) return refused;
   const ca = caEvent(e); // #266 corporate actions (kb_health lists them once 0021 is applied)
   if (ca) return ca.head;
   return EV[e.type] ?? e.type.replace(/_/g, " ");
