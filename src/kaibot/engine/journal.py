@@ -171,6 +171,9 @@ class Journal:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.now = now
         self.lock = threading.RLock()
+        # #551: the first damage a read found. A broad handler on the tick path may catch the JournalCorrupt it
+        # raised; the engine raises this one again (Engine._journal_intact). Set only by `_check` / `_checked`
+        self.damage: JournalCorrupt | None = None
         # M10 1.24 (#449): what `entries(kinds=...)` returned for a kind, kept and extended on append, so a tick's
         # many reads of the same small kinds do not scan and parse the file again (`_cached`)
         self._cache: dict[str, _Kind] = {}
@@ -235,10 +238,27 @@ class Journal:
         with self.lock:
             for seq, ts, kind, body, sum_ in self.db.execute("select seq, ts, kind, body, sum from entry "
                                                              "order by seq"):
-                check_entry(prev, seq, ts, kind, body, sum_, self._sum_from)
+                self._check(prev, seq, ts, kind, body, sum_)
                 prev = sum_
                 n += sum_ is not None
         return n
+
+    # #551: every checked read of this journal goes through these two, so a damage is kept (`damage`) whoever
+    # catches the error on the way; a read path that calls `checked`/`check_entry` itself would not keep it
+    # (tests/dst/test_journal_damage_running.py checks that none does)
+    def _check(self, prev, seq, ts, kind, body, sum_) -> None:
+        try:
+            check_entry(prev, seq, ts, kind, body, sum_, self._sum_from)
+        except JournalCorrupt as e:
+            self.damage = self.damage or e
+            raise
+
+    def _checked(self, rows: list) -> list:
+        try:
+            return checked(rows, self._sum_from)
+        except JournalCorrupt as e:
+            self.damage = self.damage or e
+            raise
 
     def check_structure(self) -> None:
         """#543: `pragma integrity_check` over the whole file: every page, and every index against its table (a
@@ -373,7 +393,7 @@ class Journal:
         if self._reads[kind] < 2:
             return None
         rows = self.db.execute(f"select {SUM_COLUMNS} from entry where kind = ? order by seq", (kind,)).fetchall()
-        c = self._cache[kind] = _Kind(checked(rows, self._sum_from))
+        c = self._cache[kind] = _Kind(self._checked(rows))
         return c
 
     def find(self, kind: str, **eq) -> list[dict]:
@@ -394,7 +414,7 @@ class Journal:
         with self.lock:
             rows = self.db.execute(f"select {SUM_COLUMNS} from entry where kind = ? order by seq desc limit 1",
                                    (kind,)).fetchall()
-        got = checked(rows, self._sum_from)
+        got = self._checked(rows)
         return got[0] if got else None
 
     def entries(self, after: int = 0, kinds: tuple[str, ...] | None = None, limit: int | None = None) -> list:
@@ -418,7 +438,7 @@ class Journal:
             q += f" limit {int(limit)}"
         with self.lock:
             rows = self.db.execute(q, args).fetchall()
-        return checked(rows, self._sum_from)
+        return self._checked(rows)
 
     def stream(self, after: int = 0, kinds: tuple[str, ...] | None = None, chunk: int = 2000):
         """`entries`, a chunk at a time: a fold over a year of rows never holds them all at once (M10 1.24)."""

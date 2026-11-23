@@ -14,7 +14,7 @@ test_drills.py fails when a sentence is no longer in its document, so a changed 
                                sleeps past the lease, another engine takes it, and this one stops and writes nothing
     supabase down at start     every start while Supabase is unreachable is refused (exit code 3) before the broker is
                                touched; once it is back the engine starts and the session's buy still goes out
-    journal damaged            at start: exit code 4 before anything else; while running: the engine must stop (#551)
+    journal damaged            at start: exit code 4 before anything else; while running: the engine stops (exit code 4)
 
 A drill returns its checks (what was expected, what happened, pass or fail); scripts/run_drills.py writes the record.
 Nothing here edits or patches the engine: the drills own only the world around it.
@@ -696,7 +696,7 @@ DRILLS: dict[str, tuple] = {
     ], None),
     "journal damaged while running": (journal_damaged_while_running, [
         ("docs/ops/ledger.md", "While running: the engine writes an `engine_error` event with the line, stops"),
-    ], 551),
+    ], None),
 }
 
 
