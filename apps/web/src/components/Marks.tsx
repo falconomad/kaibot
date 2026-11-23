@@ -9,6 +9,7 @@ import { pct, tone } from "../lib/fmt";
 import { type Marks, STALE_MS } from "../lib/marks";
 import { MARKS_MS, marksPollMs, poll } from "../lib/poll";
 import { STREAM_STALE_MS, type Stream, applyStream, mergeStream, PAUSED_MS, pricesPaused } from "../lib/stream";
+import { useVisible } from "../lib/visible";
 import { Tick } from "./Tick";
 
 /** The paper account's prices, asked for every 10 s while the tab is visible AND the market is open (lib/poll.ts
@@ -28,7 +29,10 @@ export function useMarks(run: Run, overview: Overview | undefined): { marks: Mar
   // One try per poll, never a retry: the function already shares the engine's request budget at Alpaca.
   const q = useQuery({ queryKey: ["marks"], queryFn: api.marks, enabled: open, retry: false, staleTime: MARKS_MS / 2, ...poll(open ? MARKS_MS : false) });
   const polled = open ? q.data ?? null : null;
-  const { s: stream, last: streamed, down } = usePriceStream(open);
+  // The stream only draws: while the app is hidden its channel is left (lib/visible.ts), and joined again when shown.
+  // Leaving clears the stream's `down` with it; no pause is counted while hidden anyway (below).
+  const visible = useVisible();
+  const { s: stream, last: streamed, down } = usePriceStream(open && visible);
   const fresh = !!polled && Date.now() - polled.at <= STALE_MS;
   // Streamed prices over the polled ones while the stream is live (lib/stream.applyStream); the poll's alone otherwise.
   const marks = open ? applyStream(polled, stream) : null;
