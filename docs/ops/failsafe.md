@@ -10,7 +10,7 @@ and stop" sell everything.
 | Broker-held **GTC** stops | Alpaca | engine or laptop dead at any time | intraday: bracket legs (stop and 2R target); multi-day: one standalone GTC stop per sleeve, whole shares (S78, `engine/protect.py`). They stay at the broker until filled or replaced |
 | Engine halts | engine | bad state | no new entries for the session (exits keep being managed); `Engine.entry_block()` says why, for the multi-day target path too |
 | Daily stop | engine | a bad day, overnight gaps included | the day's change in mark-to-market equity (start = yesterday's close mark) at the level's stop: entries blocked for the day, intraday sleeves flattened, multi-day sleeves keep their stops |
-| Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)) |
+| Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)). Supabase unreachable at start-up: a start "reducing only" when the last lease recorded in the journal was this machine's own ([Degraded start](#degraded-start-supabase-down-when-the-engine-starts-m10-125-450)) |
 | Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s (one that cannot be read counts only if this machine does not show the engine alive, see below): cancel open Kaibot buys (`kb...`) not yet completely filled, halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
 | Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | with 0019: heartbeat > 3 min old while the market is open: the same plan as the watchdog (cancel entries, verify and re-create stops, alarm); from close minus 4 min to the close: sell the intraday shares only. Before 0019 (0006/0017): `DELETE /v2/positions?cancel_orders=true` at close minus 4 min, i.e. the whole account |
 
@@ -65,6 +65,88 @@ the Mac itself before acting, because three minutes without Supabase used to can
   session like one that never reached the venue. A buy the dead-man cancelled is not recognised yet (its record is
   in Supabase) and stays "order canceled" until the next decision.
 
+## Degraded start: Supabase down when the engine starts (M10 1.25, #450)
+
+Before this, an engine that could not take its lease from Supabase at start-up exited (code 3), and one that could
+not verify its journal there exited too (code 4). A Supabase outage at the moment of a restart therefore meant no
+engine, while the dead-man (which also lives in Supabase) was down as well. Now the engine may come up **reducing
+only**: it manages exits, stops and sales and books fills, and buys nothing, until Supabase answers again.
+
+**When it is allowed** (`engine/__main__.py` `degraded_start`; otherwise exit code 3, as before):
+
+1. The lease could not be *checked* (`LeaseUnavailable`). A lease that another engine holds is never a reason: that
+   is still exit code 3.
+2. The journal's last `lease` record is this install's own (the holder id in `data/live/engine_holder_id`) and says
+   `acquired`, `released` or `degraded_start`. The engine writes a `lease` entry to its local journal whenever the
+   lease changes (`acquired`, `released`, `lost`, `held_by_other`, `degraded_start`, `contradicted`); these entries
+   are never sent to Supabase. No record (a new journal, or one that has not held the lease since this release), a
+   record of another holder (the journal was copied), a record written on another host name (the whole data folder,
+   holder file included, was copied to another machine; QA-Ops on #536), or `lost` / `held_by_other` /
+   `contradicted` (another engine was seen after this one): no degraded start. A host name that changed (macOS can
+   take one from the network) therefore refuses a degraded start too: fail closed, the start is as before (code 3).
+3. The broker shows nothing against it (`other_engine_evidence`): no open order, and no fill since five minutes
+   before the journal's last entry, that carries an engine's client order id (`kb...`, the fail-safes' `kbwd-` and
+   `kbdm-` apart) which this journal does not know. An engine journals every order's client id before it sends it,
+   so such an id was sent by another engine. If the broker cannot be read, that counts as evidence. A refusal here
+   is journalled (`contradicted`) and holds for every later start until a lease is taken from Supabase.
+
+**What "reducing only" is.** `EngineLease.degraded` is set and `lease.ok` is False. That is the state a *running*
+engine is in when its renewals fail, which existed before: `Engine.entry_block()` answers "lease unverified", and
+all three doors to a buy ask it (the multi-day send through `_Gate.allows`, the intraday entry, and the gate's
+kill switch). Exits, protective stops, sales, cancels of its own orders and the booking of fills go on. In
+addition, until the lease is confirmed the engine applies **no command** (one marked applied here would be taken
+from the engine that holds the lease), writes **no heartbeat** (the row belongs to the lease holder, and the
+journal check of other engines reads it) and sends **no row** to Supabase (the replicator and the news poller are
+not started). The watchdog judges it by its journal, as for any engine whose heartbeat cannot be read (M9 1.6).
+Ticket 1.21's trading state is not there yet: the mode uses the existing entry block, and
+`EngineLease.reducing_only` is the hook that state should read ("reducing").
+
+**Becoming active** (`confirm_lease`, once per loop pass, about every 10 s): the lease is taken with the same atomic
+database call as at any start, then the journal's identity is verified (`verify_identity`). Only when both succeed
+is `degraded` cleared; the replicator starts, commands are read and buys are allowed. A session that *opened*
+while Supabase was down could not read the owner's config and refused entries (`config unreadable`, fail closed).
+Since #536 (test-eng's drill) the config is read again at once when the lease is confirmed, and then once a minute
+while it is still unreadable and the lease is ours (`Engine.retry_rules`; the same holds for any Supabase blip at a
+session's open). It is the same config the open would have read (the latest applied one created before the open:
+point-in-time, never a newer one). When it is read, the refusal is lifted (`halt_cleared` event, kind `config`) and
+the session goes on under every other check: the entry hours, the 15:50-15:57 send window (a buy whose window has
+closed waits for the next session), the risk gate and the lease. Custom tickers ("Only these") were not loaded at the
+open and are not traded that session (named in the event). A config that is read and invalid is refused as at the
+open, for the session. While it stays unreadable entries stay off and the confirmation says so: the log line is
+`engine lease confirmed and journal verified, but entries stay OFF: config refused: config unreadable: ...` and the
+`engine_lease_confirmed` event has `entries: false` and `entries_off`. Only `entries: true` is logged as
+`fully active (entries allowed)`.
+
+### Why two engines can never both trade
+
+A is the machine that starts degraded; B is any other engine.
+
+| Interleaving | What happens |
+|---|---|
+| B took the lease while A was down, and has sent orders | A's start finds B's client order ids at the broker (point 3): A does not start. |
+| B took the lease while A was down, and has sent nothing yet | A starts reducing only. A cannot buy: it holds no lease, and the only way to one is the atomic call that B's live lease refuses. When A reaches Supabase it gets `LeaseHeld` and stops (code 3). Until then B is the only buyer. |
+| B starts while A runs degraded | B takes the lease normally (A holds none). Same as above from there. |
+| B ran and stopped (or died and its lease expired) before A reaches Supabase | A's call takes the free lease, but `lease.ok` stays False until the journal is verified. B's heartbeat names another journal: A is a stale standby, gives the lease back and stops (code 4). A bought nothing at any point. |
+| B's lease had only lapsed (B alive but silent for more than 90 s) when A's call takes it | B's next renewal says "not ours" and B stops; A then fails the journal check and stops. No engine, not two: the broker-held stops, the watchdog and the dead-man cover it. The same happens today when a stale engine is started normally. |
+| The whole data folder (journal and holder file) copied to a second machine C | C's degraded start is refused: the journal's last lease record names A's host, not C's (point 2). This does not cover a *normal* start of C with Supabase up: C then has A's holder id, and the lease treats a holder as one engine. That was so before this change (run_engine.md: never copy the holder file to another machine) and is not loosened here. |
+| A and B both degraded (both cut off) | Neither holds a lease, neither buys. |
+| A and B both sell the same position on the same day, same run | The client order id is a pure function of run, rule, symbol, day, purpose and attempt, so both compute the same one. The venue accepts the first and refuses the second (a reused `client_order_id`); the second engine finds the order under its id and follows it. One sale. |
+| A and B sell the same shares under different ids (another purpose, attempt or run) | The venue reserves shares for an open sell order and the paper account has shorting off (the engine refuses multi-day buys while it is on), so the second sale is refused for want of shares, or fills only what is left. The account is never short and never sells more than it held. |
+| A's book is stale and its rule, stop or run-drawdown flatten sells something B meant to keep | Possible, and the one cost of this mode: exposure can only go *down*. B's next reconciliation shows the difference and stops B's buys in that stock until the owner accepts it. |
+| A's command handling, heartbeat or rows interfere with B | They cannot: A reads no command, writes no heartbeat and sends no row until it is confirmed. If A turns out stale its journal is moved aside as for any stale standby (docs/ops/ledger.md, "Taking over"). |
+
+The first sale case rests on Alpaca refusing a reused client order id, which is its documented behaviour and what
+the simulated venue does; `scripts/probe_alpaca_idempotency.py` measures it on the paper account, and its result
+is not in the repo yet. The second case (no shorting, shares reserved by open orders) does not depend on it.
+
+Tested in `tests/test_degraded_start.py` with the simulated store and venue: every refusal above, the confirmation
+paths, two engines with the same book selling the same position in both orders (one sale, never short, only the
+lease holder buys), and the drill: Supabase down at start, the engine comes up reducing only and buys nothing;
+Supabase back, it becomes active and the rule's buy goes out once; a restart inside the session with Supabase back
+at 15:20 (the config read again, the 15:50 buy goes out); Supabase back inside the send window (the buy goes out)
+and after it (nothing is bought that day); the config still unreadable at the confirmation (entries off, said in
+the log and the event, lifted at the first good read); a config read late and invalid (refused for the session).
+
 ## Engine halts (fail closed)
 Each writes a `halt` row and an event; all clear at the next session start, except `three_stops` (the run is paused until you press Resume)
 and `engine_errors`, which also clears after 5 clean ticks in a row (M9 1.7, #432: the halt row stays, a `halt_cleared` event says why).
@@ -79,6 +161,8 @@ Another halt raised while `engine_errors` is set takes the kill over (its own ro
 | `calendar_stale` | today is after `covers_until` in `config/macro_calendar.yaml` |
 | `three_stops` | 3 daily stops within 14 calendar days (~10 sessions): run paused |
 | lease unverified (no halt row) | the engine lease could not be renewed: entries blocked until a renewal succeeds; shown as `lease: unverified` in the heartbeat |
+| degraded start (no halt row) | M10 1.25: the engine started while Supabase was down and is reducing only: entries blocked ("lease unverified"), no command applied, no heartbeat, until the lease is taken and the journal verified; events `engine_degraded_start`, then `engine_lease_confirmed` (`entries: false` and `entries_off` while something, such as an unreadable owner config, still blocks buys) |
+| `config` | the owner's config was rejected at the session's open (entries off for that session), or could not be read (`config unreadable`: asked again once a minute while the lease is ours; lifted with a `halt_cleared` event when read) |
 | account not clean | positions or open orders on symbols the engine doesn't hold (entries blocked until clean) |
 | clock skew (no halt row) | M9 1.10 (#435): the broker clock's timestamp, read at every tick, is more than 5 s from this machine's clock (or the answer has no timestamp): no new order until they agree (the near-close send of the multi-day path, buys and sales alike, and intraday entries); exits, stops, cancels and the flatten go on. One `clock_skew` event when it starts and one (`state: ok`) when it ends; an ERROR log line `clock skew: ...`; `entry_block` says how far and which way. Fix: set the machine's clock (System Settings, Date & Time, "Set time and date automatically") |
 
