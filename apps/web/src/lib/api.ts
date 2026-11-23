@@ -1,11 +1,12 @@
 import { createClient } from "@supabase/supabase-js";
 import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
-import { parseSummary } from "./summary";
+// The stock summary's and the ticker checker's parsers are fetched with the pages that use them (Home's stock sheet,
+// Strategy), not in the first load: a static import here would pull their whole modules into it.
 import { type Marks, parseMarks } from "./marks";
 import { STREAM_EVENT, STREAM_TOPIC, type Stream, parseStream } from "./stream";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
-import { checkerAnswer, type TickerCheck, type TickerLists } from "./tickers";
+import type { TickerCheck, TickerLists } from "./tickers";
 export { coerce };
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
@@ -264,6 +265,7 @@ export const api = {
     const r = await fetch("/api/check-ticker", { method: "POST", signal: AbortSignal.timeout(25_000),
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ symbol }) });
     const type = r.headers.get("content-type");
+    const { checkerAnswer } = await import("./tickers");
     return checkerAnswer(r.status, type, (type ?? "").includes("application/json") ? await r.json().catch(() => null) : null);
   },
   tickerLists: async () => {
@@ -319,12 +321,12 @@ export const api = {
     if (token) {
       const r = await fetch(`/api/summary?symbol=${encodeURIComponent(symbol)}`, { headers: { Authorization: `Bearer ${token}` } });
       const isJson = (r.headers.get("content-type") ?? "").includes("application/json");
-      if (r.ok && isJson) return parseSummary(((await r.json()) as { summary?: unknown })?.summary ?? null);
+      if (r.ok && isJson) return (await import("./summary")).parseSummary(((await r.json()) as { summary?: unknown })?.summary ?? null);
       if (r.status === 401 || r.status === 403) throw Object.assign(new Error("not authorised"), { code: "42501" });
       // no function here (local dev serves index.html; an old deployment 404s): read the stored card instead
       if (isJson && r.status !== 404 && r.status !== 405) throw new Error(`The summary could not be loaded (HTTP ${r.status}).`);
     }
-    return parseSummary(await optional(() => rpc<unknown>("kb_stock_summary", { p_symbol: symbol })));
+    return (await import("./summary")).parseSummary(await optional(() => rpc<unknown>("kb_stock_summary", { p_symbol: symbol })));
   },
   summarySpend: async () => {
     const r = await optional(() => rpc<Record<string, unknown> | null>("kb_summary_spend"));
