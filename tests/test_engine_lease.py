@@ -384,7 +384,7 @@ def test_engine_without_a_lease_object_is_unchanged(tmp_path):
 
 # ---------- the migration and the store agree ----------
 SQL = (ROOT / "migrations" / "0013_engine_lease.sql").read_text()
-SQL_NOW = (ROOT / "migrations" / "0041_engine_lease_machine.sql").read_text()  # #562: the functions as they are now
+SQL_NOW = (ROOT / "migrations" / "0042_engine_lease_epoch.sql").read_text()  # #477: the functions as they are now
 
 
 def test_store_calls_match_the_migration(monkeypatch):
@@ -394,8 +394,8 @@ def test_store_calls_match_the_migration(monkeypatch):
     monkeypatch.setattr(Store, "_call", lambda self, method, path, **kw: sent.append((method, path, kw)) or True)
     s = Store("https://example.supabase.co", "k")
     s.lease_acquire("h", "host", 90, "m")
-    s.lease_renew("h", 90, "m")
-    s.lease_release("h", "m")
+    s.lease_renew("h", 90, "m", 7)
+    s.lease_release("h", "m", 7)
     for method, path, kw in sent:
         fn = path.removeprefix("rpc/")
         assert method == "POST" and path.startswith("rpc/engine_lease_")
@@ -427,14 +427,17 @@ class PgStore:
                              capture_output=True, text=True, check=True).stdout.strip()
         return json.loads(out) if out else None
 
-    def lease_acquire(self, holder, host, ttl_s, machine):
-        return self._q(f"select kaibot.engine_lease_acquire('{holder}', '{host}', {ttl_s}, '{machine}')")
+    def lease_acquire(self, holder, host, ttl_s, machine, fenced=True):
+        f = ", true" if fenced else ""  # 0042: this release's acquire is fenced; an older one does not send it
+        return self._q(f"select kaibot.engine_lease_acquire('{holder}', '{host}', {ttl_s}, '{machine}'{f})")
 
-    def lease_renew(self, holder, ttl_s, machine):
-        return self._q(f"select to_jsonb(kaibot.engine_lease_renew('{holder}', {ttl_s}, '{machine}'))")
+    def lease_renew(self, holder, ttl_s, machine, epoch=None):
+        ep = "null" if epoch is None else int(epoch)
+        return self._q(f"select to_jsonb(kaibot.engine_lease_renew('{holder}', {ttl_s}, '{machine}', {ep}))")
 
-    def lease_release(self, holder, machine):
-        return self._q(f"select to_jsonb(kaibot.engine_lease_release('{holder}', '{machine}'))")
+    def lease_release(self, holder, machine, epoch=None):
+        ep = "null" if epoch is None else int(epoch)
+        return self._q(f"select to_jsonb(kaibot.engine_lease_release('{holder}', '{machine}', {ep}))")
 
     def age(self, seconds):  # pretend time passed: move the row into the past
         self._q(f"update kaibot.engine_lease set expires_at = expires_at - interval '{seconds} s'")

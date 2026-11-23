@@ -764,3 +764,138 @@ def test_the_config_retry_runs_only_while_the_lease_is_ours():
     lease.ok = True
     engine_main.before_tick(eng, lease)
     assert Eng.tried == 1
+
+
+# ======================================================================= the order fence (M13 4.3, #477)
+class FencedVenue(Broker):
+    """The evidence check's broker that also takes orders, behind the engine's order fence (engine/fence.py)."""
+
+    def __init__(self):
+        super().__init__(orders={"stop-1": {"id": "stop-1", "side": "sell"}, "o-buy": {"id": "o-buy", "side": "buy"}})
+        self.sent = []
+
+    def submit(self, order):
+        self.sent.append(("submit", order.side, order.symbol))
+        return {"id": f"o{len(self.sent)}", "client_order_id": order.client_order_id, "status": "accepted"}
+
+    def replace(self, order_id, **kw):
+        self.sent.append(("replace", order_id))
+        return {"id": order_id}
+
+    def cancel(self, order_id):
+        self.sent.append(("cancel", order_id))
+
+    def close_position(self, symbol):
+        self.sent.append(("close", symbol))
+
+
+def _order(side, sym="B"):
+    from kaibot.broker.protocol import OrderRequest
+
+    return OrderRequest(sym, side, 10, "market", "day", f"kb1-x-{sym}-20260803-{side}-1")
+
+
+def fenced_world(tmp_path):
+    from kaibot.engine.fence import FencedBroker
+
+    w = World(tmp_path)
+    w.ran_once()
+    renewals = []
+    real = w.db.lease_renew
+
+    def renew(holder, ttl_s, machine="", epoch=None):
+        renewals.append(epoch)
+        return real(holder, ttl_s, machine, epoch)
+
+    w.db.lease_renew = renew
+    return w, FencedBroker(FencedVenue()), renewals
+
+
+def test_qa_584_degraded_start_fences_reducing_only_then_the_confirmed_tenure_renews_with_its_epoch(tmp_path):
+    """QA-Ops on #584 (16bce47a): after a degraded start the fence never got its tenure, so it stayed off even once
+    fully active. Now it has the lease from the degraded start (before the start-up's first order call): sales,
+    stops, cancels go out, a buy is refused; once `confirm_lease` succeeds every order call renews with the epoch."""
+    from kaibot.engine.fence import Fenced
+
+    w, fb, renewals = fenced_world(tmp_path)
+    w.db.down = True
+    eng = w.engine(broker=fb)
+    seen = []
+    eng.startup = lambda: seen.append(fb.lease)
+    lease, mode = start(w, eng)
+    assert mode == "degraded" and seen == [lease] and fb.lease is lease and lease.epoch is None
+    with pytest.raises(Fenced, match="no new entry"):
+        fb.submit(_order("buy"))
+    fb.submit(_order("sell"))
+    fb.replace("stop-1", stop_price=9.0, qty=5)  # a protective stop's resize: a sale
+    fb.cancel("o-buy")
+    fb.close_position("C")
+    with pytest.raises(Fenced):
+        fb.replace("o-buy", qty=20)  # a buy's quantity change is fenced like an entry
+    assert [c[0] for c in fb.inner.sent] == ["submit", "replace", "cancel", "close"] and renewals == []
+    w.t.s += 300
+    w.db.down = False
+    assert engine_main.before_tick(eng, lease) is True and lease.ok and fb.lease is lease
+    assert lease.epoch is not None and w.db.lease["epoch"] == lease.epoch
+    renewals.clear()
+    fb.submit(_order("buy"))  # fully active: the buy goes out, after a renewal with this tenure's epoch
+    assert renewals == [lease.epoch] and fb.inner.sent[-1] == ("submit", "buy", "B") and lease.ok
+
+
+def test_qa_584_a_stale_token_is_refused_after_a_degraded_start_too(tmp_path):
+    """Never two engines: after the confirmed degraded start, another process of this install takes a new tenure;
+    this engine's next order call carries the older epoch, is refused before the venue and marks the lease lost
+    (the main loop then stops)."""
+    from kaibot.engine.fence import Fenced
+
+    w, fb, renewals = fenced_world(tmp_path)
+    w.db.down = True
+    eng = w.engine(broker=fb)
+    lease, _ = start(w, eng)
+    w.db.down = False
+    assert engine_main.before_tick(eng, lease) is True
+    old = lease.epoch
+    newer = w.lease(w.engine(path=tmp_path / "b.sqlite"))  # the same holder and machine, a new process
+    newer.acquire()
+    assert newer.epoch > old
+    sent = len(fb.inner.sent)
+    for call in (lambda: fb.submit(_order("buy")), lambda: fb.submit(_order("sell")), lambda: fb.cancel("o-buy")):
+        with pytest.raises(Fenced, match="no longer ours"):
+            call()
+    assert len(fb.inner.sent) == sent and lease.lost and renewals[0] == old
+    assert w.db.lease["epoch"] == newer.epoch and newer.renew(force=True)
+    assert w.db.lease_renew(lease.holder, lease.ttl_s, lease.machine, old) is False
+
+
+def test_qa_584_lease_taken_but_journal_unverified_the_fence_renews_and_stays_reducing_only(tmp_path):
+    from kaibot.engine.fence import Fenced
+
+    w, fb, renewals = fenced_world(tmp_path)
+    w.db.down = True
+    eng = w.engine(broker=fb)
+    lease, _ = start(w, eng)
+    w.db.down = False
+    real = w.db.select
+    w.db.select = lambda table, params: (_ for _ in ()).throw(StoreError("GET heartbeat -> 503: unavailable"))
+    assert engine_main.before_tick(eng, lease) is False and lease.held and lease.degraded
+    renewals.clear()
+    with pytest.raises(Fenced, match="no new entry"):
+        fb.submit(_order("buy"))
+    fb.submit(_order("sell"))
+    assert renewals == [lease.epoch, lease.epoch] and fb.inner.sent[-1] == ("submit", "sell", "B")
+    w.db.select = real
+    assert engine_main.before_tick(eng, lease) is True
+    fb.submit(_order("buy"))
+    assert fb.inner.sent[-1] == ("submit", "buy", "B")
+
+
+def test_qa_584_the_normal_start_fences_with_the_epoch_as_before(tmp_path):
+    w, fb, renewals = fenced_world(tmp_path)
+    eng = w.engine(broker=fb)
+    seen = []
+    eng.startup = lambda: seen.append((fb.lease, lease_.epoch if (lease_ := fb.lease) else None))
+    lease, mode = start(w, eng)
+    assert mode == "active" and seen == [(lease, lease.epoch)] and lease.epoch is not None
+    fb.submit(_order("buy"))
+    assert renewals == [lease.epoch] and fb.inner.sent == [("submit", "buy", "B")]
+    assert engine_main.before_tick(eng, lease) is False and fb.lease is lease

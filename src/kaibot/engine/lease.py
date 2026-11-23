@@ -137,6 +137,7 @@ class EngineLease:
         self.last_try: float | None = None
         self.last_error: str | None = None
         self.info: dict = {}
+        self.epoch: int | None = None  # M13 4.3 (#477): this tenure's fencing token (migration 0042)
 
     # ---------- state ----------
     @property
@@ -198,6 +199,8 @@ class EngineLease:
                 "Stop the other engine first; if it is already dead, wait 90 s and start again "
                 "(docs/ops/run_engine.md, 'Engine lease').")
         self.held, self.lost = True, False
+        ep = out.get("epoch")
+        self.epoch = int(ep) if isinstance(ep, (int, float)) and not isinstance(ep, bool) else None
         self._mark_ok()
         self.last_try = self.last_ok
         self.info = out
@@ -274,7 +277,7 @@ class EngineLease:
             return self.ok
         self.last_try = now
         try:
-            ours = self.store.lease_renew(self.holder, self.ttl_s, self.machine)
+            ours = self.store.lease_renew(self.holder, self.ttl_s, self.machine, self.epoch)
         except Exception as e:
             if self.last_error is None:
                 log.error("engine lease renewal failed (%s): no new entries until it works again", str(e)[:200])
@@ -293,6 +296,29 @@ class EngineLease:
         self._mark_ok()
         return True
 
+    # ---------- before every order (M13 4.3, #477) ----------
+    def fence(self, reducing) -> str | None:
+        """May this engine send an order NOW? None: yes; otherwise why not (the order is not sent). Raises LeaseLost
+        when the database says the tenure is no longer ours (the caller stops, as for a failed renewal).
+
+        Every order is preceded by a renewal with this tenure's epoch (one short database call; the engine sends a
+        handful of orders a day). A local "fresh enough" shortcut is not used: the lease model check
+        (tests/test_lease_fencing.py) found that another process of the same install takes a NEW tenure at once, so
+        a proof seconds old can already be stale. A pause past the TTL in which another engine took the lease ends
+        here with LeaseLost and no order. When the renewal cannot reach the database, an entry is refused and an
+        order that only reduces (a sale, a stop, a cancel) goes out, as the fail-safe design wants for a Supabase
+        outage (docs/ops/failsafe.md): the venue bounds it (shares reserved by open sells, no shorting, one client
+        order id). What is left: the milliseconds between this answer and the venue's (the venue knows no token)."""
+        if self.lost:
+            raise LeaseLost("The engine lease is no longer ours: no order is sent.")
+        if self.held:
+            self.renew(force=True)  # raises LeaseLost when the tenure is gone
+            if self.ok:
+                return None
+        if reducing() if callable(reducing) else reducing:
+            return None
+        return "lease not proved (renewal failed): no new entry"
+
     # ---------- clean stop ----------
     def release(self) -> bool:
         """Give the lease back so another machine can start at once. Never raises; never releases a lost lease."""
@@ -301,7 +327,7 @@ class EngineLease:
         self.held = False
         self._record("released")
         try:
-            return self.store.lease_release(self.holder, self.machine) is True
+            return self.store.lease_release(self.holder, self.machine, self.epoch) is True
         except Exception:
             log.exception("engine lease release failed: it expires by itself in %d s", self.ttl_s)
             return False

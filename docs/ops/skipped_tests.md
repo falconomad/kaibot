@@ -5,7 +5,7 @@ What the CI python job skips, and why. Before #256 every run reported 14 skipped
 - A part of the suite that skips more than `KAIBOT_MAX_SKIPPED` (3, the number below) fails (`tests/conftest.py`).
 - A new skip therefore has to be written down here, or made to run.
 
-## Run in CI since #256: 12 tests
+## Run in CI since #256: 13 tests
 
 These are the SQL tests that only needed a scratch Postgres with the migrations applied (`KAIBOT_TEST_PG`). With `KAIBOT_TEST_PG_AUTO=1` (set in CI), `tests/pg_scratch.py` sets one up:
 - it starts a private PostgreSQL 16 cluster in a temp directory, unix socket only. GitHub's ubuntu runner has the binaries.
@@ -22,6 +22,7 @@ So every CI run also checks that **migrations 0001 to the latest apply in order*
 | `tests/test_custom_tickers_sql.py` (9 tests) | `KAIBOT_TEST_PG` unset | runs in CI (migration 0014: ticker checks, saved lists, the accepted-ticker rule) |
 | `tests/test_engine_lease.py::test_real_sql_race_renew_takeover_release` | `KAIBOT_TEST_PG` unset | runs in CI (migration 0013: the engine lease) |
 | `tests/test_engine_lease_machine.py::test_real_sql_a_copied_holder_id_on_another_machine_is_refused_and_cannot_renew` | `KAIBOT_TEST_PG` unset | runs in CI (migration 0041, #562: the lease is bound to holder and machine) |
+| `tests/test_lease_fencing.py::test_real_sql_the_epoch_fences_an_older_process_of_the_same_install` | `KAIBOT_TEST_PG` unset | runs in CI (migration 0042, #477: the lease's fencing token) |
 
 ## Skipped on purpose: 3 tests
 

@@ -18,7 +18,7 @@ class Store:
     def lease_acquire(self, holder, host, ttl, machine):
         return {"acquired": True, "host": host}
 
-    def lease_renew(self, holder, ttl, machine):
+    def lease_renew(self, holder, ttl, machine, epoch=None):
         self.renewals += 1
         return True
 

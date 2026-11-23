@@ -36,6 +36,7 @@ from kaibot.engine.core import CONFIG_UNREADABLE, RULES_RETRY_S, Engine
 from kaibot.engine.corp_guard import RecentActions
 from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
+from kaibot.engine.fence import FencedBroker
 from kaibot.engine.journal import (
     BootstrapError,
     DurabilityError,
@@ -114,7 +115,8 @@ def refuse_unchecked_block(market) -> None:
 def build(settings: Settings) -> Engine:
     cfg = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
     etf_of = {s: etf for etf, syms in cfg["sectors"].items() for s in syms}
-    broker = AlpacaPaper(settings.alpaca_key, settings.alpaca_secret)
+    # M13 4.3 (#477): every order call behind the lease's fence (engine/fence.py; the lease is set at start-up)
+    broker = FencedBroker(AlpacaPaper(settings.alpaca_key, settings.alpaca_secret))
     data = AlpacaData(settings.alpaca_key, settings.alpaca_secret)
     strategies = load_strategies()
     # M10 1.19 (#444): the intraday path (its market, the agent room, the shadow rules) is built only when a level
@@ -394,6 +396,18 @@ def report_news(eng: Engine, poller) -> None:
             eng.store.event(kind, detail, eng._rid())
 
 
+def fence_orders(eng, lease: EngineLease) -> None:
+    """#477: give the engine's order fence (engine/fence.FencedBroker) this lease. Called at a normal start, at a
+    degraded start (before its start-up's first order call) and again when `confirm_lease` succeeds. The fence
+    follows the lease's state: while degraded and not held, a fenced call that only reduces goes out (sales, stops,
+    cancels, as the outage design wants) and an entry is refused; once the lease is taken (with its epoch) every
+    order call first renews with that epoch, and a stale tenure is refused and stops the engine (QA-Ops on #584:
+    after #536's degraded start the fence never got its tenure and stayed off once fully active)."""
+    broker = getattr(eng, "broker", None)
+    if isinstance(broker, FencedBroker):
+        broker.lease = lease
+
+
 def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> str:
     """Take the cross-machine lease, then start the engine. Without the lease nothing else happens: no order
     adoption, no start event, no heartbeat. Exits with code 3 and a message that says what to do. With the lease,
@@ -412,6 +426,7 @@ def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = Fals
         log.error("%s", e)
         raise SystemExit(EXIT_LEASE) from None
     eng.lease = lease
+    fence_orders(eng, lease)  # #477: from here on every order call is fenced by this tenure
     log.info("engine lease taken (host %s, %d s, renewed with every heartbeat)", lease.host, lease.ttl_s)
     if got.get("taken_over"):
         log.warning("took over an expired lease from host %r", got.get("previous_host"))
@@ -505,6 +520,7 @@ def degraded_start(eng: Engine, lease: EngineLease, err: Exception) -> None:
         raise SystemExit(EXIT_LEASE)
     lease.start_degraded(why)
     eng.lease = lease
+    fence_orders(eng, lease)  # #477 (QA-Ops on #584): reducing only at the fence too, before the first order call
     log.warning("The engine lease could not be checked (Supabase unreachable?). Starting REDUCING ONLY: %s and the "
                 "broker shows no other engine's orders. Exits, stops, sales and fills are managed; nothing is "
                 "bought, no command is applied and nothing is sent to Supabase until the lease is confirmed "
@@ -541,6 +557,7 @@ def confirm_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) 
         lease.release()
         raise SystemExit(EXIT_JOURNAL) from None
     lease.activate()
+    fence_orders(eng, lease)  # #477: the confirmed tenure (its epoch) fences every order call from here on
     # #536 (test-eng): a session that began while Supabase was down could not read the owner's config and refused
     # entries; it is read again now. "Entries allowed" is said only when nothing else blocks them either.
     still = retry_rules(eng, force=True)
@@ -723,6 +740,8 @@ def main() -> None:
     eng.on_progress = lambda st: beat(st)  # long steps (history load) report progress
     while not stop["now"]:
         try:
+            if lease.lost:  # #477: the fence (or a renewal) found the tenure gone: nothing more is sent
+                raise LeaseLost("The engine lease is no longer ours (found by the order fence). Stopping.")
             if before_tick(eng, lease, a.adopt_journal):
                 go_active()
             now = datetime.now(UTC)

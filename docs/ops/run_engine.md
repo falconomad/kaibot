@@ -77,6 +77,15 @@ can never renew or release the first engine's lease, and it takes over only afte
 engine then stops, `lease lost`). A machine whose name changed waits out its own old lease once (90 s) unless it
 stopped cleanly. A container recreated by Docker gets a new host name and waits the same way; `docker restart` keeps it.
 
+Since migration `0042_engine_lease_epoch.sql` (M13 4.3, #477) every start is a new **tenure** with a rising number
+(`epoch`, the fencing token). Renewals and the release name it, and **every order the engine sends is preceded by a
+renewal with it** (`engine/fence.py`: submit, replace, cancel and close all go through the fence). An older process of
+the same install (a second start on the same machine, or a laptop that wakes after a restart) is therefore refused at
+its next order or heartbeat and stops (`lease lost`); a paused engine whose lease another engine took sends nothing.
+An engine of an older release (no epoch) keeps its lease only until an engine of this release starts on the install.
+If the renewal cannot reach Supabase, the order is refused when it is a buy, and sent when it only reduces (a sale, a
+stop, a cancel, a protective stop's resize), as for any renewal failure below. Log line of a refused order: `order not sent (...): ...`.
+
 | Moment | What the engine does |
 |---|---|
 | Start-up, before it touches the broker | Takes the lease with one atomic database call. Free, expired or already its own: it starts. |
