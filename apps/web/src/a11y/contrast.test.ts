@@ -57,6 +57,12 @@ describe("text on the new screens meets 4.5:1", () => {
     ["ink", "sea-tint", "a picked theme's or list's name"],
     ["on-sea", "sea", "Add to focus, Save list"],
     ["slate", "surface", "the round add button's plus sign"],
+    ["gain", "gain-tint", "a figure's changed digits on the tick's up wash"],
+    ["loss", "loss-tint", "a figure's changed digits on the tick's down wash"],
+    ["ink", "gain-tint", "a figure's unchanged digits on the up wash"],
+    ["ink", "loss-tint", "a figure's unchanged digits on the down wash"],
+    ["gain", "surface", "the tick's up arrow and digits on a row"],
+    ["loss", "surface", "the tick's down arrow and digits on a row"],
   ];
   for (const [fg, bg, what] of pairs) it(`${what}: --${fg} on --${bg}`, () => {
     expect(r(fg, bg)).toBeGreaterThanOrEqual(4.5);

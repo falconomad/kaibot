@@ -6,7 +6,7 @@
 // value, gain and change today are at the account's price now (lib/marks.ts); otherwise at its close mark, and the
 // line under the count says which.
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { BookChecks } from "../components/Book";
 import { ExperimentSheetBody, engineDetail, experimentsOf } from "../components/Experiment";
@@ -102,6 +102,9 @@ export function Positions() {
   const fresh = live?.live || live?.engine ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
   // for Tick: a change of source (live prices, the engine's row, close marks) replaces a figure without the tint of a move
   const from = live?.live ? "live" : live?.engine ? "engine" : "close";
+  const openRef = useRef(open);
+  openRef.current = open;
+  const openSheet = useCallback((key: string) => { const o = openRef.current.find((x) => openKey(x) === key); if (o) setSheet(o); }, []);
   const invested = open.reduce((a, o) => a + o.value, 0);
   const pot = live?.pot ?? null;
   const expHeld = exps.find((e) => e.experiment && open.some((o) => o.kind === "book" && findExperiment(o.p.rule, [e])));
@@ -136,27 +139,16 @@ export function Positions() {
           {book.isError && <ErrorState compact what="The multi-day book" error={book.error} retry={() => book.refetch()} />}
           {open.length ? (
             <ul className="rows" aria-label="Open now">
-              {open.map((o) => (
-                <li key={`${o.kind}-${o.symbol}-${o.kind === "book" ? o.p.rule : ""}`}>
-                  <button type="button" className="row" aria-haspopup="dialog" onClick={() => setSheet(o)}>
-                    <StockBadge symbol={o.symbol} size={44} />
-                    <span className="row-mid">
-                      <b>{o.symbol}</b>
-                      <span className="muted">{o.kind === "day"
-                        ? `${o.p.qty} shares · in at ${px(o.p.fill)}${o.p.status === "pending" ? " · filling" : ""}`
-                        : `${ruleName(o.p.rule)} · ${o.p.qty} shares${holdingView(o.p, b!).days !== null ? ` · ${holdingView(o.p, b!).days} days` : ""}`}</span>
-                      {o.kind === "book" && (() => {
-                        // one line of tags: the plan's tag joins the experiment's, so it adds no height when it arrives
-                        const t = rowTag(current, o.p.rule, o.symbol), x = findExperiment(o.p.rule, exps);
-                        return x || t ? <span className="row-tags">{x && <span className="row-tag">Experiment: failed the ten-year test</span>}{t && <span className="row-plan">{t}</span>}</span> : null;
-                      })()}
-                    </span>
-                    <span className="row-end num"><b><Tick value={o.value} from={from}>{money(o.value)}</Tick></b>
-                      {o.gain !== null && <Tick value={o.gain} from={from} className={tone(o.gain)}>{signedMoney(o.gain)}</Tick>}
-                      {o.kind === "book" && <DayChange pct={o.day} waiting={mk.waiting} />}</span>
-                  </button>
-                </li>
-              ))}
+              {open.map((o) => {
+                const key = openKey(o);
+                // one line of tags: the plan's tag joins the experiment's, so it adds no height when it arrives
+                const x = o.kind === "book" && !!findExperiment(o.p.rule, exps), t = o.kind === "book" ? rowTag(current, o.p.rule, o.symbol) : null;
+                const sub = o.kind === "day"
+                  ? `${o.p.qty} shares · in at ${px(o.p.fill)}${o.p.status === "pending" ? " · filling" : ""}`
+                  : `${ruleName(o.p.rule)} · ${o.p.qty} shares${holdingView(o.p, b!).days !== null ? ` · ${holdingView(o.p, b!).days} days` : ""}`;
+                return <OpenRow key={key} rowKey={key} symbol={o.symbol} sub={sub} exp={x} tag={t} value={o.value} gain={o.gain}
+                  day={o.kind === "book" ? o.day : undefined} book={o.kind === "book"} waiting={mk.waiting} from={from} onOpen={openSheet} />;
+              })}
             </ul>
           ) : book.isPending && run.kind === "paper" ? <Skeleton /> : book.isError ? null : (
             <Empty>Nothing held right now. Day trades are sold by 15:55; multi-day stocks show here once bought at a close.</Empty>
@@ -212,6 +204,30 @@ function ExperimentInfo({ e }: { e: Experiment }) {
   const v = experimentView(e);
   return <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{v.text}</span>{(v.cap || v.stop) && <span className="muted" style={{ display: "block", fontSize: 14, marginTop: 6 }}>{[v.cap, v.stop].filter(Boolean).join(" · ")}</span>}</p>;
 }
+
+const openKey = (o: Open) => `${o.kind}-${o.symbol}-${o.kind === "book" ? o.p.rule : ""}`;
+
+/** One open row. Memoised on its figures and words (all primitives, and a stable `onOpen`): a streamed price
+ *  re-renders only the rows whose figures moved, never the whole list. */
+const OpenRow = memo(function OpenRow({ rowKey, symbol, sub, exp, tag, value, gain, day, book, waiting, from, onOpen }: { rowKey: string; symbol: string;
+  sub: string; exp: boolean; tag: string | null; value: number; gain: number | null; day?: number | null; book: boolean; waiting: boolean; from: string;
+  onOpen: (key: string) => void }) {
+  return (
+    <li>
+      <button type="button" className="row" aria-haspopup="dialog" onClick={() => onOpen(rowKey)}>
+        <StockBadge symbol={symbol} size={44} />
+        <span className="row-mid">
+          <b>{symbol}</b>
+          <span className="muted">{sub}</span>
+          {book && (exp || tag) ? <span className="row-tags">{exp && <span className="row-tag">Experiment: failed the ten-year test</span>}{tag && <span className="row-plan">{tag}</span>}</span> : null}
+        </span>
+        <span className="row-end num"><b><Tick value={value} from={from}>{money(value)}</Tick></b>
+          {gain !== null && <Tick value={gain} from={from} className={tone(gain)}>{signedMoney(gain)}</Tick>}
+          {book && <DayChange pct={day} waiting={waiting} />}</span>
+      </button>
+    </li>
+  );
+});
 
 function Bar({ stop, now, target }: { stop: number; now: number; target: number }) {
   const at = Math.max(0, Math.min(1, (now - stop) / (target - stop || 1)));
