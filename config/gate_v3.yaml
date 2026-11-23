@@ -149,7 +149,11 @@ statistics:
 #     components: [index_core, ...]       # the construction: an index core, overlays, sleeves
 #     sleeves: {<rule>: <budget %>}        # every return sleeve and its budget; {} for a book without one
 #     v3_declared: true                    # its pre-registration declares the gate v3 fields
-books: {}
+books:
+  index_core:                      # docs/prereg/index_core.md (M11 ticket 2.7, #458)
+    components: [index_core, volatility_cap]
+    sleeves: {}
+    v3_declared: true
 
 # ---------------------------------------------------------------- rule families
 # One family per idea (the published effect a rule leans on). The correction counts FAMILIES: every family listed

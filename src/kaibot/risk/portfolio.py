@@ -43,13 +43,24 @@ mom_12_1_band.md, choices 8-11 and Amendment 3), so that what trades live is wha
   is in `Plan.guarded`. A run that claims the pre-registered sizing asserts `guarded` stays empty.
 - `Instrument.can_open=False`: the research harness refuses an entry without the previous close or a 14-session
   ATR at the fill, after the room was counted; such a name is sized and counted, and gets no order.
+
+Index mode (#458, M11 2.7; docs/prereg/index_core.md, design.md 2.9), ranked fill only, off unless the builder
+names `index_symbol` (no live builder does): the index fund is not sized by the steps above. The list's weight for
+it, w in 0..1, asks for w x `BookLimits.max_index_pct` of equity; the ranked fill first sizes every other name as
+before (with the index holding counted as cash it could sell, and as one name), under `sleeve_budget_pct` when
+given; the index then takes the rest, cut (each cut only smaller) to the exposure cap less everything else, the
+cash plus the index held less the cash reserve, and the gap-scenario room. Whole shares. The held index is kept
+when it is within `band` of that target and fits every cut. It is exempt from the per-name cap, the sector cap
+and volatility sizing; the outer guards check it against `max_index_pct` instead of the per-name cap. A reduction
+of the index is sent right after the sales and before every purchase, so the sleeve's buy at the same print is
+funded by it (the swap); an increase is sent last.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from kaibot.risk.gate import BookLimits, gap_loss_ps, validate_book
 from kaibot.strategies.base import TargetList
@@ -151,6 +162,8 @@ class PortfolioBuilder:
     band: float = 0.10  # no trade within this fraction of the target
     fill: str = "pro_rata"  # pro_rata | ranked (the pre-registered sizing, see the module docstring)
     cash_reserve: float | None = None  # ranked: purchases fit in cash + sales - this x equity (None: no cash limit)
+    index_symbol: str | None = None  # #458: the index fund of an index core (None: no index mode, as before)
+    sleeve_budget_pct: float | None = None  # #458/#459: everything but the index at most this % of equity
 
     def __post_init__(self) -> None:
         validate_book(self.limits)
@@ -160,6 +173,11 @@ class PortfolioBuilder:
             raise ValueError("fill is pro_rata or ranked")
         if self.cash_reserve is not None and (self.fill != "ranked" or not 0 <= self.cash_reserve < 1):
             raise ValueError("cash_reserve is for the ranked fill, in [0, 1)")
+        if self.index_symbol is not None and self.fill != "ranked":
+            raise ValueError("the index mode is for the ranked fill")
+        if self.sleeve_budget_pct is not None and (self.index_symbol is None or not 0 <= self.sleeve_budget_pct
+                                                   <= 100):
+            raise ValueError("sleeve_budget_pct is for the index mode, in [0, 100]")
 
     def build(self, targets: Iterable[TargetList], current: Mapping[Key, float], market: Mapping[str, Instrument],
               *, equity: float, budgets: Mapping[str, float] | None = None, index_up: bool | None = None,
@@ -339,6 +357,25 @@ class PortfolioBuilder:
         px: dict[str, float] = {}
         for (_, sym) in cur:
             px[sym] = _px(market, sym)
+        ix = self.index_symbol
+        ikey: Key | None = None
+        iw, ihold = 0.0, 0
+        if ix is not None:  # #458: the index is taken out of the ranked pass and sized after it
+            owners = [t for t in lists if ix in t.weights]
+            held_ix = [k for k in cur if k[1] == ix]
+            if len(owners) > 1 or len(held_ix) > 1:
+                raise ValueError(f"the index {ix} may be named by one list and held by one sleeve only")
+            if owners:
+                w0 = owners[0].weights[ix]
+                iw = min(max(float(w0), 0.0), 1.0) if isinstance(w0, int | float) and math.isfinite(w0) else 0.0
+                ikey = (owners[0].strategy, ix)
+            elif held_ix and held_ix[0][0] in active:
+                ikey = held_ix[0]  # held and no longer listed: sold
+            if held_ix and ikey is not None and held_ix[0] != ikey:
+                raise ValueError(f"the index {ix} is held by {held_ix[0][0]} and listed by {ikey[0]}")
+            if ikey is not None:
+                ihold = cur.pop(ikey, 0)
+                lists = [replace(t, weights={s: w for s, w in t.weights.items() if s != ix}) for t in lists]
         fixed = {k: q for k, q in cur.items() if k[0] not in active}
         binding: dict[Key, str] = {}
         skipped: list[Skip] = []
@@ -364,14 +401,17 @@ class PortfolioBuilder:
                 room -= other
             return float(min(math.floor(eq * k_eff * listed[key] / inst.atr20), math.floor(room / inst.px)))
 
-        cap = min(lim.max_gross_pct, lim.max_overnight_pct) / 100 * eq
+        book_cap = min(lim.max_gross_pct, lim.max_overnight_pct) / 100 * eq
+        cap = book_cap if self.sleeve_budget_pct is None else min(book_cap, self.sleeve_budget_pct / 100 * eq)
         exposure = sum(q * px[k[1]] for k, q in cur.items() if k not in sell)
         if other_exposure > 0:
             exposure += other_exposure
         names_held = {k[1] for k in cur if k not in sell}
-        names = len(names_held)
+        index_on = ikey is not None and iw > 0 and lim.max_index_pct > 0
+        names = len(names_held) + (1 if index_on else 0)  # the index counts as one name
         money = None if self.cash_reserve is None else (
-            cash + sum(q * px[k[1]] for k, q in cur.items() if k in sell) - self.cash_reserve * eq)
+            cash + sum(q * px[k[1]] for k, q in cur.items() if k in sell) - self.cash_reserve * eq
+            + (ihold * px[ix] if ikey is not None and ihold else 0.0))  # the index held could be sold for it
 
         def fits(p: float) -> float:  # whole shares that fit under the cap and in the cash
             n = math.floor(max(cap - exposure, 0.0) / p)
@@ -484,6 +524,10 @@ class PortfolioBuilder:
                     skipped.append(Skip(*key, "refused", "no new position in this name now"))
                 if q == room and room < n:
                     stopped = why  # cut to the room left, and buying stops there
+        if ikey is not None:
+            sequence = self._index(ikey, iw, ihold, tgt, fixed, sequence, binding, skipped, market, px, eq,
+                                   book_cap - exposure, money, len(sell))
+            cur = {**cur, ikey: ihold} if ihold else cur
         guarded = self._guards(tgt, cur, fixed, sequence, market, px, eq, budgets, active, other_exposure)
         for key, why in guarded.items():
             binding[key] = f"guard:{why}"
@@ -492,6 +536,51 @@ class PortfolioBuilder:
         return Plan(targets=dict(sorted(tgt.items())), orders=orders, binding=dict(sorted(binding.items())),
                     skipped=skipped, exposure=exposures(book, market, other_exposure),
                     sequence=[k for k in sequence if k in orders], guarded=guarded)
+
+    def _index(self, ikey: Key, iw: float, ihold: int, tgt: dict[Key, int], fixed, sequence: list[Key], binding,
+               skipped: list[Skip], market, px, eq: float, room_cap: float, money: float | None,
+               n_sell: int) -> list[Key]:
+        """#458: the index holding after the ranked pass (module docstring, "Index mode"). `room_cap`: the exposure
+        cap less everything else after the plan; `money`: the cash plus the plan's sales plus the index held, less
+        the reserve and the plan's purchases (None: no cash limit). Returns the plan's sequence with the index's
+        order in it: a reduction right after the sales, an increase last."""
+        lim, ix = self.limits, ikey[1]
+        inst = market.get(ix)
+        if inst is None or not _ok(inst.px):  # a held index without a price already failed in _px
+            binding[ikey] = "no_data"
+            skipped.append(Skip(*ikey, "no_data", "price missing"))
+            tgt[ikey] = ihold
+            return sequence
+        p = float(inst.px)
+        px[ix] = p
+        rooms = {"index": iw * lim.max_index_pct / 100 * eq, "index_exposure": room_cap}
+        if money is not None:
+            rooms["index_cash"] = money
+        gap_ps = gap_loss_ps(p, inst.atr20 if _ok(inst.atr20) else None)
+        others = {**fixed, **tgt}
+        gap_rest = sum(q * gap_loss_ps(px[k[1]], market[k[1]].atr20 if _ok(market[k[1]].atr20) else None)
+                       for k, q in others.items() if q > 0 and k != ikey)
+        rooms["index_gap"] = (lim.max_gap_loss_pct / 100 * eq - gap_rest) / gap_ps * p
+        why = min(rooms, key=rooms.get)
+        t = max(int(math.floor(max(rooms[why], 0.0) / p + 1e-9)), 0)
+        if ihold == 0 and t > 0 and not inst.can_open:
+            binding[ikey] = "refused"
+            skipped.append(Skip(*ikey, "refused", "no new position in this name now"))
+            tgt[ikey] = 0
+            return sequence
+        fits = min(v for k, v in rooms.items() if k != "index")
+        keep = (ihold > 0 and t > 0 and abs(ihold - t) <= self.band * t and ihold * p <= fits + 1e-9 * eq
+                and ihold * p <= lim.max_index_pct / 100 * eq + 1e-9 * eq)
+        new = ihold if keep else t
+        tgt[ikey] = new
+        binding[ikey] = "index_band" if keep and new != t else why
+        if new == 0 and ihold == 0 and rooms["index"] > 0:
+            skipped.append(Skip(*ikey, why))
+        if new < ihold:
+            sequence.insert(n_sell, ikey)
+        elif new > ihold:
+            sequence.append(ikey)
+        return sequence
 
     def _guards(self, tgt: dict[Key, int], cur, fixed, sequence, market, px, eq, budgets, active,
                 other_exposure) -> dict[Key, str]:
@@ -509,8 +598,11 @@ class PortfolioBuilder:
                  eq * min(lim.max_gross_pct, 100 - lim.min_cash_pct) / 100 - max(other_exposure, 0.0)),
                 ("overnight", lambda k: True, px.__getitem__, eq * lim.max_overnight_pct / 100),
                 ("gap", lambda k: True, gap_ps, eq * lim.max_gap_loss_pct / 100)]
+        ix = self.index_symbol
         caps += [("name_cap", lambda k, s=s: k[1] == s, px.__getitem__, eq * lim.max_name_pct / 100)
-                 for s in sorted({s for (_, s) in {**fixed, **tgt}})]
+                 for s in sorted({s for (_, s) in {**fixed, **tgt}}) if s != ix]
+        if ix is not None:  # #458: the index fund's own cap replaces the per-name cap for it
+            caps.append(("index_cap", lambda k: k[1] == ix, px.__getitem__, eq * lim.max_index_pct / 100))
         caps += [("budget", lambda k, n=n: k[0] == n, px.__getitem__, eq * float(p) / 100)
                  for n, p in sorted((budgets or {}).items()) if n in active]
         for name, covers, per_share, room in caps:
