@@ -313,3 +313,15 @@ def test_the_index_core_run_refuses_the_hold_out(tmp_path: Path, monkeypatch):
         index_core.main(["--data", str(tmp_path), "--end", "2025-06-30", "--trials", ""])
     assert str(e.value.code).startswith("hold-out: index_core.py would read to 2025-06-30, inside the hold-out")
     assert list(tmp_path.iterdir()) == []
+
+
+def test_the_combined_book_run_refuses_the_hold_out(tmp_path: Path, monkeypatch):
+    """#459: scripts/index_core_book.py never reads 2025 on."""
+    monkeypatch.delenv(ho.ENV_OPENING, raising=False)
+    sys.path.insert(0, str(SCRIPTS))
+    import index_core_book
+
+    with pytest.raises(SystemExit) as e:
+        index_core_book.main(["--data", str(tmp_path), "--end", "2025-03-31", "--trials", ""])
+    assert str(e.value.code).startswith("hold-out: index_core_book.py would read to 2025-03-31")
+    assert list(tmp_path.iterdir()) == []

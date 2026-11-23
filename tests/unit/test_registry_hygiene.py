@@ -134,6 +134,7 @@ ENTRY_POINTS = [  # script, argv (the minimum to reach the guard), whether main 
     ("oneshots", ["--rule", "pullback_uptrend", "--data", "{d}", "--end", "2024-12-31"], False),
     ("trend_momentum_gbm", ["--data", "{d}", "--end", "2024-12-31"], True),  # #474
     ("index_core", ["--data", "{d}", "--end", "2024-12-31"], True),  # #458
+    ("index_core_book", ["--data", "{d}", "--end", "2024-12-31"], True),  # #459
 ]
 
 

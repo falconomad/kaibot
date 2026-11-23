@@ -176,7 +176,7 @@ def test_the_rescore_scores_existing_reports_without_running_anything(data: Path
     assert tm["report"].startswith("core_balanced_trend_momentum_pit_20261113"), "the newest report, not the older"
     assert g["statistics"]["window"] == ["2017-05-01", "2024-12-31"] and g["sessions_in_holdout_dropped"] > 400
     m = {k: v["met"] for k, v in g["marks"].items()}
-    # amendment 1 (decision 16 s.15): a 500-run control in a family of four rules is too small, so S3 (and S5,
+    # amendment 1 (decision 16 s.15): a 500-run control in a family of five rules is too small, so S3 (and S5,
     # which asks S1 to S4 on the point-in-time universe) is unknown, no longer failed
     assert m["s1"] is True and m["s2"] is True and m["s3"] is None and m["s5"] is None
     # the real pre-registration declares five neighbours and this folder holds two: the others are "not supplied"

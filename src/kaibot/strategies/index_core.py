@@ -18,6 +18,7 @@ import dataclasses
 import math
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 import numpy as np
 
@@ -105,6 +106,80 @@ class IndexCore:
         return np.full(n, np.nan), np.zeros(n, dtype=bool), lambda j: None
 
     # no stop, no exits of its own: the target list is the whole rule
+    def on_fill(self, fill: float, risk_ps: float) -> tuple[float, float | None]:
+        return fill - risk_ps, None
+
+    def manage(self, ctx, pos):
+        return None
+
+    def close_out(self, ctx, pos):
+        return None
+
+
+# ---------------------------------------------------------------- #459: a return sleeve on the core, one book
+
+
+@dataclass(frozen=True)
+class OnCore:
+    """The book of docs/prereg/index_core_trend_momentum.md (M11 ticket 2.8): one multi-day "strategy" whose target
+    list is the sleeve's own list (its stocks, best first) plus the core's index weight, decided together on the
+    sleeve's decision day on the same bars. The sleeve sees only its own stocks (`held` without the index fund); the
+    portfolio builder's index mode sizes both in one plan under one account (shared cash, one cap per name), the
+    sleeve's stocks under `budget_pct` of equity at its scaled k (`risk/index_core.sleeve_builder`).
+
+    Research only, like `IndexCore`: not registered, never imported by the live engine."""
+
+    sleeve: Any
+    core: IndexCore = IndexCore()
+    budget_pct: float = 10.0
+    name: str = "index_core_trend_momentum"
+    mode: Mode = Mode.SHADOW
+    holding: Holding = Holding.MULTI_DAY
+    schedule: tuple[When, ...] = (When(Event.AFTER_CLOSE),)
+    owner_filters: bool = False
+    room: bool = False
+    max_names: int = 30
+
+    rule = "index_core_trend_momentum"
+
+    @property
+    def market_filter(self) -> bool:  # the sleeve's (the runner's carry-over reads it)
+        return bool(getattr(self.sleeve, "market_filter", False))
+
+    @property
+    def atr_risk(self) -> float:
+        """The sleeve's k at its budget: one tenth of the rule's at a 10% budget (the rule was tested at 100%)."""
+        return float(self.sleeve.atr_risk) * self.budget_pct / 100
+
+    @property
+    def warmup(self) -> int:
+        return max(int(getattr(self.sleeve, "warmup", 0)), self.core.warmup)
+
+    def with_params(self, **kw) -> OnCore:
+        return dataclasses.replace(self, **kw)
+
+    def on_event(self, ctx: DailyContext) -> TargetList | None:
+        if ctx.event is not Event.AFTER_CLOSE or not self.sleeve.decision_day(ctx.session, ctx.fill_session):
+            return None
+        v = ctx.view
+        ix = v.symbols[v.spy]
+        own = dataclasses.replace(ctx, held={s: q for s, q in ctx.held.items() if s != ix})
+        t = self.sleeve.on_event(own)
+        if t is None:
+            return None
+        closes = v.close(self.core.lookback + 1)[:, v.spy]
+        w, sigma = index_weight(closes, self.core.lookback, self.core.vol_target)
+        if not self.core.cap:
+            w = 1.0
+        weights = {s: x for s, x in t.weights.items() if s != ix}
+        weights[ix] = w  # last: the builder sizes the index after the sleeve
+        return dataclasses.replace(t, strategy=self.name, weights=weights,
+                                   features={**t.features, "index_weight": w, "sigma": sigma,
+                                             "sleeve": self.sleeve.name, "budget_pct": self.budget_pct})
+
+    def signals(self, v):
+        return self.sleeve.signals(v)
+
     def on_fill(self, fill: float, risk_ps: float) -> tuple[float, float | None]:
         return fill - risk_ps, None
 

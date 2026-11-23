@@ -64,6 +64,7 @@ REQUIRED = {
 KINDS = ("selection", "timing")
 TIERS = ("full", "evidence_based")
 EVIDENCE_LABEL = "evidence-based, not proven here"
+EVIDENCE_BUDGET_MAX_PCT = 10.0  # decision 16 s.14: all evidence-based sleeves of a book; config may only lower it
 SCORABLE_CONTROLS = ("candidate_pool", "random_timing")
 
 
@@ -113,6 +114,10 @@ class GateV3:
                 if isinstance(pct, bool) or not isinstance(pct, int | float) or not 0 < float(pct) <= 100:
                     raise ValueError(f"config/gate_v3.yaml: books.{name}.sleeves.{rule}: the budget must be a "
                                      "number in (0, 100] (% of the book)")
+        cap = (cfg.get("evidence_based") or {}).get("book_budget_max_pct", EVIDENCE_BUDGET_MAX_PCT)
+        if isinstance(cap, bool) or not isinstance(cap, int | float) or not 0 <= float(cap) <= EVIDENCE_BUDGET_MAX_PCT:
+            raise ValueError(f"config/gate_v3.yaml: evidence_based.book_budget_max_pct={cap!r} must be a number in "
+                             f"[0, {EVIDENCE_BUDGET_MAX_PCT:g}] (decision 16 section 14; it may only be lowered)")
         if cfg["bootstrap"]["method"] != "stationary":
             raise ValueError("config/gate_v3.yaml: only the stationary bootstrap is implemented")
         return cls(cfg, hashlib.sha256(raw).hexdigest())
@@ -794,7 +799,7 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                             {"neighbours_pass": "b1"},
                             "; ".join(f"{n}: {'no result supplied' if v is None else 'fails B1'}"
                                       for n, v in res.items() if v is not True))
-    cap = float(gate.evidence.get("book_budget_max_pct", 10.0))
+    cap = min(float(gate.evidence.get("book_budget_max_pct", EVIDENCE_BUDGET_MAX_PCT)), EVIDENCE_BUDGET_MAX_PCT)
     limit6 = {"every_return_sleeve": "pass", "or": "evidence_based", "evidence_based_budget_max_pct": cap}
     if sleeves is None:
         marks["b6"] = _mark(None, {}, limit6,
