@@ -1,0 +1,15 @@
+{
+ "rule": "dip_reversal",
+ "preregistered": true,
+ "family": "intraday_dip_reversal",
+ "generated_at": "2026-11-23T12:27:50+00:00",
+ "trials": {
+  "rule": 8286,
+  "registry": 10847,
+  "family": 8632
+ },
+ "tbill": true,
+ "reports_of_this_rule": [],
+ "runs": [],
+ "as_reported": []
+}
