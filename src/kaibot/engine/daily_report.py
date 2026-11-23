@@ -163,13 +163,20 @@ def run_stats(run: DailyRun) -> dict:
 
 
 def control_for(run: DailyRun, market, spec_name: str, pol, runs: int, seed: int, equity0: float,
-                progress=None) -> dict:
-    """Gate B mark 3 on the engine's positions (see the module docstring)."""
+                progress=None, cost_model: str | None = None) -> dict:
+    """Gate B mark 3 on the engine's positions (see the module docstring). #578: the random portfolios are priced
+    with the run's own cost model (`run.cost_model`, or `cost_model` when given), so the comparison is like for
+    like: a v2 run's control is a v2 control. The returned dict says which (`cost_model`)."""
     from kaibot.replay import multiday_core as mc
+    from kaibot.replay.multiday import costs_for
 
+    model = cost_model or getattr(run, "cost_model", "v1")
     rule = SimpleNamespace(opened=run.opened, resized=run.resized)
-    return mc.exposure_matched_control(market, pol, mc.VERSIONS[spec_name], run.book, rule, run.i0, run.i1,
-                                       runs=runs, seed=seed, equity0=equity0, progress=progress)
+    out = mc.exposure_matched_control(market, pol, mc.VERSIONS[spec_name], run.book, rule, run.i0, run.i1,
+                                      runs=runs, seed=seed, equity0=equity0, progress=progress,
+                                      costs=costs_for(model))
+    out["cost_model"] = model
+    return out
 
 
 def label(name: str, fill: str, cost: float, cap: float) -> str:
@@ -184,8 +191,7 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
     """Every run Gate B needs (or the full pre-registered grid), the marks, the benchmarks. Writes the report,
     the daily CSVs and the trial rows when `out_dir` / `trials` are given. `cost_model` (#559): "v2" by default
     (Product, 22 Nov 2026: gate v3's final verdicts use cost model v2), "v1" to reproduce an earlier report. Mark 3's
-    random portfolios are replayed in the research harness at its own cost model (v1, at least 1 bp a side), which
-    is the cheaper of the two for the random portfolios in the large-cap bucket and so never flatters the rule."""
+    random portfolios are replayed in the research harness at the run's own cost model (#578: like for like)."""
     from kaibot.replay import multiday_core as mc
 
     t0 = time.time()
@@ -251,7 +257,7 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
 
         control = control_for(runs[base_label][0], market, version, pol, control_runs, control_seed, equity0, tick)
         base["control"] = {k: control.get(k) for k in ("kind", "runs", "sharpe_percentile", "cagr_percentile",
-                                                       "median", "matched", "committed_exposure_gap_pts")}
+                                                       "median", "matched", "committed_exposure_gap_pts", "cost_model")}
     gate = mc.gate_b(base, by.get(label(version, "base", 2.0, 100.0)), by.get(label(version, "base", 3.0, 100.0)),
                      bench["spy"], control, nb, break_even.get(base_label), spy_tr=bench.get("spy_total_return"),
                      universe="point_in_time" if universe == "pit" else "today")

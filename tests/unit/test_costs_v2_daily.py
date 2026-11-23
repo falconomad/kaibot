@@ -180,3 +180,52 @@ def test_v2_limit_fills_take_the_fill_probability_haircut_and_v1_does_not():
         assert all(float(b.orders[i]["filled_avg_price"]) == 99.0 for i in ids if b.orders[i]["status"] == "filled")
     assert filled["v1"] == 200
     assert 130 <= filled["v2"] <= 185  # about 80%: v2's limit_fill_prob, the same on every run
+
+
+# ---------------------------------------------------------------- #578: like-for-like controls, the stop split
+
+
+def test_the_control_is_priced_with_the_runs_cost_model(runs):
+    from kaibot.replay import multiday_core as mc
+
+    data, r, _ = runs
+    m, _ = dr.load_fixture(dr.FIXTURE)
+    c1 = dr.control_for(r["v1"], m, "trend_momentum", POL, 5, 1, 100_000.0)
+    c2 = dr.control_for(r["v2"], m, "trend_momentum", POL, 5, 1, 100_000.0)
+    assert c1["cost_model"] == "v1" and c2["cost_model"] == "v2" and r["v2"].cost_model == "v2"
+    from types import SimpleNamespace
+
+    rule = SimpleNamespace(opened=r["v1"].opened, resized=r["v1"].resized)
+    legacy = mc.exposure_matched_control(m, POL, mc.VERSIONS["trend_momentum"], r["v1"].book, rule, r["v1"].i0,
+                                         r["v1"].i1, runs=5, seed=1, equity0=100_000.0)
+    assert {k: v for k, v in c1.items() if k != "cost_model"} == legacy  # v1: the same control as before
+    assert c1["sharpe"] != c2["sharpe"]  # the random portfolios pay v2's costs under a v2 run
+    from kaibot.replay.multiday import costs_for
+
+    assert costs_for("v1") is None and costs_for("v2").name == "v2"
+
+
+def test_a_stop_fill_under_v2_is_split_at_its_own_level_and_venue(runs):
+    data, _, _ = runs
+    i0 = int(np.searchsorted(data.dates, data.dates[len(data.dates) // 2]))
+    run = run_daily(S, data, POL, i0, len(data.dates) - 1, protect_atr=1.0, cost_model="v2")
+    stops = [b for k, b in run.ledger.entries if k == "fill" and b.get("reason") == "protective_stop"]
+    assert stops, "a 1-ATR stop must fire on the fixture"
+    m = CostV2()
+    venue = {(o["symbol"], datetime.fromisoformat(o["filled_at"]).astimezone(NY).date().isoformat()): o
+             for o in run.broker.orders.values() if o.get("type") == "stop" and o.get("status") == "filled"}
+    seen = set()
+    for b in stops:
+        j, i = data.col(b["symbol"]), b["i"]
+        o_, level = float(data.raw_o[i, j]), float(venue[b["symbol"], b["session"]]["stop_price"])  # SimBroker's level
+        gapped = o_ <= level if b["side"] == "sell" else o_ >= level
+        assert b["at"] == ("open" if gapped else "continuous"), b
+        assert b["mid"] == pytest.approx(o_ if gapped else level), b  # the stop's level, or the open it gapped
+        seen.add(b["at"])
+        half = m.half_spread(FillCtx(b["mid"], 1.0, 0.0, 1.0, float(data.adv[i - 1, j]), b["at"], raw_mid=b["mid"],
+                                     symbol=b["symbol"]))
+        assert b["mid"] - b["px"] >= half - 1e-9  # the fill paid at least the venue's half-spread below the mid
+    assert seen == {"continuous", "open"}, seen  # the fixture has both: a stop touched and a stop gapped
+    v1 = run_daily(S, data, POL, i0, len(data.dates) - 1, protect_atr=1.0)
+    old = [b for k, b in v1.ledger.entries if k == "fill" and b.get("reason") == "protective_stop"]
+    assert old and all(b["at"] == "open" for b in old)  # v1 keeps its old split, bit for bit

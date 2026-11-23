@@ -59,7 +59,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from kaibot.broker.costs_v2 import CostModel, FillCtx
+from kaibot.broker.costs_v2 import CostModel, FillCtx, get_model
 from kaibot.broker.shadow_costs import sell_fees
 from kaibot.replay.data import N_MIN, SymbolDays, load_symbol
 from kaibot.replay.sim import EXIT_M, buy_px, cost_parts, half_spread, sell_px
@@ -753,3 +753,9 @@ def equal_weight_benchmark(bars: DailyBars, ind: Indicators, cols: np.ndarray, i
         rets.append(end / eq - 1)
         eq = end
     return np.array(rets)
+
+
+def costs_for(name: str) -> CostModel | None:
+    """#578: the harness's cost model by name; None for v1 (the legacy path, so a v1 control is the same code as
+    before)."""
+    return None if name == "v1" else get_model(name)
