@@ -179,15 +179,16 @@ class FakeStore:
             return {"day": b["day"], "month": b["month"], "state": st, "alert": b["month"] >= args["p_monthly_alert"]}
         raise KeyError(fn)
 
-    # --- engine lease (issue #81): mirrors kaibot.engine_lease_* in migrations 0013 and 0041 (#562: holder AND
-    # machine). One row, compare-and-set under a lock (Postgres: the row lock). `lease_now` is the database clock;
+    # --- engine lease (issue #81): mirrors kaibot.engine_lease_* in migrations 0013, 0041 (#562: holder AND
+    # machine) and 0042 (#477: every acquire is a new tenure, `epoch`, which renew and release also match).
+    # One row, compare-and-set under a lock (Postgres: the row lock). `lease_now` is the database clock;
     # `lease_fail = True` makes every lease call raise, like Supabase being unreachable.
     def _lease_guard(self):
         self.lease_calls += 1
         if self.lease_fail:
             raise ConnectionError("supabase unreachable (lease)")
 
-    def lease_acquire(self, holder, host, ttl_s, machine=""):
+    def lease_acquire(self, holder, host, ttl_s, machine="", fenced=True):
         self._lease_guard()
         if not holder or not 30 <= ttl_s <= 600:
             raise ValueError("engine_lease_acquire: holder required, ttl must be 30..600 s")
@@ -201,29 +202,34 @@ class FakeStore:
                         "expires_in_s": int(-(-(cur["expires_at"] - now).total_seconds() // 1)),
                         "reason": "holder_on_other_machine" if cur["holder"] == holder else "held_by_other"}
             started = cur["started_at"] if same and cur["expires_at"] > now else now
+            # migration 0042: a fenced acquire (this release) draws the next epoch; an unfenced one (older) sets 0
+            if fenced:
+                self.lease_epoch = getattr(self, "lease_epoch", 0) + 1
+            epoch = self.lease_epoch if fenced else 0
             self.lease = {"holder": holder, "host": host, "machine": machine, "started_at": started,
-                          "renewed_at": now, "expires_at": now + timedelta(seconds=ttl_s)}
-            return {"acquired": True, "holder": holder, "host": host, "started_at": started,
+                          "renewed_at": now, "expires_at": now + timedelta(seconds=ttl_s), "epoch": epoch}
+            return {"acquired": True, "holder": holder, "host": host, "started_at": started, "epoch": epoch,
                     "expires_at": self.lease["expires_at"], "taken_over": bool(cur) and not same,
                     "previous_holder": None if not cur or same else cur["holder"],
                     "previous_host": None if not cur or same else cur["host"]}
 
-    def _ours(self, holder, machine) -> bool:
-        return bool(self.lease) and self.lease["holder"] == holder and self.lease.get("machine", "") == (machine or "")
+    def _ours(self, holder, machine, epoch=None) -> bool:
+        return (bool(self.lease) and self.lease["holder"] == holder and self.lease.get("machine", "") == (machine or "")
+                and self.lease.get("epoch", 0) == (0 if epoch is None else epoch))  # 0042: coalesce(p_epoch, 0)
 
-    def lease_renew(self, holder, ttl_s, machine=""):
+    def lease_renew(self, holder, ttl_s, machine="", epoch=None):
         self._lease_guard()
         with self._lease_lock:
-            if not self._ours(holder, machine):
+            if not self._ours(holder, machine, epoch):
                 return False
             now = self.lease_now()
             self.lease.update(renewed_at=now, expires_at=now + timedelta(seconds=ttl_s))
             return True
 
-    def lease_release(self, holder, machine=""):
+    def lease_release(self, holder, machine="", epoch=None):
         self._lease_guard()
         with self._lease_lock:
-            if not self._ours(holder, machine):
+            if not self._ours(holder, machine, epoch):
                 return False
             self.lease = None
             return True

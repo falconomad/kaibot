@@ -10,7 +10,7 @@ and stop" sell everything.
 | Broker-held **GTC** stops | Alpaca | engine or laptop dead at any time | intraday: bracket legs (stop and 2R target); multi-day: one standalone GTC stop per sleeve, whole shares (S78, `engine/protect.py`). They stay at the broker until filled or replaced |
 | Engine halts | engine | bad state | no new entries for the session (exits keep being managed); `Engine.entry_block()` says why, for the multi-day target path too |
 | Daily stop | engine | a bad day, overnight gaps included | the day's change in mark-to-market equity (start = yesterday's close mark) at the level's stop: entries blocked for the day, intraday sleeves flattened, multi-day sleeves keep their stops |
-| Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)). Supabase unreachable at start-up: a start "reducing only" when the last lease recorded in the journal was this machine's own ([Degraded start](#degraded-start-supabase-down-when-the-engine-starts-m10-125-450)) |
+| Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)). Supabase unreachable at start-up: a start "reducing only" when the last lease recorded in the journal was this machine's own ([Degraded start](#degraded-start-supabase-down-when-the-engine-starts-m10-125-450)); every order is preceded by a renewal with the tenure's epoch (M13 4.3, #477, `engine/fence.py`), so a paused or older process whose tenure ended sends nothing |
 | Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s (one that cannot be read counts only if this machine does not show the engine alive, see below): cancel open Kaibot buys (`kb...`) not yet completely filled, halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
 | Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | with 0019: heartbeat > 3 min old while the market is open: the same plan as the watchdog (cancel entries, verify and re-create stops, alarm); from close minus 4 min to the close: sell the intraday shares only. Before 0019 (0006/0017): `DELETE /v2/positions?cancel_orders=true` at close minus 4 min, i.e. the whole account |
 
@@ -99,11 +99,14 @@ from the engine that holds the lease), writes **no heartbeat** (the row belongs 
 journal check of other engines reads it) and sends **no row** to Supabase (the replicator and the news poller are
 not started). The watchdog judges it by its journal, as for any engine whose heartbeat cannot be read (M9 1.6).
 Ticket 1.21's trading state is not there yet: the mode uses the existing entry block, and
-`EngineLease.reducing_only` is the hook that state should read ("reducing").
+`EngineLease.reducing_only` is the hook that state should read ("reducing"). The order fence (M13 4.3, #477,
+`engine/fence.py`) has the lease from the degraded start on and follows the same rule: a fenced call that only
+reduces (a sale, a stop or its resize, a cancel, closing a position) goes out, any other is refused before the venue.
 
 **Becoming active** (`confirm_lease`, once per loop pass, about every 10 s): the lease is taken with the same atomic
 database call as at any start, then the journal's identity is verified (`verify_identity`). Only when both succeed
-is `degraded` cleared; the replicator starts, commands are read and buys are allowed. A session that *opened*
+is `degraded` cleared; the replicator starts, commands are read and buys are allowed. From then on every order
+call renews first with the tenure's epoch (#477; QA-Ops on #584 found the fence left without its tenure here). A session that *opened*
 while Supabase was down could not read the owner's config and refused entries (`config unreadable`, fail closed).
 Since #536 (test-eng's drill) the config is read again at once when the lease is confirmed, and then once a minute
 while it is still unreadable and the lease is ours (`Engine.retry_rules`; the same holds for any Supabase blip at a
