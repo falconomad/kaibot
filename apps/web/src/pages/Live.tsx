@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Suspense, lazy, useState } from "react";
+import { Suspense, lazy, memo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Meter, engineChip, useRunCtx } from "../components/Shell";
 import { PotChart, RANGES, type RangeKey, chartCaption, rangesFor } from "../components/PotChart";
@@ -28,7 +28,9 @@ import { potLive } from "../lib/marks";
 // #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
 const MarketNotices = lazy(() => import("../components/Notices"));
 
-function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
+// Memoised with plain values (the formats are fixed functions): a streamed price does not draw the evidence rows again.
+const [F0, F1, F2] = [0, 1, 2].map((d) => (v: number) => v.toFixed(d));
+const Progress = memo(function Progress({ label, now, bar, fmt = F0 }: { label: string; now: number; bar: number; fmt?: (v: number) => string }) {
   return (
     <>
       <span>{label}</span>
@@ -36,7 +38,7 @@ function Progress({ label, now, bar, fmt = (v: number) => v.toFixed(0) }: { labe
       <span className="v">{fmt(now)} / {fmt(bar)}</span>
     </>
   );
-}
+});
 
 export function TradeRows({ rows }: { rows: Trade[] }) {
   const nav = useNavigate();
@@ -222,8 +224,8 @@ export function Live() {
             <h3 id="bar-h">Evidence toward the go-live bar</h3>
             <div className="kv">
               <Progress label="Trades" now={evidence.data?.n ?? s.trades} bar={BAR.trades} />
-              <Progress label="Months" now={s.months} bar={BAR.months} fmt={(v) => v.toFixed(1)} />
-              <Progress label="t-stat (net)" now={evidence.data?.t ?? s.t} bar={BAR.t} fmt={(v) => v.toFixed(2)} />
+              <Progress label="Months" now={s.months} bar={BAR.months} fmt={F1} />
+              <Progress label="t-stat (net)" now={evidence.data?.t ?? s.t} bar={BAR.t} fmt={F2} />
               <span>Max drawdown</span><span /><span className="v">{s.maxDdPct.toFixed(1)}% / {lv?.runDd ?? "—"}%</span>
               <span>Hit rate</span><span /><span className="v">{(s.hitRate * 100).toFixed(1)}%</span>
             </div>

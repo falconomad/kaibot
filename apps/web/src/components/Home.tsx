@@ -43,8 +43,10 @@ export const allRed = (risk: { items: string[]; red?: string[] }) =>
   risk.items.length > 0 && risk.items.every((t) => risk.red?.includes(t));
 
 /** The rows above the pot, in order: a halt or breach, the engine off, a broken safety check of the multi-day book,
- *  then the experiment (or the test phase when no experiment runs). Never hidden; only their explanations are. */
-export function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
+ *  then the experiment (or the test phase when no experiment runs). Never hidden; only their explanations are.
+ *  Memoised: a streamed price re-renders Home about once a second and none of these rows depends on it. Of the engine
+ *  chip only `asleep` and `note` are read here (its `sub` counts seconds). */
+export const HomeStatus = memo(function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
   run: Run; overview: Overview; risk: { severity: "ok" | "warn" | "breach"; items: string[]; red?: string[] } | undefined;
   engineLive: boolean; book: Book | undefined;
   /** The header chip's state (Shell.engineChip): asleep outside market hours is a calm row, not the warning. */
@@ -124,7 +126,8 @@ export function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
       </StatusRow>,
     );
   return rows.length ? <div className="status-rows">{rows}</div> : null;
-}
+}, (a, b) => a.run === b.run && a.overview === b.overview && a.risk === b.risk && a.engineLive === b.engineLive && a.book === b.book
+  && a.engine?.asleep === b.engine?.asleep && a.engine?.note === b.engine?.note);
 
 /** Product, 16 Nov 2026: a skipped decision (the daily prices were not refreshed, or their check failed) is a fact the
  *  stakeholder sees without a tap: the rule's decision for that session did not happen. Home and Engine. */

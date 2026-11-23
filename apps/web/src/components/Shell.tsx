@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useOutletContext } from "react-router-dom";
 import { api, supa, type Overview, type Run } from "../lib/api";
 import { LEVELS, curve } from "../lib/model";
@@ -94,7 +94,8 @@ function TabBar({ dot }: { dot: EngineDot }) {
   );
 }
 
-export function Meter({ label, value, frac }: { label: string; value: string; frac: number }) {
+/** Memoised (plain values): Home re-renders on every streamed price, a limit meter only when its own figures move. */
+export const Meter = memo(function Meter({ label, value, frac }: { label: string; value: string; frac: number }) {
   return (
     <div className="meter">
       <div className="row"><span className="cap">{label}</span><span className="num" style={{ fontSize: 13 }}>{value}</span></div>
@@ -103,7 +104,7 @@ export function Meter({ label, value, frac }: { label: string; value: string; fr
       </div>
     </div>
   );
-}
+});
 
 const STATE_TEXT: Record<string, string> = {
   trading: "Running", managing: "Running · no new entries", market_closed: "Market closed", idle: "Idle",
