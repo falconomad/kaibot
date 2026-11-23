@@ -136,7 +136,7 @@ export function Live() {
   const shown = keep && c.length > keep ? c.slice(-keep - 1) : c;
   const s = stats(run.amount_usd, daily, trades.data.rows);
   const live = liveNow;
-  const chip = engineChip(overview, run);
+  const chip = engineChip(overview, run, healthCache.data?.events);
   const pot = live?.pot ?? c.at(-1)?.pot ?? run.amount_usd;
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];

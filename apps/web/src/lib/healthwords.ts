@@ -61,3 +61,11 @@ export const clearedFrom = (events: { type: string; ts: string; payload: Record<
 /** The first clear of this halt's kind that came after it, or null (also for a time that cannot be read). */
 export const clearedAt = (h: { kind: string; ts: string }, cleared: Cleared[]): string | null =>
   cleared.filter((c) => c.kind === h.kind && Date.parse(c.ts) > Date.parse(h.ts)).map((c) => c.ts).sort()[0] ?? null;
+
+/** N3 (ui_after_engine_v3, #545): `multi_day_error` with `step: broker_payload` is a broker answer (a fill, an order
+ *  view, a dividend) that failed its checks and was not booked. It is not a failed step: orders may have gone out.
+ *  Null for every other event, which keeps its registry label. */
+export function refusedPayloadText(type: string, p: Payload): string | null {
+  if (type !== "multi_day_error" || str(p?.step) !== "broker_payload") return null;
+  return "A broker answer was refused and not booked — orders may have gone out; check the books";
+}

@@ -918,3 +918,14 @@ a.btn.sheet-cta { display: flex; align-items: center; justify-content: center; w
 .chart-scale { display: none; position: absolute; top: 0; right: 0; bottom: 0; width: 11%; pointer-events: none; }
 .chart-scale span { position: absolute; right: 0; transform: translateY(-50%); font-size: var(--t-cap); color: var(--text-2); }
 .chart-days { display: none; justify-content: space-between; margin-top: 4px; font-size: var(--t-cap); color: var(--text-2); }
+
+/* N1 (ui_after_engine_v3): the one trading-state line. The words carry the state; the dot repeats it. */
+.trading-line { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.trading-line .trading-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
+.trading-line .trading-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--slate); }
+.trading-line.red b, .trading-line.red .trading-reason { color: var(--fail); }
+header.top .ts-chip.red::before { border-color: var(--fail); }
+.trading-state { margin: 4px 0 12px; font-size: 15px; }
+.trading-state .trading-line { flex-wrap: wrap; }
+.trading-state .trading-reason { white-space: normal; }
+@media (max-width: 640px) { header.top .ts-chip .trading-reason { max-width: 30vw; } }

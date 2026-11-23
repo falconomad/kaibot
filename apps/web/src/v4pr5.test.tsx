@@ -25,7 +25,8 @@ describe("Engine: status first", () => {
   it("the status, the halt row, four safety checks, today, and Technical details behind one row", () => {
     const html = render(<Health />, { ctx, seeds: [{ key: ["health"], data: health }, { key: ["llm_budget"], data: budget }] });
     const t = text(html);
-    expect(t).toMatch(/^Engine Running Checked in \d+ s ago Engine halted entries for today/);
+    // N1: the trading-state line sits under the headline (this heartbeat has no `lease`: not "Buying", said honestly)
+    expect(t).toMatch(/^Engine Running Checked in \d+ s ago Trading: Holding — lease not reported · reason not reported Engine halted entries for today/);
     expect(t).toContain("Safety checks Engine trading · mac OK Watchdog watching");
     expect(t).toContain("Safety net Armed");
     expect(t).toContain("Paper account Clean");
