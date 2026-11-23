@@ -24,7 +24,7 @@ real watchdog and the real SQL dead-man, and checks the outcome these documents 
 | supabase down at start | Supabase is unreachable from before the first start until 15:20 | every start is refused with exit code 3 and "The engine lease could not be checked"; nothing reaches the broker and no heartbeat is written; once Supabase is back the engine starts and the session's buy still goes out (a late decision) |
 | supabase down at a restart | the engine has run since D0; Supabase goes at 08:55 on D1, the engine is killed at 09:31 | the same as above, counted from the kill. M10 1.25 (#536) changes this outcome (a restart whose last lease was this machine's comes up "reducing only"): that pull request changes the drill with the document |
 | journal damaged at start | one entry of a finished session's journal is changed on disk | the start exits with code 4 naming the entry, every later start the same; the watchdog reads the book from Supabase's ledger rows |
-| journal damaged while running | the session's decision entry is changed on disk at 11:00 while the engine runs | the engine stops and an `engine_error` event reaches Supabase. **Fails today: #551** (the daily path catches the error; the engine keeps running and sends nothing). A strict xfail until it is fixed |
+| journal damaged while running | the session's decision entry is changed on disk at 11:00 while the engine runs | the engine stops and an `engine_error` event reaches Supabase (fixed by #551: the daily path caught the error and the engine kept running) |
 
 Not drilled here, and why: a full disk, a restore from backup, a release roll-back and a key rotation need the
 real machine and the real accounts (the stakeholder's, see below); a clock jump is covered by the deterministic

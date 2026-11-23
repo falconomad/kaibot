@@ -51,7 +51,7 @@ from kaibot.engine.config import ROOT
 from kaibot.engine.dividends import match_payment, open_accruals, receivable
 from kaibot.engine.events import from_fomc_dates, in_blackout
 from kaibot.engine.execution import flatten_at_close
-from kaibot.engine.journal import Journal, canon
+from kaibot.engine.journal import Journal, JournalCorrupt, canon
 from kaibot.engine.ledger import (
     CORPORATE_ACTIVITIES,
     CORPORATE_ACTIVITY_GROUPS,
@@ -685,6 +685,7 @@ class Engine:
         try:
             call()
         except Exception as e:
+            self._journal_intact(cause=e)  # #551: a damaged journal stops the tick here, at once
             why = f"{type(e).__name__}: {e}"[:200]
             seen = getattr(self, "_daily_errors", None)
             if seen is None:
@@ -696,6 +697,7 @@ class Engine:
             log.exception("daily path: %s failed", step)
             self.store.event("multi_day_error", {"step": step, "error": why}, self._rid())
         else:
+            self._journal_intact()  # #551: damage the daily path read and caught itself stops the tick too
             errs = getattr(self, "_daily_errors", None)
             if errs:
                 errs.pop(step, None)  # recovered: the next failure is an event again
@@ -1516,11 +1518,17 @@ class Engine:
 
     # ================= commands =================
     def apply_commands(self) -> None:
+        """#551: a command's failure is written on the command and never stops the engine, except a damaged journal
+        entry read on the way: the command whose handling read it stays pending, no command after it runs, and
+        JournalCorrupt goes to the main loop (`engine_error`, stop, exit code 4)."""
+        self._journal_intact()
         for c in self.store.pending_commands():
+            self._journal_intact()
             kind, pl = c["kind"], c.get("payload") or {}
             try:
                 why = self._command_refusal(kind, pl)
             except Exception as e:  # QA-Ops (#513): a row the check itself cannot read is refused, never applied,
+                self._journal_intact(cause=e)
                 log.exception("command %r: the check failed", kind)  # and never raises out of the tick
                 why = f"the command could not be checked: {str(e)[:120]}"
             if why is not None:  # M9 1.15: refused before anything is done (a bad new_run sells nothing)
@@ -1553,10 +1561,12 @@ class Engine:
                         },
                         returning=False,
                     )
+                self._journal_intact()  # damage a handler caught itself: the command is not applied
                 self.store.mark_applied(c["id"])
                 self._cmd_done(str(c["id"]))
                 self.store.event(f"command_{kind}", pl, self._rid())
-            except Exception as e:  # a bad command must never stop the engine
+            except Exception as e:  # a bad command must never stop the engine (a damaged journal does)
+                self._journal_intact(cause=e)
                 log.exception("command %s failed", kind)
                 self._cmd_done(str(c.get("id")))
                 self.store.mark_applied(c["id"], {**pl, "error": str(e)[:200]})
@@ -1866,6 +1876,26 @@ class Engine:
 
 
     def tick(self) -> dict:
+        """One pass (`_tick`). #551: a damaged journal entry read anywhere in it stops it with JournalCorrupt, also
+        when a broad handler on the way caught the error: the main loop then writes `engine_error`, stops and exits
+        with code 4 (docs/ops/ledger.md, "Checksums"). The book's loop and the intraday path (engine/intraday.py,
+        which overrides `_tick`) both run under this check."""
+        self._journal_intact()
+        try:
+            st = self._tick()
+        except Exception as e:
+            self._journal_intact(cause=e)
+            raise
+        self._journal_intact()
+        return st
+
+    def _journal_intact(self, cause: BaseException | None = None) -> None:
+        """#551: raise the damage the journal found (Journal.damage), if any."""
+        damage = getattr(self.journal, "damage", None)
+        if damage is not None:
+            raise JournalCorrupt(str(damage)) from (cause or damage)
+
+    def _tick(self) -> dict:
         """One pass of the multi-day book's loop (M10 1.19, #444): engine/book_loop.py."""
         return book_loop.tick(self)
 

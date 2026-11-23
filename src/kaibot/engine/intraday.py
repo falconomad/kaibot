@@ -144,7 +144,7 @@ class IntradayEngine(Engine):
         shadow.on_day_end(self)  # S14: counterfactual P&L of today's shadow signals (exceptions contained)
 
     # ================= moved from engine/core.py, unchanged =================
-    def tick(self) -> dict:
+    def _tick(self) -> dict:  # #551: `_tick`, not `tick`: Engine.tick runs it under the journal-damage check
         now = self.now()
         clk = self._broker_clock()  # M9 1.10: the broker's clock, compared with the host's
         if not clk["is_open"]:
