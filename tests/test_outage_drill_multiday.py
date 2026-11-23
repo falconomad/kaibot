@@ -322,9 +322,8 @@ def test_d1_puts_one_emergency_stop_10_pct_below_the_last_price_on_each_position
     got = d.log[D1]
     stops = [o for o in got["new_orders"] if o["type"] == "stop"]
     assert sorted((o["symbol"], float(o["qty"])) for o in stops) == [("B", 40.0), ("C", 30.0)]
-    who = "kbwd-" if d.laptop else "kbdm-"  # the watchdog acts at 90 s, the dead-man after 3 minutes
-    for o in stops:
-        assert o["client_order_id"].startswith(f"{who}{MD}-{o['symbol']}-")
+    for o in stops:  # #585: the watchdog (at 90 s) and the dead-man (after 3 minutes) send the same id
+        assert o["client_order_id"].startswith(f"kbdm-{MD}-{o['symbol']}-") and o["client_order_id"].endswith(".g0")
         # 10% below the last price the fail-safe saw, in the session's first minutes
         first = [_price(d, o["symbol"], D1, m) for m in range(0, 8)]
         assert min(first) * 0.9 - 0.02 <= float(o["stop_price"]) <= max(first) * 0.9 + 0.01, o

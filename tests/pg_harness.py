@@ -2,8 +2,9 @@
 
 `DeadmanDb` starts a private cluster in a temp directory (unix socket only), creates stand-ins for what Supabase
 provides (pg_net's `net` schema, Vault's `vault.decrypted_secrets`, pg_cron's `cron` schema, the kaibot tables the
-dead-man reads) and applies migrations 0017, 0019, 0022 and 0030 as files. `pump(broker)` plays Alpaca for pg_net:
-it answers the GETs from a `SimBroker` and carries out the POSTs and DELETEs on it, as the paper venue would.
+dead-man reads) and applies migrations 0017, 0019, 0022, 0030 and 0044 as files. `pump(broker)` plays Alpaca for pg_net:
+it answers the GETs from a `SimBroker` and carries out the POSTs and DELETEs on it, as the paper venue would (a
+POST under a client id already in use is answered 422 "client_order_id must be unique", as Alpaca does, #585).
 
 Skipped when no Postgres binaries are installed (GitHub's ubuntu runners have PostgreSQL 16 preinstalled).
 """
@@ -80,7 +81,8 @@ def _free_port() -> int:
 
 
 class DeadmanDb:
-    def __init__(self, tmp: Path) -> None:
+    def __init__(self, tmp: Path, upto: int | None = None) -> None:
+        """`upto=30` stops after 0030 (the md5 guard and the before/after drills of #585)."""
         self.bin = _bindir()
         if self.bin is None or shutil.which("psql") is None and not (self.bin / "psql").exists():
             pytest.skip("no PostgreSQL binaries")
@@ -105,6 +107,8 @@ class DeadmanDb:
         self.file(ROOT / "migrations" / "0019_deadman_overnight.sql")
         self.file(ROOT / "migrations" / "0022_deadman_exdate.sql")  # #291: the ex-date rules
         self.file(ROOT / "migrations" / "0030_deadman_planned_row_not_gone.sql")  # #344: planned rows are not gone
+        if upto is None or upto >= 44:
+            self.file(ROOT / "migrations" / "0044_deadman_idempotency_key.sql")  # #585: one id per decision
         self.sql("insert into vault.decrypted_secrets values ('kaibot_alpaca_paper_key_id', 'k'), "
                  "('kaibot_alpaca_paper_secret', 's')")
 
@@ -156,9 +160,12 @@ class DeadmanDb:
         r = self.one("select result from kaibot.deadman_pass where state = 'done' order by id desc limit 1")
         return json.loads(r) if r else {}
 
-    def pump(self, broker, prices: dict | None = None) -> list[tuple[str, str]]:
+    def pump(self, broker, prices: dict | None = None, lose=lambda call: False,
+             hide=lambda order: False) -> list[tuple[str, str]]:
         """Alpaca for pg_net: answer the reads from `broker` (with its network up: Supabase has its own) and
-        carry out the writes. Returns the writes done, as (method, url)."""
+        carry out the writes. Returns the writes done, as (method, url). `lose(call)` true: the call is carried out
+        but its answer never reaches pg_net (#585, a lost answer). `hide(order)` true: the open-orders read does not
+        list that order (a late read)."""
         down, broker.down = broker.down, False
         done = []
         try:
@@ -170,7 +177,13 @@ class DeadmanDb:
                     if c["method"] == "GET" and path == "/v2/positions":
                         content = positions_json(broker, prices)
                     elif c["method"] == "GET" and path == "/v2/orders":
-                        content = orders_json(broker)
+                        content = [o for o in orders_json(broker) if not hide(o)]
+                    elif c["method"] == "GET" and path == "/v2/orders:by_client_order_id":
+                        o = broker.order_by_client_id((c["params"] or {}).get("client_order_id"))
+                        if o is None:
+                            status = 404
+                        else:
+                            content = json.loads(json.dumps(o, default=str))
                     elif c["method"] == "DELETE" and path == "/v2/positions":
                         for s in list(broker.positions()):
                             broker.close_position(s)
@@ -180,6 +193,8 @@ class DeadmanDb:
                         broker.cancel(path.rsplit("/", 1)[1])
                     elif c["method"] == "POST" and path == "/v2/orders":
                         b = c["body"]
+                        if b.get("client_order_id") and broker.order_by_client_id(b["client_order_id"]):
+                            raise BrokerError(422, '{"code":40010001,"message":"client_order_id must be unique"}')
                         broker.submit(OrderRequest(b["symbol"], b["side"], float(b["qty"]), b["type"],
                                                    b["time_in_force"], b.get("client_order_id"),
                                                    stop_price=float(b["stop_price"]) if b.get("stop_price") else None))
@@ -187,8 +202,13 @@ class DeadmanDb:
                         status = 404
                 except BrokerError as e:
                     status = e.status or 500
+                    if status == 422 and "client_order_id" in e.body:
+                        content = json.loads(e.body)  # Alpaca's answer to a duplicate id, as pg_net stores it
                 if c["method"] != "GET":
                     done.append((c["method"], path))
+                if lose(c):
+                    self.sql(f"update net.calls set done = true where id = {c['id']}")
+                    continue
                 body = "null" if content is None else json.dumps(content).replace("'", "''")
                 self.sql(f"insert into net._http_response (id, status_code, content) values ({c['id']}, {status}, "
                          f"'{body}'); update net.calls set done = true where id = {c['id']}")

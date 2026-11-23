@@ -284,7 +284,7 @@ def test_195_review_two_sleeves_one_with_an_adopted_fail_safe_stop_share_the_pos
     _failsafe(b, clock, "trend", 20)  # the watchdog re-created trend's stop while the engine was down
     did = ps.ensure({KA: 30.0, KB: 20.0}, PX, clock(), DAY)
     (rb,) = ps.stops_of(KB)
-    assert rb.coid.startswith("kbwd-") and any(d.startswith("adopt ") for d in did)
+    assert rb.coid.startswith("kbdm-") and any(d.startswith("adopt ") for d in did)
     assert (qty_of(ps, KA), qty_of(ps, KB)) == (30, 20) and resting(om) == 50
     b.pos["A"]["qty"] = 55  # rule bought 5 more, the caller's sleeve already says 40
     ps.ensure({KA: 40.0, KB: 20.0}, PX, clock(), DAY)
@@ -316,7 +316,7 @@ def test_197_relay_a_partly_filled_fail_safe_stop_is_sized_by_what_still_rests()
     b.pos["A"]["qty"] = 20
     ps.ensure({k: 20.0}, {k: 90.0}, clock(), DAY)
     (r,) = ps.stops_of(k)
-    assert r.coid.startswith("kbwd-") and (r.qty, r.cum) == (30, 10)
+    assert r.coid.startswith("kbdm-") and (r.qty, r.cum) == (30, 10)
     r.booked = r.cum  # the 10-share fill is booked to the sleeve
     sent = []
     real = b.replace

@@ -214,8 +214,24 @@ accounts and checks that they agree.
   (a fraction is never covered), at its last known stop (the order manager's journal, or `ledger_position.stop_px`);
   if none is known, or it is not below the last price, 10% below the last price (`risk/gate.GAP_SCENARIO_PCT`). Never
   for more shares than are free (other sell orders hold shares); what cannot be covered is an alarm (`unprotected`).
-  Client ids: `kbwd-<strategy>-<symbol>-<time>-wdstop` (watchdog), `kbdm-...-dmstop` (dead-man). The engine treats
-  them as orders on a symbol it holds. The engine adopts a resting `kbwd-`/`kbdm-` stop of a known sleeve as that
+  Client ids (#585, migration 0044): `kbdm-<strategy>-<symbol>-<yyyymmdd>-dmstop.g<n>` for a re-created stop and
+  `kbdm-intraday-<symbol>-<yyyymmdd>-x.g<n>` for a fail-safe's intraday sale, the SAME id from the watchdog and the
+  dead-man for the same decision and session, so whichever comes second is refused by the venue (who sent it is in
+  the journal's `watchdog_protect`/`watchdog_flatten` or the `deadman_pass` result; older `kbwd-` stops are still
+  adopted); `<yyyymmdd>` is the NY session, `<n>` a generation from 0. One id per decision: a
+  re-send uses the same id and the venue refuses a second order under it (422). `<n>` rises only on the venue's own
+  word that the order under it ended (looked up by client id; a sale: canceled, expired, rejected, done for day,
+  never filled; a stop: any status that is not live, `replaced` included once the engine's replacement chain,
+  `<id>.r<k>` / `replaced_by`, is followed and its current order is not live either: the watchdog reads the chain,
+  the dead-man looks for it in its read), or for a stop the current read lists (or a replacement of it) while more
+  shares still need one. Anything unclear keeps `<n>`.
+  How long Alpaca keeps a closed order's client id unique is not documented (its order reference says only "a unique
+  identifier for the order", at most 128 characters; no scope, no time). The key does not depend on it: if the id
+  stays taken, a re-send is refused and the venue's lookup moves `<n>` on; if it is freed when the order ends, a
+  re-send under the same `<n>` places one new order while the old one has ended, so still one working order. The
+  session date in the id bounds either case to a day. `scripts/probe_alpaca_idempotency.py` step 5 measures the
+  re-send of a cancelled order's id on the paper account (not yet run).
+  A fail-safe's own sale that still works is left alone. The engine treats them as orders on a symbol it holds. The engine adopts a resting `kbwd-`/`kbdm-` stop of a known sleeve as that
   sleeve's own protective stop at start-up, at each session's stop reconciliation and before every sale (#188,
   `ProtectiveStops.adopt`; journal `stop_adopted`, unknown sleeve `stop_adopt_skipped`). It never adds a second stop
   and never cancels and re-arms the stop; it re-prices and resizes it through replace. A fail-safe stop that filled

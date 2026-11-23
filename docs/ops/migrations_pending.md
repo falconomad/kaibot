@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applied; 0043 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applied; 0043-0044 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -42,6 +42,7 @@ Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applie
 - 0041: **applied by the stakeholder on 23 Nov 2026, ~22:10 CET** (psql, one transaction; checked: machine column, three functions take p_machine) (the PR for #562; independent of 0040). Engine lease bound to holder AND machine. Apply BEFORE deploying the engine release that sends `p_machine`, outside 09:30-16:00 ET; the running engine keeps its lease (it acts as machine ''). The stakeholder's to apply.
 - 0042: **applied by the stakeholder on 23 Nov 2026, ~22:10 CET** (psql, one transaction; checked: epoch column, renew/release take p_epoch, not callable by authenticated; the restarted engine holds a fenced epoch) (the PR for #477, M13 4.3). The lease's fencing token. After 0041; apply BEFORE the engine release that sends `p_epoch`, outside 09:30-16:00 ET. The stakeholder's to apply.
 - 0043: **pending** (step 30 below; the headline-feed PR: the dashboard's headline line). Independent of 0040-0042 (0042 is #477's). Additive; any time, but Product applies it outside 09:30-16:00 ET together with the engine release that writes it (until then the engine's writes fail softly, logged once). Changes no trading behaviour.
+- 0044: **pending** (step 31 below; the PR for #585, M13 4.3b: the dead-man's orders get one client id per decision, `...-dmstop.g<n>` / `...-x.g<n>`). After 0030; md5-guarded: refuses unless `kaibot.deadman_act` is exactly 0030's. **Outside 09:30-16:00 ET** (the dead-man acts in market hours). Changes what the dead-man sends while the engine is silent (a re-send is refused by the venue instead of placing a second order). The stakeholder's to apply.
 
 ## Apply in this order
 
@@ -80,6 +81,7 @@ run it again. Do not reorder them.
 | 28 | `migrations/0041_engine_lease_machine.sql` (whole file, one transaction; the PR for #562). After 0013. Outside 09:30-16:00 ET, BEFORE the engine release that sends `p_machine` | `kaibot.engine_lease.machine` (default ''); `engine_lease_acquire/_renew/_release` replaced by versions with `p_machine` that match on holder AND machine: a copied data folder on another machine is refused (`reason: holder_on_other_machine`) and can neither renew nor release. An older engine (no `p_machine`) acts as machine '' and keeps its lease until it stops; the new release's first start on that machine waits for it to be released (clean stop) or to expire (90 s) | Yes, but no data: the three 0013 functions are dropped and recreated in the same transaction |
 | 29 | `migrations/0042_engine_lease_epoch.sql` (whole file, one transaction; the PR for #477). After 0041. Outside 09:30-16:00 ET, BEFORE the engine release that sends `p_epoch` | A sequence `kaibot.engine_lease_epoch_seq` and `kaibot.engine_lease.epoch`; every successful `engine_lease_acquire` with `p_fenced` (this release) is a new tenure with the next number (returned as `epoch`; acquires serialised by an advisory lock); `engine_lease_renew` and `_release` take `p_epoch` (default null) and match `epoch = coalesce(p_epoch, 0)`. An engine before #477 sends neither: its tenure has epoch 0 and stays its own (the running engine; a rollback), until an engine of this release starts, which fences it out (QA-Ops on #584) | Yes, but no data: 0041's three functions are dropped and recreated in the same transaction |
 | 30 | `migrations/0043_headline_feed.sql` (whole file; the headline-feed PR). Independent of 0040-0042. Outside 09:30-16:00 ET, with or before the engine release that writes it | `kaibot.headline` (owner-only display table: the Alpaca/Benzinga headlines the engine already fetches, licence `owner_only`; SEC 8-K lines, licence `public`, a check ties licence to source), RLS with one owner select policy, a trigger keeping 7 days / 500 rows, `kaibot.headline_list` (the licence guard) and the owner-only `kb_headlines` | **Yes**: `delete from kaibot.headline` inside the retention trigger's function (old rows of this table only) |
+| 31 | `migrations/0044_deadman_idempotency_key.sql` (whole file, one transaction; the PR for #585). After 0030. **Outside 09:30-16:00 ET** | `kaibot.deadman_act` re-created: deterministic client ids (`kbdm-<strategy>-<symbol>-<yyyymmdd>-dmstop.g<n>`, `kbdm-intraday-<symbol>-<yyyymmdd>-x.g<n>`); a re-send reuses the id; `<n>` rises only when `GET /v2/orders:by_client_order_id` says the order ended (or a listed stop covers too little); the pass result records root/gen/coid/req, `lookups`, `already_sent` and the lease `epoch`; the dead-man's own working sale is left alone. Refuses (raises, nothing changed) unless the body is 0030's (md5). Same plan, look-back, `deadman_check`, helpers and cron job | No: one guarded `create or replace function`, two revokes |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -160,6 +162,8 @@ select relrowsecurity from pg_class where oid = 'kaibot.headline'::regclass;    
 select has_table_privilege('authenticated', 'kaibot.headline', 'select');                          -- false
 select has_function_privilege('anon', 'public.kb_headlines(integer)', 'execute');                 -- false
 select has_function_privilege('authenticated', 'kaibot.headline_list(boolean, integer)', 'execute');  -- false
+-- step 31 (0044): the dead-man names its orders once per decision
+select prosrc like '%by_client_order_id%' and prosrc like '%opened_session < lp.session%' from pg_proc where proname = 'deadman_act';  -- true
 -- step 28 (0041): the lease has a machine column and three functions that take p_machine
 select count(*) from information_schema.columns
  where table_schema = 'kaibot' and table_name = 'engine_lease' and column_name = 'machine';        -- 1
