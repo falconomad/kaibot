@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import math
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -70,7 +71,9 @@ from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 
 log = logging.getLogger(__name__)
 
-OM_KINDS = ("om_intent", "om_terms", "om_state", "om_fill", "fill")
+# #529: `om_covered`: a late activity of an order the owner booked by hand (OrderManager.book_missing), not booked
+OM_KINDS = ("om_intent", "om_terms", "om_state", "om_fill", "fill", "om_covered")
+OWNER_FILL = "owner:"  # #529: the activity id prefix of a fill the owner booked from the order's own view
 COID_MAX = 128  # Alpaca's limit on client_order_id
 LOST_LOOKUPS, LOST_AFTER_S = 2, 60.0
 _NY = ZoneInfo("America/New_York")  # the day an order belongs to (`_day_over`)
@@ -162,6 +165,7 @@ class OrderRecord:
     last_miss: str | None = None
     expires_at: str | None = None
     client_ids: list[str] = field(default_factory=list)  # the client ids replaces gave it, oldest first (#197)
+    waived: float = 0.0  # #529: filled shares the owner accepted without a booking (no longer "unbooked")
 
     @property
     def open(self) -> bool:
@@ -223,6 +227,7 @@ class OrderManager:
         # #333 (QA-Ops): finished orders whose fills the venue reported (`cum`) but whose FILL activities are not all
         # booked yet. Such an order is no longer working and its shares are not yet held: the target loop must wait
         self.settling: dict[str, OrderRecord] = {}
+        self.owner_booked: set[str] = set()  # #529: coids whose missing fill the owner booked from the order's view
         self.last_fill: datetime | None = None
         # #491: coid -> this process's last cancel request and how many it made (not folded)
         self.cancel_asked: dict[str, tuple[datetime, int]] = {}
@@ -263,6 +268,8 @@ class OrderManager:
                 r.cum = float(b["cum"])
             if "misses" in b:
                 r.misses = int(b["misses"])
+            if b.get("waived") is not None:
+                r.waived = float(b["waived"])
             for k in ("qty", "limit", "stop"):  # the venue's terms (a replace answered after a restart)
                 if b.get(k) is not None:
                     setattr(r, k, float(b[k]))
@@ -279,9 +286,13 @@ class OrderManager:
                 base = _base(cid)  # counted with the intents: a later attempt never reuses it
                 self.bases[base] = self.bases.get(base, 0) + 1
             self._settle(r)
+        elif kind == "om_covered":
+            self.seen.add(b["activity"])
         elif kind in ("om_fill", "fill") and b.get("activity"):
             self.seen.add(b["activity"])
             r = self.orders.get(b.get("coid") or "")
+            if r is not None and str(b["activity"]).startswith(OWNER_FILL):
+                self.owner_booked.add(r.coid)
             if r is not None:
                 q = float(b["qty"])
                 r.booked += q
@@ -292,7 +303,7 @@ class OrderManager:
                 self.last_fill = t if self.last_fill is None else max(self.last_fill, t)
 
     def _settle(self, r: OrderRecord) -> None:
-        if not r.open and r.cum > r.booked + 1e-9:
+        if not r.open and r.cum > max(r.booked, r.waived) + 1e-9:
             self.settling[r.coid] = r
         else:
             self.settling.pop(r.coid, None)
@@ -300,7 +311,7 @@ class OrderManager:
     def unbooked(self, symbol: str, strategy: str | None = None, session: str | None = None) -> float:
         """#333 (QA-Ops): shares finished orders of the sleeve filled at the venue that are not booked yet (the order's
         status can show the fill before the account activities do)."""
-        return sum(r.cum - r.booked for r in list(self.settling.values()) if r.symbol == symbol
+        return sum(r.cum - max(r.booked, r.waived) for r in list(self.settling.values()) if r.symbol == symbol
                    and (strategy is None or r.strategy == strategy) and (session is None or r.session == session))
 
     def unbooked_sold(self, symbol: str, strategy: str, now: datetime) -> float | None:
@@ -312,7 +323,7 @@ class OrderManager:
         rs = [r for r in list(self.settling.values()) if r.symbol == symbol and r.strategy == strategy]
         if not rs or any(not _day_over(r, now) for r in rs):
             return None
-        return sum(r.cum - r.booked for r in rs if r.side == "sell")
+        return sum(r.cum - max(r.booked, r.waived) for r in rs if r.side == "sell")
 
     def _append(self, kind: str, body: dict) -> None:
         body = {k: v for k, v in body.items() if v is not None}
@@ -728,8 +739,16 @@ class OrderManager:
                 self._refused(aid, why[:200], "fill activity")
                 self.foreign[aid] = {**a, payloads.INVALID: why[:200]}
                 continue
-            f = Fill(r.coid, aid, r.strategy, a["symbol"], a["side"], a["qty"], a["price"], a["fees"],
-                     a.get("transaction_time"), r.purpose)
+            if r.coid in self.owner_booked and r.booked + float(a["qty"]) > r.cum + 1e-9:
+                # #529: the owner booked this order's missing fill from its view; its activity came after all. The
+                # shares are in the book already: recorded as seen, not booked twice (a price difference to the
+                # owner's booking, if any, shows in the cash reconciliation)
+                self._append("om_covered", {"coid": r.coid, "activity": aid, "qty": float(a["qty"]),
+                                            "px": float(a["price"])})
+                log.warning("%s: activity %s came after the owner's booking: not booked again", r.coid, aid)
+                continue
+            f = Fill(r.coid, aid, r.strategy, str(a["symbol"]), str(a["side"]), float(a["qty"]), float(a["price"]),
+                     float(a.get("fees") or 0.0), a.get("transaction_time"), r.purpose)
             body = {"coid": f.coid, "activity": aid, "strategy": f.strategy, "symbol": f.symbol, "side": f.side,
                     "qty": f.qty, "px": f.px, "fees": f.fees, "ts": f.ts, "purpose": f.purpose,
                     "session": r.session}
@@ -741,6 +760,65 @@ class OrderManager:
             if self.on_fill is not None:
                 self.on_fill(f, r)
         return out
+
+    # ---------------------------------------------------------------- #529: the owner's word on an unbooked fill
+    def owner_check(self, coid: str, venue: float, booked: float, now: datetime) -> tuple[OrderRecord, dict]:
+        """#529 (the rule of #493: confirm exactly what you saw): the finished order `coid` whose filled shares
+        (`venue`) the ledger has not all booked (`booked`), as the owner's screen showed it. The venue is read
+        again; ValueError, in the owner's words, unless everything is still exactly that: the order is finished,
+        its New York day is over (until then its activity is on its way, #524), nothing was booked or waived for
+        it since, and the venue's view still has that filled quantity, readable (broker/payloads.order) with an
+        average fill price above zero. Returns the record and the venue's view. Changes nothing."""
+        r = self.orders.get(str(coid))
+        if r is None:
+            raise ValueError(f"the order {coid} is not one of the engine's")
+        if r.coid not in self.settling:
+            raise ValueError(f"the order {coid} has nothing unbooked any more: check again")
+        if not _day_over(r, now):
+            raise ValueError(f"the order {coid} is of today: its fill is usually reported within the day")
+        try:
+            shown = (float(venue), float(booked))
+        except (TypeError, ValueError):
+            raise ValueError(f"the command does not say what was shown for the order {coid}") from None
+        if abs(shown[0] - r.cum) > 1e-9 or abs(shown[1] - r.booked) > 1e-9:
+            raise ValueError(f"the order {coid} has changed since it was shown: check again and decide again")
+        if not r.order_id:
+            raise ValueError(f"the order {coid} has no id at the venue to read it by")
+        try:
+            o = self.broker.order(r.order_id)
+        except BrokerError as e:
+            raise ValueError(f"the venue could not be read for the order {coid} ({e.status}): nothing done") from None
+        filled, px = _pos(o.get("filled_qty")), _pos(o.get("filled_avg_price"))  # the checks of #545, locally
+        if filled is None or px is None or filled > float(_pos(o.get("qty")) or r.qty) + 1e-9:
+            raise ValueError(f"the venue's view of the order {coid} cannot be read (filled {o.get('filled_qty')!r} "
+                             f"at {o.get('filled_avg_price')!r}): nothing done")
+        if abs(filled - r.cum) > 1e-9:
+            raise ValueError(f"the venue now shows {o.get('filled_qty')} filled for the order {coid}, not "
+                             f"{r.cum:g}: check again")
+        return r, {**o, "filled_avg_price": px}
+
+    def book_missing(self, r: OrderRecord, o: dict, *, by: str, reason: str) -> Fill:
+        """#529 "book it": the shares the venue filled and no activity reported are booked to the order, at the
+        venue's average fill price (`o` from `owner_check`), without fees (a fee shows in the cash reconciliation
+        as before). Its activity id is `owner:<coid>:<filled>`, so it is booked once; an activity of the order that
+        still comes is then recorded as covered (`om_covered`), not booked again."""
+        qty = r.cum - r.booked
+        px = float(o["filled_avg_price"])
+        aid = f"{OWNER_FILL}{r.coid}:{r.cum:g}"
+        f = Fill(r.coid, aid, r.strategy, r.symbol, r.side, qty, px, 0.0, self.now().isoformat(), r.purpose)
+        body = {"coid": f.coid, "activity": aid, "strategy": f.strategy, "symbol": f.symbol, "side": f.side,
+                "qty": f.qty, "px": f.px, "fees": 0.0, "ts": f.ts, "purpose": f.purpose, "session": r.session,
+                "by": by, "reason": str(reason)[:200]}
+        self._append("fill", {"run_id": self.run_id, **body} if self.run_id is not None else body)
+        if self.on_fill is not None:
+            self.on_fill(f, r)
+        return f
+
+    def waive(self, r: OrderRecord, *, by: str, reason: str) -> None:
+        """#529 "accept it": the order's filled shares that no activity booked are no longer counted as unbooked
+        (the books stay as they are: the owner accepts the difference). An activity that still comes is booked as
+        any fill, so the books follow the venue's report."""
+        self._state(r, r.state, waived=r.cum, reason=f"unbooked accepted by {by}: {reason}"[:200])
 
     def snapshot(self) -> dict:
         return {c: {**asdict(r), "state": str(r.state)} for c, r in self.orders.items()}
@@ -762,6 +840,17 @@ def _base(coid: str) -> str:
 
 def _reason(e: BrokerError) -> str:
     return str(e.body or e)[:160]
+
+
+def _pos(v) -> float | None:
+    """#529: a finite number above zero from the venue (a decimal string or a number), else None."""
+    if isinstance(v, bool) or not isinstance(v, (str, int, float)):
+        return None
+    try:
+        x = float(v)
+    except ValueError:
+        return None
+    return x if math.isfinite(x) and x > 0 else None
 
 
 def _day_over(r: OrderRecord, now: datetime) -> bool:

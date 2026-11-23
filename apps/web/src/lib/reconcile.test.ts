@@ -1,6 +1,6 @@
 // M9 1.14 (#439): the heartbeat's reconcile block, read defensively, and its differences in plain words.
 import { describe, expect, it } from "vitest";
-import { acceptable, diffView, queueErrorText, reconLine, reconcileFrom, refusedText, shares, shownOf } from "./reconcile";
+import { acceptable, diffView, queueErrorText, reconLine, reconcileFrom, refusedText, shares, shownOf, unbookedOf } from "./reconcile";
 
 const QTY = { kind: "quantity", symbol: "XOM", ledger: 10, broker: 8, offset: -2 };
 const CASH = { kind: "cash", symbol: null, ledger_change: -1606.2, broker_change: -1608.95, receivable: 0, tolerance: 47.5, offset: -2.75 };
@@ -78,5 +78,25 @@ describe("the heartbeat's reconcile block", () => {
     expect(queueErrorText(new Error("unknown command"))).toMatch(/database update that hasn't been applied yet \(migration 0037\)/);
     expect(queueErrorText(new Error("not authorised"))).toMatch(/Only the owner/);
     expect(queueErrorText(new Error("fetch failed"))).toMatch(/couldn't be sent, so nothing changed\. fetch failed/);
+  });
+
+  it("#529: an unbooked fill a day old can be booked or accepted, and then only it goes back with the command", () => {
+    const UN = { kind: "unbooked", symbol: "PG", coid: "kb7-trend_momentum-PG-20260803-buy-1", venue: 7, booked: 4, aged: true, offset: null };
+    const s = reconcileFrom(beat({ ok: false, diffs: [QTY, UN, CASH] }))!;
+    expect(unbookedOf(s).map((d) => d.coid)).toEqual([UN.coid]);
+    const v = diffView(s.diffs[1]);
+    expect(v.canAccept).toBe(true);
+    expect(v.rows).toEqual([["Filled at the broker", "7 shares"], ["In kaibo's books", "4 shares"], ["Never reported", "3 shares"]]);
+    expect(acceptable(s)).toBe(true);
+    expect(shownOf(s)).toEqual([{ kind: "unbooked", symbol: "PG", coid: UN.coid, venue: 7, booked: 4, action: "book" }]);
+    expect(shownOf(s, { [UN.coid]: "accept" })[0]).toMatchObject({ action: "accept" });
+    // the same row on its own day (its report is on its way), or with a number missing: not decided here
+    for (const d of [{ ...UN, aged: false }, { ...UN, aged: "yes" }, { ...UN, coid: null }, { ...UN, venue: "x" }, { ...UN, booked: 7 }]) {
+      const t = reconcileFrom(beat({ ok: false, diffs: [d] }))!;
+      expect(unbookedOf(t)).toEqual([]);
+      expect(diffView(t.diffs[0]).canAccept).toBe(false);
+      expect(shownOf(t)).toEqual([]);
+    }
+    expect(queueErrorText(new Error("a difference shown is not one that can be accepted"))).toMatch(/migration 0040/);
   });
 });
