@@ -754,3 +754,29 @@ which an order is sent. No research result is affected (item 6). The same text i
    passes unchanged.
 7. **Known deviation, live against research.** None in the orders. In reports only: the day result's SPY return
    is computed from SPY's previous daily close, not from the last minute bar of the previous session.
+
+## Amendment 25 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): "Flatten and stop" also waits for the run's orders that are open or whose fill is not booked
+
+Written on 22 Nov 2026, before the change's first use. It narrows when Amendment 20 lets "Flatten and stop" end
+the run. It adds no buy and changes no decision, target or share count; the only sale it can add is the flatten's
+own sale of shares the run bought. No research result is affected (item 4). The same text is Amendment 27 of
+trend_momentum.
+
+1. **Why.** "Nothing left to sell" was read from the ledger alone. A buy that had filled at the venue while its fill
+   activity was not read yet, or a buy still working (or whose cancel never arrived), was not in the ledger: the
+   run was ended, nothing synced its orders any more, and the shares stayed at the venue with no sleeve and no stop
+   (found by the deterministic simulation of M12 ticket 3.2, seed 66).
+2. **The rule.** The command stays pending, as in Amendment 20, while the run's daily-path order manager shows an
+   order of the run still open (working, unconfirmed or being cancelled; a protective stop excepted; also one
+   called lost, until its New York day is over: QA-Ops on PR #544 with #535), or a finished
+   order whose filled shares are not booked while the venue holds more of that symbol than the ledger. Once the
+   fill is booked, the flatten sells the sleeve as before and then ends the run. Unbooked shares the venue does not
+   hold (a fail-safe sold them meanwhile) leave nothing to sell and do not keep the run. An order book or venue that
+   cannot be read keeps the run.
+3. **A fill that is never reported.** The command then waits, with no position opened, until the owner books or
+   accepts the difference (issue #529); it never ends the run with those shares at the venue. The wait is bounded
+   as a sale's is (QA-Ops second key on #524): from the New York day after the order on, its activity may never
+   come, and one more `command_waiting` event (with `aged`: the orders and their unbooked shares) and an ERROR log
+   line tell the owner to book or write off the fill (QA-Ops on PR #544).
+4. **Research and Gate B unchanged.** "Flatten and stop" is an owner's command of the live engine; the research venue
+   has none. No trial row, report or Gate B mark changes, and no configuration is added.

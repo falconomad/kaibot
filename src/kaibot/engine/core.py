@@ -63,6 +63,7 @@ from kaibot.engine.ledger import (
     fees_from_activities,
     price_key,
 )
+from kaibot.engine.orders import St, _day_over
 from kaibot.engine.reconcile import ACCEPT_COMMAND, Difference, Reconciler, Reconciliation
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
@@ -414,6 +415,7 @@ class Engine:
         # M9 1.2: a `flatten_and_stop` / `new_run` command waiting for a flat book: id -> why no position is opened
         self._cmd_waiting: dict[str, str] = {}
         self._cmd_note: dict[str, str] = {}  # id -> the last logged reason it waits (logged once per change)
+        self._cmd_aged: dict[str, tuple[str, ...]] = {}  # QA-Ops on #544: id -> the aged unbooked orders last raised
         self._closed_seen: datetime | None = None  # when the broker's clock last said "closed" (_market_open_now)
         # M9 1.1: the book's run end. A reading above the peak waiting for its second (run, when, equity); the last
         # journalled reason the check was skipped; the splits booked today (day, symbols)
@@ -1588,6 +1590,7 @@ class Engine:
 
     def _cmd_done(self, cid: str) -> None:
         self._cmd_note.pop(cid, None)
+        self._cmd_aged.pop(cid, None)
         if self._cmd_waiting.pop(cid, None) is not None:
             self.journal.append("command_done", {"id": cid, "ts": self.now().isoformat()})
 
@@ -1640,6 +1643,7 @@ class Engine:
                 note = str(e)[:300]
             except Exception as e:  # nothing here may lose the command
                 note = f"flatten failed: {type(e).__name__}: {e}"[:300]
+        self._cmd_unbooked_aged(cid, kind)
         if self._cmd_note.get(cid) != note:  # once per change, not every 10 s
             self._cmd_note[cid] = note
             log.warning("command %s (id %s) stays pending: %s", kind, cid, note)
@@ -1648,18 +1652,92 @@ class Engine:
     def _nothing_to_sell(self) -> bool:
         """For "Flatten and stop": no intraday position, no multi-day sale still to book, and no multi-day sleeve
         the venue still holds shares of. A sleeve the venue holds nothing of (a ledger/broker difference, which
-        `_flatten_md` does not sell either) does not keep the run from ending; an unreadable venue does."""
+        `_flatten_md` does not sell either) does not keep the run from ending; an unreadable venue does.
+
+        #533: the ledger alone does not know every share of the run. Its daily path's order manager also must show
+        (`_om_unsettled`) no order still open (working, unconfirmed, or being cancelled: it can still fill, and once
+        the run is ended no sync sends its cancel again or books its fill), and no finished order whose filled shares
+        the ledger has not booked yet while the venue holds more of that symbol than the ledger (those shares are
+        sold once the fill is booked; a fill that is never reported is the owner's to book, #529). Unbooked shares
+        the venue does not hold (sold by a fail-safe meanwhile) leave nothing to sell and do not keep the run."""
         if self.pos or self._md_exits:
             return False
         symbols = {k[1] for k in self._md_sleeves()}
-        if not symbols:
+        unsettled = self._om_unsettled()
+        if unsettled is None:
+            return False
+        open_orders, unbooked = unsettled
+        if open_orders:
+            return False
+        if not symbols and not unbooked:
             return True
         try:
             have = self.broker.positions()
         except Exception as e:
             log.warning("flatten and stop: the broker's positions could not be read (%s): not ended yet", e)
             return False
-        return all(float((have.get(s) or {}).get("qty") or 0) <= 0 for s in symbols)
+        if not all(float((have.get(s) or {}).get("qty") or 0) <= 0 for s in symbols):
+            return False
+        rid = self._rid()
+        b = self.ledger.book(rid) if rid is not None else None
+        booked = b.qty_by_symbol() if b is not None else {}
+        return all(float((have.get(s) or {}).get("qty") or 0) <= float(booked.get(s, 0.0)) + 1e-9 for s in unbooked)
+
+    def _cmd_unbooked_aged(self, cid: str, kind: str) -> None:
+        """QA-Ops on #544: the bound of a command's wait for an unbooked fill (#533), as #524 bounds a sale's. Its
+        activity is expected within the order's New York day; from the next day on it may never come. The command
+        does not end the run then (the shares would stay at the venue with no sleeve, no stop and no sync: #533
+        itself), it stays pending with entries blocked, and one more `command_waiting` event (with `aged`; an ERROR
+        log line; no migration: kb_health lists the kind since 0039) names the orders and the owner's action
+        (book or write off the fill, #529). Raised again when the set of aged orders changes; cleared with the
+        command. Never raises."""
+        try:
+            om = getattr(self.daily, "om", None) if self.daily is not None else None
+            rid = self._rid()
+            if om is None or rid is None or om.run_id != rid:
+                return
+            now = self.now()
+            aged = sorted((r for r in list(om.settling.values()) if _day_over(r, now)), key=lambda r: r.coid)
+            key = tuple(r.coid for r in aged)
+            if self._cmd_aged.get(cid, ()) == key:
+                return
+            self._cmd_aged[cid] = key
+            if not aged:
+                return
+            orders = [{"coid": r.coid, "symbol": r.symbol, "side": r.side, "unbooked": round(r.cum - r.booked, 6),
+                       "session": r.session} for r in aged]
+            log.error("command %s (id %s): fills of an earlier day are still not booked (%s): the command waits "
+                      "until the owner books or writes them off", kind, cid, ", ".join(x["coid"] for x in orders))
+            self.store.event("command_waiting", {  # a kind the Health page already shows (kb_health, 0039)
+                "command_id": cid, "kind": kind, "why": "a fill of an earlier day was never booked", "aged": orders,
+                "action": "the venue reported these fills but their account activity never arrived: the command "
+                          "stays pending (no position is opened) until the owner books or writes off the fill "
+                          "(issue #529); the run is not ended with the shares at the venue"}, rid)
+        except Exception as e:  # an alarm must never lose the command
+            log.warning("command %s (id %s): the aged-fill check failed (%s)", kind, cid, e)
+
+    def _om_unsettled(self) -> tuple[list[str], set[str]] | None:
+        """#533: (client ids of the run's open non-stop orders, symbols of its finished orders with fills not booked
+        yet) in the daily path's order manager; ([], set()) without one, None when it cannot be read."""
+        om = getattr(self.daily, "om", None) if self.daily is not None else None
+        rid = self._rid()
+        if om is None or rid is None or om.run_id != rid:
+            return [], set()
+        try:
+            open_orders = [r.coid for r in om.working() if r.purpose != "stop"]
+            # QA-Ops on #544 with #535: an order called lost ("rejected", reason "lost: ...") is a guess, and the
+            # venue may still fill it; its day order can trade only on its own New York day, so until that day is
+            # over it keeps the run as an open order does (else the run ends and a late fill, adopted or foreign,
+            # is left at the venue: the hole of #533 again)
+            now = self.now()
+            open_orders += [r.coid for r in list(getattr(om, "orders", {}).values())
+                            if r.state is St.REJECTED and str(r.reason or "").startswith("lost")
+                            and r.purpose != "stop" and not _day_over(r, now)]
+            unbooked = {r.symbol for r in list(om.settling.values())}
+        except Exception as e:  # never end a run on a read that failed
+            log.warning("flatten and stop: the order manager could not be read (%s): not ended yet", e)
+            return None
+        return open_orders, unbooked
 
     def _market_open_now(self) -> bool:
         """The broker's clock, for a command's sales. A "closed" answer is kept for 30 s (a pending command asks on

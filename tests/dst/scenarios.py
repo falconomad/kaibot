@@ -99,11 +99,13 @@ FINDINGS: dict[str, tuple] = {
         quiet({D1: ("B",)}, outages=(Outage(et(D1, "15:40"), 40),)),
         no_late_send, "the latest decision wanted ('B',)"),
     "lost cancel": (
-        # D2 buys C next to B; the venue is slow with the buy; the owner flattens: B is sold, C's buy is cancelled,
-        # and the first cancel request is lost
-        quiet({D1: ("B",), D2: ("B", "C")}, flatten=et(D2, "15:52"),
-              forced=(Forced("hold", "|C|buy", 5), Forced("cancel_lost", "", 1))),
-        cancel_never_sent_again, "the book holds ('C',)"),
+        # the engine is paused at 10:00 on D2 and the watchdog puts an emergency stop on B; D2's decision wants
+        # nothing, so the send cancels that stop before it sells B, and the first cancel request is lost. (Until
+        # #533 this was a flatten whose buy cancel was lost; "Flatten and stop" now waits for that buy itself:
+        # test_flatten_and_stop_waits_for_a_buy_whose_cancel_was_lost.)
+        quiet({D1: ("B",), D2: ()}, watchdog=True, outages=(Outage(et(D2, "10:00"), 5, kill=False),),
+              forced=(Forced("cancel_lost", "", 1),)),
+        cancel_never_sent_again, "the book holds ('B',)"),
     "lost order sent again": (
         # the order is in, its answer is lost, and for a while the venue cannot find it by its client order id
         # (the open-orders list has it: the read M9 1.11 added)
