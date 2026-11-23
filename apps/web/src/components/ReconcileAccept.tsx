@@ -2,19 +2,22 @@
 // engine's books and the broker (the stock, the shares on each side, the cash difference) and lets the owner accept
 // them: a reason, a tick that the numbers were checked, and one button that says what it does. The command carries
 // what this screen showed; the engine reads the broker again and accepts only if it still finds exactly that.
+// #529: a fill the broker never reported, a day later, is decided first (book it from the broker's order, or accept
+// it as it is); the sheet then sends only those rows, and the gaps left afterwards are accepted as before.
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { NAME } from "../brand/brand";
 import { api } from "../lib/api";
 import { timeBoth } from "../lib/fmt";
-import { REASON_MAX, REASON_MIN, type ReconState, acceptable, diffView, queueErrorText, refusedText, shownOf } from "../lib/reconcile";
+import { REASON_MAX, REASON_MIN, type ReconState, type UnbookedAction, acceptable, diffView, queueErrorText, refusedText, shownOf, unbookedOf } from "../lib/reconcile";
 
 export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconState; engineLive: boolean; waiting: boolean }) {
   const qc = useQueryClient();
   const [reason, setReason] = useState("");
+  const [choice, setChoice] = useState<Record<string, UnbookedAction>>({});
   // The tick is for the numbers that were on the screen when it was set: when the engine's next check shows other
   // numbers, the tick is gone and the owner compares again before anything can be sent.
-  const numbers = JSON.stringify(shownOf(state));
+  const numbers = JSON.stringify(shownOf(state, choice));
   const [tickedFor, setTickedFor] = useState<string | null>(null);
   const checked = tickedFor === numbers;
   const refusedAtSend = useRef<string | null>(null);
@@ -22,7 +25,7 @@ export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconSt
   const cmd = useMutation({
     mutationFn: () => {
       refusedAtSend.current = state.refused?.ts ?? null;
-      return api.command("accept_reconcile", { reason: reason.trim(), shown: shownOf(state) });
+      return api.command("accept_reconcile", { reason: reason.trim(), shown: shownOf(state, choice) });
     },
     onSuccess: () => { setTickedFor(null); void qc.invalidateQueries({ queryKey: ["health"] }); },
   });
@@ -36,6 +39,7 @@ export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconSt
     );
   }
   const can = acceptable(state);
+  const unbooked = unbookedOf(state);
   const views = state.diffs.map(diffView);
   const some = views.some((v) => !v.canAccept) && views.some((v) => v.canAccept);
   // The engine answered this send with a refusal (a newer one than was on the screen when it was sent): the sheet
@@ -56,7 +60,38 @@ export function ReconcileAccept({ state, engineLive, waiting }: { state: ReconSt
         </li>))}</ul>
       {state.more > 0 && <p className="muted">And {state.more} more that don't fit here, so the list can't be accepted from this page. It can be accepted on the computer that runs the engine (see docs/ops/ledger.md).</p>}
       <p className="muted" style={{ fontSize: 14 }}>{state.ts ? `As the engine saw it at ${timeBoth(state.ts)}. ` : ""}A late booking often clears a difference by itself within the hour.</p>
-      {can && (
+      {can && unbooked.length > 0 && (
+        <form onSubmit={(e) => { e.preventDefault(); if (ready) cmd.mutate(); }}>
+          <h3 className="section-h" style={{ marginTop: 16 }}>Decide on the fill{unbooked.length === 1 ? "" : "s"} the broker never reported</h3>
+          <p>For each one: <b>book it</b> puts the shares the broker filled into {NAME}'s books, at the broker's average price for that order
+            (the rule can then sell them, and buys in the stock resume), or <b>accept it</b> leaves the books as they are and stops waiting for the report.
+            Nothing is bought or sold. The other gaps on this page are looked at again afterwards.</p>
+          {unbooked.map((d) => (
+            <fieldset key={d.coid!} style={{ border: "none", padding: 0, margin: "10px 0" }}>
+              <legend style={{ fontWeight: 600 }}>{d.symbol}</legend>
+              {(["book", "accept"] as const).map((a) => (
+                <label key={a} style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "6px 0" }}>
+                  <input type="radio" name={`unbooked-${d.coid}`} checked={(choice[d.coid!] ?? "book") === a} disabled={sent}
+                    onChange={() => setChoice((c) => ({ ...c, [d.coid!]: a }))} style={{ flex: "none", marginTop: 2 }} />
+                  <span>{a === "book" ? "Book the broker's fill" : "Accept it without booking"}</span>
+                </label>))}
+            </fieldset>))}
+          <label htmlFor={rid} style={{ display: "block", fontWeight: 600, marginBottom: 6 }}>Why (kept in the engine's record)</label>
+          <input id={rid} type="text" value={reason} maxLength={REASON_MAX} autoComplete="off" style={{ width: "100%" }}
+            placeholder="for example: the broker never listed this fill" onChange={(e) => setReason(e.target.value)} disabled={sent} />
+          <label htmlFor={cid} style={{ display: "flex", gap: 10, alignItems: "flex-start", margin: "14px 0" }}>
+            <input id={cid} type="checkbox" checked={checked} onChange={(e) => setTickedFor(e.target.checked ? numbers : null)} disabled={sent} style={{ flex: "none", marginTop: 2 }} />
+            <span>I compared these numbers with the broker's account.</span>
+          </label>
+          {!engineLive && <p className="muted">The engine isn't running, so it can't do anything now. Start it, then come back.</p>}
+          <button type="submit" className="primary" style={{ width: "100%" }} disabled={!ready} aria-disabled={!ready}>
+            {cmd.isPending ? "Sending…" : "Send my decision"}</button>
+          {cmd.isError && <p role="alert" className="loss" style={{ marginTop: 12 }}>{queueErrorText(cmd.error)}</p>}
+          {sent && <p role="status" style={{ marginTop: 12 }}>Sent. The engine reads the broker once more and acts only if the numbers are still the same.
+            This takes about 10 seconds; this page updates by itself.</p>}
+        </form>
+      )}
+      {can && unbooked.length === 0 && (
         <form onSubmit={(e) => { e.preventDefault(); if (ready) cmd.mutate(); }}>
           <h3 className="section-h" style={{ marginTop: 16 }}>Accept the difference</h3>
           <p>Accepting means: {NAME} keeps its books as they are, treats {views.filter((v) => v.canAccept).length === 1 ? "this gap" : "these gaps"} as known,

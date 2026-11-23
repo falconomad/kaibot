@@ -12,12 +12,17 @@ export interface ReconDiff {
   ledger: number | null; broker: number | null;
   ledgerChange: number | null; brokerChange: number | null; receivable: number | null;
   qty: number | null; side: string | null; error: string | null;
+  /** #529: an unbooked fill's order, the shares the broker filled and the books hold, and whether its day is over. */
+  coid: string | null; venue: number | null; booked: number | null; aged: boolean;
 }
 export interface ReconState {
   ok: boolean; ts: string | null; diffs: ReconDiff[]; more: number;
   refused: { ts: string | null; why: string } | null;
 }
-export type Shown = { kind: string; symbol: string | null; offset: number };
+export type UnbookedAction = "book" | "accept";
+/** What goes back with the command: an accepted gap (0037), or the owner's word on an unbooked fill (#529, 0040). */
+export type Shown = { kind: string; symbol: string | null; offset: number }
+  | { kind: "unbooked"; symbol: string; coid: string; venue: number; booked: number; action: UnbookedAction };
 
 const fin = (v: unknown): number | null => {
   const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
@@ -38,7 +43,8 @@ export function reconcileFrom(detail: unknown): ReconState | null {
     diffs.push({ kind, symbol: str(d.symbol), offset: kind === "quantity" || kind === "cash" ? fin(d.offset) : null,
       ledger: fin(d.ledger), broker: fin(d.broker), ledgerChange: fin(d.ledger_change), brokerChange: fin(d.broker_change),
       receivable: fin(d.receivable), qty: fin(d.qty) ?? (fin(d.venue) !== null && fin(d.booked) !== null ? fin(d.venue)! - fin(d.booked)! : null),
-      side: str(d.side), error: str(d.error) });
+      side: str(d.side), error: str(d.error),
+      coid: str(d.coid), venue: fin(d.venue), booked: fin(d.booked), aged: d.aged === true });
   }
   const ref = obj(r.refused);
   return { ok: r.ok && diffs.length === 0, ts: str(r.ts), diffs, more: Math.max(0, fin(r.more) ?? 0),
@@ -70,6 +76,10 @@ export function diffView(d: ReconDiff): DiffView {
   if (d.kind === "foreign_fill") return { head: d.symbol ?? "A stock", canAccept: false,
     rows: d.qty !== null ? [["Filled at the broker", `${d.side === "sell" ? "sold" : d.side === "buy" ? "bought" : "traded"} ${shares(d.qty)}`]] : [],
     note: `The broker filled an order ${NAME} doesn't know, placed by hand or by another program. New buys in this stock wait. If you accept a difference on this page, this one is accepted with it; otherwise it clears by itself after three days.` };
+  if (d.kind === "unbooked" && isDecidable(d)) return { head: d.symbol!, canAccept: true,
+    rows: [["Filled at the broker", shares(d.venue!)], [`In ${NAME}'s books`, shares(d.booked!)],
+      ["Never reported", shares(d.venue! - d.booked!)]],
+    note: "The broker says this order filled, but it never sent the report of the fill, not even by the next day. New buys in this stock wait until you decide." };
   if (d.kind === "unbooked") return { head: d.symbol ?? "A stock", canAccept: false,
     rows: d.qty !== null ? [["Filled, not in the books yet", shares(d.qty)]] : [],
     note: "A fill hasn't reached the books yet. New buys in this stock wait. It usually clears by itself within minutes and can't be accepted here." };
@@ -79,9 +89,22 @@ export function diffView(d: ReconDiff): DiffView {
     note: "This difference can't be shown in full here, so it can't be accepted here." };
 }
 
-/** What goes back with the command: every difference that can be accepted, exactly as it was displayed. */
-export const shownOf = (s: ReconState): Shown[] =>
-  s.diffs.filter((d) => diffView(d).canAccept).map((d) => ({ kind: d.kind, symbol: d.symbol, offset: d.offset as number }));
+/** #529: an unbooked fill whose day is over, with every number the owner must see: it can be booked or accepted. */
+const isDecidable = (d: ReconDiff) =>
+  d.kind === "unbooked" && d.aged && !!d.symbol && !!d.coid && d.venue !== null && d.booked !== null && d.venue > d.booked;
+
+/** The unbooked fills the owner decides on first (#529). While there are any, the sheet sends only them: booking one
+ *  changes the books' shares and cash, so the other gaps are accepted afterwards, for what is left. */
+export const unbookedOf = (s: ReconState): ReconDiff[] => s.diffs.filter(isDecidable);
+
+/** What goes back with the command, exactly as it was displayed: the unbooked fills with the owner's choice (default
+ *  "book") when there are any, otherwise every difference that can be accepted. */
+export function shownOf(s: ReconState, choice: Record<string, UnbookedAction> = {}): Shown[] {
+  const un = unbookedOf(s);
+  if (un.length > 0) return un.map((d) => ({ kind: "unbooked" as const, symbol: d.symbol!, coid: d.coid!, venue: d.venue!,
+    booked: d.booked!, action: choice[d.coid!] ?? "book" }));
+  return s.diffs.filter((d) => diffView(d).canAccept).map((d) => ({ kind: d.kind, symbol: d.symbol, offset: d.offset as number }));
+}
 
 /** The whole list can be accepted from here: at least one acceptable difference, none hidden beyond the list. */
 export const acceptable = (s: ReconState) => !s.ok && s.more === 0 && shownOf(s).length > 0;
@@ -107,6 +130,7 @@ export function refusedText(why: string): string {
 export function queueErrorText(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e ?? "");
   if (/unknown command|command_kind_check/i.test(m)) return "This needs a database update that hasn't been applied yet (migration 0037). Nothing was sent.";
+  if (/can be accepted/i.test(m)) return "This needs a database update that hasn't been applied yet (migration 0040). Nothing was sent.";
   if (/not authorised/i.test(m)) return "Only the owner can accept a difference. Nothing was sent.";
   return `The acceptance couldn't be sent, so nothing changed. ${m}`;
 }

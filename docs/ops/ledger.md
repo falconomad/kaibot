@@ -243,7 +243,21 @@ with the broker (`engine/reconcile.py`):
     activity has not arrived yet). It clears at the next check after the activity is booked.
   - Both stop buys **in their own stock only** (QA-Ops review of #522): the rest of the rebalance goes out. A
     share or cash difference, or a failed read, still stops every buy.
-  - `unbooked` cannot be accepted; it heals at the next check (every 15 minutes while a difference is open).
+  - `unbooked` heals at the next check once the fill's activity is read (every 15 minutes while a difference is
+    open). On the order's own New York day it cannot be accepted: the activity is on its way. **From the next day
+    on** (#529; the difference carries `aged: true`, and `reconcile_blocked` names it in `unbooked_aged`) the owner
+    decides, on the Engine page's "Books and broker" sheet (migration 0040) or with the engine command
+    `accept_reconcile` and rows `{"kind": "unbooked", "symbol", "coid", "venue", "booked", "action"}`:
+    - `book`: the engine reads the order at the broker again and books the filled shares it shows, at the order's
+      average fill price, without fees (a fee shows as a cash difference, as before). The journal's `fill` has the
+      activity id `owner:<coid>:<shares>`; if the real activity still comes, it is recorded as covered
+      (`om_covered`) and not booked a second time. The rule can then sell the shares, and buys in the stock resume.
+    - `accept`: the books stay as they are; the order is no longer counted as unbooked (`om_state` with `waived`).
+      An activity that still comes is booked as any fill: the broker's report is the fact.
+    - The rule of #493: the rows must be exactly the day-old unbooked fills of the last check, at the numbers shown,
+      and the broker must still show that filled quantity, readable, with an average price above zero; otherwise
+      nothing is done and the refusal is in the heartbeat. Such a command carries only these rows: a booking
+      changes the books' shares and cash, so the gaps left afterwards are accepted as before, for what is left.
   - A `foreign_fill` clears when the owner accepts it or when the fill is older than 3 days (`FOREIGN_MAX_AGE`).
     Accepting: an acceptance (dashboard, command or command line, below) also accepts the fills on unknown orders
     that were in the same check, each by its activity id (`reconcile_resolved`, `foreign`); a later fill on an

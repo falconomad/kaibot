@@ -802,3 +802,21 @@ same text is Amendment 28 of trend_momentum.
    the verdict, both orders' fills are booked: the venue holds both, and the next decision sizes from the sleeve.
 4. **Research and Gate B unchanged.** The research venue answers every order at once, so nothing is called lost
    there; the bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 27 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came
+
+Written on 22 Nov 2026, before the change's first use. It changes how the wait of Amendment 22 (item 3) can end.
+It adds no order and changes no decision, target or share count. No research result is affected (item 3). The same
+text is Amendment 29 of trend_momentum.
+
+1. **Why.** A fill whose account activity never arrives was never booked: the sleeve's buys waited on it for good,
+   and a sale the next decision wanted could not be sent, because the book did not hold the shares (found by the
+   deterministic simulation of M12 ticket 3.2, seed 190).
+2. **The rule.** From the day after the order's New York day, the owner may decide on such a fill, with the rule of
+   #493: the command names exactly what the dashboard showed, and the venue is read again first. "Book it" books
+   the shares the venue's view of the order shows as filled, at that order's average fill price, without fees.
+   From then on the rule treats them as any held shares (its next send may sell them). A report that still comes
+   is recorded as covered, never booked twice. "Accept it" leaves the book as it is and ends the wait. Nothing is
+   decided by the engine alone.
+3. **Research and Gate B unchanged.** The research venue lists every fill's activity with the fill, so nothing is
+   ever unbooked there; the bit-identity test of the momentum rules passes unchanged.

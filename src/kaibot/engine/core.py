@@ -66,7 +66,14 @@ from kaibot.engine.ledger import (
     price_key,
 )
 from kaibot.engine.orders import St, _day_over
-from kaibot.engine.reconcile import ACCEPT_COMMAND, Difference, Reconciler, Reconciliation
+from kaibot.engine.reconcile import (
+    ACCEPT_COMMAND,
+    Difference,
+    Reconciler,
+    Reconciliation,
+    apply_unbooked,
+    unbooked_plan,
+)
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
 from kaibot.risk.gate import (
@@ -535,7 +542,7 @@ class Engine:
                 "broker_cash": float(cash) if cash is not None and b.broker_cash0 is not None else None,
                 "broker_cash0": b.broker_cash0,
                 "receivable": receivable(self.journal.entries(kinds=("div_accrual", "div_paid"))),
-                "equity": b.amount}
+                "equity": b.amount, "now": self.now()}
 
     def _startup_reconcile(self, when: str = "startup") -> None:
         """S78 (#118, audit D8; QA-Ops review B1): the ledger against the broker, shares and cash, at start-up and
@@ -552,9 +559,13 @@ class Engine:
             self.recon.checked = True
         self._recon_ts = self.now()
         if self.recon.last.diffs:
-            self.store.event("reconcile_blocked", {"when": when, **self.recon.last.summary(),
-                                                   "action": "entries blocked until the book matches the broker "
-                                                             "or the owner accepts the difference"}, self._rid())
+            aged = sorted(str(d.detail.get("coid")) for d in self.recon.last.diffs
+                          if d.kind == "unbooked" and d.detail.get("aged"))
+            action = "entries blocked until the book matches the broker or the owner accepts the difference"
+            if aged:  # #529: an activity that has not come by the day after: the owner books it or accepts it
+                action += "; a fill no activity reported after its day: book it or accept it on the Engine page"
+            self.store.event("reconcile_blocked", {"when": when, **self.recon.last.summary(), "action": action,
+                                                   **({"unbooked_aged": aged} if aged else {})}, self._rid())
 
     def _accept_reconcile(self, pl: dict) -> None:
         """#439 (M9 1.14): the owner's `accept_reconcile` command. The dashboard sends what its screen showed
@@ -562,7 +573,7 @@ class Engine:
         the heartbeat (`reconcile.refused`) until an acceptance or a clean check, so the owner sees why buys are
         still stopped."""
         try:
-            self.recon.resolve(str(pl.get("reason") or ""), by="owner (command)", shown=pl.get("shown"))
+            self._accept_rows(pl)
         except Exception as e:
             if self.recon.last.diffs:  # nothing open (healed, or a second command after an acceptance): no event
                 self._recon_refused = {"ts": self.now().isoformat(), "why": str(e)[:200]}
@@ -573,6 +584,29 @@ class Engine:
             raise
         self._recon_refused = None
         self._startup_reconcile("accepted")
+
+    def _accept_rows(self, pl: dict) -> None:
+        """#529: `shown` rows of kind "unbooked" (an order whose filled shares no activity booked, after its day)
+        carry the owner's choice, "book" or "accept" (reconcile.unbooked_plan): all of them are read again at the
+        venue before anything is booked or waived. Such a command carries only those rows: a booking changes the
+        books' shares and cash, so the other differences on the same screen heal or change with it, and are
+        accepted afterwards, as before (#439), for what is left."""
+        reason, shown = str(pl.get("reason") or ""), pl.get("shown")
+        rows = list(shown) if isinstance(shown, list) else None
+        un = [x for x in rows or () if isinstance(x, Mapping) and x.get("kind") == "unbooked"]
+        if not un:
+            self.recon.resolve(reason, by="owner (command)", shown=shown)
+            return
+        if not reason.strip():
+            raise ValueError("a resolution needs a reason")
+        if len(un) != len(rows):
+            raise ValueError("nothing accepted: decide the unbooked fills first, then accept what is left")
+        om = getattr(self.daily, "om", None) if self.daily is not None else None
+        plan = unbooked_plan(om, self.recon.last.diffs, un, self.now())
+        done = apply_unbooked(om, plan, by="owner (command)", reason=reason)
+        self.journal.append("reconcile_resolved", {"reason": reason.strip(), "by": "owner (command)", "offsets": [],
+                                                   "foreign": [], "unbooked": done})
+        log.warning("unbooked fills resolved by the owner: %s", done)
 
     def _recon_status(self) -> dict:
         """The heartbeat's `reconcile` block (#439): the last check's differences, as the dashboard shows them."""
