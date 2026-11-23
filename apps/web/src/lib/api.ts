@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type RealtimeChannel, type RealtimeClient } from "./supa";
 import { coerce } from "./coerce";
 import { parseBook, parseSeries } from "./book";
 // The stock summary's and the ticker checker's parsers are fetched with the pages that use them (Home's stock sheet,
@@ -11,7 +11,7 @@ export { coerce };
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-export const supa = createClient(url, key, { auth: { persistSession: true, detectSessionInUrl: true, flowType: "pkce" } });
+export const supa = createClient(url, key);
 
 export type Level = "conservative" | "balanced" | "aggressive";
 
@@ -170,11 +170,11 @@ function fixRun(r: Run): Run { return { ...r, amount_usd: Number(r.amount_usd), 
 /** The one shared subscription behind api.prices. */
 const PRICES_LEAVE_MS = 2_000;
 const priceStream: {
-  listeners: Set<(s: Stream) => void>; ch: ReturnType<typeof supa.channel> | null; joining: boolean;
+  listeners: Set<(s: Stream) => void>; rt: RealtimeClient | null; ch: RealtimeChannel | null; joining: boolean;
   leaveTimer: ReturnType<typeof setTimeout> | null;
   /** `joined`: the channel was subscribed once; `down`: it was, and is lost now (lib/stream.pricesPaused). */
   joined: boolean; down: boolean; downs: Set<(down: boolean) => void>;
-} = { listeners: new Set(), ch: null, joining: false, leaveTimer: null, joined: false, down: false, downs: new Set() };
+} = { listeners: new Set(), rt: null, ch: null, joining: false, leaveTimer: null, joined: false, down: false, downs: new Set() };
 
 function setDown(down: boolean): void {
   const p = priceStream;
@@ -186,7 +186,7 @@ function setDown(down: boolean): void {
 function leavePrices(): void {
   const p = priceStream;
   if (p.leaveTimer) { clearTimeout(p.leaveTimer); p.leaveTimer = null; }
-  if (p.ch) { const ch = p.ch; p.ch = null; void supa.removeChannel(ch); }
+  if (p.ch) { const ch = p.ch; p.ch = null; void p.rt?.removeChannel(ch); }
   p.joined = false;
   setDown(false);
 }
@@ -194,16 +194,22 @@ function leavePrices(): void {
 async function joinPrices(): Promise<void> {
   const p = priceStream;
   p.joining = true;
+  let rt: RealtimeClient;
   try {
-    await supa.realtime.setAuth().catch(() => {});  // the signed-in session's token, so the owner policy can see who asks
-    // A channel of this topic still leaving (an earlier leave) would be handed back by supa.channel and never join again.
-    const old = supa.getChannels().find((c) => c.topic === `realtime:${STREAM_TOPIC}`);
-    if (old) await supa.removeChannel(old).catch(() => "error");
+    // The realtime code is not in the first load (lib/supa.ts): it is fetched here, the first time a page asks for
+    // streamed prices. If that fails the page stays on the 10 s poll, and the next page that asks tries again.
+    rt = p.rt = await supa.realtime();
+    await rt.setAuth().catch(() => {});  // the signed-in session's token, so the owner policy can see who asks
+    // A channel of this topic still leaving (an earlier leave) would be handed back by rt.channel and never join again.
+    const old = rt.getChannels().find((c) => c.topic === `realtime:${STREAM_TOPIC}`);
+    if (old) await rt.removeChannel(old).catch(() => "error");
+  } catch {
+    return;
   } finally {
     p.joining = false;
   }
   if (!p.listeners.size || p.ch) return;
-  const ch = supa.channel(STREAM_TOPIC, { config: { private: true } });
+  const ch = rt.channel(STREAM_TOPIC, { config: { private: true } });
   p.ch = ch
     .on("broadcast", { event: STREAM_EVENT }, (m: { payload?: unknown }) => {
       const s = parseStream(m.payload);
