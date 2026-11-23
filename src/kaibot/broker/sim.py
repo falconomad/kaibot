@@ -47,6 +47,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from kaibot.broker import payloads
 from kaibot.broker.protocol import (
     ORDER_CLASSES,
     ORDER_TYPES,
@@ -242,6 +243,7 @@ class Script:
         return None
 
 
+@payloads.checked  # #545: the paper adapter's checks, so a test cannot pass a payload the live path refuses
 class SimBroker(BrokerBase):
     name = "sim"
     strict_time = True  # bars trade once, in order, and never fill an order submitted after they began

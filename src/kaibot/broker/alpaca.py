@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 
+from kaibot.broker import payloads
 from kaibot.broker.protocol import (  # noqa: F401 (ALPACA_ACTIVITY_TYPES: re-exported)
     ALPACA_ACTIVITY_TYPES,
     BrokerBase,
@@ -113,6 +114,7 @@ CANCEL_POLLS, CANCEL_POLL_S = 10, 0.5
 CANCEL_WAIT_S = CANCEL_POLLS * CANCEL_POLL_S
 
 
+@payloads.checked  # #545: refused payloads reach the engine marked, never booked
 class AlpacaPaper(BrokerBase):
     """Trading endpoints (paper account): the `Broker` protocol over Alpaca's REST API."""
 

@@ -64,6 +64,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
+from kaibot.broker import payloads
+from kaibot.broker.payloads import PayloadError
 from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 
 log = logging.getLogger(__name__)
@@ -214,6 +216,10 @@ class OrderManager:
         self.foreign: dict[str, dict] = {}  # activity id -> a fill on an order this manager does not know
         self.lost: set[str] = set()  # #535: coids called lost ("never reached the venue"), watched for LOST_WATCH
         self.named: dict[str, None] = {}  # #535: venue order ids looked up and found not to be ours (not folded)
+        # #545: broker payloads refused (broker/payloads.py), counted for the caller's event and heartbeat. A refused
+        # FILL activity is also kept in `foreign` (marked payloads.INVALID), so the reconciliation blocks its symbol
+        self.invalid: dict[str, str] = {}  # activity id or "order:<coid>" -> why
+        self.invalid_count = 0
         # #333 (QA-Ops): finished orders whose fills the venue reported (`cum`) but whose FILL activities are not all
         # booked yet. Such an order is no longer working and its shares are not yet held: the target loop must wait
         self.settling: dict[str, OrderRecord] = {}
@@ -473,11 +479,29 @@ class OrderManager:
         return new
 
     # ---------------------------------------------------------------- the venue's answers
+    def _refused(self, key: str, why: str, what: str) -> None:
+        """#545: a broker payload that is not booked: logged, counted, kept by its key (never guessed at)."""
+        self.invalid_count += 1
+        if self.invalid.get(key) != why:
+            log.error("broker payload refused (%s): %s", what, why)
+        self.invalid[key] = why
+
     def _adopt(self, r: OrderRecord, o: dict, *, reason: str | None = None) -> None:
-        """Take the venue's view of the order (and follow a replacement)."""
-        if o.get("replaced_by"):
+        """Take the venue's view of the order (and follow a replacement). #545: a view whose fill cannot be read
+        (broker/payloads.order) is not taken: the order stays as it was, and one the venue has not confirmed yet
+        becomes `unknown`, which blocks its symbol until a readable view comes."""
+        if isinstance(o, dict) and o.get("replaced_by"):
             with contextlib.suppress(BrokerError):
                 o = self.broker.order(o["replaced_by"])
+        try:
+            payloads.order(o, r.qty)
+        except PayloadError as e:
+            why = f"order {r.coid}: {e}"[:200]
+            self._refused(f"order:{r.coid}", why, "order view")
+            if r.state in (St.INTENT, St.SUBMITTED):
+                self._state(r, St.UNKNOWN, reason=f"the venue's answer cannot be read: {e}"[:200])
+            return
+        self.invalid.pop(f"order:{r.coid}", None)
         ids = [o.get("id")] + [x.get("id") for x in o.get("legs") or []]
         state = VENUE.get(str(o.get("status")), St.ACCEPTED)
         if state is St.ACCEPTED and float(o.get("filled_qty") or 0) > 0:
@@ -658,7 +682,10 @@ class OrderManager:
 
     def read_fills(self) -> list[Fill]:
         after = None if self.last_fill is None else self.last_fill - FILL_LOOKBACK
-        pending = [_ts(a["transaction_time"]) for a in self.foreign.values() if a.get("transaction_time")]
+        # QA-Ops on #545: a refused fill (kept in `foreign`) may carry a time that cannot be read: it is left out of
+        # the window instead of raising on every read (which froze the booking of every later fill)
+        pending = [t for a in self.foreign.values() if a.get("transaction_time")
+                   and (t := _ts_or_none(a["transaction_time"])) is not None]
         if after is not None and pending:  # a fill not yet attributed is read again until it is
             after = min(after, min(pending) - FILL_LOOKBACK)
         waiting = [_ts(r.created) for r in list(self.settling.values()) if r.created]
@@ -670,10 +697,23 @@ class OrderManager:
             self.errors.append(("", f"activities: {e.status}: {_reason(e)}"))
             return []
         out = []
+        if not isinstance(rows, list):  # #545: an answer that is not a list of activities: nothing is read
+            self.errors.append(("", f"activities: not a list ({type(rows).__name__})"))
+            return []
         for a in rows:
+            if not isinstance(a, dict):  # #545: cannot even be named: counted, nothing booked
+                self._refused(f"activity:{len(self.invalid)}", f"an activity is not an object: {a!r}"[:200],
+                              "activity")
+                continue
             aid = str(a.get("id"))
             if aid in self.seen:
                 continue  # a duplicate event: booked once
+            try:
+                a = payloads.fill(a)
+            except PayloadError as e:  # #545: never booked; a fill nobody can attribute, so the symbol is blocked
+                self._refused(aid, f"activity {aid}: {e}"[:200], "fill activity")
+                self.foreign[aid] = {**a, payloads.INVALID: str(e)}
+                continue
             coid = self.by_id.get(str(a.get("order_id")))
             r = self.orders.get(coid) if coid else None
             if r is None:
@@ -682,8 +722,14 @@ class OrderManager:
                 self.foreign[aid] = dict(a)
                 continue
             self.foreign.pop(aid, None)
-            f = Fill(r.coid, aid, r.strategy, str(a["symbol"]), str(a["side"]), float(a["qty"]), float(a["price"]),
-                     float(a.get("fees") or 0.0), a.get("transaction_time"), r.purpose)
+            if r.symbol != a["symbol"]:  # #545: our order's id on another stock: not booked (the side may differ:
+                # a bracket's stop leg sells under the buy's record)
+                why = f"activity {aid}: a {a['side']} of {a['symbol']} on order {r.coid} ({r.side} {r.symbol})"
+                self._refused(aid, why[:200], "fill activity")
+                self.foreign[aid] = {**a, payloads.INVALID: why[:200]}
+                continue
+            f = Fill(r.coid, aid, r.strategy, a["symbol"], a["side"], a["qty"], a["price"], a["fees"],
+                     a.get("transaction_time"), r.purpose)
             body = {"coid": f.coid, "activity": aid, "strategy": f.strategy, "symbol": f.symbol, "side": f.side,
                     "qty": f.qty, "px": f.px, "fees": f.fees, "ts": f.ts, "purpose": f.purpose,
                     "session": r.session}
@@ -723,6 +769,13 @@ def _day_over(r: OrderRecord, now: datetime) -> bool:
     if not r.created:
         return True
     return now.astimezone(_NY).date() > _ts(r.created).astimezone(_NY).date()
+
+
+def _ts_or_none(v) -> datetime | None:
+    try:
+        return _ts(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ts(v) -> datetime:

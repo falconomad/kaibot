@@ -121,6 +121,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
+from kaibot.broker import payloads
 from kaibot.broker.protocol import Broker
 from kaibot.engine import failsafe, standing
 from kaibot.engine.daily import (
@@ -144,6 +145,7 @@ from kaibot.engine.execution import (
 )
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
+from kaibot.engine.reconcile import accepted_foreign
 from kaibot.engine.standing import Standing
 from kaibot.engine.targets import Target, reconcile_targets
 from kaibot.risk.gate import BOOK_FLOORS, BOOK_HARD_CEILINGS, BookLimits, RiskPolicy, validate_book
@@ -791,6 +793,7 @@ class LiveDaily:
         self._synced = now
         om.sync()
         self._report_unfilled(om)
+        self._report_refused(om)
         self._prune()
         self._cancel_due()  # an order that was unconfirmed when the halt came is cancelled once it is confirmed
 
@@ -883,6 +886,20 @@ class LiveDaily:
             self.event("multi_day_canceled", {"coids": out, "sides": sorted(sides)})
         return out
 
+    def _report_refused(self, om: OrderManager) -> None:
+        """#545: one `multi_day_error` event (step `broker_payload`) per broker payload the order manager refused
+        (broker/payloads.py): never booked, and a refused fill stays in `foreign`, so the reconciliation's
+        `foreign_fill` difference blocks buys in its symbol until the owner accepts it."""
+        said = getattr(self, "_refused_said", None)
+        if said is None:
+            said = self._refused_said = set()
+        for key, why in sorted(om.invalid.items()):
+            if (key, why) in said:
+                continue
+            said.add((key, why))
+            self.event("multi_day_error", {"step": "broker_payload", "error": why, "refused": om.invalid_count,
+                                           "action": "not booked; buys in the symbol wait for the reconciliation"})
+
     def _prune(self) -> None:
         """The account's FILL activities include the intraday engine's own fills, which this manager does not know
         (`foreign`). The manager reads activities again from the oldest unattributed one, so they are dropped here:
@@ -893,7 +910,14 @@ class LiveDaily:
             return
         known = self.known_order_ids()
         cut = self.now() - FOREIGN_MAX_AGE
+        accepted = None
         for aid, a in list(om.foreign.items()):
+            if a.get(payloads.INVALID):  # #545: a refused fill stays until the owner accepts the difference
+                if accepted is None:  # QA-Ops on #545: then it goes (else it pins every later read's window)
+                    accepted = accepted_foreign(self.journal)
+                if aid in accepted:
+                    om.foreign.pop(aid, None)
+                continue
             ts = a.get("transaction_time")
             old = False
             if ts:
@@ -923,6 +947,7 @@ class LiveDaily:
         om.read_fills()
         if len(om.errors) > n:  # the activities were not read: the check cannot say "no such fill" (fail closed)
             raise RuntimeError(f"fill activities not read ({om.errors[-1][1]})")
+        self._report_refused(om)
         self._prune()
 
         def judged(a: dict) -> bool:
@@ -1897,6 +1922,10 @@ class LiveDaily:
             notes = ca_notes + notes
         if ended and not any(v.get("retired") for v in rules.values()):
             notes.insert(0, "multi-day book closed: its run-drawdown end was reached (no new multi-day trades)")
+        if self.om is not None and self.om.invalid_count:  # #545: broker payloads refused since the start
+            out["payload_refused"] = self.om.invalid_count
+            notes.insert(0, f"{len(self.om.invalid)} broker answer(s) refused and not booked (Health: step "
+                            "broker_payload)")
         if notes:
             out["note"] = "; ".join(notes)[:300]
         return out
