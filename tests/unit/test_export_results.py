@@ -14,6 +14,7 @@ from kaibot.evaluation import results
 
 sys.path.insert(0, str(ROOT / "scripts"))
 import export_results  # noqa: E402
+import gate_v3_rescore  # noqa: E402
 from test_results_rescore import core_report, data  # noqa: E402, F401  (the synthetic report folder)
 
 PREREGS = sorted(p.stem for p in (ROOT / "docs" / "prereg").glob("*.md") if p.stem != "TEMPLATE")
@@ -141,3 +142,39 @@ def test_the_intraday_one_shot_layout_is_read(tmp_path: Path):
     assert run["account"]["why"] is None and run["account"]["own_window"]["spy"] is None  # no SPY series anywhere
     assert "SPY series: none found" in export_results.render_page(res["pages"]["orb_stocks_in_play"],
                                                                  res["research_window"])
+
+
+def _files_with(folder: Path, needle: str) -> list[str]:
+    return sorted(str(p.relative_to(folder)) for p in folder.rglob("*") if p.is_file() and needle in p.read_text())
+
+
+@pytest.mark.parametrize("where", ["home", "repository"])
+def test_no_generated_file_holds_this_machines_home_folder(data: Path, tmp_path_factory, monkeypatch,  # noqa: F811
+                                                           where: str):
+    """Issue #594: the registry's source line and the copied pages carried /Users/<name>/...; every file both
+    scripts write is repo-relative (data under the repository) or starts with ~ (data elsewhere in the home)."""
+    home = data.parent  # the fixture's data folder sits in this "home folder"
+    monkeypatch.setenv("HOME", str(home))
+    root = ROOT
+    if where == "repository":  # a clone in the home folder with the data inside it, as on the research Mac
+        root = home
+        for part in ("config", "docs"):
+            if not (home / part).exists():
+                (home / part).symlink_to(ROOT / part)
+    (data / "reports" / "experiments_core_pit_summary.md").write_text(f"read {data / 'trials.jsonl'}\n")
+    folder = tmp_path_factory.mktemp("results_portable")
+    export_results.main(["--data", str(data), "--out", str(folder), "--root", str(root)])
+    gate_v3_rescore.main(["--data", str(data), "--out", str(folder), "--root", str(root)])
+    written = sorted(p.name for p in folder.rglob("*") if p.is_file())
+    assert "gate_v3_rescore.json" in written and "README.md" in written and "experiments_core_pit_summary.md" in written
+    assert _files_with(folder, str(home)) == [] and _files_with(folder, str(home.resolve())) == []
+    source = f"{data.name}/trials.jsonl" if where == "repository" else f"~/{data.name}/trials.jsonl"
+    assert f'"file {source}: 7 rows"' in (folder / "gate_v3_rescore.json").read_text()
+    assert f"read {source}" in (folder / "as_reported" / "experiments_core_pit_summary.md").read_text()
+
+
+def test_portable_matches_whole_paths_only(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HOME", str(tmp_path / "ab"))
+    repo = tmp_path / "ab" / "kaibot"
+    text = f"{repo}/data/x.json {repo} {tmp_path}/ab/notes {tmp_path}/abc/other"
+    assert results.portable(text, repo) == f"data/x.json . ~/notes {tmp_path}/abc/other"

@@ -63,6 +63,24 @@ class Row:
     meta: dict = field(default_factory=dict)  # universe_mode, cost_model, engine, run_at, code_sha, prereg
 
 
+def portable(text: str, root: Path | str | None = None) -> str:
+    """`text` with no absolute path of this machine in it (issue #594): a file is written into the repository.
+
+    A path inside the repository root becomes repo-relative (the root itself `.`); any other path under the home
+    folder starts with `~`. A path matches only whole (`/Users/ab` never matches inside `/Users/abc`), both as
+    given and resolved (macOS `/private/...`, symlinked clones)."""
+    def spellings(p: Path) -> list[str]:
+        return sorted({str(p), str(p.resolve())} - {"", "/", "."}, key=len, reverse=True)
+
+    end = r"(?![\w.-])"
+    for base in spellings(Path(root)) if root is not None else []:
+        text = re.sub(re.escape(base) + "/", "", text)
+        text = re.sub(re.escape(base) + end, ".", text)
+    for base in spellings(Path.home()):
+        text = re.sub(re.escape(base) + end, "~", text)
+    return text
+
+
 def reports(folder: Path | str) -> list[tuple[Path, dict]]:
     """Every JSON file in `folder` that holds accounts, oldest first (by the time in its name, then by name)."""
     out = []
