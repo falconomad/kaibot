@@ -14,6 +14,10 @@ test_drills.py fails when a sentence is no longer in its document, so a changed 
                                sleeps past the lease, another engine takes it, and this one stops and writes nothing
     supabase down at start     every start while Supabase is unreachable is refused (exit code 3) before the broker is
                                touched; once it is back the engine starts and the session's buy still goes out
+    supabase down at a restart an engine that held the lease restarts while Supabase is down (D1 morning to D2 15:20):
+                               it comes up reducing only; D1's buy reaches its send window and nothing is bought, no
+                               heartbeat is attempted; once the lease is confirmed and the owner config read, entries
+                               are allowed again and the buy goes out once in D2's window (#536)
     journal damaged            at start: exit code 4 before anything else; while running: the engine stops (exit code 4)
 
 A drill returns its checks (what was expected, what happened, pass or fail); scripts/run_drills.py writes the record.
@@ -118,6 +122,15 @@ class DrillWorld(World):
         self.writes: list[tuple[datetime, str]] = []  # every venue write, with its time
         self.log = _Capture()
         self.log.attach()
+        self.confirmed_at: datetime | None = None  # a reducing-only engine's lease confirmed (before_tick)
+        self.beat_calls: list[tuple[datetime, str]] = []  # every heartbeat write the engine attempts, even failed
+        sent = self.remote.heartbeat
+
+        def heartbeat(process, detail):
+            self.beat_calls.append((self.clock(), process))
+            return sent(process, detail)
+
+        self.remote.heartbeat = heartbeat
 
     def _venue_write(self, phase: str, what: str) -> None:
         if phase == "before":
@@ -164,7 +177,7 @@ class DrillWorld(World):
             kw = {"journal": eng.journal} if "journal" in inspect.signature(EngineLease).parameters else {}
             lease = EngineLease(eng.store, FIXED_HOLDER, "drill-mac", mono=ts, wall=ts, **kw)
             try:
-                start_with_lease(eng, lease)
+                mode = start_with_lease(eng, lease)
             except SystemExit as e:
                 self.refused.append((self.clock(), e.code, self.log.last_error()))
                 raise StartRefused(e.code) from None
@@ -177,7 +190,7 @@ class DrillWorld(World):
         self.stop = {"now": False}
         self.beat = make_beat(eng, lease, "drill-mac", self.stop)
         self.check.attach(eng)
-        self.say("engine up (with the lease)")
+        self.say("engine up (reducing only)" if mode == "degraded" else "engine up (with the lease)")
 
     def one_pass(self) -> None:
         if not self.use_lease:
@@ -219,7 +232,8 @@ class DrillWorld(World):
             try:
                 before = getattr(engine_main, "before_tick", None)  # M10 1.25 (#536): the pass's start, one seam
                 if before is not None:
-                    before(eng, self.lease)
+                    if before(eng, self.lease) and self.confirmed_at is None:  # the pass it became fully active
+                        self.confirmed_at = now
                 else:  # engine/__main__.main before #536: the same steps inline
                     if not self.lease.ok:  # prove the lease is ours before acting
                         self.lease.renew(force=True)
@@ -543,18 +557,15 @@ def lease_lost(tmp: Path) -> list[Check]:
 
 
 # ---------------------------------------------------------------- 4. Supabase down at start
-def supabase_down_at_start(tmp: Path, restart: bool = False) -> list[Check]:
-    """`restart`: the engine ran since D0 and is killed at 09:00 on D1, with Supabase down from 08:55: the restart of
-    an engine whose last lease was this machine's (M10 1.25, #536, changes this outcome; its drill changes with it)."""
-    out: list[Check] = []
-    outages = (Outage(et(D1, "09:00"), 10, effects=1),) if restart else ()
-    s = Scenario(34, {D1: ("B",), D2: None, D3: None}, ON_TIME, profile=NO_FAULTS, heal=D2, outages=outages)
+def _supabase_world(tmp: Path, start: datetime, outages: tuple = (), back: datetime | None = None,
+                    heal: str = D2) -> tuple[DrillWorld, datetime]:
+    """Supabase unreachable from `start` until `back` (15:20 on D1); D1 has a decided buy of B for the 15:50 window."""
+    s = Scenario(34, {D1: ("B",), D2: None, D3: None}, ON_TIME, profile=NO_FAULTS, heal=heal, outages=outages)
     w = DrillWorld(s, tmp, lease=True)
-    back = et(D1, "15:20")
+    back = back or et(D1, "15:20")
     full = FaultProfile(write_fail=1.0, read_fail=1.0)
-    start = et(D1, "08:55") if restart else et(D0, "16:00")
 
-    def outage(world):  # Supabase unreachable from before the first start until the afternoon of D1
+    def outage(world):
         world.replica.lease_fail = True
         world.remote.profile, world.remote.armed = full, True
 
@@ -563,12 +574,16 @@ def supabase_down_at_start(tmp: Path, restart: bool = False) -> list[Check]:
         world.remote.profile = NO_FAULTS
 
     w.hooks += [(start, outage), (back, recover)]
+    return w, back
+
+
+def supabase_down_at_start(tmp: Path) -> list[Check]:
+    """The first start ever (no lease record in the journal): no degraded start is allowed, so every start is refused
+    until Supabase is back."""
+    out: list[Check] = []
+    start = et(D0, "16:00")
+    w, back = _supabase_world(tmp, start)
     res = play(w)
-    if restart:
-        kill = next((ln for ln in w.trace if "engine down: killed" in ln), None)
-        check(out, "the engine ran and was killed with Supabase already down", kill and kill.startswith("08-03"), kill)
-        if kill:  # from here on the process is the restart's: what follows is counted from the kill
-            start = et(D1, kill[6:11], int(kill[12:14]))
     refused = [r for r in w.refused if start <= r[0] < back]
     check(out, "every start while Supabase was down was refused with exit code 3", refused and all(
         r[1] == 3 for r in refused), f"{len(refused)} refusals, codes {sorted({r[1] for r in refused})}")
@@ -586,6 +601,79 @@ def supabase_down_at_start(tmp: Path, restart: bool = False) -> list[Check]:
           [(o["client_order_id"], o["status"]) for o in buy])
     check(out, "the simulation's invariants hold and the book ends holding B", res.ok, res.violations or "ok")
     return out
+
+
+def supabase_down_at_a_restart(tmp: Path) -> list[Check]:
+    """The engine ran since D0 (its journal holds its own lease record) and is killed on the morning of D1, with
+    Supabase down from 08:55 on D1 to 15:20 on D2. M10 1.25 (#536): the restart comes up reducing only instead of
+    exiting. D1's decided buy of B reaches its 15:50 send window while the engine is reducing only: nothing may be
+    bought and no heartbeat attempted until the lease is confirmed. Once Supabase answers, the lease is confirmed,
+    the journal verified and D2's owner config (unreadable at D2's open) read again, and the buy of B goes out once,
+    in D2's 15:50-15:57 send window."""
+    out: list[Check] = []
+    back = et(D2, "15:20")
+    w, _ = _supabase_world(tmp, et(D1, "08:55"), outages=(Outage(et(D1, "09:00"), 10, effects=1),), back=back,
+                           heal=D3)
+    res = play(w)
+    kill = next((ln for ln in w.trace if "engine down: killed" in ln), None)
+    check(out, "the engine ran and was killed with Supabase already down", kill and kill.startswith("08-03"), kill)
+    if not kill:
+        return out
+    start = et(D1, kill[6:11], int(kill[12:14]))  # from here on the process is the restart's
+    at = w.confirmed_at
+    until = at or et(D3, "09:30")  # the degraded window: from the kill to the lease's confirmation
+    refused = [r for r in w.refused if start <= r[0] < back]
+    check(out, "the restart is not refused (no exit code 3 while Supabase is down)", not refused,
+          [(_ny(t), c, m[:80]) for t, c, m in refused] or "none")
+    up = next((ln for ln in w.trace if "engine up" in ln and start.astimezone(NY).strftime("%m-%d %H:%M") <= ln[:11]),
+              None)
+    check(out, "it comes up reducing only while Supabase is still down", up and "reducing only" in up
+          and up[:5] == "08-03", up)
+    warned = [m for lv, m in w.log.lines if lv == logging.WARNING and "Starting REDUCING ONLY" in m]
+    check(out, "the log says it starts REDUCING ONLY", warned, warned[0][:160] if warned else "no such line")
+    # the buy signal inside the degraded window: D1's decided buy of B reaches its send step at 15:50
+    sends = _journal_kinds(w, "md_send", et(D1, "15:50"), et(D1, "15:57"))
+    check(out, "D1's buy of B reaches its 15:50 send while the engine is reducing only",
+          sends and at is not None and et(D1, "15:57") <= at, sends[:1] or "no md_send in D1's window")
+    venue = [(o["client_order_id"], o["symbol"], _ny(t)) for o in w.sim.orders.values() if o.get("side") == "buy"
+             for t in [_submitted(o)] if start <= t < until]
+    check(out, "the venue received no buy while reducing only (its own orders, by submit time)", not venue,
+          venue[:3] or "none")
+    beats = [(_ny(t), pr) for t, pr in w.beat_calls if pr == "engine" and start <= t < until]
+    later = [t for t, pr in w.beat_calls if pr == "engine" and at is not None and t >= at]
+    check(out, "no heartbeat attempted while reducing only (every write the engine tried, failed or not)",
+          not beats and later, beats[:3] or f"none; {len(later)} after the confirmation")
+    check(out, "the lease is confirmed once Supabase is back", at is not None and at >= back, at and _ny(at))
+    lines = [m for lv, m in w.log.lines if m.startswith("engine lease confirmed and journal verified")]
+    check(out, "the log says fully active (entries allowed)",
+          lines and lines[0] == "engine lease confirmed and journal verified: fully active (entries allowed)",
+          lines[:1] or "no confirmation line")
+    ev = [e.get("payload") or {} for e in w.replica.tables.get("event", [])
+          if e.get("type") == "engine_lease_confirmed"]
+    check(out, "the engine_lease_confirmed event says entries: true", ev and ev[0].get("entries") is True, ev[:1])
+    buy = [o for o in w.sim.orders.values() if o.get("side") == "buy" and o.get("symbol") == "B"
+           and str(o.get("client_order_id") or "").startswith("kb")]
+    sent = [_submitted(o) for o in buy]
+    check(out, "the buy of B goes out once, after the confirmation, in D2's 15:50-15:57 window",
+          len(buy) == 1 and at is not None and all(at <= t and et(D2, "15:50") <= t < et(D2, "15:57") for t in sent),
+          [(o["client_order_id"], o["status"], _ny(t)) for o, t in zip(buy, sent, strict=True)])
+    check(out, "the simulation's invariants hold and the book ends holding B", res.ok, res.violations or "ok")
+    return out
+
+
+def _submitted(o: dict) -> datetime:
+    return pd.Timestamp(o.get("submitted_at") or o.get("created_at")).to_pydatetime()
+
+
+def _journal_kinds(w: World, kind: str, t0: datetime, t1: datetime) -> list[dict]:
+    """The journal's entries of `kind` written between t0 and t1 (the journal outlives the processes)."""
+    from kaibot.engine.journal import Journal
+
+    j = Journal(w.jpath)
+    try:
+        return [b for _, ts, _k, b in j.entries(kinds=(kind,)) if t0 <= datetime.fromisoformat(ts) < t1]
+    finally:
+        j.close()
 
 
 # ---------------------------------------------------------------- 5. journal damaged
@@ -683,9 +771,13 @@ DRILLS: dict[str, tuple] = {
                                    "start."),
         ("docs/ops/run_engine.md", "| Start-up, before it touches the broker | Takes the lease"),
     ], None),
-    "supabase down at a restart": (lambda tmp: supabase_down_at_start(tmp, restart=True), [
-        ("docs/ops/run_engine.md", "Without the lease the engine cannot know it is the only one, so it does not "
-                                   "start."),
+    "supabase down at a restart": (supabase_down_at_a_restart, [
+        ("docs/ops/run_engine.md", "Exits, stops, sales and fills are managed; **nothing is bought**, no dashboard "
+                                   "command is applied and the heartbeat is not written until `engine lease "
+                                   "confirmed and journal verified`."),
+        ("docs/ops/run_engine.md", "so the day's buys still go out if the 15:50-15:57 send window has not closed."),
+        ("docs/ops/failsafe.md", "Only `entries: true` is logged as `fully active (entries allowed)`."),
+        ("docs/ops/failsafe.md", "a buy whose window has closed waits for the next session"),
     ], None),
     "journal damaged at start": (journal_damaged_at_start, [
         ("docs/ops/ledger.md", "At start: the engine logs the line and exits with **code 4** before it takes the lease "

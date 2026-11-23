@@ -29,7 +29,7 @@ def test_the_drill_quotes_its_documents(name):
 
 def test_the_ticket_s_drills_are_all_there():
     want = {"watchdog takeover", "dead-man stop placement", "lease lost", "supabase down at start",
-            "journal damaged at start", "journal damaged while running"}
+            "supabase down at a restart", "journal damaged at start", "journal damaged while running"}
     assert want <= set(drills.DRILLS)
 
 
