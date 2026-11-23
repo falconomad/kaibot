@@ -36,8 +36,11 @@ def _resting_buy(tmp_path, monkeypatch, minute=SEND + 1):
 def test_flatten_and_stop_cancels_the_resting_buy(tmp_path, monkeypatch):
     a, o = _resting_buy(tmp_path, monkeypatch)
     _cmd(a, "flatten_and_stop")
-    assert a.eng.run is None
     assert o["status"] == "canceled"
+    # #533: the buy was still open at the command (it could have filled): the run waits for the order manager to
+    # see it end, then the next pass ends it
+    a.eng.apply_commands()
+    assert a.eng.run is None
     a.ticks(a.open2, SEND + 1, 390, catch=True)
     a.after_close(a.open2)
     assert "B" not in a.broker.pos or float(a.broker.pos["B"]["qty"]) == 0  # nothing bought for an ended run

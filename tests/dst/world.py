@@ -49,7 +49,7 @@ import random
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -108,8 +108,6 @@ SAID = {  # the journal entries the trace shows, with the fields that tell the s
 # Engine defects the simulation found that are still open: issue -> what the generator leaves out so that every
 # seed does not trip over the same one. Each has a strict xfail in test_dst.py; remove both when the issue is fixed.
 KNOWN: dict[int, str] = {
-    533: "a scenario with a Flatten and stop has no delayed fill activity (fill_dropped), and the owner presses "
-         "it before the send window, never while a buy of the daily path can be working",
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
          "a fill booked a day late is not sold by the decision taken meanwhile, and a watchdog flatten of the "
          "unbooked shares leaves a difference only the owner can accept",
@@ -201,13 +199,9 @@ class Scenario:
         if r.random() < 0.15:
             day = r.choice((D2, D2, D3))
             minute = r.choice((r.randrange(5, SEND), r.randrange(SEND, CLOSE)))
-            if 533 in KNOWN and minute >= SEND - 12:
-                minute = r.randrange(5, SEND - 12)
             flatten = session_open(day) + timedelta(minutes=minute)
         scale = r.choice((0.0, 0.5, 1.0, 1.0, 1.0, 2.0))
         profile = profile.scaled(scale)
-        if flatten is not None and 533 in KNOWN:
-            profile = replace(profile, fill_dropped=0.0)
         return cls(seed, plan, ready, tuple(sorted(outages, key=lambda o: o.arm)), flatten,
                    watchdog=r.random() < 0.5, profile=profile)
 

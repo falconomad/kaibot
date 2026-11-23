@@ -19,6 +19,7 @@ from scenarios import FINDINGS, quiet
 from world import D1, D2, KNOWN, Scenario, et, run_scenario, run_seed
 
 from kaibot.broker.faulty import Forced
+from kaibot.engine.orders import OrderManager
 
 SEEDS = int(os.environ.get("KAIBOT_DST_SEEDS", "3"))
 FIRST = int(os.environ.get("KAIBOT_DST_FIRST", "1"))
@@ -122,21 +123,33 @@ def test_a_lost_order_the_open_orders_list_shows_is_adopted_not_sent_again():
 
 
 # ---------------------------------------------------------------- engine defects the simulation found (KNOWN)
-@pytest.mark.xfail(strict=True, reason="engine bug #533: Flatten and stop ends the run while the venue holds a "
-                                       "filled buy whose fill is not booked yet")
 def test_flatten_and_stop_sells_a_filled_buy_whose_activity_has_not_arrived():
-    assert 533 in KNOWN
+    """#533: the buy filled at 15:51, its activity arrives at 16:21; the owner presses "Flatten and stop" at 15:53.
+    The command waits for the booking (the venue holds the shares, the ledger does not yet), the sale goes out at
+    the next open, and only then does the run end."""
     res = run_scenario(quiet({D1: ("B",)}, flatten=et(D1, "15:53"), heal=D2,
                              forced=(Forced("fill_dropped", "|B|buy", 30),)))
     assert res.ok, res.report()
 
 
-@pytest.mark.xfail(strict=True, reason="engine bug #533 (second case): Flatten and stop ends the run while a buy "
-                                       "is still working at the venue")
 def test_flatten_and_stop_waits_for_a_buy_whose_cancel_was_lost():
-    assert 533 in KNOWN
+    """#533 (second case): the buy is still working when the owner presses "Flatten and stop" and the cancel never
+    arrives. The command waits while the order is open (the cancel is sent again by the sync), books its fill, and
+    sells it."""
     res = run_scenario(quiet({D1: ("B",)}, flatten=et(D1, "15:52"), heal=D2,
                              forced=(Forced("hold", "|B|buy", 5), Forced("cancel_lost", "", 1))))
+    assert res.ok, res.report()
+
+
+@pytest.mark.xfail(not hasattr(OrderManager, "_claim"), strict=True,
+                   reason="needs #535 (PR #555): without it the late fill of an order called lost stays foreign")
+def test_flatten_and_stop_waits_for_an_order_called_lost_that_fills_later():
+    """QA-Ops on #544 with #535: the buy is called lost at 15:52, the owner presses "Flatten and stop" at 15:53, the
+    venue fills the order at 15:54. The command waits while the lost order's day lasts; the fill is adopted and
+    booked (#535) and sold at the next open, and only then does the run end."""
+    res = run_scenario(quiet({D1: ("B",)}, heal=D2, flatten=et(D1, "15:53"),
+                             forced=(Forced("submit_timeout_accepted", "|B|buy"), Forced("lookup_lag", "|B|buy", 12),
+                                     Forced("listing_lag", "|B|buy"), Forced("hold", "|B|buy", 4))))
     assert res.ok, res.report()
 
 
