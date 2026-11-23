@@ -83,6 +83,18 @@ yet; a position is only held over a close when the engine was off at 15:55.
     The next start of a newer release refuses them (`journal entry N has no checksum`). If the roll-back explains
     them, accept them once, with the engine stopped: `python -m kaibot.engine.journal --reseal` prints the range
     it accepted and moves the cut-over past it. It never accepts an entry whose checksum is wrong.
+  - **The file's structure** (#543). The reads by kind (the ledger's fold at start, the order manager, the daily
+    path) are answered from the index `entry_kind_seq`, not from the rows the checksums protect: one damaged byte
+    in the index hid an entry while every checksum passed. So every open of the journal also runs `pragma
+    integrity_check` (every page, and every index against its table; `quick_check` does not compare them), about
+    0.3 s on 600,000 entries. A finding is refused like a failed checksum: `the journal file is damaged (row 3
+    missing from index entry_kind_seq ...)`, exit code 4 at start. Anything built from the reads by kind after
+    the open (the read cache of #534 included) is built on a checked file. The watchdog's read-only reader does
+    not use the index at all (`not indexed`).
+  - What to do when only an index is named: with the engine stopped, `python -m kaibot.engine.journal --reindex`
+    (or with `--path <file>`) rebuilds the indexes from the entries and checks the whole journal again; it prints
+    `{"reindexed": true, ...}` and the engine starts. It never accepts an entry whose checksum fails or a damaged
+    table (exit code 2, the error printed): then restore the backup as above. Never while an engine runs.
   - Not covered: the last entries cut off the end of the file (the start check below catches that against
     Supabase: "restored backup"), and a change to an entry from before the cut-over.
 - State is a fold: `JournalStore` rebuilds the engine's tables from the `row` and `import` entries when it opens;

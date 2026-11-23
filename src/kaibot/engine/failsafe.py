@@ -311,7 +311,10 @@ class ReadOnlyJournal:
             # #496: a journal with checksums is checked here too (a changed entry raises, and the watchdog reads
             # the ledger rows in Supabase instead); a file from before them reads as it always did
             sums = "sum" in {r[1] for r in db.execute("pragma table_info(entry)")}
-            q, args = f"select {SUM_COLUMNS if sums else 'seq, ts, kind, body'} from entry where seq > ?", [after]
+            # #543: `not indexed`: a damaged kind index must not hide an entry from the watchdog, which opens no
+            # `Journal` and so runs no structure check; the scan reads the rows the checksums protect
+            q, args = (f"select {SUM_COLUMNS if sums else 'seq, ts, kind, body'} from entry not indexed "
+                       "where seq > ?", [after])
             if kinds:
                 q += f" and kind in ({','.join('?' * len(kinds))})"
                 args += list(kinds)

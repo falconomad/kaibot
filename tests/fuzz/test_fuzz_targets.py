@@ -63,9 +63,8 @@ def test_the_targets_have_teeth():
 
 
 # ---------------------------------------------------------------- the engine defects found (strict xfails)
-@pytest.mark.xfail(strict=True, reason="#543: a damaged kind index hides entries from reads by kind; the journal "
-                                       "still opens and verifies")
 def test_a_damaged_kind_index_does_not_hide_entries_543():
+    """#543 fixed: the journal's structure is checked at open (`pragma integrity_check`): refused, exit code 4."""
     from kaibot.engine.journal import Journal, JournalCorrupt
 
     with tempfile.TemporaryDirectory(prefix="kb-fuzz-") as td:
