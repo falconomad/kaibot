@@ -32,6 +32,8 @@ import json
 
 import numpy as np
 
+from kaibot.broker import payloads
+from kaibot.broker.payloads import PayloadError
 from kaibot.broker.protocol import OrderRequest
 from kaibot.broker.shadow_costs import QuoteCtx, sell_fees, shadow_fill_price
 from kaibot.engine import (
@@ -85,26 +87,44 @@ class IntradayEngine(Engine):
             log.exception("order adoption failed")
 
     def _sync_positions(self) -> None:
+        """The intraday positions' entries, bracket legs and exits. QA-Ops on #545: a fill price that is not a
+        finite number above zero (broker/payloads.fill_price, also when the adapter marked the view) is never
+        booked: the position is read again at the next sync, and the refusal is an event (`_payload_refused`)."""
         for p in list(self.pos.values()):
             if p.status == "closed":
                 continue
             o = self.broker.order(p.exit_order_id or p.order_id)
             if p.status == "pending":
                 if o["status"] == "filled":
+                    try:  # read again at the next sync, never booked at a price that is not one
+                        payloads.fill_price(o)
+                    except PayloadError as e:
+                        self._payload_refused(f"order:{o.get('id')}", f"entry {p.symbol}: {e}")
+                        continue
                     self._on_entry_fill(p, o)
                 elif o["status"] in ("canceled", "expired", "rejected"):
                     self._close_trade(p, None, "not_filled")
                 continue
             if p.exit_order_id:  # we sent a market sell (time / daily stop / manual)
                 if o["status"] == "filled":
-                    self._on_exit_fill(p, float(o["filled_avg_price"]), p.exit_reason or "manual", o.get("filled_at"),
+                    try:
+                        px = payloads.fill_price(o)
+                    except PayloadError as e:
+                        self._payload_refused(f"order:{o.get('id')}", f"exit {p.symbol}: {e}")
+                        continue
+                    self._on_exit_fill(p, px, p.exit_reason or "manual", o.get("filled_at"),
                                        o.get("id"), o.get("submitted_at") or o.get("created_at"))
                 continue
             for leg in o.get("legs") or []:
                 if leg["status"] == "filled":
+                    try:  # a leg is not marked by the adapter (nested): checked here, with its parent's mark
+                        px = payloads.fill_price({**leg, payloads.INVALID: o.get(payloads.INVALID)})
+                    except PayloadError as e:
+                        self._payload_refused(f"order:{leg.get('id')}", f"exit leg {p.symbol}: {e}")
+                        break
                     is_target = leg.get("type") == "limit"
                     reason = "target" if is_target else ("trail" if p.armed else "stop")
-                    self._on_exit_fill(p, float(leg["filled_avg_price"]), reason, leg.get("filled_at"), leg.get("id"),
+                    self._on_exit_fill(p, px, reason, leg.get("filled_at"), leg.get("id"),
                                        leg.get("submitted_at") or o.get("submitted_at") or o.get("created_at"))
                     break
 

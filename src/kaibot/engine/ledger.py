@@ -33,9 +33,15 @@ Start equity of a session is the last close (`start_equity`), i.e. yesterday's m
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
+
+from kaibot.broker import payloads
+from kaibot.broker.payloads import PayloadError
+
+log = logging.getLogger(__name__)
 
 LEDGER_KINDS = ("run", "position", "fill", "dividend", "split", "spinoff", "symbol_change", "mark", "fee")
 
@@ -178,6 +184,13 @@ class Ledger:
 
     def _fill(self, b: Book, e: dict) -> None:
         qty, px, fees = float(e["qty"]), float(e["px"]), float(e.get("fees") or 0.0)
+        # #545: the order manager journals only checked fills (broker/payloads.fill); an entry that is not one (an
+        # older release, a hand-written body) is never guessed at: anything but "buy" was booked as a sale
+        if e.get("side") not in ("buy", "sell") or not (math.isfinite(qty) and qty > 0 and math.isfinite(px)
+                                                        and px > 0 and math.isfinite(fees) and fees >= 0):
+            log.error("ledger: fill entry not booked (side %r, qty %r, px %r, fees %r): %s", e.get("side"),
+                      e.get("qty"), e.get("px"), e.get("fees"), e.get("activity") or e.get("coid"))
+            return
         key = (e["strategy"], e["symbol"])
         if e["side"] == "buy":
             s = self._sleeve(b, *key, e.get("session"))
@@ -429,7 +442,12 @@ def actions_from_activities(rows: Iterable[dict], ledger_qty: Mapping[str, float
             continue
         ref, day = f"alpaca:{r.get('id')}", str(r.get("date") or "")[:10]
         if t in DIVIDEND_ACTIVITIES and r.get("net_amount") is not None:
-            out.append(Action(sym, day, "dividend", amount=float(r["net_amount"]), ref=ref))
+            try:  # #545: a net_amount that is not a finite number is not booked (as fees_from_activities)
+                amount = payloads.dividend_amount(r)
+            except PayloadError as e:
+                log.error("dividend activity %s of %s not booked: %s", r.get("id"), sym, e)
+                continue
+            out.append(Action(sym, day, "dividend", amount=amount, ref=ref))
         elif t in SPLIT_ROW_TYPES:
             before, after = float(ledger_qty.get(sym) or 0), float(broker_qty.get(sym) or 0)
             if before > 0 and after > 0 and after != before:

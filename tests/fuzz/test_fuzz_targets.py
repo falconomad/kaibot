@@ -124,19 +124,19 @@ def _om_with_activity(act: dict):
     return Ledger.fold(e for e in j.entries() if e[2] in LEDGER_KINDS).book(1)
 
 
-@pytest.mark.xfail(strict=True, reason="#545: a FILL activity is booked without checking side, quantity and price")
 @pytest.mark.parametrize("act", [{"side": "BUY", "qty": "10", "price": "100"},
                                  {"side": "buy", "qty": "10", "price": "NaN"},
                                  {"side": "buy", "qty": "-10", "price": "100"}],
                          ids=["side BUY", "price NaN", "qty -10"])
 def test_a_malformed_fill_activity_is_not_booked_545(act):
+    """#545 fixed: broker/payloads.fill refuses it; the order manager keeps it as a fill it cannot attribute."""
     book = _om_with_activity(act)
     assert book.cash == 10_000.0 and not book.qty_by_symbol(), \
         f"booked: cash {book.cash}, shares {book.qty_by_symbol()}"
 
 
-@pytest.mark.xfail(strict=True, reason="#545 (first comment): a dividend's NaN net_amount is booked")
 def test_a_non_finite_dividend_is_not_booked_545():
+    """#545 (first comment) fixed: a dividend whose net_amount is not finite is not an action."""
     from kaibot.engine.ledger import actions_from_activities
 
     acts = actions_from_activities([{"activity_type": "DIV", "symbol": "B", "net_amount": "NaN", "id": "d1",
