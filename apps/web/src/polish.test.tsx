@@ -17,9 +17,26 @@ const data = [{ session: "2026-11-12", pot: 10000, spy: 10000 }, { session: "202
 
 describe("type and the font swap", () => {
   it("all four Outfit weights load first, and the fallback is Arial set to Outfit's measures", () => {
-    for (const w of [400, 500, 600, 700]) expect(indexHtml).toContain(`<link rel="preload" href="/fonts/outfit-latin-${w}-normal.woff2" as="font" type="font/woff2" crossorigin />`);
+    for (const w of [400, 500, 600, 700]) expect(indexHtml).toContain(`<link rel="preload" href="/fonts/outfit-core-${w}-normal.woff2" as="font" type="font/woff2" crossorigin />`);
     expect(tokens).toMatch(/@font-face \{ font-family: "Outfit Fallback"; src: local\("Arial"\)[^}]*size-adjust: 101\.43%; ascent-override: 98\.59%; descent-override: 25\.63%; line-gap-override: 0%; \}/);
     expect(tokens).toContain('--font-ui: "Outfit", "Outfit Fallback", "Inter",');
+  });
+  it("each weight is two faces of one file: the preloaded core cut and the full Latin file for the rest, with no character in both", () => {
+    const cps = (r: string) => new Set(r.split(",").flatMap((p) => {
+      const [a, b] = p.trim().slice(2).split("-").map((h) => parseInt(h, 16));
+      return Array.from({ length: (b ?? a) - a + 1 }, (_, i) => a + i);
+    }));
+    for (const w of [400, 500, 600, 700]) {
+      const face = (file: string) => new RegExp(`font-weight: ${w}; font-display: swap;\\s*src: url\\("/fonts/${file}-${w}-normal\\.woff2"\\) format\\("woff2"\\); unicode-range: ([^;]+);`).exec(tokens)?.[1];
+      const core = face("outfit-core"), rest = face("outfit-latin");
+      expect(core && rest).toBeTruthy();
+      const c = cps(core!), r = cps(rest!);
+      expect([...c].filter((x) => r.has(x))).toEqual([]);
+      // what the dashboard writes most: digits, the middle dot, the minus sign, dashes, the ellipsis, Intl's narrow space
+      for (const ch of "0123456789$%.,·−–—…\u202f\u00a0") expect(c.has(ch.codePointAt(0)!)).toBe(true);
+      // an accented letter or the euro sign comes from the full file
+      for (const ch of "éü€") expect(r.has(ch.codePointAt(0)!)).toBe(true);
+    }
   });
   it("no other host holds up the first paint: Inter's stylesheet never blocks, and the data API and the logo host are connected early (#297)", () => {
     expect(indexHtml.match(/<link[^>]*rel="stylesheet"[^>]*>/g)).toEqual([
