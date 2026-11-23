@@ -154,6 +154,10 @@ books:
     components: [index_core, volatility_cap]
     sleeves: {}
     v3_declared: true
+  index_core_trend_momentum:       # docs/prereg/index_core_trend_momentum.md (M11 ticket 2.8, #459)
+    components: [index_core, volatility_cap, trend_momentum_sleeve]
+    sleeves: {trend_momentum_sleeve: 10.0}
+    v3_declared: true
 
 # ---------------------------------------------------------------- rule families
 # One family per idea (the published effect a rule leans on). The correction counts FAMILIES: every family listed
@@ -190,6 +194,12 @@ families:
                               Novy-Marx and Velikov (buy-hold spread); Alpha Architect and Concretum (tranches)"}
       mom_12_1_band_nofilter: {kind: selection, v3_declared: false, existing_control: candidate_pool}
       rel_strength: {kind: selection, v3_declared: false, existing_control: none}
+      # docs/prereg/trend_momentum_sleeve.md (#459): trend_momentum, frozen, declared for gate v3 as an
+      # evidence-based sleeve (decision 16 s.14); the family now has seven rules (its prereg, Amendment 1)
+      trend_momentum_sleeve: {kind: selection, v3_declared: true, existing_control: candidate_pool,
+                              tier: evidence_based,
+                              evidence: "Jegadeesh and Titman (1993, 2001); Asness, Moskowitz and Pedersen (2013);
+                                Fama and French (2012)"}
   new_highs_breakout:
     idea: a stock at a new high keeps trending
     rules:

@@ -31,7 +31,7 @@ RNG = np.random.default_rng(514)
 SPY = pd.Series(RNG.normal(0.0005, 0.011, len(IDX)), index=IDX)
 BILLS = pd.Series(4.0, index=pd.bdate_range("2017-01-02", "2024-12-31"))
 FINAL = {"engine": "simbroker", "cost_model": "v2", "data_repairs": True, "benchmark": "spy_total_return"}
-RULE = "trend_momentum"  # four rules in cross_sectional_momentum
+RULE = "trend_momentum"  # seven rules in cross_sectional_momentum (#459, on #460 and #474)
 CONTROL = {"percentile": 99.95, "runs": 2000, "matched": True, "p_value": 1 / 2001, "pool": "candidate_pool"}
 
 
@@ -134,7 +134,7 @@ def test_s4_with_the_floor_no_skill_passes_at_most_about_the_level():
 
 
 @pytest.mark.parametrize("rule, runs, state, why", [
-    ("trend_momentum", 500, None, "500 runs, 2000 needed"),   # four rules in its family
+    ("trend_momentum", 500, None, "500 runs, 2000 needed"),   # several rules in its family
     ("trend_momentum", 2000, True, ""),
     ("spy_trend_filter", 500, True, ""),                        # one rule in its family: 500 stays enough
 ])
@@ -305,3 +305,11 @@ def test_b6_reads_a_listed_books_budgets_not_the_callers():
 def test_b6_is_unknown_when_a_listed_sleeve_has_no_verdict():
     m = book(book_gate({RULE: 5.0, "news_gap_week": 5.0}), {RULE: "evidence_based"})["marks"]["b6"]
     assert m["met"] is None and m["numbers"]["missing_verdicts"] == ["news_gap_week"]
+
+
+@pytest.mark.parametrize("cap", [10.5, 20.0, 100.0, -1.0, float("nan"), True, "10"])
+def test_the_evidence_based_book_budget_cannot_be_raised_by_config(cap):
+    """QA on #550: decision 16 s.14 caps evidence-based sleeves at 10% of a book; config may only lower it."""
+    with pytest.raises(ValueError, match="book_budget_max_pct"):
+        gate_with(lambda c: c["evidence_based"].update(book_budget_max_pct=cap))
+    assert gate_with(lambda c: c["evidence_based"].update(book_budget_max_pct=5.0)).evidence["book_budget_max_pct"] == 5

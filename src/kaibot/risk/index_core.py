@@ -102,3 +102,15 @@ def builder(level: str, cfg: IndexCoreConfig | None = None, *, sleeve_budget_pct
     return PortfolioBuilder(limits or book_limits(level, cfg), k=k, band=BAND, fill="ranked",
                             cash_reserve=cfg.cash_reserve_pct / 100, index_symbol=cfg.index_symbols[0],
                             sleeve_budget_pct=sleeve_budget_pct)
+
+
+def sleeve_builder(level: str, budget_pct: float, sleeve_k: float, sleeve_name_pct: float,
+                   cfg: IndexCoreConfig | None = None) -> PortfolioBuilder:
+    """#459 (docs/prereg/index_core_trend_momentum.md): the core with one return sleeve at `budget_pct` of equity,
+    the sleeve scaled to its budget: k = the rule's k x budget / 100 (`sleeve_k`) and the per-name cap the rule's x
+    budget / 100 (`sleeve_name_pct`), so the sleeve is the tested rule at a fraction of its size."""
+    if not 0 < budget_pct <= 100 or not 0 < sleeve_k <= BOOK_HARD_CEILINGS.atr_risk_pct / 100:
+        raise ValueError("the budget must be in (0, 100] and the sleeve's k inside the hard ceiling")
+    cfg = cfg or load()
+    return builder(level, cfg, sleeve_budget_pct=budget_pct, k=sleeve_k,
+                   limits=book_limits(level, cfg, name_pct=sleeve_name_pct))
