@@ -7,7 +7,7 @@ import { api, type Level, type Trade } from "../lib/api";
 import { BAR, LEVELS, curve, stats } from "../lib/model";
 import { R, dateEt, day, money, pct, px, signedMoney, timeBoth, timeEt, tone } from "../lib/fmt";
 import { exitText, ruleName } from "../lib/explain";
-import { ageS, ageText, etToday, evidenceVerdict } from "../lib/derive";
+import { etToday, evidenceVerdict } from "../lib/derive";
 import { StockCell } from "../components/StockBadge";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
@@ -22,7 +22,7 @@ import { DailyNoteCard } from "../components/DailyNote";
 import { engineDetail } from "../components/Experiment";
 import { dailyNote, showNote } from "../lib/engineevents";
 import { multiDayFrom } from "../lib/experiment";
-import { FreshLine, useMarks } from "../components/Marks";
+import { PricesPaused, useMarks } from "../components/Marks";
 import { potLive } from "../lib/marks";
 
 // #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
@@ -142,7 +142,6 @@ export function Live() {
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
   // the pot's gain (marked) against SPY's from the same start
   const vsSpy = (live ? pot - run.amount_usd : s.netUsd) - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
-  const beatTs = overview.heartbeat.find((h) => h.process === "engine")?.ts;
   // Stakeholder, 16 Nov 2026: while a newer run is scheduled, an ended run's pot must not read as the current one.
   const ended = run.kind === "paper" && !["scheduled", "running", "paused"].includes(run.status);
   const newer = ended ? (runs ?? []).filter((r) => r.kind === "paper" && r.id !== run.id && r.created_at >= run.created_at
@@ -178,7 +177,7 @@ export function Live() {
             {live && <Tick value={live.dayPnl} from={src} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
             <span className="muted desk-only">{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500 by {money(Math.abs(vsSpy))}</span>
           </div>
-          <FreshLine fresh={live?.fresh ?? null} />
+          <PricesPaused paused={mk.paused} />
         </section>
         {lv && meters && run.kind === "paper" && (
           <div className="desk-only meters home-meters" aria-label="Limits">
@@ -243,7 +242,6 @@ export function Live() {
           )}
           <p className="muted" style={{ fontSize: 14, margin: 0 }}>Reported P&amp;L is the worse of broker fills and the stricter cost model.
             {run.kind === "paper" && <> Pause or stop the run in <Link to="/settings">Run &amp; settings</Link>.</>}</p>
-          {beatTs && <p className="muted" style={{ fontSize: 13, margin: 0 }}>Updated {ageText(ageS(beatTs))}</p>}
         </div>
       </details>
     </>

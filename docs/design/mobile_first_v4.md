@@ -284,7 +284,10 @@ Dark first: the app has one theme and v4 keeps it. Names are roles, not colours,
   the changed characters is the one exception to "only `transform` and `opacity` animate" (accepted by Product).
 - **Live indicator:** the dot in the engine pill pulses with `transform: scale` and `opacity` on a pseudo-element (not
   `box-shadow`), once every 2 s while the engine is live. No pull-to-refresh: the page polls already, and a pull gesture
-  would suggest it does not. A one-line "Updated 5 s ago" sits under Home's details.
+  would suggest it does not. No line says how old the figures are (stakeholder, 23 Nov 2026: the "Updated 5 s ago",
+  "Live · prices 4 s ago" and "At Wednesday's close" lines are gone). One quiet cue is left: a small "Prices paused"
+  under the pot and the Positions count, only while the market is open and a held stock has had no price for more than
+  60 s or the price stream dropped.
 - **Chart range:** the line morphs to the new range in 300 ms (keep one chart instance; stop re-creating it per range).
 - **Skeletons:** keep the shaped skeletons. Each skeleton has the height of the content it stands for, so nothing jumps.
   They breathe with opacity (1 to 0.55 and back, 1.6 s, `kb-breathe`). No shimmer: it animates `background-position`,

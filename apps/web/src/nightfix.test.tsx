@@ -153,6 +153,17 @@ describe("3. the engine at night is asleep, not offline", () => {
       expect(text(html)).not.toMatch(/nothing new trades/);
     } finally { vi.useRealTimers(); }
   });
+  it("the chip's small line: the host alone while it runs (no ticking age, 23 Nov 2026); 'last seen …' when offline", () => {
+    vi.useFakeTimers({ now: new Date("2026-11-19T15:00:00Z") });
+    try {
+      const up = { ...beat("2026-11-19T14:59:48Z", "trading"), detail: { state: "trading", host: "mac-mini", next_open: "2026-11-19T09:30:00-05:00" } };
+      expect(engineChip(o(up), run)).toMatchObject({ live: true, sub: "mac-mini" });
+      expect(engineChip(o({ ...up, detail: { state: "trading" } }), run).sub).toBe("");
+      expect(engineChip(o(up), run).sub).not.toMatch(/ago|\d+ s/);
+      expect(engineChip(o(beat("2026-11-19T14:50:00Z", "trading")), run)).toMatchObject({ live: false, text: "Engine offline", sub: "last seen 10 min ago" });
+      expect(engineChip(o(beat("2026-11-19T14:58:00Z", "trading")), run).sub).toBe("last seen 2 min ago");
+    } finally { vi.useRealTimers(); }
+  });
   it("during market hours the row warns, with fixed copy", () => {
     const b = beat("2026-11-19T14:50:00Z", "trading");
     vi.useFakeTimers({ now: new Date("2026-11-19T15:00:00Z") });

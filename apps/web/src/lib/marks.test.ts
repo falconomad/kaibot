@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { Overview } from "./api";
 import { type Book, holdingView, parseBook, parseSeries } from "./book";
-import { STALE_MS, freshText, liveBook, markOf, parseMarks, potLive, type Marks } from "./marks";
+import { STALE_MS, liveBook, markOf, parseMarks, potLive, type Marks } from "./marks";
 import { MARKS_MS, marksPollMs, poll } from "./poll";
 
 // The book at Wednesday 18 Nov 2026's close (run 7, as kb_book answers), and the same seven holdings at the broker.
@@ -166,30 +166,9 @@ describe("each fallback: the engine's minute ledger for the pot, the close marks
   });
 });
 
-describe("how fresh the pot is: three states", () => {
-  it("live: seconds since the prices were read", () => {
-    expect(freshText({ kind: "live", at: AT }, NOW)).toBe("Live · prices 4 s ago");
-    expect(freshText({ kind: "live", at: NOW }, NOW)).toBe("Live · prices 1 s ago");
-    expect(freshText({ kind: "live", at: NOW + 900 }, NOW)).toBe("Live · prices 1 s ago"); // never a negative age
-    expect(freshText({ kind: "live", at: NOW - 29_600 }, NOW)).toBe("Live · prices 30 s ago");
-  });
-  it("the fallback: when the engine wrote its minute row", () => {
-    const t = (s: number) => freshText({ kind: "engine", at: NOW - s * 1000 }, NOW);
-    expect(t(5)).toBe("Updated a minute ago by the engine");
-    expect(t(62)).toBe("Updated a minute ago by the engine");
-    expect(t(170)).toBe("Updated 3 minutes ago by the engine");
-    expect(t(59 * 60)).toBe("Updated 59 minutes ago by the engine");
-    expect(t(61 * 60)).toBe("Updated an hour ago by the engine");
-    expect(t(3 * 3600)).toBe("Updated 3 hours ago by the engine");
-  });
-  it("outside market hours: the day of the booked close", () => {
-    expect(freshText({ kind: "close", session: "2026-11-18" }, Date.parse("2026-11-19T12:00:00Z"))).toBe("At Wednesday's close");
-    expect(freshText({ kind: "close", session: "2026-11-20" }, Date.parse("2026-11-23T12:00:00Z"))).toBe("At Friday's close"); // over the weekend
-    expect(freshText({ kind: "close", session: "2026-11-19" }, Date.parse("2026-11-19T22:30:00Z"))).toBe("At today's close");
-    expect(freshText({ kind: "close", session: "2026-11-10" }, Date.parse("2026-11-19T22:30:00Z"))).toBe("At the close of Nov 10"); // a weekday alone would mislead
-  });
+describe("where the pot's figures come from (no line says their age: stakeholder, 23 Nov 2026)", () => {
   it("the pot's state follows what is shown: live, the engine's minute row, or the close", () => {
-    expect(potLive(run, ov(), BOOK, SERIES, marks(), new Date(NOW)).fresh).toEqual({ kind: "live", at: AT, feed: "poll" });
+    expect(potLive(run, ov(), BOOK, SERIES, marks(), new Date(NOW)).fresh).toEqual({ kind: "live", at: AT });
     expect(potLive(run, ov(), BOOK, SERIES, null, new Date(NOW)).fresh).toEqual({ kind: "engine", at: Date.parse("2026-11-19T17:39:21Z") });
     // Wednesday night, the close booked: the minute row of that day is not used (potNow), and no price is asked for
     const night = new Date("2026-11-18T22:35:00Z");

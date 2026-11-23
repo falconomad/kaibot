@@ -20,8 +20,7 @@ export interface Mark { qty: number; price: number; prevClose: number | null }
 export interface Marks { at: number; by: Record<string, Mark>; streamAt?: number }
 export interface LiveBook extends Marks { pot: number; dayPnl: number; dayPct: number }
 /** Where the pot on screen comes from: live prices, the engine's minute row, or a booked close. */
-/** `feed` (live only): "stream" while streamed prices are in (about once a second), "poll" on the 10 s poll. */
-export type Fresh = { kind: "live"; at: number; feed?: "stream" | "poll" } | { kind: "engine"; at: number } | { kind: "close"; session: string };
+export type Fresh = { kind: "live"; at: number } | { kind: "engine"; at: number } | { kind: "close"; session: string };
 
 const fin = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const etDay = (t: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(t);
@@ -127,23 +126,10 @@ export function potLive(run: Pick<Run, "amount_usd">, o: Pick<Overview, "daily" 
   series?: SeriesPoint[] | null, marks?: Marks | null, now = new Date()): PotNow & { live: LiveBook | null; engine: EngineBook | null; fresh: Fresh | null } {
   const live = liveBook(book, marks, o, now.getTime());
   if (live) return { pot: live.pot, dayPnl: live.dayPnl, dayPct: live.dayPct, dayLabel: "today", today: true, positions: {}, source: "book", from: null,
-    live, engine: null, fresh: live.streamAt !== undefined ? { kind: "live", at: live.streamAt, feed: "stream" } : { kind: "live", at: live.at, feed: "poll" } };
+    live, engine: null, fresh: { kind: "live", at: live.streamAt ?? live.at } };
   const p = potNow(run, o, book, series, now), f = p.from;
   const engine = f?.kind === "engine" && p.source === "book" ? engineMarks(book, o, now.getTime()) : null;
   return { ...p, live: null, engine: engine && engine.pot === p.pot ? engine : null,
     fresh: !f ? null : f.kind === "engine" ? { kind: "engine", at: Date.parse(f.ts) } : f };
 }
 
-/** The one small line near the pot: "Live · prices 4 s ago", "Updated a minute ago by the engine", "At Wednesday's close". */
-export function freshText(f: Fresh, now = Date.now()): string {
-  if (f.kind === "close") {
-    const t = Date.parse(f.session), days = (Date.parse(etDay(now)) - t) / 86_400_000;
-    if (!Number.isFinite(t)) return "At the last close";
-    const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: "UTC", ...o }).format(t);
-    return days === 0 ? "At today's close" : days > 0 && days < 7 ? `At ${fmt({ weekday: "long" })}'s close` : `At the close of ${fmt({ month: "short", day: "numeric" })}`;
-  }
-  const s = Math.max(0, now - f.at) / 1000;
-  if (f.kind === "live") return `Live · prices ${Math.max(1, Math.round(s))} s ago`;
-  const m = Math.round(s / 60), h = Math.round(m / 60);
-  return `Updated ${m < 2 ? "a minute" : m < 60 ? `${m} minutes` : h < 2 ? "an hour" : `${h} hours`} ago by the engine`;
-}

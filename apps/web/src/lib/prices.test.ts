@@ -91,3 +91,37 @@ describe("api.prices: one shared private channel", () => {
     off2();
   });
 });
+
+describe("api.prices: the stream's state for 'Prices paused' (lib/stream.pricesPaused)", () => {
+  it("a refusal by the owner policy is no stream here, not a drop: never down, and the channel is left", async () => {
+    for (const msg of ["Unauthorized: You do not have permissions to read from this Channel topic: kb:prices", "new row violates row-level security policy"]) {
+      rt.state.channels = [];
+      const down = vi.fn();
+      const off = api.prices(vi.fn(), down);
+      await flush();
+      const [ch] = live();
+      ch.status?.("SUBSCRIBED");
+      ch.status?.("CHANNEL_ERROR", new Error(msg));
+      expect(ch.removed, msg).toBe(true);
+      expect(down.mock.calls.map((c) => c[0]), msg).toEqual([false]); // told "not down" when asked, never "down"
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(down.mock.calls.some((c) => c[0] === true), msg).toBe(false);
+      off();
+    }
+  });
+  it("a channel joined and then lost is down until supabase-js joins it again; a channel never joined is not down", async () => {
+    const down = vi.fn();
+    const off = api.prices(vi.fn(), down);
+    await flush();
+    const [ch] = live();
+    ch.status?.("TIMED_OUT");                       // never joined: no stream to have lost
+    expect(down.mock.calls.map((c) => c[0])).toEqual([false]);
+    ch.status?.("SUBSCRIBED");
+    ch.status?.("CHANNEL_ERROR", new Error("socket closed"));
+    expect(down.mock.calls.at(-1)?.[0]).toBe(true);
+    expect(ch.removed).toBe(false);                 // kept: supabase-js joins it again by itself
+    ch.status?.("SUBSCRIBED");
+    expect(down.mock.calls.at(-1)?.[0]).toBe(false);
+    off();
+  });
+});

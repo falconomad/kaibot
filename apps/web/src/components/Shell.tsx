@@ -132,7 +132,7 @@ export function engineChip(o: Overview | undefined, run: Run): EngineChip {
     return { dot: "var(--stale)", text: "Engine offline", sub: `last seen ${ago(age)}`, live: false, asleep: false, note: c.text };
   }
   return { dot: state === "error" ? "var(--warn)" : "var(--live)", text: STATE_TEXT[state] ?? state,
-    sub: `${beat.detail?.host ?? ""} · ${Math.round(age)} s ago`, live: true, asleep: false, note: "" };
+    sub: beat.detail?.host ?? "", live: true, asleep: false, note: "" };
 }
 
 function ago(s: number) {
