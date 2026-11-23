@@ -51,8 +51,10 @@ def test_the_flag_stays_off_by_default_and_overnight_is_allowed(monkeypatch):
     monkeypatch.delenv(registry.MULTIDAY_FLAG, raising=False)
     assert not registry.multi_day_enabled()
     assert _cfg()["all_levels"]["allow_overnight"] is True
-    # with the flag off the levels run exactly their own (intraday) lists
-    assert load_strategies() == {lv: list(body["strategies"]) for lv, body in _cfg()["levels"].items()}
+    # with the flag off the levels' lists are exactly their own (intraday) ones; M10 1.19 (#444): and the live
+    # engine runs none of them while `intraday.enabled` is off
+    assert load_strategies(intraday=True) == {lv: list(body["strategies"]) for lv, body in _cfg()["levels"].items()}
+    assert _cfg()["intraday"] == {"enabled": False} and load_strategies() == {lv: [] for lv in _cfg()["levels"]}
 
 
 def test_trend_momentum_is_the_only_multi_day_rule_on_when_the_flag_is_on(monkeypatch):
@@ -60,7 +62,8 @@ def test_trend_momentum_is_the_only_multi_day_rule_on_when_the_flag_is_on(monkey
     assert enabled_multi_day() == [MD]
     st = load_strategies()
     for lv, names in st.items():
-        assert names == [*_cfg()["levels"][lv]["strategies"], MD]
+        assert names == [MD]  # M10 1.19 (#444): the multi-day rule alone; the levels' intraday lists are off
+        assert load_strategies(intraday=True)[lv] == [*_cfg()["levels"][lv]["strategies"], MD]
         assert registry.multi_day_names(names) == [MD]
     assert not load_multi_day_rules()["mom_12_1_band"].enabled
 

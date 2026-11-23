@@ -16,28 +16,65 @@ module, add one line below, list its files under `fingerprint.strategies` in con
 
 from __future__ import annotations
 
+import importlib
 import os
 from dataclasses import dataclass
 
 from kaibot.strategies.base import Holding, Mode, Strategy
-from kaibot.strategies.dip import DipReversal
 from kaibot.strategies.momentum import VERSIONS as _MOMENTUM
-from kaibot.strategies.news_continuation import NewsContinuation
-from kaibot.strategies.orb import OrbStocksInPlay
-from kaibot.strategies.spy_momentum import SpyLateMomentum
 
-STRATEGIES: tuple[Strategy, ...] = (DipReversal(), SpyLateMomentum(), OrbStocksInPlay(), NewsContinuation())
-BY_NAME: dict[str, Strategy] = {s.name: s for s in STRATEGIES}
-assert len(BY_NAME) == len(STRATEGIES), "strategy names must be unique"
+# M10 1.19 (#444): the registered rules are all intraday ones (flat by the close), and their modules are imported
+# on first use, not with this file: the live engine, which runs none of them (`intraday.enabled: false` in
+# config/profiles.yaml), never loads their code. This table is what can be said about them without loading them:
+# name -> (module, class, mode), in registry order. `STRATEGIES` and `BY_NAME` are built from it when first read
+# (`_load`), which checks every line of it against the class.
+INTRADAY: dict[str, tuple[str, str, Mode]] = {
+    "dip_reversal": ("kaibot.strategies.dip", "DipReversal", Mode.LIVE),
+    "spy_late_momentum": ("kaibot.strategies.spy_momentum", "SpyLateMomentum", Mode.LIVE),
+    "orb_stocks_in_play": ("kaibot.strategies.orb", "OrbStocksInPlay", Mode.SHADOW),
+    "news_continuation": ("kaibot.strategies.news_continuation", "NewsContinuation", Mode.SHADOW),
+}
+
+
+def _load() -> tuple[Strategy, ...]:
+    """`STRATEGIES` (and `BY_NAME`), importing the intraday rules' modules the first time."""
+    g = globals()
+    if "STRATEGIES" not in g:
+        built = tuple(getattr(importlib.import_module(mod), cls)() for mod, cls, _ in INTRADAY.values())
+        for s, (name, (_, _, mode)) in zip(built, INTRADAY.items(), strict=True):
+            if (s.name, s.mode) != (name, mode) or s.holding is Holding.MULTI_DAY:
+                raise RuntimeError(f"registry.INTRADAY says {name} ({mode}), the class says {s.name} ({s.mode}, "
+                                   f"{s.holding})")
+        g["STRATEGIES"] = built
+        g.setdefault("BY_NAME", {s.name: s for s in built})
+    return g["STRATEGIES"]
+
+
+def _by_name() -> dict[str, Strategy]:
+    _load()
+    return globals()["BY_NAME"]
+
+
+def loaded() -> bool:
+    """Whether the intraday rules' modules were imported (never, in a live engine without an intraday rule)."""
+    return "STRATEGIES" in globals()
+
+
+def __getattr__(name: str):
+    if name in ("STRATEGIES", "BY_NAME"):
+        _load()
+        return globals()[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # What a level without a `strategies` list runs (risk/profiles.load_strategies) and what an engine built without a
 # strategy map runs (tests, replays).
-DEFAULT_LIVE: tuple[str, ...] = (DipReversal.name,)
+DEFAULT_LIVE: tuple[str, ...] = ("dip_reversal",)
 
 # Registered, still runnable by the research command, but in no level's list. An owner config saved before the
 # retirement may still say `true` for one of these: that is ignored (it can never switch the rule on), not an
 # error that would refuse the whole session. Product decision on #128 (12 Nov 2026): SPY late momentum retired.
-RETIRED: frozenset[str] = frozenset({SpyLateMomentum.name})
+RETIRED: frozenset[str] = frozenset({"spy_late_momentum"})
 
 
 # Multi-day rules (issue #161): runnable by the research command through the engine's daily path (engine/daily.py).
@@ -46,7 +83,7 @@ RETIRED: frozenset[str] = frozenset({SpyLateMomentum.name})
 # first paper start of a multi-day rule (#133, after Gate B) is one explicit switch, off by default.
 MULTI_DAY: tuple = tuple(_MOMENTUM.values())
 RESEARCH_ONLY: dict = {s.name: s for s in MULTI_DAY}
-assert not set(RESEARCH_ONLY) & set(BY_NAME), "a multi-day rule must not share a name with a registered one"
+assert not set(RESEARCH_ONLY) & set(INTRADAY), "a multi-day rule must not share a name with a registered one"
 
 
 @dataclass(frozen=True)
@@ -96,7 +133,7 @@ def may_run_on_paper(name: str) -> bool:
 # Loaded lazily, on the first `get` of one of these names: the live engine never imports the research rule.
 RESEARCH_INTRADAY_NAMES: frozenset[str] = frozenset(
     {"spy_noise_band", *(f"spy_noise_band~{k}" for k in ("lb10", "lb20", "lb30", "check15", "exit1555"))})
-assert not RESEARCH_INTRADAY_NAMES & (set(BY_NAME) | set(RESEARCH_ONLY)), "research names must be unique"
+assert not RESEARCH_INTRADAY_NAMES & (set(INTRADAY) | set(RESEARCH_ONLY)), "research names must be unique"
 _research_intraday: dict | None = None
 
 
@@ -126,9 +163,16 @@ def multi_day_enabled() -> bool:
     return os.environ.get(MULTIDAY_FLAG, "off").strip().lower() == "on"
 
 
+def registered_multi_day() -> tuple[str, ...]:
+    """The registered rules (`STRATEGIES`) that hold across sessions. None while their modules are not loaded:
+    `_load` refuses a table line whose class is a multi-day one."""
+    return tuple(s.name for s in globals()["STRATEGIES"] if s.holding is Holding.MULTI_DAY) if loaded() else ()
+
+
 def multi_day_names(names_on) -> list[str]:
+    reg = globals().get("BY_NAME") or {}  # not loaded: no registered rule is a multi-day one (`_load`)
     return sorted(n for n in set(names_on or ()) if n in RESEARCH_ONLY
-                  or (n in BY_NAME and BY_NAME[n].holding is Holding.MULTI_DAY))
+                  or (n in reg and reg[n].holding is Holding.MULTI_DAY))
 
 
 def refuse_multi_day(names_on) -> None:
@@ -141,12 +185,17 @@ def refuse_multi_day(names_on) -> None:
 
 
 def get(name: str) -> Strategy | None:
-    hit = BY_NAME.get(name) or RESEARCH_ONLY.get(name)
+    if not loaded() and name not in INTRADAY:  # M10 1.19: a multi-day rule is found without the intraday modules
+        hit = RESEARCH_ONLY.get(name)
+    else:
+        hit = _by_name().get(name) or RESEARCH_ONLY.get(name)
     return hit if hit is not None or name not in RESEARCH_INTRADAY_NAMES else research_intraday()[name]
 
 
 def names(mode: Mode | None = None) -> tuple[str, ...]:
-    return tuple(s.name for s in STRATEGIES if mode is None or s.mode is mode)
+    if not loaded():  # the table says the same (`_load` checks it) without importing the rules
+        return tuple(n for n, (_, _, m) in INTRADAY.items() if mode is None or m is mode)
+    return tuple(s.name for s in _load() if mode is None or s.mode is mode)
 
 
 def live(names_on) -> tuple[Strategy, ...]:
@@ -155,13 +204,16 @@ def live(names_on) -> tuple[Strategy, ...]:
     (`RefusedStrategy`)."""
     refuse_multi_day(names_on)
     on = set(names_on)
-    out = tuple(s for s in STRATEGIES if s.mode is Mode.LIVE and s.name in on)
+    if not loaded() and not on & set(INTRADAY):  # M10 1.19: no registered rule is named: none is loaded
+        out: tuple[Strategy, ...] = ()
+    else:
+        out = tuple(s for s in _load() if s.mode is Mode.LIVE and s.name in on)
     return out + tuple(s for s in MULTI_DAY if s.name in on)
 
 
 def shadow(only=None) -> tuple[Strategy, ...]:
     """The registered shadow strategies (or those among `only`), in registry order."""
-    return tuple(s for s in STRATEGIES if s.mode is Mode.SHADOW and (only is None or s.name in set(only)))
+    return tuple(s for s in _load() if s.mode is Mode.SHADOW and (only is None or s.name in set(only)))
 
 
 def owner_toggles() -> frozenset[str]:

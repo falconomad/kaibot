@@ -34,7 +34,6 @@ import yaml
 from kaibot.evaluation import fingerprint as fpr
 from kaibot.evaluation import trials as registry
 from kaibot.evaluation.metrics import deflated_sharpe, max_drawdown, random_entry_percentile, sharpe, t_stat
-from kaibot.strategies import dip
 from kaibot.strategies import registry as strategy_registry
 
 log = logging.getLogger(__name__)
@@ -219,7 +218,12 @@ def _c(value, limit, met) -> dict:
 
 
 # ---------------- engine hook ----------------
-def day_random(engine, n_runs: int, strategy: str = dip.NAME) -> dict | None:
+# The dip rule's name (strategies/dip.NAME; a test compares them). Written out since M10 1.19 (#444): importing
+# the rule's module here would load intraday code into an engine that runs no intraday rule.
+DIP = "dip_reversal"
+
+
+def day_random(engine, n_runs: int, strategy: str = DIP) -> dict | None:
     """Today's random-entry totals for the dip strategy (same entry count, sizing and exits as replay)."""
     from kaibot.replay.pipeline import prepare
     from kaibot.replay.sim import random_entry_runs
@@ -244,7 +248,7 @@ def day_random(engine, n_runs: int, strategy: str = dip.NAME) -> dict | None:
 
 
 # S76: the random-entry model of each rule that has one (config/gate.yaml `random_baseline` names which run).
-RANDOM_MODELS = {dip.NAME: lambda engine, n_runs, strategy: day_random(engine, n_runs, strategy)}
+RANDOM_MODELS = {DIP: lambda engine, n_runs, strategy: day_random(engine, n_runs, strategy)}
 
 
 def report_strategies(engine) -> list[str]:
@@ -262,7 +266,9 @@ def on_day_end(engine, root: Path) -> dict | None:
         rid = engine.day.run_id
         if not rid:
             return None
-        for strat in bar.cfg.get("random_baseline") or ():
+        # M10 1.19: the random-entry baselines are of intraday rules (they re-run the day's minute scan): an
+        # engine without the intraday path has neither the rule nor its market, and writes none
+        for strat in (bar.cfg.get("random_baseline") or ()) if getattr(engine, "intraday", True) else ():
             model = RANDOM_MODELS.get(strat)
             if model is None:
                 continue  # no random-entry model for this rule yet: its percentile reports "unknown" (fails closed)

@@ -13,7 +13,7 @@ from kaibot.engine.userconfig import MAX_EXCLUDED, RISK_FIELDS, ConfigError, is_
 from kaibot.risk.profiles import load_profiles, load_strategies
 
 P = yaml.safe_load((ROOT / "config" / "presets.yaml").read_text())
-PROFILES, STRATS = load_profiles(), load_strategies()
+PROFILES, STRATS = load_profiles(), load_strategies(intraday=True)  # M10 1.19: the levels' own rules
 U = yaml.safe_load((ROOT / "config" / "universe_seed.yaml").read_text())
 UNI = frozenset(s for v in U["sectors"].values() for s in v)
 THEMES = {k: v["symbols"] for k, v in U["themes"].items()}

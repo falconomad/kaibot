@@ -111,7 +111,8 @@ def test_spy_momentum_is_retired_from_every_level_but_still_registered():
     from kaibot.risk.profiles import load_strategies
     from kaibot.strategies import registry
 
-    st = load_strategies()
+    st = load_strategies(intraday=True)  # M10 1.19 (#444): the levels' own lists; the live loop runs none of them
     assert all("spy_late_momentum" not in v for v in st.values()), st
+    assert all(not v for v in load_strategies().values())
     assert st == {"conservative": ["dip_reversal"], "balanced": ["dip_reversal"], "aggressive": ["dip_reversal"]}
     assert registry.get("spy_late_momentum") is not None and "spy_late_momentum" in registry.RETIRED

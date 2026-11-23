@@ -60,10 +60,9 @@ def clean(x) -> str:
 
 def multi_day_names() -> tuple[str, ...]:
     from kaibot.strategies import registry
-    from kaibot.strategies.base import Holding
 
     return tuple(sorted({s.name for s in registry.MULTI_DAY}
-                        | {s.name for s in registry.STRATEGIES if s.holding is Holding.MULTI_DAY}))
+                        | set(registry.registered_multi_day())))
 
 
 def is_multi_day(strategy: str | None, names: Iterable[str] | None = None) -> bool:

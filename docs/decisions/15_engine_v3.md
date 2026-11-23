@@ -117,6 +117,11 @@ are research estimates, net of costs, long-only, unlevered.
 Retired: the intraday dip rule in every variant (it keeps running on paper only as a plumbing soak test until a
 replacement passes). Not pursued: leverage, shorting, options, paid data.
 
+Update 22 Nov 2026 (M10 ticket 1.19, #444; Product's decision D4 of 21 Nov 2026,
+`docs/research/engine_audit/decisions.md`): the soak test has ended. The intraday path is opt-in
+(`intraday.enabled` in `config/profiles.yaml`, off) and the live engine is the multi-day book's own loop
+(`engine/book_loop.py`). The dip rule stays runnable through the engine with `SimBroker`.
+
 Fill model for daily rules in tests: decide after the close of T; **base** fill at the close of T+1 at half a spread per
 side; **stress** fill at the open of T+1 at twice the midday half-spread; a stop gapped through fills at the open.
 This fill model is not changed by the near-close orders of 18 Nov 2026 (section 12).
