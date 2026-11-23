@@ -563,6 +563,10 @@ class IdentityError(RuntimeError):
     """This journal is not the newest one Supabase has seen (a stale standby or a restored backup)."""
 
 
+class IdentityUnreadable(IdentityError):
+    """M10 1.25: Supabase could not be read for the check (nothing is known either way)."""
+
+
 class JournalStore:
     """The engine's store (the interface of engine/store.Store) on top of the journal. `remote` is the Supabase
     store (None in research: then every table is local)."""
@@ -909,8 +913,8 @@ class JournalStore:
         try:
             obs = self.observe(process)
         except Exception as e:
-            raise IdentityError(f"Supabase cannot be read to check the journal ({str(e)[:160]}). Not starting.") \
-                from None
+            raise IdentityUnreadable(f"Supabase cannot be read to check the journal ({str(e)[:160]}). Not "
+                                     "starting.") from None
         me, last = self.journal.journal_id, self.journal.last_seq()
         problems = []
         hb = obs["heartbeat"]

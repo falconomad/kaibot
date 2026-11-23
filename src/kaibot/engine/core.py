@@ -91,6 +91,10 @@ LEVEL_NAMES = {"conservative": "Steady", "balanced": "Balanced", "aggressive": "
 # database's own limits (migrations 0001/0002: `amount_usd between 1000 and 100000`), which a local-first run row
 # would otherwise meet only when the replicator sends it; a kind outside COMMAND_KINDS is rejected, never applied.
 RUN_AMOUNT_MIN_USD, RUN_AMOUNT_MAX_USD = 1_000.0, 100_000.0
+# M10 1.25 (#536): a session whose owner config could not be READ at its start (Supabase unreachable) asks again,
+# at most this often, while the lease is ours; a config that was read and rejected is never asked again that day
+CONFIG_UNREADABLE = "config unreadable"
+RULES_RETRY_S = 60.0
 COMMAND_KINDS = ("new_run", "pause", "resume", "flatten_and_stop", ACCEPT_COMMAND, "set_level")
 # S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
 # candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
@@ -409,6 +413,7 @@ class Engine:
         self.peak: float | None = None
         self.on_progress = lambda status: None
         self.monotonic = time.monotonic  # S74: the flatten's time budget (a fake clock in tests)
+        self._rules_tried = -math.inf  # M10 1.25 (#536): the last read of an unreadable session config
         self.sleep = time.sleep  # QA-Ops (#282): the short wait for a cancel inside a flatten (a no-op in tests)
         self._flatten_slow: set[str] = set()  # S74: symbols the last flatten could not close; tried last next time
         # M9 1.2: a `flatten_and_stop` / `new_run` command waiting for a flat book: id -> why no position is opened
@@ -1768,13 +1773,18 @@ class Engine:
     def _load_rules(self, d: Day) -> None:
         """M5 S43: the owner's latest applied config created before this session's open, tightened onto the level.
         Invalid -> entries refused for the session (fail closed); management, stops and the flatten still run."""
-        lv_pol, lv_strats = self.policies[self.level()], self.level_strategies()
-        d.rules = defaults(lv_pol, lv_strats)
+        d.rules = defaults(self.policies[self.level()], self.level_strategies())
         try:
             c = self._applied_config(d.run_id, d.open_utc)
         except Exception as e:
-            self._refuse_session(f"config unreadable: {type(e).__name__}")
+            self._refuse_session(f"{CONFIG_UNREADABLE}: {type(e).__name__}")  # asked again: `retry_rules`
             return
+        self._apply_rules(d, c)
+
+    def _apply_rules(self, d: Day, c: dict | None, late: bool = False) -> None:
+        """The session's rules from the applied config `c` (None: the level's defaults). Invalid: refused."""
+        lv_pol, lv_strats = self.policies[self.level()], self.level_strategies()
+        d.rules = defaults(lv_pol, lv_strats)
         if c is None:
             self.market.min_adv = d.rules.min_adv_usd
             return
@@ -1788,7 +1798,44 @@ class Engine:
             return
         self.market.min_adv = d.rules.min_adv_usd
         self.store.event("config_applied", {"day": str(d.day), "version": d.rules.version,
-                                            "config_sha": d.rules.config_sha}, self._rid())
+                                            "config_sha": d.rules.config_sha, **({"late": True} if late else {})},
+                         self._rid())
+
+    def retry_rules(self, force: bool = False) -> str | None:
+        """M10 1.25 (#536, test-eng): a session whose owner config could not be READ at its start (Supabase was
+        unreachable, for example during a degraded start) reads it again, at most every `RULES_RETRY_S` (`force`:
+        now). The caller asks only while the lease is ours. It is the same config the open would have read (the
+        latest applied one created before this session's open: point-in-time, never a newer one), so from the next
+        tick the session runs as if it had been read at the open, and every other check (the entry hours, the
+        near-close send window, the risk gate, the lease) still applies. Custom tickers ('Only these') were not
+        loaded at the open: they are not traded this session (said in the event). A config that is read and
+        invalid is refused as at the open (its own `halt` row); one that is still unreadable stays refused, with no
+        new row. Returns the session's config refusal still in force, or None when there is none."""
+        d = self.day
+        if d is None or not (d.refused or "").startswith(CONFIG_UNREADABLE):
+            return None if d is None else d.refused  # none, or a config that was read and rejected: final today
+        now = self.monotonic()
+        if not force and now - self._rules_tried < RULES_RETRY_S:
+            return d.refused
+        self._rules_tried = now
+        try:
+            c = self._applied_config(d.run_id, d.open_utc)
+        except Exception as e:
+            log.warning("owner config still unreadable (%s): entries stay off this session", type(e).__name__)
+            return d.refused
+        was, d.refused = d.refused, None
+        self._apply_rules(d, c, late=True)
+        if d.refused:
+            return d.refused
+        detail = {"kind": "config", "day": str(d.day), "was": was, "version": d.rules.version}
+        custom = sorted(d.rules.custom_universe())
+        if custom:  # not loaded at the open (the refused session loaded none): never scanned or traded today
+            detail["custom_not_loaded"] = custom
+        self.store.event("halt_cleared", detail, self._rid())
+        log.info("owner config v%s read again: the session's config refusal is lifted%s", d.rules.version,
+                 f" (custom tickers {', '.join(custom)} were not loaded at the open: not traded today)"
+                 if custom else "")
+        return None
 
     def _custom_before_open(self, open_utc: datetime) -> dict[str, str]:
         """S68: the custom tickers of the config that will apply at `open_utc` (Only mode; none otherwise), so their

@@ -38,6 +38,9 @@ ROUTINE |= {"market_alarm", "market_alarm_error"}
 # M10 1.24 (#449): a journal snapshot that was not written (memory and a full fold differ) or not used at a start.
 # Health events waiting for a kb_health migration (0039 is taken; the next free number lists them)
 AWAITING_KB_HEALTH |= {"journal_snapshot_mismatch", "journal_snapshot_unused"}
+# M10 1.25 (#450): the engine started reducing only (Supabase down at start), and became fully active again.
+# Health events waiting for a kb_health migration (0039 is taken; the next free number lists them)
+AWAITING_KB_HEALTH |= {"engine_degraded_start", "engine_lease_confirmed"}
 needs_pg = pytest.mark.skipif(not PG, reason="set KAIBOT_TEST_PG to a scratch Postgres with migration 0033 applied")
 EMIT_RE = re.compile(r'\b(?:event|_event)\(\s*"([a-z_0-9]+)"')
 # #375: the 8-K filing flags' shadow log (KAIBOT_FILING_FLAG=shadow), one row per decision: research, not health

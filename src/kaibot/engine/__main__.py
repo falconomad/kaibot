@@ -21,7 +21,7 @@ import os
 import signal
 import socket
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -32,7 +32,7 @@ from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.book_market import BookMarket
 from kaibot.engine.config import ROOT, Settings
-from kaibot.engine.core import Engine
+from kaibot.engine.core import CONFIG_UNREADABLE, RULES_RETRY_S, Engine
 from kaibot.engine.corp_guard import RecentActions
 from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
@@ -40,6 +40,7 @@ from kaibot.engine.journal import (
     BootstrapError,
     DurabilityError,
     IdentityError,
+    IdentityUnreadable,
     Journal,
     JournalCorrupt,
     Replicator,
@@ -47,7 +48,15 @@ from kaibot.engine.journal import (
     journal_path,
     live_store,
 )
-from kaibot.engine.lease import EXIT_LEASE, EngineLease, LeaseError, LeaseLost, holder_id
+from kaibot.engine.lease import (
+    EXIT_LEASE,
+    EngineLease,
+    LeaseError,
+    LeaseHeld,
+    LeaseLost,
+    LeaseUnavailable,
+    holder_id,
+)
 from kaibot.engine.m3glue import (
     LockedDesk,
     make_daily_note,
@@ -369,14 +378,20 @@ def report_news(eng: Engine, poller) -> None:
             eng.store.event(kind, detail, eng._rid())
 
 
-def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> None:
+def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> str:
     """Take the cross-machine lease, then start the engine. Without the lease nothing else happens: no order
     adoption, no start event, no heartbeat. Exits with code 3 and a message that says what to do. With the lease,
     a new journal first copies the active run from Supabase (S77); if it cannot, exit code 4. Then the journal
     must be the newest one Supabase has seen (not a stale standby, not a restored backup); if not, exit code 4
-    and the reason, unless `adopt_journal` (`--adopt-journal`, docs/ops/ledger.md)."""
+    and the reason, unless `adopt_journal` (`--adopt-journal`, docs/ops/ledger.md).
+
+    M10 1.25 (#450): when the lease cannot be CHECKED (Supabase unreachable) the engine may start "reducing only"
+    (`degraded_start`). Returns "active" or "degraded"."""
     try:
         got = lease.acquire()
+    except LeaseUnavailable as e:
+        degraded_start(eng, lease, e)
+        return "degraded"
     except LeaseError as e:
         log.error("%s", e)
         raise SystemExit(EXIT_LEASE) from None
@@ -397,6 +412,164 @@ def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = Fals
         if out.get("imported"):
             log.info("journal started: %d rows of run %s copied from Supabase", out["imported"], out.get("run_id"))
     eng.startup()
+    return "active"
+
+
+# ---------------------------------------------------------------- degraded start (M10 1.25, #450)
+FAILSAFE_IDS = ("kbwd-", "kbdm-")  # the watchdog's and the dead-man's stops: not an engine
+EVIDENCE_LOOKBACK_S = 300.0  # fills are read from this long before the journal's last entry
+EVIDENCE_LOOKUPS = 40  # orders looked up by id for the fills; more unknown fills than this: not ruled out
+
+
+def _engine_id(coid) -> bool:
+    """A client order id an engine gives its orders (`kb-<run>-...`, `kb<run>-...`, `kbfl-...`)."""
+    c = str(coid or "")
+    return c.startswith("kb") and not c.startswith(FAILSAFE_IDS)
+
+
+def other_engine_evidence(broker, journal) -> list[str]:
+    """The broker's word on whether another engine traded this account after this journal's last entry: open
+    orders, and fills since shortly before that entry, that carry an engine's client order id this journal does
+    not know. An engine journals every order's client id BEFORE it sends it (`om_intent`, `md_exit_intent`,
+    `intent`; a replace's new id in `om_state`), so an engine id the journal lacks was sent by another engine.
+    The fail-safes' stops (`kbwd-`, `kbdm-`) and orders without an engine id are not evidence (a stranger's order
+    is the account check's business: it blocks entries). Anything that cannot be read counts as evidence."""
+    coids: set[str] = set()
+    ids: set[str] = set()
+    for _, _, _, b in journal.entries(kinds=("om_intent", "om_state", "md_exit_intent", "md_exit", "intent",
+                                             "own_order_ids")):
+        coids |= {str(b[k]) for k in ("coid", "client_id", "client_order_id") if b.get(k)}
+        ids |= {str(i) for i in [b.get("order_id"), *(b.get("ids") or [])] if i}
+    last = journal.entries(after=max(journal.last_seq() - 1, 0))
+    since = datetime.fromisoformat(last[-1][1]) - timedelta(seconds=EVIDENCE_LOOKBACK_S) if last else None
+    out: list[str] = []
+
+    def look(o: dict, what: str) -> None:
+        for x in [o, *(o.get("legs") or [])]:
+            coid = x.get("client_order_id")
+            if _engine_id(coid) and str(coid) not in coids and str(x.get("id")) not in ids:
+                out.append(f"{what} {coid} ({x.get('side')} {x.get('symbol')})")
+
+    try:
+        for o in broker.open_orders():
+            look(o, "open order")
+        asked: set[str] = set()
+        for a in broker.activities(since, types=("FILL",)):
+            oid = str(a.get("order_id"))
+            if oid in ids or oid in asked:  # ours, or looked up already
+                continue
+            asked.add(oid)
+            if len(asked) > EVIDENCE_LOOKUPS:
+                out.append(f"more than {EVIDENCE_LOOKUPS} fills on orders this journal does not know")
+                break
+            look(broker.order(oid), "fill on order")
+    except Exception as e:
+        out.append(f"the broker cannot be read ({type(e).__name__}: {str(e)[:120]})")
+    return out
+
+
+def degraded_start(eng: Engine, lease: EngineLease, err: Exception) -> None:
+    """M10 1.25 (#450): the lease could not be checked. Start "reducing only" when (1) the journal's last lease
+    record is this install's own and (2) the broker shows no order of another engine since the journal's last
+    entry; otherwise exit code 3, as before. Reducing only: `lease.ok` stays False, so every buy is refused
+    (`Engine.entry_block`: "lease unverified"); exits, stops, sales and fills go on. No command is applied, no
+    heartbeat is written and no row is sent to Supabase until `confirm_lease` has taken the lease and verified
+    the journal (docs/ops/failsafe.md, "Degraded start")."""
+    journal = getattr(eng.store, "journal", None)
+    ok, why = (lease.degraded_allowed() if journal is not None and lease.journal is not None
+               else (False, "this engine keeps no local journal"))
+    if not ok:
+        log.error("%s No degraded start: %s.", err, why)
+        raise SystemExit(EXIT_LEASE)
+    evidence = other_engine_evidence(eng.broker, journal)
+    if evidence:
+        lease.contradicted(evidence)
+        log.error("%s No degraded start: the broker shows that another engine has traded this account since "
+                  "this journal's last entry, or the broker cannot be read: %s.", err, "; ".join(evidence[:5]))
+        raise SystemExit(EXIT_LEASE)
+    lease.start_degraded(why)
+    eng.lease = lease
+    log.warning("The engine lease could not be checked (Supabase unreachable?). Starting REDUCING ONLY: %s and the "
+                "broker shows no other engine's orders. Exits, stops, sales and fills are managed; nothing is "
+                "bought, no command is applied and nothing is sent to Supabase until the lease is confirmed "
+                "(docs/ops/failsafe.md, 'Degraded start').", why)
+    eng.startup()
+    with contextlib.suppress(Exception):
+        eng.store.event("engine_degraded_start", {"why": why, "host": lease.host, "error": str(err)[:200]},
+                        eng._rid())
+
+
+def confirm_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> bool:
+    """A degraded engine asks again, once per loop pass. True: the lease is ours and the journal is the newest one
+    Supabase has seen: fully active from here on. False: still not known (Supabase unreachable): stay reducing
+    only. Another engine holds the lease: exit code 3. The lease was free but another journal ran the engine
+    meanwhile (this one is stale): the lease is given back, exit code 4. Nothing is bought before True."""
+    if not lease.held:
+        try:
+            got = lease.acquire()  # held and fresh, but `ok` stays False while `degraded` is set
+        except LeaseUnavailable:
+            return False
+        except LeaseHeld as e:
+            log.error("%s", e)
+            raise SystemExit(EXIT_LEASE) from None
+        if got.get("taken_over"):
+            log.warning("the lease was held by host %r while this engine was reducing only",
+                        got.get("previous_host"))
+    try:
+        eng.store.verify_identity(eng.process, adopt=adopt_journal)
+    except IdentityUnreadable as e:
+        log.warning("lease taken, journal not verified yet (%s): still reducing only", str(e)[:160])
+        return False
+    except IdentityError as e:
+        log.error("%s", e)
+        lease.release()
+        raise SystemExit(EXIT_JOURNAL) from None
+    lease.activate()
+    # #536 (test-eng): a session that began while Supabase was down could not read the owner's config and refused
+    # entries; it is read again now. "Entries allowed" is said only when nothing else blocks them either.
+    still = retry_rules(eng, force=True)
+    block = still and f"config refused: {still}"
+    if block is None:
+        entry_block = getattr(eng, "entry_block", None)
+        block = entry_block() if entry_block is not None else None
+    if block is None:
+        log.info("engine lease confirmed and journal verified: fully active (entries allowed)")
+    elif still:
+        log.warning("engine lease confirmed and journal verified, but entries stay OFF: %s (%s; exits, stops and "
+                    "sales go on)", block, f"the owner's config is asked again every {RULES_RETRY_S:.0f} s"
+                    if still.startswith(CONFIG_UNREADABLE) else "until the next session")
+    else:
+        log.info("engine lease confirmed and journal verified: active (no entries for now: %s)", block)
+    with contextlib.suppress(Exception):
+        eng.store.event("engine_lease_confirmed", {"host": lease.host, "entries": block is None,
+                                                   **({"entries_off": str(block)[:200]} if block else {})},
+                        eng._rid())
+    return True
+
+
+def retry_rules(eng: Engine, force: bool = False) -> str | None:
+    """`Engine.retry_rules` where the engine has it (the start-up tests' stand-in does not)."""
+    retry = getattr(eng, "retry_rules", None)
+    return retry(force=force) if retry is not None else None
+
+
+def before_tick(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> bool:
+    """The start of every loop pass. True on the pass a degraded engine became fully active (the caller then
+    starts what waits for that: replication, the news poller). While degraded no command is applied: a command
+    marked applied here would be taken from the engine that holds the lease."""
+    became = False
+    if lease.degraded:
+        if not confirm_lease(eng, lease, adopt_journal):
+            if lease.held:  # taken, identity not verified yet: keep it alive
+                lease.renew()
+            return False
+        became = True
+    if not lease.ok:  # a slow or failed step may have let it lapse: prove it is ours before acting
+        lease.renew(force=True)
+    if lease.ok and not became:  # #536: a config unreadable at the session's start is asked again (once a minute)
+        retry_rules(eng)
+    eng.apply_commands()
+    return became
 
 
 def write_pid_file(data_dir, host: str) -> None:
@@ -420,6 +593,8 @@ def make_beat(eng: Engine, lease: EngineLease, host: str, stop: dict):
     works again); a lease that now belongs to another engine sets `stop` so the main loop ends."""
 
     def beat(st: dict) -> None:
+        if lease.degraded:  # M10 1.25: the heartbeat row and the lease belong to whoever holds the lease
+            return
         try:
             lease.renew()
         except LeaseLost as e:
@@ -499,18 +674,25 @@ def main() -> None:
     signal.signal(signal.SIGINT, lambda *_: stop.update(now=True))
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
     host = socket.gethostname()
-    lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host)
-    start_with_lease(eng, lease, adopt_journal=a.adopt_journal)
+    lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host, journal=eng.journal)
+    mode = start_with_lease(eng, lease, adopt_journal=a.adopt_journal)
     write_pid_file(settings.data_dir, host)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
-    # Once, now: with 0018 the new tables; without it the pre-0018 ones (the dashboard keeps updating).
-    # Supabase unreachable: asked again at the first pass that reaches it.
-    log.info("replica schema: %s", replicator.detect() or "not known yet (Supabase unreachable)")
-    replicator.start()
     news = getattr(eng, "news_poller", None)
-    if news is not None:
-        news.start()
-        log.info("news poller: on (every %.0f s now; heartbeat `news`)", news.every_s())
+
+    def go_active() -> None:
+        """What only the engine that holds the lease does: send its rows to Supabase, poll the news. At once
+        after a normal start; after a degraded one (M10 1.25) when the lease is confirmed."""
+        # Once, now: with 0018 the new tables; without it the pre-0018 ones (the dashboard keeps updating).
+        # Supabase unreachable: asked again at the first pass that reaches it.
+        log.info("replica schema: %s", replicator.detect() or "not known yet (Supabase unreachable)")
+        replicator.start()
+        if news is not None:
+            news.start()
+            log.info("news poller: on (every %.0f s now; heartbeat `news`)", news.every_s())
+
+    if mode == "active":
+        go_active()
     status: dict = {"state": "starting"}
     last_minute = None
     upkeep: dict = {}
@@ -525,9 +707,8 @@ def main() -> None:
     eng.on_progress = lambda st: beat(st)  # long steps (history load) report progress
     while not stop["now"]:
         try:
-            if not lease.ok:  # a slow or failed step may have let it lapse: prove it is ours before acting
-                lease.renew(force=True)
-            eng.apply_commands()
+            if before_tick(eng, lease, a.adopt_journal):
+                go_active()
             now = datetime.now(UTC)
             minute = now.replace(second=0, microsecond=0)
             if minute != last_minute and now.second >= 7:
@@ -569,6 +750,12 @@ def main() -> None:
             if stop["now"]:
                 break
             time.sleep(1)
+    if lease.degraded:
+        # M10 1.25: stopped while still reducing only. Nothing was sent to Supabase and nothing is now (no
+        # heartbeat, no rows: the journal was never verified); the journal keeps everything for the next start.
+        lease.release()  # only if it was taken and the journal not yet verified
+        log.info("engine stopped (it was reducing only: nothing was sent to Supabase)")
+        return
     if news is not None:
         news.stop()
     if stop.get("lease_lost"):
