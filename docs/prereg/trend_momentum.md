@@ -831,3 +831,25 @@ mom_12_1_band.
    line tell the owner to book or write off the fill (QA-Ops on PR #544).
 4. **Research and Gate B unchanged.** "Flatten and stop" is an owner's command of the live engine; the research venue
    has none. No trial row, report or Gate B mark changes, and no configuration is added.
+
+## Amendment 28 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order
+
+Written on 22 Nov 2026, before the change's first use. It changes how a fill is booked, not whether an order goes
+out: it adds no order and changes no decision, target or share count. No research result is affected (item 4). The
+same text is Amendment 26 of mom_12_1_band.
+
+1. **Why.** Under Amendment 16 an order is called lost ("never reached the venue") only after the venue's orders,
+   fills and position were read, and that verdict was final. When the venue's lookups lag the order by more than a
+   minute and it fills after the verdict, its fill stayed a fill on an unknown order for good: a quantity, a cash
+   and a foreign-fill difference, buys blocked, and the shares in no sleeve (found by the deterministic simulation
+   of M12 ticket 3.2).
+2. **The rule.** An order called lost stays under watch for three days after its intent (the time the live path
+   keeps a fill it cannot attribute). A fill of the same stock and side on an order the engine cannot name is looked
+   up once by the venue's order id. When that order carries the lost order's client order id, the order is taken
+   back with what the venue shows ("adopted"), and the fill is booked to its sleeve as any fill of the rule. While an
+   order is under watch the live path reads the account's fills every 15 minutes, also with no order open.
+3. **What it does not change.** An order whose venue order carries another client id stays a foreign fill. A lookup
+   that fails is tried again at the next read. When the decision was already sent again under a new attempt after
+   the verdict, both orders' fills are booked: the venue holds both, and the next decision sizes from the sleeve.
+4. **Research and Gate B unchanged.** The research venue answers every order at once, so nothing is called lost
+   there; the bit-identity test of the momentum rules passes unchanged.

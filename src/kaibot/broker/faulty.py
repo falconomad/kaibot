@@ -101,7 +101,8 @@ class FaultProfile:
 NO_FAULTS = FaultProfile()
 # The pull-request profile: each fault is rare enough that most sessions meet two or three, not all at once.
 DEFAULT_FAULTS = FaultProfile(
-    submit_timeout_accepted=0.10, submit_timeout_lost=0.05, lookup_lag=0.5, cancel_lost=0.25, cancel_late=0.25,
+    submit_timeout_accepted=0.10, submit_timeout_lost=0.05, lookup_lag=0.5, listing_lag=0.5, cancel_lost=0.25,
+    cancel_late=0.25,
     fill_duplicate=0.10, fill_dropped=0.12, partial_fill=0.10, hold=0.10, rate_limit=0.004, clock_skew=0.002,
     mark_bad=0.004, quote_stale=0.03, quote_missing=0.03, quote_zero=0.02, quote_crossed=0.02,
     write_fail=0.02, write_timeout=0.02, write_twice=0.02, read_fail=0.01)

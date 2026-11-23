@@ -215,4 +215,4 @@ def test_a_profile_can_be_scaled_and_cut_down():
     assert only.hold == DEFAULT_FAULTS.hold and only.cancel_lost == 0 and only.write_fail > 0
     with pytest.raises(ValueError, match="unknown faults"):
         DEFAULT_FAULTS.only("gremlins")
-    assert DEFAULT_FAULTS.listing_lag == 0  # engine bug #535: off in the random profile while it is open
+    assert DEFAULT_FAULTS.listing_lag > 0  # on since #535 was fixed (a lost order's late fill is adopted)

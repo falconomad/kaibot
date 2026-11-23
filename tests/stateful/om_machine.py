@@ -88,6 +88,9 @@ LEGAL: dict[St, set[St]] = {
     St.PENDING_REPLACE: _ANY_VENUE | {St.PENDING_CANCEL},  # cancelled while its replace was unanswered
     **{s: set() for s in TERMINAL},
 }
+# #535: the one way out of a terminal state. An order called lost ("rejected", reason "lost: ...") whose fill the
+# venue reports later is adopted (reason "adopted: ..."): "lost" was a guess, the venue's order is the fact.
+LOST_ADOPTED = _ANY_VENUE - {St.REJECTED}
 
 
 class Kill(BaseException):
@@ -533,13 +536,20 @@ class OrdersAndLedger(RuleBasedStateMachine):
     def inv4_legal_transitions(self) -> None:
         state: dict[str, St] = {}
         cum: dict[str, float] = {}
+        lost: set[str] = set()
         for _, _, kind, b in self.journal.entries(kinds=("om_intent", "om_state")):
             c = b["coid"]
             if kind == "om_intent":
                 state[c], cum[c] = St.INTENT, 0.0
                 continue
             new = St(b["state"])
-            assert new is state[c] or new in LEGAL[state[c]], f"{c}: illegal transition {state[c]} -> {new}"
+            adopted = c in lost and str(b.get("reason") or "").startswith("adopted") and new in LOST_ADOPTED
+            assert new is state[c] or new in LEGAL[state[c]] or adopted, \
+                f"{c}: illegal transition {state[c]} -> {new}"
+            if new is St.REJECTED and str(b.get("reason") or "").startswith("lost"):
+                lost.add(c)
+            elif new is not St.REJECTED:
+                lost.discard(c)
             if b.get("cum") is not None:
                 assert float(b["cum"]) >= cum[c] - 1e-9, f"{c}: filled quantity fell from {cum[c]} to {b['cum']}"
                 cum[c] = float(b["cum"])
