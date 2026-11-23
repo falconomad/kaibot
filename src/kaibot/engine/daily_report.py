@@ -58,6 +58,8 @@ EXPOSURES = (100.0, 60.0, 30.0)
 NEED_HISTORY = 252 + 21
 STATUS = ("engine + SimBroker (decision 15): strategy plug-ins, closing-auction orders, cost model v1 with impact as "
           "pre-registered; the ledger is the documented stand-in until #117 lands")
+STATUS_V2 = ("engine + SimBroker (decision 15): strategy plug-ins, near-close orders filled at the closing print, cost "
+             "model v2 (broker.sim.AuctionCostsV2: ADV buckets, the print's venue, capped impact, 2026 fees; #559)")
 
 
 # ---------------------------------------------------------------- data
@@ -178,9 +180,12 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
            end: str | None = None, equity0: float = 100_000.0, control_runs: int | None = None,
            control_seed: int = 127,
            grid: str = "gate", out_dir: Path | None = None, trials: Path | None = None, prereg: dict | None = None,
-           log=print) -> dict:
+           log=print, cost_model: str = "v2") -> dict:
     """Every run Gate B needs (or the full pre-registered grid), the marks, the benchmarks. Writes the report,
-    the daily CSVs and the trial rows when `out_dir` / `trials` are given."""
+    the daily CSVs and the trial rows when `out_dir` / `trials` are given. `cost_model` (#559): "v2" by default
+    (Product, 22 Nov 2026: gate v3's final verdicts use cost model v2), "v1" to reproduce an earlier report. Mark 3's
+    random portfolios are replayed in the research harness at its own cost model (v1, at least 1 bp a side), which
+    is the cheaper of the two for the random portfolios in the large-cap bucket and so never flatters the rule."""
     from kaibot.replay import multiday_core as mc
 
     t0 = time.time()
@@ -199,7 +204,8 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
 
     def one(strat, kind: str, fill: str, cost: float, cap: float) -> dict:
         t = time.time()
-        r = run_daily(strat, data, pol, i0, i1, fill=fill, cost=cost, exposure_pct=cap, equity0=equity0)
+        r = run_daily(strat, data, pol, i0, i1, fill=fill, cost=cost, exposure_pct=cap, equity0=equity0,
+                      cost_model=cost_model)
         st = run_stats(r)
         lab = label(strat.name, fill, cost, cap)
         row = {"label": lab, "kind": kind, "spec": strat.name, "fill": fill, "cost": cost, "exposure_pct": cap,
@@ -254,7 +260,8 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
     run_at = datetime.now(UTC)
     tag = f"engine_{level}_{version}_{universe}_{run_at.strftime('%Y%m%dT%H%M%S')}"
     rep = {"run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "set": "engine_core",
-           "status": STATUS, "version": version, "rule": strategy.rule, "prereg": prereg, "level": level,
+           "status": STATUS_V2 if cost_model == "v2" else STATUS, "cost_model": cost_model, "version": version,
+           "rule": strategy.rule, "prereg": prereg, "level": level,
            "universe": universe, "data": info, "oos_window": [str(dates[0]), str(dates[-1])],
            "oos_sessions": int(i1 - i0 + 1), "symbols": len(data.symbols), "equity": equity0, "grid": grid,
            "base_label": base_label, "rows": rows, "neighbours": nb, "benchmarks": bench, "control": control,
@@ -286,7 +293,7 @@ def report(version: str, market, info: dict, *, universe: str, level: str = "bal
         for lab, (r, row, st) in runs.items():
             trials_registry.append(trials, json.loads(json.dumps({
                 "ts": run_at.isoformat(timespec="seconds"), "trial_id": f"{tag}_{lab}", "strategy": strategy.rule,
-                "variant": "engine_simbroker", "label": f"engine {lab}", "level": level, "cost_model": "v1",
+                "variant": "engine_simbroker", "label": f"engine {lab}", "level": level, "cost_model": cost_model,
                 "universe_mode": universe, "code_sha": code_sha, "status": "engine",
                 "prereg_sha256": (prereg or {}).get("sha256"),
                 "n_trials": int(row["fill"] == "base" and row["cost"] == 1.0),

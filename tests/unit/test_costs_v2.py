@@ -162,7 +162,13 @@ def test_live_code_never_imports_v2_and_v1_constants_are_unchanged():
     for f in (ROOT / "src" / "kaibot").rglob("*.py"):
         if f.parent.name == "replay" or f.name == "costs_v2.py":
             continue
+        # #559: SimBroker's v2 print costs (broker/sim.AuctionCostsV2, the simulated venue only, never a live
+        # order) price the engine's daily research runs; the live engine never builds them
+        if f.relative_to(ROOT / "src" / "kaibot").as_posix() == "broker/sim.py":
+            continue
         assert "costs_v2" not in f.read_text(), f
+    for live in ("engine/core.py", "engine/live_daily.py", "broker/alpaca.py"):
+        assert "AuctionCostsV2" not in (ROOT / "src" / "kaibot" / live).read_text(), live
     assert shadow_costs.SEC_FEE_PER_DOLLAR_SOLD == 0.0000278 and shadow_costs.TAF_PER_SHARE_SOLD == 0.000166
     q = shadow_costs.QuoteCtx(99.99, 100.01, 0.001, 1000.0)
     spread = 0.02
