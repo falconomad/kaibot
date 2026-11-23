@@ -274,8 +274,14 @@ Dark first: the app has one theme and v4 keeps it. Names are roles, not colours,
 - **Push to a detail page:** new page slides in 24 px from the right and fades, 240 ms; back reverses it.
 - **Bottom sheet:** slides up with `transform: translateY`, 320 ms; scrim fades 200 ms. Closes on swipe down, scrim tap, X
   and Escape. Focus moves into the sheet and returns to the row that opened it. Height never animates.
-- **Number changes:** when a polled figure changes, the new value fades in over 200 ms and the figure tints green or red
-  for 600 ms, then returns to its colour. No rolling digits. Only the figures that changed animate.
+- **Number changes** (revised 23 Nov 2026 for the live price stream, PR #599; `components/Tick.tsx`, `lib/tick.ts`): the
+  figure changes in place (same element, tabular figures, no layout shift). A wash in `--up-tint` / `--down-tint` behind
+  it comes in over 120 ms and fades out over 560 ms (opacity only, absolutely positioned). Only the characters that
+  changed take `--up` / `--down`, roll in by 0.12 em and fade back to the figure's colour. No scale, no bounce. A small
+  ▲/▼ (CSS, hidden from screen readers) gives the direction; gain and loss figures keep their own ▲/▼ and sign. At most
+  one tick per figure every 250 ms: a value inside the window is held and the latest is shown at its end. Equal values,
+  values that format the same and a change of source do not tick. Only the figures that changed animate. The colour of
+  the changed characters is the one exception to "only `transform` and `opacity` animate" (accepted by Product).
 - **Live indicator:** the dot in the engine pill pulses with `transform: scale` and `opacity` on a pseudo-element (not
   `box-shadow`), once every 2 s while the engine is live. No pull-to-refresh: the page polls already, and a pull gesture
   would suggest it does not. A one-line "Updated 5 s ago" sits under Home's details.
@@ -285,9 +291,10 @@ Dark first: the app has one theme and v4 keeps it. Names are roles, not colours,
   which repaints every frame.
   Space for the halt row is reserved while the overview loads (fixes audit #9).
 - **Accordions:** content fades in 200 ms; the row's chevron turns 90°. Use `grid-template-rows: 0fr → 1fr` for height.
-- **Only `transform` and `opacity` animate.** No `width`, `height`, `box-shadow` or `background-position` animations.
-- **Reduced motion:** every duration becomes 0, the pulse stops, skeletons stand still, sheets and pages appear in place, the number tint stays
-  (colour is not motion). The existing global rule already does this; keep it and its test.
+- **Only `transform` and `opacity` animate** (one exception: the colour of a number tick's changed characters, above).
+  No `width`, `height`, `box-shadow` or `background-position` animations.
+- **Reduced motion:** every duration becomes 0, the pulse stops, skeletons stand still, sheets and pages appear in place, and a
+  number just changes (no wash, roll or tint). The existing global rule already does this; keep it and its test.
 
 ## Desktop: targeted changes only
 

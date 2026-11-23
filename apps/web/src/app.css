@@ -45,11 +45,25 @@ main > *, .enter { animation: kb-in var(--d-base) var(--ease) both; }
 .sk-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .sk-row { display: flex; flex-wrap: wrap; gap: 16px; }
 .sk-row > * { flex: 1 1 260px; }
-/* v4 PR 7: number tick. The new value fades in (200 ms); the tint is a class held for 600 ms, so it also shows with
-   reduced motion, where only the fade and the colour's return are off. */
-@keyframes kb-tick { from { opacity: .25; } to { opacity: 1; } }
-.tick { animation: kb-tick var(--d-base) var(--ease) both; transition: color var(--d-base) var(--ease); }
-.tint-up, .tint-up * { color: var(--up) !important; } .tint-down, .tint-down * { color: var(--down) !important; }
+/* The number tick (components/Tick.tsx, lib/tick.ts; redone 23 Nov 2026 for the live stream). The figure changes in
+   place; behind it a wash in the up/down tint comes in (120 ms) and fades out (560 ms), opacity only; the changed
+   characters take the up/down colour, roll in by .12 em, and fade back to the figure's colour (no 100% keyframe: the
+   animation ends on the element's own colour). A small arrow says the direction, so colour is never the only cue
+   (a gain or loss has its own arrow and sign; there the roll, up or down, is the second cue).
+   No scale, no bounce. Reduced motion: the global rule turns all of it off, so the figure just changes. */
+@keyframes kb-wash { 0% { opacity: 0; } 17.6% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes kb-roll-up { 0% { opacity: .4; transform: translateY(.12em); color: var(--up); } 17.6% { opacity: 1; transform: none; color: var(--up); } }
+@keyframes kb-roll-down { 0% { opacity: .4; transform: translateY(-.12em); color: var(--down); } 17.6% { opacity: 1; transform: none; color: var(--down); } }
+.tk { position: relative; isolation: isolate; font-variant-numeric: tabular-nums; }
+.tk > .tk-fx { position: absolute; inset: -1px -4px; z-index: -1; border-radius: 6px; pointer-events: none; opacity: 0; animation: kb-wash 680ms var(--ease) both; }
+.tint-up > .tk-fx { background: var(--up-tint); } .tint-down > .tk-fx { background: var(--down-tint); }
+.tk > .tk-fx::after { position: absolute; right: 100%; top: 50%; margin-right: 1px; transform: translateY(-50%); font-size: 12px; line-height: 1; }
+.tint-up > .tk-fx::after { content: "\25B2"; color: var(--up); } .tint-down > .tk-fx::after { content: "\25BC"; color: var(--down); }
+/* a gain or a loss already carries its own ▲/▼ (the sign of the total, below): no second arrow beside it; the roll's
+   direction and the sign say the rest */
+.tk:is(.gain, .loss, .flat) > .tk-fx::after { content: none; }
+.tk > .tk-mid { display: inline-block; }
+.tint-up > .tk-mid { animation: kb-roll-up 680ms var(--ease); } .tint-down > .tk-mid { animation: kb-roll-down 680ms var(--ease); }
 /* v4 PR 7: route fades. A tab change cross-fades with a 4 px rise (kb-in above); a push to a detail page
    (/positions/12, /strategy/fine-tune) slides in 24 px from the right and fades, 240 ms. */
 @keyframes kb-push { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }

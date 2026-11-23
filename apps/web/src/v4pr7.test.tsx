@@ -19,14 +19,25 @@ describe("number tick", () => {
     expect(tickDir(undefined, 100)).toBeNull();
     expect(tickDir(100, null)).toBeNull();
     expect(tickDir(NaN, 1)).toBeNull();
-    expect(renderToStaticMarkup(<Tick value={5} className="gain">+$5.00</Tick>)).toBe('<span class="gain">+$5.00</span>');
-    expect(TINT_MS).toBe(600);
+    expect(renderToStaticMarkup(<Tick value={5} className="gain">+$5.00</Tick>)).toBe('<span class="tk gain">+$5.00</span>');
+    expect(TINT_MS).toBe(680); // 120 ms in, 560 ms out (lib/tick.ts)
   });
-  it("the fade is opacity only in 200 ms; the tint is a class (colour), so it stays with reduced motion", () => {
-    expect(props(keyframes("kb-tick"))).toEqual(["opacity", "opacity"]);
-    expect(css).toMatch(/\.tick \{ animation: kb-tick var\(--d-base\)/);
-    expect(css).toMatch(/\.tint-up, \.tint-up \* \{ color: var\(--up\) !important; \}/);
-    expect(css).toMatch(/\.tint-down, \.tint-down \* \{ color: var\(--down\) !important; \}/);
+  it("the wash is opacity only (in, then out, 680 ms) in the up/down tints; the roll is transform, opacity and the colour's return, no scale", () => {
+    expect(props(keyframes("kb-wash"))).toEqual(["opacity", "opacity", "opacity"]);
+    for (const k of ["kb-roll-up", "kb-roll-down"]) {
+      expect(props(keyframes(k)).every((p) => ["transform", "opacity", "color"].includes(p)), k).toBe(true);
+      expect(keyframes(k)).not.toMatch(/scale|100%/);           // no 100%: it ends on the figure's own colour
+    }
+    expect(keyframes("kb-roll-up")).toMatch(/color: var\(--up\)/);
+    expect(keyframes("kb-roll-down")).toMatch(/color: var\(--down\)/);
+    expect(css).toMatch(/\.tk > \.tk-fx \{[^}]*opacity: 0; animation: kb-wash 680ms/);
+    expect(css).toMatch(/\.tint-up > \.tk-fx \{ background: var\(--up-tint\); \} \.tint-down > \.tk-fx \{ background: var\(--down-tint\); \}/);
+    expect(css).toMatch(/\.tint-up > \.tk-mid \{ animation: kb-roll-up 680ms/);
+    // colour is never the only cue: an arrow, drawn by CSS (so it is not in the figure's text) and hidden from readers
+    expect(css).toMatch(/\.tint-up > \.tk-fx::after \{ content: "\\25B2"; color: var\(--up\); \} \.tint-down > \.tk-fx::after \{ content: "\\25BC"; color: var\(--down\); \}/);
+    expect(css).toMatch(/\.tk:is\(\.gain, \.loss, \.flat\) > \.tk-fx::after \{ content: none; \}/); // no second arrow
+    // reduced motion: all of it is animation, so the global rule below turns it off and the figure just changes
+    expect(css).not.toMatch(/\.tint-(up|down)[^{]*\{[^}]*color: var\(--(up|down)\) !important/);
   });
 });
 

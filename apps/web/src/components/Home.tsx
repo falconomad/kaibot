@@ -1,7 +1,7 @@
 // v4 Home (docs/design/mobile_first_v4.md, "Home" and mockups/v4/home.png): status rows that open sheets, the paper
 // pot, top holdings and a Details section. One thing per screen: the pot; the facts above it stay visible (a halt, the
 // engine being off, the experiment), and their explanations sit one tap away in a bottom sheet.
-import { useState, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Overview, Run } from "../lib/api";
 import { type Book, bookChecks, holdingView } from "../lib/book";
@@ -210,7 +210,6 @@ export function holdingRows(positions: Record<string, IntradayPos>, book: Book |
 export function TopHoldings({ rows, max, top = 3, waiting = false, from }: { rows: HoldingRowData[]; max: number | null; top?: number;
   /** The first live prices are on their way: keep the place of each book row's "today" line. */ waiting?: boolean;
   /** Where the book rows' figures come from ("live" or "close"), for Tick: a change of source does not tint. */ from?: string }) {
-  const nav = useNavigate();
   return (
     <section aria-labelledby="hold-top-h" className="home-holdings">
       <Link to="/positions" className="home-section-link">
@@ -220,22 +219,31 @@ export function TopHoldings({ rows, max, top = 3, waiting = false, from }: { row
       {rows.length ? (
         <ul className="hold-rows">
           {rows.slice(0, top).map((r) => (
-            <li key={r.key}>
-              <button type="button" className="hold-row" onClick={() => nav(r.to)}>
-                <StockBadge symbol={r.symbol} size={40} />
-                <span className="hold-mid"><b>{r.symbol}</b>
-                  {r.bar ? <PriceBar {...r.bar} /> : r.sub ? <span className="muted">{r.sub}</span> : null}</span>
-                <span className="hold-end num"><b><Tick value={r.value} from={from}>{money(r.value)}</Tick></b>
-                  {r.gain !== null && <Tick value={r.gain} from={from} className={r.gain > 0 ? "gain" : r.gain < 0 ? "loss" : "flat"}>{signedMoney(r.gain)}</Tick>}
-                  <DayChange pct={r.day} waiting={waiting && r.book} /></span>
-              </button>
-            </li>
+            <HoldRow key={r.key} r={r} waiting={waiting && !!r.book} from={from} />
           ))}
         </ul>
       ) : <p className="muted" style={{ margin: 0, fontSize: 15 }}>Nothing held right now. {NAME} is flat by 15:55 every day; multi-day stocks show here once bought.</p>}
     </section>
   );
 }
+
+/** One holding row. Memoised on its data (plain values, compared as JSON): a streamed price re-renders only the rows
+ *  whose figures moved, never the whole list. */
+const HoldRow = memo(function HoldRow({ r, waiting, from }: { r: HoldingRowData; waiting: boolean; from?: string }) {
+  const nav = useNavigate();
+  return (
+    <li>
+      <button type="button" className="hold-row" onClick={() => nav(r.to)}>
+        <StockBadge symbol={r.symbol} size={40} />
+        <span className="hold-mid"><b>{r.symbol}</b>
+          {r.bar ? <PriceBar {...r.bar} /> : r.sub ? <span className="muted">{r.sub}</span> : null}</span>
+        <span className="hold-end num"><b><Tick value={r.value} from={from}>{money(r.value)}</Tick></b>
+          {r.gain !== null && <Tick value={r.gain} from={from} className={r.gain > 0 ? "gain" : r.gain < 0 ? "loss" : "flat"}>{signedMoney(r.gain)}</Tick>}
+          <DayChange pct={r.day} waiting={waiting} /></span>
+      </button>
+    </li>
+  );
+}, (a, b) => JSON.stringify(a) === JSON.stringify(b));
 
 /** Where the price is between the stop and the target. */
 function PriceBar({ stop, now, target }: { stop: number; now: number; target: number }) {

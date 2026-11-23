@@ -85,7 +85,7 @@ describe("Home while the market is open and the account holds exactly the book",
     expect(rowOf(html, "XOM")).toBe("XOM Trend momentum · 0 d $3,173.60 −$38.20 −1.18% today");
     expect(rowOf(html, "TMO")).toMatch(/\$2,745\.44 −\$26\.36 −0\.92% today$/);
     // gains and losses keep their colours (and so their arrows, which the stylesheet adds to .gain and .loss in .num)
-    expect(html).toMatch(/<span class="hold-end num">.*?<span class="loss">−\$38\.20<\/span><span class="day"><span class="loss">−1\.18%<\/span> today<\/span>/s);
+    expect(html).toMatch(/<span class="hold-end num">.*?<span class="tk loss">−\$38\.20<\/span><span class="day"><span class="tk loss">−1\.18%<\/span> today<\/span>/s);
   });
 
   it("the chart's last point follows the live pot; the earlier points stay the booked closes", () => {
@@ -101,7 +101,7 @@ describe("Home while the market is open and the account holds exactly the book",
     at(NOW);
     const html = home(marks({ XOM: [20, 162.5, 160.58] }));
     expect(rowOf(html, "XOM")).toBe("XOM Trend momentum · 0 d $3,250.00 +$38.20 +1.20% today");
-    expect(html).toMatch(/<span class="gain">\+\$38\.20<\/span><span class="day"><span class="gain">\+1\.20%<\/span> today<\/span>/);
+    expect(html).toMatch(/<span class="tk gain">\+\$38\.20<\/span><span class="day"><span class="tk gain">\+1\.20%<\/span> today<\/span>/);
   });
 });
 
