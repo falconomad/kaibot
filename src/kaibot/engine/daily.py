@@ -252,7 +252,7 @@ def momentum_limits(strategy, pol: RiskPolicy, exposure_pct: float) -> BookLimit
     15%, in the frozen construction), the exposure cap as the gross and overnight cap, at most the rule's
     `max_names`, the sector cap at 40% (Amendment 4). The cash floor (1%, below the 3% reserve) and the gap-scenario
     cap (15%) are the hard ceilings: outer guards the pre-registered sizing never reaches (`DailyRun.guards`).
-    No index fund (#458): `max_index_pct` is 0, not the ceiling's 97, so a momentum book never carries an index cap
+    No index fund (#458): `max_index_pct` is 0, not the ceiling's 27, so a momentum book never carries an index cap
     (only `risk/index_core.book_limits` sets one)."""
     return replace(BOOK_HARD_CEILINGS, atr_risk_pct=float(strategy.atr_risk) * 100,
                    max_name_pct=float(pol.max_position_pct), max_gross_pct=float(exposure_pct),

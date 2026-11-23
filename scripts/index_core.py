@@ -9,10 +9,10 @@ What runs (each ONE continuous $100k account through `engine.daily.run_daily`, `
 filled at the closing print, cost model v2 (`broker.sim.AuctionCostsV2`, prereg Amendment 2), the ledger booking
 SPY's dividends):
 
-- the judged configuration: `IndexCore()` at Hunter (97% index cap, 100% exposure cap), at 1x, 2x, 3x and 0x
+- the judged configuration: `IndexCore()` at Hunter (27% index cap, #600; 100% exposure cap), at 1x, 2x, 3x and 0x
   costs (0x for the break-even), and the stress fill (the opening print at twice the cost);
 - the five pre-declared neighbours at Hunter, 1x (mark B5);
-- Balanced (57% / 60%) and Careful (27% / 30%) at 1x, reported, not judged.
+- Balanced (27% / 60%) and Careful (27% / 30%) at 1x, reported, not judged.
 
 What is judged: `evaluation.gate_v3.evaluate_book` on the research window (2017-05-01 to 2024-12-31; the hold-out
 is never read: `holdout.enforce` refuses an --end on or after 2025-01-01). B6 with no sleeves. B4: the run is on

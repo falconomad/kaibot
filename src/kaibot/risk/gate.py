@@ -82,9 +82,9 @@ BOOK_HARD_CEILINGS = BookLimits(atr_risk_pct=0.25, max_name_pct=HARD_CEILINGS.ma
                                 max_gap_loss_pct=15.0,
                                 # stakeholder, 13 Nov 2026: 1.5 x the ten-year test's max drawdown at the 100% cap
                                 run_drawdown_end_pct=27.0,
-                                # #458: 100% less the builder's 3% cash reserve (design.md 2.9); the level values
-                                # (27 / 57 / 97% proposed) are the stakeholder's to confirm
-                                max_index_pct=97.0)
+                                # #458, #600 (stakeholder, 23 Nov 2026): the index fund's cap is 27% at every
+                                # level, and the ceiling is 27 too, so no config edit can raise it (was 97)
+                                max_index_pct=27.0)
 BOOK_FLOORS = ("min_cash_pct",)
 
 # The gap scenario: every overnight position opens this far below its last price; a resting stop does not help

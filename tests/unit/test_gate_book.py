@@ -215,7 +215,7 @@ def test_book_hard_ceilings():
     assert c.atr_risk_pct == 0.25 and c.max_name_pct == HARD_CEILINGS.max_position_pct
     assert (c.max_sector_pct, c.max_names, c.min_cash_pct, c.max_gap_loss_pct) == (40, 30, 1.0, 15)
     assert c.run_drawdown_end_pct == 27  # #206: the multi-day book's own end (stakeholder, 13 Nov 2026)
-    assert c.max_index_pct == 97 and BookLimits().max_index_pct == 0  # #458: the index fund's own cap, off
+    assert c.max_index_pct == 27 and BookLimits().max_index_pct == 0  # #458: the index fund's own cap, off
     validate_book(BOOK)
     validate_book(BookLimits())  # the defaults sit inside the ceilings
 

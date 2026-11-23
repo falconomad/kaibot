@@ -38,7 +38,7 @@ def test_the_sleeve_is_the_rule_at_one_tenth_and_sees_only_its_own_stocks():
     assert b.atr_risk == pytest.approx(0.0001) and b.budget_pct == 10.0
     pb = script.book_builder(b, "aggressive", ic.load(), script.load_profiles())
     assert pb.k == pytest.approx(0.0001) and pb.limits.max_name_pct == pytest.approx(1.5)
-    assert pb.sleeve_budget_pct == 10.0 and pb.index_symbol == "SPY" and pb.limits.max_index_pct == 97.0
+    assert pb.sleeve_budget_pct == 10.0 and pb.index_symbol == "SPY" and pb.limits.max_index_pct == 27.0  # #600
     assert pb.limits.max_names == 30
 
 
@@ -98,7 +98,7 @@ def test_one_combined_book_through_the_engine_keeps_the_sleeve_inside_its_budget
     for p, market, eq in plans:
         sleeve = sum(q * market[s].px for (_, s), q in p.targets.items() if s != "SPY")
         index = sum(q * market[s].px for (_, s), q in p.targets.items() if s == "SPY")
-        assert sleeve <= 0.10 * eq + 1e-6 and index <= 0.97 * eq + 1e-6
+        assert sleeve <= 0.10 * eq + 1e-6 and index <= 0.27 * eq + 1e-6
         assert sum(1 for (_, s), q in p.targets.items() if q > 0) <= 30
         held_stock |= sleeve > 0
     assert held_stock and any(f["symbol"] == "SPY" for f in run.fills)

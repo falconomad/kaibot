@@ -89,3 +89,10 @@ final verdicts use cost model v2, and #572 put it into the engine's daily path. 
 `engine/daily.run_daily(cost_model="v2")` (`broker.sim.AuctionCostsV2`). 2x and 3x are v2's multiples, 0x is the
 break-even, and the stress fill is v2's opening venue. The source and every trial row record `cost_model: v2`. The
 v1 print model is not run. Nothing else changes.
+
+## Amendment 2 (23 Nov 2026, quant research, before any run on real data)
+
+The core's index cap, as in docs/prereg/index_core.md Amendment 3: the stakeholder set `max_index_pct` to **27% at
+every level** (issue #600). Row 1 reads "27% at every level", and row 9 reads "Hunter (27% index cap, 100% exposure
+cap)". The sleeve's 10% budget, the neighbours, the pass marks and the trial count are unchanged. With at most 27% in
+SPY and 10% in the sleeve, most of the book is cash at 0%, and the book test is judged on that.
