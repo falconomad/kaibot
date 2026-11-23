@@ -115,7 +115,11 @@ def _sell_fees_dropped(monkeypatch):
 
 def _blind_resend(monkeypatch):
     """An order without an answer is written off as lost without the lookup by its client id: the next pass sends
-    the decision again while the first order may be working at the venue."""
+    the decision again while the first order may be working at the venue. Since #535 a fill of an order called
+    lost is adopted, which books this program's late fill to its order (the program sends nothing in between): the
+    plant takes that second guard away too, as tests/dst/scenarios.py does for M9 1.11."""
+    monkeypatch.setattr(orders_mod.OrderManager, "_claim", lambda self, a: None)
+
     def resolve(self):
         out = [r for r in list(self.live.values()) if r.state in orders_mod.UNCONFIRMED]
         for r in out:

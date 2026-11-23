@@ -56,6 +56,7 @@ Nothing here reads the wall clock: `now` is injected (the engine's clock, or `Si
 from __future__ import annotations
 
 import contextlib
+import logging
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -64,6 +65,8 @@ from enum import StrEnum
 from zoneinfo import ZoneInfo
 
 from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
+
+log = logging.getLogger(__name__)
 
 OM_KINDS = ("om_intent", "om_terms", "om_state", "om_fill", "fill")
 COID_MAX = 128  # Alpaca's limit on client_order_id
@@ -79,6 +82,11 @@ CANCEL_RESEND_S = 15.0
 # per order, not four times a minute per order for as long as it lasts (the order path has a rate budget)
 CANCEL_RESEND_MAX_S = 300.0
 FILL_LOOKBACK = timedelta(minutes=10)  # activities are read from a little before the last one seen (ids dedupe)
+# #535: an order called lost stays under watch this long after its intent: a fill in its symbol and side on an order
+# the manager cannot name is looked up by its venue id, and adopted when that order carries the record's client id.
+# A day order trades on its own day; the rest covers an activity reported late (#529). The live path drops a foreign
+# fill after three days (live_daily.FOREIGN_MAX_AGE), so the watch is no longer.
+LOST_WATCH = timedelta(days=3)
 
 
 class St(StrEnum):
@@ -204,6 +212,8 @@ class OrderManager:
         self.aliases: dict[str, str] = {}  # a client id a replace gave the order -> its record's coid (#197)
         self.seen: set[str] = set()  # activity ids booked
         self.foreign: dict[str, dict] = {}  # activity id -> a fill on an order this manager does not know
+        self.lost: set[str] = set()  # #535: coids called lost ("never reached the venue"), watched for LOST_WATCH
+        self.named: dict[str, None] = {}  # #535: venue order ids looked up and found not to be ours (not folded)
         # #333 (QA-Ops): finished orders whose fills the venue reported (`cum`) but whose FILL activities are not all
         # booked yet. Such an order is no longer working and its shares are not yet held: the target loop must wait
         self.settling: dict[str, OrderRecord] = {}
@@ -234,9 +244,15 @@ class OrderManager:
             r.state = St(b["state"])
             if r.state in TERMINAL:
                 self.live.pop(r.coid, None)
+            else:  # #535: a lost order adopted while the venue still works it is managed again
+                self.live[r.coid] = r
             for k in ("venue", "reason", "expires_at", "last_miss"):
                 if k in b:
                     setattr(r, k, b[k])
+            if r.state is St.REJECTED and str(r.reason or "").startswith("lost"):
+                self.lost.add(r.coid)
+            else:
+                self.lost.discard(r.coid)
             if b.get("cum") is not None:
                 r.cum = float(b["cum"])
             if "misses" in b:
@@ -457,7 +473,7 @@ class OrderManager:
         return new
 
     # ---------------------------------------------------------------- the venue's answers
-    def _adopt(self, r: OrderRecord, o: dict) -> None:
+    def _adopt(self, r: OrderRecord, o: dict, *, reason: str | None = None) -> None:
         """Take the venue's view of the order (and follow a replacement)."""
         if o.get("replaced_by"):
             with contextlib.suppress(BrokerError):
@@ -470,7 +486,45 @@ class OrderManager:
         cid = o.get("client_order_id")  # the id it works under (a venue that chose its own: recorded too)
         cid = str(cid) if cid and cid != r.coid and cid not in r.client_ids else None
         self._state(r, state, order_id=o.get("id"), venue=o.get("status"), cum=float(o.get("filled_qty") or 0),
-                    ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0, client_id=cid, **terms)
+                    ids=[i for i in ids if i], expires_at=o.get("expires_at"), misses=0, client_id=cid, reason=reason,
+                    **terms)
+
+    def watching(self) -> bool:
+        """#535: an order called lost is still under watch (LOST_WATCH): its fills must still be read."""
+        now = self.now()
+        return any((r := self.orders.get(c)) is not None and r.created and now - _ts(r.created) <= LOST_WATCH
+                   for c in self.lost)
+
+    def _claim(self, a: dict) -> OrderRecord | None:
+        """#535: a fill on an order no record names. While an order of the same symbol and side was called lost
+        less than LOST_WATCH ago, the venue's order is read once by its id; when it carries that record's client
+        order id, "lost" was a guess and the venue's order is the fact: the record adopts it (whatever the venue
+        shows: filled, or still working) and the fill is booked to it. A venue id found to carry another client id
+        is not read again by this process; a read that failed or found nothing is tried at the next read."""
+        oid = str(a.get("order_id") or "")
+        if not oid or not self.lost or oid in self.named:
+            return None
+        now = self.now()
+        watched = [r for c in sorted(self.lost) if (r := self.orders.get(c)) is not None and r.symbol == a.get("symbol")
+                   and r.side == a.get("side") and r.created and now - _ts(r.created) <= LOST_WATCH]
+        if not watched:
+            return None
+        try:
+            o = self.broker.order(oid)
+        except BrokerError as e:  # a 404 too: the venue's reads can lag the order (the case of #535), so tried again
+            # logged, not in `errors`: there an entry means "the activities were not read" (LiveDaily.recon_view)
+            log.warning("fill on unknown order %s: lookup %s: %s (tried again)", oid, e.status, _reason(e))
+            return None
+        if o is None:
+            return None
+        cid = o.get("client_order_id")
+        for r in watched:
+            if cid and cid in (r.coid, *r.client_ids):
+                self._adopt(r, o, reason=f"adopted: the venue filled order {oid}, called lost before"[:200])
+                log.warning("%s: an order called lost was at the venue (order %s): adopted", r.coid, oid)
+                return r
+        self.named[oid] = None
+        return None
 
     def _poll(self, r: OrderRecord, again: bool = False) -> None:
         try:
@@ -622,6 +676,8 @@ class OrderManager:
                 continue  # a duplicate event: booked once
             coid = self.by_id.get(str(a.get("order_id")))
             r = self.orders.get(coid) if coid else None
+            if r is None:
+                r = self._claim(a)  # #535: an order called lost that the venue had after all
             if r is None:  # not ours, or not yet known to be ours (an unknown order is resolved later)
                 self.foreign[aid] = dict(a)
                 continue

@@ -19,7 +19,6 @@ from scenarios import FINDINGS, quiet
 from world import D1, D2, KNOWN, Scenario, et, run_scenario, run_seed
 
 from kaibot.broker.faulty import Forced
-from kaibot.engine.orders import OrderManager
 
 SEEDS = int(os.environ.get("KAIBOT_DST_SEEDS", "3"))
 FIRST = int(os.environ.get("KAIBOT_DST_FIRST", "1"))
@@ -141,8 +140,6 @@ def test_flatten_and_stop_waits_for_a_buy_whose_cancel_was_lost():
     assert res.ok, res.report()
 
 
-@pytest.mark.xfail(not hasattr(OrderManager, "_claim"), strict=True,
-                   reason="needs #535 (PR #555): without it the late fill of an order called lost stays foreign")
 def test_flatten_and_stop_waits_for_an_order_called_lost_that_fills_later():
     """QA-Ops on #544 with #535: the buy is called lost at 15:52, the owner presses "Flatten and stop" at 15:53, the
     venue fills the order at 15:54. The command waits while the lost order's day lasts; the fill is adopted and
@@ -153,10 +150,9 @@ def test_flatten_and_stop_waits_for_an_order_called_lost_that_fills_later():
     assert res.ok, res.report()
 
 
-@pytest.mark.xfail(strict=True, reason="engine bug #535: an order called lost that the venue fills later is never "
-                                       "adopted")
 def test_an_order_called_lost_that_fills_later_is_booked():
-    assert 535 in KNOWN
+    """#535: the venue's lookups lag the order for minutes, it is called lost at 15:52 and fills at 15:54. The fill
+    is looked up by its venue order id, carries the lost record's client order id, and is booked to it."""
     res = run_scenario(quiet({D1: ("B",)}, heal=D2,
                              forced=(Forced("submit_timeout_accepted", "|B|buy"), Forced("lookup_lag", "|B|buy", 12),
                                      Forced("listing_lag", "|B|buy"), Forced("hold", "|B|buy", 4))))

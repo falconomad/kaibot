@@ -111,7 +111,6 @@ KNOWN: dict[int, str] = {
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
          "a fill booked a day late is not sold by the decision taken meanwhile, and a watchdog flatten of the "
          "unbooked shares leaves a difference only the owner can accept",
-    535: "the open-orders list never lags (listing_lag is not in the random profile)",
 }
 
 
