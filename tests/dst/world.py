@@ -680,9 +680,34 @@ class World:
         for m in sorted(marks):
             self.at(et(day, "16:00", 7) + timedelta(minutes=m))
 
+    def _state_seam(self):
+        """Invariant 10 (M10 1.21, #446): no buy reaches the venue while the engine's one trading state is not
+        `active` (engine/state.py). Checked at the order seam (engine/order_path.py), so every path is covered; the
+        check only reads (`Engine.trading_state`), and adds nothing to the trace unless it fails."""
+        from kaibot.engine import order_path
+        from kaibot.engine.state import allows
+
+        saved = {n: getattr(order_path, n) for n in ("submit", "submit_bracket", "submit_oto_stop")}
+
+        def wrap(name, f):
+            def sent(broker, *a, **kw):
+                side = getattr(a[0], "side", None) if name == "submit" else "buy"
+                sym = getattr(a[0], "symbol", None) if name == "submit" else a[1]
+                if self.eng is not None and side == "buy":
+                    t = self.eng.trading_state()
+                    if not allows(t.state, "submit", side):
+                        self.bad(f"invariant 10: a buy of {sym} left while trading was {t.state.value} ({t.why})")
+                return f(broker, *a, **kw)
+            return sent
+
+        for n, f in saved.items():
+            setattr(order_path, n, wrap(n, f))
+        return lambda: [setattr(order_path, n, f) for n, f in saved.items()]
+
     def run(self) -> Result:
         os.environ["KAIBOT_MULTIDAY"] = "on"
         rng = random.Random(f"kaibot-dst-ticks-{self.s.seed}")
+        unseam = self._state_seam()
         try:
             self.evening(D0)
             for day in SESSIONS:
@@ -695,6 +720,7 @@ class World:
                 self.at(et(D3, "21:10", 7) + timedelta(minutes=m))
             self.check.at_quiescence()
         finally:
+            unseam()
             if self.eng is not None:
                 with contextlib.suppress(Exception):
                     self.eng.journal.close()
@@ -708,7 +734,8 @@ class World:
 
 # ---------------------------------------------------------------- the invariants
 class Checker:
-    """The nine invariants, checked incrementally: the journal's new entries after every pass, the venue's books
+    """The nine invariants (the tenth, the trading state, is checked at the order seam: World._state_seam),
+    checked incrementally: the journal's new entries after every pass, the venue's books
     against the engine's, and at the end the quiescence and liveness checks."""
 
     def __init__(self, world: World) -> None:
