@@ -685,6 +685,7 @@ class DailyRun:
     guards: list[tuple[int, str, str]] = field(default_factory=list)  # (session, symbol, guard) an outer cap cut
     basis_gaps: list[tuple[int, str]] = field(default_factory=list)  # (session, held symbol) see builder_sizing
     carried: list[tuple[int, str, int]] = field(default_factory=list)  # #363: (session, symbol, target) carried
+    cost_model: str = "v1"  # #578: the cost model the run's fills were priced with (its control uses the same)
 
     @property
     def entries(self) -> dict[int, int]:
@@ -774,7 +775,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         costs = AuctionCostsV2(sigma=sigma, adv=adv, mult=mult)
 
         def ledger_half(mid: float, s: str, i: int, at: str) -> float:
-            return costs.half_at(mid, s, data.day(i), "open" if at == "open" else "close")
+            return costs.half_at(mid, s, data.day(i), at if at in ("open", "continuous") else "close")
     else:
         costs = AuctionImpactCosts(sigma=sigma, mult=mult)
     clock = SimClock(_at(data.day(i0 - 1), AFTER_CLOSE) - timedelta(minutes=1))
@@ -784,7 +785,8 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal, half=ledger_half)
     om = OrderManager(broker, journal, clock)
     builder = builder or momentum_builder(strategy, pol, exposure_pct)
-    run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om)
+    run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om,
+                   cost_model=cost_model)
     policy = ExecutionPolicy("near_close" if near else "close" if tif == "cls" else "open",
                              research_open=tif == "opg")
     at_close = ExecutionPolicy("near_close" if near else "close")
@@ -913,6 +915,13 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             qty, px = f.qty, f.px
             at = "close" if r.tif == "cls" or (near and (r.type, r.tif) == ("market", "day")) else "open"
             mid = float(data.raw_c[i, j] if at == "close" else data.raw_o[i, j])
+            if cost_model == "v2" and r.purpose == "stop" and r.stop is not None:
+                # #578: a protective stop's no-cost price is its level, unless the open gapped through it (then
+                # the open); its venue is v2's continuous or open one, as SimBroker priced it. Under v1 the split
+                # stays as it always was (every earlier run unchanged)
+                level, o_ = float(r.stop), float(data.raw_o[i, j])
+                gapped = o_ <= level if f.side == "sell" else o_ >= level
+                at, mid = ("open", o_) if gapped else ("continuous", level)
             ref = float(data.px[i - 1, j]) / data.split_at(i, j)
             reason = why if kind != "resize" else "resize"
             led.apply("fill", {"i": i, "session": str(d), "symbol": s, "side": f.side, "qty": qty, "px": px,
