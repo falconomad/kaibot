@@ -43,7 +43,9 @@ from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 
+from kaibot.broker import payloads
 from kaibot.broker.alpaca import CANCEL_POLL_S, CANCEL_POLLS, CANCEL_WAIT_S
+from kaibot.broker.payloads import PayloadError
 from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
 from kaibot.engine import book_loop
 from kaibot.engine.clock import session_minutes
@@ -1408,7 +1410,11 @@ class Engine:
                 continue
             o = self.broker.order(oid)
             if o["status"] == "filled":
-                px, ts = float(o["filled_avg_price"]), o.get("filled_at")
+                try:  # QA-Ops on #545: a price that is not a finite number above zero is never booked
+                    px, ts = payloads.fill_price(o), o.get("filled_at")
+                except PayloadError as e:
+                    self._payload_refused(f"order:{oid}", f"multi-day sale {oid}: {e}")
+                    continue  # stays in `_md_exits` (a new run and "Flatten and stop" wait): read again next pass
                 fresh = [(k, q) for k, q in x["keys"] if not self._md_exit_booked(oid, k[0], k[1])]
                 if fresh:
                     fees = (self._venue_fees(oid, ts, o.get("submitted_at") or o.get("created_at"))
@@ -1519,6 +1525,19 @@ class Engine:
             self.store.event("session_restored", {"day": str(d.day), "entries": d.entries, "closed": len(closed),
                                                   "realized": round(d.realized_reported, 2), "halted": d.halted},
                              self._rid())
+
+    def _payload_refused(self, key: str, why: str) -> None:
+        """QA-Ops on #545: a broker payload a path of this engine did not book (broker/payloads.py): an ERROR log
+        line and one `multi_day_error` event (step `broker_payload`, a Health type) per key and reason."""
+        said = self.__dict__.setdefault("_payload_said", {})
+        if said.get(key) == why:
+            return
+        said[key] = why
+        log.error("broker payload refused: %s", why)
+        with contextlib.suppress(Exception):  # an alarm never stops the path
+            self.store.event("multi_day_error", {"step": "broker_payload", "error": why[:200],
+                                                 "action": "not booked; read again, the reconciliation shows "
+                                                           "any difference"}, self._rid())
 
     def _rid(self) -> int | None:
         return self.run["id"] if self.run else None
@@ -2593,8 +2612,17 @@ class Engine:
         px = float(x.ratio)
         try:
             rows = self.broker.activities(self.now() - timedelta(days=10), types=("MA",))
-            paid = sum(float(r.get("net_amount") or 0) for r in rows if r.get("symbol") == x.symbol
-                       and float(r.get("net_amount") or 0) > 0)
+            paid = 0.0
+            for r in rows:
+                if r.get("symbol") != x.symbol:
+                    continue
+                try:  # QA-Ops on #545: only a finite amount is Alpaca's cash (else the record's rate is used)
+                    amt = payloads.number(r.get("net_amount"), "net_amount")
+                except PayloadError as e:
+                    self._payload_refused(f"alpaca:{r.get('id')}", f"cash merger {x.symbol}: {e}")
+                    paid = 0.0
+                    break
+                paid += amt if amt > 0 else 0.0
             if paid > 0 and qty > 0:
                 px = paid / qty
         except Exception:
@@ -2639,7 +2667,12 @@ class Engine:
             if ref is None:
                 out.append(r)
                 continue
-            accrued, net = float(acc[ref]["amount"]), float(r.get("net_amount") or 0.0)
+            try:  # QA-Ops on #545: a payment that is not a finite amount does not close its accrual
+                net = payloads.dividend_amount(r)
+            except PayloadError as e:
+                self._payload_refused(aid, f"dividend payment {aid} of {r.get('symbol')}: {e}")
+                continue  # the accrual stays a receivable; the row is not booked either
+            accrued = float(acc[ref]["amount"])
             self.journal.append("div_paid", {"ref": ref, "activity": aid, "net_amount": net, "accrued": accrued})
             acc.pop(ref)
             if abs(net - accrued) > 0.01:
@@ -2853,12 +2886,19 @@ class Engine:
         for a in rows:
             if str(a.get("order_id")) != str(order_id):
                 continue
+            try:  # QA-Ops on #545: a refused activity's fee is not one (the order manager keeps the fill out too)
+                if a.get(payloads.INVALID):
+                    raise PayloadError(str(a[payloads.INVALID]))
+                fee = 0.0 if a.get("fees") in (None, "") else payloads.number(a.get("fees"), "fees", nonneg=True)
+            except PayloadError as e:
+                self._payload_refused(str(a.get("id")), f"fee of order {order_id}: {e}")
+                continue
             aid = a.get("id")
             if aid is not None:
                 if aid in seen:
                     continue
                 seen.add(aid)
-            total += float(a.get("fees") or 0.0)
+            total += fee
         return total
 
 

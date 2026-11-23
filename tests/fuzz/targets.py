@@ -42,9 +42,6 @@ from pathlib import Path
 KNOWN: dict[int, str] = {
     543: "journal_file: a damaged byte in the kind index hides entries from reads by kind while the journal opens "
          "and verifies; the target compares reads by kind only when 543 is not known",
-    545: "broker_payloads: a FILL activity is booked without checking side, quantity and price; while it is open "
-         "the target gives fills (and order views' filled quantity) only well-formed values of those fields; the same "
-         "for a dividend's net_amount (actions_from_activities books NaN: the issue's first comment)",
 }
 GOOD_NUMBERS = ["1", "2", "10", "0.5", "3", 3, 2.5, "100.25"]
 
