@@ -214,6 +214,8 @@ families:
     rules:
       news_continuation: {kind: selection, v3_declared: false, existing_control: none}
       news_gap_week: {kind: selection, v3_declared: false, existing_control: universe}
+      # M12 3.9 (#471): a logging-mode veto test with its own pass marks (docs/prereg), not judged by this gate
+      preopen_negative_news_veto: {kind: selection, v3_declared: false, existing_control: none}
   earnings_drift:
     idea: stocks drift for days after an earnings surprise
     rules:

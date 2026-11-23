@@ -23,6 +23,14 @@ Failures only log. A missing key, a refused or exhausted budget (the daily cap: 
 is skipped), a timeout or a broken answer is recorded with its status ("skipped" is not a decision of anyone).
 Nothing fails closed because nothing acts on the verdicts. trend_momentum's pre-registration has no AI in it
 (docs/prereg/trend_momentum.md, Amendment 9).
+
+M12 3.9 (#471), logging mode for the pre-registered negative-news veto (docs/prereg/preopen_negative_news_veto.md):
+- every record carries `call`: the pinned model (`models.preopen`), the model that answered, the response id, the
+  prompt's sha256, the review's fingerprint and the input sent (`preopen.GatewayReviewer`);
+- the same buys are sent a second time with tickers and company names masked (`agents/preopen_mask.py`), after
+  the raw arm and only when it answered; that arm is `masked` in the record (its verdicts mapped back to the real
+  symbols, its own `call`). `KAIBOT_PREOPEN_MASKED=off` drops it. Both arms go through the same budget gateway.
+The raw arm is unchanged: its fields, the event and the heartbeat block are what they were.
 """
 
 from __future__ import annotations
@@ -39,6 +47,7 @@ from datetime import date, datetime
 from kaibot.agents import preopen
 from kaibot.agents.preopen import ReviewOutcome
 from kaibot.agents.preopen_daily import EvidenceFn, keys_of, summary, target_view
+from kaibot.agents.preopen_mask import MASK_VERSION, Masker
 from kaibot.strategies.base import TargetList
 
 log = logging.getLogger("kaibot.preopen.shadow")
@@ -47,7 +56,8 @@ FLAG_ENV = "KAIBOT_PREOPEN"
 SHADOW = "shadow"
 KIND = "md_review_shadow"
 EVENT = "multi_day_review_shadow"
-STALE_S = preopen.TOTAL_S + 60.0
+MASKED_ENV = "KAIBOT_PREOPEN_MASKED"
+STALE_S = 2 * preopen.TOTAL_S + 60.0  # two arms, one after the other, each cut off at TOTAL_S
 # preopen.review is a pure function gated by an env mapping; this mapping is handed to it alone (never os.environ)
 _REVIEW_ON = {"KAIBOT_ROOM": "on", preopen.FLAG_ENV: "on"}
 
@@ -57,6 +67,13 @@ def enabled(env: Mapping[str, str] | None = None) -> bool:
     from kaibot.common import switches  # M10 1.23 (#448): one parser per switch
 
     return switches.get(FLAG_ENV, env) == SHADOW
+
+
+def masked_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """The masked arm runs with the shadow unless KAIBOT_PREOPEN_MASKED is off (common/switches.py)."""
+    from kaibot.common import switches
+
+    return bool(switches.get(MASKED_ENV, env))
 
 
 def _frozen(obj):
@@ -80,8 +97,9 @@ class ShadowDesk:
 
     def __init__(self, reviewer, gateway, *, evidence_fn: EvidenceFn | None = None, inline: bool = False,
                  total_s: float = preopen.TOTAL_S, clock: Callable[[], float] = time.monotonic,
-                 needs_key: bool = True) -> None:
+                 needs_key: bool = True, masked: bool | None = None) -> None:
         self.reviewer, self.gateway, self.evidence_fn = reviewer, gateway, evidence_fn
+        self.masked = masked_enabled() if masked is None else masked
         self.inline, self.total_s, self.clock, self.needs_key = inline, total_s, clock, needs_key
         self._jobs: dict[tuple[str, str], _Job] = {}
         self._lock = threading.Lock()
@@ -142,7 +160,30 @@ class ShadowDesk:
         # `_reviewed` is deliberately dropped: in shadow mode no reviewed plan exists anywhere
         if out.status != "done":
             log.info("shadow pre-open review %s for %s: %s", out.status, session, out.error)
-        return record(out, plan, current, cands, tl)
+        rec = record(out, plan, current, cands, tl)
+        if self.masked and out.status == "done" and cands:
+            rec["masked"] = self._masked(session, tl, plan, current, evidence)
+        return rec
+
+    def _masked(self, session, tl, plan, current, evidence) -> dict:
+        """The masked arm: the same buys with tickers and names replaced by aliases. Never raises."""
+        m = Masker()
+        try:
+            _r, out, _c = preopen.review(session, [tl] if tl is not None else [], plan, current, self.reviewer,
+                                            env=_REVIEW_ON, gateway=self.gateway, total_s=self.total_s,
+                                            evidence=evidence, transform=m)
+        except Exception as e:
+            log.exception("masked shadow arm crashed (nothing else is affected)")
+            out = ReviewOutcome("error", session, error=f"{type(e).__name__}: {e}"[:200])
+        out.verdicts = m.unmask_verdicts(out.verdicts)
+        out.answer = m.unmask_answer(out.answer)
+        would = preopen.apply(plan, current, out) if out.status == "done" else dict(plan)
+        sm = summary(out, plan, current, would)
+        return {"mask_version": MASK_VERSION, "status": skipped(out.status), "review_status": out.status,
+                "error": out.error, "verdicts": dict(out.verdicts), "answer": out.answer,
+                "latency_ms": out.latency_ms, "cost_usd": round(out.cost_usd, 5), "call": out.call,
+                "aliases": dict(m.aliases), "name_masked": dict(m.by_name),
+                "would_have": {"vetoed": sm["vetoed"], "downgraded": sm["downgraded"], "allowed": sm["allowed"]}}
 
     def collect(self, rule: str, session: date) -> dict | None:
         """The finished shadow record of (rule, session), once; None while it runs or when none was started."""
@@ -180,7 +221,7 @@ def record(out: ReviewOutcome, plan, current, cands, tl) -> dict:
             "candidates": [c.shown() for c in cands],
             "targets": target_view(tl, [c.symbol for c in cands]),
             "would_have": {"vetoed": s["vetoed"], "downgraded": s["downgraded"], "allowed": s["allowed"]},
-            "acted": False}
+            "call": out.call, "acted": False}
 
 
 def skipped(status: str) -> str:

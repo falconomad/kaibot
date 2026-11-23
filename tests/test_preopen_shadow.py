@@ -55,7 +55,7 @@ def live(store=None, **over):
     store = store or FakeStore()
     llm = FakeLLM({PREOPEN_TOOL["name"]: model_answer(**over)})
     gw = Gateway(store, llm, CFG)
-    return store, llm, ps.ShadowDesk(GatewayReviewer(gw), gw, inline=True)
+    return store, llm, ps.ShadowDesk(GatewayReviewer(gw), gw, inline=True, masked=False)  # M12 3.9: raw arm alone
 
 
 # ---------- switches ----------

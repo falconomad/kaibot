@@ -76,6 +76,8 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
        default="off", choices=("off", "shadow")),
     _s("KAIBOT_PREOPEN_REVIEW", "flag", "agents-ai", "#131: the pre-open review that can veto or halve buys "
        "(with KAIBOT_ROOM)", default=False),
+    _s("KAIBOT_PREOPEN_MASKED", "flag", "agents-ai", "M12 3.9 (#471): the shadow review's masked arm (tickers and "
+       "names hidden; a second call a session); on unless switched off", default=True),
     _s("KAIBOT_DAILY_NOTE", "flag", "agents-ai", "#311: the daily report in plain words", default=False),
     _s("KAIBOT_FILING_FLAG", "choice", "data", "#375: 'shadow' = the 8-K filing-flag observer",
        default="off", choices=("off", "shadow")),
@@ -193,6 +195,7 @@ class Switches:
     room: bool
     preopen: str
     preopen_review: bool
+    preopen_masked: bool
     daily_note: bool
     filing_flag: str
     market_alarm: bool
