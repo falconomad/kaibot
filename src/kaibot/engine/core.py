@@ -47,7 +47,7 @@ from kaibot.broker import payloads
 from kaibot.broker.alpaca import CANCEL_POLL_S, CANCEL_POLLS, CANCEL_WAIT_S
 from kaibot.broker.payloads import PayloadError
 from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
-from kaibot.engine import book_loop
+from kaibot.engine import book_loop, order_path
 from kaibot.engine.clock import session_minutes
 from kaibot.engine.config import ROOT
 from kaibot.engine.dividends import match_payment, open_accruals, receivable
@@ -1284,7 +1284,7 @@ class Engine:
                         keys = [(k, q) for k, q in capped if q > 0]
                     for oo in self.broker.open_orders():
                         if oo.get("symbol") == sym and oo.get("status") != "pending_cancel":
-                            self._order("cancel", lambda oid=oo["id"]: self.broker.cancel_order(oid),
+                            self._order("cancel", lambda oid=oo["id"]: order_path.cancel_order(self.broker, oid),
                                         order_id=oo["id"], symbol=sym, strategy=",".join(k[0] for k, _ in keys))
                     left = [oo for oo in self.broker.open_orders() if oo.get("symbol") == sym]
                     # QA-Ops (#282): Alpaca confirms a cancel within a moment; wait for it here, inside the flatten's
@@ -1306,7 +1306,7 @@ class Engine:
                     for oo in self.broker.open_orders():
                         pc = parse_coid(oo.get("client_order_id"))
                         if oo.get("symbol") == sym and oo.get("side") == "sell" and pc and pc[0] == clean(k[0]):
-                            self._order("cancel", lambda oid=oo["id"]: self.broker.cancel_order(oid),
+                            self._order("cancel", lambda oid=oo["id"]: order_path.cancel_order(self.broker, oid),
                                         order_id=oo["id"], symbol=sym, strategy=k[0])
                     coid = f"kbfl-{clean(k[0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
                     self._md_exit_submit(sym, [(k, q)], coid, reason, rid)
@@ -1344,7 +1344,8 @@ class Engine:
         qty = sum(q for _, q in keys)
         self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
                                                "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
-        o = self._order("sell", lambda: self.broker.submit(OrderRequest(sym, "sell", qty, "market", "day", coid)),
+        o = self._order("sell",
+                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid)),
                         coid=coid, symbol=sym, strategy=",".join(k[0] for k, _ in keys), qty=qty, reason=reason)
         self._md_exit_sent(o, rid, keys, reason)
 
