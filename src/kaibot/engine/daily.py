@@ -56,7 +56,7 @@ import numpy as np
 import pandas as pd
 
 from kaibot.broker.shadow_costs import half_spread
-from kaibot.broker.sim import NY, AuctionImpactCosts, SimBroker
+from kaibot.broker.sim import NY, AuctionCostsV2, AuctionImpactCosts, SimBroker
 from kaibot.engine.clock import SimClock
 from kaibot.engine.execution import NEAR_CLOSE_MIN, REGULAR_CLOSE, ExecutionPolicy, minus
 from kaibot.engine.journal import Journal, canon
@@ -82,6 +82,7 @@ AFTER_CLOSE, CORP_ACTIONS, SEND = time(16, 30), time(8, 0), time(9, 0)
 NEAR_CLOSE = minus(REGULAR_CLOSE, NEAR_CLOSE_MIN)  # 15:50 ET: the near-close orders go out (issue #333)
 OPEN_BAR, CLOSE_BAR = time(9, 30), time(15, 59)
 FILLS = {"base": ("close", 1.0), "stress": ("open", 2.0)}  # where orders fill, spread / impact factor
+COST_MODELS = ("v1", "v2")  # #559: v1 (AuctionImpactCosts, the default) or v2 (AuctionCostsV2, gate v3's verdicts)
 
 
 def _ffill(a: np.ndarray) -> np.ndarray:
@@ -516,8 +517,11 @@ class RunLedger:
     rows (`book`). `Ledger.fold(self.entries)` gives the same book."""
 
     def __init__(self, strategy: str, rule: str, data: DailyData, amount: float, mult: float,
-                 journal: Journal | None = None, run_id: int = 1) -> None:
+                 journal: Journal | None = None, run_id: int = 1,
+                 half: Callable[[float, str, int, str], float] | None = None) -> None:
         self.strategy, self.rule, self.d, self.mult, self.run_id = strategy, rule, data, mult, run_id
+        # the spread part of a fill's cost, for the trade rows' split (#559: the cost model's own; v1 by default)
+        self.half = half or (lambda mid, symbol, i, at: half_spread(mid) * self.mult)
         self.journal = journal
         self.entries: list[tuple[str, dict]] = []
         self.ledger = Ledger()
@@ -578,7 +582,7 @@ class RunLedger:
         i, s, qty, px, mid = e["i"], e["symbol"], float(e["qty"]), float(e["px"]), float(e["mid"])
         fees = float(e.get("fees", 0.0))
         costless = e.get("reason") == "delisted"
-        half = 0.0 if costless else half_spread(mid) * self.mult
+        half = 0.0 if costless else self.half(mid, s, i, e.get("at", "close"))
         if e["side"] == "buy":
             imp = px - mid - half
             p = self.stats.get(s)
@@ -720,7 +724,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
               cost: float = 1.0, exposure_pct: float = 100.0, equity0: float = 100_000.0,
               on_session: Callable[[int], None] | None = None, protect_atr: float | None = None,
               builder: PortfolioBuilder | None = None, execution: str = "near_close",
-              carry: bool = True) -> DailyRun:
+              carry: bool = True, cost_model: str = "v1") -> DailyRun:
     """One continuous account of one multi-day strategy over sessions i0..i1, starting flat: the strategy decides
     after each close, the portfolio builder sizes (`momentum_builder`: the pre-registered sizing at the rule's own
     limits), the target loop (engine/targets.py) sends
@@ -740,21 +744,44 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     fills, costs and equity; only the orders' type and send time differ.
     `carry` (#363, default on, as the live path): between decisions, the latest decision's buys the venue left
     unfilled are sent again (`carry_targets`). On this venue it never fires (see the function); False is for the
-    test that shows it."""
+    test that shows it.
+    `cost_model` (#559): "v1" (default, `AuctionImpactCosts`: every earlier run and every parity test, unchanged
+    to the bit) or "v2" (`AuctionCostsV2`, cost model v2: ADV buckets, the venue of each print, capped impact,
+    2026 fees; Product, 22 Nov 2026: gate v3's final verdicts use it). The orders are the same code either way;
+    only fill prices and fees differ, and through them the equity later decisions size on. Under v2 the stress fill
+    prices at v2's "open" venue, which already charges twice the midday half-spread, so its extra factor is 1."""
     if execution not in ("near_close", "close"):
         raise ValueError("execution is near_close or close")
     if i0 < 1 or i1 >= len(data.dates) or i0 > i1:
         raise ValueError("sessions i0..i1 must lie inside the data, with i0 >= 1")
+    if cost_model not in COST_MODELS:
+        raise ValueError(f"cost_model is one of {COST_MODELS}")
     where, factor = FILLS[fill]
+    if cost_model == "v2" and fill == "stress":
+        factor = 1.0
     mult = cost * factor
     tif = "cls" if where == "close" else "opg"
     near = tif == "cls" and execution == "near_close"
-    costs = AuctionImpactCosts(sigma=lambda sym, day: data.sigma_at(data.index_of(day), data.col(sym)), mult=mult)
+    def sigma(sym: str, day) -> float:
+        return data.sigma_at(data.index_of(day), data.col(sym))
+
+    def adv(sym: str, day) -> float:  # the 20-session dollar volume known before the fill session (point in time)
+        i = data.index_of(day)
+        return float(data.adv[i - 1, data.col(sym)]) if i > 0 else math.nan
+
+    ledger_half = None
+    if cost_model == "v2":
+        costs = AuctionCostsV2(sigma=sigma, adv=adv, mult=mult)
+
+        def ledger_half(mid: float, s: str, i: int, at: str) -> float:
+            return costs.half_at(mid, s, data.day(i), "open" if at == "open" else "close")
+    else:
+        costs = AuctionImpactCosts(sigma=sigma, mult=mult)
     clock = SimClock(_at(data.day(i0 - 1), AFTER_CLOSE) - timedelta(minutes=1))
     broker = SimBroker(data.bar_history(), clock, costs=costs, cash=equity0, calendar=data.calendar(),
                        cash_at="fill", near_close=NEAR_CLOSE if near else None)
     journal = Journal(now=clock)
-    led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal)
+    led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal, half=ledger_half)
     om = OrderManager(broker, journal, clock)
     builder = builder or momentum_builder(strategy, pol, exposure_pct)
     run = DailyRun(strategy.name, led.book, led, [], [], {}, [], 0, [], [], broker, i0, i1, om=om)
@@ -933,7 +960,8 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         for s, (q, last) in list(led.held().items()):
             j = data.col(s)
             vol = float(data.v_last[i1, j]) if math.isfinite(data.v_last[i1, j]) and data.v_last[i1, j] > 0 else 1.0
-            px = costs.price("sell", last, q, data.sigma_at(i1, j), vol)
+            px = (costs.price_at("sell", last, q, s, data.day(i1), vol) if cost_model == "v2"
+                  else costs.price("sell", last, q, data.sigma_at(i1, j), vol))
             fees = costs.fees("sell", q, px)
             run.fills.append({"i": i1, "symbol": s, "side": "sell", "qty": q, "px": px, "fees": fees,
                               "reason": "end_of_data"})

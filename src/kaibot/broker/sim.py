@@ -44,6 +44,7 @@ import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from kaibot.broker.protocol import (
@@ -84,6 +85,86 @@ class ShadowCosts:
 
 
 COSTS_V1 = ShadowCosts()
+
+
+@dataclass(frozen=True)
+class AuctionCostsV2(ShadowCosts):
+    """Cost model v2 (`broker/costs_v2.CostV2`) at the daily venue's prints (issue #559; Product, 22 Nov 2026:
+    gate v3's final verdicts use cost model v2). Opt-in, as `AuctionImpactCosts` is: nothing that does not ask for
+    it changes.
+
+    A fill at the closing print pays v2's "close" venue (one full half-spread of the stock's ADV bucket and half the
+    continuous impact), one at the opening print its "open" venue (twice the midday half-spread), and a market or
+    stop order in the session its "continuous" venue. ADV is the 20-session average dollar volume of the session
+    before the fill (`adv(symbol, day)`, point in time); unknown ADV pays v2's floor bucket. Fees are v2's 2026 SEC
+    and FINRA TAF on sales. `mult` scales spread and impact (the 2x and 3x cost runs), never the fees."""
+
+    sigma: Callable[[str, date], float] | None = None
+    adv: Callable[[str, date], float] | None = None
+    mult: float = 1.0
+    model: Any = None  # a `costs_v2.CostV2` (default: v2 at its pre-declared parameters)
+
+    name = "v2"
+
+    def _m(self):
+        from kaibot.broker.costs_v2 import CostV2
+
+        return self.model if self.model is not None else CostV2()
+
+    def _ctx(self, price: float, qty: float, symbol: str | None, day: date | None, vol: float, venue: str):
+        from kaibot.broker.costs_v2 import FillCtx
+
+        sig = self.sigma(symbol, day) if self.sigma is not None and symbol is not None and day is not None else 0.0
+        adv = self.adv(symbol, day) if self.adv is not None and symbol is not None and day is not None else math.nan
+        vol = float(vol) if math.isfinite(vol) and vol > 0 else 1.0
+        return FillCtx(price, qty, sig if math.isfinite(sig) else 0.0, vol, adv if math.isfinite(adv) else math.nan,
+                       venue, raw_mid=price, symbol=symbol)
+
+    def _px(self, side: str, ctx) -> float:
+        px = self._m().fill(side, ctx).price
+        return px if self.mult == 1.0 else ctx.mid + (px - ctx.mid) * self.mult
+
+    def market(self, side: str, price: float, qty: float, sigma_1m: float, vol_1m: float) -> float:
+        from kaibot.broker.costs_v2 import FillCtx
+
+        return self._px(side, FillCtx(price, qty, sigma_1m, vol_1m if vol_1m > 0 else 1.0, math.nan, "continuous",
+                                      raw_mid=price))
+
+    def market_at(self, side: str, price: float, qty: float, symbol: str, t: datetime, sigma_1m: float, vol: float,
+                  gapped: bool = False) -> float:
+        """A market or stop order in the session (QA on #572): v2's "continuous" venue at the stock's ADV bucket
+        (the session before the fill); a stop gapped through at the open is an opening fill (v2's "open" venue)."""
+        from kaibot.broker.costs_v2 import FillCtx
+
+        day = t.astimezone(NY).date()
+        adv = self.adv(symbol, day) if self.adv is not None else math.nan
+        vol = float(vol) if math.isfinite(vol) and vol > 0 else 1.0
+        return self._px(side, FillCtx(price, qty, sigma_1m if math.isfinite(sigma_1m) else 0.0, vol,
+                                      adv if math.isfinite(adv) else math.nan, "open" if gapped else "continuous",
+                                      raw_mid=price, symbol=symbol))
+
+    def limit_fills(self, side: str, limit: float, low: float, high: float, key: str) -> bool:
+        """v2's limit fill-probability haircut (QA on #572): through by a tick AND the deterministic draw for `key`."""
+        return self._m().limit_fill(side, limit, low, high, key) is not None
+
+    def auction_fill_at(self, side: str, price: float, qty: float, symbol: str, t: datetime, vol: float) -> float:
+        et = t.astimezone(NY)
+        venue = "open" if et.time() < time(12, 0) else "close"
+        return self._px(side, self._ctx(price, qty, symbol, et.date(), vol, venue))
+
+    def auction_fill(self, side: str, price: float, qty: float, symbol: str, day: date, vol: float) -> float:
+        return self._px(side, self._ctx(price, qty, symbol, day, vol, "close"))
+
+    def price_at(self, side: str, mid: float, qty: float, symbol: str, day: date, vol: float) -> float:
+        """The closing print's price of a sale or buy (the runner's end-of-data valuation)."""
+        return self._px(side, self._ctx(mid, qty, symbol, day, vol, "close"))
+
+    def half_at(self, mid: float, symbol: str, day: date, venue: str) -> float:
+        """$ per share of spread at this venue, scaled like the price (the ledger's split of a fill's cost)."""
+        return self._m().half_spread(self._ctx(mid, 1.0, symbol, day, 1.0, venue)) * self.mult
+
+    def fees(self, side: str, qty: float, price: float) -> float:
+        return self._m().sell_fees(qty, price, raw_price=price) if side == "sell" else 0.0
 
 
 @dataclass(frozen=True)
@@ -714,14 +795,17 @@ class SimBroker(BrokerBase):
                 self._fill(o, o, qty, self._market(side, bar.o, qty, o["symbol"], bar, t), t)
         elif o["type"] == "limit":
             limit = float(o["limit_price"])
-            if (bar.l <= limit - THROUGH) if side == "buy" else (bar.h >= limit + THROUGH):
+            if ((bar.l <= limit - THROUGH) if side == "buy" else (bar.h >= limit + THROUGH)) \
+                    and self._limit_ok(o, side, limit, bar, t):
                 self._fill(o, o, left, limit, t)
         elif o["type"] == "stop":
             stop = float(o["stop_price"])
             if side == "sell" and bar.l <= stop:
-                self._fill(o, o, left, self._market(side, min(stop, bar.o), left, o["symbol"], bar, t), t)
+                self._fill(o, o, left, self._market(side, min(stop, bar.o), left, o["symbol"], bar, t,
+                                                    gapped=bar.o <= stop), t)
             elif side == "buy" and bar.h >= stop:
-                self._fill(o, o, left, self._market(side, max(stop, bar.o), left, o["symbol"], bar, t), t)
+                self._fill(o, o, left, self._market(side, max(stop, bar.o), left, o["symbol"], bar, t,
+                                                    gapped=bar.o >= stop), t)
         if o["status"] == "filled":
             for leg in o.get("legs") or []:
                 if leg["status"] == "held":
@@ -738,10 +822,12 @@ class SimBroker(BrokerBase):
         qty = float(o.get("filled_qty") or o["qty"])
         if stop is not None and bar.l <= float(stop["stop_price"]):
             gross = min(float(stop["stop_price"]), bar.o)  # elected: a market order; gapped through: the open
-            self._fill(o, stop, qty, self._market("sell", gross, qty, o["symbol"], bar, t), t)
+            self._fill(o, stop, qty, self._market("sell", gross, qty, o["symbol"], bar, t,
+                                                  gapped=bar.o <= float(stop["stop_price"])), t)
             if tgt is not None:
                 tgt["status"] = "canceled"
-        elif tgt is not None and bar.h >= float(tgt["limit_price"]) + THROUGH:
+        elif tgt is not None and bar.h >= float(tgt["limit_price"]) + THROUGH \
+                and self._limit_ok(tgt, "sell", float(tgt["limit_price"]), bar, t):
             self._fill(o, tgt, qty, float(tgt["limit_price"]), t)
             if stop is not None:
                 stop["status"] = "canceled"
@@ -750,15 +836,30 @@ class SimBroker(BrokerBase):
                     child["status"] = "canceled"
 
     # ---------- prices ----------
-    def _market(self, side: str, price: float, qty: float, symbol: str, bar: Bar, t: datetime) -> float:
+    def _market(self, side: str, price: float, qty: float, symbol: str, bar: Bar, t: datetime,
+                gapped: bool = False) -> float:
         if self.costs is None:
             return price
         sigma = self.bars.sigma_1m(symbol, t.astimezone(NY).date())
+        at = getattr(self.costs, "market_at", None)  # AuctionCostsV2 (QA on #572): ADV bucket, gapped stop = open
+        if at is not None:
+            return at(side, price, qty, symbol, t, sigma if math.isfinite(sigma) else 0.0, bar.v, gapped)
         return self.costs.market(side, price, qty, sigma if math.isfinite(sigma) else 0.0, bar.v)
+
+    def _limit_ok(self, o: dict, side: str, limit: float, bar: Bar, t: datetime) -> bool:
+        """Cost model v2's fill-probability haircut on a resting limit (QA on #572); every other model: True."""
+        ok = getattr(self.costs, "limit_fills", None) if self.costs is not None else None
+        if ok is None:
+            return True
+        key = f"{o.get('symbol') or ''}|{t.astimezone(NY).isoformat()}|{o['id']}|{side}"
+        return bool(ok(side, limit, bar.l, bar.h, key))
 
     def _auction(self, side: str, price: float, qty: float, symbol: str, bar: Bar, t: datetime) -> float:
         if self.costs is None:
             return price
+        at = getattr(self.costs, "auction_fill_at", None)  # AuctionCostsV2 (#559): the print's venue from its time
+        if at is not None:
+            return at(side, price, qty, symbol, t, bar.v)
         full = getattr(self.costs, "auction_fill", None)  # AuctionImpactCosts: spread plus impact (#161)
         if full is not None:
             return full(side, price, qty, symbol, t.astimezone(NY).date(), bar.v)

@@ -538,7 +538,9 @@ def test_the_research_command_runs_the_engine_and_reports_gate_b_on_the_fixture(
     m, info = dr.load_fixture(FIXTURE)
     data = DailyData.from_market(m)
     i0 = int(np.searchsorted(data.dates, np.datetime64(rep["oos_window"][0])))
-    again = run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, len(data.dates) - 1)
+    # #559: the research command prices with cost model v2 by default
+    assert rep["cost_model"] == "v2" and "cost model v2" in rep["status"]
+    again = run_daily(mom.VERSIONS["trend_momentum"], data, POL, i0, len(data.dates) - 1, cost_model="v2")
     assert base["final_equity"] == pytest.approx(again.book.equity, abs=0.01)  # the report is the engine's fills
     assert "| Gate B mark |" in buf.getvalue() and "prereg" in rep and len(rep["prereg"]["sha256"]) == 64
 
@@ -571,6 +573,7 @@ def test_the_research_command_on_a_store_writes_the_report_and_trial_rows(tmp_pa
     assert rep["gate_b"][4]["verdict"] != mc.CANNOT or "point-in-time" in rep["gate_b"][4]["detail"]
     rows = [json.loads(x) for x in (data_dir / "trials.jsonl").read_text().splitlines()]
     assert len(rows) == 9 and {r["variant"] for r in rows} == {"engine_simbroker"}
+    assert {r["cost_model"] for r in rows} == {"v2"}  # #559
     assert sum(r["n_trials"] for r in rows) == 6  # the base configuration and its five neighbours
 
 

@@ -137,6 +137,9 @@ def main(argv: list[str] | None = None) -> int:
                          "default from config/gate_v3.yaml: 2,000 for a rule whose family has several rules, 500 "
                          "otherwise; 0 on the fixture)")
     md.add_argument("--grid", choices=("gate", "full"), default="gate")
+    md.add_argument("--costs", choices=("v1", "v2"), default="v2",
+                    help="cost model of the fills (#559: v2 by default, what gate v3's verdicts use; v1 reproduces "
+                         "earlier reports)")
     md.add_argument("--open-holdout", default=None, metavar="ID",
                     help="read the hold-out under this opening of config/holdout.yaml (docs/ops/holdout.md)")
     a = ap.parse_args(argv)
@@ -208,7 +211,7 @@ def multi_day(a: argparse.Namespace) -> int:
             runs = a.control_runs
         out_dir, trials = a.data / "reports", a.data / "trials.jsonl"
     rep = dr.report(a.strategy, market, info, universe=a.universe, level=a.level, control_runs=runs,
-                    grid=a.grid, out_dir=out_dir, trials=trials, prereg=pre)
+                    grid=a.grid, out_dir=out_dir, trials=trials, prereg=pre, cost_model=a.costs)
     if a.out:
         a.out.write_text(json.dumps(rep, indent=1, sort_keys=True, default=str) + "\n")
     print(dr.summary(rep))
