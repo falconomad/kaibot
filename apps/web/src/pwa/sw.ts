@@ -1,5 +1,5 @@
 // The service worker of the installable web app (M13 4.7, #481), written by the build (vite.config.ts `pwa`) as
-// /sw.js. It keeps the APP SHELL only: the page, the app's own JavaScript and CSS, and the four font files. Nothing
+// /sw.js. It keeps the APP SHELL only: the page, the app's own JavaScript and CSS, and the four preloaded font files. Nothing
 // else is ever stored, and that is the point: a trading dashboard must never show a stored price, pot or position as
 // if it were now. So:
 // - only GET requests to this site are looked at; Supabase (the data API, sign-in, the price stream) and the logo CDN
@@ -16,7 +16,7 @@
 export const SW_PATH = "sw.js";
 export const CACHE_PREFIX = "kb-shell-";
 /** The fonts index.html preloads (public/fonts). */
-export const SHELL_FONTS = [400, 500, 600, 700].map((w) => `/fonts/outfit-latin-${w}-normal.woff2`);
+export const SHELL_FONTS = [400, 500, 600, 700].map((w) => `/fonts/outfit-core-${w}-normal.woff2`);
 
 /** The shell's files from the build's output names: the page, every script and stylesheet of the app, the fonts. */
 export function shellFiles(outputs: string[]): string[] {

@@ -136,7 +136,7 @@ describe("the service worker", () => {
     await w.lifecycle("install");
     net = offline;
     expect((await w.get("/assets/index-AbC12345.js"))!.body).toBe("code of /assets/index-AbC12345.js");
-    expect((await w.get("/fonts/outfit-latin-400-normal.woff2"))!.ok).toBe(true);
+    expect((await w.get("/fonts/outfit-core-400-normal.woff2"))!.ok).toBe(true);
     net = online;
     expect((await w.get("/assets/Tape-Old00001.js"))!.body).toBe("code of /assets/Tape-Old00001.js");
     net = offline;
