@@ -1,10 +1,8 @@
 # The index-fund bucket of cost model v2 (M11 ticket 2.3, issue #454). Read by kaibot.broker.costs_v2
 # (`get_model("v2_index")`, scenario "v2idx" of kaibot.replay.sim_costs). RESEARCH ONLY: nothing live reads it.
 #
-# NOT CALIBRATED YET. `half_spread_bp` stays empty until it has been MEASURED on the research Mac with
-#   ./scripts/calibrate_index_costs.sh
-# and the value is committed here together with the table the script wrote (docs/research/results/). While it is
-# empty the model refuses to build, so no run can use a guessed cost.
+# CALIBRATED 23 Nov 2026 on the research Mac with ./scripts/calibrate_index_costs.sh --quotes-only; the table is
+# docs/research/results/index_cost_calibration.md.
 #
 # The rule that turns the measurement into the value, fixed BEFORE any measurement was made:
 #   1. the measure is the QUOTED half-spread in bp at the moments the fund is traded: (ask - bid) / 2 / mid;
@@ -18,6 +16,14 @@
 # every run that uses the new value logs a trial.
 version: 1
 symbols: [SPY]
-half_spread_bp:            # bp per side; empty = not calibrated
-source:                    # filled in with the value: method (fills | quotes), fills or quotes used, sessions,
-                           # window, feed, mean and median quoted half-spread, the script's code version, the date
+half_spread_bp: 0.20       # bp per side
+source:
+  method: quotes
+  rows: 260
+  sessions: 20
+  window: [2026-10-26, 2026-11-20]
+  feed: sip
+  mean_quoted_half_bp: 0.1737
+  median_quoted_half_bp: 0.1364
+  measured_at: 2026-11-23T12:28:12+00:00
+  code_sha: a29d833
