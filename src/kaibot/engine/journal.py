@@ -50,12 +50,14 @@ import contextlib
 import hashlib
 import json
 import logging
+import marshal
 import re
 import sqlite3
 import sys
 import threading
 import time
 import uuid
+from bisect import bisect_right
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -87,6 +89,14 @@ MULTI_DAY_RETRY_S = 3600.0  # #384: how often a missing `ledger.multi_day` colum
 POISON_AFTER_N, POISON_AFTER_S = 5, 120.0
 POISON_REALARM_S = 3600.0  # QA-Ops (#516): a cause still skipping rows is announced again this long after its alarm
 BACKLOG_ALARM_S = 600.0  # rows waiting, and not fewer at any look, for this long: an alarm
+
+# M10 1.24 (#449): the kinds never kept in the journal's read cache (`Journal._cache`): the engine's table rows are
+# the bulk of the file (390 minute rows a session), are folded once at start and sent by the replicator in batches
+BULK_KINDS = frozenset({"row", "import", "snapshot"})
+# ... and the tables whose rows the LIVE store does not keep in memory (`live_store`): one row a minute, written for
+# Supabase and the dashboard, never read back by the engine. The journal keeps every one of them.
+MINUTE_TABLES = frozenset({"ledger"})
+SNAPSHOT_V = 1
 
 SCHEMA = """
 create table if not exists entry (
@@ -161,6 +171,11 @@ class Journal:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self.now = now
         self.lock = threading.RLock()
+        # M10 1.24 (#449): what `entries(kinds=...)` returned for a kind, kept and extended on append, so a tick's
+        # many reads of the same small kinds do not scan and parse the file again (`_cached`)
+        self._cache: dict[str, _Kind] = {}
+        self._reads: dict[str, int] = {}
+        self._dv: int | None = None
         self.db = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         with self.lock:
             if self.path != ":memory:":
@@ -294,16 +309,78 @@ class Journal:
                 p = self.db.execute("select sum from entry order by seq desc limit 1").fetchone()
                 self.db.execute("insert into entry (seq, ts, kind, body, sum) values (?, ?, ?, ?, ?)",
                                 (seq, ts, kind, text, entry_sum(p[0] if p else None, seq, ts, kind, text)))
+                same = self._unchanged()  # under the write lock: no other writer can commit before we do
                 self.db.execute("commit")
             except BaseException:
                 with contextlib.suppress(sqlite3.Error):
                     self.db.execute("rollback")
                 raise
+            c = self._cache.get(kind) if same else None
+            if c is not None:
+                c.add((seq, ts, kind, json.loads(text)))
             return seq
+
+    # ---------------------------------------------------------------- the read cache (M10 1.24, #449)
+    def _unchanged(self) -> bool:
+        """Has nobody else written to the file since the cache was last known good? SQLite's `data_version` moves
+        when ANOTHER connection commits (the owner's `reconcile --accept` while the engine runs, a repair tool,
+        anything that changes an entry through SQLite), never for this connection's own writes. When it moved, the
+        cache is dropped: the next read of each kind goes to the file and checks every checksum again (#496)."""
+        v = int(self.db.execute("pragma data_version").fetchone()[0])
+        if v == self._dv:
+            return True
+        self._cache.clear()
+        self._dv = v
+        return False
+
+    def _cached(self, kind: str) -> _Kind | None:
+        """The kind's entries in memory, or None for a kind that is not cached: the bulk kinds, and a kind on its
+        first read (the folds a start makes once are not worth keeping: ten years of research orders)."""
+        c = self._cache.get(kind)
+        if c is not None:
+            return c
+        if kind in BULK_KINDS:
+            return None
+        self._reads[kind] = self._reads.get(kind, 0) + 1
+        if self._reads[kind] < 2:
+            return None
+        rows = self.db.execute(f"select {SUM_COLUMNS} from entry where kind = ? order by seq", (kind,)).fetchall()
+        c = self._cache[kind] = _Kind(checked(rows, self._sum_from))
+        return c
+
+    def find(self, kind: str, **eq) -> list[dict]:
+        """The bodies of the kind's entries whose top-level fields equal `eq` (e.g. `find("md_decision",
+        strategy=..., session=...)`), in journal order: an index kept per kind and field set, updated on append.
+        The same answer as filtering `entries(kinds=(kind,))`, without reading every entry of the kind."""
+        fields = tuple(sorted(eq))
+        with self.lock:
+            self._unchanged()
+            self._reads[kind] = max(self._reads.get(kind, 0), 1)  # an indexed kind is worth keeping at once
+            c = self._cached(kind)
+            if c is None:  # a bulk kind: the plain read
+                return [b for _, _, _, b in self.entries(kinds=(kind,)) if all(b.get(f) == eq[f] for f in fields)]
+            return c.find(fields, tuple(eq[f] for f in fields))
+
+    def last(self, kind: str) -> tuple | None:
+        """The newest entry of a kind, checked (#496), or None. One indexed row, whatever the size of the file."""
+        with self.lock:
+            rows = self.db.execute(f"select {SUM_COLUMNS} from entry where kind = ? order by seq desc limit 1",
+                                   (kind,)).fetchall()
+        got = checked(rows, self._sum_from)
+        return got[0] if got else None
 
     def entries(self, after: int = 0, kinds: tuple[str, ...] | None = None, limit: int | None = None) -> list:
         """#496: every entry returned was checked against its checksum (JournalCorrupt names the first that fails;
         nothing after it is returned)."""
+        if kinds:
+            with self.lock:
+                self._unchanged()
+                cs = [self._cached(k) for k in dict.fromkeys(kinds)]
+                if all(c is not None for c in cs):
+                    out = [e for c in cs for e in c.copy(after)]
+                    if len(cs) > 1:
+                        out.sort(key=lambda e: e[0])
+                    return out[: int(limit)] if limit else out
         q, args = f"select {SUM_COLUMNS} from entry where seq > ?", [after]
         if kinds:
             q += f" and kind in ({','.join('?' * len(kinds))})"
@@ -314,6 +391,15 @@ class Journal:
         with self.lock:
             rows = self.db.execute(q, args).fetchall()
         return checked(rows, self._sum_from)
+
+    def stream(self, after: int = 0, kinds: tuple[str, ...] | None = None, chunk: int = 2000):
+        """`entries`, a chunk at a time: a fold over a year of rows never holds them all at once (M10 1.24)."""
+        while True:
+            got = self.entries(after=after, kinds=kinds, limit=chunk)
+            yield from got
+            if len(got) < chunk:
+                return
+            after = got[-1][0]
 
     def last_seq(self) -> int:
         with self.lock:
@@ -350,6 +436,56 @@ class Journal:
             self.db.close()
 
 
+class _Kind:
+    """One kind's entries as a checked read returned them (`rows`, never handed out) plus this journal's own
+    appends. Every read gets its own copy, as it did when each read parsed the file: a caller may change what it
+    was given. `marshal` makes that copy in a third of the time `json` takes to parse the text again."""
+
+    def __init__(self, rows: list) -> None:
+        self.rows = rows
+        self.seqs = [r[0] for r in rows]
+        self.blob: bytes | None = None
+        self.keyed: dict[tuple, dict[tuple, list[int]]] = {}
+
+    def add(self, row: tuple) -> None:
+        self.rows.append(row)
+        self.seqs.append(row[0])
+        self.blob = None
+        for fields, idx in self.keyed.items():
+            idx.setdefault(_key(row[3], fields), []).append(len(self.rows) - 1)
+
+    def copy(self, after: int = 0) -> list:
+        if after > 0:
+            return marshal.loads(marshal.dumps(self.rows[bisect_right(self.seqs, after):]))
+        if self.blob is None:
+            self.blob = marshal.dumps(self.rows)
+        return marshal.loads(self.blob)
+
+    def find(self, fields: tuple, values: tuple) -> list[dict]:
+        idx = self.keyed.get(fields)
+        if idx is None:
+            idx = self.keyed[fields] = {}
+            for i, r in enumerate(self.rows):
+                idx.setdefault(_key(r[3], fields), []).append(i)
+        try:
+            at = idx.get(values, [])
+        except TypeError:  # a value that cannot be a key (a list): no entry equals it by this index; filter
+            at = [i for i, r in enumerate(self.rows) if all(r[3].get(f) == v for f, v in zip(fields, values,
+                                                                                               strict=True))]
+        return marshal.loads(marshal.dumps([self.rows[i][3] for i in at]))
+
+
+def _key(body: dict, fields: tuple) -> tuple:
+    """The index key of an entry: its values of `fields`; a value that cannot be hashed (a list, a dict) is keyed
+    by its JSON text, which no scalar a caller asks for equals."""
+    out = []
+    for f in fields:
+        v = body.get(f)
+        scalar = isinstance(v, str | int | float | bool | type(None))
+        out.append(v if scalar else ("json", json.dumps(v, sort_keys=True)))
+    return tuple(out)
+
+
 def checked(rows: list, sum_from: int) -> list:
     """Rows of SUM_COLUMNS as `(seq, ts, kind, body)` with the body parsed, each one checked first (#496)."""
     out = []
@@ -371,6 +507,10 @@ class DurabilityError(RuntimeError):
     """The journal file is not in write-ahead mode with synchronous=FULL (and `fullfsync` on macOS)."""
 
 
+class SnapshotMismatch(RuntimeError):
+    """M10 1.24: the store's state in memory is not what a fold of the whole journal gives. No snapshot."""
+
+
 class IdentityError(RuntimeError):
     """This journal is not the newest one Supabase has seen (a stale standby or a restored backup)."""
 
@@ -380,13 +520,20 @@ class JournalStore:
     store (None in research: then every table is local)."""
 
     def __init__(self, journal: Journal, remote=None, *, live: bool = False, id_base: int = 0,
-                 breaker_s: float = 30.0, mono: Callable[[], float] = time.monotonic):
+                 breaker_s: float = 30.0, mono: Callable[[], float] = time.monotonic,
+                 keep: Callable[[str], bool] | None = None, snapshots: bool = True):
         """`live`: ids come from this journal's own range (`epoch << 32`), unique across journals; else from
-        `id_base` up (research: 1, 2, 3, ...)."""
+        `id_base` up (research: 1, 2, 3, ...).
+
+        M10 1.24 (#449). `keep(table)`: False for a table whose rows are not kept in memory (`live_store`: the
+        minute rows); the journal has them, the replicator sends them from there, and a `select` of such a table
+        folds them from the journal when asked. `snapshots`: start from the newest `snapshot` entry and fold only
+        what came after it (False: fold everything, which is what a snapshot is checked against)."""
         self.journal, self.remote = journal, remote
         self.id_base = journal.id_base if live else id_base
         self._id_hi = self.id_base + ID_SPAN if live else None
         self.breaker_s, self.mono = breaker_s, mono
+        self._keep = keep or (lambda table: True)
         self._open_until = -1.0  # remote reads are skipped until then (after a failure)
         self.tables: dict[str, list[dict]] = {}
         self.applied: set = set()  # command ids this engine has applied (the update may not have reached Supabase)
@@ -397,12 +544,94 @@ class JournalStore:
         # epoch -> the highest journal number of theirs it knew of
         self.known_journals: dict[str, int] = {}
         self.known_epochs: dict[int, int] = {}
-        for _, _, kind, op in journal.entries(kinds=("row", "import", "bootstrap", "adopt")):
+        self.snapshot_from: int | None = None  # the entry number of the snapshot this start folded from
+        self.snapshot_problem: str | None = None  # why the newest snapshot was not used (then: a full fold)
+        after = self._load_snapshot() if snapshots else 0
+        read = getattr(journal, "stream", None) or journal.entries  # a read-only journal has `entries` alone
+        for _, _, kind, op in read(after=after, kinds=("row", "import", "bootstrap", "adopt")):
             if kind in ("bootstrap", "adopt"):
                 self._prev_hash = op.get("prev_hash") or self._prev_hash
                 self._know(op)
                 continue
             self._apply(op)
+
+    # ---------------------------------------------------------------- snapshots (M10 1.24, #449)
+    def state(self) -> dict:
+        """Everything the fold builds, as JSON: what a snapshot holds and what two folds are compared by."""
+        return {"tables": {t: rows for t, rows in sorted(self.tables.items()) if rows},
+                "applied": sorted(self.applied), "max_id": self._max_id, "prev_hash": self._prev_hash,
+                "known_journals": dict(sorted(self.known_journals.items())),
+                "known_epochs": {str(k): v for k, v in sorted(self.known_epochs.items())},
+                "dropped": sorted(t for t in MINUTE_TABLES if not self._keep(t))}
+
+    def _load_snapshot(self) -> int:
+        """Take the newest snapshot's state; returns the entry number the fold goes on from (0: no snapshot, or
+        one that cannot be used: then everything is folded, as before snapshots, and `snapshot_problem` says why).
+        The entry is checked like every other (#496); its own digest and the store's settings are checked here."""
+        last = getattr(self.journal, "last", None)  # a read-only journal (scripts/preview_next_send.py) has no
+        got = last("snapshot") if callable(last) else None  # `last()`; its `last` is a number: no snapshot read
+        if got is None:
+            return 0
+        seq, _, _, b = got
+        st = b.get("state") or {}
+        why = None
+        if b.get("v") != SNAPSHOT_V:
+            why = f"version {b.get('v')!r}"
+        elif b.get("digest") != state_digest(st):
+            why = "its digest does not match its state"
+        elif b.get("id_base") != self.id_base or st.get("dropped") != sorted(
+                t for t in MINUTE_TABLES if not self._keep(t)):
+            why = "taken by a store with other settings"
+        elif not isinstance(b.get("upto"), int) or not 0 <= b["upto"] < seq:
+            why = f"it covers entries up to {b.get('upto')!r}"
+        if why is not None:
+            self.snapshot_problem = f"snapshot entry {seq} not used ({why}): every entry is folded"
+            log.warning("journal %s", self.snapshot_problem)
+            return 0
+        self.tables = {t: list(rows) for t, rows in st["tables"].items()}
+        self.applied = set(st["applied"])
+        self._max_id, self._prev_hash = int(st["max_id"]), st["prev_hash"]
+        self.known_journals = {k: int(v) for k, v in st["known_journals"].items()}
+        self.known_epochs = {int(k): int(v) for k, v in st["known_epochs"].items()}
+        self.snapshot_from = seq
+        return int(b["upto"])
+
+    def snapshot(self, reason: str = "") -> dict:
+        """Write a `snapshot` entry: this store's state after entry `upto`, so the next start folds only what came
+        after it. Before it is written the WHOLE journal is folded again from its first entry, snapshots ignored,
+        and the result must equal the state in memory; if not, nothing is written and SnapshotMismatch names the
+        difference (the journal is the truth: restart to fold it). Called with the market closed: the check takes
+        as long as a start without a snapshot. A snapshot is never sent to Supabase and changes no other entry."""
+        with self.journal.lock:
+            upto = self.journal.last_seq()
+            mine = canon(self.state())
+            full = canon(JournalStore(self.journal, None, live=self._id_hi is not None, id_base=self.id_base,
+                                      keep=self._keep, snapshots=False).state())
+            if mine != full:
+                diff = sorted(k for k in mine if mine[k] != full[k])
+                tables = sorted(t for t in set(mine["tables"]) | set(full["tables"])
+                                if mine["tables"].get(t) != full["tables"].get(t))
+                raise SnapshotMismatch(
+                    f"no snapshot written: the state in memory differs from a fold of the whole journal up to "
+                    f"entry {upto} in {', '.join(diff)}" + (f" (tables: {', '.join(tables)})" if tables else ""))
+            body = {"v": SNAPSHOT_V, "upto": upto, "id_base": self.id_base, "digest": state_digest(mine),
+                    "reason": reason, "run_id": (self.active_run() or {}).get("id"), "state": mine}
+            seq = self.journal.append("snapshot", body)
+        return {"seq": seq, "upto": upto, "digest": body["digest"],
+                "rows": sum(len(r) for r in mine["tables"].values())}
+
+    def snapshot_due(self, now: datetime) -> str | None:
+        """Why a snapshot should be written now, or None: there is none yet, the newest one is of an earlier
+        month (UTC), or of another run than the active one."""
+        last = getattr(self.journal, "last", None)  # a read-only journal (scripts/preview_next_send.py) has no
+        got = last("snapshot") if callable(last) else None  # `last()`; its `last` is a number: no snapshot read
+        if got is None:
+            return "first" if self.journal.last_seq() else None
+        _, ts, _, b = got
+        if str(ts)[:7] != now.astimezone(UTC).isoformat()[:7]:
+            return "month"
+        run = (self.active_run() or {}).get("id")
+        return "run" if run is not None and b.get("run_id") != run else None
 
     def _know(self, op: dict) -> None:
         for k, v in (op.get("known") or {}).items():
@@ -415,38 +644,40 @@ class JournalStore:
     # ---------------------------------------------------------------- the fold
     def _apply(self, op: dict) -> None:
         t, kind = op["table"], op["op"]
-        rows = self.tables.setdefault(t, [])
+        if not self._keep(t):  # M10 1.24: a minute row is not kept; its id still counts (ids are never reused)
+            i = op["row"].get("id") if kind == "insert" else None
+            if isinstance(i, int) and self._ours(i):
+                self._max_id = max(self._max_id, i)
+            return
+        _fold_row(self.tables.setdefault(t, []), op)
         if kind == "insert":
-            row = dict(op["row"])
-            rows.append(row)
+            row = op["row"]
             if isinstance(row.get("id"), int) and self._ours(row["id"]):
                 self._max_id = max(self._max_id, row["id"])
             if t == "event" and row.get("hash"):
                 self._prev_hash = row["hash"]
-        elif kind == "update":
-            for r in rows:
-                if all(str(r.get(k)) == str(v) for k, v in op["match"].items()):
-                    r.update(op["values"])
-            if t == "command" and "applied_at" in op["values"]:
-                self.applied.add(str(op["match"].get("id")))
-        elif kind == "upsert":
-            keys = op["on_conflict"].split(",")
-            row = op["row"]
-            for r in rows:
-                if all(str(r.get(k)) == str(row.get(k)) for k in keys):
-                    r.update(row)
-                    break
-            else:
-                rows.append(dict(row))
+        elif kind == "update" and t == "command" and "applied_at" in op["values"]:
+            self.applied.add(str(op["match"].get("id")))
+
+    def _from_journal(self, table: str) -> list[dict]:
+        """The rows of a table that is not kept in memory, folded from the journal now (every entry checked). A
+        full read of the journal's rows: for a tool or a test, never for the tick."""
+        rows: list[dict] = []
+        read = getattr(self.journal, "stream", None) or self.journal.entries
+        for _, _, _, op in read(kinds=("row", "import")):
+            if op.get("table") == table:
+                _fold_row(rows, op)
+        return rows
 
     def _ours(self, i: int) -> bool:
         """An id from this journal's range (imported rows of another journal keep theirs)."""
         return i >= self.id_base and (self._id_hi is None or i < self._id_hi)
 
-    def _write(self, op: dict) -> None:
+    def _write(self, op: dict) -> dict:
         op = canon(op)
         self.journal.append("row", op)  # durable first
         self._apply(op)
+        return op
 
     def _local(self, table: str) -> bool:
         return self.remote is None or table in LOCAL_TABLES
@@ -483,8 +714,8 @@ class JournalStore:
                 r.setdefault(DEFAULT_TS[table], datetime.now(UTC))
             if table == "run":
                 r.setdefault("kind", "paper")
-            self._write({"op": "insert", "table": table, "row": r})
-            out.append(self.tables[table][-1])
+            op = self._write({"op": "insert", "table": table, "row": r})
+            out.append(self.tables[table][-1] if self._keep(table) else op["row"])
         return out[0] if isinstance(row, dict) else out
 
     def upsert(self, table: str, row, on_conflict: str):
@@ -503,6 +734,8 @@ class JournalStore:
     def select(self, table: str, params: dict) -> list[dict]:
         if not self._local(table):
             return self._remote(lambda: self._quick().select(table, params))
+        if not self._keep(table):
+            return select_rows(self._from_journal(table), params)
         return select_rows(self.tables.get(table, []), params)
 
     def rpc(self, fn: str, args: dict) -> Any:
@@ -715,6 +948,38 @@ class JournalStore:
         self._know(body)
         self._prev_hash = self._prev_hash or prev
         return {"imported": n, "run_id": run and run["id"]}
+
+
+def _fold_row(rows: list[dict], op: dict) -> None:
+    """One `row` / `import` entry applied to its table's rows."""
+    kind = op["op"]
+    if kind == "insert":
+        rows.append(dict(op["row"]))
+    elif kind == "update":
+        for r in rows:
+            if all(str(r.get(k)) == str(v) for k, v in op["match"].items()):
+                r.update(op["values"])
+    elif kind == "upsert":
+        keys = op["on_conflict"].split(",")
+        row = op["row"]
+        for r in rows:
+            if all(str(r.get(k)) == str(row.get(k)) for k in keys):
+                r.update(row)
+                break
+        else:
+            rows.append(dict(row))
+
+
+def state_digest(state: dict) -> str:
+    return hashlib.sha256(json.dumps(state, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def live_store(journal: Journal, remote, **kw) -> JournalStore:
+    """The paper engine's store (engine/__main__.py): ids from the journal's own range, and the minute rows
+    (MINUTE_TABLES: 390 a session, each with every open position's mark) not kept in memory. They were the bulk of
+    a year's state and nothing in the engine reads them back; the journal holds them and the replicator sends
+    them to Supabase from there."""
+    return JournalStore(journal, remote, live=True, keep=lambda table: table not in MINUTE_TABLES, **kw)
 
 
 def select_rows(rows: list[dict], params: dict) -> list[dict]:
