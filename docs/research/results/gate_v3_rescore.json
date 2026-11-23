@@ -226,7 +226,7 @@
    "winners_run": 346
   },
   "sources": [
-   "file /Users/appucyriac/Projects/kaibot/data/trials.jsonl: 434 rows"
+   "file ~/Projects/kaibot/data/trials.jsonl: 434 rows"
   ]
  },
  "reports_read": 28,
