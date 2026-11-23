@@ -140,10 +140,8 @@ export const DIM_LABEL: Record<string, string> = {
   strategy: "Strategy", exit_reason: "How it closed", hour_et: "Entry hour (ET)", weekday: "Weekday", symbol: "Stock",
 };
 
-/** Seconds since an ISO timestamp, and a short human form. */
+/** Seconds since an ISO timestamp. */
 export const ageS = (iso: string, now = Date.now()) => Math.max(0, (now - new Date(iso).getTime()) / 1000);
-export const ageText = (s: number) =>
-  s < 120 ? `${Math.round(s)} s ago` : s < 7200 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
 
 /** Plain-language summary of today's dip scan (engine heartbeat). Never claims a cause the counters don't show. */
 export function scanSummary(sc: Scan | null | undefined, entries = 0): { headline: string; lines: string[] } {

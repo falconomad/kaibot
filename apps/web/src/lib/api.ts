@@ -171,12 +171,23 @@ const PRICES_LEAVE_MS = 2_000;
 const priceStream: {
   listeners: Set<(s: Stream) => void>; ch: ReturnType<typeof supa.channel> | null; joining: boolean;
   leaveTimer: ReturnType<typeof setTimeout> | null;
-} = { listeners: new Set(), ch: null, joining: false, leaveTimer: null };
+  /** `joined`: the channel was subscribed once; `down`: it was, and is lost now (lib/stream.pricesPaused). */
+  joined: boolean; down: boolean; downs: Set<(down: boolean) => void>;
+} = { listeners: new Set(), ch: null, joining: false, leaveTimer: null, joined: false, down: false, downs: new Set() };
+
+function setDown(down: boolean): void {
+  const p = priceStream;
+  if (p.down === down) return;
+  p.down = down;
+  for (const f of [...p.downs]) f(down);
+}
 
 function leavePrices(): void {
   const p = priceStream;
   if (p.leaveTimer) { clearTimeout(p.leaveTimer); p.leaveTimer = null; }
-  if (p.ch) { void supa.removeChannel(p.ch); p.ch = null; }
+  if (p.ch) { const ch = p.ch; p.ch = null; void supa.removeChannel(ch); }
+  p.joined = false;
+  setDown(false);
 }
 
 async function joinPrices(): Promise<void> {
@@ -198,7 +209,11 @@ async function joinPrices(): Promise<void> {
       if (s) for (const f of [...p.listeners]) f(s);
     })
     .subscribe((status, err) => {
-      if (status === "CHANNEL_ERROR" && /unauthori[sz]ed|denied|policy/i.test(String(err?.message ?? "")) && p.ch === ch) leavePrices();
+      if (p.ch !== ch) return;
+      // refused by the owner policy: there is no stream here at all, which is not a stream that dropped
+      if (status === "CHANNEL_ERROR" && /unauthori[sz]ed|denied|policy/i.test(String(err?.message ?? ""))) return leavePrices();
+      if (status === "SUBSCRIBED") { p.joined = true; setDown(false); }
+      else if (p.joined) setDown(true);  // CHANNEL_ERROR, TIMED_OUT or CLOSED after a join; supabase-js joins again
     });
 }
 
@@ -298,9 +313,10 @@ export const api = {
    *  leaving its own would take the next page's with it); the channel is left 2 s after the last page stops, so a move
    *  between Live and Positions keeps it. Refused (not the owner, 0032 not applied, the relay off): no message comes
    *  and the page stays on the 10 s poll; a refusal leaves the channel, so nothing retries until a page asks again. */
-  prices: (on: (s: Stream) => void): (() => void) => {
+  prices: (on: (s: Stream) => void, onDown?: (down: boolean) => void): (() => void) => {
     const p = priceStream;
     p.listeners.add(on);
+    if (onDown) { p.downs.add(onDown); onDown(p.down); }
     if (p.leaveTimer) { clearTimeout(p.leaveTimer); p.leaveTimer = null; }
     if (!p.ch && !p.joining) void joinPrices();
     let done = false;
@@ -308,6 +324,7 @@ export const api = {
       if (done) return;
       done = true;
       p.listeners.delete(on);
+      if (onDown) p.downs.delete(onDown);
       if (!p.listeners.size && !p.leaveTimer) p.leaveTimer = setTimeout(leavePrices, PRICES_LEAVE_MS);
     };
   },

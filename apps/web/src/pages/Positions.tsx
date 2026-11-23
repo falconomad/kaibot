@@ -33,7 +33,7 @@ import { etToday } from "../lib/derive";
 import { type Unfilled, exitKinds, unfilledFrom, unfilledLine } from "../lib/engineevents";
 import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
-import { DayChange, FreshLine, useMarks } from "../components/Marks";
+import { DayChange, PricesPaused, useMarks } from "../components/Marks";
 import { type BuyState, buyState, buyStateText, carriesFrom, pastBuys } from "../lib/carry";
 import { planNotes } from "../lib/planlate";
 import { markOf, potLive } from "../lib/marks";
@@ -98,8 +98,6 @@ export function Positions() {
       return { kind: "book", symbol: p.symbol, p, value: v.value, gain: v.gain, day: v.dayPct, rank: p.qty * p.mark };
     }),
   ].sort((x, y) => y.rank - x.rank);
-  // the rows' prices: live, else the engine's minute row when it lists exactly the book (#384), else the close marks
-  const fresh = live?.live || live?.engine ? live.fresh : b?.session && b.positions.length ? { kind: "close" as const, session: b.session } : null;
   // for Tick: a change of source (live prices, the engine's row, close marks) replaces a figure without the tint of a move
   const from = live?.live ? "live" : live?.engine ? "engine" : "close";
   const openRef = useRef(open);
@@ -118,7 +116,7 @@ export function Positions() {
         {/* #359: no count while the book loads or failed (a "0 open" there reads as data); a space keeps the line's height */}
         <p className="muted num" style={{ margin: 0 }}>{countKnown ? <>{open.length} open{open.length ? <> · <Tick value={invested} from={from}>{money(invested)}</Tick> invested</> : ""}
           {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</> : "\u00a0"}</p>
-        <FreshLine fresh={fresh} />
+        <PricesPaused paused={mk.paused} />
         {line && <p className={`muted num ${line.ended ? "loss" : ""}`} style={{ margin: 0 }} title={`peak ${money(line.peak)}, now ${money(line.equity)}`}>Multi-day book: {lineText(line)}</p>}
         {run.kind === "paper" && (
           <div className="seg" role="tablist" aria-label="Show" onKeyDown={onTabKeys}>

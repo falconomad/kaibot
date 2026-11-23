@@ -6,7 +6,7 @@ import { StatusRow, allRed, noDecisionRows } from "../components/Home";
 import { Sheet } from "../components/Sheet";
 import { engineChip, useRunCtx } from "../components/Shell";
 import { api, type Heartbeat } from "../lib/api";
-import { ageS, ageText, haltResolved, haltText, scanSummary, sessionTime } from "../lib/derive";
+import { ageS, haltResolved, haltText, scanSummary, sessionTime } from "../lib/derive";
 import { engineVersion } from "../lib/engine";
 import { commandText, ruleName } from "../lib/explain";
 import { Empty, ErrorState, RuleName } from "../components/States";
@@ -23,6 +23,11 @@ import { clearedAt, clearedFrom, clockSkewText, commandEventText, haltClearedTex
 import { reconLine, reconcileFrom } from "../lib/reconcile";
 import { ReconcileAccept } from "../components/ReconcileAccept";
 import { EVENT_LABELS } from "../lib/eventNames";
+
+/** An age in words, for this page only (the dashboard shows no ages: stakeholder, 23 Nov 2026). Kept out of
+ *  lib/derive.ts so it loads with this page, not with the first screen. */
+const ageText = (s: number) =>
+  s < 120 ? `${Math.round(s)} s ago` : s < 7200 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
 
 const PROC: Record<string, { name: string; what: string; staleS: number }> = {
   engine: { name: "Engine", what: "trades the run: reads prices, decides, places bracket orders", staleS: 90 },

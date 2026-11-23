@@ -1,10 +1,12 @@
 // Stakeholder, 19 Nov 2026, during market hours: "why the amounts on the dashboard are not updating in realtime".
 // Each holding stood at the last booked close all day, and the pot moved once a minute at best. On the page now:
-// 1. live: the pot, today, the chart's last point and every holding at the paper account's prices, and one small line
-//    that says so ("Live · prices 4 s ago");
+// 1. live: the pot, today, the chart's last point and every holding at the paper account's prices;
 // 2. each fallback (the function unavailable, prices stale, share counts that differ): the pot from the engine's minute
-//    ledger ("Updated a minute ago by the engine"), the rows at their close marks, and no figure that mixes the two;
-// 3. outside market hours: the booked close ("At Wednesday's close"), whatever is in the cache.
+//    ledger, the rows at their close marks, and no figure that mixes the two;
+// 3. outside market hours: the booked close, whatever is in the cache.
+// Stakeholder, 23 Nov 2026: no line says how old the figures are ("Live · prices 4 s ago", "Updated a minute ago by
+// the engine", "At Wednesday's close" are gone). One quiet cue is left: "Prices paused", while the market is open and a
+// held stock has had no price for more than a minute (or the stream dropped: livemarks.dom.test.tsx).
 // The maths is in lib/marks.test.ts, the function in apiMarks.test.ts, the polling itself in livemarks.dom.test.tsx.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import css from "./app.css?raw";
@@ -59,22 +61,32 @@ const at = (iso: number | string) => vi.useFakeTimers({ now: new Date(iso), toFa
 const home = (m: Marks | null | undefined, o = overview()) => render(<Live />, { ctx: ctxFor(run, { overview: o }), seeds: seeds(m) });
 const positions = (m: Marks | null | undefined, o = overview()) => render(<Positions />, { ctx: ctxFor(run, { overview: o }), seeds: seeds(m), path: "/positions", route: "/positions" });
 /** One row's text, by its ticker. */
+/** Any line about the figures' age, as the page had before 23 Nov 2026. */
+const AGE = /s ago|ago by the engine|Live ·|At [A-Za-z']+ close|At the close of|Updated/;
 const rowOf = (html: string, symbol: string, cls = "hold-row") =>
   text(new RegExp(`<button[^>]*class="${cls}"[^>]*>(?:(?!</button>).)*?<b>${symbol}</b>.*?</button>`, "s").exec(html)?.[0] ?? "");
 
 describe("Home while the market is open and the account holds exactly the book", () => {
-  it("the pot is the last close plus the day's move, today is that move, and one small line says the prices are live", () => {
+  it("the pot is the last close plus the day's move, today is that move, and no line says how old the prices are", () => {
     at(NOW);
     const html = home(marks()), t = text(html);
     expect(t).toContain("Paper pot $94,773.29");
     expect(t).toContain("−$226.71 all time");
     expect(t).toContain("−$223.97 today");
-    expect(t).toContain("Live · prices 4 s ago");
-    expect(html).toContain('<p class="fresh live">Live · prices 4 s ago<span class="feed" title="Prices update every 10 s">10 s</span></p>');
+    expect(t).not.toMatch(AGE);
+    expect(html).not.toMatch(/class="(fresh|paused)/);
     // one source: the engine's minute figure is nowhere on the page
     expect(t).not.toContain("94,796.94");
-    expect(t).not.toMatch(/by the engine|At .* close/);
     expect(glitches(html)).toEqual([]);
+  });
+
+  it("a held stock with no price for more than a minute: a quiet 'Prices paused', and the figures fall back", () => {
+    at(NOW);
+    for (const age of [59_000, 60_000]) expect(text(home(marks({}, NOW - age)))).not.toContain("Prices paused");
+    const html = home(marks({}, NOW - 60_001)), t = text(html);
+    expect(html).toContain('<p class="paused" role="status">Prices paused</p>');
+    expect(t).toContain("Paper pot $94,796.94");               // the engine's minute row, as with any stale prices
+    expect(t).not.toMatch(AGE);
   });
 
   it("each holding: shares times the price now, its gain against the average cost, today against the previous close", () => {
@@ -110,10 +122,8 @@ describe("Home's fallbacks: the engine's minute ledger for the pot, the close ma
     const t = text(html);
     expect(t).toContain("Paper pot $94,796.94");
     expect(t).toContain("−$200.32 today");
-    expect(t).toContain("Updated a minute ago by the engine");
-    expect(html).toContain('<p class="fresh">Updated a minute ago by the engine</p>');
-    expect(html).not.toContain("fresh live");
-    expect(t).not.toMatch(/Live ·|prices \d+ s ago/);
+    expect(t).not.toMatch(AGE);                                 // no line says where the figures come from or how old
+    expect(html).not.toMatch(/class="(fresh|paused)/);         // not paused: the prices are not a minute old
     // the rows: every figure at the close mark, and no change today
     expect(rowOf(html, "XOM")).toBe("XOM Trend momentum · 0 d $3,212.40 +$0.60");
     expect(t).not.toMatch(/% today/);
@@ -132,16 +142,17 @@ describe("Home's fallbacks: the engine's minute ledger for the pot, the close ma
   it("while the first prices are on their way the rows keep the place of their 'today' line, and show close marks", () => {
     at(NOW);
     const html = home(undefined);
-    expect(text(html)).toContain("Updated a minute ago by the engine");
+    expect(text(html)).not.toMatch(AGE);
+    expect(text(html)).not.toContain("Prices paused");           // nothing has arrived yet: nothing has paused
     expect(rowOf(html, "XOM")).toBe("XOM Trend momentum · 0 d $3,212.40 +$0.60");
     expect(html.match(/<span class="day" aria-hidden="true"> <\/span>/g)).toHaveLength(3);
   });
-  it("the engine wrote nothing today either: the pot is the last close, and the line says which", () => {
+  it("the engine wrote nothing today either: the pot is the last close, and no line says so", () => {
     at(NOW);
     const html = home(null, overview({ ledger: null }));
     expect(text(html)).toContain("Paper pot $94,997.26");
     expect(text(html)).toContain("−$2.74 on Wed, Nov 18");
-    expect(html).toContain('<p class="fresh">At Wednesday&#x27;s close</p>');
+    expect(text(html)).not.toMatch(AGE);
   });
 });
 
@@ -151,8 +162,8 @@ describe("outside market hours the booked close is the truth", () => {
     const fresh = marks({}, Date.now() - 2_000);
     const html = home(fresh, overview({ ledger: null, heartbeat: [] })), t = text(html);
     expect(t).toContain("Paper pot $94,997.26");
-    expect(t).toContain("At Wednesday's close");
-    expect(t).not.toMatch(/Live ·|by the engine|% today/);
+    expect(t).not.toMatch(AGE);
+    expect(t).not.toMatch(/% today|Prices paused/);
     expect(rowOf(html, "XOM")).toBe("XOM Trend momentum · 0 d $3,212.40 +$0.60");
     expect(html).not.toContain('class="day"'); // nothing is on its way either: no place is kept
   });
@@ -161,38 +172,40 @@ describe("outside market hours the booked close is the truth", () => {
     const t = text(home(marks({}, Date.now() - 2_000), overview({ ledger: { ts: "2026-11-18T20:59:21Z", cash: 95000, positions: {}, equity_venue: 95000, equity_shadow: 95000 } })));
     expect(t).toContain("Paper pot $94,997.26");
     expect(t).toContain("−$2.74 today");
-    expect(t).toContain("At today's close");
+    expect(t).not.toMatch(AGE);
   });
   it("a weekend: Friday's close", () => {
     at("2026-11-21T15:00:00Z");
     const friday = { ...BOOK, session: "2026-11-20" };
     const t = text(render(<Live />, { ctx: ctxFor(run, { overview: overview({ ledger: null, heartbeat: [] }) }),
       seeds: [...seeds(marks({}, Date.now() - 1_000)).filter((s) => String(s.key[0]) !== "book"), { key: ["book", 7], data: friday }] }));
-    expect(t).toContain("At Friday's close");
-    expect(t).not.toContain("Live ·");
+    expect(t).not.toMatch(AGE);
   });
 });
 
 describe("Positions", () => {
-  it("live: every open row at the price now, with today's change, and the same line as Home", () => {
+  it("live: every open row at the price now, with today's change, and no line about the prices' age", () => {
     at(NOW);
     const html = positions(marks()), t = text(html);
     expect(t).toMatch(/Positions 7 open · \$15,101\.5\d invested · 16% of the pot/);
-    expect(html).toContain('<p class="fresh live">Live · prices 4 s ago<span class="feed" title="Prices update every 10 s">10 s</span></p>');
+    expect(t).not.toMatch(AGE);
     expect(rowOf(html, "XOM", "row")).toBe("XOM Trend momentum · 20 shares · 0 days $3,173.60 −$38.20 −1.18% today");
     expect(rowOf(html, "ABBV", "row")).toMatch(/\$1,411\.85 −\$18\.95 −1\.27% today$/);
     expect([...html.matchAll(/class="row".*?<b>([A-Z]+)<\/b>/gs)].map((m) => m[1])).toEqual(["XOM", "TMO", "BIIB", "BBY", "PFE", "ABBV", "APA"]);
     expect(glitches(html)).toEqual([]);
   });
-  it("fallback: the rows at their close marks, and the line says so", () => {
+  it("fallback: the rows at their close marks, with no line about it; prices over a minute old are paused", () => {
     for (const m of [null, marks({}, NOW - 31_000), marks({ XOM: [19, 158.68, 160.58] })]) {
       at(NOW);
       const html = positions(m), t = text(html);
       expect(t).toMatch(/Positions 7 open · \$15,325\.4\d invested · 16% of the pot/);
-      expect(html).toContain("<p class=\"fresh\">At Wednesday&#x27;s close</p>");
+      expect(t).not.toMatch(AGE);
+      expect(t).not.toContain("Prices paused");
       expect(rowOf(html, "XOM", "row")).toBe("XOM Trend momentum · 20 shares · 0 days $3,212.40 +$0.60");
-      expect(t).not.toMatch(/Live ·|% today|3,173\.60/);
+      expect(t).not.toMatch(/% today|3,173\.60/);
     }
+    at(NOW);
+    expect(positions(marks({}, NOW - 61_000))).toContain('<p class="paused" role="status">Prices paused</p>');
   });
   it("the detail sheet, live: the price now and today's change in dollars and percent", () => {
     at(NOW);
@@ -222,18 +235,20 @@ describe("Positions", () => {
 
 describe("how it is drawn and asked for", () => {
   const rule = (sel: string) => new RegExp(`(?:^|\\n)${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
-  it("the freshness line is small and muted, in text tokens; live carries the brand's live point, still", () => {
-    expect(rule(".fresh")).toMatch(/font-size: var\(--t-cap\); color: var\(--text-2\)/);
-    expect(rule(".fresh.live::before")).toMatch(/width: 6px; height: 6px; border-radius: 999px; background: var\(--live\)/);
+  it("'Prices paused' is small and quiet, in text tokens, with a pause sign (not colour alone); nothing animates", () => {
+    expect(rule(".paused")).toMatch(/font-size: var\(--t-cap\); color: var\(--text-2\)/);
+    expect(rule(".paused::before")).toMatch(/border-left: 2px solid var\(--text-3\); border-right: 2px solid var\(--text-3\)/);
     expect(rule(".day")).toMatch(/color: var\(--text-2\)/);
-    for (const sel of [".fresh", ".fresh.live::before", ".day"]) expect(rule(sel), sel).not.toMatch(/animation|transition|infinite/);
+    for (const sel of [".paused", ".paused::before", ".day"]) expect(rule(sel), sel).not.toMatch(/animation|transition|infinite/);
+    expect(css).not.toMatch(/(^|\n)\.fresh\b/);                // the old age line's rules are gone
   });
-  it("numbers change through Tick; the line that counts seconds is not announced by a screen reader", () => {
+  it("numbers change through Tick; nothing counts seconds; the pause is said once (role=status), nothing else is live", () => {
     at(NOW);
-    const html = home(marks());
-    expect(html).not.toMatch(/<p class="fresh[^>]*(role|aria-live)/);
+    expect(home(marks())).not.toMatch(/role="status"|aria-live/);
     expect(marksSrc).toMatch(/<Tick value=\{r\} className=\{tone\(r\)\}>/);
-    expect(marksSrc).not.toMatch(/aria-live|role="status"/);
+    expect(marksSrc).not.toMatch(/aria-live|setInterval\([^)]*1000/);
+    expect(marksSrc).toMatch(/<p className="paused" role="status">Prices paused<\/p>/);
+    expect(liveSrc).not.toMatch(/FreshLine|ageText|Updated \{/);
   });
   it("the poll goes through lib/poll.ts, one try at a time, and the book keeps its 5-minute cache", () => {
     expect(marksSrc).toMatch(/marksPollMs\(run, overview\) !== false/);
