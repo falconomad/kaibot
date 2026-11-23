@@ -43,7 +43,8 @@ CALL_RE = re.compile(r'\b(?:event|_event)\(\s*([^\s"),][^,)]*)')
 DYNAMIC_SITES = {
     # engine/__main__.report_conflicts: a replicator fallback's "event" key, "stop_state_fallback" by default
     ("src/kaibot/engine/__main__.py", 'f.get("event"'),
-    # engine/__main__.report_news: the news poller's queued events (`self._events.append(("<name>", ...))`)
+    # engine/__main__.report_news: the news poller's and the headline feed's queued events
+    # (`self._events.append(("<name>", ...))` in ingest/news_poll.py and news/feed.py)
     ("src/kaibot/engine/__main__.py", "kind"),
     # live_daily: the agents' `EVENT = "<name>"` constants (pre-open review, its shadow, the daily note)
     ("src/kaibot/engine/live_daily.py", "EVENT"),
@@ -71,6 +72,7 @@ def _dynamic() -> set[str]:
     for p in (src / "agents").glob("*.py"):
         out |= set(AGENT_EVENT_RE.findall(p.read_text()))
     out |= set(QUEUED_RE.findall((src / "ingest" / "news_poll.py").read_text()))
+    out |= set(QUEUED_RE.findall((src / "news" / "feed.py").read_text()))  # the headline feed, same report_news
     core = (src / "engine" / "core.py").read_text()
     apply = core.split('self.store.event(f"command_{kind}"', 1)[0].rsplit("def ", 1)[1]  # the command loop
     consts = {"ACCEPT_COMMAND": re.search(r'^ACCEPT_COMMAND = "([a-z_]+)"', (src / "engine" / "reconcile.py")
@@ -149,7 +151,7 @@ def test_the_dynamic_names_are_found():
     d = _dynamic()
     assert {"multi_day_column_missing", "multi_day_review", "multi_day_review_shadow", "daily_note",
             "news_feed_unhealthy", "news_feed_ok", "command_pause", "command_set_level", "command_new_run",
-            "command_accept_reconcile", "stop_state_fallback"} <= d
+            "command_accept_reconcile", "stop_state_fallback", "headline_feed_failed", "headline_feed_ok"} <= d
 
 
 INSERT = """insert into kaibot.event (ts, type, payload, hash) values

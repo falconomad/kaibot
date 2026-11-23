@@ -84,6 +84,10 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_MARKET_ALARM", "on_off", "data", "S103 (#377): the market-event alarm as a logged notice",
        default=False),
     _s("KAIBOT_NEWS_POLL", "flag", "data", "#354: the engine's news poller (on unless switched off)", default=True),
+    _s("KAIBOT_HEADLINE_FEED", "flag", "backend-quant", "the dashboard's headline line: the headlines the engine "
+       "fetches anyway, copied to kaibot.headline (0043; on unless switched off)", default=True),
+    _s("KAIBOT_HEADLINE_EDGAR", "flag", "backend-quant", "the headline line's SEC 8-K source (licence public, for "
+       "multi-user); needs SEC_USER_AGENT", default=False),
     _s("KAIBOT_DATA_CHECKS", "flag", "data", "M12 3.11 (#473): the minute-bar data checks, report only",
        default=False, readers=("src/kaibot/engine/market.py",)),
     _s("KAIBOT_DATA_CHECKS_BLOCK", "checks", "backend-quant", "M12 3.11 (#473): which minute-bar data checks block "
@@ -214,6 +218,8 @@ class Switches:
     filing_flag: str
     market_alarm: bool
     news_poll: bool
+    headline_feed: bool
+    headline_edgar: bool
     data_checks: bool
     data_checks_block: tuple[str, ...]
     reenable: str | None

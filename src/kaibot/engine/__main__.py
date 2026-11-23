@@ -174,9 +174,32 @@ def build(settings: Settings) -> Engine:
     # Data (19 Nov 2026): news on a schedule, so news_item fills without the room (ingest/news_poll.py). Started in
     # main() after the lease; never with --check. KAIBOT_NEWS_POLL=off: None
     eng.news_poller = news_poll.for_engine(eng, desk, data, locked.lock)
+    eng.headline_feed = headline_feed(eng, remote, desk, eng.news_poller)
     if not intraday:
         market.holdings = eng._md_symbols  # the book's sleeves and the symbols of its working orders
     return eng
+
+
+def headline_feed(eng: Engine, remote, desk, poller, env=None):
+    """The dashboard's headline line (news/feed.py): the headlines the poller and the desk fetch anyway, copied to
+    kaibot.headline on the feed's own thread; SEC 8-K lines too with KAIBOT_HEADLINE_EDGAR=on. Display only: nothing
+    of it is read back. Started in go_active (the lease holder only); None with KAIBOT_HEADLINE_FEED=off."""
+    try:
+        from kaibot.news import feed  # display only; loaded only here (tests/unit/test_news_tags.py)
+
+        def focus():
+            sc = news_poll.engine_scope(eng)
+            return sc.planned | sc.held
+
+        f = feed.for_engine(remote, focus, os.environ if env is None else env)
+    except Exception:
+        log.exception("headline feed not built: the dashboard shows no new headlines")
+        return None
+    if f is not None:
+        desk.feed = f
+        if poller is not None:
+            poller.feed = f
+    return f
 
 
 def bounded_data(data):
@@ -388,7 +411,8 @@ def journal_upkeep(eng: Engine, status, now: datetime, done: dict) -> None:
 
 
 def report_news(eng: Engine, poller) -> None:
-    """The news poller's health changes (news_feed_unhealthy / news_feed_ok), written from the main thread."""
+    """The news poller's health changes (news_feed_unhealthy / news_feed_ok) and the headline feed's
+    (headline_feed_failed / headline_feed_ok), written from the main thread."""
     if poller is None:
         return
     for kind, detail in poller.take_events():
@@ -712,6 +736,7 @@ def main() -> None:
     write_pid_file(settings.data_dir, host)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
     news = getattr(eng, "news_poller", None)
+    feed = getattr(eng, "headline_feed", None)
 
     def go_active() -> None:
         """What only the engine that holds the lease does: send its rows to Supabase, poll the news. At once
@@ -723,6 +748,9 @@ def main() -> None:
         if news is not None:
             news.start()
             log.info("news poller: on (every %.0f s now; heartbeat `news`)", news.every_s())
+        if feed is not None:
+            feed.start()
+            log.info("headline feed: on (EDGAR filings %s)", feed.status()["edgar"])
 
     if mode == "active":
         go_active()
@@ -777,6 +805,7 @@ def main() -> None:
                     eng.store.event("engine_error", {"error": msg}, eng._rid())
         report_conflicts(eng, replicator)
         report_news(eng, news)
+        report_news(eng, feed)  # headline_feed_failed / _ok, written from this thread (the event chain)
         status = {**status, "replication": replicator.status()} if isinstance(status, dict) else status
         if news is not None and isinstance(status, dict):
             status = {**status, "news": news.status()}
@@ -793,6 +822,8 @@ def main() -> None:
         return
     if news is not None:
         news.stop()
+    if feed is not None:
+        feed.stop()
     if stop.get("lease_lost"):
         # Another engine is in charge: write nothing. Its heartbeat and lease are not ours, and an event from
         # here would fork the hash-chained event log it is now appending to. Its `engine_lease_takeover` event

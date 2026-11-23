@@ -115,6 +115,7 @@ class NewsDesk:
         self._orphans: set[int] = set()  # cluster rows written without their item whose delete failed (#360)
         self.orphans_removed = 0  # such rows deleted so far (a count for tests and logs)
         self.triage_calls = 0
+        self.feed = None  # the dashboard's headline line (news/feed.py): handed what `poll` fetched; never blocks
 
     # ---------------- ingest ----------------
     def poll(self, symbols: list[str], lookback: timedelta = WINDOW) -> dict:
@@ -126,6 +127,11 @@ class NewsDesk:
                 raw.extend(self.source.news(symbols[i : i + 50], now - lookback, now))
         except Exception as e:
             log.warning("news fetch failed: %s", type(e).__name__)
+        if raw and self.feed is not None:  # a copy for the dashboard (no new request); never raises here
+            try:
+                self.feed.offer(raw, symbols)
+            except Exception:
+                log.debug("headline feed offer failed")
         return self.ingest(raw)
 
     def ingest(self, raw_items: Iterable[dict]) -> dict:
