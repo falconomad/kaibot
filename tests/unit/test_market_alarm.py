@@ -218,6 +218,77 @@ def test_rankings_take_the_ten_highest_dollar_volumes_of_members_one_ticker_per_
     assert t["month"].min() == "2024-03-01"  # at the end of January there are fewer than 40 sessions: no ranking
 
 
+def _store_from_2016(end: date) -> tuple[list[date], pd.DataFrame]:
+    days = nyse.sessions(date(2016, 1, 4), end)
+    dates = np.array([np.datetime64(d) for d in days])
+    k = 12
+    close, vol = np.full((len(days), k), 10.0), np.tile(np.arange(1, k + 1, dtype=float), (len(days), 1)) * 1e6
+    t = R.rankings_from_panel(dates, [f"S{j}" for j in range(k)], close, vol, np.ones((len(days), k), dtype=bool),
+                              {j: f"C{j}" for j in range(k)}, date(2016, 1, 1), end)
+    return days, t
+
+
+def test_a_store_from_2016_01_04_has_no_ranking_before_april_2016_the_61_unknown_sessions(tmp_path):
+    """#377: the run of 23 Nov 2026 had megacap_report unknown on 61 sessions. A store that begins on 2016-01-04
+    has 19 sessions at the end of January and 39 at the end of February, below the 40 a ranking needs: January to
+    March 2016 have no ranking, and Amendment 1 leaves exactly those sessions out of the comparisons."""
+    days, t = _store_from_2016(date(2016, 6, 30))
+    assert t["month"].min() == "2016-04-01" and t[t["month"] == "2016-04-01"].iloc[0]["ranked_on"] == "2016-03-31"
+    t.to_csv(tmp_path / "top10.csv", index=False)
+    rankings = tuple(ma.read_rankings(tmp_path / "top10.csv"))
+    inputs = ma.Inputs((), (), rankings, (), {})
+    rows = ma.backfill(days, inputs)
+    unknown = [date.fromisoformat(r["session"]) for r in rows if r["flags"]["megacap_report"] is None]
+    assert len(unknown) == 61 and unknown[0] == date(2016, 1, 4) and unknown[-1] == date(2016, 3, 31)
+    assert R.before_first_ranking(rows, inputs) == set(unknown)
+    # any other reason for unknown still stops the comparison: a missing earnings file leaves nothing out
+    missing = ma.Inputs((), (), rankings, ("reports",), {})
+    assert R.before_first_ranking(ma.backfill(days, missing), missing) == set()
+
+
+def test_an_unknown_session_after_the_first_ranking_is_not_left_out(tmp_path):
+    days, t = _store_from_2016(date(2016, 6, 30))
+    t[t["month"] != "2016-05-01"].to_csv(tmp_path / "top10.csv", index=False)  # keep April and June
+    late = ma.Inputs((), (), tuple(ma.read_rankings(tmp_path / "top10.csv")), (), {})
+    rows = [{**r, "flags": {**r["flags"], "megacap_report": None}} if r["session"] == "2016-05-02" else r
+            for r in ma.backfill(days, late)]
+    left = R.before_first_ranking(rows, late)
+    assert date(2016, 5, 2) not in left and len(left) == 61
+
+
+def test_the_study_run_leaves_out_the_sessions_before_the_first_ranking_and_says_so(tmp_path, monkeypatch):
+    """QA on #596: Amendment 1 through main(), at the comparison level. A store from 2016-01-04: the rankings start
+    in April 2016, so megacap_report M1 runs without January to March 2016 (60 sessions with a SPY return: the first
+    session has none), and the report, its table line and the trial row all give that count, the first and the
+    last. The other flags keep every session."""
+    days, top10 = _store_from_2016(date(2016, 6, 30))
+    (tmp_path / "daily").mkdir()
+    (tmp_path / "earnings").mkdir()
+    reports = [{"company": "C11", "symbol": "S11", "session": d.isoformat(), "report": True,
+                "accepted_ts": (datetime.combine(d, datetime.min.time(), tzinfo=UTC) - timedelta(hours=10))}
+               for d in days[::9]]
+    pd.DataFrame(reports).to_parquet(tmp_path / ma.ANNOUNCEMENTS)
+    spy = pd.Series(np.r_[np.nan, np.random.default_rng(377).normal(0, 0.01, len(days) - 1)], index=days)
+    monkeypatch.setattr(R, "build_rankings", lambda data, start, end: top10)
+    monkeypatch.setattr(R, "spy_abs_returns", lambda data, start, end: spy)
+    assert R.main(["--start", "2016-01-01", "--end", "2016-06-30", "--data", str(tmp_path)]) == 0
+    rep = json.loads((tmp_path / "reports" / "market_alarm_backfill.json").read_text())
+    by = {(c["flag"], c["measure"]): c for c in rep["comparisons"]}
+    m1 = by[("megacap_report", "M1")]
+    want = {"sessions": 60, "first": "2016-01-05", "last": "2016-03-31",
+            "why": "no ranking public yet at as_of (Amendment 1)"}
+    assert "not_run" not in m1 and m1["left_out"] == want
+    assert m1["stats"]["n"] == len(days) - 61 and m1["stats"]["flagged"] > 0
+    assert all("left_out" not in c and c["stats"]["n"] == len(days) - 1
+               for (f, m), c in by.items() if m == "M1" and f != "megacap_report")
+    md = (tmp_path / "reports" / "market_alarm_backfill.md").read_text()
+    assert "`megacap_report` M1: 60 sessions left out, 2016-01-05 to 2016-03-31" in md
+    rows = {r["trial_id"]: r for r in map(json.loads, (tmp_path / "trials.jsonl").read_text().splitlines())}
+    row = rows[f"{R.STUDY}_megacap_report_M1"]
+    assert row["params"]["left_out"] == want and row["window"] == [str(days[61]), str(days[-1])]
+    assert "left_out" not in rows[f"{R.STUDY}_fed_day_M1"]["params"] and len(rows) == 4  # M2: no engine run here
+
+
 def test_tightening_raises_the_threshold_until_major_is_at_most_one_in_ten():
     days = nyse.sessions(date(2024, 1, 2), date(2024, 1, 31))
     rank = ma.Ranking(date(2024, 1, 1), ts("2023-12-29T21:15:00+00:00"), frozenset(f"C{i}" for i in range(10)))

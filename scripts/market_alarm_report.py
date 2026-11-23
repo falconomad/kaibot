@@ -196,6 +196,21 @@ def tighten(sessions: list[date], inputs: ma.Inputs) -> tuple[int, list[dict], l
         rows = ma.backfill(sessions, inputs, thr)
 
 
+def before_first_ranking(rows: list[dict], inputs: ma.Inputs) -> set[date]:
+    """Sessions on which `megacap_report` is unknown only because no ranking was public yet at their `as_of`
+    (Amendment 1): before the first ranking, with the earnings file read. They are left out of the comparisons."""
+    if "reports" in inputs.missing or not inputs.rankings:
+        return set()
+    out = set()
+    for r in rows:
+        d = date.fromisoformat(r["session"])
+        if r["flags"]["megacap_report"] is None and not any(
+                k.available_ts <= ma.as_of_for(d) and k.month <= d for k in inputs.rankings):
+            out.add(d)
+    first = min((k.month for k in inputs.rankings), default=None)
+    return {d for d in out if first is None or d < first}
+
+
 def logged_ids(path: Path) -> set[str]:
     rows, _ = trials_mod.read_jsonl(path)
     return {r.get("trial_id") for r in rows if r.get("strategy") == STUDY}
@@ -247,6 +262,8 @@ def markdown(rep: dict) -> str:
                      f"{_num(s['mean_other'], 5)} | {_num(s['b'], 5)} | {_num(s['t'], 2)} | "
                      f"{'yes' if s['t'] is not None and abs(s['t']) >= CLEAR_T else 'no'} | {r['trial']} |")
         L += ["", f"M1 = absolute SPY close-to-close return. M2 = daily return of `{rep.get('m2_file') or '-'}`."]
+        L += [f"`{r['flag']}` {r['measure']}: {r['left_out']['sessions']} sessions left out, {r['left_out']['first']} "
+              f"to {r['left_out']['last']}: {r['left_out']['why']}." for r in rep["comparisons"] if r.get("left_out")]
     L += ["", "## Mega listings (not tested)", "", "| Session | What | SPY close-to-close |", "|---|---|---|"]
     L += [f"| {m['session']} | {m['what']} | {_pct(m['spy'])} |" for m in rep["mega_listings"]] or ["| - | none | |"]
     return "\n".join(L) + "\n"
@@ -313,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         done = logged_ids(trials_file)
         comps = []
         by_day = {date.fromisoformat(r["session"]): r for r in rows}
+        no_ranking = before_first_ranking(rows, inputs)
         for flag in ma.TESTED_FLAGS:
             for measure, series in (("M1", None if spy is None else spy.abs()), ("M2", m2)):
                 rec = {"flag": flag, "measure": measure, "trial": "-"}
@@ -321,6 +339,12 @@ def main(argv: list[str] | None = None) -> int:
                     comps.append(rec)
                     continue
                 days = [d for d in series.index if d in by_day and np.isfinite(series[d])]
+                if flag == "megacap_report":  # Amendment 1: no ranking public yet -> left out, and said so
+                    gone = sorted(d for d in days if d in no_ranking)
+                    days = [d for d in days if d not in no_ranking]
+                    if gone:
+                        rec["left_out"] = {"sessions": len(gone), "first": str(gone[0]), "last": str(gone[-1]),
+                                           "why": "no ranking public yet at as_of (Amendment 1)"}
                 flags = [by_day[d]["flags"][flag] for d in days]
                 if any(v is None for v in flags):
                     rec["not_run"] = f"{flag} unknown on {sum(v is None for v in flags)} sessions"
@@ -337,7 +361,8 @@ def main(argv: list[str] | None = None) -> int:
                         "ts": rep["run_at"], "trial_id": tid, "strategy": STUDY, "variant": "event_study",
                         "label": f"market alarm {flag} {measure}", "status": "study", "n_trials": 1,
                         "prereg_sha256": sha, "code_sha": rep["code_sha"],
-                        "params": {"flag": flag, "measure": measure, "nw_lags": NW_LAGS, "megacap_major": thr},
+                        "params": {"flag": flag, "measure": measure, "nw_lags": NW_LAGS, "megacap_major": thr,
+                                   **({"left_out": rec["left_out"]} if rec.get("left_out") else {})},
                         "window": [str(days[0]), str(days[-1])], "metrics": st})
                     rec["trial"] = "logged"
                 comps.append(rec)

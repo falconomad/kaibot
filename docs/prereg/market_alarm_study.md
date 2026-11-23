@@ -107,3 +107,23 @@ B. If none is clear, no gate is ever proposed from this study.
 Run: `.venv/bin/python scripts/market_alarm_report.py --start 2016-01-01` on the machine with `data/daily`,
 `data/earnings` and `data/reports`. A second run does not log new trial rows for a comparison that has one (the
 script refuses), so the study runs once.
+
+## Amendment 1 (23 Nov 2026, quant research, before the `megacap_report` M1 comparison is run)
+
+A clarification of how a session without a ranking is handled. No frozen setting changes: the sessions, inputs,
+`available_ts`, flags, tiers, the ranking (60 sessions, at least 40 with a bar), the tightening and the eight
+comparisons stay as above.
+
+**Why.** The run of 23 Nov 2026 (`--end 2024-12-31`) left `megacap_report` unknown on 61 sessions, and did not run
+its M1 comparison ("unknown on 60 sessions": the first session has no previous close, so no SPY return). The daily
+store begins on 2016-01-04. At the end of January 2016 a stock has 19 sessions with a bar, at the end of February 39,
+both below the 40 the ranking needs; the first ranking is made on 2016-03-31 and covers April 2016. January to
+March 2016 is 19 + 20 + 22 = 61 sessions with no ranking public at `as_of`, so the flag cannot say yes or no on them.
+The M2 rows are not affected: the `trend_momentum` run starts after its own warm-up, past March 2016.
+
+**Rule.** A session on which a tested flag is unknown **only because no ranking is public yet at its `as_of`**
+(before the first ranking of the backfill, with the earnings file read) is left out of that flag's comparisons.
+The report states how many sessions were left out, the first and the last, and the trial row carries the same.
+Any other unknown session (a missing earnings file, an unknown session after the first ranking) still stops the
+comparison, as before. The three M1 rows already run (`fed_day`, `cpi_day`, `index_reshuffle`) have no unknown
+session and are unchanged; no row already logged is logged again.
