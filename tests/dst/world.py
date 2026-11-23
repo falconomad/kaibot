@@ -750,9 +750,20 @@ class Checker:
                 self.state[b["coid"]] = now
             elif kind == "fill":
                 aid = str(b.get("activity"))
+                if aid.startswith("owner:"):  # #529: the owner booked the order's fill from its view: it stands for
+                    # the venue's executions of that order (their activities never came); same shares, or a violation
+                    execs = [f for f in w.sim.fills if str((w.sim.orders.get(f["order_id"]) or {}).get(
+                        "client_order_id") or "") == b.get("coid") and str(f["id"]) not in self.booked]
+                    if execs and abs(sum(float(f["qty"]) for f in execs) - float(b["qty"])) < 1e-9:
+                        self.booked.update(str(f["id"]) for f in execs)
+                        aid = None
+                    else:
+                        w.bad(f"the owner booked {b['qty']} on {b.get('coid')}, the venue's unbooked executions of "
+                              f"it are {[(f['id'], f['qty']) for f in execs]}")
                 if aid in self.booked:
                     w.bad(f"execution {aid} was booked twice")
-                self.booked.add(aid)
+                if aid is not None:
+                    self.booked.add(aid)
                 sign = 1.0 if b["side"] == "buy" else -1.0
                 self.fills_cash += -sign * float(b["qty"]) * float(b["px"]) - float(b.get("fees") or 0.0)
                 self.fills_qty[b["symbol"]] = self.fills_qty.get(b["symbol"], 0.0) + sign * float(b["qty"])

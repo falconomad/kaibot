@@ -51,8 +51,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 CASH_TOLERANCE_USD, CASH_TOLERANCE_PCT = 1.0, 0.05
@@ -120,9 +121,11 @@ def cash_tolerance(equity: float | None) -> float:
 def compare(ledger_qty: Mapping[str, float], broker_positions: Mapping[str, dict], *, om=None,
             ledger_cash: float | None = None, ledger_cash0: float | None = None, broker_cash: float | None = None,
             broker_cash0: float | None = None, receivable: float = 0.0, equity: float | None = None,
-            accepted: Mapping[Key, float] | None = None, accepted_fills=()) -> Reconciliation:
+            accepted: Mapping[Key, float] | None = None, accepted_fills=(), now: datetime | None = None
+            ) -> Reconciliation:
     """`accepted`: owner-accepted offsets per (kind, symbol), broker minus ledger. `accepted_fills`: the activity
-    ids of the foreign fills the owner accepted (`accepted_foreign`)."""
+    ids of the foreign fills the owner accepted (`accepted_foreign`). `now`: an "unbooked" difference then says
+    whether its order's New York day is over (`aged`): from then on the owner can book it or accept it (#529)."""
     out = Reconciliation()
     acc = accepted or {}
     tol = cash_tolerance(equity)
@@ -145,9 +148,11 @@ def compare(ledger_qty: Mapping[str, float], broker_positions: Mapping[str, dict
                                                              "qty": a.get("qty"), "side": a.get("side")})
             (out.accepted if str(aid) in accepted_fills else out.diffs).append(d)
         for r in sorted(om.orders.values(), key=lambda r: r.coid):
-            if r.cum > r.booked + QTY_EPS:
-                out.diffs.append(Difference("unbooked", r.symbol, {"coid": r.coid, "venue": r.cum,
-                                                                   "booked": r.booked}))
+            if r.cum > max(r.booked, getattr(r, "waived", 0.0)) + QTY_EPS:  # #529: waived by the owner: accepted
+                detail = {"coid": r.coid, "venue": r.cum, "booked": r.booked}
+                if now is not None:
+                    detail["aged"] = bool(r.open is False and _day_over(r, now))
+                out.diffs.append(Difference("unbooked", r.symbol, detail))
     if None not in (ledger_cash, ledger_cash0, broker_cash, broker_cash0):
         theirs = broker_cash - broker_cash0
         mine = ledger_cash - ledger_cash0 - receivable
@@ -178,6 +183,52 @@ def accepted_foreign(journal) -> set[str]:
     if journal is None:
         return set()
     return {str(i) for *_, b in journal.entries(kinds=("reconcile_resolved",)) for i in b.get("foreign") or []}
+
+
+UNBOOKED_ACTIONS = ("book", "accept")  # #529
+
+
+def unbooked_plan(om, last: Sequence[Difference], rows, now: datetime) -> list[tuple[dict, object, dict]]:
+    """#529, the rule of #493 (confirm exactly what you saw): the owner's word on the "unbooked" differences, as
+    `shown` rows {"kind": "unbooked", "symbol", "coid", "venue", "booked", "action": "book" | "accept"}. The rows
+    must be exactly the aged unbooked differences of the last check (all of them, at the numbers shown), and each
+    one is read again at the venue (`OrderManager.owner_check`). ValueError, in the owner's words, otherwise;
+    nothing is changed here. Returns [(row, record, venue view)] for `apply_unbooked`."""
+    have = {str(d.detail.get("coid")): d for d in last if d.kind == "unbooked" and d.detail.get("aged")}
+    want: dict[str, dict] = {}
+    for x in rows:
+        if not isinstance(x, Mapping) or x.get("action") not in UNBOOKED_ACTIONS or not x.get("coid"):
+            raise ValueError("the command does not say what to do with an unbooked fill (book or accept)")
+        want[str(x["coid"])] = dict(x)
+    if om is None:
+        raise ValueError("the engine has no order book to look the order up in")
+    if set(want) != set(have):
+        raise ValueError("the unbooked fills have changed since they were shown: check again and decide again")
+    plan = []
+    for coid, x in sorted(want.items()):
+        r, o = om.owner_check(coid, x.get("venue"), x.get("booked"), now)
+        plan.append((x, r, o))
+    return plan
+
+
+def apply_unbooked(om, plan, *, by: str, reason: str) -> list[dict]:
+    """#529: each row of `unbooked_plan`, done: "book" books the missing shares from the venue's view, "accept"
+    stops counting them as unbooked. The journal entries are the order manager's (a `fill`, an `om_state`)."""
+    done = []
+    for x, r, o in plan:
+        if x["action"] == "book":
+            f = om.book_missing(r, o, by=by, reason=reason)
+            done.append({"coid": r.coid, "action": "book", "qty": f.qty, "px": f.px, "symbol": r.symbol})
+        else:
+            om.waive(r, by=by, reason=reason)
+            done.append({"coid": r.coid, "action": "accept", "qty": r.cum - r.booked, "symbol": r.symbol})
+    return done
+
+
+def _day_over(r, now: datetime) -> bool:
+    from kaibot.engine.orders import _day_over as over
+
+    return over(r, now)
 
 
 def _foreign_ids(diffs) -> set[str]:
