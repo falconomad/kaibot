@@ -77,15 +77,21 @@ def test_a_half_set_or_absurd_bucket_is_refused(kw):
         V2Params(**kw)
 
 
-def test_no_value_is_committed_and_the_model_refuses_to_build_without_one():
-    with pytest.raises(cv.NotCalibrated, match="calibrate_index_costs"):
-        cv.load_index_bucket(ROOT)
-    with pytest.raises(cv.NotCalibrated):
-        get_model("v2_index")
-    with pytest.raises(cv.NotCalibrated):
-        sim_costs.costs_for("v2idx")
+def test_the_committed_bucket_is_the_measured_one():
+    """Calibrated 23 Nov 2026 (#454): the value and its measurement are committed together, and the table is in
+    docs/research/results. The value follows the pre-fixed rule: the mean quoted half-spread rounded UP to 0.05 bp."""
+    import math
+    b = cv.load_index_bucket(ROOT)
     text = (ROOT / "config" / "costs_index_bucket.yaml").read_text()
-    assert "NOT CALIBRATED YET" in text and "rounded UP to the next 0.05 bp" in text
+    assert "rounded UP to the next 0.05 bp" in text and "NOT CALIBRATED YET" not in text
+    assert (ROOT / "docs" / "research" / "results" / "index_cost_calibration.md").exists()
+    import yaml
+    cfg = yaml.safe_load(text)
+    assert cfg["source"]["method"] == "quotes" and cfg["source"]["rows"] == 260
+    assert cfg["half_spread_bp"] == pytest.approx(math.ceil(cfg["source"]["mean_quoted_half_bp"] / 0.05) * 0.05)
+    assert b is not None
+    get_model("v2_index")
+    sim_costs.costs_for("v2idx")
 
 
 def write_bucket(root: Path, value: str = "0.25") -> None:
@@ -265,8 +271,11 @@ def test_timestamps_with_nanoseconds_and_recent_fills():
 # ---------------------------------------------------------------- the cost re-run
 
 
-def test_the_rerun_refuses_until_the_bucket_is_measured(bars, monkeypatch):  # noqa: F811
+def test_the_rerun_refuses_until_the_bucket_is_measured(bars, tmp_path: Path, monkeypatch):  # noqa: F811
     root = bars[0]
+    write_bucket(tmp_path, "")  # an uncalibrated file, as before 23 Nov 2026
+    real = cv.load_index_bucket
+    monkeypatch.setattr(cv, "load_index_bucket", lambda root=None: real(tmp_path))
     with pytest.raises(SystemExit, match="half_spread_bp is not set"):
         rerun.main(["--data", str(root), "--start", FIRST, "--test-start", TEST_START, "--end", "2017-05-19"])
     assert not list((root / "reports").glob("spy_cost_rerun_*")) if (root / "reports").exists() else True
