@@ -252,3 +252,38 @@ def test_a_sharpe_above_one_is_a_leak_and_no_verdict():
     assert script.judge("pass", False, 0.4) == (False, "fail")  # a pass that does not beat trend_momentum
     assert script.judge("fail", True, 0.4) == (False, "fail")
     assert script.judge("pass", True, float("nan")) == (False, "pass")
+
+
+def test_0x_costs_fill_at_the_close_and_differ_from_1x_only_through_cash(fx):
+    """#474 (24 Nov run: rule 0x CAGR 9.78% below 1x 10.32%): the cost multiple is wired the right way round and
+    0x is not a special case. At 0x every fill is at the session's close (spread and impact zero, only the
+    regulatory fees on sales); at 1x a buy pays more and a sale gets less. The two accounts start identical and
+    differ only by the cash the costs took, so until a whole-share count rounds differently they send the same
+    orders; the first order that differs is the same name and side with at least as many shares at 0x (more cash
+    on a larger account). From there the books part ways (path dependence through cash and share counts), which
+    is how a cost-free run can end below the costed one on real data. No bug: this pins the mechanism."""
+    from kaibot.engine.daily import run_daily
+    from kaibot.risk.profiles import load_profiles
+
+    data, i0, i1 = fx
+    pol = load_profiles()["balanced"]
+    r0, r1 = (run_daily(gb.TrendMomentumGbm(min_decision_days=10), data, pol, i0, i1, cost=c) for c in (0.0, 1.0))
+    priced = [f for f in r0.fills if f["reason"] != "delisted"]
+    assert priced and all(f["px"] == pytest.approx(float(data.raw_c[f["i"], data.col(f["symbol"])]), abs=1e-9)
+                          for f in priced)
+    assert sum(t.cost_spread + t.cost_impact for t in r0.book.trades) == 0.0
+    assert sum(t.cost_spread + t.cost_impact for t in r1.book.trades) > 0.0
+    first0, first1 = r0.fills[0], r1.fills[0]
+    assert (first0["i"], first0["symbol"], first0["side"], first0["qty"]) == (
+        first1["i"], first1["symbol"], first1["side"], first1["qty"])
+    assert first0["side"] == "buy" and first1["px"] > first0["px"]
+    sold = next(f for f in r1.fills if f["side"] == "sell" and f["reason"] != "delisted")
+    assert sold["px"] < float(data.raw_c[sold["i"], data.col(sold["symbol"])])
+    eq0 = [float(d["end"]) for d in r0.book.daily]
+    eq1 = [float(d["end"]) for d in r1.book.daily]
+    k = next(n for n, (a, b) in enumerate(zip(r0.orders, r1.orders, strict=False)) if a != b)
+    assert r0.orders[:k] == r1.orders[:k]
+    (s0, kind0, sym0, q0), (s1, kind1, sym1, q1) = r0.orders[k], r1.orders[k]
+    assert (s0, kind0, sym0) == (s1, kind1, sym1) and kind0 in ("buy", "resize") and q0 > q1
+    day = next(n for n, d in enumerate(r0.book.daily) if d["date"] == data.dates[s0])
+    assert all(a >= b for a, b in zip(eq0[:day], eq1[:day], strict=True))  # 0x is the larger account until then
