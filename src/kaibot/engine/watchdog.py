@@ -86,6 +86,22 @@ POLL_S = 15
 ENTRY_PREFIX = "kb"  # S80: intraday "kb-<run>-..." and the order manager's "kb<run>-<strategy>-..."
 OPEN_ENTRY_STATES = failsafe.OPEN_STATES
 PROTECT_EVERY_S = 60.0  # S80: the stop check runs at most once a minute while the engine is stale
+# #585: a fail-safe order's client id is kbdm-<strategy>-<symbol>-<session yyyymmdd>-dmstop.g<n> (stop) or
+# kbdm-intraday-<symbol>-<session yyyymmdd>-x.g<n> (sale): the SAME id the database dead-man (migration 0044) sends
+# for the same decision and session, so whichever fail-safe comes second is refused by the venue (decision on #585's
+# open question). A re-send uses the same id; <n> rises only when the venue's own record of the order under that id
+# says it has ended. A filled sale is never such evidence (a second sale could sell short).
+# A stop's order counts as ended unless its status is live (QA on #615): `replaced` and any status not listed here
+# move to the next generation once the replacement chain (`replaced_by`) has been followed to its current order
+# and that order is not live either. A missing stop is the worse failure; a second one on a late read is bounded by
+# the venue's share reservation.
+LIVE_STOP = frozenset({"new", "accepted", "pending_new", "partially_filled", "held", "accepted_for_bidding",
+                       "pending_replace", "pending_cancel", "calculated", "stopped", "suspended"})
+MAX_HOPS = 20  # replacements followed per lookup
+FINAL_SALE = frozenset({"canceled", "expired", "rejected", "done_for_day"})
+MAX_GENERATIONS = 50
+FAILSAFE_PREFIX = "kbdm"  # #585: shared with the dead-man; older kbwd- stops are still read and adopted
+STOP_PURPOSE = "dmstop"
 SENT_COVERS_S = 180.0  # a stop this watchdog sent counts as resting for this long (the venue may list it late)
 # M9 1.6: with the heartbeat unreadable, the engine is alive while its journal's last write is younger than this.
 # A session's tick writes the minute row once a minute, so a healthy engine's last write is up to a minute plus one
@@ -273,6 +289,8 @@ class Watchdog:
         self._alive_said = False
         self._protected_at: datetime | None = None
         self._sent: dict[tuple[str, str], tuple[datetime, int]] = {}  # stops sent: (strategy, symbol) -> (when, qty)
+        self._listed: set[str] = set()
+        self._gen: dict[tuple, int] = {}  # #585: (purpose, strategy, symbol, session) -> the generation in use
         self._alarms: tuple = ()
         self.tripped = False
         self.flattened_on = None
@@ -354,6 +372,7 @@ class Watchdog:
             except Exception:  # the flatten must still run: multi-day shares then come from the book alone
                 log.exception("open-orders read failed: multi-day shares from the book only")
                 orders = []
+        self._listed = {str(o.get("client_order_id") or "") for o in orders}  # #585: what this plan counted
         p = failsafe.plan(positions, orders, self._read_book(), flatten=flatten)
         now = self.now()
         kept = []
@@ -377,10 +396,15 @@ class Watchdog:
             log.exception("stop check failed: positions or orders unreadable")
             out["protect_failed"] = f"{type(e).__name__}: {e}"[:200]
             return
-        made, failed = [], {}
+        made, failed, present = [], {}, []
         for st in p.stops:
-            coid = failsafe_coid(st.strategy, st.symbol, now)
             try:
+                coid, there = self._keyed(st.strategy, st.symbol, STOP_PURPOSE, None, self._listed)
+                if there is not None:  # #585: our stop of this generation already works (an answer we lost)
+                    self._sent[(st.strategy, st.symbol)] = (now, st.qty)
+                    present.append({"strategy": st.strategy, "symbol": st.symbol, "client_order_id": coid,
+                                    "status": there.get("status")})
+                    continue
                 # #179's lesson: a stop that filled since the read leaves no shares; a sell stop then would open a
                 # short. So the position is read again right before each new stop, and it must still hold them.
                 held = float((self.broker.positions().get(st.symbol) or {}).get("qty") or 0)
@@ -396,6 +420,8 @@ class Watchdog:
                 log.exception("protective stop for %s failed", st.symbol)
                 failed[st.symbol] = f"{type(e).__name__}: {e}"[:200]
         out["stops"], out["multi_day"] = made, p.multi_day
+        if present:
+            out["stops_present"] = present
         alarms = tuple(p.alarms) + tuple(f"{s}: stop not accepted ({w})" for s, w in failed.items())
         if made or failed or alarms != self._alarms:
             log.error("engine silent: protective stops re-created %s, failed %s, alarms %s", made, failed, alarms)
@@ -514,10 +540,11 @@ class Watchdog:
                 if qty is None:
                     self.broker.close_position(sym)
                 else:  # free the intraday shares (their legs), keep the multi-day stop, sell the rest
-                    for oid in cancel:
-                        self.broker.cancel(oid)
-                    self.broker.submit(OrderRequest(sym, "sell", qty, "market", "day",
-                                                    failsafe_coid("intraday", sym, self.now(), "x")))
+                    coid, there = self._keyed("intraday", sym, "x", FINAL_SALE)
+                    if there is None:  # #585: our sale of this generation still working is left to work
+                        for oid in cancel:
+                            self.broker.cancel(oid)
+                        self.broker.submit(OrderRequest(sym, "sell", qty, "market", "day", coid))
                 out["closed"].append(sym)
             except Exception as e:
                 log.exception("close failed for %s", sym)
@@ -532,6 +559,50 @@ class Watchdog:
                       out["kept"])
         self._event("watchdog_flatten", {"closed": out["closed"], "failed": failed, "complete": not failed,
                                          "attempt": attempt, "kept": out["kept"]})
+
+    def _keyed(self, strategy: str, symbol: str, purpose: str, final: frozenset[str] | None,
+               listed: set[str] = frozenset()) -> tuple[str, dict | None]:
+        """#585: the client id to send under, and the order that already holds it if it still works (then nothing
+        is sent). The venue is asked by client id before every send. A sale (`final` given) moves to the next
+        generation only on a status in `final` (a filled sale never). A stop (`final` None) follows the engine's
+        replacements (`replaced_by`; the engine replaces an adopted fail-safe stop under `<id>.r<k>`) to the current
+        order, and moves on unless that order is live. A generation the plan already counted (`listed`: the id or
+        one of its replacements is in this read) moves on too: what the plan asks for is more than that covers. A
+        failed lookup raises: nothing is sent this poll."""
+        now = self.now()
+        key = (purpose, strategy, symbol, now.astimezone(NY).date())
+        g = self._gen.get(key, 0)
+        lookup = getattr(self.broker, "order_by_client_id", None)
+        for _ in range(MAX_GENERATIONS):
+            coid = failsafe_coid(strategy, symbol, now, purpose, g)
+            o = lookup(coid) if lookup is not None else None
+            if o is None:
+                self._gen[key] = g
+                return coid, None
+            if coid in listed or any(c.startswith(coid + ".r") for c in listed):
+                g += 1
+                continue
+            if final is not None:
+                if str(o.get("status")) not in final:
+                    self._gen[key] = g
+                    return coid, o
+            else:
+                cur = self._current(o)
+                if str(cur.get("status")) in LIVE_STOP and str(cur.get("client_order_id") or "") not in listed:
+                    self._gen[key] = g
+                    return coid, cur
+            g += 1
+        raise RuntimeError(f"{MAX_GENERATIONS} generations of {purpose} for {symbol} today: none sent")
+
+    def _current(self, o: dict) -> dict:
+        """QA on #615: the order a stop's id now lives on, through its replacements (`replaced_by`). A failed read
+        raises (nothing is sent this poll); a chain longer than MAX_HOPS ends where it was reached."""
+        for _ in range(MAX_HOPS):
+            nxt = o.get("replaced_by") if str(o.get("status")) == "replaced" else None
+            if not nxt:
+                return o
+            o = self.broker.order(str(nxt))
+        return o
 
     def _beat(self, detail: dict) -> None:
         try:
@@ -553,11 +624,14 @@ class Watchdog:
         self._event("halt", {"kind": kind, "reason": reason})
 
 
-def failsafe_coid(strategy: str, symbol: str, now: datetime, purpose: str = "wdstop") -> str:
-    """kbwd-<strategy>-<symbol>-<yyyymmddHHMMSS>-<purpose>: unique per second, never taken for an entry (not a buy),
-    and the strategy stays readable for the next check (failsafe.is_multi_day)."""
-    t = now.astimezone(NY).strftime("%Y%m%d%H%M%S")
-    return f"kbwd-{failsafe.clean(strategy)[:40]}-{failsafe.clean(symbol)[:12]}-{t}-{purpose}"
+def failsafe_coid(strategy: str, symbol: str, now: datetime, purpose: str = STOP_PURPOSE, gen: int = 0) -> str:
+    """kbdm-<strategy>-<symbol>-<session yyyymmdd>-<purpose>.g<gen> (#585): one id per decision and session, and the
+    same id the dead-man's 0044 builds, so a re-send by either fail-safe is refused by the venue instead of placing
+    a second order; never taken for an entry (not a buy), and the strategy stays readable for the next check
+    (failsafe.is_multi_day). Who sent it is in the journal (`watchdog_protect`, `watchdog_flatten`) or the
+    dead-man's `deadman_pass` result, not in the id."""
+    t = now.astimezone(NY).strftime("%Y%m%d")
+    return f"{FAILSAFE_PREFIX}-{failsafe.clean(strategy)[:40]}-{failsafe.clean(symbol)[:12]}-{t}-{purpose}.g{gen}"
 
 
 def book_reader(journal_path, store, now=lambda: datetime.now(UTC)):

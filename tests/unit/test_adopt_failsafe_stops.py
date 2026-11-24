@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import pytest
 from test_order_manager import DAY, NEXT, et, manager, run, venue
 
 from kaibot.broker.protocol import BrokerError, OrderRequest
@@ -39,9 +40,9 @@ def setup(qty=30, journal=None, **kw):
 
 def failsafe_stop(b, clock, qty=30, stop=90.0, who="wd", strategy=MD, symbol="A"):
     """A stop the watchdog (or the dead-man) sent straight to the venue, behind the engine's back."""
-    coid = failsafe_coid(strategy, symbol, clock())
-    if who == "dm":
-        coid = "kbdm-" + coid[len("kbwd-"):].replace("-wdstop", "-dmstop")
+    coid = failsafe_coid(strategy, symbol, clock())  # #585: both fail-safes send kbdm-...-dmstop.g0, as 0044 names it
+    if who == "legacy":  # a watchdog stop from before #585, still resting at the venue
+        coid = coid.replace("kbdm-", "kbwd-", 1).replace("-dmstop.g0", "093100-wdstop")
     return b.submit(OrderRequest(symbol, "sell", qty, "stop", "gtc", coid, stop_price=stop))
 
 
@@ -53,9 +54,10 @@ def kinds(om, kind):
     return [body for _, _, k, body in om.journal.entries(kinds=(kind,))]
 
 
-def test_a_resting_watchdog_stop_is_adopted_as_the_sleeves_own_and_no_second_stop_is_sent():
+@pytest.mark.parametrize(("who", "by"), [("wd", "failsafe"), ("legacy", "watchdog")])
+def test_a_resting_watchdog_stop_is_adopted_as_the_sleeves_own_and_no_second_stop_is_sent(who, by):
     b, clock, om, ps, _ = setup()
-    o = failsafe_stop(b, clock)
+    o = failsafe_stop(b, clock, who=who)
     did = ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
     (r,) = ps.stops_of(K)
     assert r.coid == o["client_order_id"] and r.order_id == o["id"] and r.purpose == "stop"
@@ -63,7 +65,7 @@ def test_a_resting_watchdog_stop_is_adopted_as_the_sleeves_own_and_no_second_sto
     assert did == [f"adopt {r.coid}"]
     assert [x["client_order_id"] for x in resting_stops(b)] == [o["client_order_id"]]  # no duplicate
     (a,) = kinds(om, "stop_adopted")
-    assert (a["coid"], a["by"], a["strategy"], a["symbol"]) == (r.coid, "watchdog", MD, "A")
+    assert (a["coid"], a["by"], a["strategy"], a["symbol"]) == (r.coid, by, MD, "A")
     assert ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY) == []  # adopted once; nothing more to do
     assert len(kinds(om, "stop_adopted")) == 1
 
@@ -71,10 +73,10 @@ def test_a_resting_watchdog_stop_is_adopted_as_the_sleeves_own_and_no_second_sto
 def test_a_dead_man_stop_is_adopted_the_same_way():
     b, clock, om, ps, _ = setup()
     o = failsafe_stop(b, clock, who="dm")
-    assert o["client_order_id"].startswith("kbdm-") and o["client_order_id"].endswith("-dmstop")
+    assert o["client_order_id"].startswith("kbdm-") and o["client_order_id"].endswith("-dmstop.g0")
     ps.ensure({K: 30.0}, {K: 90.0}, clock(), DAY)
     (r,) = ps.stops_of(K)
-    assert r.coid == o["client_order_id"] and kinds(om, "stop_adopted")[0]["by"] == "deadman"
+    assert r.coid == o["client_order_id"] and kinds(om, "stop_adopted")[0]["by"] == "failsafe"  # #585: shared id
     assert len(resting_stops(b)) == 1
 
 
@@ -227,8 +229,8 @@ def test_drill_engine_down_the_watchdog_re_creates_the_stop_the_engine_restarts_
         tmp_path):
     """Engine on DAY: the sleeve holds 30 shares of A with its own GTC stop. The engine is killed. Overnight the stop
     is lost (cancelled by hand at the broker). NEXT 09:31: the watchdog sees the silent engine and re-creates the
-    stop (`kbwd-`). NEXT 10:00: the engine restarts on the same journal: one stop rests for the sleeve (the
-    watchdog's, adopted), then a sale (30 -> 10) and a resize (back to 25 after a purchase) go through."""
+    stop (`kbdm-...-dmstop.g0`, #585). NEXT 10:00: the engine restarts on the same journal: one stop rests for the
+    sleeve (the watchdog's, adopted), then a sale (30 -> 10) and a resize (back to 25 after a purchase) go through."""
     path = tmp_path / "journal.sqlite"
     b, clock = venue(replace_new_id=True)
     j = Journal(path, now=clock)
@@ -246,7 +248,7 @@ def test_drill_engine_down_the_watchdog_re_creates_the_stop_the_engine_restarts_
     assert out["state"] == "engine_stale" and [(s["symbol"], s["qty"], s["stop"]) for s in out["stops"]] == [
         ("A", 30, 90.0)]
     (wdstop,) = resting_stops(b)
-    assert wdstop["client_order_id"].startswith("kbwd-")
+    assert wdstop["client_order_id"] == f"kbdm-{MD}-A-{NEXT.replace('-', '')}-dmstop.g0"
 
     clock.set(et(NEXT, "10:00", 7))  # the engine starts again
     j2 = Journal(path, now=clock)

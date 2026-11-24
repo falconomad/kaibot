@@ -156,4 +156,4 @@ def test_0030_is_0022s_deadman_act_with_only_the_344_line_added():
     m30 = "0030_deadman_planned_row_not_gone.sql"
     later = [p.name for p in sorted(root.glob("*.sql"))
              if p.name > m30 and "function kaibot.deadman_act(" in p.read_text()]
-    assert later == []
+    assert later == ["0044_deadman_idempotency_key.sql"]  # #585: md5-guarded on 0030's body

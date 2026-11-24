@@ -29,8 +29,9 @@ off. Sent through the order manager like every other order.
 
 A fraction of a share (never held in v3.0: whole shares only) is not covered.
 
-Fail-safe stops (issue #188). While the engine is silent the watchdog (`kbwd-<strategy>-<symbol>-<time>-wdstop`)
-and the database dead-man (`kbdm-...-dmstop`, migration 0019) re-create a missing stop straight at the venue. That
+Fail-safe stops (issue #188). While the engine is silent the watchdog and the database dead-man (migration 0019) both
+name a re-created stop `kbdm-<strategy>-<symbol>-<session>-dmstop.g<n>` (#585, 0044; before it `kbwd-`/`kbdm-` with a
+timestamp, still adopted) and re-create a missing stop straight at the venue. That
 stop holds the shares, so the manager's own stop would be refused and a sale could not free them. `adopt` takes
 every resting fail-safe stop of a known sleeve into the order manager as that sleeve's own protective stop
 (`OrderManager.adopt_order`: an `om_intent` under the venue's client id plus its `om_state`, and a `stop_adopted`
@@ -124,7 +125,9 @@ class ProtectiveStops:
                         "why": "no sleeve of that strategy" if not match else "more than one sleeve matches"})
                 continue
             key = match[0]
-            by = "watchdog" if m.group(1) == "wd" else "deadman"
+            # #585: since 0044 both fail-safes send the same kbdm-...-dmstop.g<n>, so that id names neither; older
+            # ids (kbwd-/kbdm- with a timestamp) still say who sent them
+            by = "watchdog" if m.group(1) == "wd" else "failsafe" if ".g" in m.group(5) else "deadman"
             r = self.om.adopt_order(o, strategy=key[0], purpose="stop",
                                     session=session or str(o.get("created_at") or "")[:10], meta={"by": by})
             self._track(key, r.coid)

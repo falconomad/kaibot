@@ -423,7 +423,7 @@ def deadman_stop_placement(tmp: Path) -> list[Check]:
     out: list[Check] = []
     w = DrillWorld(_silent_day(32, watchdog=True), tmp / "watchdog")
     res = play(w)
-    py = _stop_check(out, "watchdog", w, "kbwd-")
+    py = _stop_check(out, "watchdog", w, "kbdm-")  # #585: the id both fail-safes send
     held_d2 = float((w.sim.pos.get("B") or {}).get("qty") or 0)
     sold = [o for o in w.sim.orders.values() if o.get("symbol") == "B" and o["side"] == "sell"
             and o.get("type") != "stop"]
