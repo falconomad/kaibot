@@ -131,8 +131,9 @@ def test_load_specs_rejects_bad_budgets(tmp_path, bad):
 
 def test_repo_sources_yaml_has_budgets_for_every_source_we_call():
     s = load_specs()
-    for name in ("alpaca", "alpaca_trading", "sec_edgar", "fred", "finnhub", "finra_regsho", "gdelt_doc"):
+    for name in ("alpaca", "alpaca_trading", "sec_edgar", "fred", "finnhub", "gdelt_doc"):
         assert not s[name].unlimited, name
+    assert "finra_regsho" not in s  # switched off (#623)
     assert s["sec_edgar"].windows[0][0] <= 10  # SEC fair access: max 10 req/s
     assert s["gdelt_doc"].min_interval >= 5  # GDELT: one request every 5 s
 

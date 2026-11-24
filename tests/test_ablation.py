@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
+import yaml
 
 from kaibot.evaluation.ablation import (
     MIN_HISTORY_DAYS,
@@ -20,7 +21,7 @@ from kaibot.evaluation.ablation import (
     random_subset_totals,
     run_ablation,
 )
-from kaibot.ingest.alt import finra, store
+from kaibot.ingest.alt import form4, store
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -164,29 +165,31 @@ def _script():
     return mod
 
 
-def _finra_rows(root, symbol, days, last_short=600, last_avail=None):
-    for i in range(days):
-        d = date(2026, 10, 1) + timedelta(days=i)
-        avail = last_avail if (i == days - 1 and last_avail) else finra.publication_ts(d)
-        short = last_short if i == days - 1 else 400
-        t = pa.table({"trade_date": [d], "symbol": [symbol], "short_volume": [short], "short_exempt_volume": [0],
-                      "total_volume": [1000], "market": ["N"], "available_ts": pa.array([avail], store.TS),
-                      "ingested_ts": pa.array([avail], store.TS)}, schema=finra.SCHEMA)
-        store.append_versions(root, finra.SOURCE, d, t, finra.KEY, finra.VALUES)
-    return date(2026, 10, 1) + timedelta(days=days - 1)
+def _form4_buy(root, symbol, avail):
+    """One Form 4 open-market purchase of `symbol` that Kaibot could first know at `avail`."""
+    acc, tdate = "0000000000-26-000001", avail.date()
+    led = [{"accession": acc, "symbol": symbol, "issuer_cik": "0000000001", "form": "4", "filing_date": tdate,
+            "status": "ok", "n_rows": 1, "accepted_ts": avail, "available_ts": avail, "ingested_ts": avail}]
+    tx = [{"accession": acc, "row": 0, "symbol": symbol, "issuer_cik": "0000000001", "form": "4",
+           "derivative": False, "transaction_date": tdate, "code": "P", "shares": 100, "price": 10.0,
+           "filing_date": tdate, "accepted_ts": avail, "available_ts": avail, "ingested_ts": avail}]
+    store.append_versions(root, form4.LEDGER, tdate, pa.Table.from_pylist(led, schema=form4.LEDGER_SCHEMA),
+                          ["accession"], ["status"])
+    store.append_versions(root, form4.SOURCE, tdate, pa.Table.from_pylist(tx, schema=form4.TX_SCHEMA),
+                          form4.TX_KEY, form4.TX_VALUES)
 
 
 def test_pit_value_available_after_decision_is_not_used(tmp_path):
     mod = _script()
     decision = datetime(2026, 10, 23, 14, 0, tzinfo=UTC)
-    # the 22nd row (trade date 2026-10-22, ratio 0.9) only became available AFTER the decision
-    _finra_rows(tmp_path, "ACME", 22, last_short=900, last_avail=decision + timedelta(hours=1))
+    # the filing only became available AFTER the decision
+    _form4_buy(tmp_path, "ACME", decision + timedelta(hours=1))
     look = mod.alt_lookup(tmp_path)
     with mod.cached_alt_reads():
-        before = look("ACME", decision)["short_volume"]
-        after = look("ACME", decision + timedelta(hours=2))["short_volume"]
-    assert before["trade_date"] == "2026-10-21" and abs(before["svr"] - 0.4) < 1e-9
-    assert after["trade_date"] == "2026-10-22" and abs(after["svr"] - 0.9) < 1e-9  # the cache did not break PIT
+        before = look("ACME", decision)["insider_30d"]
+        after = look("ACME", decision + timedelta(hours=2))["insider_30d"]
+    assert before is None  # not in the ledger yet
+    assert after["n_buys"] == 1 and after["net_usd"] == 1000.0  # the cache did not break PIT
 
 
 def test_script_with_zero_alt_history_reports_insufficient_and_logs_a_trial(tmp_path):
@@ -198,7 +201,12 @@ def test_script_with_zero_alt_history_reports_insufficient_and_logs_a_trial(tmp_
     csv = tmp_path / "trades_balanced_test.csv"
     pd.DataFrame(rows).to_csv(csv, index=False)
     out = tmp_path / "out"
-    res = mod.main(["--trades", str(csv), "--data", str(out)])
+    # the repo config still holds the FINRA rules pending Product's amendment (#623): use the other rules
+    cfg = yaml.safe_load((ROOT / "config" / "ablation.yaml").read_text())
+    cfg["rules"] = [r for r in cfg["rules"] if not r["feature"].startswith("short_volume.")]
+    cfg_path = tmp_path / "ablation.yaml"
+    cfg_path.write_text(yaml.safe_dump(cfg))
+    res = mod.main(["--trades", str(csv), "--data", str(out), "--config", str(cfg_path)])
     assert res["trades"] == 150 and res["summary"]["insufficient"] == len(res["rules"]) > 0
     assert all(p["coverage"] == 0 and p["kept"] == 150 for p in res["rules"])
     files = list((out / "ablation").glob("*.json"))

@@ -1,7 +1,7 @@
 """Alt-data ablation for admission (story S39). Pure: no file, network or clock access.
 
 PRD v2: alt data is logged from M1 and traded only after a 3-month ablation. A pre-registered rule is a simple keep
-filter on one point-in-time feature (config/ablation.yaml), e.g. `short_volume.svr_rel <= 1.5`. For each rule:
+filter on one point-in-time feature (config/ablation.yaml), e.g. `insider_30d.net_usd >= 0`. For each rule:
 
 - the kept subset is every trade whose value passes, plus every trade whose value is unknown (unknown = kept);
 - its total R is compared with `n_random` (>= 1,000) random subsets of the SAME size drawn from all trades, with a
@@ -48,7 +48,7 @@ Lookup = Callable[[str, datetime], Mapping]
 @dataclass(frozen=True)
 class Rule:
     name: str
-    feature: str  # dotted path into the lookup's dict, e.g. "short_volume.svr_rel"
+    feature: str  # dotted path into the lookup's dict, e.g. "insider_30d.net_usd"
     op: str
     value: float
     hypothesis: str = ""

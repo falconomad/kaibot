@@ -1,6 +1,6 @@
 # Alt-data ablation for admission (story S39)
 
-PRD v2: alt data (FINRA short volume, Form 4 insider buying, GDELT tone; later Polymarket, Kalshi, ApeWisdom,
+PRD v2: alt data (Form 4 insider buying, GDELT tone; FINRA short volume until it was switched off on #623; later Polymarket, Kalshi, ApeWisdom,
 Tradestie, Wikipedia) is **logged** from M1 and **traded only after a 3-month ablation**. The one exception is
 `pump_risk`, which already blocks longs and reads no alt data. This page is the procedure for that ablation.
 
@@ -11,8 +11,8 @@ and `kaibot.features.alt` stays unreachable from trading code (`tests/unit/test_
 
 ## What is tested
 `config/ablation.yaml` holds pre-registered rules. Each one is a keep filter on one point-in-time feature from
-`kaibot.features.alt.alt_features` (dotted path), e.g. `short_volume.svr_rel <= 1.5`: keep the trade unless
-off-exchange short volume spiked. Write the rule and its hypothesis **before** looking at results. The file's
+`kaibot.features.alt.alt_features` (dotted path), e.g. `insider_30d.net_usd >= 0`: keep the trade unless
+insiders were net sellers. Write the rule and its hypothesis **before** looking at results. The file's
 sha256 goes into every result and trial row, so a rule edited after seeing data shows up as a new trial.
 
 For each rule, `src/kaibot/evaluation/ablation.py` (pure, injectable feature lookup):
@@ -36,6 +36,11 @@ The thresholds are constants in the module; the config cannot loosen them. If th
 the kept set is just a random subset, so one rule clears the per-rule bar about 5% of the time (a test checks this
 over 200 seeds). With 7 rules that would mean a false admit *somewhere* about 30% of the time, so admission also
 requires Bonferroni across the rules tested (family-wise 5%). The admission PR's own replay trial is a second check.
+
+**FINRA rules on hold (#623).** `short_volume` is switched off (docs/data/finra_regsho.md). The two pre-registered
+rules on it (`sv_rel_no_spike`, `sv_level_not_extreme`) are still in `config/ablation.yaml`, because that file is
+frozen. `scripts/run_ablation.py` refuses any config with `short_volume.*` rules until Product amends the
+pre-registration.
 
 ## Running it
 ```

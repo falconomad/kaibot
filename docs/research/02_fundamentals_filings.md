@@ -16,7 +16,7 @@ The loser hunter must answer within seconds: is the drop company-specific (8-K, 
 | Finnhub free | API key | 60/min, 30/s burst | Real-time to daily | **USE** |
 | Alpha Vantage | API key | 25/day | Daily | MAYBE |
 | FMP Basic | API key | 250/day, 500 MB per 30 days | EOD | MAYBE |
-| FINRA Reg SHO daily short volume | None (CDN file) | Unlimited file pulls | Same day by 6pm ET | **USE** |
+| FINRA Reg SHO daily short volume | None (CDN file) | Unlimited file pulls | Same day by 6pm ET | ~~USE~~ **NO: terms (#623)** |
 | FINRA equity short interest | None (files) or API key | Free files | Twice a month, ~7 business-day lag | MAYBE |
 | Cboe VIX history CSV | None | n/a | Daily | **USE** |
 | Cboe daily put/call page | None | HTML only | Daily | MAYBE |
@@ -55,7 +55,7 @@ The loser hunter must answer within seconds: is the drop company-specific (8-K, 
 
 **Financial Modeling Prep Basic** — MAYBE. The free plan gives 250 calls/day, 500 MB of bandwidth per trailing 30 days, 5 years of history and end-of-day data only. Annual statements are included for US companies. The earnings calendar is paid. Displaying or redistributing the data needs a separate license. This is a fallback for ratios when XBRL tags are messy.
 
-**FINRA** — USE / MAYBE.
+**FINRA** — NO (24 Nov 2026, #623: finra.org terms forbid a database and predictive use; switched off, see `docs/data/finra_regsho.md`). Original note:
 - Reg SHO daily short volume: `https://cdn.finra.org/equity/regsho/daily/CNMSshvol20261109.txt`, posted by 6:00pm ET same day, occasionally re-posted as "Updated". Off-exchange (TRF/ADF/ORF) volume only.
 - Short interest: twice a month, published 7 business days after settlement. A slow factor.
 - The Query API's Public credential is $0, but coverage of the short datasets is unclear. Use the CDN files.

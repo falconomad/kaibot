@@ -45,7 +45,8 @@ fundamentals_filings:
   nasdaq_trader:    {use: new_listing_watch_shadow, schedule: nightly, limit: "static files and one news feed; no published limit", min_seconds_between_requests: 1,
                      endpoint: "www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt, /otherlisted.txt, /rss.aspx?feed=currentheadlines&categorylist=48 (Data Technical News), /TraderNews.aspx?id=... (a notice page, at most 5 a night)",
                      note: "3 requests a night plus one per new listing notice; URLs and layouts not verified from the build sandbox (host blocked there): the first run on the Mac confirms them (docs/ops/listings.md)"}
-  finra_regsho:     {use: daily_short_volume, schedule: "after 18:00 ET", limit: "static CDN files", min_seconds_between_requests: 1}
+  # FINRA Reg SHO short volume: removed, switched off by the stakeholder on #623 (FINRA terms forbid a database / predictive use).
+  #   kaibot.ingest.alt.store.DISABLED refuses it; see docs/data (FINRA page).
   fred:             {use: regime, auth: key, limit: "120 req/min per key", budget_per_min: 30}
   fred_vixcls:      {use: regime, schedule: daily, note: "VIX via FRED (Cboe CSV unreachable from our network, 10 Nov 2026); requests count against fred"}
   fred_dtb3:        {use: research_cash_yield, schedule: "on demand", note: "3-month Treasury-bill rate (DTB3) for evaluation reports (M11 2.4, scripts/fetch_tbill.py): one request a run, counts against fred; research input only, never in the live path"}
