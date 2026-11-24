@@ -11,7 +11,7 @@
 // squashed landing in 600 ms. CSS only (app.css, kb-logo-hop): the class goes on the point when the intro ends, so its
 // 6 s delay counts from there; the keyframes hold three uneven hops per cycle, so the beat never reads as a metronome.
 // The point then is its own small <svg> over the letters (below), so the hop runs on the compositor.
-// "often" (sign-in, /register): every 8.7-9.4 s; "rare" (the app's header): every 29-31 s. Paused while the tab is
+// "often" (sign-in, /register): every 3.4-3.7 s; "rare" (the app's header): every 5.8-6.3 s (stakeholder, 24 Nov 2026 23:40). Paused while the tab is
 // hidden; none with reduced motion. Only the point's transform moves.
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import wordDark from "../brand/logo/wordmark-on-dark.svg?raw";
@@ -32,10 +32,10 @@ export function mark(kind: "word" | "symbol", on: "dark" | "light"): Mark {
 
 /** Which path is which, by its place in Design's file (brand.test.tsx checks the files still have this shape). */
 export const ROLES = { word: { arm: 0, leg: 1, stem: 2, point: 6 }, symbol: { arm: 0, point: 1, leg: 2, stem: 3 } } as const;
-/** The idle hop's cycle in seconds per kind: three hops at 0, 32.2% and 67% of it (app.css). */
-export const IDLE = { often: 27, rare: 90, after: 6 } as const;
+/** The idle hop's cycle in seconds per kind: three uneven hops per cycle (app.css). */
+export const IDLE = { often: 10.6, rare: 18, after: 6 } as const;
 /** The sign-in and /register logo is this much larger than the header's (stakeholder, 24 Nov 2026; app.css .logo-lg). */
-export const LARGE = 1.1;
+export const LARGE = 1.25;
 /** The storyboard's timing in seconds: [starts at, lasts]. The pulse ends at 0.96 s. */
 export const TIMING = { stem: [0, 0.2], leg: [0.12, 0.24], arm: [0.26, 0.3], point: [0.56, 0.18], pulse: [0.66, 0.3] } as const;
 
@@ -47,7 +47,7 @@ export const resetLogoMotion = () => { played = false; };
 /** `size`: the height of the letters in px, from the top of the k to the baseline (without it, the stylesheet sizes the
  *  logo: 26 px on phones, 28 px on wider screens). `symbolOnly`: the k alone, carrying its point. `on`: the background
  *  it stands on; the app is dark. `animate`: play the load motion if no logo has played it yet. `idle`: after it,
- *  the point hops now and then. `large`: 10% larger than the stylesheet's size (sign-in and /register). */
+ *  the point hops now and then. `large`: 25% larger than the stylesheet's size (sign-in and /register). */
 export function Logo({ size, symbolOnly = false, on = "dark", animate = false, idle, large = false }:
   { size?: number; symbolOnly?: boolean; on?: "dark" | "light"; animate?: boolean; idle?: "often" | "rare"; large?: boolean }) {
   const kind = symbolOnly ? "symbol" : "word";
