@@ -4,40 +4,10 @@ from datetime import UTC, date, datetime, timedelta
 
 import pyarrow as pa
 
-from kaibot.features.alt import alt_features, gdelt_tone_z, insider_net_buying, short_volume
-from kaibot.ingest.alt import finra, form4, gdelt, store
+from kaibot.features.alt import alt_features, gdelt_tone_z, insider_net_buying
+from kaibot.ingest.alt import form4, gdelt, store
 
 NOW = datetime(2026, 11, 11, 15, 0, tzinfo=UTC)
-
-
-def _finra(root, days=22, symbol="ACME"):
-    for i in range(days):
-        d = date(2026, 10, 1) + timedelta(days=i)
-        avail = finra.publication_ts(d)
-        short = 600 if i == days - 1 else 400  # the latest day has a 0.6 ratio vs 0.4 before
-        t = pa.table({"trade_date": [d], "symbol": [symbol], "short_volume": [short], "short_exempt_volume": [0],
-                      "total_volume": [1000], "market": ["N"], "available_ts": pa.array([avail], store.TS),
-                      "ingested_ts": pa.array([avail], store.TS)}, schema=finra.SCHEMA)
-        store.append_versions(root, finra.SOURCE, d, t, finra.KEY, finra.VALUES)
-    return date(2026, 10, 1) + timedelta(days=days - 1)
-
-
-def test_short_volume_ratio_vs_20d_mean_is_point_in_time(tmp_path):
-    last = _finra(tmp_path)
-    r = short_volume(tmp_path, "ACME", NOW)
-    assert r["trade_date"] == str(last) and abs(r["svr"] - 0.6) < 1e-9 and abs(r["svr_mean20"] - 0.4) < 1e-9
-    assert abs(r["svr_rel"] - 1.5) < 1e-9
-    # 17:59 ET on the last trade date: that day's file is not published yet
-    before = finra.publication_ts(last) - timedelta(minutes=1)
-    r2 = short_volume(tmp_path, "ACME", before)
-    assert r2["trade_date"] != str(last) and abs(r2["svr"] - 0.4) < 1e-9
-    assert short_volume(tmp_path, "OTHER", NOW) is None
-
-
-def test_short_volume_needs_history(tmp_path):
-    _finra(tmp_path, days=5)
-    r = short_volume(tmp_path, "ACME", NOW)
-    assert r["svr"] is not None and r["svr_mean20"] is None and r["svr_rel"] is None
 
 
 def _form4(root, rows):
@@ -90,9 +60,9 @@ def test_gdelt_tone_z(tmp_path):
 
 def test_everything_missing_is_none_not_an_error(tmp_path):
     out = alt_features(tmp_path / "nothing-here", "ACME", NOW)
-    assert out["short_volume"] is None and out["insider_30d"] is None
+    assert out["insider_30d"] is None and "short_volume" not in out  # FINRA is switched off (#623)
     assert set(out["gdelt_tone_z"]) == set(gdelt.QUERIES) and all(v is None for v in out["gdelt_tone_z"].values())
-    corrupt = tmp_path / "alt" / finra.SOURCE / "date=2026-11-10"
+    corrupt = tmp_path / "alt" / form4.LEDGER / "date=2026-11-10"
     corrupt.mkdir(parents=True)
     (corrupt / "part-x.parquet").write_bytes(b"not parquet")
-    assert alt_features(tmp_path, "ACME", NOW)["short_volume"] is None
+    assert alt_features(tmp_path, "ACME", NOW)["insider_30d"] is None

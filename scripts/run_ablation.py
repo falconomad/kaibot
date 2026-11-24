@@ -33,6 +33,9 @@ from kaibot.evaluation.ablation import SESSION_TZ, parse_config, run_ablation  #
 from kaibot.features.alt import alt_features  # noqa: E402
 from kaibot.ingest.alt import store as alt_store  # noqa: E402
 
+# Feature roots that no ablation rule may use: FINRA short volume is switched off (stakeholder decision on #623).
+DISABLED_FEATURES = {"short_volume": "#623 (FINRA Reg SHO short volume switched off: finra.org terms)"}
+
 TRADE_COLS = "id,run_id,strategy,symbol,entry_ts,exit_ts,risk_usd,pnl_usd,exit_reason"
 
 
@@ -114,6 +117,11 @@ def cached_alt_reads() -> Iterator[None]:
         alt_store.read_source = orig
 
 
+def disabled_rules(cfg) -> list[str]:
+    """Names of rules whose feature is switched off by a decision (see DISABLED_FEATURES)."""
+    return [r.name for r in cfg.rules if r.feature.split(".")[0] in DISABLED_FEATURES]
+
+
 def alt_lookup(alt_root: Path):
     return lambda symbol, decision_ts: alt_features(alt_root, symbol, decision_ts)
 
@@ -147,6 +155,12 @@ def main(argv: list[str] | None = None) -> dict:
     alt_root = Path(a.alt_root) if a.alt_root else data
     cfg_path = Path(a.config)
     cfg = parse_config(cfg_path.read_bytes())
+    if blocked := disabled_rules(cfg):
+        # The pre-registered config is frozen (its sha256 is in every trial): it is not edited here. Product decides
+        # and amends it; until then the run is refused rather than silently reporting those rules as "insufficient".
+        raise SystemExit(f"run_ablation: refused: {cfg_path.name} has rules on switched-off features {blocked} "
+                         f"({'; '.join(sorted(set(DISABLED_FEATURES.values())))}). Product must amend the "
+                         "pre-registration before the next run.")
 
     if a.trades:
         raw, source = pd.read_csv(a.trades), f"csv:{Path(a.trades).name}"

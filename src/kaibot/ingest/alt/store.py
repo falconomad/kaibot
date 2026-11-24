@@ -28,10 +28,26 @@ import pyarrow.parquet as pq
 log = logging.getLogger(__name__)
 TS = pa.timestamp("us", tz="UTC")
 
+# Sources switched off by a stakeholder decision. Every read, write and lock goes through source_dir, so the store
+# refuses them, including old files left on disk. Do not remove an entry without a new decision on its issue.
+DISABLED: dict[str, str] = {
+    "finra_regsho": (
+        "FINRA Reg SHO short volume is switched off (stakeholder decision on #623, 24 Nov 2026): the finra.org "
+        "Terms of Use forbid building a database from the FINRA website and using it for predictive analytics. "
+        "Do not collect, read or use data/alt/finra_regsho; see docs/data/finra_regsho.md."
+    ),
+}
+
+
+class SourceDisabled(RuntimeError):
+    """The source is switched off by a decision (see DISABLED); it must not be collected or read."""
+
 
 def source_dir(root: Path, source: str) -> Path:
     if not source.replace("_", "").isalnum():
         raise ValueError(f"bad source name {source!r}")
+    if source in DISABLED:
+        raise SourceDisabled(DISABLED[source])
     return Path(root) / "alt" / source
 
 

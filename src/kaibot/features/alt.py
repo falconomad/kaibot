@@ -8,8 +8,8 @@ kaibot.features.pump (re-exported here) and does not read alt data, so the engin
 Every reader goes through kaibot.ingest.alt.store.read_pit: only rows with available_ts <= decision_ts, latest
 version per key. Missing data (no files, no rows for the symbol, too little history) gives None, never an error.
 
-- short_volume: FINRA Reg SHO CNMS short volume / total volume for the latest trade date known at decision_ts,
-  vs the mean ratio of the previous 20 trade dates (needs >= 10).
+- (removed) short_volume: FINRA Reg SHO short volume is switched off by the stakeholder decision on #623 (FINRA
+  terms forbid a database / predictive analytics). No feature here may read it; tests/test_finra_off.py checks.
 - insider_net_buying: Form 4 non-derivative open-market purchases (code P) minus sales (code S) with a
   transaction date in the last 30 days. Zero only for symbols the collector covers (they appear in the filing
   ledger); otherwise None.
@@ -27,9 +27,9 @@ from pathlib import Path
 import pandas as pd
 
 from kaibot.features.pump import pump_risk, rules_veto_extra
-from kaibot.ingest.alt import finra, form4, gdelt, store
+from kaibot.ingest.alt import form4, gdelt, store
 
-__all__ = ["alt_features", "gdelt_tone_z", "insider_net_buying", "pump_risk", "rules_veto_extra", "short_volume"]
+__all__ = ["alt_features", "gdelt_tone_z", "insider_net_buying", "pump_risk", "rules_veto_extra"]
 log = logging.getLogger("kaibot.features.alt")
 
 
@@ -47,21 +47,6 @@ def _f(x) -> float | None:
     except (TypeError, ValueError):
         return None
     return x if math.isfinite(x) else None
-
-
-def short_volume(root: Path, symbol: str, decision_ts: datetime, n: int = 20) -> dict | None:
-    df = _pit(root, finra.SOURCE, decision_ts, finra.KEY)
-    if df.empty or "symbol" not in df:
-        return None
-    d = df[(df["symbol"] == symbol) & (df["total_volume"] > 0)].sort_values("trade_date")
-    if d.empty:
-        return None
-    ratio = (d["short_volume"] / d["total_volume"]).astype(float)
-    latest = _f(ratio.iloc[-1])
-    prior = ratio.iloc[:-1].tail(n)
-    mean = _f(prior.mean()) if len(prior) >= max(10, n // 2) else None
-    return {"trade_date": str(d["trade_date"].iloc[-1]), "svr": latest, "svr_mean20": mean,
-            "svr_rel": (latest / mean) if latest is not None and mean else None}
 
 
 def insider_net_buying(root: Path, symbol: str, decision_ts: datetime, days: int = 30) -> dict | None:
@@ -103,10 +88,9 @@ def gdelt_tone_z(root: Path, query_name: str, decision_ts: datetime, days: int =
 
 
 def alt_features(root: Path, symbol: str, decision_ts: datetime) -> dict:
-    """Everything above for one symbol, for the signal log / ablation. Each value may be None."""
+    """Everything above for one symbol, for the signal log / ablation. Each value may be None. No FINRA (#623)."""
     out: dict = {}
-    for name, fn in (("short_volume", lambda: short_volume(root, symbol, decision_ts)),
-                     ("insider_30d", lambda: insider_net_buying(root, symbol, decision_ts))):
+    for name, fn in (("insider_30d", lambda: insider_net_buying(root, symbol, decision_ts)),):
         try:
             out[name] = fn()
         except Exception as e:
