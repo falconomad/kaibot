@@ -97,6 +97,16 @@ header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wr
 .logo-pop { transform-box: fill-box; transform-origin: center; animation: kb-logo-pop .18s cubic-bezier(.3, 1.4, .5, 1) both; }
 /* forwards, not both: the ring must stay unseen until its turn */
 .logo-pulse { transform-box: fill-box; transform-origin: center; opacity: 0; animation: kb-logo-pulse .3s var(--ease) forwards; }
+/* idle (Logo.tsx): from 6 s after the intro, the point hops 60% of its height (3-4 px) and lands squashed, 600 ms;
+   three uneven hops per cycle: every 8.7-9.4 s, or every 29-31 s in the header (.rare). The point is its own
+   small <svg> on its own layer (.logo-box holds it over the letters), so only its transform moves, on the compositor. */
+@keyframes kb-logo-hop { 0%, 2.2%, 32.2%, 34.4%, 67%, 69.2% { transform: none; } .9%, 33.1%, 67.9% { transform: translateY(-60%) scale(.94, 1.06); } 1.6%, 33.8%, 68.6% { transform: scale(1.08, .92); } }
+@keyframes kb-logo-hop-rare { 0%, .67%, 32.2%, 32.87%, 67%, 67.67% { transform: none; } .27%, 32.47%, 67.27% { transform: translateY(-60%) scale(.94, 1.06); } .48%, 32.68%, 67.48% { transform: scale(1.08, .92); } }
+.logo-box { position: relative; flex: none; }
+.logo-hop { position: absolute; will-change: transform; transform-origin: 50% 100%; animation: kb-logo-hop 27s var(--ease) 6s infinite; }
+.logo-hop.rare { animation-name: kb-logo-hop-rare; animation-duration: 90s; }
+/* sign-in and /register: 10% larger (1.1 x 28 px, and 1.1 x 26 px on phones below) */
+.logo-lg { height: 30.8px; }
 nav.topnav { display: flex; flex-wrap: wrap; gap: 2px; font-size: 16px; font-weight: 500; }
 nav.topnav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--slate); padding: 0 14px; border-radius: 999px; transition: color .2s var(--ease), background-color .2s var(--ease); }
 nav.topnav a:hover { color: var(--ink); }
@@ -241,6 +251,7 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
   /* v4: one-row top bar, 56 px: mark, name, Paper, engine state. The run picker and the meters move to More and Home. */
   header.top { flex-wrap: nowrap; min-height: var(--topbar); padding: 6px 16px; gap: 8px; }
   .logo { height: 26px; }
+  .logo-lg { height: 28.6px; }
   header.top .engine-chip { max-width: 44vw; min-width: 0; }
   header.top .engine-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   nav.topnav, .hide-sm { display: none !important; }
