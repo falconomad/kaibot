@@ -6,4 +6,12 @@
 #     script: scripts/fetch_sec_fundamentals.py   # must be a key of ops/runner/allowed.yaml
 #     args: ["--status"]                 # only the flags allowed.yaml lists for that script
 #     posts_to_issue: 600
-jobs: []
+jobs:
+  - id: index-core-2026-11-24
+    script: scripts/index_core.py
+    args: ["--end", "2024-12-31"]
+    posts_to_issue: 458
+  - id: index-core-book-2026-11-24
+    script: scripts/index_core_book.py
+    args: ["--end", "2024-12-31"]
+    posts_to_issue: 459
