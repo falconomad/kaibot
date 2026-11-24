@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -122,6 +123,33 @@ def disabled_rules(cfg) -> list[str]:
     return [r.name for r in cfg.rules if r.feature.split(".")[0] in DISABLED_FEATURES]
 
 
+def config_version(raw: bytes) -> tuple[int, list[dict]]:
+    """(version, amendments) of an ablation config, checked like a docs/prereg amendment chain.
+
+    A config without `version` and `amendments` is version 1. Version n has exactly n - 1 amendments, numbered 1..n-1
+    in order, each with a heading, a date, a reason and the rules it removed; no removed rule may come back under
+    its name. Anything else is refused: the version is what tells trial rows of an amended config apart."""
+    doc = yaml.safe_load(raw) or {}
+    amendments = doc.get("amendments") or []
+    version = doc.get("version", 1)
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise SystemExit(f"run_ablation: refused: version must be a whole number >= 1, got {version!r}")
+    if not isinstance(amendments, list) or version != 1 + len(amendments):
+        raise SystemExit(f"run_ablation: refused: version {version} needs {version - 1} appended amendment(s), the "
+                         f"config has {len(amendments) if isinstance(amendments, list) else amendments!r}")
+    names = {str(r.get("name")) for r in doc.get("rules") or [] if isinstance(r, dict)}
+    for i, am in enumerate(amendments, start=1):
+        if not isinstance(am, dict) or am.get("n") != i or not all(str(am.get(k) or "").strip()
+                                                                    for k in ("heading", "date", "reason")):
+            raise SystemExit(f"run_ablation: refused: amendment {i} must have n: {i}, a heading, a date and a reason "
+                             "(amendments are appended and never renumbered)")
+        back = sorted(names & {str(r.get("name")) for r in am.get("removed") or [] if isinstance(r, dict)})
+        if back:
+            raise SystemExit(f"run_ablation: refused: rules {back} were removed by amendment {i}; a removed rule "
+                             "does not come back under its old name")
+    return version, amendments
+
+
 def alt_lookup(alt_root: Path):
     return lambda symbol, decision_ts: alt_features(alt_root, symbol, decision_ts)
 
@@ -154,13 +182,16 @@ def main(argv: list[str] | None = None) -> dict:
     data = Path(a.data)
     alt_root = Path(a.alt_root) if a.alt_root else data
     cfg_path = Path(a.config)
-    cfg = parse_config(cfg_path.read_bytes())
+    raw_cfg = cfg_path.read_bytes()
+    cfg = parse_config(raw_cfg)
     if blocked := disabled_rules(cfg):
-        # The pre-registered config is frozen (its sha256 is in every trial): it is not edited here. Product decides
-        # and amends it; until then the run is refused rather than silently reporting those rules as "insufficient".
+        # The pre-registered config is frozen (its sha256 is in every trial): it is not edited here. Product amends
+        # it (Amendment 1 of config/ablation.yaml removed the FINRA rules); a config that still has such a rule is
+        # refused rather than silently reporting those rules as "insufficient".
         raise SystemExit(f"run_ablation: refused: {cfg_path.name} has rules on switched-off features {blocked} "
                          f"({'; '.join(sorted(set(DISABLED_FEATURES.values())))}). Product must amend the "
                          "pre-registration before the next run.")
+    version, amendments = config_version(raw_cfg)
 
     if a.trades:
         raw, source = pd.read_csv(a.trades), f"csv:{Path(a.trades).name}"
@@ -175,6 +206,7 @@ def main(argv: list[str] | None = None) -> dict:
         res = run_ablation(trades, alt_lookup(alt_root), cfg, git_sha=git_sha(), source=source)
     now = datetime.now(UTC)
     res.update({"run_at": now.isoformat(timespec="seconds"), "config": str(cfg_path.name),
+                "config_version": version, "config_amendments": [str(am["heading"]) for am in amendments],
                 "decision_lag_min": a.decision_lag_min, "trades_input": len(raw),
                 "trades_dropped": len(raw) - len(trades), "strategies": strategies,
                 "caveats": [
@@ -194,8 +226,12 @@ def main(argv: list[str] | None = None) -> dict:
     trials_mod.append(data / "trials.jsonl", json.loads(json.dumps({
             "ts": res["run_at"], "trial_id": trial_id, "kind": "ablation", "strategy": a.strategy,
             "prereg_sha256": pre_sha, "strategies_in_trades": strategies,
-            "code_sha": res["git_sha"], "params": f"pre-registered {cfg_path.name} sha256={cfg.sha256[:12]}",
-            "config_sha256": cfg.sha256, "source": source, "window": res["window"],
+            "code_sha": res["git_sha"],
+            "params": f"pre-registered {cfg_path.name} v{version} sha256={cfg.sha256[:12]}",
+            # an amended config is a new version with a new sha256: its runs are new trials; rows logged under an
+            # earlier version keep the hash and id they were written with (the file is only ever appended to)
+            "config_sha256": cfg.sha256, "config_version": version,
+            "config_amendments": res["config_amendments"], "source": source, "window": res["window"],
             # every rule actually tested is a filtered variant of the strategy: it counts against the DSR
             "n_trials": res["rules_tested"],
             "metrics": {"trades": res["trades"], "trading_days": res["trading_days"], **res["summary"],

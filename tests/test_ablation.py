@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pytest
-import yaml
 
 from kaibot.evaluation.ablation import (
     MIN_HISTORY_DAYS,
@@ -201,12 +200,8 @@ def test_script_with_zero_alt_history_reports_insufficient_and_logs_a_trial(tmp_
     csv = tmp_path / "trades_balanced_test.csv"
     pd.DataFrame(rows).to_csv(csv, index=False)
     out = tmp_path / "out"
-    # the repo config still holds the FINRA rules pending Product's amendment (#623): use the other rules
-    cfg = yaml.safe_load((ROOT / "config" / "ablation.yaml").read_text())
-    cfg["rules"] = [r for r in cfg["rules"] if not r["feature"].startswith("short_volume.")]
-    cfg_path = tmp_path / "ablation.yaml"
-    cfg_path.write_text(yaml.safe_dump(cfg))
-    res = mod.main(["--trades", str(csv), "--data", str(out), "--config", str(cfg_path)])
+    # the repo config as amended (Amendment 1, #623: no FINRA rules)
+    res = mod.main(["--trades", str(csv), "--data", str(out), "--config", str(ROOT / "config" / "ablation.yaml")])
     assert res["trades"] == 150 and res["summary"]["insufficient"] == len(res["rules"]) > 0
     assert all(p["coverage"] == 0 and p["kept"] == 150 for p in res["rules"])
     files = list((out / "ablation").glob("*.json"))
