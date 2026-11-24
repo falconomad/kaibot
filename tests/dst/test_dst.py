@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from scenarios import FINDINGS, quiet
-from world import D1, D2, KNOWN, Scenario, et, run_scenario, run_seed
+from world import D0, D1, D2, KNOWN, Outage, Scenario, et, run_scenario, run_seed
 
 from kaibot.broker.faulty import Forced
 
@@ -157,6 +157,40 @@ def test_an_order_called_lost_that_fills_later_is_booked():
                              forced=(Forced("submit_timeout_accepted", "|B|buy"), Forced("lookup_lag", "|B|buy", 12),
                                      Forced("listing_lag", "|B|buy"), Forced("hold", "|B|buy", 4))))
     assert res.ok, res.report()
+
+
+def test_flatten_and_stop_waits_for_a_sale_whose_activity_is_late():
+    """#591 (seed 796524965): D2's decision wants nothing, so B is sold at 15:50; the sale fills at once and its
+    activity is hidden for 300 minutes. The owner presses "Flatten and stop" at 15:56. The venue holds no B, so the
+    run used to end there, and with it every sync: the sale was never booked (the ledger kept 23 shares and missed
+    the proceeds). The command now waits for the booking, as it does for an unbooked buy (#533)."""
+    res = run_scenario(quiet({D1: ("B",), D2: ()}, flatten=et(D2, "15:56"),
+                             forced=(Forced("fill_dropped", "|B|sell", 300),)))
+    assert res.ok, res.report()
+
+
+def test_flatten_and_stop_ends_the_run_too_early_without_the_wait_for_a_late_sale(monkeypatch):
+    """#591's teeth: the same scenario with the wait taken away breaks the ledger-equals-venue invariant."""
+    from kaibot.engine.core import Engine
+
+    monkeypatch.setattr(Engine, "_om_unbooked_sale", lambda self: False)
+    res = run_scenario(quiet({D1: ("B",), D2: ()}, flatten=et(D2, "15:56"),
+                             forced=(Forced("fill_dropped", "|B|sell", 300),)))
+    assert not res.ok
+    assert any("executions are not booked" in v for v in res.violations), res.report()
+
+
+def test_a_late_decision_journalled_then_killed_is_still_expected():
+    """#591 (seeds 796432438, 796432719, 796525694; the oracle's own mistake): the run starts after D0's close, so
+    D1's decision is the late one at 09:31, and the engine is killed right after journalling it, back after the
+    close. The oracle waited LATE_EVERY into the session before it counted a chance to decide, so it expected
+    nothing, while the engine sends the journalled decision late on D2 (M9 1.4) and holds B. A decision the engine
+    journalled now counts as taken, and the run must end holding it."""
+    res = run_scenario(quiet({D1: ("B",)}, outages=(Outage(et(D0, "17:00"), 400, effects=1, orders_only=True,
+                                                           after=True),)))
+    assert res.ok, res.report()
+    assert any("killed at after journal.md_decision" in t for t in res.trace), res.report()
+    assert any("late_of=" + D1 in t for t in res.trace), res.report()
 
 
 @pytest.mark.xfail(strict=True, reason="engine bug #529 (seed 190's case): a fill activity a day late; the sale the "

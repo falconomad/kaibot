@@ -442,6 +442,7 @@ class World:
         # during the session over at least LATE_EVERY, the pace of the late decision's tries). An engine that was
         # down from before the view came until after the fill session closed has decided nothing for it, and no
         # later session makes that decision up: an outage of a whole session, not a defect of the engine.
+        # A decision the engine did journal counts whenever it was taken (#591; `Checker.journal_tail`).
         self.decidable: set[str] = set()
         self._first_ok: dict[str, datetime] = {}
         self._run_seen: datetime | None = None  # the first pass that saw the run (see _could_decide)
@@ -766,6 +767,11 @@ class Checker:
                 w.say(f"journal {seq} {kind} " + " ".join(f"{k}={b[k]}" for k in SAID[kind] if b.get(k) is not None))
             if kind == "run":
                 self.rid = b.get("run_id")
+            elif kind == "md_decision" and b.get("target") is not None and b.get("run_id") == self.rid:
+                # #591: a decision the engine journalled was a chance it took, however quickly (`_could_decide`
+                # waits LATE_EVERY into the session; a late decision at 09:31 and a kill right after it is sent
+                # late on the next session, M9 1.4, and that send is what the book must show at the end)
+                w.decidable.add(str(b["fill_session"]))
             elif kind == "om_intent":
                 self.intents.add(b["coid"])
                 self.state[b["coid"]] = "intent"
