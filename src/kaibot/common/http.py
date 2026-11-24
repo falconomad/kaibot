@@ -31,6 +31,7 @@ from kaibot.common.ratelimit import Budget, get_budget
 log = logging.getLogger(__name__)
 DEFAULT_MAX_BYTES = 16 * 1024 * 1024
 _CHUNK = 64 * 1024
+_URLOPEN = urllib.request.urlopen  # the real one: only it is given the certifi context (see _default_open)
 
 
 CERT_HINT = ("the server's certificate could not be verified (missing root certificates). On macOS with "
@@ -69,6 +70,14 @@ def ssl_context() -> ssl.SSLContext:
         else:
             return ssl.create_default_context(cafile=certifi.where())
     return ssl.create_default_context()
+
+
+def _default_open(req, timeout):
+    """urllib's urlopen with the verifying context. A urlopen replaced at runtime (test fakes) is called as before."""
+    fn = urllib.request.urlopen
+    if fn is _URLOPEN:
+        return fn(req, timeout=timeout, context=ssl_context())
+    return fn(req, timeout=timeout)
 
 
 def _is_cert_error(e: BaseException) -> bool:
@@ -145,11 +154,7 @@ def get(
     if urllib.parse.urlsplit(url).scheme != "https":
         raise ValueError(f"refusing non-HTTPS URL {_redact(url)}")
     b = budget or get_budget(source)
-    if opener is None:
-        def open_(req, timeout):
-            return urllib.request.urlopen(req, timeout=timeout, context=ssl_context())
-    else:
-        open_ = opener
+    open_ = opener or _default_open
     last = "no attempt"
     for attempt in range(attempts):
         b.acquire()

@@ -89,10 +89,25 @@ def test_default_opener_passes_the_verifying_context(monkeypatch):
         raise urllib.error.URLError(ConnectionRefusedError("refused"))
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(http, "_URLOPEN", fake_urlopen)  # stands in for the real urlopen
     with pytest.raises(http.HttpError):
         http.get("https://e/x", source="x", attempts=1, budget=Budget("x", BudgetSpec(), FakeClock()))
     assert seen["context"] is http.ssl_context()
     assert seen["context"].verify_mode == ssl.CERT_REQUIRED
+
+
+def test_a_replaced_urlopen_is_called_as_before(monkeypatch):
+    """Code and tests that swap urllib.request.urlopen for a fake (req, timeout) keep working unchanged."""
+    seen = []
+
+    def fake(req, timeout):
+        seen.append(timeout)
+        raise urllib.error.URLError(ConnectionRefusedError("refused"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    with pytest.raises(http.HttpError):
+        http.get("https://e/x", source="x", attempts=1, timeout=7, budget=Budget("x", BudgetSpec(), FakeClock()))
+    assert seen == [7]
 
 
 def _cert_failure():
