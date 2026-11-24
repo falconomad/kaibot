@@ -241,3 +241,64 @@ def test_schema_is_stable():
     assert sf.SCHEMA.field("available_date").type == pa.date32()
     assert set(sf.METRICS) == {"revenues", "net_income", "operating_cash_flow", "gross_profit", "total_assets",
                                "total_liabilities", "long_term_debt", "shares_outstanding"}
+
+
+def _five_companies(data: Path):
+    (data / "earnings").mkdir(parents=True)
+    (data / "earnings" / "cik_map.csv").write_text(
+        "company,cik,how,verified,note\n"
+        + "".join(f"{t},{n},ticker,1,\n" for t, n in [("AAPL", 11), ("MSFT", 12), ("NVDA", 13), ("AMZN", 14),
+                                                       ("JPM", 15)]))
+
+
+def _failing_http(monkeypatch, fail, calls):
+    def fake_get(url, **kw):
+        calls.append(url)
+        return fail(url, len(calls))
+
+    monkeypatch.setattr(http, "get", fake_get)
+
+
+def test_fetch_stops_when_the_first_three_downloads_fail_on_certificates(tmp_path, monkeypatch):
+    mod = _script()
+    calls: list[str] = []
+
+    def fail(url, n):
+        raise http.CertificateError(url, "unable to get local issuer certificate")
+
+    _failing_http(monkeypatch, fail, calls)
+    _five_companies(tmp_path)
+    with pytest.raises(SystemExit, match="Install Certificates.command") as e:
+        mod.fetch(tmp_path, "Test Person test@example.com", refresh=False, max_age_days=7, limit=None)
+    assert len(calls) == 3 and "first 3 companies" in str(e.value)
+
+
+def test_fetch_stops_when_the_first_three_downloads_fail_on_the_same_connection_error(tmp_path, monkeypatch):
+    mod = _script()
+    calls: list[str] = []
+
+    def fail(url, n):
+        raise http.HttpError(0, url, "giving up after 5 attempts (URLError)")
+
+    _failing_http(monkeypatch, fail, calls)
+    _five_companies(tmp_path)
+    with pytest.raises(SystemExit, match="same error"):
+        mod.fetch(tmp_path, "Test Person test@example.com", refresh=False, max_age_days=7, limit=None)
+    assert len(calls) == 3
+
+
+def test_fetch_goes_on_when_the_early_failures_are_not_all_alike(tmp_path, monkeypatch):
+    mod = _script()
+    calls: list[str] = []
+
+    def fail(url, n):  # a 500 give-up, then connection errors, then 404s: company-level, the run goes on
+        if n == 1:
+            raise http.HttpError(0, url, "giving up after 5 attempts (HTTP 500)")
+        if n in (2, 3, 4):
+            raise http.HttpError(0, url, "giving up after 5 attempts (URLError)")
+        return http.Response(404, {}, b"")
+
+    _failing_http(monkeypatch, fail, calls)
+    _five_companies(tmp_path)
+    meta = mod.fetch(tmp_path, "Test Person test@example.com", refresh=False, max_age_days=7, limit=None)
+    assert len(calls) == 5 and len(meta["errors"]) == 4
