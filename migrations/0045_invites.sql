@@ -34,7 +34,7 @@
 -- headlines (kb_headlines, kaibot.headline: Alpaca/Benzinga licence owner_only), no config and no command. The realtime
 -- price channel is owner-only too (0032). tests/test_invites_sql.py calls every one of them as an invited user.
 --
--- Additive: create table / index / function / trigger only when missing, revoke and grant. The only update is inside
+-- Additive, in one transaction: create table / index / function / trigger only when missing, revoke and grant. The only update is inside
 -- the redeem trigger (kaibot.invite.used_at of the confirmed email's invite). No delete, drop or truncate. Any time,
 -- also while the engine runs (the engine never reads or writes auth.users).
 --
@@ -46,6 +46,8 @@
 --   select tgname from pg_trigger where tgrelid = 'auth.users'::regclass and tgname like 'kaibot_%' order by 1;
 --     -- kaibot_invite_admit, kaibot_invite_redeem
 --   select (public.kb_invite_check('0000-0000-0000-0000'))->>'reason';                                   -- unknown
+
+begin;  -- one transaction: if any step is refused (e.g. the trigger on auth.users), nothing is left half-made
 
 create table if not exists kaibot.invite (
   id          bigint generated always as identity primary key,
@@ -242,3 +244,5 @@ do $$ begin
       for each row execute function kaibot.invite_redeem();
   end if;
 end $$;
+
+commit;
