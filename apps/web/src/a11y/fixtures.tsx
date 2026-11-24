@@ -17,6 +17,8 @@ import { Positions } from "../pages/Positions";
 import { Report } from "../pages/Report";
 import { Settings } from "../pages/Settings";
 import { NotOwner, SignIn } from "../pages/SignIn";
+import { Register } from "../pages/Register";
+import { Member } from "../pages/Member";
 import { Strategy, StrategyHome } from "../pages/Strategy";
 import { Tape } from "../pages/Tape";
 import { TradeDetailPage } from "../pages/TradeDetail";
@@ -173,4 +175,8 @@ export const PAGES: Page[] = [
   { name: "Sign in", el: <SignIn />, keys: [], empty: [], loaded: [] },
   { name: "Not the owner", el: <NotOwner failed={false} retry={() => {}} />, keys: [], empty: [], loaded: [] },
   { name: "Not the owner (the check failed)", el: <NotOwner failed retry={() => {}} />, keys: [], empty: [], loaded: [] },
+  { name: "Register (invite)", el: <Register search="?code=ABCD-1234-ABCD-1234" />, keys: [], empty: [], loaded: [] },
+  { name: "Invited member", el: <Member name="Fran" />, keys: [["invites"]], empty: [{ key: ["invites"], data: { cap: 5, taken: 2, invites: [] } }],
+    loaded: [{ key: ["invites"], data: { cap: 5, taken: 3, invites: [{ id: 1, email: "friend@example.com", created_at: "2026-11-24T10:00:00Z",
+      expires_at: "2026-12-01T10:00:00Z", used_at: null, status: "open", code: "ABCD-1234-ABCD-1234", mine: true }] } }] },
 ];

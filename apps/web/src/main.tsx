@@ -28,6 +28,9 @@ const StrategyHome = lazy(() => load["/strategy"]().then((m) => ({ default: m.St
 const FineTune = lazy(() => load["/strategy/fine-tune"]().then((m) => ({ default: m.FineTune })));
 const More = lazy(() => load["/more"]().then((m) => ({ default: m.More })));
 const Positions = lazy(() => load["/positions"]().then((m) => ({ default: m.Positions })));
+// Invites (migration 0045): the registration page and an invited user's page, neither in the first load.
+const Register = lazy(() => import("./pages/Register").then((m) => ({ default: m.Register })));
+const Member = lazy(() => import("./pages/Member").then((m) => ({ default: m.Member })));
 
 /** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton. */
 const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense>;
@@ -53,9 +56,18 @@ function Gate() {
   }, []);
   // Server decides ownership: the first account to sign in claims the dashboard; everyone else is refused.
   const owner = useQuery({ queryKey: ["owner", session?.user.id], queryFn: api.claimOwner, enabled: !!session, staleTime: Infinity });
+  // Not the owner: an invited member (0045's kb_me) gets their own page; anyone else, or before 0045, "Not your dashboard".
+  const me = useQuery({ queryKey: ["me", session?.user.id], queryFn: api.me, enabled: !!session && owner.data === false,
+    staleTime: Infinity, retry: 1 });
+  const { pathname, search } = useLocation();
 
   if (session === undefined || (session && owner.isPending)) return <Skeleton variant="center" />;
-  if (!session) return <SignIn />;
+  if (!session) return pathname === "/register"
+    ? <Suspense fallback={<Skeleton variant="center" />}><Register search={search} /></Suspense> : <SignIn />;
+  if (owner.data === false && me.isPending) return <Skeleton variant="center" />;
+  if (owner.data === false && me.data?.member) {
+    return <Suspense fallback={<Skeleton variant="center" />}><Member name={me.data.name} /></Suspense>;
+  }
   if (owner.isError || owner.data === false) return <NotOwner failed={owner.isError} retry={() => { void owner.refetch(); }} />;
   return (
     <Suspense fallback={<Skeleton variant="center" />}>

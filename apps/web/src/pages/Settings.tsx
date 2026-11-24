@@ -8,6 +8,7 @@ import { day, money } from "../lib/fmt";
 import { ErrorState } from "../components/States";
 import { Controls } from "./Controls";
 import { InstallApp } from "../components/InstallApp";
+import { InviteCard } from "../components/InviteCard";
 
 const STATUS: Record<string, string> = {
   scheduled: "starts at the next open", running: "running", paused: "paused (no new entries)", stopped: "stopped by you",
@@ -87,6 +88,9 @@ export function Settings() {
       </section>
 
       <InstallApp />
+
+      {/* 0045: the owner invites people (stakeholder, 24 Nov 2026) */}
+      <InviteCard />
 
       <section className="card" aria-labelledby="acct-h" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 16 }}>
         <div style={{ flex: "1 1 300px" }}>

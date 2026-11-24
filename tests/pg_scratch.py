@@ -8,7 +8,8 @@ and those tests stay skipped, as before.
 
 What stands in for Supabase (only so the migrations apply; the tests themselves exercise the kaibot SQL):
 - roles anon, authenticated, service_role;
-- `auth.users` and `auth.uid()`, which reads the session setting `test.uid` (the tests set it per call);
+- `auth.users` (id, email, raw_user_meta_data, email_confirmed_at) and `auth.uid()`, which reads the session setting
+  `test.uid` (the tests set it per call); the postgres role gets `kaibot.allow_direct_signup = 'on'` (0045's trigger);
 - the legacy public tables 0003 locks;
 - Realtime's `realtime.messages` (RLS on) and `realtime.topic()`, which reads `test.topic` (0032);
 - pg_net's `net` schema, Vault's `vault`, pg_cron's `cron` (as in tests/pg_harness.py). The two
@@ -39,7 +40,10 @@ do $$ begin
   if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role; end if;
 end $$;
 create schema auth;
-create table auth.users (id uuid primary key);
+create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb, email_confirmed_at timestamptz);
+-- 0045: new accounts need an invite (a trigger on auth.users); the tests' own seed rows are added as an admin would,
+-- with kaibot.allow_direct_signup on (tests/test_invites_sql.py turns it off to exercise the trigger)
+alter role postgres set kaibot.allow_direct_signup = 'on';
 create function auth.uid() returns uuid language sql stable as
   $f$ select nullif(current_setting('test.uid', true), '')::uuid $f$;
 create function auth.role() returns text language sql stable as $f$ select 'authenticated'::text $f$;
