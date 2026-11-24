@@ -227,20 +227,40 @@ async function joinPrices(): Promise<void> {
 /** kb_me (migration 0045): who the signed-in account is. */
 export interface Me { owner: boolean; member: boolean; helper: boolean; name: string | null; can_invite: boolean }
 export interface InviteMade { email: string; code: string; link: string; expires_at: string; reused: boolean }
-export type InviteReason = "unknown" | "used" | "expired" | "email_mismatch";
+export type InviteReason = "unknown" | "revoked" | "used" | "expired" | "email_mismatch";
 export interface InviteCheck { ok: boolean; reason: InviteReason | null; expires_at?: string }
 export interface InviteRow { id: number; email: string; created_at: string; expires_at: string; used_at: string | null;
-  status: "open" | "used" | "expired"; code: string | null; mine: boolean }
+  status: "open" | "used" | "expired" | "revoked"; code: string | null; mine: boolean;
+  /** 0046 (#635): the caller may revoke this open invite (theirs, or any for the owner). Absent before 0046. */
+  can_revoke?: boolean; revoked_at?: string | null }
+export interface InviteRevoked { id: number; email: string; status: "revoked"; revoked_at: string }
+
+/** Who the signed-in account is (kb_me), after repairing a missing profile (0046's kb_profile_repair, #635): an invited
+ * member whose profile was not made at confirmation would otherwise see "Not your dashboard". The repair is asked only
+ * for an account that is neither owner, member nor helper; it makes the profile only for a confirmed account with an
+ * invite it redeemed. Before 0046 (or if the repair fails) the first answer stands. */
+export async function meRepaired(me: () => Promise<Me | null>, repair: () => Promise<boolean | null>): Promise<Me | null> {
+  const first = await me();
+  if (!first || first.owner || first.member || first.helper) return first;
+  let made: boolean | null = null;
+  try { made = await repair(); } catch { return first; }
+  return made ? (await me()) ?? first : first;
+}
 export interface InviteList { cap: number; taken: number; invites: InviteRow[] }
 
 export const api = {
   claimOwner: () => rpc<boolean>("kb_claim_owner"),
   // 0045's invites. Each is null while the migration is not applied (the pages then keep the old behaviour and say so).
   me: () => optional(() => rpc<Me>("kb_me")),
+  /** kb_me, and a missing profile made first if this account is owed one (0046; see meRepaired). */
+  meAtSignIn: () => meRepaired(() => optional(() => rpc<Me>("kb_me")),
+    () => optional(() => rpc<boolean>("kb_profile_repair"))),
   inviteCreate: (email: string) => optional(() => rpc<InviteMade>("kb_invite_create", { p_email: email })),
   inviteCheck: (code: string, email?: string) =>
     optional(() => rpc<InviteCheck>("kb_invite_check", { p_code: code, p_email: email ?? null })),
   inviteList: () => optional(() => rpc<InviteList>("kb_invite_list")),
+  /** 0046 (#635): null while the migration is not applied. */
+  inviteRevoke: (id: number) => optional(() => rpc<InviteRevoked>("kb_invite_revoke", { p_id: id })),
   runs: async () => (await rpc<Run[]>("kb_runs")).map(fixRun),
   overview: async (run: number) => {
     const o = await rpc<Overview>("kb_overview", { p_run: run });

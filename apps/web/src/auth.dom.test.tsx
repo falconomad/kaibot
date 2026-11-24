@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { all, doing, mount, q, reducedMotionOn, settle, unmount } from "./a11y/dom";
 import { SignIn } from "./pages/SignIn";
 import { NOT_OPEN, REASON, REFUSED, Register, codeFromUrl } from "./pages/Register";
-import { InviteCard, NOT_APPLIED, mailto } from "./components/InviteCard";
+import { InviteCard, NOT_APPLIED, REVOKE_NOT_APPLIED, mailto } from "./components/InviteCard";
 import { Member } from "./pages/Member";
 import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, NO_ACCOUNT, isNoAccount, isSignupRefused, takeAttempt } from "./lib/attempts";
 
@@ -16,12 +16,13 @@ const rec = vi.hoisted(() => ({
   check: vi.fn<(code: string, email?: string) => Promise<unknown>>(),
   create: vi.fn<(email: string) => Promise<unknown>>(),
   list: vi.fn<() => Promise<unknown>>(),
+  revoke: vi.fn<(id: number) => Promise<unknown>>(),
   signOut: vi.fn(),
 }));
 vi.mock("./lib/api", async () => {
   const kit = await import("./pages/testkit-api");
   const never = () => new Promise<never>(() => {});
-  const calls: Record<string, unknown> = { inviteCheck: rec.check, inviteCreate: rec.create, inviteList: rec.list };
+  const calls: Record<string, unknown> = { inviteCheck: rec.check, inviteCreate: rec.create, inviteList: rec.list, inviteRevoke: rec.revoke };
   return {
     ...kit,
     api: new Proxy({}, { get: (_t, k) => calls[k as string] ?? never }),
@@ -119,7 +120,7 @@ describe("registration: /register?code=...", () => {
     expect(alert()).toBe(REASON.email_mismatch);
   });
 
-  it.each(["unknown", "used", "expired"] as const)("a %s code is refused in words, and nothing is sent", async (reason) => {
+  it.each(["unknown", "revoked", "used", "expired"] as const)("a %s code is refused in words, and nothing is sent", async (reason) => {
     rec.check.mockResolvedValue({ ok: false, reason });
     await mount(<Register search="?code=ABCD-1234-ABCD-1234" />);
     await fill();
@@ -211,6 +212,64 @@ describe("the invite card", () => {
     await settle();
     expect(text(document.body)).toContain(NOT_APPLIED);
     expect(q("#inv-email")).toBeNull();
+  });
+
+  // #635: revoking an open invite (migration 0046's kb_invite_revoke and kb_invite_list's can_revoke)
+  const row = (id: number, email: string, status: string, can_revoke?: boolean) => ({ id, email, status, can_revoke,
+    created_at: "2026-11-24T12:00:00Z", expires_at: "2026-12-01T12:00:00Z", used_at: null,
+    code: status === "open" ? "ABCD-1234-ABCD-1234" : null, mine: true });
+  const revokeButtons = () => all("button").filter((b) => text(b) === "Revoke");
+
+  it("Revoke shows only where the list allows it, asks once more, then sends the id and refreshes the list", async () => {
+    rec.list.mockResolvedValueOnce({ cap: 5, taken: 3, invites: [row(7, "open@example.com", "open", true),
+      row(6, "used@example.com", "used", false), row(5, "old@example.com", "expired", false)] });
+    rec.list.mockResolvedValue({ cap: 5, taken: 2, invites: [row(7, "open@example.com", "revoked", false),
+      row(6, "used@example.com", "used", false), row(5, "old@example.com", "expired", false)] });
+    rec.revoke.mockResolvedValue({ id: 7, email: "open@example.com", status: "revoked", revoked_at: "2026-11-25T09:00:00Z" });
+    await mount(<InviteCard />);
+    await settle();
+    expect(revokeButtons()).toHaveLength(1);
+    expect(revokeButtons()[0].getAttribute("aria-label")).toBe("Revoke invite for open@example.com");
+    await doing(() => { revokeButtons()[0].click(); });
+    expect(rec.revoke).not.toHaveBeenCalled();  // asked first
+    const keep = all("button").find((b) => text(b) === "Keep")!;
+    await doing(() => { keep.click(); });
+    expect(rec.revoke).not.toHaveBeenCalled();
+    await doing(() => { revokeButtons()[0].click(); });
+    await doing(() => { all("button").find((b) => text(b) === "Yes, revoke")!.click(); });
+    await settle();
+    expect(rec.revoke).toHaveBeenCalledWith(7);
+    expect(text(q('[role="status"]'))).toBe("Invite for open@example.com revoked. Its link and code no longer work.");
+    expect(rec.list).toHaveBeenCalledTimes(2);
+    expect(revokeButtons()).toHaveLength(0);
+    expect(all("tbody tr").map((tr) => text(tr.children[1]))).toEqual(["revoked", "registered", "expired"]);
+  });
+
+  it("before migration 0046: no Revoke button (the list sends no can_revoke)", async () => {
+    rec.list.mockResolvedValue({ cap: 5, taken: 2, invites: [row(7, "open@example.com", "open")] });
+    await mount(<InviteCard />);
+    await settle();
+    expect(text(document.body)).toContain("open@example.com");
+    expect(revokeButtons()).toHaveLength(0);
+    expect(all("th").length).toBe(3);
+  });
+
+  it("the server's refusal, or the migration missing, is shown and the invite stays", async () => {
+    rec.list.mockResolvedValue({ cap: 5, taken: 2, invites: [row(7, "open@example.com", "open", true)] });
+    rec.revoke.mockRejectedValueOnce(new Error("no open invite of yours with that id"));
+    rec.revoke.mockResolvedValueOnce(null);
+    await mount(<InviteCard />);
+    await settle();
+    await doing(() => { revokeButtons()[0].click(); });
+    await doing(() => { all("button").find((b) => text(b) === "Yes, revoke")!.click(); });
+    await settle();
+    expect(alert()).toBe("no open invite of yours with that id");
+    await doing(() => { revokeButtons()[0].click(); });
+    await doing(() => { all("button").find((b) => text(b) === "Yes, revoke")!.click(); });
+    await settle();
+    expect(alert()).toBe(REVOKE_NOT_APPLIED);
+    expect(rec.list).toHaveBeenCalledTimes(1);
+    expect(revokeButtons()).toHaveLength(1);
   });
 });
 

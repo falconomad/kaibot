@@ -29,8 +29,9 @@ OWNER = "00000000-0000-0000-0000-000000000001"
 SHARED = ("00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002",
           "00000000-0000-0000-0000-000000000003")
 MEMBER, STRANGER, NEWBIE, HELPERX = (f"00000000-0000-0000-0000-0000000000a{i}" for i in (1, 2, 3, 4))
-# the functions an invited member may call; every other kb_* must refuse them
-MEMBER_OK = {"kb_invite_create", "kb_invite_check", "kb_invite_list", "kb_me", "kb_claim_owner", "kb_helper_whoami"}
+# the functions an invited member may call; every other kb_* must refuse them (0046 adds the last two: #635)
+MEMBER_OK = {"kb_invite_create", "kb_invite_check", "kb_invite_list", "kb_me", "kb_claim_owner", "kb_helper_whoami",
+             "kb_invite_revoke", "kb_profile_repair"}
 # the realtime policies' predicates (0032, 0038): they answer false rather than raise
 PREDICATES = {"kb_price_stream_reader", "kb_price_stream_sender"}
 

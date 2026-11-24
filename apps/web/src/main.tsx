@@ -57,7 +57,8 @@ function Gate() {
   // Server decides ownership: the first account to sign in claims the dashboard; everyone else is refused.
   const owner = useQuery({ queryKey: ["owner", session?.user.id], queryFn: api.claimOwner, enabled: !!session, staleTime: Infinity });
   // Not the owner: an invited member (0045's kb_me) gets their own page; anyone else, or before 0045, "Not your dashboard".
-  const me = useQuery({ queryKey: ["me", session?.user.id], queryFn: api.me, enabled: !!session && owner.data === false,
+  // A member whose profile was not made at confirmation gets it made here first (0046's kb_profile_repair, #635).
+  const me = useQuery({ queryKey: ["me", session?.user.id], queryFn: api.meAtSignIn, enabled: !!session && owner.data === false,
     staleTime: Infinity, retry: 1 });
   const { pathname, search } = useLocation();
 
