@@ -23,6 +23,10 @@ import { NAME } from "../brand/brand";
 import { type CaEvent, caEvents } from "../lib/corpactions";
 import { type Unfilled, unfilledDetail, unfilledFrom, unfilledLine, unfilledNext, unfilledText } from "../lib/engineevents";
 import { StockBadge, SystemTile } from "../components/StockBadge";
+import { useBook } from "../components/useBook";
+import { parsePlan } from "../lib/multiday";
+import { carriedToday, lastPlan, sessionDate } from "../lib/plantoday";
+import { carriesFrom } from "../lib/carry";
 
 const PAGE = 100;
 type Filter = "all" | "fills" | "skipped" | "room" | "alerts";
@@ -86,6 +90,14 @@ export function Tape() {
   // #333: an order of the multi-day rule the venue let expire at the close with shares left (kb_health's events)
   const unfRows: Row[] = filter === "all" || filter === "fills"
     ? unfilledFrom(health.data?.events, run.id).map((u) => ({ kind: "unf", u, ts: u.ts })) : [];
+  // Product, 24 Nov 2026: a plan whose fill session is over is not shown as planned buys anywhere; here it is one quiet
+  // line, how it ended (lib/plantoday.ts). Same queries as Positions', so they are shared.
+  const paper = run.kind === "paper";
+  const planQ = useQuery({ queryKey: ["md-plan", run.id], queryFn: () => api.multidayPlan(run.id), enabled: paper, retry: false, ...poll(60_000) });
+  const { book } = useBook(run);
+  const plans = parsePlan(planQ.data), today = sessionDate();
+  const last = paper ? lastPlan(plans, unfilledFrom(health.data?.events, run.id), book.data, today,
+    carriedToday(plans, carriesFrom(health.data?.events, run.id), today)) : null;
   const all = q.data?.pages.flat() ?? [];
   const halts: Row[] = (overview?.halts_today ?? []).map((h) => ({ kind: "halt", h, ts: h.ts }));
   const items: Row[] = all.filter((it) => testOnly || !(it.kind === "signal" && it.mode === "shadow"))
@@ -109,6 +121,7 @@ export function Tape() {
             title="Rules that are only measured, never traded">Test only{shadowN ? ` · ${shadowN}` : ""}</button>
         </div>
       </section>
+      {last && <p className="muted last-plan" style={{ margin: "0 0 8px" }}>{last.text}</p>}
       {expShown && (
         <StatusRow tone="exp" title={ruleName(expShown.strategy)} text={expShown.label}>
           <ExperimentSheetBody e={expShown} />

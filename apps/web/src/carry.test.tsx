@@ -90,9 +90,11 @@ describe("each planned buy's state", () => {
   });
 });
 
+// Product, 24 Nov 2026: a plan whose fill session is over is no longer listed on Positions (lib/plantoday.ts); its
+// carry-over states stay unit-tested above.
 describe("Positions after the 20 Nov session", () => {
   const SEVEN = ["ABBV", "APA", "BBY", "BIIB", "PFE", "TMO", "XOM"];
-  it("every carried buy skipped with the market filter off: each says so in plain words, none says just 'not filled'", () => {
+  it("Wednesday's plan is over by Friday: no 'Planned buys', no 'not filled' row, nothing of it listed", () => {
     const health: HealthResp = { now: "2026-11-20T22:00:00Z", heartbeat: [], halts: [], pending_commands: [], deadman: { armed: true, jobs: [], runs: [] },
       events: [carry(FRI, [], Object.fromEntries(SEVEN.map((s) => [s, "market filter off"])), { risk_off: true }),
         ev("multi_day_unfilled", { strategy: "trend_momentum", symbol: "APA", side: "buy", qty: 26, filled: 0, left: 26, session: WED, status: "expired" }, `${WED}T21:01:00Z`)] };
@@ -101,23 +103,9 @@ describe("Positions after the 20 Nov session", () => {
       const html = render(<Positions />, { ctx: ctxFor(run), seeds: [{ key: ["health"], data: health },
         { key: ["md-plan", 7], data: RAW_PLAN(SEVEN.map((s) => buy(s, 10))) }, { key: ["book", 7], data: book(THU, []) }] });
       const t = text(html);
-      expect(t).toContain("Planned buys for the close of Nov 18, 2026");
-      for (const s of SEVEN) expect(t).toContain(`${s} Buy 10 shares · in the top ranks · the market check is off`);
-      expect(t.match(/skipped today/g)?.length).toBe(7);
-      expect(t).toContain("it will try again next session until Wednesday's decision");
-      expect(t).not.toContain("not filled");
+      expect(t).not.toMatch(/Planned buys|At the close of|skipped today|not filled|waiting to be carried/);
+      for (const s of SEVEN) expect(t).not.toContain(s);
       expect(glitches(html)).toEqual([]);
-    } finally { vi.useRealTimers(); }
-  });
-  it("before 0033 is applied (no carry events): a short buy after its fill session waits to be carried", () => {
-    const health: HealthResp = { now: "2026-11-19T22:00:00Z", heartbeat: [], halts: [], pending_commands: [], deadman: { armed: true, jobs: [], runs: [] }, events: [] };
-    vi.useFakeTimers({ now: new Date("2026-11-19T22:00:00Z"), toFake: ["Date"] });
-    try {
-      const html = render(<Positions />, { ctx: ctxFor(run), seeds: [{ key: ["health"], data: health },
-        { key: ["md-plan", 7], data: RAW_PLAN([buy("ABBV", 5, "filled"), buy("APA", 26)]) }, { key: ["book", 7], data: book(WED, [pos("ABBV", 5, WED)]) }] });
-      const t = text(html);
-      expect(t).toContain("ABBV Buy 5 shares · in the top ranks · bought at the close of Wed, Nov 18 filled");
-      expect(t).toContain("APA Buy 26 shares · in the top ranks · not filled; the next session's close tries again waiting to be carried");
     } finally { vi.useRealTimers(); }
   });
 });
