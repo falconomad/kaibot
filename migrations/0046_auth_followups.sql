@@ -6,6 +6,9 @@
 --    empty, so if the owner row were ever deleted the next account to sign in (an invited member, say) would take the
 --    dashboard. Now it claims only when no owner row exists AND exactly one account exists in auth.users AND that
 --    account is the caller: the fresh project of 0045's admit trigger ("the very first account is let through").
+--    An invited member (a profile, or an invite they redeemed) never claims, not even as the last account left
+--    after the owner's account was deleted (second-key review on #635; that deletion takes the invites the owner made
+--    with it, so the profile is the mark then); restoring an owner is an admin's SQL.
 --    It takes 0045's advisory lock, so no sign-up can land between the count and the claim. With an owner row it
 --    answers kaibot.is_owner() as before. 0038's trigger still refuses a helper.
 -- 2) Revoking invites. kaibot.invite gets revoked_at and revoked_by. public.kb_invite_revoke(id): the inviter, or the
@@ -62,7 +65,10 @@ begin
   insert into kaibot.owner (user_id) select v_uid
    where not exists (select 1 from kaibot.owner)
      and (select count(*) from auth.users) = 1
-     and exists (select 1 from auth.users u where u.id = v_uid);
+     and exists (select 1 from auth.users u where u.id = v_uid)
+     -- never an invited member, even the last account left (e.g. after the owner's account was deleted)
+     and not exists (select 1 from kaibot.profile p where p.user_id = v_uid)
+     and not exists (select 1 from kaibot.invite i where i.used_by = v_uid);
   return kaibot.is_owner();
 end $$;
 

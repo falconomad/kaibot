@@ -105,6 +105,23 @@ def test_the_only_account_of_a_fresh_project_claims(db):  # noqa: F811
 
 
 @needs_pg
+def test_a_member_left_alone_cannot_claim(db):  # noqa: F811
+    """Second-key review: the owner's account deleted (its owner row goes with it), one invited member left."""
+    _member()
+    out = psql(f"""begin;
+      delete from kaibot.owner; delete from auth.users where id <> '{MEMBER}';
+      select count(*) from auth.users;
+      set local test.uid = '{MEMBER}'; set local role authenticated;
+      select public.kb_claim_owner();
+      reset role;
+      select count(*) from kaibot.owner;
+      rollback;""", role=None)
+    # alone, with a profile: false. (The inviter's deletion took the invite rows with it, on delete cascade: the
+    # profile is what marks a member then. An account with neither is a fresh project's first account.)
+    assert out.splitlines()[-3:] == ["1", "f", "0"]
+
+
+@needs_pg
 def test_a_lone_helper_still_cannot_claim(db):  # noqa: F811
     with pytest.raises(AssertionError, match="a helper cannot be the owner"):
         psql(f"""begin;
