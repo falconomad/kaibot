@@ -139,18 +139,22 @@ def test_the_helper_cannot_insert_a_command_or_touch_the_lease_or_any_engine_tab
 @needs_pg
 def test_a_helper_can_never_become_the_owner(seeded):
     """QA-Ops on #497: 0002's kb_claim_owner() makes the first signed-in user the owner while kaibot.owner is
-    empty, and the helper is a signed-in user. With an owner it answers false; without one it is refused (the
-    trigger on kaibot.owner), and another user can still claim."""
+    empty, and the helper is a signed-in user. With an owner it answers false; without one, 0046 (#635) claims only
+    for the one account of a fresh project, so with three accounts it answers false for everyone; the trigger on
+    kaibot.owner still refuses a helper (a direct insert here; a lone helper's claim in test_auth_followups_sql.py)."""
     assert psql("select public.kb_claim_owner();", uid=HELPER) == "f"
     assert psql("select string_agg(user_id::text, ',') from kaibot.owner;", role=None) == OWNER
     psql("delete from kaibot.owner;", role=None)
     try:
-        refused("select public.kb_claim_owner();", "a helper cannot be the owner", uid=HELPER)
+        assert psql("select public.kb_claim_owner();", uid=HELPER) == "f"
         refused(f"insert into kaibot.owner (user_id) values ('{HELPER}');", "a helper cannot be the owner",
                 role=None)
         assert psql("select count(*) from kaibot.owner;", role=None) == "0"
         assert psql("select public.kb_helper_whoami();", uid=HELPER) == '{"helper": true}'  # still only a helper
-        assert psql("select public.kb_claim_owner();", uid=OTHER) == "t"  # the first other user, as before
+        # 0046 (#635): with more than one account nobody claims (tests/test_auth_followups_sql.py has the one-account
+        # case); before it, the first other user did
+        assert psql("select public.kb_claim_owner();", uid=OTHER) == "f"
+        psql(f"insert into kaibot.owner (user_id) values ('{OTHER}');", role=None)
         psql(f"update kaibot.owner set user_id = '{OWNER}';", role=None)
         refused(f"update kaibot.owner set user_id = '{HELPER}';", "a helper cannot be the owner", role=None)
     finally:

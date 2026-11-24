@@ -12,6 +12,7 @@ import { TOO_MANY, isSignupRefused, takeAttempt } from "../lib/attempts";
 
 export const REASON: Record<InviteReason, string> = {
   unknown: "That code isn't an invite. Check it, or ask for a new invite.",
+  revoked: "That invite was withdrawn by the person who sent it. Ask them for a new one.",
   used: "That invite has been used. Sign in with your email instead.",
   expired: "That invite has expired (invites last 7 days). Ask for a new one.",
   email_mismatch: "This invite is for a different email. Use the address the invite was sent to.",

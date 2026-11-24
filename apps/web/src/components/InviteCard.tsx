@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type InviteMade } from "../lib/api";
+import { api, type InviteMade, type InviteRow } from "../lib/api";
 import { NAME } from "../brand/brand";
 
 // "Invite someone" (stakeholder, 24 Nov 2026; migration 0045). The dashboard holds no service key, so it cannot send
 // an email itself: it shows the link and the code to copy or share by mail. Supabase Auth sends the invitee their own
 // email (the link that creates the account) when they register.
+
+export const REVOKE_NOT_APPLIED = "Revoking needs the database update for revoking invites (migration 0046), which isn't applied yet.";
 
 export const NOT_APPLIED = "Invites need the database update for invites (migration 0045), which isn't applied yet. Until then sign-in works as before for existing accounts.";
 
@@ -22,7 +24,34 @@ export function mailto(made: InviteMade, link: string): string {
   return `mailto:${encodeURIComponent(made.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-const STATUS = { open: "open", used: "registered", expired: "expired" } as const;
+const STATUS = { open: "open", used: "registered", expired: "expired", revoked: "revoked" } as const;
+
+/** Revoke (0046, #635): shown only where kb_invite_list says can_revoke (absent before 0046), asked once more before
+ * it is sent. A revoked code admits nobody; a new invite for the email gets a new code. */
+function RevokeCell({ invite, onDone }: { invite: InviteRow; onDone: (msg: string, ok: boolean, email: string) => void }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!invite.can_revoke || invite.status !== "open") return null;
+  async function revoke() {
+    setBusy(true);
+    try {
+      const r = await api.inviteRevoke(invite.id);
+      if (r === null) onDone(REVOKE_NOT_APPLIED, false, invite.email);
+      else onDone(`Invite for ${invite.email} revoked. Its link and code no longer work.`, true, invite.email);
+    } catch (x) { onDone((x as Error).message, false, invite.email); }
+    setBusy(false); setAsking(false);
+  }
+  if (!asking) {
+    return <button type="button" aria-label={`Revoke invite for ${invite.email}`} onClick={() => setAsking(true)}>Revoke</button>;
+  }
+  return (
+    <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+      <button type="button" className="danger" disabled={busy} aria-label={`Yes, revoke invite for ${invite.email}`}
+        onClick={revoke}>{busy ? "Revoking…" : "Yes, revoke"}</button>
+      <button type="button" disabled={busy} onClick={() => setAsking(false)}>Keep</button>
+    </span>
+  );
+}
 
 export function InviteCard() {
   const qc = useQueryClient();
@@ -32,6 +61,14 @@ export function InviteCard() {
   const [err, setErr] = useState("");
   const [made, setMade] = useState<InviteMade | null>(null);
   const [copied, setCopied] = useState("");
+  const [revoked, setRevoked] = useState<{ msg: string; ok: boolean } | null>(null);
+
+  function afterRevoke(msg: string, ok: boolean, email: string) {
+    setRevoked({ msg, ok });
+    if (!ok) return;
+    void qc.invalidateQueries({ queryKey: ["invites"] });
+    if (made?.email === email) setMade(null);  // the link shown above no longer works
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
@@ -92,13 +129,16 @@ export function InviteCard() {
       )}
       {!!list.data?.invites.length && (
         <table className="list" aria-label="Invites" style={{ marginTop: 10 }}>
-          <thead><tr><th>Email</th><th>Status</th><th className="r">Expires</th></tr></thead>
+          <thead><tr><th>Email</th><th>Status</th><th className="r">Expires</th>
+            {list.data.invites.some((i) => i.can_revoke) && <th><span className="sr-only">Revoke</span></th>}</tr></thead>
           <tbody>{list.data.invites.map((i) => (
-            <tr key={i.id}><td>{i.email}</td><td>{STATUS[i.status]}</td>
-              <td className="r num">{i.status === "open" ? new Date(i.expires_at).toLocaleDateString() : "—"}</td></tr>
+            <tr key={i.id}><td>{i.email}</td><td>{STATUS[i.status] ?? i.status}</td>
+              <td className="r num">{i.status === "open" ? new Date(i.expires_at).toLocaleDateString() : "—"}</td>
+              {list.data!.invites.some((x) => x.can_revoke) && <td className="r"><RevokeCell invite={i} onDone={afterRevoke} /></td>}</tr>
           ))}</tbody>
         </table>
       )}
+      {revoked && <p className={revoked.ok ? "muted" : "loss"} role={revoked.ok ? "status" : "alert"}>{revoked.msg}</p>}
     </section>
   );
 }

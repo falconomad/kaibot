@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applied; 0043-0045 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applied; 0043-0046 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -44,6 +44,7 @@ Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applie
 - 0043: **pending** (step 30 below; the headline-feed PR: the dashboard's headline line). Independent of 0040-0042 (0042 is #477's). Additive; any time, but Product applies it outside 09:30-16:00 ET together with the engine release that writes it (until then the engine's writes fail softly, logged once). Changes no trading behaviour.
 - 0044: **pending** (step 31 below; the PR for #585, M13 4.3b: the dead-man's orders get one client id per decision, `...-dmstop.g<n>` / `...-x.g<n>`). After 0030; md5-guarded: refuses unless `kaibot.deadman_act` is exactly 0030's. **Outside 09:30-16:00 ET** (the dead-man acts in market hours). Changes what the dead-man sends while the engine is silent (a re-send is refused by the venue instead of placing a second order). The stakeholder's to apply.
 - 0045: **pending** (step 32 below; the auth-invites PR: sign-in by invite only, stakeholder 24 Nov 2026). Independent of 0040-0044. Additive; any time, also while the engine runs (the engine never touches auth.users). Adds two triggers on `auth.users`: after it, Supabase Auth creates an account only for an email with an open invite (the dashboard's Settings → Invite someone). Changes no trading behaviour.
+- 0046: **pending** (step 33 below; the PR for #635, the auth follow-ups of the #634 review). After 0045. Additive; any time, also while the engine runs (the engine never touches auth.users, kaibot.invite or kaibot.profile). `kb_claim_owner` claims only for the one account of a fresh project; invites can be revoked (`kb_invite_revoke`; a revoked code is refused by the check and both triggers); a member without a profile gets it at sign-in (`kb_profile_repair`). The dashboard works before it (no Revoke button, no repair). Changes no trading behaviour.
 
 ## Apply in this order
 
@@ -84,6 +85,7 @@ run it again. Do not reorder them.
 | 30 | `migrations/0043_headline_feed.sql` (whole file; the headline-feed PR). Independent of 0040-0042. Outside 09:30-16:00 ET, with or before the engine release that writes it | `kaibot.headline` (owner-only display table: the Alpaca/Benzinga headlines the engine already fetches, licence `owner_only`; SEC 8-K lines, licence `public`, a check ties licence to source), RLS with one owner select policy, a trigger keeping 7 days / 500 rows, `kaibot.headline_list` (the licence guard) and the owner-only `kb_headlines` | **Yes**: `delete from kaibot.headline` inside the retention trigger's function (old rows of this table only) |
 | 31 | `migrations/0044_deadman_idempotency_key.sql` (whole file, one transaction; the PR for #585). After 0030. **Outside 09:30-16:00 ET** | `kaibot.deadman_act` re-created: deterministic client ids (`kbdm-<strategy>-<symbol>-<yyyymmdd>-dmstop.g<n>`, `kbdm-intraday-<symbol>-<yyyymmdd>-x.g<n>`); a re-send reuses the id; `<n>` rises only when `GET /v2/orders:by_client_order_id` says the order ended (or a listed stop covers too little); the pass result records root/gen/coid/req, `lookups`, `already_sent` and the lease `epoch`; the dead-man's own working sale is left alone. Refuses (raises, nothing changed) unless the body is 0030's (md5). Same plan, look-back, `deadman_check`, helpers and cron job | No: one guarded `create or replace function`, two revokes |
 | 32 | `migrations/0045_invites.sql` (whole file; the auth-invites PR). Independent of 0040-0044. Any time | `kaibot.invite` and `kaibot.profile` (RLS on, no policies, no table privilege for anon/authenticated); `kb_invite_create`, `kb_invite_list`, `kb_me` (authenticated) and `kb_invite_check` (anon too); triggers `kaibot_invite_admit` (before insert on auth.users: no open invite, or 5 accounts, refuses the account; the very first account of an empty project passes) and `kaibot_invite_redeem` (email confirmed: invite used, profile made). No existing function changes | No: create table / function / trigger, revoke and grant; one `update` of kaibot.invite inside the redeem trigger |
+| 33 | `migrations/0046_auth_followups.sql` (whole file; the PR for #635). After 0045. Any time | `kaibot.invite.revoked_at` / `revoked_by`; `kb_claim_owner` (0002) claims only when no owner row exists and exactly one account exists (the caller's); new `kb_invite_revoke(id)` (the inviter, or the owner for any invite; open invites only) and `kb_profile_repair()` (authenticated); `kb_invite_check` answers `revoked`, `kb_invite_list` shows it and `can_revoke`, `kb_invite_create` and the seat count skip revoked invites; the admit trigger refuses a revoked code, the redeem trigger never redeems one and keeps the invite used if the profile insert fails | No: `add column if not exists`, `create or replace function`, `revoke` and `grant`; `update kaibot.invite` only inside `kb_invite_revoke` and the redeem trigger |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -169,6 +171,11 @@ select relrowsecurity from pg_class where oid = 'kaibot.invite'::regclass;      
 select has_table_privilege('authenticated', 'kaibot.invite', 'select');                            -- false
 select has_function_privilege('anon', 'public.kb_invite_create(text)', 'execute');                -- false
 select string_agg(tgname, ', ' order by tgname) from pg_trigger where tgrelid = 'auth.users'::regclass and tgname like 'kaibot_%';  -- kaibot_invite_admit, kaibot_invite_redeem
+-- step 33 (0046): revoke and repair exist and are not for anon; the claim needs a single account
+select has_function_privilege('anon', 'public.kb_invite_revoke(bigint)', 'execute')
+    or has_function_privilege('anon', 'public.kb_profile_repair()', 'execute');                       -- false
+select prosrc like '%count(*) from auth.users) = 1%' from pg_proc where proname = 'kb_claim_owner';    -- true
+select prosrc like '%revoked_at is null%' from pg_proc where proname = 'invite_admit';                -- true
 -- step 31 (0044): the dead-man names its orders once per decision
 select prosrc like '%by_client_order_id%' and prosrc like '%opened_session < lp.session%' from pg_proc where proname = 'deadman_act';  -- true
 -- step 28 (0041): the lease has a machine column and three functions that take p_machine
