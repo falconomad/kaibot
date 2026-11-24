@@ -13,7 +13,7 @@ import ts from "typescript";
 import { BRAND, NAME, REPO_DIR, brandText } from "./brand/brand";
 import { APP_COLOUR, ICONS, MANIFEST_PATH, backgroundOf, brandHtml, manifest, manifestJson } from "./brand/assets";
 import lock from "./brand/icons.lock.json";
-import { Logo, ROLES, TIMING, mark, resetLogoMotion } from "./components/Logo";
+import { IDLE, LARGE, Logo, ROLES, TIMING, mark, resetLogoMotion } from "./components/Logo";
 import { capsule, circle, drawnFrom } from "./brand/mark";
 import wordDark from "./brand/logo/wordmark-on-dark.svg?raw";
 import wordLight from "./brand/logo/wordmark-on-light.svg?raw";
@@ -22,6 +22,7 @@ import iconDark from "./brand/logo/icon-dark.svg?raw";
 import tokens from "./v4tokens.css?raw";
 import { Shell } from "./components/Shell";
 import { NotOwner, SignIn } from "./pages/SignIn";
+import { Register } from "./pages/Register";
 import { Onboarding } from "./pages/Onboarding";
 import { PRESETS, SPEC } from "./lib/config";
 import { applyBlockers, itemFromCheck } from "./lib/tickers";
@@ -248,6 +249,76 @@ describe("the logo's motion on load", () => {
     } finally { vi.unstubAllGlobals(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }); }
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
     expect(css).toMatch(/\.logo-pulse \{[^}]*opacity: 0;/);
+  });
+});
+
+describe("the logo's idle hop (stakeholder, 24 Nov 2026)", () => {
+  // The hops of a cycle, from its keyframes: each hop is a rest stop, a lift and a landing; returns [start %, end %].
+  const hops = (name: string) => {
+    const body = new RegExp(`@keyframes ${name} \\{(.*)\\}`).exec(css)?.[1] ?? "";
+    const stops = (sel: RegExp) => (sel.exec(body)?.[1] ?? "").split(",").map((v) => parseFloat(v));
+    const rest = stops(/([\d.%, ]+)\{ transform: none; \}/);
+    return [0, 2, 4].map((i) => [rest[i], rest[i + 1]]);
+  };
+  const rule = (sel: string) => new RegExp(`(?:^|\\n)${sel.replace(/\./g, "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
+
+  it("about 600 ms each, 6 s after the intro, on the brand easing, transform only", () => {
+    expect(rule(".logo-hop")).toBe(` position: absolute; will-change: transform; transform-origin: 50% 100%; animation: kb-logo-hop ${IDLE.often}s var(--ease) ${IDLE.after}s infinite; `);
+    expect(rule(".logo-hop.rare")).toBe(` animation-name: kb-logo-hop-rare; animation-duration: ${IDLE.rare}s; `);
+    for (const [name, cycle] of [["kb-logo-hop", IDLE.often], ["kb-logo-hop-rare", IDLE.rare]] as const) {
+      for (const [a, b] of hops(name)) expect(Math.abs(((b - a) / 100) * cycle - 0.6), name).toBeLessThan(0.02);
+      const body = new RegExp(`@keyframes ${name} \\{(.*)\\}`).exec(css)?.[1] ?? "";
+      expect([...body.matchAll(/([a-z-]+)\s*:/g)].every((m) => m[1] === "transform"), name).toBe(true);
+      expect(body).toContain("translateY(-60%) scale(.94, 1.06)"); // up 60% of the point: 3.1-3.8 px at 26-30.8 px
+      expect(hops(name)[0][0], "the first hop comes right at the end of the delay").toBe(0);
+    }
+  });
+
+  it("every 8-10 s on sign-in, uneven; the header's variant much rarer, about every 30 s", () => {
+    const gaps = (name: string, cycle: number) => {
+      const starts = hops(name).map(([a]) => (a / 100) * cycle);
+      return starts.map((t, i) => Math.round(((i + 1 < starts.length ? starts[i + 1] : cycle) - t) * 100) / 100);
+    };
+    const often = gaps("kb-logo-hop", IDLE.often), rare = gaps("kb-logo-hop-rare", IDLE.rare);
+    expect(often).toEqual([8.69, 9.4, 8.91]);
+    expect(rare).toEqual([28.98, 31.32, 29.7]);
+    for (const g of often) expect(g >= 8 && g <= 10).toBe(true);
+    for (const g of rare) expect(g >= 28 && g <= 32).toBe(true);
+    expect(new Set(often).size).toBe(3); // jitter: no two gaps alike
+    expect(Math.min(...rare)).toBeGreaterThan(3 * Math.max(...often));
+  });
+
+  it("where: sign-in and /register often, the app's header (and New run's) rare", () => {
+    const sources = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    for (const f of ["./pages/SignIn.tsx", "./pages/Register.tsx"]) expect(sources[f], f).toContain('<Logo animate idle="often" large />');
+    for (const f of ["./components/Shell.tsx", "./pages/Onboarding.tsx"]) expect(sources[f], f).toContain('<Logo animate idle="rare" />');
+    expect(still(<Logo idle="rare" />)).toMatch(/<span class="logo-box"><svg class="logo logo-word"[^]*<svg class="logo-hop rare"/);
+    expect(still(<Logo idle="often" />)).toMatch(/<svg class="logo-hop"/);
+    expect(still(<Logo />)).not.toMatch(/logo-hop|logo-box/);
+  });
+
+  it("with reduced motion: no hop at all, and the global rule would stop any that slipped through", () => {
+    vi.stubGlobal("window", { matchMedia: (q: string) => ({ matches: q === "(prefers-reduced-motion: reduce)" }) });
+    try {
+      for (const idle of ["often", "rare"] as const) {
+        const html = still(<Logo idle={idle} />);
+        expect(html).not.toMatch(/logo-hop|logo-box/);
+        expect(ds(html)).toEqual(fileDs(wordDark));
+      }
+    } finally { vi.unstubAllGlobals(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }); }
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
+  });
+
+  it("the sign-in (and /register) logo is 1.1 times the header's, on phones too", () => {
+    expect(LARGE).toBe(1.1);
+    const big = Number(/\n\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
+    const bigPhone = Number(/@media \(max-width: 760px\) \{[^@]*\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
+    expect(Math.round((big / 28) * 1000) / 1000).toBe(LARGE);
+    expect(Math.round((bigPhone / 26) * 1000) / 1000).toBe(LARGE);
+    for (const html of [render(<SignIn />), render(<Register />)]) expect(html).toContain('class="logo logo-word logo-lg');
+    const run = paperRun();
+    const header = render(<Shell />, { route: "*", seeds: [{ key: ["runs"], data: [run] }, { key: ["overview", 1], data: emptyOverview(run) }] });
+    expect(header).not.toContain("logo-lg");
   });
 });
 
