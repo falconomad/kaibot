@@ -1199,6 +1199,12 @@ class Engine:
             return f"config refused: {d.refused}"
         return None
 
+    def trading_state(self):
+        """M10 1.21 (#446), step 1: the one trading state, derived from `entry_block` (engine/state.py)."""
+        from kaibot.engine.state import from_entry_block
+
+        return from_entry_block(self.entry_block())
+
     def _md_stops(self) -> dict:
         """(strategy, symbol) -> the price of the multi-day protective stop resting at the broker now."""
         from kaibot.engine.failsafe import _md_stop, multi_day_names
