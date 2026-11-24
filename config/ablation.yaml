@@ -6,21 +6,15 @@
 # sha256 (recorded in every result and trial row), so a rule tuned after seeing data shows up as a new trial.
 # The admission thresholds (95th percentile vs random, 63 trading days, 100 known trades) are fixed in
 # src/kaibot/evaluation/ablation.py and cannot be loosened here. Passing only PROPOSES a feature (docs/ops/ablation.md).
-version: 1
+#
+# Amendments (as for docs/prereg/*.md): a change is made only by a dated entry APPENDED to `amendments:` at the end
+# of this file, and `version` is 1 + the number of amendments. Earlier entries are never edited, removed or
+# renumbered. scripts/run_ablation.py refuses a config whose version and amendments disagree, and records the
+# version and the amendment headings in every trial row; past trial rows keep the sha256 they recorded.
+version: 2
 seed: 39            # numpy RNG seed for the random subsets (deterministic)
 n_random: 1000      # random subsets per rule (>= 1000)
 rules:
-  - name: sv_rel_no_spike
-    feature: short_volume.svr_rel
-    op: "<="
-    value: 1.5
-    hypothesis: A jump in the off-exchange short-volume share vs its 20-day mean flags informed selling; skipping
-      those longs raises mean R.
-  - name: sv_level_not_extreme
-    feature: short_volume.svr
-    op: "<="
-    value: 0.6
-    hypothesis: Days when more than 60% of off-exchange volume is short are crowded-short; longs there do worse.
   - name: insider_no_net_selling
     feature: insider_30d.net_usd
     op: ">="
@@ -46,3 +40,26 @@ rules:
     op: ">="
     value: -2
     hypothesis: Same for recession/layoffs news tone shocks.
+amendments:
+  - heading: >-
+      Amendment 1 (24 Nov 2026, Product, stakeholder decision on #623, before any ablation run on this version):
+      the two FINRA short-volume rules are removed
+    n: 1
+    date: 2026-11-24
+    by: Product (decision of 24 Nov 2026); written by backend-quant
+    issue: "#623"
+    reason: >-
+      The stakeholder switched FINRA Reg SHO short volume off (#623, PR #630). The finra.org Terms of Use
+      forbid building a database of FINRA website data and using it with predictive analytics, so no ablation
+      rule may read it. Feature short_volume no longer exists in kaibot.features.alt.
+    supersedes_sha256: 5d5e49aa502016dbdd414c72e52d22428b619f2c5088b44522653cd2bdb59537  # version 1 (PR #630 tree)
+    removed:
+      - {name: sv_rel_no_spike, feature: short_volume.svr_rel, op: "<=", value: 1.5}
+      - {name: sv_level_not_extreme, feature: short_volume.svr, op: "<=", value: 0.6}
+    unchanged: >-
+      No other rule, threshold or setting changes. The five remaining rules (insider_no_net_selling,
+      insider_any_buying, tariffs_tone_not_shock, conflict_tone_not_shock, recession_tone_not_shock) keep their
+      name, feature, op, value and hypothesis; seed 39 and n_random 1000 stay; the admission thresholds in
+      src/kaibot/evaluation/ablation.py are not touched. Only `version` goes from 1 to 2. Past ablation trials
+      keep their recorded config_sha256 and trial_id; no trial row is edited, removed or renumbered. Version 2
+      has a new sha256, so its runs are new trials.

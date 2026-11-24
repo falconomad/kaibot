@@ -37,10 +37,17 @@ the kept set is just a random subset, so one rule clears the per-rule bar about 
 over 200 seeds). With 7 rules that would mean a false admit *somewhere* about 30% of the time, so admission also
 requires Bonferroni across the rules tested (family-wise 5%). The admission PR's own replay trial is a second check.
 
-**FINRA rules on hold (#623).** `short_volume` is switched off (docs/data/finra_regsho.md). The two pre-registered
-rules on it (`sv_rel_no_spike`, `sv_level_not_extreme`) are still in `config/ablation.yaml`, because that file is
-frozen. `scripts/run_ablation.py` refuses any config with `short_volume.*` rules until Product amends the
-pre-registration.
+**FINRA rules removed (#623, Amendment 1).** `short_volume` is switched off (docs/data/finra_regsho.md). Product
+removed the two pre-registered rules on it (`sv_rel_no_spike`, `sv_level_not_extreme`) by Amendment 1 at the end of
+`config/ablation.yaml` (24 Nov 2026): version 2, five rules, nothing else changed. `scripts/run_ablation.py` still
+refuses any config with a `short_volume.*` rule.
+
+**Amending the config.** As for `docs/prereg/*.md`: append a dated entry to `amendments:` (n, heading, date, reason,
+the rules removed, what stays unchanged) and raise `version` to 1 + the number of amendments. Never edit, remove or
+renumber an earlier entry. `run_ablation.py` refuses a config whose version and amendments disagree, or that brings
+back a removed rule under its old name. Each trial row records `config_version`, `config_amendments` and
+`config_sha256`: a new version has a new hash, so its runs are new trials, and rows logged under an earlier version
+keep the hash and id they were written with (`data/trials.jsonl` is only appended to).
 
 ## Running it
 ```

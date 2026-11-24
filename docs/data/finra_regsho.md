@@ -21,9 +21,8 @@ Kaibot's alt store is a database built from those files for predictive research,
 - `config/sources.yaml`: the `finra_regsho` budget is gone.
 - `kaibot.features.alt`: the `short_volume` feature is removed; `alt_features()` no longer returns it.
 - `scripts/run_ablation.py` refuses a config with rules on `short_volume.*`. The pre-registered
-  `config/ablation.yaml` still has two such rules (`sv_rel_no_spike`, `sv_level_not_extreme`). It is frozen (its
-  sha256 is in every ablation trial), so the data team did not edit it: **Product decides and amends it**.
-  Until then the ablation is refused instead of quietly reporting those rules as `insufficient`.
+  `config/ablation.yaml` had two such rules (`sv_rel_no_spike`, `sv_level_not_extreme`). Product removed them by
+  Amendment 1 of that file (24 Nov 2026, version 2); the five other rules are unchanged and run again.
 - The CNMS test fixture is deleted. `tests/test_finra_off.py` checks all of the above, and that no code, config
   or dashboard file references the source.
 
