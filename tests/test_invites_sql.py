@@ -187,11 +187,13 @@ def test_who_may_invite(db):
     # an invited member may invite, and sees only their own invites; the owner sees all
     _member()
     assert j("select public.kb_me();", uid=MEMBER)["name"] == "Mia"
+    # (one invite only: the other SQL tests' up to three accounts and this member must fit in the cap of 5)
     j("select public.kb_invite_create('friend-of-mia@example.com');", uid=MEMBER)
-    j("select public.kb_invite_create('friend-of-owner@example.com');")
     mine = j("select public.kb_invite_list();", uid=MEMBER)["invites"]
-    assert [i["email"] for i in mine] == ["friend-of-mia@example.com"]
-    assert len(j("select public.kb_invite_list();")["invites"]) == 3
+    assert [(i["email"], i["mine"]) for i in mine] == [("friend-of-mia@example.com", True)]
+    everyone = j("select public.kb_invite_list();")["invites"]
+    assert [i["email"] for i in everyone] == ["friend-of-mia@example.com", "member@example.com"]
+    assert [i["mine"] for i in everyone] == [False, True]
     # nobody reads the tables directly
     for uid in (OWNER, MEMBER):
         for t in ("kaibot.invite", "kaibot.profile"):

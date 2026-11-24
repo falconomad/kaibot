@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applied; 0043-0044 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 24 Nov 2026 (0001-0042 applied; 0043-0045 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
