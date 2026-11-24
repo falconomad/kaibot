@@ -34,7 +34,7 @@ import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
 import { DayChange, PricesPaused, useMarks } from "../components/Marks";
 import { type BuyState, buyState, buyStateText, carriesFrom } from "../lib/carry";
-import { carriedText, carriedToday, currentPlans, sessionDate } from "../lib/plantoday";
+import { carriedText, carriedToday, carryHold, carryHoldText, currentPlans, sessionDate } from "../lib/plantoday";
 import { planNotes } from "../lib/planlate";
 import { markOf, potLive } from "../lib/marks";
 
@@ -83,6 +83,8 @@ export function Positions() {
   for (const c of carriedToday(plans, carries, today))
     if (!tonight.some((o) => o.rule === c.rule && o.symbol === c.symbol))
       tonight.push({ symbol: c.symbol, action: "buy", sharesNow: c.held, sharesTarget: c.target, why: c.why, state: "working", rule: c.rule, fillsAt: today, carriedFrom: c.from });
+  // #621: the market filter holds the carried buys: one plain line instead of "sent again at today's close"
+  const hold = carryHold(plans, carries, today);
   // M9 1.3 / 1.4 (#517, #518): a decision taken late, and a decision sent late (lib/planlate.ts)
   const notes = planNotes(plans, carries, today);
   const withCarry = tonight.map((o) => {
@@ -161,6 +163,7 @@ export function Positions() {
               {n.skipped.length > 0 && <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{n.skipped.map((x) => <li key={x.symbol}><b>{x.symbol}</b> was left out: {x.text}</li>)}</ul>}
             </div>
           ))}
+          {hold && <p className="muted carry-hold" role="status">{carryHoldText(hold)}</p>}
           {(tonight.length > 0 || unmatched.length > 0) && <NextClose orders={withCarry.map((o) => ({ ...o, unfilled: matchU(o.rule, o.symbol, o.fillsAt) }))}
             extra={unmatched} today={today} />}
         </>

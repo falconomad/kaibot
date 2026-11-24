@@ -76,4 +76,13 @@ describe("24 Nov: the 18 Nov plan is over", () => {
     const a = text(render(<Tape />, { ctx: ctxFor(run, { overview }), seeds: seeds("2026-11-18", withCarry) }));
     expect(a).toContain("Last plan (18 Nov): 7 of 37 buys filled, 2 carried into today's close, 28 expired at the close");
   });
+  it("#621: with the market filter off the carried buys are on hold, in one line; nothing says 'sent again'", () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    const off = { type: "multi_day_carry", ts: "2026-11-23T20:50:19Z", run_id: 7, payload: { strategy: "trend_momentum", session: "2026-11-23",
+      of: "2026-11-18", carried: [], skipped: Object.fromEntries(SYMS.slice(7).map((s) => [s, "market filter off"])), risk_off: true } };
+    const t = text(render(<Positions />, { ctx: ctxFor(run, { overview }), seeds: seeds("2026-11-18", { ...health, events: [...health.events, off] }) }));
+    expect(t.match(/Carried buys on hold — market filter off/g)).toHaveLength(1);
+    expect(t).not.toMatch(/sent again|At the close of|Last plan/);
+    for (const s of SYMS) expect(t).not.toContain(s);
+  });
 });
