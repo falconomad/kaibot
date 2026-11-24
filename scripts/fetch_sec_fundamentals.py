@@ -8,8 +8,10 @@
 Needs KAIBOT_SEC_USER_AGENT ("Name email@domain", SEC fair access), from the environment or the --env file; refuses
 to run without it and never prints it. One request per company to data.sec.gov (companyfacts), paced by the shared
 `sec_edgar` budget (5 req/s; SEC allows 10), 429/5xx retried with backoff, a 403 stops the run. A company whose raw
-file is younger than --max-age-days is not downloaded again. Company -> CIK comes from data/earnings/cik_map.csv
-(scripts/fetch_earnings_dates.py) when it exists, else it is resolved here the same way (about 2,000 more requests).
+file is younger than --max-age-days is not downloaded again. If the first 3 downloads all fail with the same
+connection or certificate error the run stops (the network or the root certificates are broken, not the companies).
+Company -> CIK comes from data/earnings/cik_map.csv (scripts/fetch_earnings_dates.py) when it exists, else it is
+resolved here the same way (about 2,000 more requests).
 
 Writes data/fundamentals/: facts/cik=##########.parquet, ciks.parquet, raw/companyfacts/*.json.gz, build.json.
 Docs: docs/data/fundamentals.md.
@@ -88,6 +90,16 @@ def mapping(data: Path, m: Membership, ua: str) -> tuple[list, str]:
     return rows, "resolved here (data/fundamentals/cik_map.csv)"
 
 
+EARLY_ABORT_AFTER = 3  # downloads; all failing alike means the machine, not the companies, is the problem
+
+
+def _network_failure(e: http.HttpError) -> str | None:
+    """A key for errors that say nothing about the company (no connection, bad certificates), else None."""
+    if isinstance(e, http.CertificateError):
+        return "certificate"
+    return e.detail if e.status == 0 else None
+
+
 def fetch(data: Path, ua: str, refresh: bool, max_age_days: float, limit: int | None) -> dict:
     out = data / "fundamentals"
     t0 = time.monotonic()
@@ -99,6 +111,7 @@ def fetch(data: Path, ua: str, refresh: bool, max_age_days: float, limit: int | 
     print(f"{len(m.spells)} companies since 2016, {len(ciks)} with a CIK; companyfacts at 5 requests/s…", flush=True)
     get = getter(ua)
     reports, misses, errors, new_versions, skipped = {}, [], {}, 0, 0
+    first: list[str | None] = []  # outcome of the first EARLY_ABORT_AFTER downloads (None: not a network failure)
     for i, cik in enumerate(ciks, 1):
         raw = out / "raw" / "companyfacts" / f"CIK{cik}.json.gz"
         fresh = raw.is_file() and (time.time() - raw.stat().st_mtime) < max_age_days * 86400
@@ -107,7 +120,17 @@ def fetch(data: Path, ua: str, refresh: bool, max_age_days: float, limit: int | 
                 skipped += 1
                 body, seen = sf.read_raw(raw), datetime.fromtimestamp(raw.stat().st_mtime, UTC)
             else:
-                status, body = get(sf.URL.format(cik=cik))
+                try:
+                    status, body = get(sf.URL.format(cik=cik))
+                except http.HttpError as e:
+                    if len(first) < EARLY_ABORT_AFTER:
+                        first.append(_network_failure(e))
+                        if len(first) == EARLY_ABORT_AFTER and first[0] is not None and len(set(first)) == 1:
+                            raise SystemExit(f"The first {EARLY_ABORT_AFTER} companies all failed with the same "
+                                             f"error, so the run stopped instead of trying {len(ciks)}: {e}") from None
+                    raise
+                if len(first) < EARLY_ABORT_AFTER:
+                    first.append(None)
                 if status == 404:
                     misses.append(cik)
                     continue
