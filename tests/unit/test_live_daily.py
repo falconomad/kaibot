@@ -668,6 +668,37 @@ def test_a_carry_waits_while_the_market_filter_is_off(data, tmp_path, monkeypatc
     assert notes and all(n["risk_off"] and not n["carried"] for n in notes)
 
 
+def test_a_carry_held_by_the_market_filter_journals_each_short_buy_once_per_session_with_its_reason(
+        data, tmp_path, monkeypatch):
+    """#621: while the market filter is off a carried buy is not sent, and the skip is on record: on every
+    carry-over session each buy still short of the plan is in `md_send.carry.skipped` as "market filter off", with
+    one `md_send` and one `multi_day_carry` event per (rule, session), never a carry order."""
+    from kaibot.engine import daily
+
+    monkeypatch.setattr(daily, "market_on", lambda spy: False)
+    s, h = _carry_run(data, tmp_path)
+    h.run()
+    x, y = _first_orders(h)
+    fill = datetime.fromisoformat(x["submitted_at"]).astimezone(NY).date()
+    short = {x["symbol"], y["symbol"]}
+    sends = [b for *_, b in h.journal.entries(kinds=("md_send",)) if b["strategy"] == s.name]
+    keys = [b["session"] for b in sends]
+    assert len(keys) == len(set(keys))  # one send record per session
+    carried = [b for b in sends if b.get("carry")]
+    nxt = str(data.day(data.index_of(fill) + 1))
+    assert carried and carried[0]["session"] == nxt
+    for b in carried:
+        note = b["carry"]
+        assert note["risk_off"] is True and note["carried"] == [] and note["of"] == str(fill)
+        assert short <= set(note["skipped"]) and set(note["skipped"].values()) == {"market filter off"}
+        assert not [t for t in b["targets"] if t[2] == daily.CARRY]
+    ev = [b for k, b in h.events if k == "multi_day_carry" and b["strategy"] == s.name]
+    assert sorted(e["session"] for e in ev) == sorted(b["session"] for b in carried)
+    assert all(e["skipped"] == b["carry"]["skipped"] for e, b in
+               zip(sorted(ev, key=lambda e: e["session"]), sorted(carried, key=lambda b: b["session"]), strict=True))
+    assert not [o for o in h.broker.orders.values() if "-carry-" in o["client_order_id"]]
+
+
 def test_a_carry_skips_a_stock_with_an_announced_corporate_action(data, tmp_path):
     """Amendment 6 (live-safety exclusion) applies to a carried buy as to any buy."""
     from types import SimpleNamespace
