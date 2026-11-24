@@ -8,7 +8,17 @@
 // Anything else (the function unavailable or stale, a fill since the close, a count that differs, the market closed)
 // falls back to what potNow does (the engine's minute ledger, else the booked close) for the pot and to the close marks
 // for the rows. A number never mixes the two sources. Pure: unit-tested in marks.test.ts.
+//
+// The S&P 500 side (stakeholder, 24 Nov 2026: "Ahead of / Behind the S&P 500 by $X" and the chart legend did not move
+// during the session). The same answer carries SPY's last IEX trade and the close before it (api/marks.ts). While the
+// pot is live (fresh "live" or "engine") and that trade is at most 30 s old (STALE_MS, the prices' own rule) and its
+// previous close is the very session the S&P 500 line ends at, the live point's SPY is
+//   that close's SPY value x (SPY now / SPY's previous close)
+// so the hero's gap, the chart's last S&P point and its legend move together (homeLine). Otherwise the live point's SPY
+// stays at the last close, as before, and the page says so: "at last close" (vsSpyText, PotChart's legend).
 import type { Overview, Run } from "./api";
+import type { Curve } from "./model";
+import { money } from "./fmt";
 import { type Book, type LiveMark, type PotNow, type SeriesPoint, potNow } from "./book";
 
 /** Prices older than this are not live any more (three missed polls). */
@@ -17,7 +27,10 @@ export const STALE_MS = 30_000;
 export interface Mark { qty: number; price: number; prevClose: number | null }
 /** `at`: when the poll's prices were read, on this device's clock (ms). `streamAt`: when streamed prices
  *  (lib/stream.ts) last replaced some of them; absent on the poll alone. */
-export interface Marks { at: number; by: Record<string, Mark>; streamAt?: number }
+export interface Marks { at: number; by: Record<string, Mark>; streamAt?: number; spy?: SpyMark | null }
+/** SPY now (api/marks.ts `spy`). `at`: when the price was traded, on this device's clock (ms), measured on the server's
+ *  clock as the poll's age is; `prevSession`: the ET session `prevClose` closed (null with it when unknown). */
+export interface SpyMark { price: number; at: number; prevClose: number | null; prevSession: string | null }
 export interface LiveBook extends Marks { pot: number; dayPnl: number; dayPct: number }
 /** Where the pot on screen comes from: live prices, the engine's minute row, or a booked close. */
 export type Fresh = { kind: "live"; at: number } | { kind: "engine"; at: number } | { kind: "close"; session: string };
@@ -38,7 +51,65 @@ export function parseMarks(raw: unknown, received = Date.now(), sent?: string | 
     by[p.symbol] = { qty: p.qty, price: p.price, prevClose: fin(p.prev_close) && p.prev_close > 0 ? p.prev_close : null };
   }
   const server = sent ? Date.parse(sent) : NaN;
-  return { at: Number.isFinite(server) ? received - Math.max(0, server - asOf) : asOf, by };
+  const back = (t: number) => (Number.isFinite(server) ? received - Math.max(0, server - t) : t);
+  const out: Marks = { at: back(asOf), by };
+  const spy = parseSpy((r as { spy?: unknown }).spy);
+  if (spy) out.spy = { ...spy, at: back(spy.at) };
+  return out;
+}
+
+const SESSION = /^\d{4}-\d{2}-\d{2}$/;
+/** The answer's `spy` -> a SpyMark on the server's clock, or null when absent or not what api/marks.ts sends. A
+ *  previous close without its session (or the other way round) is no previous close: both are null then. */
+export function parseSpy(raw: unknown): SpyMark | null {
+  const s = raw as { price?: unknown; as_of?: unknown; prev_close?: unknown; prev_session?: unknown } | null;
+  const at = typeof s?.as_of === "string" ? Date.parse(s.as_of) : NaN;
+  if (!s || typeof s !== "object" || !fin(s.price) || s.price <= 0 || !Number.isFinite(at)) return null;
+  const ok = fin(s.prev_close) && s.prev_close > 0 && typeof s.prev_session === "string" && SESSION.test(s.prev_session);
+  return { price: s.price, at, prevClose: ok ? (s.prev_close as number) : null, prevSession: ok ? (s.prev_session as string) : null };
+}
+
+/** SPY's move since its previous close, as a factor, when it may be used against `close` (the session the S&P 500
+ *  line ends at): fresh (STALE_MS, and not from the future by more than a second), and its previous close is that
+ *  very session. Else null: the S&P 500 side stays at the last close. */
+export function spyFactor(spy: SpyMark | null | undefined, close: string | undefined, now = Date.now()): number | null {
+  if (!spy || !close || spy.prevClose === null || spy.prevSession !== close) return null;
+  if (!(now - spy.at <= STALE_MS && now - spy.at >= -1_000) || !(spy.price > 0) || !(spy.prevClose > 0)) return null;
+  return spy.price / spy.prevClose;
+}
+
+/** Where the S&P 500 side of the last point comes from: none (no live point: closes on both sides), live (SPY now),
+ *  or close (a live pot against SPY's last close: the page says "at last close"). */
+export type SpyAt = "none" | "live" | "close";
+
+/** Home's line and its end, the one point the hero, "Ahead of / Behind the S&P 500" and the chart's legend all read.
+ *  `c`: the booked closes (mtmCurve or curve); `p`: potLive's answer (null for a replay). While the pot is live (fresh
+ *  "live" or "engine") the last point is today's, at the live pot, marked live, and its SPY moves with SPY now when
+ *  spyFactor allows it, else holds the last close (spyAt "close"). A booked close of the same session as the line's
+ *  last point gives that point the book's figure (the hero's), so the two never differ. Pure; `c` is not changed. */
+export function homeLine(c: Curve[], p: Pick<PotNow, "pot"> & { fresh: Fresh | null } | null, spy: SpyMark | null | undefined,
+  today: string, start: number, now = Date.now()): { curve: Curve[]; end: Curve | undefined; spyAt: SpyAt } {
+  const curve = c.slice();
+  const tail = curve.at(-1);
+  const f = p?.fresh;
+  if (p && f && f.kind !== "close") {
+    // the close the S&P 500 line ends at: the last point before today (today's own point is replaced below)
+    const close = tail?.session === today ? curve.at(-2) : tail;
+    const k = close && close.session < today ? spyFactor(spy, close.session, now) : null;
+    const base = tail?.session === today ? tail.spy : tail?.spy ?? start;
+    const point: Curve = { session: today, pot: p.pot, spy: k !== null ? close!.spy * k : base, live: true, ...(k !== null ? {} : { spyClose: true }) };
+    if (tail?.session === today) curve[curve.length - 1] = point;
+    else curve.push(point);
+    return { curve, end: point, spyAt: k !== null ? "live" : "close" };
+  }
+  if (p && f?.kind === "close" && tail?.session === f.session && tail.pot !== p.pot) curve[curve.length - 1] = { ...tail, pot: p.pot };
+  return { curve, end: curve.at(-1), spyAt: "none" };
+}
+
+/** "Ahead of the S&P 500 by $1,234", or "... the S&P 500 at last close by ..." when a live pot is measured against
+ *  SPY's last close (spyAt "close"): it never reads as live when only one side is. */
+export function vsSpyText(vs: number, spyAt: SpyAt, amount = true): string {
+  return `${vs >= 0 ? "Ahead of" : "Behind"} the S&P 500${spyAt === "close" ? " at last close" : ""}${amount ? ` by ${money(Math.abs(vs))}` : ""}`;
 }
 
 /** The book marked at the account's prices, or null when they may not be used (see the top of this file).

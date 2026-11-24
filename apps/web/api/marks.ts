@@ -6,17 +6,24 @@
 //    asked. kb_runs only reads; its answer is not used.
 // 2. No ALPACA_API_KEY / ALPACA_SECRET here (preview deployments, local dev), or a base URL that is not the paper one:
 //    {available: false}. Nothing is read.
-// 3. Otherwise ONE read of Alpaca PAPER, GET only: the open positions (paper-api /v2/positions). Nothing else of the
-//    broker is touched: not the account, not the asset list, not market data.
+// 3. Otherwise two reads of Alpaca, GET only, side by side: the paper account's open positions (paper-api /v2/positions)
+//    and SPY's snapshot on the free IEX feed (data /v2/stocks/SPY/snapshot?feed=iex), so Home can move the S&P 500 side
+//    of "Ahead of / Behind the S&P 500" with the pot (stakeholder, 24 Nov 2026). Nothing else of the broker is touched:
+//    not the account, not the asset list, no other symbol. SPY is optional: a snapshot that fails or cannot be read
+//    leaves the positions answer as it is, with the last SPY read kept (its own as_of says how old it is) or null.
 // 4. The engine trades on the same paper account and shares its request budget (Alpaca: 200 calls a minute per
 //    account; config/sources.yaml gives the engine 150 of them), so each instance of this function calls Alpaca at most
 //    once in 10 seconds, whatever happens: requests inside that window get the last answer from memory, requests that
 //    arrive together share one call, and a failed or timed-out read (4 s) is not tried again until the window is over.
 //    After a failure the last good answer is served, with its own as_of, for at most 30 seconds; the page stops
 //    calling it live at the same age.
-// The answer is {available, as_of, positions: [{symbol, qty, price, prev_close}]} and nothing else: no account number,
-// no cost, no key. This file cannot place, change or cancel anything at the broker: it sends Alpaca one GET to one
-// address and holds no other. Keys are read from the environment only and never logged or returned.
+// The answer is {available, as_of, positions: [{symbol, qty, price, prev_close}], spy: {price, as_of, prev_close,
+// prev_session} | null} and nothing else: no account number, no cost, no key. spy.as_of is the time of SPY's last IEX
+// trade (not of the read), so the page can apply its 30 s rule to the price itself; prev_close is the close of the
+// latest daily bar of a session BEFORE that trade's session (ET), and prev_session that session, so the page can
+// check it is the very close its S&P 500 line ends at (a holiday, a weekend, a missing close: it is not, and the page
+// says "at last close" instead). This file cannot place, change or cancel anything at the broker: it sends Alpaca a
+// GET to two fixed addresses and holds no other. Keys are read from the environment only and never logged or returned.
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -26,6 +33,10 @@ type Obj = Record<string, unknown>;
 
 export const PAPER_URL = "https://paper-api.alpaca.markets";
 export const POSITIONS_URL = `${PAPER_URL}/v2/positions`;
+export const DATA_URL = "https://data.alpaca.markets";
+/** SPY on the free IEX feed (SIP is only for data >= 15 min old). The data host's budget is the engine's `alpaca`
+ *  budget in config/sources.yaml: this is one call in 10 s per instance, as the positions read is. */
+export const SPY_URL = `${DATA_URL}/v2/stocks/SPY/snapshot?feed=iex`;
 /** At most one upstream call per instance in this many milliseconds. */
 export const MIN_GAP_MS = 10_000;
 /** The upstream read is given up after this long. */
@@ -34,10 +45,11 @@ export const TIMEOUT_MS = 4_000;
 export const KEEP_MS = 30_000;
 
 export interface Mark { symbol: string; qty: number; price: number; prev_close: number | null }
-export interface Answer { available: boolean; as_of: string | null; positions: Mark[] }
-/** One instance's memory: when Alpaca was last called, the last good answer, and the call under way. */
-export interface Cache { called: number; good: { at: number; positions: Mark[] } | null; flight: Promise<Answer> | null }
-export const newCache = (): Cache => ({ called: -Infinity, good: null, flight: null });
+export interface Spy { price: number; as_of: string; prev_close: number | null; prev_session: string | null }
+export interface Answer { available: boolean; as_of: string | null; positions: Mark[]; spy?: Spy | null }
+/** One instance's memory: when Alpaca was last called, the last good answer, the last good SPY, and the call under way. */
+export interface Cache { called: number; good: { at: number; positions: Mark[] } | null; spy: Spy | null; flight: Promise<Answer> | null }
+export const newCache = (): Cache => ({ called: -Infinity, good: null, spy: null, flight: null });
 const CACHE = newCache();
 
 const NONE: Answer = { available: false, as_of: null, positions: [] };
@@ -59,25 +71,51 @@ function mark(row: unknown): Mark {
   return { symbol, qty, price, prev_close: Number.isFinite(prev) && prev > 0 ? prev : null };
 }
 
-/** The only way this file talks to Alpaca: one GET of the paper account's open positions, given up after TIMEOUT_MS. */
-async function positions(f: Fetch, keyId: string, secret: string): Promise<Mark[]> {
+const etDay = (t: number) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(t);
+
+/** SPY's snapshot -> its last trade and the close before that trade's session, or Unreadable. The close is the newer of
+ *  dailyBar and prevDailyBar whose ET session is before the trade's: before the first IEX trade of a day dailyBar is
+ *  still the last session's, after it the day's own. No such bar: prev_close and prev_session are null. */
+export function spyOf(body: unknown): Spy {
+  const b = obj(body), trade = obj(b?.latestTrade), price = num(trade?.p), ts = typeof trade?.t === "string" ? Date.parse(trade.t) : NaN;
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(ts)) throw new Unreadable();
+  const day = etDay(ts);
+  let prev: { c: number; session: string } | null = null;
+  for (const bar of [obj(b?.dailyBar), obj(b?.prevDailyBar)]) {
+    const c = num(bar?.c), t = typeof bar?.t === "string" ? Date.parse(bar.t) : NaN;
+    if (!Number.isFinite(c) || c <= 0 || !Number.isFinite(t)) continue;
+    const session = etDay(t);
+    if (session < day && (!prev || session > prev.session)) prev = { c, session };
+  }
+  return { price, as_of: new Date(ts).toISOString(), prev_close: prev?.c ?? null, prev_session: prev?.session ?? null };
+}
+
+/** The only way this file talks to Alpaca: a GET of one of its two fixed addresses, given up after TIMEOUT_MS. */
+async function alpacaGet(f: Fetch, url: typeof POSITIONS_URL | typeof SPY_URL, keyId: string, secret: string): Promise<unknown> {
   const stop = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, no) => { timer = setTimeout(() => { stop.abort(); no(new TimedOut()); }, TIMEOUT_MS); });
   const read = (async () => {
-    const r = await f(POSITIONS_URL, { method: "GET", signal: stop.signal,
+    const r = await f(url, { method: "GET", signal: stop.signal,
       headers: { "APCA-API-KEY-ID": keyId, "APCA-API-SECRET-KEY": secret, Accept: "application/json" } });
     if (!r.ok) throw new HttpError(r.status);
-    const rows: unknown = await r.json().catch(() => null);
-    if (!Array.isArray(rows)) throw new Unreadable();
-    return rows.map(mark);
+    return r.json().catch(() => null) as Promise<unknown>;
   })();
   try { return await Promise.race([read, late]); } finally { clearTimeout(timer); }
 }
 
+/** The paper account's open positions. */
+async function positions(f: Fetch, keyId: string, secret: string): Promise<Mark[]> {
+  const rows = await alpacaGet(f, POSITIONS_URL, keyId, secret);
+  if (!Array.isArray(rows)) throw new Unreadable();
+  return rows.map(mark);
+}
+
+const why = (e: unknown) => (e instanceof HttpError ? `HTTP ${e.status}` : e instanceof Error ? e.name : "error");
+
 /** The last good answer while it is young enough, else unavailable. */
 const answer = (c: Cache, t: number): Answer =>
-  c.good && t - c.good.at <= KEEP_MS ? { available: true, as_of: new Date(c.good.at).toISOString(), positions: c.good.positions } : NONE;
+  c.good && t - c.good.at <= KEEP_MS ? { available: true, as_of: new Date(c.good.at).toISOString(), positions: c.good.positions, spy: c.spy } : NONE;
 
 /** At most one upstream call per MIN_GAP_MS: the call under way is shared, and inside the window the cache answers. */
 function marks(c: Cache, f: Fetch, keyId: string, secret: string, clock: () => number): Promise<Answer> {
@@ -85,10 +123,12 @@ function marks(c: Cache, f: Fetch, keyId: string, secret: string, clock: () => n
   const t = clock();
   if (t - c.called < MIN_GAP_MS) return Promise.resolve(answer(c, t));
   c.called = t;
-  c.flight = positions(f, keyId, secret)
-    .then((rows) => { c.good = { at: t, positions: rows }; },
-      (e: unknown) => { console.warn("marks: read failed", e instanceof HttpError ? `HTTP ${e.status}` : e instanceof Error ? e.name : "error"); })
-    .then(() => { c.flight = null; return answer(c, clock()); });
+  // side by side: SPY never delays or fails the positions
+  const spy = alpacaGet(f, SPY_URL, keyId, secret).then(spyOf)
+    .then((s) => { c.spy = s; }, (e: unknown) => { console.warn("marks: SPY read failed", why(e)); });
+  const held = positions(f, keyId, secret)
+    .then((rows) => { c.good = { at: t, positions: rows }; }, (e: unknown) => { console.warn("marks: read failed", why(e)); });
+  c.flight = Promise.all([held, spy]).then(() => { c.flight = null; return answer(c, clock()); });
   return c.flight;
 }
 
