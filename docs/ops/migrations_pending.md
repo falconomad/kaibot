@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 22 Nov 2026 (0001-0039 applied; 0040-0042 pending). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 22 Nov 2026 (0001-0039 applied; 0040-0043 pending). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -41,6 +41,7 @@ Owner: backend-quant. Last checked against main on 22 Nov 2026 (0001-0039 applie
 - 0040: **pending** (step 27 below; the PR for #529: the owner books or accepts a fill whose activity never came, from the Engine page's "Books and broker" sheet). After 0037. **Outside 09:30-16:00 ET**. Changes live trading behaviour when used: a booked fill puts the shares in the books; an accepted one lifts the wait for it. The stakeholder's to apply.
 - 0041: **pending** (the PR for #562; independent of 0040). Engine lease bound to holder AND machine. Apply BEFORE deploying the engine release that sends `p_machine`, outside 09:30-16:00 ET; the running engine keeps its lease (it acts as machine ''). The stakeholder's to apply.
 - 0042: **pending** (the PR for #477, M13 4.3). The lease's fencing token. After 0041; apply BEFORE the engine release that sends `p_epoch`, outside 09:30-16:00 ET. The stakeholder's to apply.
+- 0043: **pending** (step 30 below; the headline-feed PR: the dashboard's headline line). Independent of 0040-0042 (0042 is #477's). Additive; any time, but Product applies it outside 09:30-16:00 ET together with the engine release that writes it (until then the engine's writes fail softly, logged once). Changes no trading behaviour.
 
 ## Apply in this order
 
@@ -78,6 +79,7 @@ run it again. Do not reorder them.
 | 27 | `migrations/0040_accept_unbooked.sql` (whole file; the PR for #529). After 0037. **Outside 09:30-16:00 ET** (the engine reads `kaibot.command` every loop) | `kb_command`'s `accept_reconcile` also takes rows of kind `unbooked` (`symbol`, `coid`, `venue`, `booked`, `action` book or accept); 0037's function otherwise. The engine acts only on exactly the day-old unbooked fills it found, read again at the broker | No: one `create or replace function`, a revoke and a grant |
 | 28 | `migrations/0041_engine_lease_machine.sql` (whole file, one transaction; the PR for #562). After 0013. Outside 09:30-16:00 ET, BEFORE the engine release that sends `p_machine` | `kaibot.engine_lease.machine` (default ''); `engine_lease_acquire/_renew/_release` replaced by versions with `p_machine` that match on holder AND machine: a copied data folder on another machine is refused (`reason: holder_on_other_machine`) and can neither renew nor release. An older engine (no `p_machine`) acts as machine '' and keeps its lease until it stops; the new release's first start on that machine waits for it to be released (clean stop) or to expire (90 s) | Yes, but no data: the three 0013 functions are dropped and recreated in the same transaction |
 | 29 | `migrations/0042_engine_lease_epoch.sql` (whole file, one transaction; the PR for #477). After 0041. Outside 09:30-16:00 ET, BEFORE the engine release that sends `p_epoch` | A sequence `kaibot.engine_lease_epoch_seq` and `kaibot.engine_lease.epoch`; every successful `engine_lease_acquire` with `p_fenced` (this release) is a new tenure with the next number (returned as `epoch`; acquires serialised by an advisory lock); `engine_lease_renew` and `_release` take `p_epoch` (default null) and match `epoch = coalesce(p_epoch, 0)`. An engine before #477 sends neither: its tenure has epoch 0 and stays its own (the running engine; a rollback), until an engine of this release starts, which fences it out (QA-Ops on #584) | Yes, but no data: 0041's three functions are dropped and recreated in the same transaction |
+| 30 | `migrations/0043_headline_feed.sql` (whole file; the headline-feed PR). Independent of 0040-0042. Outside 09:30-16:00 ET, with or before the engine release that writes it | `kaibot.headline` (owner-only display table: the Alpaca/Benzinga headlines the engine already fetches, licence `owner_only`; SEC 8-K lines, licence `public`, a check ties licence to source), RLS with one owner select policy, a trigger keeping 7 days / 500 rows, `kaibot.headline_list` (the licence guard) and the owner-only `kb_headlines` | **Yes**: `delete from kaibot.headline` inside the retention trigger's function (old rows of this table only) |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -153,6 +155,11 @@ select has_function_privilege('anon', 'public.kb_command(text, text, jsonb)', 'e
 -- step 26 (0039): kb_health returns M9's replica, clock and calendar events
 select prosrc like '%replica_poison%' and prosrc like '%clock_skew%' and prosrc like '%calendar_expiring%'
    and prosrc like '%multi_day_column_missing%' from pg_proc where proname = 'kb_health';              -- true
+-- step 30 (0043): the headline table is owner-only and the dashboard's read is not open to anon
+select relrowsecurity from pg_class where oid = 'kaibot.headline'::regclass;                       -- true
+select has_table_privilege('authenticated', 'kaibot.headline', 'select');                          -- false
+select has_function_privilege('anon', 'public.kb_headlines(integer)', 'execute');                 -- false
+select has_function_privilege('authenticated', 'kaibot.headline_list(boolean, integer)', 'execute');  -- false
 -- step 28 (0041): the lease has a machine column and three functions that take p_machine
 select count(*) from information_schema.columns
  where table_schema = 'kaibot' and table_name = 'engine_lease' and column_name = 'machine';        -- 1

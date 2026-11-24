@@ -148,6 +148,9 @@ class NewsPoller:
         self._mu = threading.Lock()  # status/events between the poller thread and the main loop
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        # The dashboard's headline line (news/feed.py, KAIBOT_HEADLINE_FEED): handed what this poll fetched anyway.
+        # `offer` never blocks or raises and makes no request; None: nothing is handed over.
+        self.feed = None
 
     # ---------------- schedule ----------------
     def every_s(self, now: datetime | None = None) -> float:
@@ -224,6 +227,9 @@ class NewsPoller:
                 since = max(now - BACKFILL, (self._through or now - BACKFILL) - OVERLAP)
                 ok += self._fetch(old, since, now, raw, errors)
             calls = self._counts["calls"] - before
+            if raw and self.feed is not None:  # outside the desk lock; a copy for the dashboard, no new request
+                with contextlib.suppress(Exception):
+                    self.feed.offer(raw, focus)
             if raw:
                 try:
                     added, store_error = self._ingest(raw)

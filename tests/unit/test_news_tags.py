@@ -3,7 +3,9 @@
 - the fixture is pinned by hash and the rules' answers on it by hash (the same headline always gives the same tags);
 - a tag is in SHIPPED only when the measurement on the hand-labelled sample says so;
 - headlines are untrusted text: the function only matches patterns;
-- nothing that decides or places an order imports kaibot.news.tags.
+- nothing that decides or places an order imports kaibot.news.tags. The one exception in the engine process is the
+  dashboard's headline feed (kaibot.news.feed, display only, 23 Nov 2026): it writes tags to kaibot.headline for the
+  owner to read and nothing of it flows back; the tests at the end pin that.
 """
 
 from __future__ import annotations
@@ -219,7 +221,8 @@ def test_nothing_that_trades_imports_the_tags():
 
 
 def test_the_engine_process_never_loads_the_tags():
-    """Importing the engine's entry points and every strategy, the gate and the brokers does not load the module."""
+    """Importing the engine's entry points and every strategy, the gate and the brokers does not load the module.
+    (At run time the display-only headline feed loads it, from engine/__main__.headline_feed: see below.)"""
     code = ("import importlib, pkgutil, sys\n"
             "import kaibot.strategies, kaibot.risk, kaibot.broker\n"
             "for pkg in (kaibot.strategies, kaibot.risk, kaibot.broker):\n"
@@ -233,3 +236,41 @@ def test_the_engine_process_never_loads_the_tags():
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=180,
                        env={"PYTHONPATH": str(ROOT / "src"), "PATH": "/usr/bin:/bin"})
     assert r.returncode == 0 and r.stdout.strip() == "ok", (r.stdout[-500:], r.stderr[-2000:])
+
+
+# ---------------- the dashboard's headline feed: the one display-only reader in the engine process ----------------
+
+def test_only_the_display_feed_imports_the_tags_outside_the_tag_package():
+    def uses(f: Path) -> bool:
+        mods = _imports(f)
+        return any(m == "kaibot.news.tags" or m.startswith("kaibot.news.tags.") for m in mods)
+
+    users = sorted(str(f.relative_to(SRC)) for f in SRC.rglob("*.py")
+                   if not str(f.relative_to(SRC)).startswith(("news/tags.py", "news/tagset/")) and uses(f))
+    assert users == ["news/feed.py"], users
+
+
+def test_nothing_that_trades_or_prompts_imports_the_feed():
+    """The feed's tags reach no order and no prompt: only engine/__main__.py (wiring, inside a function) names it."""
+    files = [f for pkg in ORDER_PATHS for f in (SRC / pkg).rglob("*.py")] + list((SRC / "agents").rglob("*.py"))
+    files += [SRC / "news" / n for n in ("__init__.py", "desk.py", "triage.py", "text.py")]
+    users = sorted(str(f.relative_to(SRC)) for f in files
+                   if "kaibot.news.feed" in _imports(f) or "news import feed" in f.read_text())
+    assert users == ["engine/__main__.py"], users
+    main = (SRC / "engine" / "__main__.py").read_text()
+    top = [ln for ln in main.splitlines() if ln.startswith(("import ", "from ")) and "feed" in ln]
+    assert top == [], "import the feed inside headline_feed(), not at module level"
+
+
+def test_the_feed_hands_nothing_back():
+    """`offer` returns None; the desk and the poller call it and ignore it."""
+    from kaibot.news.feed import HeadlineFeed
+
+    class _S:
+        def upsert(self, *a, **k):
+            return {"tags": ["analyst_up"]}
+
+    f = HeadlineFeed(_S())
+    assert f.offer([{"headline": "Zelman Upgrades Acme to Outperform", "symbols": ["ACME"],
+                     "created_at": "2026-11-23T14:00:00Z"}]) is None
+    assert f.step() is None
