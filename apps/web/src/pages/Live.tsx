@@ -26,7 +26,8 @@ import { PricesPaused, useMarks } from "../components/Marks";
 import { potLive } from "../lib/marks";
 
 // #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
-const MarketNotices = lazy(() => import("../components/Notices"));
+// The market notices and the headline line (migration 0043): one chunk of their own, not first load
+const Lines = lazy(() => import("../components/Lines"));
 
 // Memoised with plain values (the formats are fixed functions): a streamed price does not draw the evidence rows again.
 const [F0, F1, F2] = [0, 1, 2].map((d) => (v: number) => v.toFixed(d));
@@ -166,7 +167,7 @@ export function Live() {
       {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
       <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} />
       <StartBanner state={startState(run, overview)} />
-      {run.kind === "paper" && <Suspense fallback={null}><MarketNotices /></Suspense>}
+      {run.kind === "paper" && <Suspense fallback={null}><Lines headlines={!ended} /></Suspense>}
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
