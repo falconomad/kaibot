@@ -124,4 +124,25 @@ describe("carried buys on hold while the market filter is off (#621)", () => {
     expect(carryHold([p], [], TODAY)).toBeNull();
     expect(carryHold([p], carriesFrom([ev("2026-11-23", true, [], "2026-11-11")], 7), TODAY)).toBeNull();
   });
+  it("QA on #626: after a late send the carry-overs name the late send's session (`of`); the newest one decides", () => {
+    // the 18 Nov plan was sent late on 19 Nov with the filter off; the 20 Nov carry-over (of: 19 Nov) sends its buys
+    const late = { ...ev("2026-11-19", true, [], "2026-11-18"), payload: { ...ev("2026-11-19", true, [], "2026-11-18").payload, late_of: "2026-11-18" } };
+    const on = carriesFrom([late, ev("2026-11-20", false, [["APA", 10, 0]], "2026-11-19")], 7);
+    expect(carryHold([p], on, "2026-11-23")).toBeNull();
+    const off = carriesFrom([late, ev("2026-11-20", true, [], "2026-11-19")], 7);
+    expect(carryHold([p], off, "2026-11-23")).toBe("market filter off");
+    expect(carryHold([p], carriesFrom([late], 7), "2026-11-20")).toBe("market filter off"); // before 20 Nov's window
+  });
+  it("QA on #626: a weekend or a holiday reads the last session's carry-over; a new decision ends the hold", () => {
+    const fri = carriesFrom([ev("2026-11-27", true)], 7);
+    expect(carryHold([p], fri, "2026-11-28")).toBe("market filter off"); // Saturday
+    expect(carryHold([p], carriesFrom([ev("2026-11-25", true)], 7), "2026-11-26")).toBe("market filter off"); // Thanksgiving
+    expect(carryHold([p], carriesFrom([ev("2026-11-27", false)], 7), "2026-11-28")).toBeNull();
+    // the next decision (kb_multiday_plan returns only the latest): on its fill session and the session after,
+    // before that session's carry-over, the old plan's carry events say nothing
+    const next = plan("2026-11-25", [buy("APA"), buy("XOM")]);
+    expect(carryHold([next], fri, "2026-11-25")).toBeNull();
+    expect(carryHold([next], carriesFrom([ev("2026-11-24", true)], 7), "2026-11-26")).toBeNull();
+    expect(carryHold([next], carriesFrom([ev("2026-11-24", true), ev("2026-11-27", true, [], "2026-11-25")], 7), "2026-11-27")).toBe("market filter off");
+  });
 });

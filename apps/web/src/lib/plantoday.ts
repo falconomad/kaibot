@@ -61,7 +61,11 @@ export function carryHold(plans: Plan[], carries: Carry[], today: string): strin
     if (!q || q.fillsAt! < p.fillsAt) latest.set(p.rule, p);
   }
   for (const p of latest.values()) {
-    const c = carries.find((x) => x.rule === p.rule && x.session > p.fillsAt! && x.session <= today && (!x.of || x.of === p.fillsAt));
+    // QA on #626: after a late send (M9 1.4, its event has `late_of` = the fill session) the carry-overs name the late
+    // send's session as their `of` (engine/live_daily.py `_carry`: the plan's own session); they are this plan's too
+    const late = carries.find((x) => x.rule === p.rule && x.lateOf === p.fillsAt && x.session > p.fillsAt!)?.session;
+    const c = carries.find((x) => x.rule === p.rule && x.session > p.fillsAt! && x.session <= today
+      && (!x.of || x.of === p.fillsAt || (!!late && x.of === late)));
     if (c?.riskOff) return "market filter off";
   }
   return null;
