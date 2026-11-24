@@ -1,0 +1,85 @@
+# The research runner's allow-list (scripts/research_runner.py, docs/ops/research_runner.md).
+# Only the entries below can ever be run from ops/runner/queue.yaml. Each entry is a script under scripts/ or a
+# module under src/kaibot/; nothing else (no shell, no other path, no other interpreter flag).
+#
+#   flags:       the only arguments a job may pass. `null` = a switch without a value; otherwise a regular expression
+#                the whole value must match (anchored by the runner). Anything else is rejected, and so are
+#                --env, --data, --out, --root, --trials and --open-holdout (the runner adds --env itself).
+#   env:         true = the runner appends `--env ~/Projects/kaibot-secrets/.env`. The runner never opens that file.
+#   heavy:       true = started under `nice -n 10` (market hours are allowed, #600, 24 Nov 2026).
+#   sec:         true = calls SEC EDGAR in bulk: never two at once (see sec_process_patterns).
+#   timeout_min: the job is killed (its whole process group) after this many minutes.
+#
+# Changing this file widens what Product can run on the owner's Mac: it needs the QA-Ops key and the owner.
+
+repo: falconomad/kaibot          # where results are posted (issue comments)
+max_jobs_per_run: 5              # at most this many new jobs per 15-minute tick
+tail_lines: 150                  # lines of output posted per job
+# Other processes on the Mac that call SEC EDGAR in bulk. A sec job is deferred to the next tick while one of these
+# runs (as well as while the runner's own SEC lock is held).
+sec_process_patterns:
+  - fetch_sec_fundamentals
+  - fetch_earnings_dates
+  - fetch_fundamentals
+  - fetch_spinoffs
+  - fetch_listings
+  - fetch_sp500_history
+
+scripts:
+  scripts/index_core.py:
+    heavy: true
+    timeout_min: 180
+    flags: &replay_flags
+      --start: '\d{4}-\d{2}-\d{2}'
+      --end: '\d{4}-\d{2}-\d{2}'
+      --universe: 'pit|today'
+      --fixture: null
+
+  scripts/index_core_book.py:
+    heavy: true
+    timeout_min: 240
+    flags:
+      <<: *replay_flags
+      --control-runs: '[1-9][0-9]{0,2}'
+
+  scripts/trend_momentum_gbm.py:
+    heavy: true
+    timeout_min: 240
+    flags:
+      <<: *replay_flags
+      --cost-model: 'v1|v2'
+      --control-runs: '[1-9][0-9]{0,2}'
+
+  scripts/fetch_sec_fundamentals.py:
+    env: true
+    heavy: true
+    sec: true
+    timeout_min: 120
+    flags:
+      --refresh: null
+      --max-age-days: '[0-9]{1,3}(\.[0-9]{1,2})?'
+      --limit: '[1-9][0-9]{0,3}'
+      --build: null
+      --status: null
+
+  scripts/export_results.py:
+    timeout_min: 20
+    flags:
+      --rule: '[a-z0-9_]{1,64}'
+
+  scripts/market_alarm_report.py:
+    heavy: true
+    timeout_min: 60
+    flags:
+      --start: '\d{4}-\d{2}-\d{2}'
+      --end: '\d{4}-\d{2}-\d{2}'
+      --flags-only: null
+      --rankings-only: null
+
+  # The golden set's stub run only: --live spends money (stakeholder decision) and --record writes a tracked file.
+  kaibot.agents.evalset.golden:
+    timeout_min: 20
+    flags: {}
+
+# Asked for but not listed: scripts/shadow_results.py does not exist. The shadow results are scripts/shadow_results.sh,
+# a psql script that needs DATABASE_URL from the secrets file; the runner never reads that file, so it cannot run it.

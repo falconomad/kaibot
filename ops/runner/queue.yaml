@@ -1,0 +1,9 @@
+# Research jobs for the runner on the owner's Mac (docs/ops/research_runner.md). Append a job; never edit or reuse
+# the id of one that ran (done ids are skipped). The runner picks up main every 15 minutes and posts the last lines
+# of output as a comment on `posts_to_issue`.
+#
+#   - id: sec-status-2026-11-24          # unique; letters, digits, . _ - (max 64)
+#     script: scripts/fetch_sec_fundamentals.py   # must be a key of ops/runner/allowed.yaml
+#     args: ["--status"]                 # only the flags allowed.yaml lists for that script
+#     posts_to_issue: 600
+jobs: []
