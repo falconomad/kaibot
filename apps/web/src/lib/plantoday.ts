@@ -37,10 +37,19 @@ const shortDay = (d: string) => new Intl.DateTimeFormat("en-GB", { day: "numeric
 /** A past plan's buy carried into today's session: shown as a current order. */
 export interface CarriedBuy { rule: string; symbol: string; from: string; held: number; target: number; why: string | null }
 
+/** A test for the carry events of plan `p`: its rule, and its fill session as their `of`. QA on #626 / #627: after a
+ *  late send (M9 1.4, its event has `late_of` = the fill session) the carry-overs name the late send's session as their
+ *  `of` (engine/live_daily.py `_carry`: the plan's own session); they are this plan's too. */
+function carryOf(p: Plan, carries: Carry[]): (x: Carry) => boolean {
+  const late = carries.find((x) => x.rule === p.rule && x.lateOf === p.fillsAt && x.session > p.fillsAt!)?.session;
+  return (x) => x.rule === p.rule && (!x.of || x.of === p.fillsAt || (!!late && x.of === late));
+}
+
 /** The buys of plans whose fill session is over that a carry event of `today` sends again at today's close. */
 export function carriedToday(plans: Plan[], carries: Carry[], today: string): CarriedBuy[] {
   return plans.filter((p) => p.fillsAt && DATE.test(p.fillsAt) && p.fillsAt < today).flatMap((p) => {
-    const c = carries.find((x) => x.rule === p.rule && x.session === today && (!x.of || x.of === p.fillsAt));
+    const ofP = carryOf(p, carries);
+    const c = carries.find((x) => x.session === today && ofP(x));
     return (c?.carried ?? []).filter((x) => x.target > x.held).map((x) => ({ rule: p.rule, symbol: x.symbol, from: p.fillsAt!, held: x.held, target: x.target,
       why: p.orders.find((o) => o.symbol === x.symbol)?.why ?? null }));
   });
@@ -61,11 +70,8 @@ export function carryHold(plans: Plan[], carries: Carry[], today: string): strin
     if (!q || q.fillsAt! < p.fillsAt) latest.set(p.rule, p);
   }
   for (const p of latest.values()) {
-    // QA on #626: after a late send (M9 1.4, its event has `late_of` = the fill session) the carry-overs name the late
-    // send's session as their `of` (engine/live_daily.py `_carry`: the plan's own session); they are this plan's too
-    const late = carries.find((x) => x.rule === p.rule && x.lateOf === p.fillsAt && x.session > p.fillsAt!)?.session;
-    const c = carries.find((x) => x.rule === p.rule && x.session > p.fillsAt! && x.session <= today
-      && (!x.of || x.of === p.fillsAt || (!!late && x.of === late)));
+    const ofP = carryOf(p, carries);
+    const c = carries.find((x) => x.session > p.fillsAt! && x.session <= today && ofP(x));
     if (c?.riskOff) return "market filter off";
   }
   return null;
