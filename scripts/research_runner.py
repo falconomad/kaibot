@@ -103,16 +103,23 @@ def load_allowed(path: Path = ALLOWED, root: Path = ROOT) -> Config:
             f = root / target
             if not f.is_file() or f.is_symlink() or f.resolve().parent != (root / "scripts").resolve():
                 raise JobError(f"allowed.yaml: {target} is not a file in scripts/")
+            source = f.read_text()
         elif MODULE_RE.fullmatch(target):
             rel = Path("src", *target.split("."))
-            if not ((root / rel).with_suffix(".py").is_file() or (root / rel / "__main__.py").is_file()):
+            f = next((p for p in ((root / rel).with_suffix(".py"), root / rel / "__main__.py") if p.is_file()), None)
+            if f is None:
                 raise JobError(f"allowed.yaml: module {target} not found under src/")
+            source = f.read_text()
         else:
             raise JobError(f"allowed.yaml: {target!r} is neither scripts/<name>.py nor a kaibot module")
         flags: dict[str, re.Pattern | None] = {}
         for flag, pat in (raw.get("flags") or {}).items():
             if not re.fullmatch(r"--[a-z][a-z0-9-]{0,40}", str(flag)) or flag in FORBIDDEN_FLAGS:
                 raise JobError(f"allowed.yaml: {target}: flag {flag!r} may not be allowed")
+            # argparse expands unambiguous prefixes (--d -> --data), but an exact option always wins: so every
+            # allowed flag must be a real option of the script, never an abbreviation
+            if not re.search(r"add_argument\(\s*['\"]" + re.escape(flag) + r"['\"]", source):
+                raise JobError(f"allowed.yaml: {target}: {flag} is not an add_argument option of the script")
             flags[flag] = None if pat is None else re.compile(str(pat), re.ASCII)
         specs[target] = Spec(target, flags, bool(raw.get("env")), bool(raw.get("heavy")), bool(raw.get("sec")),
                              float(raw.get("timeout_min", 60)))
@@ -224,10 +231,11 @@ _REDACTIONS: list[tuple[re.Pattern, str]] = [
 ]
 
 
-def redact(text: str) -> str:
+def redact(text: str, home: str | None = None) -> str:
     for pat, repl in _REDACTIONS:
         text = pat.sub(repl, text)
-    return text
+    home = str(Path.home()) if home is None else home
+    return text.replace(home, "~") if len(home) > 1 else text  # the owner's user name stays off GitHub
 
 
 def tail(path: Path, n: int = 150, width: int = 400) -> str:
@@ -246,7 +254,8 @@ def comment(job: Job, res: dict, sha: str) -> str:
 
 
 def rejected_comment(jid: str, reason: str) -> str:
-    return f"**Research runner** rejected job `{jid}` and did not run it: {redact(reason)}\n"
+    why = redact(reason).replace("`", "'")
+    return f"**Research runner** rejected job `{jid}` and did not run it:\n\n```text\n{why}\n```\n"
 
 
 # ---------------------------------------------------------------- state, locks, posting

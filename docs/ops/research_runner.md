@@ -60,14 +60,16 @@ which needs `DATABASE_URL` from the secrets file, and the runner never reads tha
 - **Arguments are validated.** Each flag must be listed for that script and its value must fully match the
   pattern (ASCII only). A flag may not appear twice, and there is a cap on the number and length of arguments.
   `--env`, `--data`, `--out`, `--root`, `--trials`, `--universe-file`, `--open-holdout`, `--live` and `--record`
-  can never be allowed.
+  can never be allowed. Every allowed flag must be a real `add_argument` option in the script's source. argparse
+  expands abbreviations (`--d` becomes `--data`), so an abbreviation can never slip through.
 - **Secrets.** The runner never opens `~/Projects/kaibot-secrets/.env`. For a script marked `env` it adds
   `--env <that path>`, and the script reads only the line it needs. A job starts with a short, fixed environment
   (`HOME PATH LANG LC_ALL TMPDIR TZ SSL_CERT_FILE`, plus `PYTHONPATH`). The runner's own environment, including any
   `GH_TOKEN`, is never passed on.
 - **Redaction.** Before anything is posted or saved to `out/`, the runner blanks API keys and tokens
   (Anthropic, GitHub, AWS, Alpaca, Supabase, JWTs), `NAME_KEY=value`-style assignments, bearer tokens, emails,
-  URLs that carry credentials, private keys and long high-entropy strings. The full raw log stays on the Mac in
+  URLs that carry credentials, private keys and long high-entropy strings. It also replaces the home directory
+  with `~`. A rejection reason is posted inside a code block, so text from the queue cannot @-mention anyone. The full raw log stays on the Mac in
   `data/runner/logs/<id>.log`. Redaction works by pattern, so treat a posted comment as public.
 - **One job at a time.** A lock (`data/runner/runner.lock`) is held for the whole tick, and launchd never starts
   a second copy while one is running. Each tick runs at most 5 new jobs.

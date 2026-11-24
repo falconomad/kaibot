@@ -124,7 +124,8 @@ def test_an_allow_list_that_names_the_engine_or_anything_outside_scripts_is_refu
         rr.load_allowed(a)
 
 
-@pytest.mark.parametrize("flag", ["--env", "--data", "--out", "--live", "--open-holdout"])
+@pytest.mark.parametrize("flag", ["--env", "--data", "--out", "--live", "--open-holdout", "--d", "--en", "--o",
+                                  "--open", "--univ", "--universe-f", "--made-up"])  # abbreviations: argparse expands
 def test_an_allow_list_cannot_open_the_forbidden_flags(tmp_path, flag):
     a = tmp_path / "allowed.yaml"
     a.write_text(yaml.safe_dump({"repo": "o/r", "scripts": {"scripts/index_core.py": {"flags": {flag: ".*"}}}}))
@@ -262,6 +263,13 @@ def test_redaction_blanks_the_values_of_secret_looking_assignments(line):
     red = rr.redact(line)
     assert "[REDACTED" in red and not any(v in red for v in ("abcd1234", "xyz.abc", "hunter2", "postgres://x",
                                                              "abcdefghijklmnop"))
+
+
+def test_the_home_directory_is_not_posted_and_a_rejection_is_fenced():
+    red = rr.redact("wrote /Users/owner/Projects/kaibot/data/x", home="/Users/owner")
+    assert red == "wrote ~/Projects/kaibot/data/x"
+    body = rr.rejected_comment("j1", "script '@someone `x`' is not on the allow-list")
+    assert "```text\nscript '@someone 'x'' is not" in body
 
 
 def test_redaction_keeps_ordinary_research_output():
