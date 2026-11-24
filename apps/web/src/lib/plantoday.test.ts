@@ -5,7 +5,7 @@ import { parseBook } from "./book";
 import type { Unfilled } from "./engineevents";
 import { type Plan, type PlanOrder } from "./multiday";
 import { carriesFrom } from "./carry";
-import { carriedText, carriedToday, currentPlans, isCurrentPlan, lastPlan, sessionDate } from "./plantoday";
+import { carriedText, carriedToday, carryHold, carryHoldText, currentPlans, isCurrentPlan, lastPlan, sessionDate } from "./plantoday";
 
 const buy = (symbol: string, state: PlanOrder["state"] = "canceled", now = 0): PlanOrder =>
   ({ symbol, action: "buy", sharesNow: now, sharesTarget: now + 10, why: "rank", state });
@@ -94,5 +94,34 @@ describe("buys carried into today (#366, QA on #620)", () => {
     const l = lastPlan([p], [expired("APA"), expired("XOM"), expired("BBY")], null, TODAY, c)!;
     expect(l).toMatchObject({ filled: 0, carried: 2, expired: 1 });
     expect(l.text).toBe("Last plan (18 Nov): 0 of 3 buys filled, 2 carried into today's close, 1 expired at the close");
+  });
+});
+
+describe("carried buys on hold while the market filter is off (#621)", () => {
+  const TODAY = "2026-11-24";
+  const ev = (session: string, riskOff: boolean, carried: [string, number, number][] = [], of = "2026-11-18") => ({ type: "multi_day_carry",
+    ts: `${session}T20:50:19Z`, run_id: 7, payload: { strategy: "trend_momentum", session, of, carried,
+      skipped: riskOff ? { APA: "market filter off", XOM: "market filter off" } : {}, risk_off: riskOff } });
+  const p = plan("2026-11-18", [buy("APA"), buy("XOM")]);
+  it("filter off: the card says the carried buys are on hold, not 'sent again at today's close'", () => {
+    // before today's near-close window the last carry-over (23 Nov) holds; today's, once it is there, too
+    for (const evs of [[ev("2026-11-20", true), ev("2026-11-23", true)], [ev("2026-11-23", true), ev(TODAY, true)]]) {
+      const c = carriesFrom(evs, 7);
+      expect(carryHold([p], c, TODAY)).toBe("market filter off");
+      expect(carriedToday([p], c, TODAY)).toEqual([]);
+    }
+    expect(carryHoldText("market filter off")).toBe("Carried buys on hold — market filter off");
+  });
+  it("filter on: no hold, and today's carried buys are sent again at today's close", () => {
+    const c = carriesFrom([ev("2026-11-23", true), ev(TODAY, false, [["APA", 10, 0]])], 7);
+    expect(carryHold([p], c, TODAY)).toBeNull();
+    expect(carriedToday([p], c, TODAY).map((x) => carriedText(x))).toEqual(["carried from 18 Nov, sent again at today's close"]);
+  });
+  it("nothing to hold: no past plan, no short buy, no carry event, or another decision's event", () => {
+    const off = carriesFrom([ev("2026-11-23", true)], 7);
+    expect(carryHold([plan(TODAY)], off, TODAY)).toBeNull();
+    expect(carryHold([plan("2026-11-18", [buy("APA", "filled", 10)].map((o) => ({ ...o, sharesTarget: 10 })))], off, TODAY)).toBeNull();
+    expect(carryHold([p], [], TODAY)).toBeNull();
+    expect(carryHold([p], carriesFrom([ev("2026-11-23", true, [], "2026-11-11")], 7), TODAY)).toBeNull();
   });
 });

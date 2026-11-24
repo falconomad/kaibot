@@ -9,6 +9,8 @@
 // current order: it shows in today's list ("carried from 18 Nov, sent again at today's close") and is kept out of the
 // last plan's expired / not-filled count. Before today's carry event (it comes in the near-close window) there is no
 // record that a buy is carried today, so it stays hidden.
+// #621: while the market filter is off no carried buy is sent; the card then says "Carried buys on hold — market
+// filter off" (carryHold), never "sent again at today's close".
 import type { Book } from "./book";
 import type { Carry } from "./carry";
 import type { Unfilled } from "./engineevents";
@@ -45,6 +47,27 @@ export function carriedToday(plans: Plan[], carries: Carry[], today: string): Ca
 }
 /** "carried from 18 Nov, sent again at today's close" */
 export const carriedText = (c: Pick<CarriedBuy, "from">) => `carried from ${shortDay(c.from)}, sent again at today's close`;
+
+/** #621: while the market filter is off (SPY below its 200-day average) the engine sends no carried buy: each
+ *  carry-over skips them all with `risk_off` (engine/daily.py carry_targets). The newest past plan of a rule with buys
+ *  still short is on hold when its latest carry-over (today's, or before today's near-close window the last one) says
+ *  so. The heartbeat does not carry the engine's entry block (ticket E1 / #446), so this reads the carry events only.
+ *  Returns the reason in words, or null when nothing says the carried buys are held. */
+export function carryHold(plans: Plan[], carries: Carry[], today: string): string | null {
+  const latest = new Map<string, Plan>();
+  for (const p of plans) {
+    if (!p.fillsAt || !DATE.test(p.fillsAt) || p.fillsAt >= today || !p.orders.some(isBuy)) continue;
+    const q = latest.get(p.rule);
+    if (!q || q.fillsAt! < p.fillsAt) latest.set(p.rule, p);
+  }
+  for (const p of latest.values()) {
+    const c = carries.find((x) => x.rule === p.rule && x.session > p.fillsAt! && x.session <= today && (!x.of || x.of === p.fillsAt));
+    if (c?.riskOff) return "market filter off";
+  }
+  return null;
+}
+/** "Carried buys on hold — market filter off" */
+export const carryHoldText = (why: string) => `Carried buys on hold — ${why}`;
 
 export interface LastPlan { rule: string; session: string; buys: number; filled: number; carried: number; expired: number | null; text: string }
 
