@@ -13,6 +13,12 @@ body::before { content: ""; position: fixed; z-index: -1; pointer-events: none; 
   transform: translate(var(--glow-x, -50vw), var(--glow-y, 50vh)); transition: transform 600ms var(--ease); }
 body[data-glow-move="long"]::before { transition-duration: 900ms; }
 body[data-glow-move="none"]::before { transition: none; }
+/* Sign-in's entrance, the mirror of the sign-out drift (lib/glow.ts primeGlowArrival): sign-out moves the light
+   down-left into sign-in's corner in 600 ms on --ease (the transition above); on a first load of sign-in or /register
+   it sweeps up-right, from 40vw/40vh past that corner (sign-in's anchor is -50vw, 50vh) to rest, in the same 600 ms on
+   the same curve. Transform only; the layer stays three screens wide at every frame. Reduced motion: off (global rule). */
+@keyframes kb-glow-arrive { from { transform: translate(-90vw, 90vh); } to { transform: translate(-50vw, 50vh); } }
+body[data-glow-move="arrive"]::before { transition: none; animation: kb-glow-arrive 600ms var(--ease) both; }
 a { color: var(--sea-ink); text-decoration: none; }
 a:hover { color: var(--blue-200); }
 .serif { font-family: var(--font-ai); }

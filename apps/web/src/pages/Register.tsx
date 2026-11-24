@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, supa, type InviteReason } from "../lib/api";
 import { Logo } from "../components/Logo";
-import { FROM_SIGNIN } from "../lib/glow";
+import { FROM_SIGNIN, useGlow } from "../lib/glow";
 import { TOO_MANY, isSignupRefused, takeAttempt } from "../lib/attempts";
 
 // /register?code=... (stakeholder, 24 Nov 2026): the invitee types their name and the invited email. The code is
@@ -24,6 +24,7 @@ export function codeFromUrl(search: string): string {
 }
 
 export function Register({ search = typeof window === "undefined" ? "" : window.location.search }: { search?: string }) {
+  useGlow("signin"); // sign-in's place, and its entrance on a first load (lib/glow.ts primeGlowArrival)
   const [code, setCode] = useState(() => codeFromUrl(search));
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
