@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rt = vi.hoisted(() => {
   type Ch = { topic: string; config: unknown; handlers: ((m: unknown) => void)[]; status?: (s: string, e?: Error) => void; removed: boolean };
-  const state = { channels: [] as Ch[], made: 0, removed: 0 };
+  const state = { channels: [] as Ch[], made: 0, removed: 0, offline: false };
   const client = {
     realtime: { setAuth: async () => {} },
     getChannels: () => state.channels.filter((c) => !c.removed),
@@ -23,7 +23,11 @@ const rt = vi.hoisted(() => {
   };
   return { state, client };
 });
-vi.mock("@supabase/supabase-js", () => ({ createClient: () => rt.client }));
+// lib/supa.ts hands the realtime client out on demand (it is not in the first load); the fake is that client.
+vi.mock("./supa", () => ({ createClient: () => ({ realtime: async () => {
+  if (rt.state.offline) throw new TypeError("Failed to fetch dynamically imported module");
+  return { ...rt.client, setAuth: rt.client.realtime.setAuth };
+} }) }));
 
 const { api } = await import("./api");
 const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
@@ -31,7 +35,7 @@ const live = () => rt.state.channels.filter((c) => !c.removed);
 const send = (prices: Record<string, number>) =>
   live().forEach((c) => c.handlers.forEach((h) => h({ payload: { as_of: new Date().toISOString(), feed: "iex", prices } })));
 
-beforeEach(() => { vi.useFakeTimers(); rt.state.channels = []; rt.state.made = 0; rt.state.removed = 0; });
+beforeEach(() => { vi.useFakeTimers(); rt.state.channels = []; rt.state.made = 0; rt.state.removed = 0; rt.state.offline = false; });
 afterEach(async () => { await vi.runAllTimersAsync(); vi.useRealTimers(); });
 
 describe("api.prices: one shared private channel", () => {
@@ -88,6 +92,23 @@ describe("api.prices: one shared private channel", () => {
     await flush();
     expect(left.removed).toBe(true);
     expect(live()).toHaveLength(1);
+    off2();
+  });
+
+  it("the realtime code could not be fetched: no channel and no error; the next page that asks tries again", async () => {
+    rt.state.offline = true;
+    const off1 = api.prices(vi.fn());
+    await flush();
+    expect(rt.state.made).toBe(0);
+    off1();
+    await vi.advanceTimersByTimeAsync(2_000);
+    rt.state.offline = false;
+    const b = vi.fn();
+    const off2 = api.prices(b);
+    await flush();
+    expect(rt.state.made).toBe(1);
+    send({ XOM: 2 });
+    expect(b).toHaveBeenCalledTimes(1);
     off2();
   });
 });

@@ -51,6 +51,8 @@ export default defineConfig({
           if (!m) return undefined;
           const pkg = m[1].replace("\\", "/");
           if (["react", "react-dom", "scheduler", "react-router", "react-router-dom"].includes(pkg)) return "react";
+          // The price stream's code (lib/supa.ts) is fetched on demand: in the "supabase" chunk it would be first load again.
+          if (pkg === "@supabase/realtime-js" || pkg === "@supabase/phoenix") return "realtime";
           if (pkg.startsWith("@supabase/")) return "supabase";
           if (pkg.startsWith("@tanstack/")) return "query";
           return undefined;
