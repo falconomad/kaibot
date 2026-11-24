@@ -39,7 +39,9 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
 
 Never two engines: the service checks for an engine started by hand (`engine_guard.sh`), keeps a pid lock
 (`data/live/service.pid`), and the engine's database lease refuses a second engine on any machine. If you start one
-by hand while the service runs, yours is refused. If the service finds one started by hand, it stands by and takes
+by hand while the service runs, `./scripts/run_engine.sh` refuses at once and says to use `./scripts/service.sh restart`
+(#613; `--check` is still allowed). One watchdog per data folder too: a watchdog refuses to start while another live
+kaibot watchdog of this machine holds `data/live/watchdog.lock` (#613). If the service finds one started by hand, it stands by and takes
 over about a minute after that one stops.
 
 Beside the engine, in its own process group and never able to stop or restart it: the ticker-check worker
