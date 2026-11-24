@@ -130,6 +130,8 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
         ("KAIBOT_CHECKS_START_DELAY", "data", "that job's start delay"),
         ("KAIBOT_DAILY_FETCH", "data", "the evening daily-bars fetch in the service"),
         ("KAIBOT_HISTORY_START", "data", "fetch_history.sh's first day"),
+        ("KAIBOT_SEC_USER_AGENT", "data", "fetch_sec_fundamentals.py: the declared SEC User-Agent "
+         "(\"Name email\"); the fetch refuses to run without it"),
         ("KAIBOT_FORMER_MEMBERS", "data", "fetch_daily.sh: also fetch former index members"),
         ("KAIBOT_EXP_START", "quant", "run_experiments.sh's first day"),
         ("KAIBOT_EXP_END", "quant", "run_experiments.sh's last day"),
