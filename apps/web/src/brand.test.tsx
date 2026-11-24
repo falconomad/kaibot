@@ -269,23 +269,23 @@ describe("the logo's idle hop (stakeholder, 24 Nov 2026)", () => {
       for (const [a, b] of hops(name)) expect(Math.abs(((b - a) / 100) * cycle - 0.6), name).toBeLessThan(0.02);
       const body = new RegExp(`@keyframes ${name} \\{(.*)\\}`).exec(css)?.[1] ?? "";
       expect([...body.matchAll(/([a-z-]+)\s*:/g)].every((m) => m[1] === "transform"), name).toBe(true);
-      expect(body).toContain("translateY(-60%) scale(.94, 1.06)"); // up 60% of the point: 3.1-3.8 px at 26-30.8 px
+      expect(body).toContain("translateY(-60%) scale(.94, 1.06)"); // up 60% of the point: 3.1-4.2 px at 26-35 px
       expect(hops(name)[0][0], "the first hop comes right at the end of the delay").toBe(0);
     }
   });
 
-  it("every 8-10 s on sign-in, uneven; the header's variant much rarer, about every 30 s", () => {
+  it("every 3-4 s on sign-in, uneven; elsewhere about every 6 s", () => {
     const gaps = (name: string, cycle: number) => {
       const starts = hops(name).map(([a]) => (a / 100) * cycle);
       return starts.map((t, i) => Math.round(((i + 1 < starts.length ? starts[i + 1] : cycle) - t) * 100) / 100);
     };
     const often = gaps("kb-logo-hop", IDLE.often), rare = gaps("kb-logo-hop-rare", IDLE.rare);
-    expect(often).toEqual([8.69, 9.4, 8.91]);
-    expect(rare).toEqual([28.98, 31.32, 29.7]);
-    for (const g of often) expect(g >= 8 && g <= 10).toBe(true);
-    for (const g of rare) expect(g >= 28 && g <= 32).toBe(true);
+    expect(often).toEqual([3.5, 3.7, 3.4]);
+    expect(rare).toEqual([5.8, 6.3, 5.9]);
+    for (const g of often) expect(g >= 3 && g <= 4).toBe(true);
+    for (const g of rare) expect(g >= 5.5 && g <= 6.5).toBe(true);
     expect(new Set(often).size).toBe(3); // jitter: no two gaps alike
-    expect(Math.min(...rare)).toBeGreaterThan(3 * Math.max(...often));
+    expect(Math.min(...rare)).toBeGreaterThan(Math.max(...often));
   });
 
   it("where: sign-in and /register often, the app's header (and New run's) rare", () => {
@@ -309,8 +309,8 @@ describe("the logo's idle hop (stakeholder, 24 Nov 2026)", () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
   });
 
-  it("the sign-in (and /register) logo is 1.1 times the header's, on phones too", () => {
-    expect(LARGE).toBe(1.1);
+  it("the sign-in (and /register) logo is 1.25 times the header's, on phones too", () => {
+    expect(LARGE).toBe(1.25);
     const big = Number(/\n\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
     const bigPhone = Number(/@media \(max-width: 760px\) \{[^@]*\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
     expect(Math.round((big / 28) * 1000) / 1000).toBe(LARGE);
