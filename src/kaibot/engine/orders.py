@@ -68,6 +68,7 @@ from zoneinfo import ZoneInfo
 from kaibot.broker import payloads
 from kaibot.broker.payloads import PayloadError
 from kaibot.broker.protocol import Broker, BrokerError, OrderRequest
+from kaibot.engine import order_path
 
 log = logging.getLogger(__name__)
 
@@ -402,7 +403,7 @@ class OrderManager:
             "purpose": purpose, "session": session, "meta": dict(meta or {}), "created": self.now().isoformat()})
         r = self.orders[coid]
         try:
-            o = self.broker.submit(req)
+            o = order_path.submit(self.broker, req)
         except BrokerError as e:
             if e.status in REFUSED and "client_order_id" not in (e.body or ""):
                 self._state(r, St.REJECTED, reason=f"{e.status}: {_reason(e)}")
@@ -451,7 +452,7 @@ class OrderManager:
         without an error: the broker contract), so it may be repeated."""
         self.cancel_asked[r.coid] = (self.now(), self.cancel_asked.get(r.coid, (None, 0))[1] + 1)
         try:
-            self.broker.cancel(r.order_id)
+            order_path.cancel(self.broker, r.order_id)
         except BrokerError as e:
             self.errors.append((r.coid, f"cancel: {e.status}: {_reason(e)}"))
 
@@ -465,7 +466,8 @@ class OrderManager:
         cid = self.replacement_coid(r)
         self._state(r, St.PENDING_REPLACE, client_id=cid)  # journalled before the call (#197)
         try:
-            o = self.broker.replace(r.order_id, stop_price=stop, limit_price=limit, qty=qty, client_order_id=cid)
+            o = order_path.replace(self.broker, r.order_id, stop_price=stop, limit_price=limit, qty=qty,
+                                   client_order_id=cid)
         except BrokerError as e:
             self.errors.append((coid, f"replace: {e.status}: {_reason(e)}"))
             self._poll(r)
@@ -481,7 +483,7 @@ class OrderManager:
         on its own (issue #11)."""
         r = self.orders[coid]
         try:
-            o = self.broker.replace(leg_id, stop_price=stop, limit_price=limit)
+            o = order_path.replace(self.broker, leg_id, stop_price=stop, limit_price=limit)
         except BrokerError as e:
             self.errors.append((coid, f"replace leg {leg_id}: {e.status}: {_reason(e)}"))
             return None
