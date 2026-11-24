@@ -141,6 +141,48 @@ describe("the market is open and the tab is visible", () => {
   });
 });
 
+describe("the S&P 500 side moves with SPY now (stakeholder, 24 Nov 2026)", () => {
+  // the line's last close: SPY from the same start over the two booked sessions (daily spy_ret)
+  const SPY_CLOSE = 95000 * (1 - 0.012294) * (1 - 0.009749);
+  const withSpy = (price: number, age = 2_000, prevSession = SESSION) => async (): Promise<Marks> => ({ ...(await xom(158.68)()),
+    spy: { price, at: Date.now() - age, prevClose: 659.3, prevSession } });
+  const legend = () => [...document.querySelectorAll(".chart-legend > span")].map((e) => (e.textContent ?? "").replace(/\s+/g, " ").trim());
+  const usd = (v: number) => `$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const whole = (v: number) => `$${Math.round(v).toLocaleString("en-US")}`;
+
+  it("the hero, 'Ahead of / Behind the S&P 500' and the legend read the same live point", async () => {
+    asked.marks.mockImplementation(withSpy(662.1));
+    await start(OPEN);
+    const pot = 94958.46, spy = SPY_CLOSE * (662.1 / 659.3), vs = (pot - 95000) - (spy - 95000);
+    expect(page()).toContain(`Paper pot${usd(pot)}`);
+    const [k, sp] = legend();
+    expect(k).toContain(whole(pot));
+    expect(sp).toMatch(new RegExp(`^SPY, same start \\${whole(spy)} `));
+    expect(page()).toContain(`${vs >= 0 ? "Ahead of" : "Behind"} the S&P 500 by ${usd(vs)}`);
+    expect(page()).not.toContain("last close");
+    // SPY moves, our stocks do not: the gap and the legend follow at the next poll
+    asked.marks.mockImplementation(withSpy(665));
+    await pass(10_000);
+    const spy2 = SPY_CLOSE * (665 / 659.3), vs2 = (pot - 95000) - (spy2 - 95000);
+    expect(legend()[1]).toContain(whole(spy2));
+    expect(page()).toContain(`${vs2 >= 0 ? "Ahead of" : "Behind"} the S&P 500 by ${usd(vs2)}`);
+    expect(legend()[0]).toContain(whole(pot));
+  });
+
+  it("no fresh SPY price: the last close, and both the gap and the legend say so", async () => {
+    for (const make of [xom(158.68), withSpy(662.1, 45_000), withSpy(662.1, 2_000, "2026-11-17")]) {
+      asked.marks.mockImplementation(make);
+      await start(OPEN);
+      const pot = 94958.46, vs = (pot - 95000) - (SPY_CLOSE - 95000);
+      expect(page()).toContain(`Paper pot${usd(pot)}`);
+      expect(legend()[0]).toContain(whole(pot));
+      expect(legend()[1]).toMatch(new RegExp(`^SPY, same start \\(last close\\) \\${whole(SPY_CLOSE)} `));
+      expect(page()).toContain(`${vs >= 0 ? "Ahead of" : "Behind"} the S&P 500 at last close by ${usd(vs)}`);
+      await unmount();
+    }
+  });
+});
+
 describe("the tab is hidden", () => {
   it("makes no request; what is on screen stops being called live after 30 s; coming back asks at once", async () => {
     asked.marks.mockImplementation(xom(158.68));

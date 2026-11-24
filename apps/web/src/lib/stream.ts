@@ -53,7 +53,7 @@ export function applyStream(marks: Marks | null, s: Stream | null | undefined, n
     const p = s.prices[sym];
     if (p !== undefined) { by[sym] = { ...m, price: p }; n++; } else by[sym] = m;
   }
-  return n ? { at: marks.at, by, streamAt: s.at } : marks;
+  return n ? { ...marks, by, streamAt: s.at } : marks;
 }
 
 /** "Prices paused" (stakeholder, 23 Nov 2026: no "prices 1 s ago" lines, one quiet safety cue instead). While the

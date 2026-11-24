@@ -23,7 +23,7 @@ import { engineDetail } from "../components/Experiment";
 import { dailyNote, showNote } from "../lib/engineevents";
 import { multiDayFrom } from "../lib/experiment";
 import { PricesPaused, useMarks } from "../components/Marks";
-import { potLive } from "../lib/marks";
+import { homeLine, potLive, vsSpyText } from "../lib/marks";
 
 // #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
 // The market notices and the headline line (migration 0043): one chunk of their own, not first load
@@ -118,20 +118,16 @@ export function Live() {
 
   const daily = overview.daily;
   const marked = (series.data ?? []).filter((p) => p.marked);
-  const c = marked.length ? mtmCurve(run.amount_usd, series.data!, daily) : curve(run.amount_usd, daily);
-  // Product, 16 Nov 2026: the line ends at the hero figure. Today's live pot (paper, ledger from today) is the last
-  // point, marked live; the S&P 500 line holds its last close there. Stakeholder, 18 Nov 2026: the hero and the line
-  // are the marked book (kb_book close_equity, the same series), never the sum of closed trades. 19 Nov 2026: live
-  // prices when the account holds exactly the book, else the engine's minute ledger (potLive); the earlier points
-  // stay the booked closes.
+  const closes = marked.length ? mtmCurve(run.amount_usd, series.data!, daily) : curve(run.amount_usd, daily);
+  // Product, 16 Nov 2026: the line ends at the hero figure. Stakeholder, 18 Nov 2026: the hero and the line are the
+  // marked book (kb_book close_equity, the same series), never the sum of closed trades. 19 Nov 2026: live prices when
+  // the account holds exactly the book, else the engine's minute ledger (potLive); the earlier points stay the booked
+  // closes. 24 Nov 2026: the hero, "Ahead of / Behind the S&P 500" and the chart's legend all read ONE last point
+  // (lib/marks.homeLine). While the pot is live it is today's point, and its S&P 500 value moves with SPY now (the
+  // last close's SPY value x SPY now / SPY's previous close, from the same /api/marks answer, at most 30 s old). With no
+  // fresh SPY price it holds the last close, as before, and the text says "at last close": never a silent mix.
   const liveNow = run.kind === "paper" ? potLive(run, overview, useBookData, series.data, mk.marks) : null;
-  const todayEt = etToday();
-  const tail = c.at(-1);
-  if (liveNow?.fresh && liveNow.fresh.kind !== "close") {
-    const point = { session: todayEt, pot: liveNow.pot, spy: tail?.spy ?? run.amount_usd, live: true };
-    if (tail?.session === todayEt) c[c.length - 1] = { ...tail, pot: liveNow.pot, live: true };
-    else c.push(point);
-  }
+  const { curve: c, end, spyAt } = homeLine(closes, liveNow, mk.marks?.spy, etToday(), run.amount_usd);
   // Stakeholder, 19 Nov 2026: with few sessions every range drew the same line; only ranges that show less than All
   const ranges = rangesFor(c.length);
   const range = ranges.includes(rangePick) ? rangePick : "ALL";
@@ -140,11 +136,12 @@ export function Live() {
   const s = stats(run.amount_usd, daily, trades.data.rows);
   const live = liveNow;
   const chip = engineChip(overview, run, healthCache.data?.events);
-  const pot = live?.pot ?? c.at(-1)?.pot ?? run.amount_usd;
+  const pot = end?.pot ?? live?.pot ?? run.amount_usd;
   const lastDay = [...daily].reverse().find((d) => d.trades > 0);
   const lastRows = lastDay ? trades.data.rows.filter((t) => t.entry_ts.slice(0, 10) === lastDay.session) : [];
-  // the pot's gain (marked) against SPY's from the same start
-  const vsSpy = (live ? pot - run.amount_usd : s.netUsd) - (c.at(-1) ? c.at(-1)!.spy - run.amount_usd : 0);
+  // the pot's gain (marked) against SPY's from the same start, both read from the line's last point
+  const vsSpy = (live ? pot - run.amount_usd : s.netUsd) - (end ? end.spy - run.amount_usd : 0);
+  const spyPct = end ? ((end.spy - run.amount_usd) / run.amount_usd) * 100 : s.spyPct;
   // Stakeholder, 16 Nov 2026: while a newer run is scheduled, an ended run's pot must not read as the current one.
   const ended = run.kind === "paper" && !["scheduled", "running", "paused"].includes(run.status);
   const newer = ended ? (runs ?? []).filter((r) => r.kind === "paper" && r.id !== run.id && r.created_at >= run.created_at
@@ -178,7 +175,7 @@ export function Live() {
           <div className="num home-change">
             <Tick value={allTime} from={src} className={tone(allTime)}>{signedMoney(allTime)} all time</Tick>
             {live && <Tick value={live.dayPnl} from={src} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
-            <span className="muted desk-only">{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500 by {money(Math.abs(vsSpy))}</span>
+            <span className="muted desk-only">{vsSpyText(vsSpy, spyAt)}</span>
           </div>
           <PricesPaused paused={mk.paused} />
         </section>
@@ -212,8 +209,8 @@ export function Live() {
         <summary><span>Details</span><span className="muted">vs S&amp;P 500, limits, evidence, rules</span></summary>
         <div className="home-details-body">
           <div className="kv">
-            <span>S&amp;P 500 (SPY), same start</span><span /><span className="v num">{s.spyPct >= 0 ? "+" : ""}{pct(s.spyPct)}</span>
-            <span>{vsSpy >= 0 ? "Ahead of" : "Behind"} the S&amp;P 500</span><span /><span className="v num">{money(Math.abs(vsSpy))}</span>
+            <span>S&amp;P 500 (SPY), same start{spyAt === "close" ? " (last close)" : ""}</span><span /><span className="v num">{spyPct >= 0 ? "+" : ""}{pct(spyPct)}</span>
+            <span>{vsSpyText(vsSpy, spyAt, false)}</span><span /><span className="v num">{money(Math.abs(vsSpy))}</span>
           </div>
           {lv && meters && run.kind === "paper" && (
             <div className="phone-only meters meters-home" aria-label="Limits">

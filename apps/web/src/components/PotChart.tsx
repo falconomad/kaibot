@@ -95,7 +95,7 @@ export function PotChart({ data, start, markers = [], compact = false, base, cap
     <div className={compact ? "potchart compact" : "potchart"}>
       <div className="legend chart-legend">
         <span title="after costs"><i className="sw pot" aria-hidden="true" />{NAME} <b className="num">{whole(last.pot)}</b> <span className="num">{changePct(last.pot, from.pot)}</span></span>
-        <span><i className="sw spy" aria-hidden="true" />SPY, same start <b className="num">{whole(last.spy)}</b> <span className="num">{changePct(last.spy, from.spy)}</span></span>
+        <span><i className="sw spy" aria-hidden="true" />SPY, same start{last.spyClose ? " (last close)" : ""} <b className="num">{whole(last.spy)}</b> <span className="num">{changePct(last.spy, from.spy)}</span></span>
         <span className="spacer" />
         <button className="chart-table-btn" style={{ minHeight: 44, fontSize: 15, padding: "0 14px" }} onClick={() => setTable(!table)}>{table ? "Show chart" : "Show table"}</button>
       </div>
