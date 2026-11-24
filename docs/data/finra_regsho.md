@@ -30,7 +30,7 @@ Kaibot's alt store is a database built from those files for predictive research,
 The live engine never imported any of this (`tests/unit/test_alt_isolation.py`).
 
 ## Old data on the Mac: the owner deletes it
-The repo never held the data. The collector wrote under the data folder, by default `~/Projects/kaibot/data`
+The repo held only a 10-line CNMS test fixture, deleted in this PR. The collector wrote under the data folder, by default `~/Projects/kaibot/data`
 (the launchd job's `--data`, or `KAIBOT_DATA_DIR` if you set it):
 
 ```
