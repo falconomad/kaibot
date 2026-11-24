@@ -127,8 +127,8 @@ def config_version(raw: bytes) -> tuple[int, list[dict]]:
     """(version, amendments) of an ablation config, checked like a docs/prereg amendment chain.
 
     A config without `version` and `amendments` is version 1. Version n has exactly n - 1 amendments, numbered 1..n-1
-    in order, each with a heading, a date, a reason and the rules it removed; no removed rule may come back under
-    its name. Anything else is refused: the version is what tells trial rows of an amended config apart."""
+    in order, each with a heading, a date and a reason (and the rules it removed, if any); no removed rule may come
+    back under its name. Anything else is refused: the version is what tells trial rows of an amended config apart."""
     doc = yaml.safe_load(raw) or {}
     amendments = doc.get("amendments") or []
     version = doc.get("version", 1)
