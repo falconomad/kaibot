@@ -13,7 +13,7 @@ import { Live } from "./pages/Live";
 import { Skeleton } from "./components/Skeleton";
 import { ROUTE_LOADERS as load } from "./routes";
 import { STALE } from "./lib/poll";
-import { primeGlowFromUrl } from "./lib/glow";
+import { primeGlowArrival, primeGlowFromUrl } from "./lib/glow";
 
 // Lazy routes (see routes.ts). Sign-in, the shell and Home stay in the first load so the first screen is one round trip.
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
@@ -102,8 +102,9 @@ function Gate() {
 // The installable web app (#481): the service worker and the install offer, fetched after the first screen.
 if (import.meta.env.PROD) void import("./pwa/start");
 
-// Landing from the emailed sign-in link: the glow starts where sign-in had it (lib/glow.ts).
-primeGlowFromUrl();
+// Landing from the emailed sign-in link: the glow starts where sign-in had it (lib/glow.ts). Otherwise, a signed-out
+// first load (sign-in or /register) plays sign-in's entrance, the mirror of the sign-out drift.
+if (!primeGlowFromUrl()) primeGlowArrival();
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={qc}>
