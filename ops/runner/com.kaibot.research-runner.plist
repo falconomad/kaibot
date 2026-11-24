@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Kaibot research runner (docs/ops/research_runner.md). A template: scripts/install_runner.sh fills in
+     __REPO__, __HOME__ and __PATH__ and installs it as ~/Library/LaunchAgents/com.kaibot.research-runner.plist.
+     Every 15 minutes, one tick of scripts/research_runner.py. launchd never starts a second copy while one runs.
+     It does not start, stop or restart the engine (com.kaibot.engine, scripts/service.sh). -->
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>com.kaibot.research-runner</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__REPO__/.venv/bin/python</string>
+		<string>__REPO__/scripts/research_runner.py</string>
+	</array>
+	<key>WorkingDirectory</key><string>__REPO__</string>
+	<key>StartInterval</key><integer>900</integer>
+	<key>RunAtLoad</key><false/>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key><string>__PATH__</string>
+		<key>HOME</key><string>__HOME__</string>
+		<key>LANG</key><string>en_US.UTF-8</string>
+	</dict>
+	<key>StandardOutPath</key><string>__REPO__/data/runner/runner.log</string>
+	<key>StandardErrorPath</key><string>__REPO__/data/runner/runner.log</string>
+</dict>
+</plist>
