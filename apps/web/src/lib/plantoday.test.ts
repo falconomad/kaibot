@@ -133,6 +133,14 @@ describe("carried buys on hold while the market filter is off (#621)", () => {
     expect(carryHold([p], off, "2026-11-23")).toBe("market filter off");
     expect(carryHold([p], carriesFrom([late], 7), "2026-11-20")).toBe("market filter off"); // before 20 Nov's window
   });
+  it("#627: after a late send, today's carry-over (of: the late send's session) is sent again at today's close", () => {
+    const late = { ...ev("2026-11-19", true, [], "2026-11-18"), payload: { ...ev("2026-11-19", true, [], "2026-11-18").payload, late_of: "2026-11-18" } };
+    const c = carriesFrom([late, ev("2026-11-20", false, [["APA", 10, 0]], "2026-11-19")], 7);
+    expect(carriedToday([p], c, "2026-11-20").map((x) => [x.symbol, x.from, carriedText(x)]))
+      .toEqual([["APA", "2026-11-18", "carried from 18 Nov, sent again at today's close"]]);
+    // without the late send's event, a carry-over of another session's decision is still not this plan's
+    expect(carriedToday([p], carriesFrom([ev("2026-11-20", false, [["APA", 10, 0]], "2026-11-19")], 7), "2026-11-20")).toEqual([]);
+  });
   it("QA on #626: a weekend or a holiday reads the last session's carry-over; a new decision ends the hold", () => {
     const fri = carriesFrom([ev("2026-11-27", true)], 7);
     expect(carryHold([p], fri, "2026-11-28")).toBe("market filter off"); // Saturday
