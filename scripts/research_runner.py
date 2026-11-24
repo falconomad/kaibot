@@ -238,9 +238,14 @@ def redact(text: str, home: str | None = None) -> str:
     return text.replace(home, "~") if len(home) > 1 else text  # the owner's user name stays off GitHub
 
 
-def tail(path: Path, n: int = 150, width: int = 400) -> str:
-    with path.open("r", errors="replace") as f:
-        lines = deque(f, maxlen=n)
+def tail(path: Path, n: int = 150, width: int = 400, max_bytes: int = 256_000) -> str:
+    """The last n lines, reading at most the last max_bytes of the log (a runaway job's log can be huge)."""
+    with path.open("rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - max_bytes))
+        chunk = f.read().decode("utf-8", errors="replace")
+    lines = deque(chunk.splitlines(keepends=True), maxlen=n)
     return "".join(ln if len(ln) <= width else ln[:width] + "...\n" for ln in lines)
 
 

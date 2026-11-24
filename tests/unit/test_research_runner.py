@@ -272,6 +272,13 @@ def test_the_home_directory_is_not_posted_and_a_rejection_is_fenced():
     assert "```text\nscript '@someone 'x'' is not" in body
 
 
+def test_the_tail_of_a_huge_log_is_bounded(tmp_path):
+    log = tmp_path / "x.log"
+    log.write_text("x" * 5_000_000 + "\nlast\n")
+    t = rr.tail(log, 150)
+    assert t.endswith("last\n") and len(t) < 1000
+
+
 def test_redaction_keeps_ordinary_research_output():
     text = ("main @ cc77204d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b  sharpe 0.81  2016-01-04..2024-12-31  input_tokens: 1200\n"
             "wrote data/reports/index_core_book_20261124T101500Z.md\n")
