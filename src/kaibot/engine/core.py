@@ -388,7 +388,7 @@ class Engine:
         # S34: the agent room (None = rules-only). It can only veto or halve a candidate the rules approved.
         self.roomflow = self._roomflow(room, pack_fn)
         self.rules_extra = rules_extra  # extra rules-only veto (S37 pump risk): (engine, symbol, m) -> str | None
-        self.kill: str | None = None  # set by a fail-closed halt; blocks entries until the next session
+        self.kill = None  # set by a fail-closed halt; blocks entries until the next session (#446: the switch's hold)
         # Issue #81: the cross-machine lease (engine/lease.py), set by __main__. None = not enforced (tests,
         # replays). When set, entries need a lease that is provably ours right now.
         self.lease = None
@@ -1198,6 +1198,31 @@ class Engine:
         if d is not None and d.refused:
             return f"config refused: {d.refused}"
         return None
+
+    @property
+    def trading(self):
+        """M10 1.21 (#446) step 2: the trading switch the triggers set (engine/state.py `TradingSwitch`)."""
+        from kaibot.engine.state import TradingSwitch
+
+        sw = self.__dict__.get("_trading_switch")
+        if sw is None:  # also for an Engine made without __init__ (some unit tests)
+            sw = self.__dict__["_trading_switch"] = TradingSwitch()
+        return sw
+
+    @property
+    def kill(self) -> str | None:
+        """The fail-closed halt's kind (None: none): the trading switch's `halt` hold (#446 step 2). Setting it holds
+        the engine `reducing_only` (sales and stops still go, as before); setting None releases the hold."""
+        return self.trading.held("halt")
+
+    @kill.setter
+    def kill(self, kind: str | None) -> None:
+        from kaibot.engine.state import TradingState
+
+        if kind:
+            self.trading.hold("halt", TradingState.REDUCING_ONLY, kind)
+        else:
+            self.trading.release("halt")
 
     def trading_state(self):
         """M10 1.21 (#446), step 1: the one trading state, derived from `entry_block` (engine/state.py)."""
