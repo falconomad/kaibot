@@ -189,7 +189,8 @@ def test_who_may_invite(db):
     assert j("select public.kb_me();", uid=MEMBER)["name"] == "Mia"
     j("select public.kb_invite_create('friend-of-mia@example.com');", uid=MEMBER)
     j("select public.kb_invite_create('friend-of-owner@example.com');")
-    assert [i["email"] for i in j("select public.kb_invite_list();", uid=MEMBER)["invites"]] == ["friend-of-mia@example.com"]
+    mine = j("select public.kb_invite_list();", uid=MEMBER)["invites"]
+    assert [i["email"] for i in mine] == ["friend-of-mia@example.com"]
     assert len(j("select public.kb_invite_list();")["invites"]) == 3
     # nobody reads the tables directly
     for uid in (OWNER, MEMBER):
@@ -209,7 +210,8 @@ def test_the_cap_counts_accounts_and_open_invites(db):
     # re-asking for an open invite is not a new seat
     assert j(f"select public.kb_invite_create('{made[0]['email']}');")["reused"] is True
     # an expired invite frees its seat
-    psql(f"update kaibot.invite set expires_at = now() - interval '1 second' where code = '{made[0]['code']}';", role=None)
+    psql(f"update kaibot.invite set expires_at = now() - interval '1 second' where code = '{made[0]['code']}';",
+         role=None)
     j("select public.kb_invite_create('one-more@example.com');")
 
 
@@ -288,7 +290,8 @@ def _kb_functions() -> list[tuple[str, int]]:
 @needs_pg
 def test_an_invited_member_reaches_no_owner_data(db):
     """Every kb_* function the authenticated role may call, called as an invited member with null arguments: each
-    one refuses (not authorised; the two realtime policy predicates answer false), except the invite functions, kb_me, kb_claim_owner (false: the owner exists) and
+    one refuses (not authorised; the two realtime policy predicates answer false), except the invite functions,
+    kb_me, kb_claim_owner (false: the owner exists) and
     kb_helper_whoami (false). This is the database's enforcement; the dashboard's hiding is only the second lock."""
     _member()
     fns = _kb_functions()
@@ -313,7 +316,8 @@ def test_an_invited_member_reaches_no_owner_data(db):
     # the headline table: no privilege, and RLS shows nothing to a non-owner even with one
     with pytest.raises(AssertionError, match="permission denied"):
         psql("select count(*) from kaibot.headline;", uid=MEMBER)
-    assert psql("""begin; grant usage on schema kaibot to authenticated; grant select on kaibot.headline to authenticated;
+    assert psql("""begin; grant usage on schema kaibot to authenticated;
+      grant select on kaibot.headline to authenticated;
       grant execute on function kaibot.is_owner() to authenticated;
       insert into kaibot.headline (dedup_key, symbols, headline, source, licence, created_at)
         values ('alp:rls1', array['AAPL'], 'Owner-only', 'alpaca_benzinga', 'owner_only', now());
