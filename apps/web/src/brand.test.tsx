@@ -178,7 +178,7 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
     expect(still(<Logo size={18} />)).toContain("height:18px");
   });
 
-  it("the header, sign-in and New run all draw it, each once, and nothing else draws a logo", () => {
+  it("the header, sign-in (and its sibling, registration) and New run all draw it, each once, and nothing else draws a logo", () => {
     const run = paperRun();
     const header = render(<Shell />, { route: "*", seeds: [{ key: ["runs"], data: [run] }, { key: ["overview", 1], data: emptyOverview(run) }] });
     expect(header).toMatch(/<a class="brand" aria-label="kaibo home"[^>]*><svg class="logo logo-word[^"]*" viewBox="0 -88 301.55 88" role="img" aria-label="kaibo"/);
@@ -188,7 +188,8 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
     expect(text(signIn)).toMatch(/^PAPER Sign in/);
     const sources = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
     const draws = Object.keys(sources).filter((f) => !/\.test\.tsx$/.test(f) && /brand\/logo\/|<Logo\b/.test(sources[f])).sort();
-    expect(draws).toEqual(["./components/Logo.tsx", "./components/Shell.tsx", "./pages/Onboarding.tsx", "./pages/SignIn.tsx"]);
+    expect(draws).toEqual(["./components/Logo.tsx", "./components/Shell.tsx", "./pages/Onboarding.tsx", "./pages/Register.tsx",
+      "./pages/SignIn.tsx"]);
   });
 
   it("the size comes from the stylesheet: 26 px on phones, 28 px above, in a 64 px and a 72 px header", () => {

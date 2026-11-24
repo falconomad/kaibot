@@ -3,6 +3,7 @@ import { supa } from "../lib/api";
 import { Logo } from "../components/Logo";
 import { FROM_SIGNIN, useGlow } from "../lib/glow";
 import { NAME } from "../brand/brand";
+import { NO_ACCOUNT, TOO_MANY, isNoAccount, takeAttempt } from "../lib/attempts";
 
 // #481: the installed app signs in with the code from the email; on demand, and nothing in a browser tab.
 const CodeEntry = lazy(() => import("../pwa/CodeEntry"));
@@ -15,9 +16,14 @@ export function SignIn() {
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
+    const turn = takeAttempt();
+    if (!turn.ok) { setErr(TOO_MANY(turn.waitMs)); setState("error"); return; }
     setState("sending");
-    const { error } = await supa.auth.signInWithOtp({ email, options: { emailRedirectTo: `${window.location.origin}/?${FROM_SIGNIN}` } });
-    if (error) { setErr(error.message); setState("error"); } else setState("sent");
+    // Sign-in never creates an account (stakeholder, 24 Nov 2026): a new account needs an invite (/register). For an
+    // email without an account Supabase sends nothing and answers otp_disabled.
+    const { error } = await supa.auth.signInWithOtp({ email,
+      options: { shouldCreateUser: false, emailRedirectTo: `${window.location.origin}/?${FROM_SIGNIN}` } });
+    if (error) { setErr(isNoAccount(error) ? NO_ACCOUNT : error.message); setState("error"); } else setState("sent");
   }
 
   return (
@@ -40,6 +46,7 @@ export function SignIn() {
             <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
             {state === "error" && <p className="loss" style={{ margin: 0 }} role="alert">{err}</p>}
             <button className="primary" disabled={state === "sending" || !email}>{state === "sending" ? "Sending…" : "Email me a link"}</button>
+            <p className="muted" style={{ margin: 0, fontSize: 13 }}>Got an invite? <a href="/register">Register with your code</a>.</p>
           </>
         )}
       </form>

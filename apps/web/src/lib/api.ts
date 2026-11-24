@@ -224,8 +224,23 @@ async function joinPrices(): Promise<void> {
     });
 }
 
+/** kb_me (migration 0045): who the signed-in account is. */
+export interface Me { owner: boolean; member: boolean; helper: boolean; name: string | null; can_invite: boolean }
+export interface InviteMade { email: string; code: string; link: string; expires_at: string; reused: boolean }
+export type InviteReason = "unknown" | "used" | "expired" | "email_mismatch";
+export interface InviteCheck { ok: boolean; reason: InviteReason | null; expires_at?: string }
+export interface InviteRow { id: number; email: string; created_at: string; expires_at: string; used_at: string | null;
+  status: "open" | "used" | "expired"; code: string | null; mine: boolean }
+export interface InviteList { cap: number; taken: number; invites: InviteRow[] }
+
 export const api = {
   claimOwner: () => rpc<boolean>("kb_claim_owner"),
+  // 0045's invites. Each is null while the migration is not applied (the pages then keep the old behaviour and say so).
+  me: () => optional(() => rpc<Me>("kb_me")),
+  inviteCreate: (email: string) => optional(() => rpc<InviteMade>("kb_invite_create", { p_email: email })),
+  inviteCheck: (code: string, email?: string) =>
+    optional(() => rpc<InviteCheck>("kb_invite_check", { p_code: code, p_email: email ?? null })),
+  inviteList: () => optional(() => rpc<InviteList>("kb_invite_list")),
   runs: async () => (await rpc<Run[]>("kb_runs")).map(fixRun),
   overview: async (run: number) => {
     const o = await rpc<Overview>("kb_overview", { p_run: run });
