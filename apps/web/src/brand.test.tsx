@@ -252,59 +252,67 @@ describe("the logo's motion on load", () => {
   });
 });
 
-describe("the logo's idle hop (stakeholder, 24 Nov 2026)", () => {
-  // The hops of a cycle, from its keyframes: each hop is a rest stop, a lift and a landing; returns [start %, end %].
-  const hops = (name: string) => {
-    const body = new RegExp(`@keyframes ${name} \\{(.*)\\}`).exec(css)?.[1] ?? "";
-    const stops = (sel: RegExp) => (sel.exec(body)?.[1] ?? "").split(",").map((v) => parseFloat(v));
-    const rest = stops(/([\d.%, ]+)\{ transform: none; \}/);
-    return [0, 2, 4].map((i) => [rest[i], rest[i + 1]]);
+describe("the logo's idle motion: the point's hop and the arm's redraw in turn (stakeholder, 25 Nov 2026)", () => {
+  const frames = (name: string) => new RegExp(`@keyframes ${name} \\{(.*)\\}`).exec(css)?.[1] ?? "";
+  // [start %, end %] of the one motion in a cycle: the keyframes between the first two "none" stops that frame it
+  const span = (name: string) => {
+    const stops = [...frames(name).matchAll(/([\d.%, ]+)\{ transform: ([^;]+);/g)].flatMap((m) => m[1].split(",").map((v) => [parseFloat(v), m[2]] as const));
+    const moving = stops.filter(([, t]) => t !== "none").map(([p]) => p);
+    const rest = stops.filter(([, t]) => t === "none").map(([p]) => p);
+    return [Math.max(...rest.filter((p) => p < Math.min(...moving))), Math.min(...rest.filter((p) => p > Math.max(...moving)))];
   };
   const rule = (sel: string) => new RegExp(`(?:^|\\n)${sel.replace(/\./g, "\\.")} \\{([^}]*)\\}`).exec(css)?.[1] ?? "";
 
-  it("about 600 ms each, 6 s after the intro, on the brand easing, transform only", () => {
-    expect(rule(".logo-hop")).toBe(` position: absolute; will-change: transform; transform-origin: 50% 100%; animation: kb-logo-hop ${IDLE.often}s var(--ease) ${IDLE.after}s infinite; `);
-    expect(rule(".logo-hop.rare")).toBe(` animation-name: kb-logo-hop-rare; animation-duration: ${IDLE.rare}s; `);
-    for (const [name, cycle] of [["kb-logo-hop", IDLE.often], ["kb-logo-hop-rare", IDLE.rare]] as const) {
-      for (const [a, b] of hops(name)) expect(Math.abs(((b - a) / 100) * cycle - 0.6), name).toBeLessThan(0.02);
-      const body = new RegExp(`@keyframes ${name} \\{(.*)\\}`).exec(css)?.[1] ?? "";
-      expect([...body.matchAll(/([a-z-]+)\s*:/g)].every((m) => m[1] === "transform"), name).toBe(true);
-      expect(body).toContain("translateY(-60%) scale(.94, 1.06)"); // up 60% of the point: 3.1-4.2 px at 26-35 px
-      expect(hops(name)[0][0], "the first hop comes right at the end of the delay").toBe(0);
+  it("one 4 s cycle shared by both, from 2 s after the intro, on the brand easing; only transforms move", () => {
+    expect(IDLE).toEqual({ cycle: 4, offset: 2, after: 2 });
+    expect(rule(".logo-hop, .logo-arm")).toBe(` will-change: transform; animation: kb-logo-hop ${IDLE.cycle}s var(--ease) ${IDLE.after}s infinite; `);
+    expect(rule(".logo-arm")).toBe(" display: block; width: 100%; height: 100%; animation-name: kb-logo-arm; ");
+    expect(rule(".logo-hop")).toBe(" position: absolute; transform-origin: 50% 100%; ");
+    for (const name of ["kb-logo-hop", "kb-logo-arm"]) {
+      expect([...frames(name).matchAll(/([a-z-]+)\s*:/g)].every((m) => ["transform", "animation-timing-function"].includes(m[1])), name).toBe(true);
     }
+    expect(frames("kb-logo-hop")).toContain("translateY(-60%) scale(.94, 1.06)"); // up 60% of the point: 3.1-4.2 px
+    expect(frames("kb-logo-arm")).toContain("translate(var(--fx), var(--fy))"); // back along its own line, as the intro's draw
+    expect(css).not.toMatch(/kb-logo-hop-rare|\.logo-hop\.rare/);
   });
 
-  it("every 3-4 s on sign-in, uneven; elsewhere about every 6 s", () => {
-    const gaps = (name: string, cycle: number) => {
-      const starts = hops(name).map(([a]) => (a / 100) * cycle);
-      return starts.map((t, i) => Math.round(((i + 1 < starts.length ? starts[i + 1] : cycle) - t) * 100) / 100);
-    };
-    const often = gaps("kb-logo-hop", IDLE.often), rare = gaps("kb-logo-hop-rare", IDLE.rare);
-    expect(often).toEqual([3.5, 3.7, 3.4]);
-    expect(rare).toEqual([5.8, 6.3, 5.9]);
-    for (const g of often) expect(g >= 3 && g <= 4).toBe(true);
-    for (const g of rare) expect(g >= 5.5 && g <= 6.5).toBe(true);
-    expect(new Set(often).size).toBe(3); // jitter: no two gaps alike
-    expect(Math.min(...rare)).toBeGreaterThan(Math.max(...often));
+  it("the hop first, right at the end of the delay; the arm 2 s later; so one motion every 2 s, alternating", () => {
+    const [h0, h1] = span("kb-logo-hop"), [a0, a1] = span("kb-logo-arm");
+    const s = (p: number) => Math.round((p / 100) * IDLE.cycle * 1000) / 1000;
+    expect(h0).toBe(0);
+    expect(Math.abs(s(h1) - 0.6)).toBeLessThan(0.02); // the hop: 600 ms
+    expect(s(a0)).toBe(IDLE.offset); // the arm starts half a cycle (2 s) after the hop
+    expect(Math.abs(s(a1) - s(a0) - 0.5)).toBeLessThan(0.02); // the arm: 500 ms (back 200 ms, the intro's 300 ms draw out)
+    expect(s(a0) - s(h0)).toBe(2);
+    expect(IDLE.cycle - s(a0)).toBe(2); // and the next hop 2 s after the arm
+    expect(s(a1)).toBeLessThan(IDLE.cycle);
   });
 
-  it("where: sign-in and /register often, the app's header (and New run's) rare", () => {
+  it("the same everywhere: sign-in, /register, the app's header and New run", () => {
     const sources = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-    for (const f of ["./pages/SignIn.tsx", "./pages/Register.tsx"]) expect(sources[f], f).toContain('<Logo animate idle="often" large />');
-    for (const f of ["./components/Shell.tsx", "./pages/Onboarding.tsx"]) expect(sources[f], f).toContain('<Logo animate idle="rare" />');
-    expect(still(<Logo idle="rare" />)).toMatch(/<span class="logo-box"><svg class="logo logo-word"[^]*<svg class="logo-hop rare"/);
-    expect(still(<Logo idle="often" />)).toMatch(/<svg class="logo-hop"/);
-    expect(still(<Logo />)).not.toMatch(/logo-hop|logo-box/);
+    for (const f of ["./pages/SignIn.tsx", "./pages/Register.tsx"]) expect(sources[f], f).toContain("<Logo animate idle large />");
+    for (const f of ["./components/Shell.tsx", "./pages/Onboarding.tsx"]) expect(sources[f], f).toContain("<Logo animate idle />");
+    expect(Object.values(sources).join("\n")).not.toMatch(/idle="/);
+    const html = still(<Logo idle />);
+    expect(html).toMatch(/^<span class="logo-box"><svg class="logo logo-word"[^]*<span class="logo-clip"[^]*<svg class="logo-arm"[^]*<svg class="logo-leg"[^]*<svg class="logo-hop"/);
+    expect(still(<Logo idle large />).replace(/ logo-lg/, "")).toBe(html);
+    expect(still(<Logo />)).not.toMatch(/logo-hop|logo-box|logo-arm/);
   });
 
-  it("with reduced motion: no hop at all, and the global rule would stop any that slipped through", () => {
+  it("split, the logo still has each of Design's shapes once, with the file's colours, and the arm under the leg", () => {
+    const html = still(<Logo idle />);
+    expect(ds(html).sort()).toEqual(fileDs(wordDark).sort());
+    const m = mark("word", "dark");
+    expect(html.indexOf(m.parts[ROLES.word.arm].d)).toBeLessThan(html.indexOf(m.parts[ROLES.word.leg].d));
+    expect(html).toContain(`fill="${m.parts[ROLES.word.arm].fill}"`);
+  });
+
+  it("with reduced motion: no idle motion at all, and the global rule would stop any that slipped through", () => {
     vi.stubGlobal("window", { matchMedia: (q: string) => ({ matches: q === "(prefers-reduced-motion: reduce)" }) });
     try {
-      for (const idle of ["often", "rare"] as const) {
-        const html = still(<Logo idle={idle} />);
-        expect(html).not.toMatch(/logo-hop|logo-box/);
-        expect(ds(html)).toEqual(fileDs(wordDark));
-      }
+      const html = still(<Logo idle />);
+      expect(html).not.toMatch(/logo-hop|logo-box|logo-arm/);
+      expect(ds(html)).toEqual(fileDs(wordDark));
     } finally { vi.unstubAllGlobals(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} }); }
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
   });

@@ -7,19 +7,20 @@
 // appears with one soft pulse, in under a second; then the mark is still. Only position and opacity move, nothing
 // changes size around it, and with reduced motion the finished mark simply shows.
 //
-// Idle (stakeholder, 24 Nov 2026): once the intro has ended, the blue point now and then hops, a few px up with a soft,
-// squashed landing in 600 ms. CSS only (app.css, kb-logo-hop): the class goes on the point when the intro ends, so its
-// 6 s delay counts from there; the keyframes hold three uneven hops per cycle, so the beat never reads as a metronome.
-// The point then is its own small <svg> over the letters (below), so the hop runs on the compositor.
-// "often" (sign-in, /register): every 3.4-3.7 s; "rare" (the app's header): every 5.8-6.3 s (stakeholder, 24 Nov 2026 23:40). Paused while the tab is
-// hidden; none with reduced motion. Only the point's transform moves.
+// Idle (stakeholder, 24 Nov 2026; 25 Nov 2026 13:21 and 16:38): once the intro has ended, the blue point hops (a few px
+// up, a soft squashed landing, 600 ms) and, 2 s later, the k's blue arm replays its intro draw in short (it slides back
+// into its lower end and draws out again along its own line, 500 ms); then the point again, and so on: one motion every
+// 2 s, alternating, in one 4 s cycle, the same on sign-in, /register, the app's header and New run. CSS only (app.css,
+// kb-logo-hop and kb-logo-arm share one animation-delay): the classes go on when the intro ends, so the 2 s delay counts
+// from there. The point and the arm are then each their own <svg> layer (below), so they move on the compositor.
+// Paused while the tab is hidden; none with reduced motion. Only their transforms move.
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import wordDark from "../brand/logo/wordmark-on-dark.svg?raw";
 import wordLight from "../brand/logo/wordmark-on-light.svg?raw";
 import symbolDark from "../brand/logo/symbol-on-dark.svg?raw";
 import symbolLight from "../brand/logo/symbol-on-light.svg?raw";
 import { BRAND } from "../brand/brand";
-import { circle, drawnFrom, parseMark, type Mark } from "../brand/mark";
+import { capsule, circle, drawnFrom, parseMark, type Mark } from "../brand/mark";
 import { reducedMotion } from "../lib/a11y";
 
 const FILES = { word: { dark: wordDark, light: wordLight }, symbol: { dark: symbolDark, light: symbolLight } };
@@ -32,8 +33,8 @@ export function mark(kind: "word" | "symbol", on: "dark" | "light"): Mark {
 
 /** Which path is which, by its place in Design's file (brand.test.tsx checks the files still have this shape). */
 export const ROLES = { word: { arm: 0, leg: 1, stem: 2, point: 6 }, symbol: { arm: 0, point: 1, leg: 2, stem: 3 } } as const;
-/** The idle hop's cycle in seconds per kind: three uneven hops per cycle (app.css). */
-export const IDLE = { often: 10.6, rare: 18, after: 6 } as const;
+/** The idle motion in seconds (app.css): one cycle, the arm's turn this far into it, and the delay after the intro. */
+export const IDLE = { cycle: 4, offset: 2, after: 2 } as const;
 /** The sign-in and /register logo is this much larger than the header's (stakeholder, 24 Nov 2026; app.css .logo-lg). */
 export const LARGE = 1.25;
 /** The storyboard's timing in seconds: [starts at, lasts]. The pulse ends at 0.96 s. */
@@ -47,9 +48,9 @@ export const resetLogoMotion = () => { played = false; };
 /** `size`: the height of the letters in px, from the top of the k to the baseline (without it, the stylesheet sizes the
  *  logo: 26 px on phones, 28 px on wider screens). `symbolOnly`: the k alone, carrying its point. `on`: the background
  *  it stands on; the app is dark. `animate`: play the load motion if no logo has played it yet. `idle`: after it,
- *  the point hops now and then. `large`: 25% larger than the stylesheet's size (sign-in and /register). */
+ *  the point hops and the arm redraws, in turn. `large`: 25% larger than the stylesheet's size (sign-in and /register). */
 export function Logo({ size, symbolOnly = false, on = "dark", animate = false, idle, large = false }:
-  { size?: number; symbolOnly?: boolean; on?: "dark" | "light"; animate?: boolean; idle?: "often" | "rare"; large?: boolean }) {
+  { size?: number; symbolOnly?: boolean; on?: "dark" | "light"; animate?: boolean; idle?: boolean; large?: boolean }) {
   const kind = symbolOnly ? "symbol" : "word";
   const m = mark(kind, on), role = ROLES[kind];
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
@@ -68,8 +69,8 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
   const [x, y, w, h] = m.box;
   const style: CSSProperties = { aspectRatio: `${w} / ${h}`, ...(size ? { height: size } : null) };
   const time = (k: keyof typeof TIMING): CSSProperties => ({ animationDelay: `${TIMING[k][0]}s`, animationDuration: `${TIMING[k][1]}s` });
-  const dot = circle(m.parts[role.point].d);
-  const pt = m.parts[role.point];
+  const dot = circle(m.parts[role.point].d), arm = capsule(m.parts[role.arm].d);
+  const pt = m.parts[role.point], split = hops && !!dot && !!arm;
   const letters = (
     <svg className={`logo${symbolOnly ? "" : " logo-word"}${large ? " logo-lg" : ""}${moving ? " logo-moving" : ""}`} viewBox={`${x} ${y} ${w} ${h}`} role="img" aria-label={BRAND} style={style}>
       <g transform={`translate(${m.shift[0]} ${m.shift[1]})`}>
@@ -77,7 +78,7 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
         {m.parts.map((p, i) => {
           const path = (extra?: { className: string; style: CSSProperties }) =>
             <path key={i} fill={p.fill} fillRule={p.evenodd ? "evenodd" : undefined} d={p.d} {...extra} />;
-          if (!moving) return hops && dot && i === role.point ? null : path();
+          if (!moving) return split && (i === role.point || i === role.arm || i === role.leg) ? null : path();
           const k = i === role.stem ? "stem" : i === role.leg ? "leg" : i === role.arm ? "arm" : null;
           if (k) {
             // The stroke slides out along its own line inside its own outline, so it is drawn with a round end.
@@ -92,22 +93,51 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
       </g>
     </svg>
   );
-  if (!hops || !dot) return letters;
-  // The hopping point is its own small <svg> laid over the letters' point, not a <path> inside them: Chromium runs a
-  // transform animation on an SVG child on the main thread (style, layout and a repaint of the whole logo every frame),
-  // but on an HTML-level box it runs on the compositor and repaints nothing. Same place, size and colour as Design's.
-  const [cx, cy] = [dot.c[0] + m.shift[0], dot.c[1] + m.shift[1]], r = dot.r, pc = (v: number, of: number) => `${round((v / of) * 100)}%`;
-  const lift = symbolOnly ? 0 : 8; // .logo-word is lifted 8% of its height (app.css); the point goes with it
+  if (!split) return letters;
+  // The point and the arm are each their own <svg> laid over their place in the letters, not a <path> inside them:
+  // Chromium runs a transform animation on an SVG child on the main thread (style, layout and a repaint of the whole logo
+  // every frame), but on an HTML-level box it runs on the compositor and repaints nothing. Same place, size and colour
+  // as Design's. The arm goes under the white leg, which overlaps its lower end (as in the file), so the leg is drawn
+  // over it in a still <svg> of its own, and the rest of the letters stay below both, off any layer. The arm and the leg
+  // have the letters' own box, with their 8% lift in the viewBox rather than a transform: an <svg> is snapped to whole
+  // pixels and a layer is not redrawn for a fraction of one, so their pixels at rest are the letters' own.
+  const lift = symbolOnly ? 0 : 8; // .logo-word is lifted 8% of its height (app.css); the point and the arm go with it
+  const vb = `${x} ${round(y + (lift / 100) * h)} ${w} ${h}`;
+  const [sx, sy] = m.shift, [cx, cy] = [dot!.c[0] + sx, dot!.c[1] + sy], r = dot!.r;
+  const ap = m.parts[role.arm], [fx, fy] = drawnFrom(ap.d, "left");
+  // The clip, in % of the logo's box: everything ahead of the arm's lower end, and that end's round cap 0.75 px wider, so
+  // the arm's own edge at rest is never cut (its pixels stay the file's). The leg's cap covers that end (same centre and
+  // size), so the arm slides out of sight under it as the intro's draw did inside its outline; at most a sub-pixel rim
+  // of it shows past the leg while it moves.
+  const [p0, p1] = arm!.ends, [c0, e0] = fx < 0 ? [p0, p1] : [p1, p0], len = Math.hypot(e0[0] - c0[0], e0[1] - c0[1]);
+  const [ux, uy] = [(e0[0] - c0[0]) / len, (e0[1] - c0[1]) / len], K = 400;
+  const at = (a: number, b: number, px = 0) => {
+    const [dx, dy] = px ? [ux * a - uy * b, uy * a + ux * b].map((v) => v / Math.hypot(a, b)) : [0, 0];
+    const X = pc(c0[0] + sx + ux * a - uy * b - x, w), Y = `${round(((c0[1] + sy + uy * a + ux * b - y) / h) * 100 - lift)}%`;
+    return px ? `calc(${X} + ${round(dx * px)}px) calc(${Y} + ${round(dy * px)}px)` : `${X} ${Y}`;
+  };
+  const clip = [at(K, K), at(K, -K), at(0, -K), ...Array.from({ length: 19 }, (_, i) => {
+    const t = ((i - 9) * Math.PI) / 18; return at(-arm!.r * Math.cos(t), arm!.r * Math.sin(t), 0.75);
+  }), at(0, K)];
+  const shape = (p: Mark["parts"][number]) => <path fill={p.fill} d={p.d} transform={`translate(${sx} ${sy})`} />;
+  const paused = hidden ? { animationPlayState: "paused" } : null;
   return (
     <span className="logo-box">
       {letters}
-      <svg className={`logo-hop${idle === "rare" ? " rare" : ""}`} viewBox={`${cx - r} ${cy - r} ${2 * r} ${2 * r}`} aria-hidden="true"
-        style={{ left: pc(cx - r - x, w), top: `${round(((cy - r - y) / h) * 100 - lift)}%`, width: pc(2 * r, w), height: pc(2 * r, h),
-          ...(hidden ? { animationPlayState: "paused" } : null) }}>
-        <path fill={pt.fill} d={pt.d} transform={`translate(${m.shift[0]} ${m.shift[1]})`} />
+      <span className="logo-clip" style={{ clipPath: `polygon(${clip.join(",")})` }}>
+        <svg className="logo-arm" viewBox={vb} aria-hidden="true"
+          style={{ "--fx": pc(fx, w), "--fy": pc(fy, h), ...paused } as CSSProperties}>
+          {shape(ap)}
+        </svg>
+      </span>
+      <svg className="logo-leg" viewBox={vb} aria-hidden="true">{shape(m.parts[role.leg])}</svg>
+      <svg className="logo-hop" viewBox={`${cx - r} ${cy - r} ${2 * r} ${2 * r}`} aria-hidden="true"
+        style={{ left: pc(cx - r - x, w), top: `${round(((cy - r - y) / h) * 100 - lift)}%`, width: pc(2 * r, w), height: pc(2 * r, h), ...paused }}>
+        {shape(pt)}
       </svg>
     </span>
   );
 }
 
+const pc = (v: number, of: number) => `${round((v / of) * 100)}%`;
 const round = (v: number) => Math.round(v * 100) / 100;

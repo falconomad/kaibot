@@ -97,14 +97,16 @@ header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wr
 .logo-pop { transform-box: fill-box; transform-origin: center; animation: kb-logo-pop .18s cubic-bezier(.3, 1.4, .5, 1) both; }
 /* forwards, not both: the ring must stay unseen until its turn */
 .logo-pulse { transform-box: fill-box; transform-origin: center; opacity: 0; animation: kb-logo-pulse .3s var(--ease) forwards; }
-/* idle (Logo.tsx): from 6 s after the intro, the point hops 60% of its height (3-4 px) and lands squashed, 600 ms;
-   three uneven hops per cycle: every 3.4-3.7 s on sign-in, or every 5.8-6.3 s elsewhere (.rare). The point is its own
-   small <svg> on its own layer (.logo-box holds it over the letters), so only its transform moves, on the compositor. */
-@keyframes kb-logo-hop { 0%, 5.6%, 33.02%, 38.62%, 67.92%, 73.53% { transform: none; } 2.29%, 35.31%, 70.22% { transform: translateY(-60%) scale(.94, 1.06); } 4.08%, 37.09%, 72% { transform: scale(1.08, .92); } }
-@keyframes kb-logo-hop-rare { 0%, 3.3%, 32.22%, 35.52%, 67.22%, 70.52% { transform: none; } 1.35%, 33.57%, 68.57% { transform: translateY(-60%) scale(.94, 1.06); } 2.4%, 34.62%, 69.62% { transform: scale(1.08, .92); } }
+/* idle (Logo.tsx): 2 s after the intro, the point hops 60% of its height (3-4 px) and lands squashed, 600 ms; 2 s later
+   the arm slides back into its lower end and draws out again (the intro's draw, 500 ms); one 4 s cycle, everywhere.
+   Each is its own <svg> on its own layer (.logo-box), so only their transforms move, on the compositor. */
+@keyframes kb-logo-hop { 0%, 14.84% { transform: none; } 6.07% { transform: translateY(-60%) scale(.94, 1.06); } 10.81% { transform: scale(1.08, .92); } }
+@keyframes kb-logo-arm { 0%, 62.5% { transform: none; } 50% { transform: none; animation-timing-function: ease-in; } 55% { transform: translate(var(--fx), var(--fy)); } }
 .logo-box { position: relative; flex: none; }
-.logo-hop { position: absolute; will-change: transform; transform-origin: 50% 100%; animation: kb-logo-hop 10.6s var(--ease) 6s infinite; }
-.logo-hop.rare { animation-name: kb-logo-hop-rare; animation-duration: 18s; }
+.logo-clip, .logo-leg { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.logo-hop, .logo-arm { will-change: transform; animation: kb-logo-hop 4s var(--ease) 2s infinite; }
+.logo-hop { position: absolute; transform-origin: 50% 100%; }
+.logo-arm { display: block; width: 100%; height: 100%; animation-name: kb-logo-arm; }
 /* sign-in and /register: 25% larger (1.25 x 28 px, and 1.25 x 26 px on phones below) */
 .logo-lg { height: 35px; }
 nav.topnav { display: flex; flex-wrap: wrap; gap: 2px; font-size: 16px; font-weight: 500; }

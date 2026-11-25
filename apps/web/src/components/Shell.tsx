@@ -251,7 +251,7 @@ export function Shell() {
     <div className="shell">
       <a className="skip" href="#main">Skip to content</a>
       <header className="top">
-        <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle="rare" /></Link>
+        <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle /></Link>
         <nav className="topnav" aria-label="Main">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>{n.label}</NavLink>)}
         </nav>
