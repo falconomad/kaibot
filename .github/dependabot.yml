@@ -1,0 +1,43 @@
+# Audit 2 ticket 7.3 (#713): weekly dependency updates, one grouped pull request per ecosystem and folder.
+# Dependabot only opens pull requests; nothing merges without review and green checks (docs/ops/hygiene.md).
+#
+# Python: Kaibot's packages are locked in uv.lock and exported, hash-pinned, to requirements-{engine,research,ml}.txt
+# (scripts/lock_deps.sh). The "uv" ecosystem updates uv.lock; Dependabot's "pip" ecosystem would rewrite the exports
+# alone, which the next ./scripts/lock_deps.sh would undo. A Python update's PR therefore fails `lock_deps.sh --check`
+# until someone runs ./scripts/lock_deps.sh on its branch and pushes the three re-exported files.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule: {interval: weekly, day: monday, time: "06:17", timezone: Europe/Berlin}
+    open-pull-requests-limit: 3
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message: {prefix: "Deps (python)"}
+  - package-ecosystem: uv  # the audit tools of supply-chain.yml (pip-audit, zizmor)
+    directory: /.github/audit
+    schedule: {interval: weekly, day: monday, time: "06:17", timezone: Europe/Berlin}
+    open-pull-requests-limit: 2
+    groups:
+      audit-tools:
+        patterns: ["*"]
+    commit-message: {prefix: "Deps (audit tools)"}
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule: {interval: weekly, day: monday, time: "06:17", timezone: Europe/Berlin}
+    open-pull-requests-limit: 3
+    groups:
+      web-runtime:
+        dependency-type: production
+      web-dev:
+        dependency-type: development
+    commit-message: {prefix: "Deps (web)"}
+  - package-ecosystem: github-actions  # actions stay pinned by commit; Dependabot updates the sha and the tag comment
+    directory: /
+    schedule: {interval: weekly, day: monday, time: "06:17", timezone: Europe/Berlin}
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message: {prefix: "Deps (actions)"}

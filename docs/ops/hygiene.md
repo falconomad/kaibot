@@ -23,6 +23,34 @@ alembic, apscheduler, duckdb, datasketch, structlog, tenacity, feedparser, plus 
 used it), the `nlp` extra (transformers, torch) and the dev packages pytest-asyncio, respx and freezegun.
 (httpx still arrives as a dependency of anthropic.)
 
+## Dependency updates, audits and the browser policy (audit 2 7.3, #713)
+
+- **Dependabot** (`.github/dependabot.yml`): every Monday, one grouped pull request per set: Python (`uv`, the
+  root `uv.lock`), the audit tools (`.github/audit`), the web app (`npm`, runtime and dev tools apart) and the
+  GitHub Actions (still pinned by commit; Dependabot moves the sha and the tag comment). The Python ecosystem is
+  `uv`, not `pip`: `pip` would rewrite the requirements exports without `uv.lock`. A Python update's PR is red on
+  `lock_deps.sh --check` until `./scripts/lock_deps.sh` is run on its branch and the three exports are pushed. Its
+  alerts and security updates (Settings > Code security) are repository settings: the owner's.
+- **npm audit** (`ci.yml`, job `web`): `npm audit --omit=dev --audit-level=high` blocks, so nothing with a high or
+  critical advisory ships to the browser. The same audit of the dev tools runs but does not block yet: on 25 Nov 2026
+  vitest 2 pulled in tinypool (critical), vite-node, vite and esbuild with open advisories, fixed only by
+  vitest 4.1.11 or later (a major upgrade, a frontend story). Make that step blocking once it is done.
+- **Content-Security-Policy** (`apps/web/vercel.json`, every path): sent as `Content-Security-Policy-Report-Only`,
+  so a violation is a console line and nothing is blocked. It names what the browser uses: our files; the Inter
+  sheet's inline `onload` by hash; Google Fonts; the logo hosts (tickerlogos, Finnhub, FMP); the Supabase project
+  over https and wss. Alpaca is not listed: only the functions in `api/` call it. `apps/web/src/csp.test.ts` keeps
+  the policy and the code in step (a new logo host, inline handler or project fails it). To enforce: watch the
+  production console for a week, then rename the header to `Content-Security-Policy`.
+
+### Security settings only the owner can change
+
+The live Supabase advisors (second engine audit, 25 Nov 2026) raise two notes that no pull request can clear:
+
+| Advisor note | Why it stays for now | What the owner does |
+|---|---|---|
+| Leaked-password protection off (Auth) | Supabase offers it on the Pro plan and above; the project is on the free plan. Sign-up is by invite only (0045) and the owner's account is the only one that trades | Nothing on the free plan. On a paid plan: Authentication > Providers > Email > "Prevent use of leaked passwords" on |
+| `pg_net` installed in schema `public` (lint 0014) | pg_net cannot be moved with `alter extension ... set schema`: it must be dropped and created again, which drops `net._http_response` and any request in flight. The dead-man (0019) reads that table every minute 13:00-21:59 UTC on weekdays | In a planned window outside 13:00-22:00 UTC on a weekday (or at a weekend): `drop extension pg_net; create extension pg_net with schema extensions;`, then the dead-man drill of `failsafe.md` (`select kaibot.deadman_check(force => true);` twice a minute apart, engine stopped) and the advisor again |
+
 ## Types and import rules (non-blocking)
 
 CI job `hygiene` runs `mypy` (config in `pyproject.toml`, `[tool.mypy]`) and `lint-imports` (`[tool.importlinter]`).
