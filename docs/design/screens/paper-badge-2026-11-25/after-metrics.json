@@ -1,0 +1,754 @@
+{
+ "home-dark-360x640": {
+  "logo": [
+   16,
+   13.75,
+   144.5,
+   51.25
+  ],
+  "pill": [
+   149.5,
+   13.75,
+   203.48,
+   31.75
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 5.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": 72,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   235.8,
+   13.5,
+   344,
+   57.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "home-dark-390x844": {
+  "logo": [
+   16,
+   13.75,
+   144.5,
+   51.25
+  ],
+  "pill": [
+   149.5,
+   13.75,
+   203.48,
+   31.75
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 5.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": 72,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   265.8,
+   13.5,
+   374,
+   57.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "home-dark-1280x800": {
+  "logo": [
+   20,
+   16.3,
+   157.06,
+   56.3
+  ],
+  "pill": [
+   162.06,
+   16.31,
+   302.33,
+   34.31
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 6.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": 80,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   1078.56,
+   17.5,
+   1260,
+   61.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   322.33,
+   17.5,
+   934.09,
+   61.5
+  ]
+ },
+ "home-dark-1440x900": {
+  "logo": [
+   20,
+   16.3,
+   157.06,
+   56.3
+  ],
+  "pill": [
+   162.06,
+   16.31,
+   302.33,
+   34.31
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 6.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": 80,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   1088.66,
+   17.5,
+   1420,
+   61.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   322.33,
+   17.5,
+   934.09,
+   61.5
+  ]
+ },
+ "sign-in-dark-360x640": {
+  "logo": [
+   53,
+   144,
+   224.33,
+   194
+  ],
+  "pill": [
+   229.33,
+   144,
+   281.31,
+   160
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "sign-in-dark-390x844": {
+  "logo": [
+   53,
+   246,
+   224.33,
+   296
+  ],
+  "pill": [
+   229.33,
+   246,
+   281.31,
+   262
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "sign-in-dark-1280x800": {
+  "logo": [
+   449,
+   221.1,
+   637.47,
+   276.1
+  ],
+  "pill": [
+   642.47,
+   221.11,
+   694.45,
+   237.11
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "sign-in-dark-1440x900": {
+  "logo": [
+   529,
+   271.1,
+   717.47,
+   326.1
+  ],
+  "pill": [
+   722.47,
+   271.11,
+   774.45,
+   287.11
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-dark-360x640": {
+  "logo": [
+   53,
+   49,
+   224.33,
+   99
+  ],
+  "pill": [
+   229.33,
+   49,
+   281.31,
+   65
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-dark-390x844": {
+  "logo": [
+   53,
+   150.5,
+   224.33,
+   200.5
+  ],
+  "pill": [
+   229.33,
+   150.5,
+   281.31,
+   166.5
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-dark-1280x800": {
+  "logo": [
+   449,
+   125.6,
+   637.47,
+   180.6
+  ],
+  "pill": [
+   642.47,
+   125.61,
+   694.45,
+   141.61
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-dark-1440x900": {
+  "logo": [
+   529,
+   175.6,
+   717.47,
+   230.6
+  ],
+  "pill": [
+   722.47,
+   175.61,
+   774.45,
+   191.61
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "home-light-360x640": {
+  "logo": [
+   16,
+   13.75,
+   144.5,
+   51.25
+  ],
+  "pill": [
+   149.5,
+   13.75,
+   203.48,
+   31.75
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 5.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": 72,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   235.8,
+   13.5,
+   344,
+   57.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "home-light-390x844": {
+  "logo": [
+   16,
+   13.75,
+   144.5,
+   51.25
+  ],
+  "pill": [
+   149.5,
+   13.75,
+   203.48,
+   31.75
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 5.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": 72,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   265.8,
+   13.5,
+   374,
+   57.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   0,
+   0,
+   0,
+   0
+  ]
+ },
+ "home-light-1280x800": {
+  "logo": [
+   20,
+   16.3,
+   157.06,
+   56.3
+  ],
+  "pill": [
+   162.06,
+   16.31,
+   302.33,
+   34.31
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 6.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": 80,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   1078.56,
+   17.5,
+   1260,
+   61.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   322.33,
+   17.5,
+   934.09,
+   61.5
+  ]
+ },
+ "home-light-1440x900": {
+  "logo": [
+   20,
+   16.3,
+   157.06,
+   56.3
+  ],
+  "pill": [
+   162.06,
+   16.31,
+   302.33,
+   34.31
+  ],
+  "pillText": "PAPER \u00b7 BALANCED",
+  "font": "12px",
+  "padding": "0px 6.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": 80,
+  "rows": 1,
+  "overflow": false,
+  "halt": true,
+  "chip": [
+   1088.66,
+   17.5,
+   1420,
+   61.5
+  ],
+  "chipLabelWhole": true,
+  "nav": [
+   322.33,
+   17.5,
+   934.09,
+   61.5
+  ]
+ },
+ "sign-in-light-360x640": {
+  "logo": [
+   53,
+   144,
+   224.33,
+   194
+  ],
+  "pill": [
+   229.33,
+   144,
+   281.31,
+   160
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "sign-in-light-390x844": {
+  "logo": [
+   53,
+   246,
+   224.33,
+   296
+  ],
+  "pill": [
+   229.33,
+   246,
+   281.31,
+   262
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "sign-in-light-1280x800": {
+  "logo": [
+   449,
+   221.1,
+   637.47,
+   276.1
+  ],
+  "pill": [
+   642.47,
+   221.11,
+   694.45,
+   237.11
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "sign-in-light-1440x900": {
+  "logo": [
+   529,
+   271.1,
+   717.47,
+   326.1
+  ],
+  "pill": [
+   722.47,
+   271.11,
+   774.45,
+   287.11
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-light-360x640": {
+  "logo": [
+   53,
+   49,
+   224.33,
+   99
+  ],
+  "pill": [
+   229.33,
+   49,
+   281.31,
+   65
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-light-390x844": {
+  "logo": [
+   53,
+   150.5,
+   224.33,
+   200.5
+  ],
+  "pill": [
+   229.33,
+   150.5,
+   281.31,
+   166.5
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-light-1280x800": {
+  "logo": [
+   449,
+   125.6,
+   637.47,
+   180.6
+  ],
+  "pill": [
+   642.47,
+   125.61,
+   694.45,
+   141.61
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ },
+ "register-light-1440x900": {
+  "logo": [
+   529,
+   175.6,
+   717.47,
+   230.6
+  ],
+  "pill": [
+   722.47,
+   175.61,
+   774.45,
+   191.61
+  ],
+  "pillText": "PAPER",
+  "font": "12px",
+  "padding": "2px 4.5px",
+  "bg": "rgb(247, 183, 70)",
+  "color": "rgb(10, 11, 13)",
+  "gap": 5,
+  "topDelta": 0.01,
+  "header": null,
+  "rows": 0,
+  "overflow": false,
+  "halt": false,
+  "chip": null,
+  "chipLabelWhole": null,
+  "nav": null
+ }
+}

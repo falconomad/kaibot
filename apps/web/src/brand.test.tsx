@@ -223,20 +223,59 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
     // the header's padding leaves at least 16 px above and below the logo, on phones and above
     expect((72 - SIZE.header.phone) / 2).toBeGreaterThanOrEqual(16);
     expect((80 - SIZE.header.wide) / 2).toBeGreaterThanOrEqual(16);
-    expect(css).toMatch(/@media \(min-width: 761px\) \{[^@]*header\.top \.brand \{ margin-right: 8px; \}/);
+    expect(css).toMatch(/@media \(min-width: 761px\) \{[^@]*header\.top \.brand-lockup \{ margin-right: 8px; \}/);
     expect(css).toMatch(/header\.top \{[^}]*min-height: 80px;/);
     expect(css).toMatch(/header\.top \{ flex-wrap: nowrap; min-height: var\(--topbar\);/);
     expect(tokens).toMatch(/--topbar: 72px;/);
     expect(css).toMatch(/\.haltbar-wrap \{[^}]*top: var\(--topbar\)/);
-    expect(css).toMatch(/header\.top \.pill \{[^}]*min-height: 36px/);
     expect(css).toMatch(/header\.top \.engine-chip::before \{[^}]*inset: 4px 0;/);
     expect(css).toMatch(/\.brand \{[^}]*min-height: 44px/);
     // on phones the larger logo takes the spacer's room, not the trading chip's label: it never truncates, its reason
     // gives way, and under 400 px the reason is left to the halt bar (scripts/mobile_check.py measures 360 px)
     const phone = /@media \(max-width: 760px\) \{\n {2}\/\* v4: one-row top bar([^]*?)\n\}/.exec(css)?.[1] ?? "";
-    expect(phone).toMatch(/header\.top \.spacer \{ display: none; \} header\.top \.spacer \+ \.pill \{ margin-left: auto; padding: 0 11px; \}/);
+    expect(phone).toMatch(/header\.top \.spacer \{ display: none; \} header\.top \.engine-chip \{ margin-left: auto; \} header\.top \.pill \{ padding: 0 5\.5px; \}/);
     expect(phone).toMatch(/header\.top \.ts-chip b \{ flex: none; \}/);
     expect(css).toMatch(/@media \(max-width: 400px\) \{ header\.top \.ts-chip \{ padding: 0 10px; \} header\.top \.ts-chip \.trading-reason \{ display: none; \} \}/);
+  });
+
+  it("PAPER is a tag on the wordmark's top right, half its old size, the text at the 12 px floor (25 Nov 2026)", () => {
+    const rule = (sel: string, src = css) => new RegExp(`(?:^|\\n)\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`).exec(src)?.[1] ?? "";
+    const px = (decl: string, prop: string) => Number(new RegExp(`${prop}: (-?[\\d.]+)px`).exec(decl)?.[1]);
+    const phone = /@media \(max-width: 760px\) \{\n {2}\/\* v4: one-row top bar([^]*?)\n\}/.exec(css)?.[1] ?? "";
+    // sizes: 13 / 14 px text would halve to 6.5 / 7 px, under the design system's 12 px floor, so it is 12 px; the
+    // header tag is 18 px tall (was 36) with 6.5 / 5.5 px sides (was 13 / 11); sign-in 2 x 4.5 px padding (was 4 x 9)
+    const pill = rule(".pill");
+    expect(px(pill, "font-size")).toBe(12);
+    expect(pill).toMatch(/line-height: 1;/);
+    expect(pill).toMatch(/padding: 2px 4\.5px;/);
+    expect(pill).toMatch(/color: var\(--on-warn\); background: var\(--warn\);/);
+    const head = rule("header.top .pill");
+    expect(px(head, "min-height")).toBe(36 / 2);
+    expect(head).toMatch(/padding: 0 6\.5px;/);
+    expect(head).not.toMatch(/font-size/);
+    expect(phone).toMatch(/header\.top \.pill \{ padding: 0 5\.5px; \}/);
+    expect(css.match(/\.pill[^{]*\{[^}]*font-size: (\d+)px/g)?.map((d) => Number(/(\d+)px$/.exec(d)?.[1])).every((v) => v >= 12)).toBe(true);
+    // place: 5 px after the logo, its top on the letters' top. The letters fill the logo's box, lifted 8% (.logo-word);
+    // in the header the 44 px home link centres the logo
+    expect(css).toMatch(/\n\.logo-word \{ transform: translateY\(-8%\); \}/);
+    for (const sel of [".brand-row", ".brand-lockup"]) {
+      expect(rule(sel)).toMatch(/display: flex; align-items: flex-start; gap: 5px;/);
+    }
+    const top = (logo: number, box = logo) => Math.round(((box - logo) / 2 - 0.08 * logo) * 100) / 100;
+    expect(px(rule(".brand-row .pill"), "margin-top")).toBe(top(SIZE.large.wide));
+    expect(px(rule(".brand-lockup .pill"), "margin-top")).toBe(top(SIZE.header.wide, 44));
+    expect(phone).toContain(`.brand-lockup .pill { margin-top: ${top(SIZE.header.phone, 44)}px; } .brand-row .pill { margin-top: ${top(SIZE.large.phone)}px; }`);
+  });
+
+  it("PAPER follows the logo everywhere it is shown: the header, New run, sign-in and /register", () => {
+    const run = paperRun();
+    const header = render(<Shell />, { route: "*", seeds: [{ key: ["runs"], data: [run] }, { key: ["overview", 1], data: emptyOverview(run) }] });
+    expect(header).toMatch(/<header class="top"><div class="brand-lockup"><a class="brand"[^>]*>[^]*?<\/a><span class="pill"[^>]*>PAPER/);
+    expect(render(<Onboarding />)).toMatch(/<div class="brand-lockup"><a class="brand"[^>]*>[^]*?<\/a><span class="pill">PAPER<\/span><\/div>/);
+    expect(render(<SignIn />)).toMatch(/<div class="brand-row">(<span class="logo-box">)?<svg class="logo logo-word logo-lg[^]*?<span class="pill">PAPER<\/span><\/div>/);
+    const sources = import.meta.glob("./**/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    const shown = Object.keys(sources).filter((f) => !/\.test\.tsx$/.test(f) && /className="pill"/.test(sources[f])).sort();
+    expect(shown).toEqual(["./components/Shell.tsx", "./pages/Onboarding.tsx", "./pages/Register.tsx", "./pages/SignIn.tsx"]);
   });
 
   it("the header's logo is the largest brand element on every page: no page title is set larger (25 Nov 2026)", () => {
@@ -389,7 +428,7 @@ describe("the logo's idle motion: the point's hop and the arm's redraw in turn (
     expect([bigPhone, big]).toEqual([SIZE.large.phone, SIZE.large.wide]);
     expect(SIZE.large.phone).toBeGreaterThan(SIZE.header.phone);
     expect(SIZE.large.wide).toBeGreaterThan(SIZE.header.wide);
-    expect(css).toMatch(/\n\.brand-row \{ display: flex; align-items: center; gap: 12px; margin-bottom: 4px; \}/);
+    expect(css).toMatch(/\n\.brand-row \{ display: flex; align-items: flex-start; gap: 5px; margin-bottom: 4px; \}/);
     for (const html of [render(<SignIn />), render(<Register />)]) {
       expect(html).toMatch(/<div class="brand-row">(<span class="logo-box">)?<svg class="logo logo-word logo-lg/);
     }

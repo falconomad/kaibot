@@ -107,17 +107,25 @@ header.top { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wr
 .logo-hop, .logo-arm { will-change: transform; animation: kb-logo-hop 4s var(--ease) 2s infinite; }
 .logo-hop { overflow: visible; }
 .logo-arm { display: block; width: 100%; height: 100%; animation-name: kb-logo-arm; }
-/* sign-in and /register: 55 px, and 50 px on phones below; PAPER beside it, a little air before "Sign in" */
+/* sign-in and /register: 55 px, and 50 px on phones below; PAPER on its top right, a little air before "Sign in" */
 .logo-lg { height: 55px; }
-.brand-row { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.brand-row { display: flex; align-items: flex-start; gap: 5px; margin-bottom: 4px; }
+/* PAPER is a tag on the wordmark's top right (stakeholder, 25 Nov 2026: half its size): 5 px after the logo, its top on
+   the letters' top. The letters fill the logo's box and are lifted 8% of its height (.logo-word), so the tag is raised
+   by that much; in the header the 44 px home link centres the logo, so add (44 - logo) / 2 (Logo.tsx SIZE) */
+.brand-row .pill { margin-top: -4.4px; }
+.brand-lockup { display: flex; align-items: flex-start; gap: 5px; flex: none; }
+.brand-lockup .pill { margin-top: -1.2px; }
 nav.topnav { display: flex; flex-wrap: wrap; gap: 2px; font-size: 16px; font-weight: 500; }
 nav.topnav a { display: inline-flex; align-items: center; min-height: 44px; color: var(--slate); padding: 0 14px; border-radius: 999px; transition: color .2s var(--ease), background-color .2s var(--ease); }
 nav.topnav a:hover { color: var(--ink); }
 nav.topnav a.active { color: var(--ink); background: var(--surface-2); }
-.pill { font-size: 13px; font-weight: 700; letter-spacing: 0.08em; color: var(--on-warn); background: var(--warn); border-radius: 999px; padding: 4px 9px; white-space: nowrap; }
-/* in the header (stakeholder, 16 Nov 2026: the header was too small) Paper and the engine chip are 36 px tall; the
-   engine chip keeps a 44 px tap area: the link is 44 px, its drawn shape (::before) 36 px */
-header.top .pill { display: inline-flex; align-items: center; min-height: 36px; padding: 0 13px; font-size: 14px; }
+/* half of 13 / 14 px would be under the 12 px floor (design system), so the text stays 12 px; padding and height halve */
+.pill { font-size: 12px; line-height: 1; font-weight: 700; letter-spacing: 0.08em; color: var(--on-warn); background: var(--warn); border-radius: 999px; padding: 2px 4.5px; white-space: nowrap; }
+/* in the header Paper is 18 px tall (36 px before 25 Nov 2026); the engine chip is 36 px and keeps a 44 px tap area:
+   the link is 44 px, its drawn shape (::before) 36 px */
+header.top .pill { display: inline-flex; align-items: center; min-height: 18px; padding: 0 6.5px; }
+header.top .pill > span { white-space: pre; } /* " · BALANCED": a flex item would drop its leading space */
 header.top .engine-chip { position: relative; isolation: isolate; border-color: transparent; background: transparent; }
 header.top .engine-chip::before { content: ""; position: absolute; z-index: -1; inset: 4px 0; border: 1px solid var(--control); border-radius: 999px;
   background: var(--surface); transition: border-color .2s var(--ease); }
@@ -258,8 +266,10 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
   header.top .engine-chip { max-width: 44vw; min-width: 0; }
   header.top .engine-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* the 37.5 px logo (25 Nov 2026): the spacer's 24 px and its gap go to the trading chip, whose label never truncates;
-     its reason gives way first, and under 400 px it is left to the halt bar just below */
-  header.top .spacer { display: none; } header.top .spacer + .pill { margin-left: auto; padding: 0 11px; }
+     its reason gives way first, and under 400 px it is left to the halt bar just below. PAPER is by the logo, so the
+     chip itself keeps to the right (margin-left: auto) */
+  header.top .spacer { display: none; } header.top .engine-chip { margin-left: auto; } header.top .pill { padding: 0 5.5px; }
+  .brand-lockup .pill { margin-top: 0.25px; } .brand-row .pill { margin-top: -4px; }
   header.top .ts-chip b { flex: none; }
   nav.topnav, .hide-sm { display: none !important; }
   .meters { width: 100%; } .meter { flex: 1; min-width: 0; }
@@ -731,7 +741,7 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 /* v4 desktop item 2: one header row from 1280 px; the meters now live in Home's top band */
 @media (min-width: 761px) {
   header.top { gap: 8px 12px; padding-left: 20px; padding-right: 20px; }
-  header.top .brand { margin-right: 8px; } /* the 40 px logo gets 20 px before Home */
+  header.top .brand-lockup { margin-right: 8px; } /* the logo and its PAPER tag get 20 px before Home */
   nav.topnav { font-size: 15px; } nav.topnav a { padding: 0 8px; }
   header.top .engine-chip .hide-sm { display: none; }
 }

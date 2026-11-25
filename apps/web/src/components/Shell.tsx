@@ -251,12 +251,14 @@ export function Shell() {
     <div className="shell">
       <a className="skip" href="#main">Skip to content</a>
       <header className="top">
-        <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle /></Link>
+        <div className="brand-lockup">
+          <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle /></Link>
+          <span className="pill" title={lv ? `Paper trading only · ${lv.name} level` : "Paper trading only"}>PAPER<span className="hide-sm">{lv ? ` · ${lv.name.toUpperCase()}` : ""}</span></span>
+        </div>
         <nav className="topnav" aria-label="Main">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>{n.label}</NavLink>)}
         </nav>
         <div className="spacer" />
-        <span className="pill" title={lv ? `Paper trading only · ${lv.name} level` : "Paper trading only"}>PAPER<span className="hide-sm">{lv ? ` · ${lv.name.toUpperCase()}` : ""}</span></span>
         {list.length > 1 && (
           <select aria-label="Run" className="chip hide-sm" value={run.id} onChange={(e) => pickRun(Number(e.target.value))}>
             {list.map((r) => <option key={r.id} value={r.id}>{r.label ?? `Run ${r.id}`}</option>)}
