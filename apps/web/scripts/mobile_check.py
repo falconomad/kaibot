@@ -9,7 +9,7 @@ production data, account or key is used.
     cd apps/web && VITE_SUPABASE_URL=http://localhost:54321 VITE_SUPABASE_PUBLISHABLE_KEY=mock npm run build
     python scripts/mobile_check.py --dist dist [--routes home,tape] [--widths 390] [--json out.json] [--interact]
 
---interact (v4 PR 2) also checks, at 390 px: the top bar is 64 px (72 px at 1280); the tab bar has five 48 px items; every page
+--interact (v4 PR 2) also checks, at 390 px: the top bar is 72 px (80 px at 1280 and 1440); the tab bar has five 48 px items; every page
 is reachable from the tab bar or More; the experiment sheet opens as a dialog with focus inside, closes on Escape and
 returns focus; and with reduced motion on, nothing animates.
 
@@ -319,12 +319,12 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     tabs = pg.evaluate("[...document.querySelectorAll('nav.tabbar a')].map(a => [a.textContent.trim(), "
                        "Math.round(a.getBoundingClientRect().height)])")
     print("header", header, "px; tabs", tabs)
-    if header != 64:
-        fails.append(f"top bar is {header} px on a phone (want 64)")
+    if header != 72:
+        fails.append(f"top bar is {header} px on a phone (want 72)")
     hdr = pg.evaluate(HEADER_JS)
     print("header parts:", hdr)
-    if not 29.5 <= hdr["logo"] <= 30.5 or hdr["pill"] != 36 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
-        fails.append(f"header parts on a phone (logo 30, Paper 36, chip 36 drawn and 44 to tap, home link 44): {hdr}")
+    if not 37 <= hdr["logo"] <= 38 or hdr["pill"] != 36 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
+        fails.append(f"header parts on a phone (logo 37.5, Paper 36, chip 36 drawn and 44 to tap, home link 44): {hdr}")
     if hdr["rows"] != 1 or abs(hdr["hug"]) > 0.5:
         fails.append(f"header: one row, and the logo's box must hug its letters: {hdr}")
     if [t[0] for t in tabs] != ["Home", "Positions", "Activity", "Engine", "More"] or any(t[1] < 48 for t in tabs):
@@ -380,7 +380,7 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     if running or early or paths != 10:
         fails.append(f"reduced motion: {running} animations run, the logo moved {early}, or its mark is not whole ({paths} paths)")
     ctx.close()
-    # 1280 and 1440 px: the header is one 72 px row, the wordmark 32 px, with the mock's halt chip in it (#673).
+    # 1280 and 1440 px: the header is one 80 px row, the wordmark 40 px, with the mock's halt chip in it (#673).
     for w, h in DESKTOP:
         ctx = context(browser, now, viewport={"width": w, "height": h})
         ctx.add_init_script(session)
@@ -393,8 +393,35 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
                            "Math.round(document.querySelector('header.top .logo').getBoundingClientRect().height), "
                            "!!document.querySelector('header.top .ts-chip.red')]")
         print(f"{w} px: header", wide[0], "px, wordmark", wide[1], "px, halt chip", wide[2])
-        if wide != [72, 32, True]:
-            fails.append(f"at {w} px the header is {wide[0]} px and the wordmark {wide[1]} px, halt chip {wide[2]} (want 72, 32 and the chip)")
+        if wide != [80, 40, True]:
+            fails.append(f"at {w} px the header is {wide[0]} px and the wordmark {wide[1]} px, halt chip {wide[2]} (want 80, 40 and the chip)")
+        ctx.close()
+    # 360x640, the smallest phone (25 Nov 2026, the 37.5 and 50 px logos): the header is one 72 px row with nothing past
+    # its edge, the halt chip in it, and sign-in's card, its button included, fits the screen with no scroll.
+    for path, signed in (("/", True), ("/", False)):
+        ctx = context(browser, now, viewport={"width": 360, "height": 640}, is_mobile=True, has_touch=True)
+        if signed:
+            ctx.add_init_script(session)
+        ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
+        pg = ctx.new_page()
+        pg.goto(audit.APP + path, wait_until="load")
+        pg.wait_for_selector("main > *, .center")
+        pg.wait_for_timeout(1200)
+        if signed:
+            hdr = pg.evaluate(HEADER_JS)
+            top = pg.evaluate("(() => { const t = document.querySelector('header.top'); const r = t.getBoundingClientRect(); "
+                              "return [Math.round(r.height), t.scrollWidth > t.clientWidth, Math.max(...[...t.children].map((e) => e.getBoundingClientRect().right)), "
+                              "!!t.querySelector('.ts-chip.red'), (() => { const l = t.querySelector('.ts-chip b'); return !!l && l.scrollWidth <= l.clientWidth; })()]; })()")
+            print("360 px: header", top, hdr)
+            if hdr["rows"] != 1 or top[0] != 72 or top[1] or top[2] > 344 or not top[3] or not top[4] or not 37 <= hdr["logo"] <= 38:
+                fails.append(f"at 360 px the header must be one 72 px row inside 360 - 16 px, with the 37.5 px logo and the halt chip, its label whole: {top}, {hdr}")
+        else:
+            fit = pg.evaluate("(() => { const b = document.querySelector('.center form button').getBoundingClientRect(); "
+                              "return [Math.round(document.documentElement.scrollHeight), innerHeight, Math.round(b.bottom * 10) / 10, "
+                              "Math.round(document.querySelector('.center .logo').getBoundingClientRect().height * 10) / 10]; })()")
+            print("360x640 sign-in: page height, screen, button bottom, logo", fit)
+            if fit[0] > fit[1] or fit[2] > fit[1] or fit[3] != 50:
+                fails.append(f"at 360x640 sign-in must fit with no scroll and a 50 px logo: {fit}")
         ctx.close()
 
 
