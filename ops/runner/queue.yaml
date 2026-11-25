@@ -35,3 +35,7 @@ jobs:
     script: scripts/index_core_book.py
     args: ["--end", "2024-12-31", "--index-cap", "80"]
     posts_to_issue: 459
+  - id: gate-v3-rescore-books-2026-11-25  # #456: the re-score with the book test, after the 80% runs above
+    script: scripts/gate_v3_rescore.py
+    args: []
+    posts_to_issue: 456
