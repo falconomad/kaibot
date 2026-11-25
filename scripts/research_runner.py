@@ -17,6 +17,12 @@ After each job the checkout is checked: changes only inside the job's `writes:` 
 on runner/<job id>, pushed (that branch only, never main) and opened as a pull request, and the checkout goes back to
 main; any other change is left as it is and the runner runs no more jobs until the checkout is clean.
 The runner does not touch the engine, its lease or scripts/service.sh. Runbook: docs/ops/research_runner.md.
+
+QA-Ops audit (25 Nov 2026): the runner works only in its OWN checkout (~/Projects/kaibot-runner, made by
+scripts/install_runner.sh), never in the engine's. A tick refuses to run (nothing pulled, nothing run) when its
+checkout is the engine's, or inside it, or holds it, or when data/ links into the engine's data/live or data/runner
+(the engine's checkout: KAIBOT_ENGINE_CHECKOUT, ~/Projects/kaibot, and the WorkingDirectory of the engine service's
+launchd plist, which is only read).
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ import contextlib
 import fcntl
 import json
 import os
+import plistlib
 import re
 import shlex
 import shutil
@@ -65,6 +72,14 @@ MAX_COMMIT_FILES, MAX_FILE_BYTES = 400, 2_000_000
 BRANCH_PREFIX = "runner/"
 PAUSED = "paused.json"           # in data/runner: set while the checkout holds changes the runner will not commit
 GIT_USER = ("Kaibot research runner", "research-runner@users.noreply.github.com")  # never the owner's own email
+
+# The engine's checkout, which the runner never works in (QA-Ops audit, 25 Nov 2026): install_runner.sh passes it
+# as KAIBOT_ENGINE_CHECKOUT; ~/Projects/kaibot is the default; the engine service's plist is read (never written).
+ENGINE_CHECKOUT_ENV = "KAIBOT_ENGINE_CHECKOUT"
+DEFAULT_ENGINE_CHECKOUT = "~/Projects/kaibot"
+ENGINE_SERVICE_PLIST = "~/Library/LaunchAgents/com.kaibot.engine.plist"
+# Folders of the engine's data/ a link in the runner's data/ may never point into (the engine's state, the old runner's)
+ENGINE_DATA_PRIVATE = ("live", "runner")
 
 
 class JobError(ValueError):
@@ -280,6 +295,66 @@ def comment(job: Job, res: dict, sha: str) -> str:
 def rejected_comment(jid: str, reason: str) -> str:
     why = redact(reason).replace("`", "'")
     return f"**Research runner** rejected job `{jid}` and did not run it:\n\n```text\n{why}\n```\n"
+
+
+# ---------------------------------------------------------------- the runner's own checkout
+
+
+def engine_checkouts(env: dict | None = None, plist: str | None = None) -> list[Path]:
+    """The engine's checkout(s): KAIBOT_ENGINE_CHECKOUT (else ~/Projects/kaibot) and the WorkingDirectory of the
+    engine service's launchd plist when there is one. Read only."""
+    env = os.environ if env is None else env
+    found = [Path(env.get(ENGINE_CHECKOUT_ENV) or DEFAULT_ENGINE_CHECKOUT).expanduser()]
+    with contextlib.suppress(OSError, ValueError, plistlib.InvalidFileException, AttributeError, TypeError):
+        wd = plistlib.loads(Path(plist or ENGINE_SERVICE_PLIST).expanduser().read_bytes()).get("WorkingDirectory")
+        if wd:
+            found.append(Path(wd).expanduser())
+    out: list[Path] = []
+    for p in found:
+        r = p.resolve()
+        if r not in out:
+            out.append(r)
+    return out
+
+
+def _same(a: Path, b: Path) -> bool:
+    """The same folder: by device and inode when both exist (macOS folders are case-insensitive), else by path."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return a == b
+
+
+def _inside(p: Path, folder: Path) -> bool:
+    return any(_same(x, folder) for x in (p, *p.parents))
+
+
+def own_checkout_problem(root: Path, engines: list[Path]) -> str | None:
+    """Why this checkout may not run jobs: it is (or holds, or sits in) the engine's checkout, or its data/ links
+    into the engine's data/live or data/runner, or data/ itself is a link. None when it is the runner's own."""
+    r = root.resolve()
+    for e in engines:
+        if _same(r, e):
+            return (f"the runner's checkout {r} is the engine's checkout: the runner works only in its own checkout "
+                    f"(./scripts/install_runner.sh makes ~/Projects/kaibot-runner; docs/ops/research_runner.md)")
+        if _inside(r, e) or _inside(e, r):
+            return f"the runner's checkout {r} and the engine's checkout {e} are nested"
+    data = root / "data"
+    if data.is_symlink():
+        return f"{data} is a link (the runner keeps its own data/; only folders inside it may link to the engine's)"
+    if not data.is_dir():
+        return None
+    for child in data.iterdir():
+        if not child.is_symlink():
+            continue
+        target = child.resolve()
+        for e in engines:
+            private = [(e / "data" / x).resolve() for x in ENGINE_DATA_PRIVATE]
+            if _same(target, e) or _same(target, e / "data") or any(_inside(target, x) for x in private):
+                return f"data/{child.name} links to the engine's {target}: never the engine's data/live or data/runner"
+            if _inside(target, e) and not _inside(target, e / "data"):
+                return f"data/{child.name} links into the engine's checkout outside its data/ ({target})"
+    return None
 
 
 # ---------------------------------------------------------------- state, locks, posting
@@ -620,8 +695,16 @@ def _kill_group(p) -> None:
 
 
 def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed: Path = ALLOWED, pull: bool = True,
-         run=subprocess.run, popen=subprocess.Popen, python: str | None = None) -> dict:
-    """One pass over the queue. Returns {id: status} for what this tick did (tests read it)."""
+         run=subprocess.run, popen=subprocess.Popen, python: str | None = None,
+         engines: list[Path] | None = None) -> dict:
+    """One pass over the queue. Returns {id: status} for what this tick did (tests read it). Refused, before any
+    pull or job, in the engine's checkout (`own_checkout_problem`; `engines` default: `engine_checkouts()`)."""
+    if why := own_checkout_problem(root, engine_checkouts() if engines is None else engines):
+        try:
+            log(state, f"refused: {why}; nothing pulled, no job run")
+        except OSError:  # no state folder (a checkout the runner never ran in): stderr only, nothing created
+            print(f"{now()} research runner refused: {why}", file=sys.stderr, flush=True)
+        return {"_refused": why}
     state.mkdir(parents=True, exist_ok=True)
     (state / "out").mkdir(exist_ok=True)
     (state / "logs").mkdir(exist_ok=True)
@@ -734,7 +817,7 @@ def main(argv_: list[str] | None = None) -> int:
                 print(f"REJECT  {raw.get('id') if isinstance(raw, dict) else raw!r}: {e}")
         return 1 if bad else 0
     res = tick(pull=not a.no_pull)
-    return 1 if "_error" in res else 0
+    return 3 if "_refused" in res else 1 if "_error" in res else 0
 
 
 if __name__ == "__main__":
