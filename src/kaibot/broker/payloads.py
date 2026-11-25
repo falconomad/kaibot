@@ -66,8 +66,9 @@ def _text(v: object, what: str) -> str:
 
 def fill(a: Mapping) -> dict:
     """A FILL activity as the engine books it: a copy with `side` exactly in FILL_SIDES, `qty` and
-    `price` finite and above zero, `fees` finite and not negative (absent: 0), `transaction_time` a time when
-    present, `id`, `order_id` and `symbol` present. PayloadError otherwise."""
+    `price` finite and above zero, `fees` finite and not negative (absent: 0), its value (`qty * price + fees`)
+    finite (#656), `transaction_time` a time when present, `id`, `order_id` and `symbol` present. PayloadError
+    otherwise."""
     if not isinstance(a, Mapping):
         raise PayloadError(f"the activity is not an object: {type(a).__name__}")
     if a.get(INVALID):
@@ -83,6 +84,10 @@ def fill(a: Mapping) -> dict:
     out["price"] = number(a.get("price"), "price", positive=True)
     fees = a.get("fees")
     out["fees"] = 0.0 if fees in (None, "") else number(fees, "fees", nonneg=True)
+    # #656 (nightly fuzz): a finite quantity at a finite price can still be worth more than a float holds
+    # (1e308 shares at 2.5): booked, the ledger's cash became -inf. The value the ledger books must be finite too
+    if not math.isfinite(out["qty"] * out["price"] + out["fees"]):
+        raise PayloadError(f"the fill's value is not finite: {a.get('qty')!r} at {a.get('price')!r}"[:200])
     if a.get("transaction_time") is not None:
         timestamp(a.get("transaction_time"), "transaction_time")
     return out

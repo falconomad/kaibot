@@ -191,6 +191,12 @@ class Ledger:
             log.error("ledger: fill entry not booked (side %r, qty %r, px %r, fees %r): %s", e.get("side"),
                       e.get("qty"), e.get("px"), e.get("fees"), e.get("activity") or e.get("coid"))
             return
+        # #656: nor one whose value, or the cash after it, a float cannot hold (finite numbers, an infinite product)
+        if not (math.isfinite(qty * px + fees) and math.isfinite(b.cash - qty * px - fees)
+                and math.isfinite(b.cash + qty * px - fees)):
+            log.error("ledger: fill entry not booked (its value %r x %r is beyond a number): %s", qty, px,
+                      e.get("activity") or e.get("coid"))
+            return
         key = (e["strategy"], e["symbol"])
         if e["side"] == "buy":
             s = self._sleeve(b, *key, e.get("session"))
