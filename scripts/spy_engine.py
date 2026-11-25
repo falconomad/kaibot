@@ -427,6 +427,11 @@ def run(a: argparse.Namespace) -> dict:
     days = [str(d) for d in sd.dates if a.test_start <= str(d) <= a.end]
     if not days:
         raise SystemExit(f"no SPY session between {a.test_start} and {a.end}")
+    try:  # M11 2.4 (#455): the bill rate must cover the window before the engine runs, not after
+        bills = tbill_mod.checked(data, pd.DatetimeIndex(days))
+    except ValueError as e:
+        raise SystemExit(f"no run: the Treasury-bill file does not cover the window ({e}); run "
+                         "scripts/fetch_tbill.py, or move data/inputs/fred_dtb3.json away for a run without it") from e
     i0, i1 = int(np.searchsorted(sd.dates, np.datetime64(days[0]))), int(np.searchsorted(sd.dates,
                                                                                         np.datetime64(days[-1])))
     vix, vix_note = load_vix(data)
@@ -473,7 +478,7 @@ def run(a: argparse.Namespace) -> dict:
         neighbours=neighbours if not a.no_neighbours else None, prereg=pre,
         source={"engine": "simbroker", "cost_model": "v2", "data_repairs": True, "benchmark": bench_kind},
         registry=trials_mod.load(trials_file=data / "trials.jsonl"), first_run_at=first_run_at(data / "trials.jsonl"),
-        tbill=tbill_mod.find(data))  # M11 2.4 (#455): Sharpe above bills beside the 0% one; no mark moves
+        tbill=bills)  # M11 2.4 (#455): Sharpe above bills beside the 0% one; no mark moves
 
     # the pre-registration's marks, as written (0.5 / 1 bp) and on cost model v2
     nbr_05 = {v.split("~")[1]: stats[(v, s)] for v, s in stats if s == "0.5" and "~" in v}

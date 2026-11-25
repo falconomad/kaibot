@@ -254,3 +254,14 @@ def test_rates_after_the_last_session_never_change_a_gate_report():
     a = g2.statistics(GATE, net, spy, exposure=exposure, tbill=cut)["cash_yield"]
     b = g2.statistics(GATE, net, spy, exposure=exposure, tbill=longer)["cash_yield"]
     assert a == b and a["mean_idle_share"] == pytest.approx(0.4, abs=1e-3)
+
+
+def test_a_run_checks_the_bill_file_before_it_starts(tmp_path: Path):
+    """#455: a hole or an early end is found before the simulation, not in the gate after it."""
+    sessions = pd.bdate_range("2017-05-01", "2017-06-30")
+    assert tbill.checked(tmp_path, sessions) is None, "no file: the report says so, the run goes on"
+    tbill.write_cache(tmp_path / tbill.FILE, [{"date": str(d.date()), "value": 4.0} for d in FLAT_4.index
+                                              if d < pd.Timestamp("2017-06-01")], datetime(2017, 6, 1, tzinfo=UTC))
+    with pytest.raises(ValueError):
+        tbill.checked(tmp_path, sessions)
+    assert len(tbill.checked(tmp_path, sessions[sessions < "2017-06-05"])) > 0

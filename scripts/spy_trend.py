@@ -205,8 +205,12 @@ def run(a: argparse.Namespace) -> Path:
     data = Path(a.data)
     pre = prereg()
     d, tr, tr_info, cash, cash_note = load(data, a.start, a.end)
-    bills = tbill_mod.find(data)  # M11 2.4 (#455): FRED DTB3, each session the last rate dated before it
     i0, i1 = window(d, a.end)
+    try:  # M11 2.4 (#455): FRED DTB3, each session the last rate dated before it; checked before any account runs
+        bills = tbill_mod.checked(data, pd.DatetimeIndex(d.dates[i0:i1 + 1]))
+    except ValueError as e:
+        sys.exit(f"no run: the Treasury-bill file does not cover the window ({e}); run scripts/fetch_tbill.py, or "
+                 "move data/inputs/fred_dtb3.json away for a run without it")
     print(f"pre-registration {pre['file']} sha256 {pre['sha256'][:12]}; SPY {len(d.dates)} sessions, window "
           f"{d.dates[i0]} to {d.dates[i1]}; SPY total return: {tr_info.get('source')}; T-bill: {cash_note}",
           flush=True)
