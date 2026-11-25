@@ -279,15 +279,21 @@ refused_backoff() {
   wait_s="${KAIBOT_REFUSED_BACKOFF_S:-300}"
   case "$wait_s" in ''|*[!0-9]*) say "KAIBOT_REFUSED_BACKOFF_S='$wait_s' is not a number of seconds: 300 is used"
                                  wait_s=300 ;; esac
+  hc fail "kaibot engine refused to start (exit code 5) on $(hostname -s): multi-day sleeves and no daily path (KAIBOT_MULTIDAY); not trading until fixed; see engine.log"
+  # The line comes last, just before the wait: from it on no command substitution runs (bash 5.2 can drop a trap
+  # whose signal lands while it parses one, as in `say` or the alarm's hostname)
   say "engine refused to start (exit code 5): its run holds multi-day sleeves and it has no daily path" \
       "(KAIBOT_MULTIDAY off, or no multi-day rule enabled; the ERROR line above names the fix;" \
       "docs/ops/run_engine.md). Nothing was sent; the broker-held stops stay. Next try in $wait_s s"
-  hc fail "kaibot engine refused to start (exit code 5) on $(hostname -s): multi-day sleeves and no daily path (KAIBOT_MULTIDAY); not trading until fixed; see engine.log"
-  trap 'stopping=1' INT TERM HUP
-  sleep "$wait_s" & s=$!
-  while [ "$stopping" = 0 ] && kill -0 "$s" 2>/dev/null; do wait "$s"; done  # a stop signal interrupts `wait`
-  kill "$s" 2>/dev/null; wait "$s" 2>/dev/null
-  trap - INT TERM HUP
+  # The caller's trap ('stopping=1') is set: a stop before or during the wait ends it. In 1 s slices: a stop whose
+  # trap runs between the check and `wait` (a race a single long `wait` lost, sitting out the whole back-off) costs
+  # at most one slice; a stop during `wait` interrupts it at once.
+  local i
+  for ((i = 0; i < wait_s && stopping == 0; i++)); do  # at least wait_s seconds (each slice is a full 1 s sleep)
+    sleep 1 & s=$!
+    wait "$s"
+    kill "$s" 2>/dev/null; wait "$s" 2>/dev/null
+  done
   return 0
 }
 
@@ -351,7 +357,10 @@ run_engine() {
     wait "$child"; code=$?
     kill -0 "$child" 2>/dev/null || break
   done
-  trap - INT TERM HUP
+  # QA-Ops (#660's flaky test): the engine has exited, so a stop from here on only has to be remembered. Without a
+  # trap, a SIGINT that came while a foreground command ran (the pinger's 2 s, an alarm) was dropped by bash once
+  # that command ended normally, and the service sat out the whole code-5 back-off instead of stopping.
+  trap 'stopping=1' INT TERM HUP
   [ -n "$checks" ] && checks_end "$checks"
   [ -n "$streamer" ] && stream_end "$streamer"
   [ -n "$pinger" ] && { sleep 2; kill "$pinger" 2>/dev/null; }

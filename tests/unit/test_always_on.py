@@ -664,27 +664,93 @@ def test_wrapper_backs_off_after_a_refused_start_code_5(wrapper):
     assert "launchd starts it again" not in out  # not the generic restart line (or its second alarm)
 
 
+def _code_5_service(wrapper, backoff: str):
+    r, env, tmp = wrapper
+    env = {**env, "FAKE_CODE": "5", "KAIBOT_REFUSED_BACKOFF_S": backoff}
+    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, env=env, stdout=subprocess.PIPE,
+                         text=True)
+    return p, r, tmp
+
+
+def _read_until(p, text: str, limit_s: float = 60) -> list[str]:
+    """The service's lines up to and including the first that holds `text` (a reader thread: never blocks the test
+    past `limit_s`, however slow the machine)."""
+    import queue
+    import threading
+
+    q: queue.Queue = queue.Queue()
+    threading.Thread(target=lambda: [q.put(ln) for ln in p.stdout] + [q.put(None)], daemon=True).start()
+    seen, end = [], time.monotonic() + limit_s
+    while time.monotonic() < end:
+        try:
+            ln = q.get(timeout=max(0.0, end - time.monotonic()))
+        except queue.Empty:
+            break
+        if ln is None:
+            break
+        seen.append(ln)
+        if text in ln:
+            p._kb_rest = q  # the rest of the output, read by _rest()
+            return seen
+    p.kill()
+    raise AssertionError(f"no line with {text!r} within {limit_s} s: {''.join(seen)}")
+
+
+def _rest(p, limit_s: float = 30) -> str:
+    p.wait(timeout=limit_s)
+    out, q = [], p._kb_rest
+    while (ln := q.get(timeout=limit_s)) is not None:
+        out.append(ln)
+    return "".join(out)
+
+
 @pytest.mark.parametrize("sig", ["INT", "TERM"])
 def test_a_stop_during_the_code_5_back_off_ends_it_at_once(wrapper, sig):
     """service.sh stop (SIGINT) or a logout (SIGTERM) during the 5-minute wait: exit 0 at once, so launchd leaves
-    it stopped. A back-off value that is not a number of seconds is named and the default (300 s) is used."""
+    it stopped. A back-off value that is not a number of seconds is named and the default (300 s) is used.
+    QA-Ops (CI timeout on main e2693e8): the signal is sent once the back-off has said "Next try in", not after a
+    fixed sleep, so it always lands in the wait, however slow the machine. The line is the last thing before the
+    wait (the alarm goes first), so nothing but builtins runs between it and `wait`: bash 5.2 can drop a trap whose
+    signal lands while it parses a command substitution (`$(date)`, `$(hostname -s)`)."""
     import signal
 
-    r, env, tmp = wrapper
-    env = {**env, "FAKE_CODE": "5", "KAIBOT_REFUSED_BACKOFF_S": "5m"}
-    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, env=env, stdout=subprocess.PIPE,
-                         text=True)
-    for _ in range(100):
-        if (tmp / "ran").exists():
-            break
-        time.sleep(0.1)
-    time.sleep(3)  # past the engine's exit (and the alarm pinger's 2 s) into the wait
+    p, r, _ = _code_5_service(wrapper, "5m")
+    out = "".join(_read_until(p, "Next try in"))
     t0 = time.monotonic()
     p.send_signal(getattr(signal, f"SIG{sig}"))
-    out, _ = p.communicate(timeout=30)
+    out += _rest(p)
     assert p.returncode == 0, out
     assert time.monotonic() - t0 < 10  # not the 300 s
     assert "KAIBOT_REFUSED_BACKOFF_S='5m' is not a number of seconds: 300 is used" in out
+    assert "Next try in 300 s" in out and "stopped (on request)" in out
+    assert not (r / "data/live/service.pid").exists()
+
+
+@pytest.mark.parametrize("sig", ["INT", "TERM"])
+def test_a_stop_while_the_code_5_alarm_is_sent_is_not_lost(wrapper, sig):
+    """QA-Ops (the cause of that timeout): a stop that came while a command ran in the foreground between the
+    engine's exit and the wait (the alarm pinger's 2 s, the code-5 alarm itself) was dropped by bash once that
+    command ended, and the service sat out the whole wait. It is remembered now: exit 0 as soon as the alarm is
+    done. The alarm here is a stand-in that says when it has started and then takes 2 s, so the stop lands inside
+    it every time."""
+    import signal
+
+    r, _, tmp = wrapper
+    (r / "scripts/healthcheck.py").write_text(
+        "import pathlib, sys, time\n"
+        f"if 'fail' in sys.argv:\n    pathlib.Path({str(tmp / 'alarm')!r}).write_text('x')\n    time.sleep(2)\n"
+        "elif 'watch' in sys.argv:\n    time.sleep(600)\n")
+    p, r, tmp = _code_5_service(wrapper, "300")
+    for _ in range(6000):
+        if (tmp / "alarm").exists():
+            break
+        time.sleep(0.01)
+    assert (tmp / "alarm").exists(), "the code-5 alarm was never sent"
+    t0 = time.monotonic()
+    p.send_signal(getattr(signal, f"SIG{sig}"))
+    out, _ = p.communicate(timeout=60)
+    assert p.returncode == 0, out
+    assert time.monotonic() - t0 < 10, out  # the alarm's 2 s, not the 300 s
     assert "Next try in 300 s" in out and "stopped (on request)" in out
     assert not (r / "data/live/service.pid").exists()
 
