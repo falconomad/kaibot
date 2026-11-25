@@ -50,6 +50,10 @@ LEASE_KIND = "lease"  # the journal's record of the lease (local only)
 OWN_STATES = ("acquired", "released", "degraded_start")
 EXIT_LEASE = 3  # process exit code when the lease stops this engine
 MACHINE_ID_FILES = ("/etc/machine-id", "/var/lib/dbus/machine-id")  # Linux (systemd, dbus)
+# Audit 2, 5.8: the fence tries a failed renewal once more when the first try failed within this many seconds
+FENCE_RETRY_WITHIN_S = 5.0
+# The fence's answer when the lease could not be proved for an entry: nothing reached the venue (engine/fence.py)
+NOT_PROVED = "lease not proved (renewal failed): no new entry"
 
 
 class LeaseError(RuntimeError):
@@ -308,16 +312,31 @@ class EngineLease:
         here with LeaseLost and no order. When the renewal cannot reach the database, an entry is refused and an
         order that only reduces (a sale, a stop, a cancel) goes out, as the fail-safe design wants for a Supabase
         outage (docs/ops/failsafe.md): the venue bounds it (shares reserved by open sells, no shorting, one client
-        order id). What is left: the milliseconds between this answer and the venue's (the venue knows no token)."""
+        order id). What is left: the milliseconds between this answer and the venue's (the venue knows no token).
+
+        Audit 2, 5.8: a renewal that FAILED (no answer, not "not ours") is tried once more before an ENTRY is
+        refused, when the first try failed within `FENCE_RETRY_WITHIN_S` (a blip: a refused connection, a 503).
+        A try that took longer (a timeout) is not repeated, so the fence answers within that bound plus one
+        renewal call (the store's own lease timeout). A reduction goes out at once, as before, without a second
+        try to wait for. A second "not ours" raises LeaseLost as the first would."""
         if self.lost:
             raise LeaseLost("The engine lease is no longer ours: no order is sent.")
         if self.held:
+            t0 = self.mono()
             self.renew(force=True)  # raises LeaseLost when the tenure is gone
             if self.ok:
                 return None
+            if reducing() if callable(reducing) else reducing:
+                return None  # a reduction goes out without the proof: no second try to wait for
+            if self.held and self.last_error is not None and self.mono() - t0 <= FENCE_RETRY_WITHIN_S:
+                log.warning("engine lease renewal before an entry failed: trying once more")
+                self.renew(force=True)  # raises LeaseLost when the tenure is gone
+                if self.ok:
+                    return None
+            return NOT_PROVED
         if reducing() if callable(reducing) else reducing:
             return None
-        return "lease not proved (renewal failed): no new entry"
+        return NOT_PROVED
 
     # ---------- clean stop ----------
     def release(self) -> bool:
