@@ -72,3 +72,15 @@ def find(data: Path | str) -> pd.Series | None:
     """The cached rate under a data directory, or None when it has not been fetched."""
     f = Path(data) / FILE
     return read_cache(f) if f.is_file() else None
+
+
+def checked(data: Path | str, sessions) -> pd.Series | None:
+    """`find`, checked up front against the sessions a run will price (#455): a hole, a file that ends too early or
+    a session before the first rate raises `ValueError` here, before hours of simulation, instead of in the gate at
+    the end. None when the file has not been fetched (the report then says so)."""
+    from kaibot.evaluation import mtm  # mtm does not import this module; imported here to keep it that way
+
+    rate = find(data)
+    if rate is not None:
+        mtm.tbill_daily(rate, sessions)
+    return rate

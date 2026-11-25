@@ -80,6 +80,7 @@ from kaibot.evaluation import gate_v2 as gv  # noqa: E402
 from kaibot.evaluation import gate_v3 as gv3  # noqa: E402
 from kaibot.evaluation import holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
+from kaibot.evaluation import tbill as tbill_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.replay import spy_noise_band as nb  # noqa: E402
 from kaibot.replay.data import ET, N_MIN, SymbolDays, from_frame  # noqa: E402
@@ -426,6 +427,11 @@ def run(a: argparse.Namespace) -> dict:
     days = [str(d) for d in sd.dates if a.test_start <= str(d) <= a.end]
     if not days:
         raise SystemExit(f"no SPY session between {a.test_start} and {a.end}")
+    try:  # M11 2.4 (#455): the bill rate must cover the window before the engine runs, not after
+        bills = tbill_mod.checked(data, pd.DatetimeIndex(days))
+    except ValueError as e:
+        raise SystemExit(f"no run: the Treasury-bill file does not cover the window ({e}); run "
+                         "scripts/fetch_tbill.py, or move data/inputs/fred_dtb3.json away for a run without it") from e
     i0, i1 = int(np.searchsorted(sd.dates, np.datetime64(days[0]))), int(np.searchsorted(sd.dates,
                                                                                         np.datetime64(days[-1])))
     vix, vix_note = load_vix(data)
@@ -471,7 +477,8 @@ def run(a: argparse.Namespace) -> dict:
                    universe="point_in_time", traded=daily_series(runs[(RULE, "v2")], "traded")),
         neighbours=neighbours if not a.no_neighbours else None, prereg=pre,
         source={"engine": "simbroker", "cost_model": "v2", "data_repairs": True, "benchmark": bench_kind},
-        registry=trials_mod.load(trials_file=data / "trials.jsonl"), first_run_at=first_run_at(data / "trials.jsonl"))
+        registry=trials_mod.load(trials_file=data / "trials.jsonl"), first_run_at=first_run_at(data / "trials.jsonl"),
+        tbill=bills)  # M11 2.4 (#455): Sharpe above bills beside the 0% one; no mark moves
 
     # the pre-registration's marks, as written (0.5 / 1 bp) and on cost model v2
     nbr_05 = {v.split("~")[1]: stats[(v, s)] for v, s in stats if s == "0.5" and "~" in v}
@@ -605,7 +612,10 @@ def page(rep: dict, name: str = "") -> str:
     st = g["statistics"]
     out += ["", f"Rule CAGR {gv._pct(st['rule']['cagr'])}, max drawdown {gv._pct(st['rule']['max_drawdown'])}, "
             f"Sharpe {st['rule']['sharpe']['sharpe']:.2f}; benchmark {rep['benchmark']['kind']} CAGR "
-            f"{gv._pct(st['spy']['cagr'])}, max drawdown {gv._pct(st['spy']['max_drawdown'])}.", ""]
+            f"{gv._pct(st['spy']['cagr'])}, max drawdown {gv._pct(st['spy']['max_drawdown'])}."]
+    # M11 2.4 (#455): idle cash both ways (0% as simulated, and FRED DTB3 point in time); the marks use 0%
+    out += gv._cash_lines(st.get("cash_yield"), rep["benchmark"]["kind"], st["rule"]["sharpe"]["haircut_share"])
+    out += [""]
     out += [f"**Size (read before the marks):** this is the account the risk gate allows, not the prereg's 1x "
             f"account: {v2['mean_position_pct']}% of equity on average when long (at most "
             f"{v2['max_position_pct']}%; the level's per-position cap, at most 20% under `HARD_CEILINGS`). "

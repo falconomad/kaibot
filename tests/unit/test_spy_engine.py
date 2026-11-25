@@ -246,3 +246,26 @@ def test_run_experiments_has_the_spy_engine_set():
     sh = (ROOT / "scripts" / "run_experiments.sh").read_text()
     for needle in ('"${1:-}" = "spy_engine"', "scripts/spy_engine.py", "experiments_spy_engine.md"):
         assert needle in sh, needle
+
+
+def test_the_bill_rate_shows_idle_cash_both_ways_and_moves_no_mark(report, tmp_path):
+    """M11 2.4 (#455): the SimBroker go/no-go run hands gate B the FRED bill rate when the file is there. The rule
+    is flat at every close, so no interest is added; the report shows the Sharpe above bills beside the 0% one."""
+    from kaibot.evaluation import tbill
+
+    root, args, f, rep = report
+    assert rep["gate_b"]["statistics"]["cash_yield"] is None
+    assert "Idle cash at the Treasury-bill rate: not computed" in (root / "reports" / se.SUMMARY).read_text()
+    fresh = tmp_path / "data"
+    make_bars(fresh)
+    tbill.write_cache(fresh / tbill.FILE, [{"date": str(x.date()), "value": 4.0}
+                                           for x in pd.bdate_range("2016-12-01", "2018-01-31")])
+    assert se.main(["--data", str(fresh), *args[2:]]) == 0
+    _, rep2 = se.find_report(fresh / "reports", "balanced")
+    c = rep2["gate_b"]["statistics"]["cash_yield"]
+    assert c["rf"]["mean_ann"] > 0.03 and c["tbill_cash"]["rule"] is None
+    assert c["tbill_cash"]["simulated_excess"]["sharpe"]["sharpe"] < rep2["gate_b"]["statistics"]["rule"]["sharpe"][
+        "sharpe"]
+    assert {k: v["met"] for k, v in rep2["gate_b"]["marks"].items()} == {
+        k: v["met"] for k, v in rep["gate_b"]["marks"].items()}
+    assert "Idle cash: both versions" in (fresh / "reports" / se.SUMMARY).read_text()
