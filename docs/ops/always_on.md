@@ -119,7 +119,8 @@ dead-man cover a dead engine during the session (`docs/ops/failsafe.md`).
 | Symptom | Do this |
 |---|---|
 | Healthchecks "down", no fail message | The Mac is off, asleep or offline, or the service is stopped. `./scripts/service.sh status`. After a power cut the Mac restarts, logs in and starts the engine by itself. |
-| `kaibot engine exited with code N` repeating | `./scripts/service.sh logs`. Code 3 = the lease (another engine runs somewhere: `docs/ops/run_engine.md`, "Engine lease"). Code 1 at start = a key missing in `.env`, a missing release tag or local edits. It retries every minute; fix and wait, or `hold` while you look. |
+| `kaibot engine exited with code N` repeating | `./scripts/service.sh logs`. Code 3 = the lease (another engine runs somewhere: `docs/ops/run_engine.md`, "Engine lease"). Code 1 at start = a key missing in `.env`, a missing release tag or local edits. Code 4 = the journal (`docs/ops/ledger.md`). It retries every minute; fix and wait, or `hold` while you look. |
+| `kaibot engine refused to start (exit code 5)` every ~6 minutes | The run holds multi-day shares and the engine has no daily path: set `KAIBOT_MULTIDAY=on` in the `.env` (`docs/ops/run_engine.md`, "When a start is refused"). The service waits 5 minutes between tries; the next one starts by itself once it is fixed. |
 | `kaibot halt: …` | Read the reason on the dashboard. Entries stay off for the session; positions are still managed. |
 | `kaibot stalled` | Process alive but no tick for 10 minutes. `./scripts/service.sh restart`. |
 | "waiting for Docker Desktop" in the log | Open Docker Desktop; the service starts within a minute after it is up. |

@@ -507,11 +507,19 @@ class Engine:
     def _require_daily_path(self) -> None:
         """M10 1.20 step 2 (#445): fail closed when the run's multi-day sleeves exist and the daily path does not.
         Only reads the ledger: nothing is sent, journalled or written before it."""
+        refusal = self.daily_path_refusal(self._rid())
+        if refusal is not None:
+            raise refusal
+
+    def daily_path_refusal(self, run_id) -> DailyPathMissing | None:
+        """The refusal `startup` would raise for run `run_id` (exit code 5), or None when it would start. Reads only
+        the ledger folded from the journal, so `--check` asks it too, before any start (#643 follow-up)."""
         if self.daily is not None:
-            return
-        held = self._md_sleeves()
-        if held:
-            raise DailyPathMissing(self._rid(), sorted({sym for _, sym in held}), registry.multi_day_enabled())
+            return None
+        held = self._md_sleeves(run_id)
+        if not held:
+            return None
+        return DailyPathMissing(run_id, sorted({sym for _, sym in held}), registry.multi_day_enabled())
 
     def check_account(self) -> None:
         """Positions or open orders the engine doesn't know about block all entries (fail closed).
@@ -1250,11 +1258,12 @@ class Engine:
             log.warning("book end: not sold yet %s (retried at the next tick)", list(failed))
 
     # ================= multi-day sleeves (S80, #120) =================
-    def _md_sleeves(self) -> dict:
+    def _md_sleeves(self, run_id=None) -> dict:
         """The run's multi-day sleeves that are not a `Pos` of this engine: the ledger's (strategy, symbol) books of
         rules that hold across sessions (their fills come from the order manager's daily path). Empty for an
-        intraday-only book, so nothing in the intraday path changes while no multi-day rule holds anything."""
-        rid = self._rid() or (self.day.run_id if self.day else None)
+        intraday-only book, so nothing in the intraday path changes while no multi-day rule holds anything.
+        `run_id`: that run's, for a caller with no started run (`daily_path_refusal` under `--check`)."""
+        rid = run_id if run_id is not None else (self._rid() or (self.day.run_id if self.day else None))
         b = self.ledger.book(rid) if rid is not None else None
         if b is None:
             return {}

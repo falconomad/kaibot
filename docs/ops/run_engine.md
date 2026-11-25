@@ -69,6 +69,22 @@ after the `.env` file is read); every reader in the engine, the agents and the s
 change to a switch takes effect at the next restart, never in a running engine. A `KAIBOT_*` variable that is not
 declared (a misspelt switch, such as `KAIBOT_MULTI_DAY`) is named in a warning at start and is otherwise ignored.
 
+## When a start is refused (exit codes)
+
+The engine exits with a code that says why it did not start. In every case below it sent nothing to the broker, and
+the broker-held stops, the watchdog and the dead-man keep protecting open positions.
+
+| Exit code | Why | What the always-on service does | Do this |
+|---|---|---|---|
+| 1 | A setting or a key is missing or invalid (`invalid settings (nothing was started): …`), or `--check` found a FAILED line. | Tries again every minute. | Fix the line it names. |
+| 3 | The engine lease: another engine runs, or the lease could not be checked. | Tries again every minute (a standby). | See [Engine lease](#engine-lease-one-engine-whatever-the-machine) below. |
+| 4 | The journal was refused (not durable, stale, damaged, or another journal ran meanwhile). | Tries again every minute and names the journal each time. | [ledger.md](ledger.md). |
+| 5 | `refusing to start: run N holds multi-day sleeves (…) and this engine has no daily path; …` (M10 1.20 step 2, #445). The active run's ledger holds multi-day shares, and this engine was started with `KAIBOT_MULTIDAY` off (or unset), or with it on but no multi-day rule enabled in `config/profiles.yaml` (`multi_day.rules`). Without the daily path nothing could sell, sync or book those sleeves, so the engine does not start. The lease is given back. | Waits 5 minutes before it exits (`KAIBOT_REFUSED_BACKOFF_S`, 300 s), so one line `engine refused to start (exit code 5): …` and one alarm come about every 6 minutes, not every minute. A stop during the wait ends it at once. | Set `KAIBOT_MULTIDAY=on` in the engine's `.env` (or enable the rule that holds the sleeves, as the line says). The next try starts by itself; `./scripts/service.sh restart` starts it at once. `./scripts/run_engine.sh --check` reports it beforehand: `daily_path: FAILED: a start would be refused (exit code 5): …`. |
+
+`./scripts/run_engine.sh --check` asks the exit-code-5 question read-only (`daily_path`): with the daily path on,
+or no multi-day sleeve in the active run's ledger, it prints `daily_path: on|off`, the sleeves it found and
+`start: allowed`. It reads the journal's ledger only; it takes no lease and writes nothing.
+
 ## Engine lease (one engine, whatever the machine)
 
 `scripts/engine_guard.sh` stops a second engine on the **same** machine. The lease stops one on **another**
