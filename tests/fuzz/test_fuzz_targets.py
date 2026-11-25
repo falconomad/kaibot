@@ -92,6 +92,33 @@ def test_a_damaged_kind_index_does_not_hide_entries_543():
             j.close()
 
 
+def test_a_lost_last_entry_is_refused_at_open_590():
+    """#590 (nightly fuzz input `corpus/journal_file/entry-leaf-cell-count-damaged-590`): one flipped bit in the
+    cell count of the entry table's leaf page (3 -> 2) drops the last entry from the table. The checksum chain
+    cannot see a lost tail, so the journal opened with 2 entries of 3 before #543's structure check; now the table
+    no longer matches its kind index and the journal is refused at open (exit code 4)."""
+    from kaibot.engine.journal import Journal, JournalCorrupt
+
+    with tempfile.TemporaryDirectory(prefix="kb-fuzz-") as td:
+        p = Path(td) / "journal.sqlite"
+        j = Journal(p)
+        for i in range(3):
+            j.append("fill", {"coid": f"c{i}"})
+        j.db.execute("pragma wal_checkpoint(truncate)")
+        j.close()
+        db = sqlite3.connect(p)
+        root = db.execute("select rootpage from sqlite_master where name='entry'").fetchone()[0]
+        psize = db.execute("pragma page_size").fetchone()[0]
+        db.close()
+        raw = bytearray(p.read_bytes())
+        head = (root - 1) * psize + (100 if root == 1 else 0)
+        assert raw[head] == 0x0D and raw[head + 3:head + 5] == b"\x00\x03"  # a table leaf holding the 3 entries
+        raw[head + 4] ^= 1  # 3 cells -> 2: the last entry is gone from the table, still in the index
+        p.write_bytes(bytes(raw))
+        with pytest.raises(JournalCorrupt, match="damaged"):
+            Journal(p)
+
+
 def _om_with_activity(act: dict):
     from kaibot.broker.protocol import OrderRequest
     from kaibot.engine.journal import Journal

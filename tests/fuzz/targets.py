@@ -39,10 +39,7 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-KNOWN: dict[int, str] = {
-    543: "journal_file: a damaged byte in the kind index hides entries from reads by kind while the journal opens "
-         "and verifies; the target compares reads by kind only when 543 is not known",
-}
+KNOWN: dict[int, str] = {}  # #543 fixed (pragma integrity_check at open): journal_file compares reads by kind again
 GOOD_NUMBERS = ["1", "2", "10", "0.5", "3", 3, 2.5, "100.25"]
 
 
