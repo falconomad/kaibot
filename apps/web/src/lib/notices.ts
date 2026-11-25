@@ -3,6 +3,7 @@
 // Loaded with the Notices chunk only (components/Notices.tsx is lazy), so none of this is in the first load.
 import { supa } from "./api";
 import { ruleName } from "./explain";
+import { type Freshness, freshness } from "./freshness";
 import { NAME } from "../brand/brand";
 
 export type NoticeKind = "new_listing" | "big_day";
@@ -53,6 +54,17 @@ export async function fetchNotices(): Promise<Notices | null> {
     throw Object.assign(new Error(error.message), { code: error.code });
   }
   return parseNotices(data);
+}
+
+/** How often Home asks kb_market_notices (components/Notices.tsx polls at this interval). */
+export const NOTICES_EVERY = 30 * 60_000;
+
+/** The notices' freshness, by the one rule of lib/freshness.ts (#604, the cue of #650): said only when the latest ask
+ *  failed and the rows on screen are older than that rule allows ("Stale · 2 h old"). While asks succeed the answer is
+ *  as new as the calendar it reads, so nothing is said. */
+export function noticesFreshness(updatedAt: number, failed: boolean, now = Date.now()): Freshness | null {
+  if (!failed || !updatedAt) return null;
+  return freshness(updatedAt, NOTICES_EVERY, now);
 }
 
 // ---------------------------------------------------------------- which notices, and their words

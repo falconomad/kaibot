@@ -4,15 +4,18 @@
 import MarketNotices from "./Notices";
 import Headlines from "./Headlines";
 import type { Freshness } from "../lib/freshness";
+import type { Viewer } from "../lib/headlines";
 
-/** `headlines`: show the headline line (a paper run that is not over). Only the owner reaches Home today (every read
- *  is owner-only), so the viewer is the owner; multi-user passes "other" and sees public (SEC) lines only. */
-/** `fresh`: how fresh the news feed is (lib/freshness.ts newsFreshness), said on the headline card when not live. */
-export default function Lines({ headlines, fresh }: { headlines: boolean; fresh?: Freshness | null }) {
+/** `viewer`: who is looking. Only the owner reaches Home today (main.tsx sends an invited member to their own page and
+ *  every read here is owner-only in the database), and the page says the same rule again (#634): the market notices
+ *  are for the owner alone, and anyone else would get the public (SEC) headlines only (lib/headlines.ts visibleTo).
+ *  `headlines`: show the headline line (a paper run that is not over).
+ *  `fresh`: how fresh the news feed is (lib/freshness.ts newsFreshness), said on the headline card when not live. */
+export default function Lines({ viewer, headlines, fresh }: { viewer: Viewer; headlines: boolean; fresh?: Freshness | null }) {
   return (
     <>
-      <MarketNotices />
-      {headlines && <Headlines viewer="owner" fresh={fresh} />}
+      {viewer === "owner" && <MarketNotices />}
+      {headlines && <Headlines viewer={viewer} fresh={fresh} />}
     </>
   );
 }
