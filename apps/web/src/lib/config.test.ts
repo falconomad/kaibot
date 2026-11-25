@@ -269,6 +269,13 @@ describe("dollars and dates", () => {
     expect(nextOpenEt(new Date("2026-11-13T22:00:00Z"))).toBe("2026-11-16"); // Fri evening → Mon
     expect(nextOpenEt(new Date("2026-11-15T12:00:00Z"))).toBe("2026-11-16"); // Sunday
   });
+  it("next open skips NYSE holidays (audit): not Thanksgiving, not Christmas", () => {
+    expect(nextOpenEt(new Date("2026-11-25T17:00:00Z"))).toBe("2026-11-27"); // Wed 12:00 ET → Fri, not Thu 26 Nov
+    expect(nextOpenEt(new Date("2026-11-26T13:00:00Z"))).toBe("2026-11-27"); // Thanksgiving morning
+    expect(nextOpenEt(new Date("2026-11-27T13:00:00Z"))).toBe("2026-11-27"); // the early-close day still opens at 09:30
+    expect(nextOpenEt(new Date("2026-12-24T19:00:00Z"))).toBe("2026-12-28"); // Christmas Eve afternoon → Mon
+    expect(nextOpenEt(new Date("2026-12-31T22:00:00Z"))).toBe("2027-01-04"); // New Year's Day closed
+  });
 });
 
 describe("the Strategy page has no live-trading control", () => {

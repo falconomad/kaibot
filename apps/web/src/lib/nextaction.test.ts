@@ -29,6 +29,33 @@ describe("the calendar", () => {
     expect(nextDecisionFill("dip_reversal", "2026-11-25", s)).toBeNull();
   });
   it("days read 'Wed 25 Nov'", () => { expect(dayText("2026-11-25")).toBe("Wed 25 Nov"); });
+  it("without the notices' calendar, NYSE days (lib/nyse.ts): Thanksgiving and Christmas are skipped (audit)", () => {
+    expect(sessionsFrom("2026-11-25", null).slice(0, 3)).toEqual(["2026-11-25", "2026-11-27", "2026-11-30"]);
+    expect(sessionsFrom("2026-12-23", null).slice(0, 3)).toEqual(["2026-12-23", "2026-12-24", "2026-12-28"]);
+  });
+});
+
+describe("early closes (audit): orders at the close minus 10 minutes", () => {
+  const due = (fill: string) => detail({ standing: { state: "due", fill_session: fill } });
+  const FRI = (hhmmZ: string) => at(`2026-11-27T${hhmmZ}:00Z`);
+  it("Thanksgiving, 26 Nov, is closed: a due decision goes out on Fri 27 Nov at 12:50 ET", () => {
+    expect(next(due("2026-11-27"), { calendar: null, now: at("2026-11-26T16:00:00Z") })).toBe("Next: orders go out on Fri 27 Nov at 12:50 ET");
+  });
+  it("on Fri 27 Nov the window is 12:50-12:57 ET; after 12:57 it is the next session's 15:50", () => {
+    expect(next(due("2026-11-27"), { calendar: null, now: FRI("17:00") })).toBe("Next: orders go out today at 12:50 ET");   // 12:00 ET
+    expect(next(due("2026-11-27"), { calendar: null, now: FRI("17:56") })).toBe("Next: orders go out today at 12:50 ET");   // 12:56 ET
+    expect(next(due("2026-11-27"), { calendar: null, now: FRI("17:58") })).toBe("Next: orders go out late, on Mon 30 Nov at 15:50 ET");
+  });
+  it("the market closes at 13:00 on 27 Nov: from then the stops line, as after any close", () => {
+    const met = detail({ standing: { state: "met", fill_session: "2026-11-25" } });
+    expect(next(met, { calendar: null, now: FRI("17:30") })).toBe("Next: next decision, orders on Wed 2 Dec at 15:50 ET"); // 12:30, open
+    expect(next(met, { calendar: null, now: FRI("18:05") })).toBe("Next: stops checked at the open, Mon 30 Nov 09:30 ET"); // 13:05, closed
+  });
+  it("Christmas Eve sends at 12:50 ET; Christmas Day is closed, so the next window after it is Mon 28 Dec", () => {
+    expect(next(due("2026-12-24"), { calendar: null, now: at("2026-12-24T15:00:00Z") })).toBe("Next: orders go out today at 12:50 ET");
+    expect(next(due("2026-12-24"), { calendar: null, now: at("2026-12-24T19:00:00Z") })).toBe("Next: orders go out late, on Mon 28 Dec at 15:50 ET");
+    expect(next(due("2026-12-28"), { calendar: null, now: at("2026-12-25T16:00:00Z") })).toBe("Next: orders go out on Mon 28 Dec at 15:50 ET");
+  });
 });
 
 describe("the next action, from the standing targets (multi_day.rules.<rule>.standing)", () => {
@@ -36,16 +63,16 @@ describe("the next action, from the standing targets (multi_day.rules.<rule>.sta
     const due = { standing: { state: "due", decided: "2026-11-24", fill_session: "2026-11-25" } };
     expect(next(detail(due))).toBe("Next: orders go out today at 15:50 ET");
     expect(next(detail(due), { now: MORNING })).toBe("Next: orders go out today at 15:50 ET");
-    expect(next(detail({ standing: { state: "due", fill_session: "2026-11-27" } }))).toBe("Next: orders go out on Fri 27 Nov at 15:50 ET");
+    expect(next(detail({ standing: { state: "due", fill_session: "2026-11-27" } }))).toBe("Next: orders go out on Fri 27 Nov at 12:50 ET");
   });
   it("a due decision whose window has passed goes out late, at the next session's window", () => {
     const due = { standing: { state: "due", fill_session: "2026-11-25" } };
-    expect(next(detail(due), { now: EVENING })).toBe("Next: orders go out late, on Fri 27 Nov at 15:50 ET");
+    expect(next(detail(due), { now: EVENING })).toBe("Next: orders go out late, on Fri 27 Nov at 12:50 ET");
   });
   it("buys still short after the send: carried at the next window, or on hold while the market filter is off", () => {
     const sent = { standing: { state: "sent", fill_session: "2026-11-24", sent_on: "2026-11-24", short: ["XOM", "TMO"] } };
     expect(next(detail(sent))).toBe("Next: 2 short buys sent again today at 15:50 ET");
-    expect(next(detail(sent), { now: EVENING })).toBe("Next: 2 short buys sent again on Fri 27 Nov at 15:50 ET");
+    expect(next(detail(sent), { now: EVENING })).toBe("Next: 2 short buys sent again on Fri 27 Nov at 12:50 ET");
     const carry = (risk_off: boolean, session = "2026-11-25") =>
       ({ type: "multi_day_carry", ts: `${session}T20:51:00Z`, payload: { strategy: "trend_momentum", session, of: "2026-11-24", carried: [], skipped: {}, risk_off } });
     expect(next(detail(sent), { events: [carry(true)] })).toBe("Next: carried buys on hold, market filter off");

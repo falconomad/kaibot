@@ -11,11 +11,12 @@
 // - kb_health's events when a page already fetched them: the latest `multi_day_carry` (risk_off: the market filter
 //   holds the carried buys) and `multi_day_data_late` {session, strategy, deadline, why};
 // - the market calendar: kb_market_notices' `sessions` (today when it trades, then the next ones; no early closes)
-//   when cached, else the heartbeat's `next_open`, else weekdays.
+//   when cached, else the heartbeat's `next_open`, else NYSE days from lib/nyse.ts (weekdays without the holidays).
 // Orders go out in the 15:50-15:57 ET window of their session (engine/live_daily.py SEND_FROM / SEND_UNTIL). On an
-// early-close day the window is earlier; the page does not know those days and says 15:50 ET.
+// early-close day (lib/nyse.ts EARLY_CLOSES) the window is the close minus 10 to minus 3 minutes: 12:50-12:57 ET.
 import { NAME } from "../brand/brand";
 import { needsStop } from "./exits";
+import { OPEN_MIN as OPEN, addDays, closeMin, hm, isTradingDay, sendFromMin, sendUntilMin } from "./nyse";
 
 type Ev = { type: string; ts: string; payload: Record<string, unknown> | null; run_id?: number | null };
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null);
@@ -32,24 +33,21 @@ export function etAt(t: number): { day: string; min: number } {
 }
 const noon = (d: string) => new Date(`${d}T12:00:00Z`);
 const wd = (d: string) => noon(d).getUTCDay(); // 0 Sunday .. 6 Saturday
-const addDays = (d: string, n: number) => new Date(noon(d).getTime() + n * 86_400_000).toISOString().slice(0, 10);
 /** "Wed 25 Nov" */
 export const dayText = (d: string) => new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(noon(d));
 
-const SEND_UNTIL = 15 * 60 + 57, OPEN = 9 * 60 + 30;
-
 /** The trading sessions from `today` on, as well as the page knows them: the calendar's list when it reaches past
- *  today, else weekdays from the heartbeat's next open (a holiday it names is skipped), else weekdays. */
+ *  today, else NYSE days from the heartbeat's next open (a holiday it names is skipped), else NYSE days (lib/nyse.ts). */
 export function sessionsFrom(today: string, calendar?: string[] | null, nextOpen?: unknown): string[] {
   const cal = (calendar ?? []).filter((d) => DATE.test(d) && d >= today).sort();
   const known = cal.some((d) => d > today);
   const t = typeof nextOpen === "string" ? Date.parse(nextOpen) : NaN;
-  // past the calendar's last day (it lists six sessions) or without it: weekdays
+  // past the calendar's last day (it lists six sessions) or without it: NYSE days
   const first = known ? addDays(cal.at(-1)!, 1) : Number.isFinite(t) && t > Date.parse(`${today}T00:00:00Z`) ? etAt(t).day : today;
   const out = known ? cal : [];
   for (let i = 0; out.length < 30 && i < 60; i++) {
     const d = addDays(first, i);
-    if (wd(d) !== 0 && wd(d) !== 6) out.push(d);
+    if (isTradingDay(d)) out.push(d);
   }
   return out;
 }
@@ -132,11 +130,12 @@ export function nextAction(x: NextInput): string | null {
   const now = x.now ?? Date.now(), et = etAt(now), today = et.day;
   const sessions = sessionsFrom(today, x.calendar, obj(detail)?.next_open);
   const isSession = (d: string) => sessions.includes(d);
-  // the next session whose send window is still ahead: today's until 15:57 ET, else the next one
-  const sendDay = sessions.find((d) => d > today || (d === today && et.min < SEND_UNTIL)) ?? null;
+  // the next session whose send window is still ahead: today's until 15:57 ET (12:57 on an early close), else the next one
+  const open = (d: string) => d > today || (d === today && et.min < sendUntilMin(d));
+  const sendDay = sessions.find(open) ?? null;
   const when = (d: string) => (d === today ? "today" : `on ${dayText(d)}`);
-  const at = (d: string) => `${when(d)} at 15:50 ET`;
-  const marketOpen = isSession(today) && et.min >= OPEN && et.min < 16 * 60;
+  const at = (d: string) => `${when(d)} at ${hm(sendFromMin(d))} ET`;
+  const marketOpen = isSession(today) && et.min >= OPEN && et.min < closeMin(today);
   const openDay = sessions.find((d) => d > today || (d === today && et.min < OPEN)) ?? null;
   // only a rule whose stocks rest a stop at the broker: the momentum rules sell by their list at a close and have none
   // by design (lib/exits.ts; the heartbeat's rules.<rule>.exit decides)
@@ -157,7 +156,7 @@ export function nextAction(x: NextInput): string | null {
     if (!st || !state) continue;
     const fill = date(st.fill_session);
     if (state === "due" && fill) {
-      const day = fill > today || (fill === today && et.min < SEND_UNTIL) ? fill : sendDay;
+      const day = open(fill) ? fill : sendDay;
       if (!day) continue;
       const head = `Next: orders go out ${fill === day ? "" : "late, "}${at(day)}`;
       return block ? `${head}; buys on hold, ${block}` : head;

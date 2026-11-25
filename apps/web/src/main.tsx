@@ -6,7 +6,8 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "
 import "./tokens.css";
 import "./v4tokens.css";
 import "./app.css";
-import { api, supa } from "./lib/api";
+import { api, stopRealtime, supa } from "./lib/api";
+import { resetUserData, watchUser } from "./lib/session";
 import { Shell } from "./components/Shell";
 import { NotOwner, SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
@@ -39,6 +40,10 @@ const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense f
 // doesn't fire every query at once.
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: STALE.default,
   refetchIntervalInBackground: false } } });
+
+// Sign-out, or another account in this tab: drop every cached answer and the realtime channels (lib/session.ts). Wired
+// before Gate subscribes, so the cache is empty before the next screen renders.
+watchUser(supa.auth, () => resetUserData(qc, stopRealtime));
 
 /** /trades/:id (before v4) -> /positions/:id, keeping the query (?tab=...). */
 function OldTrade() {

@@ -126,6 +126,13 @@ describe("3. the engine at night is asleep, not offline", () => {
     expect(marketHours(new Date("2026-11-18T15:00:00Z"))).toBe(true);  // Wed 10:00 ET
     expect(marketHours(new Date("2026-11-18T22:35:00Z"))).toBe(false); // Wed 17:35 ET
     expect(marketHours(new Date("2026-11-21T15:00:00Z"))).toBe(false); // Saturday
+    // NYSE holidays and early closes (lib/nyse.ts), with no heartbeat to say so (audit)
+    expect(marketHours(new Date("2026-11-26T15:00:00Z"))).toBe(false); // Thanksgiving 10:00 ET
+    expect(marketHours(new Date("2026-11-27T17:30:00Z"))).toBe(true);  // Fri 27 Nov 12:30 ET
+    expect(marketHours(new Date("2026-11-27T18:05:00Z"))).toBe(false); // 13:05 ET, after the early close
+    expect(marketHours(new Date("2026-12-24T18:30:00Z"))).toBe(false); // Christmas Eve 13:30 ET
+    expect(marketHours(new Date("2026-12-25T15:00:00Z"))).toBe(false); // Christmas Day
+    expect(engineClock(new Date("2026-11-27T18:05:00Z"), null, "Europe/Berlin").kind).not.toBe("offline");
     // Thanksgiving: the last heartbeat (market closed) said the next open is Friday
     expect(marketHours(new Date("2026-11-26T15:00:00Z"), beat("2026-11-25T21:20:00Z", "market_closed", "2026-11-27T09:30:00-05:00"))).toBe(false);
     // an engine that died while trading: still market hours
