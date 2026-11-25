@@ -103,6 +103,10 @@ export function itemFromCheck(c: TickerCheck): Item {
   }
 }
 
+/** A saved list's tickers as symbols, in order: the store keeps either plain symbols or the checked rows. */
+export const savedSymbols = (l: { symbols: (SavedSymbol | string)[] }) =>
+  l.symbols.map((s) => String(typeof s === "string" ? s : s.symbol).toUpperCase());
+
 /** An editor row from a saved list's entry (latest check of the last 7 days, or unchecked). Only an accepted entry with
  * a sector fund counts as accepted; anything else must be checked again before it can be used. */
 export function itemFromSaved(s: SavedSymbol | string): Item {

@@ -524,6 +524,13 @@ dialog.kb-sheet::backdrop { background: var(--scrim); }
 .kb-lcard-meta { font-size: 13px; color: var(--slate); }
 .kb-lcard[aria-checked=true] .kb-lcard-meta { color: var(--sea-ink); }
 .kb-lcard[aria-checked=true] .kb-radio { border-color: var(--sea); background: var(--sea); box-shadow: inset 0 0 0 3px var(--sea-tint); }
+/* A saved list's logos, stacked (25 Nov): StockBadge tiles as circles, each ringed 2 px in the card's colour; "+N" last. */
+.kb-lstack { display: flex; padding: 2px 0 2px 8px; }
+.kb-lstack > * { margin-left: -8px; border-radius: 50%; -webkit-mask: none; mask: none; box-shadow: 0 0 0 2px var(--surface); }
+.kb-lstack .badge::after { content: none; }
+.kb-lstack .badge:not(.logo) { letter-spacing: -.05em; color: var(--grey-50); } /* the tints are dark in both themes */
+.kb-lstack b { position: relative; display: flex; align-items: center; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--slate); font-size: 12px; }
+.kb-lcard[aria-checked=true] .kb-lstack > * { box-shadow: 0 0 0 2px var(--sea-tint); }
 .kb-ml-field { display: flex; flex-direction: column; gap: 6px; }
 .kb-ml-field > .kb-search { flex: none; } /* in a column, 220px basis became 220px of height (18 Nov) */
 .kb-ml-label { font-size: 13px; font-weight: 600; color: var(--slate); }
@@ -582,66 +589,17 @@ tr.click:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; 
 .v3-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .v3-list b { font-weight: 600; }
 
-/* #130: the multi-day book (boards 11, 12, 15). Desktop shows the detail; at 720 px and below only the headline and
-   a compact row (symbol, value, gain or loss); the rest opens on a tap. Every tap target is at least 44 px. */
-.m-only { display: none; }
-@media (max-width: 720px) { .d-only { display: none !important; } .m-only { display: initial; } }
-.book-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.book-link { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; }
+/* #130: the multi-day book's check strip (its page layout went with the v4 pages; 25 Nov: unused rules removed). */
 .book-strip { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 10px 0 0; padding: 10px 14px; border-radius: 14px; background: var(--surface-2); font-size: 14px; }
 .book-strip.bad { background: var(--loss-tint); border: 1px solid var(--fail); }
 .book-check { display: inline-flex; gap: 8px; align-items: flex-start; min-width: 0; }
 .book-check > span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
 .book-check-v { color: var(--ink); }
-.book-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; margin-top: 14px; }
-.book-hero { display: flex; flex-direction: column; gap: 4px; }
-.book-hero .hero { font-size: clamp(32px, 8vw, 48px); }
-.book-hero-sub { display: flex; flex-wrap: wrap; gap: 4px 16px; font-weight: 500; }
-.book-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.book-next h3 { font-size: 16px; margin: 0 0 6px; }
-.book-invested { display: flex; flex-direction: column; gap: 8px; }
-.book-meter { position: relative; height: 8px; border-radius: 8px; background: var(--surface-2); }
-.book-meter > i { display: block; height: 100%; border-radius: 8px; background: var(--sea); transform-origin: left; animation: kb-growX .9s var(--ease) .2s both; }
-.book-limit { position: absolute; top: -5px; width: 2px; height: 18px; background: var(--ink); transform: translateX(-1px); }
-.book-meter-ends { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
-.book-rules { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
-.book-rule-row { display: grid; grid-template-columns: minmax(0, 1fr) 96px 44px; gap: 10px; align-items: center; }
-.book-rule-row b { text-align: right; }
-.book-mini { height: 4px; border-radius: 4px; background: var(--surface-2); overflow: hidden; } .book-mini i { display: block; height: 100%; background: var(--sea); }
-.book-more { width: 100%; margin-top: 4px; }
-.book-empty { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; font-size: 15px; }
-.hlist { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.hrow-main, .hrow-head { display: grid; grid-template-columns: 40px minmax(0, 1.4fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
-  gap: 12px; align-items: center; width: 100%; text-align: left; }
-.hrow-head { font-size: 13px; color: var(--stale); padding: 0 12px; }
-.hrow-main { height: auto; min-height: 56px; padding: 8px 12px; border: 0; border-radius: 14px; background: transparent; font-weight: 400; font-size: 15px; }
-.hrow-main:hover:not(:disabled) { background: var(--surface-2); filter: none; }
-.hrow.open .hrow-main { background: var(--surface-2); }
-.hrow-name, .hrow-d, .hrow-v { display: flex; flex-direction: column; min-width: 0; }
-.hrow-name > *, .hrow-d > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hrow-d .muted, .hrow-name .muted { font-size: 13px; }
-.hrow-v { text-align: right; align-items: flex-end; font-weight: 600; }
-.hrow-v .muted { font-weight: 400; font-size: 13px; }
-.hrow-detail { padding: 10px 12px 14px 64px; animation: kb-rise .25s var(--ease) both; }
-.hold-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-top: 12px; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip-btn { min-height: 44px; padding: 0 16px; font-size: 15px; }
 /* a selected filter is ink, not blue: blue is the one action on the screen */
 .chip-btn[aria-pressed=true] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
-.hold-sort { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--stale); }
-.hold-sort select { min-height: 44px; }
-.hold-group { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
-.hrow.compact .hrow-main { grid-template-columns: 40px minmax(0, 1fr) auto; }
-.hrow.compact .d-only { display: none; } .hrow.compact .m-only { display: initial; }
-.hrow.compact .hrow-detail { padding-left: 12px; }
-/* the experiment badge looks small, but its tap area is 44 px tall */
 @media (max-width: 720px) {
-  .book-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .book-side { display: none; } .book-side.open { display: flex; animation: kb-rise .25s var(--ease) both; }
-  .hrow-main { grid-template-columns: 40px minmax(0, 1fr) auto; }
-  .hrow-detail { padding: 8px 4px 12px; }
-  .hrow-detail .kv { grid-template-columns: minmax(0, 1fr) 0 auto; font-size: 14px; }
-  .hrow-detail .kv .v { overflow-wrap: anywhere; }
   .book-strip { flex-direction: column; }
 }
 
