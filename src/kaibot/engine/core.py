@@ -352,6 +352,7 @@ def gate_peak(peak: float | None, eq: float, book_pnl: float) -> float | None:
 
 class Engine:
     intraday = False  # M10 1.19: True on engine/intraday.IntradayEngine only
+    CONTAIN_DRIFT_READ = True  # audit 2 5.10: a failed positions read of the drift check holds buys, not the minute
 
     def __new__(cls, *args, intraday: bool | None = None, **kw):
         """M10 1.19 (#444): `Engine(..., intraday=False)` is the multi-day book's engine, this class: what the
@@ -740,10 +741,13 @@ class Engine:
         Audit 2, 5.10 (the 1.5 residual): a read of the broker's positions that fails no longer fails the minute
         (which kept the whole send, sales included, behind this step while the endpoint was down). It is contained
         here: the `positions` hold stops new buys until a read works again (fail closed for buys), sales and stops
-        go on, and the minute completes. One `engine_error` event per spell; the hold is let go at the next read."""
+        go on, and the minute completes. One `engine_error` event per spell; the hold is let go at the next read.
+        The retired intraday path (`CONTAIN_DRIFT_READ` False) still fails its minute, as before."""
         try:
             broker_pos = self.broker.positions()
         except Exception as e:  # noqa: BLE001 - contained: buys held (below), the tick goes on
+            if not self.CONTAIN_DRIFT_READ:  # the retired intraday path (engine/intraday.py): as before
+                raise
             why = f"broker positions unreadable ({type(e).__name__}: {str(e)[:120]}): no new buys"
             if self._positions_unread is None:
                 log.error("drift check: %s", why)

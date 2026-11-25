@@ -75,6 +75,9 @@ __all__ = ["IntradayEngine"]
 
 class IntradayEngine(Engine):
     intraday = True
+    # audit 2 5.10 is the book loop's: this retired path keeps M9 1.5's fail closed, a failed positions read of the
+    # drift check fails its minute and the retry does that minute's work (tests/test_engine_soak.py d6)
+    CONTAIN_DRIFT_READ = False
 
     # ================= what the book's engine leaves to this path =================
     def _roomflow(self, room, pack_fn):

@@ -17,21 +17,32 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "dst"))
 
+import world  # noqa: E402
 from scenarios import quiet  # noqa: E402
 from world import D1, D2, D3, NY, World  # noqa: E402
 
 from kaibot.broker.faulty import Forced  # noqa: E402
+from kaibot.engine.core import Engine  # noqa: E402
 from kaibot.engine.state import BLOCK_CODES, ENTRY_SOURCES, TradingState  # noqa: E402
+from kaibot.risk.profiles import load_profiles  # noqa: E402
 
 DAY2, DAY3 = D2.replace("-", ""), D3.replace("-", "")
 POSITIONS_DOWN = Forced("rate_limit", f"positions|{DAY2}T19")  # 15:00-15:59 ET on D2 (EDT): every positions() read
+
+
+def book_loop(monkeypatch) -> None:
+    """The live process's engine: `Engine(..., intraday=False)`, whose tick is engine/book_loop.py (the DST world
+    builds the intraday engine otherwise, which keeps M9 1.5's fail closed: `CONTAIN_DRIFT_READ`)."""
+    none = {level: [] for level in load_profiles()}
+    monkeypatch.setattr(world, "Engine", lambda *a, **k: Engine(*a, intraday=False, strategies=none, **k))
 
 
 def venue_orders(w, symbol, side):
     return [o for o in w.sim.orders.values() if o["symbol"] == symbol and o["side"] == side]
 
 
-def test_positions_unreadable_all_window_the_sale_goes_out_and_the_buy_is_held():
+def test_positions_unreadable_all_window_the_sale_goes_out_and_the_buy_is_held(monkeypatch):
+    book_loop(monkeypatch)
     w = World(quiet({D1: ("B",), D2: ("C",)}, forced=(POSITIONS_DOWN,)))
     seen = []
     tick = w.one_pass
@@ -45,6 +56,7 @@ def test_positions_unreadable_all_window_the_sale_goes_out_and_the_buy_is_held()
     w.one_pass = watched
     res = w.run()
     assert res.ok, res.report()
+    assert not w.eng.intraday  # the book's own loop ran
     assert any("fault rate_limit positions" in t for t in res.trace)
     sold = venue_orders(w, "B", "sell")
     assert len(sold) == 1 and f"-B-{DAY2}-sell-1" in sold[0]["client_order_id"] and sold[0]["status"] == "filled"
