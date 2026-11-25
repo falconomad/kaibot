@@ -9,6 +9,9 @@
 #   heavy:       true = started under `nice -n 10` (market hours are allowed, #600, 24 Nov 2026).
 #   sec:         true = calls SEC EDGAR in bulk: never two at once (see sec_process_patterns).
 #   timeout_min: the job is killed (its whole process group) after this many minutes.
+#   writes:      folders under docs/ (ending in "/") the job may change in the checkout. After the job, changes only
+#                there are committed on runner/<job id> and opened as a pull request (never pushed to main), and the
+#                checkout goes back to clean main. Any change anywhere else pauses the runner until it is clean.
 #
 # Changing this file widens what Product can run on the owner's Mac: it needs the QA-Ops key and the owner.
 
@@ -64,6 +67,7 @@ scripts:
 
   scripts/export_results.py:
     timeout_min: 20
+    writes: [docs/research/results/]
     flags:
       --rule: '[a-z0-9_]{1,64}'
 
