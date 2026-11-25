@@ -258,12 +258,23 @@ accounts and checks that they agree.
 - **Engine side:** the close-minus-5 flatten and the daily stop take intraday sleeves only; only intraday positions
   are "carried" (sold at the next open); the account guard and the drift check count the ledger's multi-day sleeves as
   the engine's own; equity counts them from their last close mark (the overnight gap is in the day's change); run
-  drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills. Since M9 ticket 1.8 (#433) that sale goes through the
-  order manager, one per sleeve, under `kb<run>-<rule>-<symbol>-<day>-flatten-<n>`: every fill is booked at its own
-  quantity (a sale cancelled after a partial fill too), and a sale without an answer is looked up by its id, never
-  sent again blind. Without the daily path (KAIBOT_MULTIDAY off) the older direct sale (`kbfl-...`) is still used.
+  drawdown, a new run and "Flatten and stop" also sell them (`_flatten_md`), and the sale is booked when it fills.
+  The multi-day book's own run end (#206, `_book_end`) sells them the same way: it journals `md_book_end`, writes a
+  `book_drawdown` halt row, cancels the daily path's working orders and sells every sleeve at market, retried at each
+  tick until none is left (never with the market closed). A sleeve is sold only through the daily path's order
+  manager (M9 ticket 1.8, #433), one sale per sleeve, under `kb<run>-<rule>-<symbol>-<day>-flatten-<n>`: every fill
+  is booked at its own quantity (a sale cancelled after a partial fill too), and a sale without an answer is looked
+  up by its id, never sent again blind. There is no other way to sell a sleeve: the older direct sale (`kbfl-...`)
+  was deleted in M10 1.20 (#445, #665). **Fail closed:** an engine whose run holds multi-day sleeves and that has no
+  daily path (KAIBOT_MULTIDAY off, or no multi-day rule enabled) refuses to start (`DailyPathMissing`, exit code 5,
+  before any order call; the message names the fix), and the broker-held stops stay. Should a flatten still meet
+  sleeves without an order manager, it cancels nothing, sends nothing and journals nothing for them, counts each
+  symbol as failed (`FlattenIncomplete`), and the stops keep resting. Sales an older engine already journalled
+  (`kbfl-`, `md_exit_intent`) are still rebuilt at start-up and booked when they fill (`_rebuild_md_exits`,
+  `_sync_md_exits`).
 - **Turning multi-day rules on:** `KAIBOT_MULTIDAY=on` in the engine's environment (the `.env`); default off, and the
-  engine refuses to load a multi-day rule without it. It is the explicit switch for the first paper start (#133,
+  engine refuses to load a multi-day rule without it (and, once a run holds multi-day sleeves, to start at all
+  without it; see above). It is the explicit switch for the first paper start (#133,
   after Gate B) and needs #188 (done) and #197 first. It does not loosen anything else: `config/profiles.yaml` `all_levels.allow_overnight` (the level
   limits, the stakeholder's) still caps overnight exposure at 0 while false, and migration 0019 must be applied first.
 

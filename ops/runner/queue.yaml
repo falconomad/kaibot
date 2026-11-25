@@ -43,3 +43,11 @@ jobs:
     script: scripts/near_close_1550_rerun.py
     args: ["--end", "2024-12-31"]
     posts_to_issue: 454
+  - id: listings-history-2016-2026-11-25    # #376 step 1 (#386): the history since 2016 from EDGAR, ~45 SEC requests
+    script: scripts/fetch_listings.py
+    args: ["--since", "2016-01-01"]
+    posts_to_issue: 376
+  - id: listings-first-bars-2026-11-25      # #376 step 1b (#664): first sessions from Alpaca bars; needs the history
+    script: scripts/fetch_listings.py
+    args: ["--first-bars"]
+    posts_to_issue: 376
