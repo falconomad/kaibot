@@ -38,7 +38,7 @@ export function Onboarding() {
   return (
     <div className="shell">
       <header className="top">
-        <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle /></Link><span className="pill">PAPER</span>
+        <div className="brand-lockup"><Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle /></Link><span className="pill">PAPER</span></div>
       </header>
       <main style={{ maxWidth: 880, margin: "0 auto", width: "100%" }}>
         <div className="steps" aria-label="Progress">

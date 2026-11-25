@@ -228,6 +228,10 @@ HEADER_JS = r"""() => {
     homeTap: Math.round(h('header.top .brand').height),
     rows: new Set(tops).size,
     hug: Math.round((Math.abs(drawn.width - box.width) + Math.abs(drawn.height - box.height)) * 10) / 10,
+    // PAPER on the wordmark's top right (25 Nov 2026): px from the letters' top and right edge, and its text size
+    tagTop: Math.round((h('header.top .pill').top - box.top) * 10) / 10,
+    tagGap: Math.round((h('header.top .pill').left - box.right) * 10) / 10,
+    tagFont: parseFloat(getComputedStyle(document.querySelector('header.top .pill')).fontSize),
   };
 }"""
 
@@ -323,8 +327,10 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         fails.append(f"top bar is {header} px on a phone (want 72)")
     hdr = pg.evaluate(HEADER_JS)
     print("header parts:", hdr)
-    if not 37 <= hdr["logo"] <= 38 or hdr["pill"] != 36 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
-        fails.append(f"header parts on a phone (logo 37.5, Paper 36, chip 36 drawn and 44 to tap, home link 44): {hdr}")
+    if not 37 <= hdr["logo"] <= 38 or hdr["pill"] != 18 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
+        fails.append(f"header parts on a phone (logo 37.5, Paper 18, chip 36 drawn and 44 to tap, home link 44): {hdr}")
+    if abs(hdr["tagTop"]) > 0.5 or not 4 <= hdr["tagGap"] <= 6 or hdr["tagFont"] < 12:
+        fails.append(f"PAPER is a tag on the logo's top right: its top on the letters' top, 4-6 px after them, text 12 px or more: {hdr}")
     if hdr["rows"] != 1 or abs(hdr["hug"]) > 0.5:
         fails.append(f"header: one row, and the logo's box must hug its letters: {hdr}")
     if [t[0] for t in tabs] != ["Home", "Positions", "Activity", "Engine", "More"] or any(t[1] < 48 for t in tabs):
