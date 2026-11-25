@@ -59,6 +59,12 @@ describe("ErrorBoundary", () => {
     expect(logged("Pot")).toBe(true);
   });
 
+  it("a falsy throw (0) still shows the fallback, without looping", async () => {
+    function Zero(): never { throw 0; }
+    const body = await mount(<ErrorBoundary name="Zero"><Zero /></ErrorBoundary>);
+    expect(body.querySelector('[role="alert"]')?.getAttribute("data-part")).toBe("Zero");
+  });
+
   it("Retry re-mounts the children with fresh state", async () => {
     let broken = true, mounts = 0;
     function Flaky() {

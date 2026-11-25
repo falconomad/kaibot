@@ -25,6 +25,7 @@ export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null, attempt: 0 };
 
   static getDerivedStateFromError(error: unknown): Partial<State> {
+    // A thrown null or undefined still counts as an error; a falsy throw (0, "") is kept and checked against null.
     return { error: error ?? new Error("render error") };
   }
 
@@ -33,14 +34,14 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidUpdate(prev: Props) {
-    if (this.state.error && prev.resetKey !== this.props.resetKey) this.retry();
+    if (this.state.error !== null && prev.resetKey !== this.props.resetKey) this.retry();
   }
 
   /** Re-mount the children: a new key gives them fresh state (a lazy chunk that failed to load stays failed; Reload). */
   retry = () => this.setState((s) => ({ error: null, attempt: s.attempt + 1 }));
 
   render() {
-    if (!this.state.error) return <Fragment key={this.state.attempt}>{this.props.children}</Fragment>;
+    if (this.state.error === null) return <Fragment key={this.state.attempt}>{this.props.children}</Fragment>;
     const body = (
       <div className="state state-error" role="alert" data-part={this.props.name}>
         <b>{BOUNDARY_TEXT}</b>{" "}
