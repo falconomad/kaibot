@@ -241,3 +241,21 @@ def test_the_experiment_runs_from_the_daily_store_and_writes_one_table(market, t
     assert set(g["marks"]["mark_6"]["numbers"]["declared"]) == set(st.NEIGHBOURS)
     assert any("research_harness" in r for r in g["provisional_reasons"])
     assert math.isfinite(rep["benchmarks"]["spy_total_return"]["cagr_pct"])
+
+
+def test_the_bill_rate_shows_idle_cash_both_ways_and_moves_no_mark(market):
+    """M11 2.4 (#455): with the FRED file the gate gets the bill rate; the 0% marks stay as they were."""
+    from kaibot.replay.multiday_core import spy_total_return
+
+    panel, d = market
+    tr = np.asarray(spy_total_return(panel, "SPY")[0], dtype=float)
+    i0, i1 = window(d)
+    bills = pd.Series(4.0, index=pd.bdate_range("2016-01-01", "2026-11-20"))
+    a = script.evaluate(d, tr, i0, i1, control_runs=0)
+    b = script.evaluate(d, tr, i0, i1, control_runs=0, bills=bills)
+    for m in script.MODELS:
+        assert a["gate_b"][m]["statistics"]["cash_yield"] is None
+        c = b["gate_b"][m]["statistics"]["cash_yield"]
+        assert 0 < c["mean_idle_share"] < 1 and c["tbill_cash"]["rule"]["cagr"] > c["zero_cash"]["rule"]["cagr"]
+        assert {k: v["met"] for k, v in a["gate_b"][m]["marks"].items()} == {
+            k: v["met"] for k, v in b["gate_b"][m]["marks"].items()}

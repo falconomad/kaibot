@@ -221,3 +221,36 @@ def test_gate_b_report_script_shows_both_versions_when_the_file_is_there(tmp_pat
     assert c["mean_idle_share"] == pytest.approx(0.4, abs=1e-3) and after["inputs"]["tbill"].endswith("fred_dtb3.json")
     assert {k: v["met"] for k, v in after["marks"].items()} == {k: v["met"] for k, v in before["marks"].items()}
     assert gate_v2_report.main([*args, "--no-tbill"])["statistics"]["cash_yield"] is None
+
+
+# ---------------------------------------------------------------- every gate call gets the rate (#455)
+
+GATE_ENTRIES = ("evaluate_gate_b", "evaluate_sleeve", "evaluate_book")
+
+
+def test_every_script_that_runs_a_gate_hands_it_the_bill_rate():
+    """A run script that calls a gate without `tbill=` writes a report with idle cash at 0% only. spy_engine.py
+    (the SimBroker go/no-go run) and spy_trend.py did until #455; this keeps a new script from doing it."""
+    import ast
+
+    missing, calls = [], 0
+    for f in sorted((ROOT / "scripts").glob("*.py")):
+        for node in ast.walk(ast.parse(f.read_text())):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in GATE_ENTRIES:
+                calls += 1
+                if "tbill" not in {k.arg for k in node.keywords}:
+                    missing.append(f"{f.name}:{node.lineno} {node.func.attr}")
+    assert calls >= 8 and missing == []
+
+
+def test_rates_after_the_last_session_never_change_a_gate_report():
+    """Point in time: a bill file that goes on past the run (here into the hold-out, at an absurd 25%) gives the
+    same cash block as one cut before the last session. Session t only ever reads a rate dated before t."""
+    net, spy = run().net, SPY
+    idx = net.index
+    cut = FLAT_4[FLAT_4.index < idx[-1]]
+    longer = pd.concat([cut, pd.Series(25.0, index=pd.bdate_range(idx[-1], "2026-11-20"))])
+    exposure = pd.Series(0.6, index=idx)
+    a = g2.statistics(GATE, net, spy, exposure=exposure, tbill=cut)["cash_yield"]
+    b = g2.statistics(GATE, net, spy, exposure=exposure, tbill=longer)["cash_yield"]
+    assert a == b and a["mean_idle_share"] == pytest.approx(0.4, abs=1e-3)

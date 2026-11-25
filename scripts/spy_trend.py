@@ -35,6 +35,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from kaibot.evaluation import gate_v2, holdout  # noqa: E402
 from kaibot.evaluation import prereg as prereg_mod  # noqa: E402
+from kaibot.evaluation import tbill as tbill_mod  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.replay import spy_trend as st  # noqa: E402
 
@@ -102,7 +103,7 @@ def window(d: st.SpyData, end: str) -> tuple[int, int]:
 
 def evaluate(d: st.SpyData, spy_tr: np.ndarray, i0: int, i1: int, *, cash: np.ndarray | None = None,
              control_runs: int = st.CONTROL_RUNS, control_seed: int = st.CONTROL_SEED, equity0: float = 100_000.0,
-             prereg_obj=None, registry=None, first_run_at=None) -> dict:
+             prereg_obj=None, registry=None, first_run_at=None, bills: pd.Series | None = None) -> dict:
     """Every account the pre-registration declares, the controls and Gate B per cost model (the script writes it
     out; the tests call this on synthetic bars)."""
     dates = d.dates[i0:i1 + 1]
@@ -161,7 +162,7 @@ def evaluate(d: st.SpyData, spy_tr: np.ndarray, i0: int, i1: int, *, cash: np.nd
             gate, rule=st.RULE, run=run, neighbours=nb, prereg=prereg_obj, registry=registry,
             first_run_at=first_run_at,
             source={"engine": "research_harness", "cost_model": m, "data_repairs": True,
-                    "benchmark": "spy_total_return"})
+                    "benchmark": "spy_total_return"}, tbill=bills)  # #455: idle cash both ways; no mark moves
     return {"rows": rows, "books": books, "benchmarks": bench, "control": control, "gate_b": gates,
             "gate_sha": gate.sha, "tbill": cash is not None, "exposure_base": exposure,
             "spells": st.spells(tg["base"]), "window": [str(dates[0]), str(dates[-1])], "sessions": len(dates)}
@@ -204,6 +205,7 @@ def run(a: argparse.Namespace) -> Path:
     data = Path(a.data)
     pre = prereg()
     d, tr, tr_info, cash, cash_note = load(data, a.start, a.end)
+    bills = tbill_mod.find(data)  # M11 2.4 (#455): FRED DTB3, each session the last rate dated before it
     i0, i1 = window(d, a.end)
     print(f"pre-registration {pre['file']} sha256 {pre['sha256'][:12]}; SPY {len(d.dates)} sessions, window "
           f"{d.dates[i0]} to {d.dates[i1]}; SPY total return: {tr_info.get('source')}; T-bill: {cash_note}",
@@ -220,7 +222,8 @@ def run(a: argparse.Namespace) -> Path:
     f_spy = data / "daily" / "bars" / "symbol=SPY.parquet"
     input_sha = hashlib.sha256(f_spy.read_bytes() + f"|{a.start}|{a.end}".encode()).hexdigest()
     code = git_sha()
-    res = evaluate(d, tr, i0, i1, cash=cash, control_runs=0, prereg_obj=pobj)  # accounts only, to log the trials
+    # accounts only, to log the trials
+    res = evaluate(d, tr, i0, i1, cash=cash, control_runs=0, prereg_obj=pobj, bills=bills)
     tdir = data / "trials"
     tdir.mkdir(parents=True, exist_ok=True)
     for r in res["rows"]:
@@ -234,7 +237,7 @@ def run(a: argparse.Namespace) -> Path:
     print(f"accounts done ({len(res['rows'])} runs), {time.time() - t0:.0f}s; random-timing control "
           f"{a.control_runs} runs per cost model ...", flush=True)
     registry = trials_mod.load(None, data / "trials.jsonl")
-    res = evaluate(d, tr, i0, i1, cash=cash, control_runs=a.control_runs, control_seed=a.control_seed,
+    res = evaluate(d, tr, i0, i1, cash=cash, bills=bills, control_runs=a.control_runs, control_seed=a.control_seed,
                    prereg_obj=pobj, registry=registry, first_run_at=run_at)
     for label, b in res["books"].items():
         st.daily_frame(b).to_csv(out / tag / f"daily_{label.replace('|', '_').replace('~', '-')}.csv", index=False)
