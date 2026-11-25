@@ -209,6 +209,7 @@ export const EVENT_SEVERITY: Record<string, EventSeverity> = {
   data_entry_unblocked: "info",
   engine_gap: "warn",
   multi_day_close_unknown: "warn",
+  multi_day_sale_refused: "critical",
   cash_merger_booked: "info",
   config_applied: "info",
   custom_tickers: "info",

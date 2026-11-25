@@ -125,7 +125,8 @@ def test_the_critical_events_are_the_ones_that_stop_trading_or_need_the_owner():
     """Pinned so that raising or lowering an event to or from critical is a reviewed change, not a side effect."""
     crit = {e.name for e in (*en.HEALTH, *en.PENDING, *en.ROUTINE) if e.severity == "critical"}
     assert crit == {"halt", "account_not_clean", "watchdog_flatten", "multi_day_book_ended", "multi_day_error",
-                    "ledger_mismatch", "reconcile_blocked", "engine_degraded_start"}
+                    "ledger_mismatch", "reconcile_blocked", "engine_degraded_start",
+                    "multi_day_sale_refused"}  # audit 2 5.9: a due sale the venue refused all window: owner looks
     assert all(e.severity != "critical" for e in en.ROUTINE)  # routine flow is never critical
 
 

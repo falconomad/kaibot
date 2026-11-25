@@ -145,6 +145,9 @@ PENDING: tuple[Event, ...] = (
     # QA-Ops audit (25 Nov 2026): the calendar unreadable and no local close for the day: sent as on an early close
     Event("multi_day_close_unknown", "warn",
           "Session close unknown: multi-day orders sent only in the early-close window (12:50-12:57 ET)"),
+    # Audit 2, 5.9: the venue refused a multi-day sale at every try of the send window (sent again next session)
+    Event("multi_day_sale_refused", "critical",
+          "The broker refused a sale all through the send window: it is tried again next session"),
 )
 
 ROUTINE: tuple[Event, ...] = (
