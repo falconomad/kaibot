@@ -575,6 +575,22 @@ def test_intraday_reports_and_the_resumable_symbol_cache(runs):
     assert [m["mark"] for m in nw["marks"]][0] == "trades >= 900" and nw["verdict"].startswith("FAIL")
 
 
+def test_intraday_daily_files_carry_exposure_for_gate_v3(runs):
+    """#677: every intraday account's daily file has `exposure` (flat at every close: sold by the 15:55 exit),
+    which the report reader gives to the gate v3 scorer."""
+    from kaibot.evaluation import results
+
+    data = runs[0]
+    for rule in script.INTRADAY:
+        f, rep = script.find_report(data / "reports", rule)
+        rows = [r for r in results.rows(f, rep) if r.daily_file is not None]
+        assert rows, rule
+        for row in rows:
+            assert "exposure" in pd.read_csv(row.daily_file, nrows=1).columns, row.label
+            d = results.daily(row)
+            assert d is not None and (d["exposure"] == 0.0).all(), row.label
+
+
 def test_the_summary_is_one_table_with_pass_fail_per_rule(runs):
     data, base, mend, out, call = runs
     text = (data / "reports" / script.SUMMARY).read_text()

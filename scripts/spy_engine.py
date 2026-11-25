@@ -213,7 +213,7 @@ def engine_run(frame: pd.DataFrame, cal: dict, days: list[str], version: str, sc
             fills = costs.log[n_fills:]
             cost = sum(abs(f["price"] - f["mid"]) * f["qty"] + f.get("fee", 0.0) for f in fills)
             daily.append({"date": day, "start": before, "end": after, "pnl": after - before,
-                          "cost": cost, "invested": bool(fills),
+                          "cost": cost, "invested": bool(fills), "exposure": _exposure(sim.broker),
                           "traded": sum(f["price"] * f["qty"] for f in fills)})
             if progress and (k + 1) % 250 == 0:
                 progress(f"    {version} | {scenario}: {k + 1} of {len(days)} sessions, {time.time() - t0:.0f}s")
@@ -244,6 +244,15 @@ def _job(x: dict) -> dict:
 
 def _equity(broker) -> float:
     return float(broker.account()["equity"])
+
+
+def _exposure(broker) -> float:
+    """The share of equity invested at the close (positions at their last price over equity), the `exposure` column
+    gate v3's scorer reads from a daily file (`evaluation.results.daily`, issue #677). Measured from the broker, not
+    assumed: the intraday versions are flat at the close (0.0) unless a position was left open."""
+    a = broker.account()
+    equity = float(a["equity"])
+    return (equity - float(a["cash"])) / equity if equity > 0 else 0.0
 
 
 # ---------------------------------------------------------------- round trips from the venue's fills

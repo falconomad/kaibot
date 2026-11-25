@@ -222,6 +222,31 @@ def test_the_script_writes_gate_b_and_the_prereg_marks(report, capsys):
         assert (root / "reports" / r["files"]["fills"]).is_file()
 
 
+def test_every_daily_file_carries_the_exposure_the_gate_v3_scorer_reads(report):
+    """#677: the exposure at each close is in the daily file (positions over equity, from the broker), and the
+    re-score's reader builds an account with it."""
+    import gate_v3_rescore
+
+    from kaibot.evaluation import results
+
+    root, args, f, rep = report
+    rows = [r for r in results.rows(f, rep) if r.daily_file is not None]
+    assert rows
+    spy = results.spy(f, rep, results.spy_pool(root / "reports"))
+    for row in rows:
+        d = results.daily(row)
+        assert d is not None and "exposure" in d and d["exposure"].between(0.0, 1.0).all(), row.label
+        if spy is not None:
+            assert gate_v3_rescore.account(row, spy).exposure is not None
+
+
+def test_the_engine_rows_hold_the_exposure_at_the_close(bars):
+    run = _run(bars, "v2")
+    assert all("exposure" in d for d in run["daily"])
+    assert all(0.0 <= d["exposure"] <= 1.0 for d in run["daily"])
+    assert all(d["exposure"] == 0.0 for d in run["daily"]), "the intraday rule is flat at every close"
+
+
 def test_has_and_summary(report, capsys):
     root, args, f, rep = report
     assert se.main([*args, "--has"]) == 0

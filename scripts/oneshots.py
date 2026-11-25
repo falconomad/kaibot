@@ -477,6 +477,14 @@ def spy_sessions(data: Path, spy: str, start: str, end: str) -> tuple[np.ndarray
     return sd.dates, np.r_[np.nan, c[1:] / c[:-1] - 1]
 
 
+def intraday_daily(sessions: np.ndarray, rets: np.ndarray) -> pd.DataFrame:
+    """The daily file of an intraday one-shot account: `date`, `ret` and `exposure`, the share of equity invested at
+    the close, in the format gate v3's scorer reads (`evaluation.results.daily`, issue #677). Every trade of
+    `replay/oneshots_intraday.py` is sold by the 15:55 time exit of its own session, so the account is flat at every
+    close: 0.0."""
+    return pd.DataFrame({"date": np.asarray(sessions).astype(str), "ret": rets, "exposure": 0.0})
+
+
 def run_intraday_rule(a: argparse.Namespace, rule: str) -> None:
     t0 = time.time()
     data = Path(a.data)
@@ -526,7 +534,7 @@ def run_intraday_rule(a: argparse.Namespace, rule: str) -> None:
     def curve(name: str, trades: pd.DataFrame, weight: float, params: dict, fill: str = "base") -> dict:
         rets = oi.account(trades, sessions, weight)
         st = mc.series_stats(sessions, rets)
-        pd.DataFrame({"date": sessions.astype(str), "ret": rets}).to_csv(out / tag / f"daily_{name}.csv", index=False)
+        intraday_daily(sessions, rets).to_csv(out / tag / f"daily_{name}.csv", index=False)
         trades.drop(columns=[c for c in ("rand_r",) if c in trades]).to_csv(out / tag / f"trades_{name}.csv",
                                                                             index=False)
         trials.append(trial_row(ctx, name, name, params, fill, 1.0, (sessions, rets), {

@@ -20,7 +20,11 @@ Layouts read (each from the script that writes it):
 - spy_trend: `spy_trend_<ts>.json` (spy_trend.py); `rows[]`, daily files in the folder, `control.<model>`;
 - the walk-forwards (intraday and multi-day first look): `walkforward_<level>_<tag>.json`; `files.tuned`
   and `files.default`;
-- intraday one-shots: `oneshots_<rule>_<ts>.json` with `variants.<name>.account`; daily files hold `ret` only.
+- intraday one-shots: `oneshots_<rule>_<ts>.json` with `variants.<name>.account`; daily files hold `ret`
+  (and `exposure` since #677).
+
+Since #677 the walk-forward, one-shot, spy_engine and spy_cost_rerun daily files carry `exposure` too; the
+runs written before it have none and stay unscored (nothing is re-run without a pre-registration).
 
 A row whose daily file is missing is still listed, with `daily_file` None and the report's own summary numbers:
 nothing is dropped silently. A file that is not a report (a gate report, a study, a skipped marker) is ignored
