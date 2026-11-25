@@ -16,6 +16,10 @@ cd ~/Projects/kaibot && git pull
 # 1. Once: the history since 2016. About 45 SEC requests, a few minutes (it downloads 44 quarterly indexes).
 .venv/bin/python scripts/fetch_listings.py --since 2016-01-01
 
+# 1b. Once, after 1: first sessions of the listings that data/daily does not hold, from Alpaca daily bars (paper
+#     keys; one request per listing, at most 40 a minute, resumable). Writes data/listings only.
+.venv/bin/python scripts/fetch_listings.py --env ~/Projects/kaibot-secrets/.env --first-bars
+
 # 2. Once: the first night of the watch. About 85 daily indexes and up to a few hundred company lookups at SEC,
 #    one request to Alpaca for the asset list, three to Nasdaq Trader: 3-5 minutes. The --listing-notice part is
 #    only for this first run: it reads Nasdaq's notice of 11 Nov in case the news feed no longer lists it.
@@ -35,6 +39,7 @@ The times and request counts on this page are estimates; each run prints its own
 | `fetch_listings.py --since 2016-01-01` | about 45 to SEC | a few minutes | **outside 15:30-22:00 Berlin** |
 | `collect_alt.py --source listings`, first run | about 85 + up to 400 to SEC, 1 + a few to Alpaca, 3-4 to Nasdaq Trader | 3-5 minutes | **outside 15:30-22:00 Berlin** |
 | `collect_alt.py --source listings`, every night after | about 20-100 to SEC, 1 + at most 40 to Alpaca, 3 to Nasdaq Trader | about a minute | 00:45 Berlin with the other collectors |
+| `fetch_listings.py --first-bars` (after the first command) | one to Alpaca per listing of kind `ipo` outside `data/daily`, perhaps 1,000-1,500 | at most 40 a minute, so up to about 40 minutes; resumable | any time; the engine may stay on |
 | `fetch_listings.py --show / --report / --status / --build / --eligible` | none | seconds | any time: they read local files only |
 | `fetch_listings.py --since 2016-01-01 --prices` (optional, not needed for the acceptance criteria) | one per listing, a few thousand | 10-20 minutes, about 500 MB | **outside 15:30-22:00 Berlin** |
 
@@ -165,14 +170,17 @@ that is already listed and is left out.
 | `symbol` | today's ticker of that filer; empty when the company no longer trades |
 | `kind` | `ipo`, or `spac` for a blank-check company. A direct listing cannot be told apart here |
 | `first_filed`, `registration_filed`, `prospectus_filed` | the dates of the first S-1 or F-1, the 8-A12B and the 424B4 |
-| `first_session`, `first_session_source` | the first daily bar in `data/daily`, when the store holds the symbol and that bar lies within 10 days of the prospectus. **Otherwise empty** |
+| `first_session`, `first_session_source` | `daily_bar`: the first daily bar in `data/daily`, when the store holds the symbol and that bar lies within 10 days of the prospectus. Else `alpaca_bar`: the first Alpaca daily bar of today's ticker read by `--first-bars`, under the same 10-day test, and only if the ticker did not already trade in the first week of the 45 days asked for before the prospectus (an older company under the same ticker). **Otherwise empty** |
 | `pricing_date`, `offer_price`, `shares_offered` | empty unless `--prices` read the prospectus cover and it stated exactly one of each. **Never guessed** |
 | `available_ts` | the first session's close plus 15 minutes; without a first session, 06:00 ET the day after the prospectus |
 
-The daily store holds the research universe and the S&P 500 members, so most listings have no first session here.
-SpaceX (SPCX) and Anthropic (ANT) are in neither, so their rows will have the company, CIK, symbol and filing dates,
-and an empty first session, until their bars are in `data/daily`. Whether to add them there is a decision for
-Product and Backend-quant (see the PR).
+The daily store holds the research universe and the S&P 500 members, so most listings have no first session from
+it. SpaceX (SPCX) and Anthropic (ANT) are in neither. `fetch_listings.py --first-bars` reads the first daily bar of
+such a listing from Alpaca into `data/listings/alpaca_first_bars.json`, one request per listing, and never writes
+into `data/daily`, which the live daily engine reads (Product, 19 Nov 2026, on #386). Each answer is kept with its
+verdict (`first_bar`, `traded_before`, `not_near`, `no_bars`, `no_data`) and is never asked again; a recent
+listing whose 20 days after the prospectus have not passed yet, or whose bar is not final, is asked again on a later
+run. `--build` merges the file offline. A blank-check company (`spac`) is not asked: it trades as units first.
 
 ## Not verified, and known limits
 

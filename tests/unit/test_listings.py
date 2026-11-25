@@ -495,6 +495,112 @@ def test_fetch_listings_needs_the_declared_user_agent(tmp_path, monkeypatch, cap
     assert "SEC_USER_AGENT" in capsys.readouterr().out and not (tmp_path / "l" / "ipos.parquet").exists()
 
 
+def test_first_bar_verdict_takes_only_a_bar_near_the_prospectus():
+    filed = D(2026, 6, 12)
+    start, end = lp.first_bar_window(filed)
+    assert (start, end) == (D(2026, 4, 28), D(2026, 7, 2))
+    assert lp.first_bar_verdict(D(2026, 6, 12), filed, window_over=True) == "first_bar"
+    assert lp.first_bar_verdict(D(2026, 6, 2), filed, window_over=True) == "first_bar"  # 10 days: still near
+    assert lp.first_bar_verdict(D(2026, 5, 29), filed, window_over=True) == "not_near"
+    assert lp.first_bar_verdict(D(2026, 6, 30), filed, window_over=True) == "not_near"  # units first, shares later
+    assert lp.first_bar_verdict(start, filed, window_over=True) == "traded_before"  # the ticker's older holder
+    assert lp.first_bar_verdict(start + timedelta(days=ls.BAR_OLD_DAYS), filed, window_over=True) == "traded_before"
+    assert lp.first_bar_verdict(None, filed, window_over=True) == "no_bars"
+    assert lp.first_bar_verdict(None, filed, window_over=False) is None  # too early to say: ask again later
+
+
+def _history_on_disk(tmp_path, monkeypatch, script):
+    def get(url: str) -> bytes:
+        name = url.rsplit("/", 1)[-1]
+        if name == "company_tickers.json":
+            return fx(name)
+        y, q = url.split("/full-index/")[1].split("/")[:2]
+        p = FIX / f"master_{y}{q}.idx"
+        return p.read_bytes() if p.is_file() else b"CIK|Company Name|Form Type|Date Filed|File Name\n"
+
+    monkeypatch.setattr(script, "sec_getter", lambda ua: get)
+    data = tmp_path / "listings"
+    script.fetch(data, tmp_path / "daily", "Kaibot ops@example.com", D(2026, 4, 1), today=D(2026, 11, 20))
+    return data
+
+
+ALPACA_NET = [("/v2/stocks/SPCX/bars", fx("alpaca_bars_SPCX.json")),
+              ("/v2/stocks/ANT/bars", fx("alpaca_bars_ANT.json"))]
+
+
+def test_first_sessions_outside_the_daily_store_come_from_alpaca_into_the_listings_store(tmp_path, monkeypatch):
+    """Product's follow-up on #386: SPCX and ANT are not in data/daily, so their first sessions are read from
+    Alpaca's daily bars into data/listings, never into data/daily."""
+    script = _script()
+    data = _history_on_disk(tmp_path, monkeypatch, script)
+    assert pd.read_parquet(data / "ipos.parquet")["first_session"].notna().sum() == 0
+    fake = FakeNet(list(ALPACA_NET))
+    meta = script.fetch_first_bars(data, tmp_path / "daily", {"APCA-API-KEY-ID": "k", "APCA-API-SECRET-KEY": "s"},
+                                   now=N3, **fake.kw)
+    urls = [u for u, _ in fake.calls]
+    assert len(urls) == 2 and meta["alpaca_requests_this_run"] == 2  # ANT and SPCX; not the SPAC, not "Gone Since"
+    assert all(u.startswith("https://data.alpaca.markets/v2/stocks/") for u in urls)  # the data host, read only
+    spcx = next(u for u in urls if "/SPCX/" in u)
+    assert "start=2026-04-28" in spcx and "end=2026-07-02" in spcx and "feed=sip" in spcx and "adjustment=raw" in spcx
+    ant = next(u for u in urls if "/ANT/" in u)
+    assert "end=2026-11-20T23%3A25%3A00" in ant  # the window is not over: never later than 20 minutes ago
+    assert meta["first_session_from_alpaca"] == 2 and meta["alpaca_verdicts"] == {"first_bar": 2}
+    assert list(pd.read_parquet(data / "ipos.parquet").columns) == lp.HISTORY_COLUMNS
+    df = pd.read_parquet(data / "ipos.parquet").set_index("symbol")
+    assert (df.loc["SPCX", "first_session"], df.loc["SPCX", "first_session_source"]) == (D(2026, 6, 12), "alpaca_bar")
+    assert df.loc["SPCX", "available_ts"] == pd.Timestamp("2026-06-12T20:15:00", tz="UTC")  # its close + 15 min
+    assert df.loc["ANT", "first_session"] == D(2026, 11, 19)
+    assert df.loc["ORBT", "first_session"] is None  # a blank-check company is not asked
+    assert not (tmp_path / "daily").exists()  # nothing is written into the daily store
+    again = FakeNet(list(ALPACA_NET))
+    script.fetch_first_bars(data, tmp_path / "daily", {}, now=N3, **again.kw)
+    assert again.calls == []  # a final answer is never asked again
+    assert script.build(data, tmp_path / "daily")["first_session_from_alpaca"] == 2  # offline rebuild keeps them
+
+
+def test_alpaca_bars_never_override_the_daily_store_or_a_ticker_held_before(tmp_path, monkeypatch):
+    script = _script()
+    data = _history_on_disk(tmp_path, monkeypatch, script)
+    old = tmp_path / "old.json"
+    old.write_bytes(fx("alpaca_bars_OLD.json"))  # bars from early October: ANT's ticker traded weeks before
+    fake = FakeNet([("/v2/stocks/SPCX/bars", 404), ("/v2/stocks/ANT/bars", old.read_bytes())])
+    meta = script.fetch_first_bars(data, tmp_path / "daily", {}, now=N3 + timedelta(days=30), **fake.kw)
+    assert meta["alpaca_verdicts"] == {"no_data": 1, "traded_before": 1} and meta["first_session_from_alpaca"] == 0
+    df = pd.read_parquet(data / "ipos.parquet").set_index("symbol")
+    assert df.loc["ANT", "first_session"] is None and df.loc["SPCX", "first_session"] is None  # nothing guessed
+    h = _hist(lambda symbol, filed: D(2026, 6, 12) if symbol == "SPCX" else None).reset_index()
+    found = {h.set_index("symbol").loc["SPCX", "accession"]: {"symbol": "SPCX", "verdict": "first_bar",
+                                                               "first_bar": "2026-06-15"}}
+    kept = lp.fill_first_sessions(h, found).set_index("symbol")
+    assert (kept.loc["SPCX", "first_session"], kept.loc["SPCX", "first_session_source"]) == (D(2026, 6, 12),
+                                                                                           "daily_bar")
+    other = {h.set_index("symbol").loc["ANT", "accession"]: {"symbol": "ANTX", "verdict": "first_bar",
+                                                              "first_bar": "2026-11-19"}}
+    assert lp.fill_first_sessions(h, other).set_index("symbol").loc["ANT", "first_session"] is None  # another ticker
+
+
+def test_first_bars_stop_after_five_failures_in_a_row_and_go_on_later(tmp_path, monkeypatch):
+    script = _script()
+    data = _history_on_disk(tmp_path, monkeypatch, script)
+    monkeypatch.setattr(script, "MAX_ERRORS_IN_A_ROW", 1)
+    fake = FakeNet([("/v2/stocks/", 401)])
+    meta = script.fetch_first_bars(data, tmp_path / "daily", {}, now=N3, **fake.kw)
+    assert len(fake.calls) == 1 and len(meta["alpaca_errors"]) == 1 and meta["alpaca_verdicts"] == {}
+    assert script.fetch_first_bars(data, tmp_path / "daily", {}, now=N3, **FakeNet(list(ALPACA_NET)).kw)[
+        "first_session_from_alpaca"] == 2
+
+
+def test_first_bars_need_the_paper_keys(tmp_path, monkeypatch, capsys):
+    script = _script()
+    for k in ("ALPACA_API_KEY", "ALPACA_SECRET", "ALPACA_API_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    env = tmp_path / "empty.env"
+    env.write_text("# nothing\n")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("no request is expected"))
+    assert script.main(["--env", str(env), "--first-bars", "--data", str(tmp_path / "l")]) == 1
+    assert "ALPACA_API_KEY" in capsys.readouterr().out
+
+
 # ---------------------------------------------------------------- the nightly hook, budgets, isolation
 
 

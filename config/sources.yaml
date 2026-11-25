@@ -12,7 +12,7 @@ market_data:
   alpaca_assets:    {use: new_listing_watch_shadow, auth: key, endpoint: "paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",
                      note: "requests count against alpaca_trading (the paper trading host); one a night from scripts/collect_alt.py --source listings; read-only; shadow store data/alt/listings, never in the live path (docs/ops/listings.md)"}
   alpaca_first_bar: {use: new_listing_watch_shadow, auth: key, endpoint: "/v2/stocks/{symbol}/bars timeframe=1Day adjustment=raw feed=sip limit=10, end >= 20 min old",
-                     note: "requests count against alpaca; at most 40 a night, one per symbol that looks like a new listing, until its first bar is stored (15 nights at most)"}
+                     note: "requests count against alpaca; at most 40 a night, one per symbol that looks like a new listing, until its first bar is stored (15 nights at most). History (#376): scripts/fetch_listings.py --first-bars, one per listing outside data/daily, paced at 40/min, each answer stored in data/listings and never asked again"}
   finnhub:          {use: fallback_quotes, auth: key, limit: "60/min, 30/s burst; WS 50 symbols; no candles on free", budget_per_min: 45}
   massive:          {use: nightly_universe, auth: key, limit: "5/min, EOD grouped daily bars", budget_per_min: 4}
   tiingo:           {use: third_fallback, auth: key, limit: "50/hr, 1000/day", budget_per_hour: 40}
