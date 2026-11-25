@@ -357,6 +357,20 @@ def multi_day_state(remote=None) -> dict:
             "experiments": experiments(rules, level), **({"daily_store": daily_store_state()} if rules else {})}
 
 
+def daily_path_state(eng: Engine, remote) -> dict | str:
+    """`--check` (#643 follow-up): would a start be refused with exit code 5 (the active run's ledger holds
+    multi-day sleeves and this engine has no daily path)? Read-only: the same question `Engine.startup` asks, of the
+    ledger folded from the journal; no lease, no order, no journal entry, no event. A refusal is a FAILED line with
+    the engine's own words (the fix names KAIBOT_MULTIDAY or the rule), so `--check` ends with exit code 1."""
+    run = remote.active_run()
+    refusal = eng.daily_path_refusal(run["id"]) if run else None
+    if refusal is not None:
+        return f"FAILED: a start would be refused (exit code {EXIT_DAILY_PATH}): {refusal}"
+    sleeves = sorted({sym for _, sym in eng._md_sleeves(run["id"])}) if run else []
+    return {"daily_path": "on" if eng.daily is not None else "off", "multi_day_sleeves": sleeves,
+            "start": "allowed"}
+
+
 def daily_store_state() -> dict:
     """#206: where the daily path reads its daily view, and the last session the store holds (SPY)."""
 
@@ -751,6 +765,7 @@ def main() -> None:
 
         step("journal", journal_state)
         step("multi_day", lambda: multi_day_state(remote))
+        step("daily_path", lambda: daily_path_state(eng, remote))
         def news_state():  # read-only: one request, nothing stored
             now = datetime.now(UTC)
             n = len(eng.market.data.news(["SPY"], now - pd.Timedelta(hours=72), now, max_pages=1))

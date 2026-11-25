@@ -134,6 +134,7 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
         ("KAIBOT_START_HOUR", "qa-ops", "the service's daily start hour"),
         ("KAIBOT_LOG_DIR", "qa-ops", "the service's log folder"),
         ("KAIBOT_LOG_KEEP", "qa-ops", "how many logs the service keeps"),
+        ("KAIBOT_REFUSED_BACKOFF_S", "qa-ops", "the service's wait after a start refused with exit code 5 (300 s)"),
         ("KAIBOT_LAUNCH_AGENTS_DIR", "qa-ops", "where uninstall_service.sh looks for the launch agents"),
         ("KAIBOT_BACKUP_DIR", "qa-ops", "backup_local.sh's target"),
         ("KAIBOT_BACKUP_KEEP_DAYS", "qa-ops", "backup_local.sh's retention"),

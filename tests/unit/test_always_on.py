@@ -640,6 +640,65 @@ def test_wrapper_exit_codes_drive_keepalive(wrapper):
     assert (tmp / "ran").read_text().count("ran") == 2 and not (r / "data/live/service.pid").exists()
 
 
+def test_wrapper_backs_off_after_a_refused_start_code_5(wrapper):
+    """#643 follow-up: exit code 5 (multi-day sleeves and no daily path) is refused again on every try, so the
+    service waits KAIBOT_REFUSED_BACKOFF_S before it exits 1, with one clear line per try (not launchd's minute).
+    The pid lock is kept during the wait, so a hand start is still refused."""
+    r, env, tmp = wrapper
+    env = {**env, "FAKE_CODE": "5", "KAIBOT_REFUSED_BACKOFF_S": "3"}
+    t0 = time.monotonic()
+    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, env=env, stdout=subprocess.PIPE,
+                         text=True)
+    held = False
+    while p.poll() is None:
+        held = held or ((tmp / "ran").exists() and (r / "data/live/service.pid").exists())
+        time.sleep(0.1)
+    out = p.stdout.read()
+    assert p.returncode == 1, out
+    assert time.monotonic() - t0 >= 3  # it waited before handing back to launchd
+    assert held and not (r / "data/live/service.pid").exists()  # the lock was held while waiting, then removed
+    lines = [ln for ln in out.splitlines() if "code 5" in ln]
+    assert len(lines) == 1, out  # one line per try, nothing else about code 5
+    assert "engine refused to start (exit code 5)" in lines[0] and "KAIBOT_MULTIDAY" in lines[0]
+    assert "Next try in 3 s" in lines[0] and "docs/ops/run_engine.md" in lines[0]
+    assert "launchd starts it again" not in out  # not the generic restart line (or its second alarm)
+
+
+@pytest.mark.parametrize("sig", ["INT", "TERM"])
+def test_a_stop_during_the_code_5_back_off_ends_it_at_once(wrapper, sig):
+    """service.sh stop (SIGINT) or a logout (SIGTERM) during the 5-minute wait: exit 0 at once, so launchd leaves
+    it stopped. A back-off value that is not a number of seconds is named and the default (300 s) is used."""
+    import signal
+
+    r, env, tmp = wrapper
+    env = {**env, "FAKE_CODE": "5", "KAIBOT_REFUSED_BACKOFF_S": "5m"}
+    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, env=env, stdout=subprocess.PIPE,
+                         text=True)
+    for _ in range(100):
+        if (tmp / "ran").exists():
+            break
+        time.sleep(0.1)
+    time.sleep(3)  # past the engine's exit (and the alarm pinger's 2 s) into the wait
+    t0 = time.monotonic()
+    p.send_signal(getattr(signal, f"SIG{sig}"))
+    out, _ = p.communicate(timeout=30)
+    assert p.returncode == 0, out
+    assert time.monotonic() - t0 < 10  # not the 300 s
+    assert "KAIBOT_REFUSED_BACKOFF_S='5m' is not a number of seconds: 300 is used" in out
+    assert "Next try in 300 s" in out and "stopped (on request)" in out
+    assert not (r / "data/live/service.pid").exists()
+
+
+def test_the_ops_docs_list_exit_code_5():
+    doc = (ROOT / "docs/ops/run_engine.md").read_text()
+    for code in ("1", "3", "4", "5"):
+        assert f"\n| {code} | " in doc
+    assert "KAIBOT_REFUSED_BACKOFF_S" in doc and "daily_path: FAILED" in doc
+    assert "exit code 5" in (ROOT / "docs/ops/always_on.md").read_text()
+    head = (SCRIPTS / "service_run.sh").read_text().split("set -uo pipefail")[0]
+    assert "code 5" in head and "KAIBOT_REFUSED_BACKOFF_S" in head  # the exit-code list at the top of the script
+
+
 def test_wrapper_pid_lock_refuses_a_second_run(wrapper):
     r, env, tmp = wrapper
     (r / "data/live").mkdir(parents=True)

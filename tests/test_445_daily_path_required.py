@@ -119,3 +119,62 @@ def test_main_passes_a_normal_start_through(monkeypatch):
     lease = _Lease()
     monkeypatch.setattr(entry, "start_with_lease", lambda eng, lease, adopt_journal=False: "active")
     assert entry.start_or_refuse(object(), lease) == "active" and lease.released == 0
+
+
+# ---------------------------------------------------------------- `--check` (#643 follow-up)
+def _untouched(a, eng):
+    return dict(a.broker.orders), len(a.store.tables["event"]), eng.journal.last_seq(), \
+        len(a.store.tables.get("heartbeat", [])), eng.run
+
+
+def test_check_reports_the_refusal_read_only_with_the_engines_own_words(tmp_path, monkeypatch):
+    """`--check`'s `daily_path` asks what `startup` would, before any start: a FAILED line with exit code 5 and the
+    fix, and nothing sent, journalled, evented or beaten. The start then refuses with the same words."""
+    a = DailyAccount(tmp_path, monkeypatch)
+    _hold_b(a)
+    monkeypatch.delenv("KAIBOT_MULTIDAY", raising=False)
+    eng = _without_daily_path(a)
+    before = _untouched(a, eng)
+    got = entry.daily_path_state(eng, a.store)
+    assert isinstance(got, str) and got.startswith("FAILED: a start would be refused (exit code 5): ")
+    assert "KAIBOT_MULTIDAY=on" in got and "(B)" in got and f"run {a.rid} " in got
+    assert _untouched(a, eng) == before and eng.run is None  # read-only: not even a started run
+    with pytest.raises(DailyPathMissing) as e:
+        eng.startup()
+    assert got.endswith(str(e.value))  # the same question, the same answer
+
+
+def test_check_names_the_missing_rule_when_the_switch_is_on(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch)
+    _hold_b(a)
+    got = entry.daily_path_state(_without_daily_path(a), a.store)  # the flag is on, no daily path built
+    assert got.startswith("FAILED") and "no multi-day rule is enabled" in got
+
+
+def test_check_with_the_daily_path_allows_the_start_and_lists_the_sleeves(tmp_path, monkeypatch):
+    a = DailyAccount(tmp_path, monkeypatch)
+    _hold_b(a)
+    a.eng.journal.close()
+    eng = DailyAccount.engine(a)
+    assert eng.daily is not None
+    before = _untouched(a, eng)
+    assert entry.daily_path_state(eng, a.store) == {"daily_path": "on", "multi_day_sleeves": ["B"],
+                                                    "start": "allowed"}
+    assert _untouched(a, eng) == before
+
+
+def test_check_without_a_sleeve_or_a_run_allows_the_start(tmp_path, monkeypatch):
+    monkeypatch.delenv("KAIBOT_MULTIDAY", raising=False)
+    a = Account(tmp_path)
+    a.ticks(a.open1, 0, 30)
+    a.eng.journal.close()
+    eng = Account.engine(a)
+    Account.quiet(eng)
+    assert entry.daily_path_state(eng, a.store) == {"daily_path": "off", "multi_day_sleeves": [],
+                                                    "start": "allowed"}
+
+    class NoRun:
+        def active_run(self):
+            return None
+
+    assert entry.daily_path_state(eng, NoRun())["start"] == "allowed"

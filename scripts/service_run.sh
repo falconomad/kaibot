@@ -14,6 +14,10 @@
 #   1  failed, refused or waiting for something (Docker, another engine): launchd tries again after 60 s
 #      (an engine that refused its journal, its exit code 4, is tried again too and says so each time: the alarm
 #      names the journal; it starts by itself once the journal is fixed)
+#      An engine that refused to start because its run holds multi-day sleeves and it has no daily path (its exit
+#      code 5: KAIBOT_MULTIDAY off, or no multi-day rule enabled) waits KAIBOT_REFUSED_BACKOFF_S (300 s) first, then
+#      exits 1: one line and one alarm per try, about every 6 minutes, not every minute. A restart cannot cure it;
+#      it starts by itself once the .env (or config/profiles.yaml) is fixed. A stop during the wait exits 0.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 REPO="$PWD"
@@ -266,6 +270,27 @@ stream_end() {  # $1 = the loop's pid: give it 15 s to stop the relay, then end 
   rm -f "$STREAM_PID"; return 0
 }
 
+# #643 follow-up: exit code 5, the start was refused because the run holds multi-day sleeves and this engine has no
+# daily path. Every try refuses again until the .env is fixed, so the service waits before it exits (and launchd
+# starts it again): one line and one alarm per try, about every 6 minutes instead of every minute. The pid lock is
+# kept during the wait (service.sh status shows the run, a hand start is refused). A stop ends the wait at once.
+refused_backoff() {
+  local wait_s s
+  wait_s="${KAIBOT_REFUSED_BACKOFF_S:-300}"
+  case "$wait_s" in ''|*[!0-9]*) say "KAIBOT_REFUSED_BACKOFF_S='$wait_s' is not a number of seconds: 300 is used"
+                                 wait_s=300 ;; esac
+  say "engine refused to start (exit code 5): its run holds multi-day sleeves and it has no daily path" \
+      "(KAIBOT_MULTIDAY off, or no multi-day rule enabled; the ERROR line above names the fix;" \
+      "docs/ops/run_engine.md). Nothing was sent; the broker-held stops stay. Next try in $wait_s s"
+  hc fail "kaibot engine refused to start (exit code 5) on $(hostname -s): multi-day sleeves and no daily path (KAIBOT_MULTIDAY); not trading until fixed; see engine.log"
+  trap 'stopping=1' INT TERM HUP
+  sleep "$wait_s" & s=$!
+  while [ "$stopping" = 0 ] && kill -0 "$s" 2>/dev/null; do wait "$s"; done  # a stop signal interrupts `wait`
+  kill "$s" 2>/dev/null; wait "$s" 2>/dev/null
+  trap - INT TERM HUP
+  return 0
+}
+
 run_engine() {
   if [ -f data/HOLD ]; then note_once "on hold (data/HOLD exists): not starting. ./scripts/service.sh unhold"; exit 0; fi
   # Local pid lock: one service engine per machine, even while run_engine.sh is still installing or building.
@@ -330,9 +355,11 @@ run_engine() {
   [ -n "$checks" ] && checks_end "$checks"
   [ -n "$streamer" ] && stream_end "$streamer"
   [ -n "$pinger" ] && { sleep 2; kill "$pinger" 2>/dev/null; }
+  if [ "$code" = 5 ] && [ "$stopping" = 0 ]; then refused_backoff; fi  # keeps the pid lock while it waits
   rm -f "$lock"
   if [ "$stopping" = 1 ]; then say "engine stopped (on request)"; exit 0; fi
   if [ "$code" = 0 ]; then say "engine exited cleanly"; exit 0; fi
+  if [ "$code" = 5 ]; then exit 1; fi  # refused_backoff said it and waited: launchd tries again in about a minute
   if [ "$code" = 4 ]; then  # QA-Ops (#511): the journal was refused; a restart does not cure it, so say what it is
     say "engine exited with code 4: it refused its journal (the reason is the last ERROR line of engine.log;" \
         "docs/ops/ledger.md). launchd tries again every minute; it is refused until that is fixed"
