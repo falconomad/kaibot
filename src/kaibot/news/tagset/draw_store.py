@@ -44,7 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from kaibot.news.tags import NOT_SHIPPED, RULES_VERSION, all_tags
+from kaibot.news.tags import ALL_TAGS, RULES_VERSION, all_tags
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
@@ -57,6 +57,10 @@ RANDOM_PER_YEAR = 50
 FIRED_PER_TAG = 25
 GUIDANCE = ("guidance_up", "guidance_down")
 DRAWN_WITH_RULES_VERSION = 1
+# The tags v2 draws a fired stratum for: the ten v1 left out (all but analyst_up), in this order (the order draws
+# from the seeded generator). Frozen with the declared draw of #399; not tags.NOT_SHIPPED, which follows the newest
+# measurement and so would change this draw.
+DRAWN_FOR: tuple[str, ...] = tuple(t for t in ALL_TAGS if t != "analyst_up")
 # Three probe requests: one January week each; enough to see whether old headlines and which sources come back.
 PROBES = (("AAPL", "2016-01-04T00:00:00Z", "2016-01-09T00:00:00Z"),
           ("JPM", "2021-01-04T00:00:00Z", "2021-01-09T00:00:00Z"),
@@ -147,7 +151,7 @@ def draw(rows: list[dict], days: set[tuple[str, str]] | None, seed: int = SEED_V
             picked[i] = "random"
     fired = [all_tags(r["headline"]) for r in rows]
     eday = [on_earnings_day(r, days) for r in rows]
-    for tag in NOT_SHIPPED:
+    for tag in DRAWN_FOR:
         groups = ([("earnings", True), ("other", False)] if tag in GUIDANCE and days is not None else [("", None)])
         for name, want in groups:
             pool = [i for i in range(len(rows)) if tag in fired[i] and i not in picked

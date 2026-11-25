@@ -55,9 +55,9 @@ STORE_TIMEOUT_S = 5.0
 RETRY_S = 60.0
 EDGAR_EVERY_S = 30.0
 SEEN_MAX = 5000
-# The tags measured as shipping on sample v2 (src/kaibot/news/tagset/measure_v2.json "shipped", PR #597).
-# tags.SHIPPED still says v1's {"analyst_up"} (Agents-AI's file); the test pins this tuple to measure_v2.json.
-FEED_TAGS: frozenset[str] = frozenset({"analyst_up", "analyst_down", "management_change", "listing"})
+# The tags measured as shipping (tags.SHIPPED, = tagset/measure_v2.json "shipped", PR #597). One source: the tests
+# pin it to measure_v2.json, to 0043's check constraint on kaibot.headline.tags and to the dashboard's Tag type.
+FEED_TAGS: frozenset[str] = T.SHIPPED
 LICENCES = {"alpaca_benzinga": "owner_only", "sec_edgar": "public"}
 _SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
