@@ -8,6 +8,7 @@ from it.
 - The generated lists are not stale: the latest kb_health migration lists exactly HEALTH, in order, and
   apps/web/src/lib/eventNames.ts is the generator's output (`python -m kaibot.engine.event_names --ts`).
 - At run time an unregistered name is written anyway and logged once: the registry never costs an event.
+- Every event has one severity (info, warn, critical), generated into eventNames.ts with the names and the text.
 """
 
 from __future__ import annotations
@@ -72,7 +73,7 @@ def test_no_name_is_both_health_and_routine_and_every_routine_one_says_why():
 
 
 def test_a_name_registered_twice_is_an_error(monkeypatch):
-    monkeypatch.setattr(en, "ROUTINE", (*en.ROUTINE, en.Event("halt", why="x")))
+    monkeypatch.setattr(en, "ROUTINE", (*en.ROUTINE, en.Event("halt", "info", why="x")))
     with pytest.raises(ValueError, match="twice"):
         en._check_registry()
 
@@ -104,3 +105,31 @@ def test_at_run_time_an_unregistered_name_is_written_and_logged_once(monkeypatch
 def test_the_registered_store_paths_call_note():
     for f in ("src/kaibot/engine/store.py", "src/kaibot/engine/journal.py", "tests/fakes.py"):
         assert "event_names.note(kind)" in (ROOT / f).read_text(), f
+
+
+# ---------------------------------------------------------------- severity (name, severity, plain-English text)
+def test_every_event_has_a_known_severity():
+    for e in (*en.HEALTH, *en.PENDING, *en.ROUTINE):
+        assert e.severity in en.SEVERITIES, e.name
+        assert en.severity(e.name) == e.severity
+    assert en.severity("not_a_real_event") is None
+
+
+def test_an_event_without_a_valid_severity_is_an_error(monkeypatch):
+    monkeypatch.setattr(en, "PENDING", (*en.PENDING, en.Event("brand_new_event", "loud", "x")))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="severity"):
+        en._check_registry()
+
+
+def test_the_critical_events_are_the_ones_that_stop_trading_or_need_the_owner():
+    """Pinned so that raising or lowering an event to or from critical is a reviewed change, not a side effect."""
+    crit = {e.name for e in (*en.HEALTH, *en.PENDING, *en.ROUTINE) if e.severity == "critical"}
+    assert crit == {"halt", "account_not_clean", "watchdog_flatten", "multi_day_book_ended", "multi_day_error",
+                    "ledger_mismatch", "reconcile_blocked", "engine_degraded_start"}
+    assert all(e.severity != "critical" for e in en.ROUTINE)  # routine flow is never critical
+
+
+def test_the_dashboard_gets_every_severity():
+    ts = TS.read_text()
+    for e in (*en.HEALTH, *en.PENDING, *en.ROUTINE):
+        assert f'  {e.name}: "{e.severity}",' in ts, e.name
