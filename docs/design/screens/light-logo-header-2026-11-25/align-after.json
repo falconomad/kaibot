@@ -1,0 +1,50 @@
+{
+ "signin-dark-390": {
+  "split": true,
+  "inplace": true,
+  "max": 59,
+  "over8": 189
+ },
+ "signin-dark-1440": {
+  "split": true,
+  "inplace": true,
+  "max": 90,
+  "over8": 217
+ },
+ "home-dark-390": {
+  "split": true,
+  "inplace": true,
+  "max": 47,
+  "over8": 10
+ },
+ "home-dark-1440": {
+  "split": true,
+  "inplace": true,
+  "max": 3,
+  "over8": 0
+ },
+ "signin-light-390": {
+  "split": true,
+  "inplace": true,
+  "max": 64,
+  "over8": 196
+ },
+ "signin-light-1440": {
+  "split": true,
+  "inplace": true,
+  "max": 98,
+  "over8": 227
+ },
+ "home-light-390": {
+  "split": true,
+  "inplace": true,
+  "max": 46,
+  "over8": 10
+ },
+ "home-light-1440": {
+  "split": true,
+  "inplace": true,
+  "max": 2,
+  "over8": 0
+ }
+}

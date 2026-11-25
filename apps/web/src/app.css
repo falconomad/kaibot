@@ -770,9 +770,12 @@ main > *, .kb-sect, .kb-twocol > *, .kb-presets, .kb-tgrid, .kb-lgrid { min-widt
 @media (min-width: 761px) {
   header.top { gap: 8px 12px; padding-left: 20px; padding-right: 20px; }
   header.top .brand { margin-right: 8px; } /* the 32 px logo gets 20 px before Home */
-  nav.topnav { font-size: 15px; } nav.topnav a { padding: 0 10px; }
+  nav.topnav { font-size: 15px; } nav.topnav a { padding: 0 8px; }
   header.top .engine-chip .hide-sm { display: none; }
 }
+/* #673: one row from 1280 px, the halt chip too: the trading chip gives way (its reason ends in an ellipsis; the full
+   line is its title and what a screen reader hears), never the logo or the nav */
+@media (min-width: 1280px) { header.top { flex-wrap: nowrap; } nav.topnav { flex: none; } header.top .engine-chip { min-width: 0; } header.top .trading-line b { white-space: nowrap; } }
 
 /* ---------- v4 PR 4: rows (Positions, Activity) and their sheets ---------- */
 .pos-head { display: flex; flex-direction: column; gap: 8px; }

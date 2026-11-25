@@ -47,13 +47,21 @@ let played = false;
 export const resetLogoMotion = () => { played = false; };
 
 /** `size`: the height of the letters in px, from the top of the k to the baseline (without it, the stylesheet sizes the
- *  logo: SIZE.header). `symbolOnly`: the k alone, carrying its point. `on`: the background
- *  it stands on; the app is dark. `animate`: play the load motion if no logo has played it yet. `idle`: after it,
- *  the point hops and the arm redraws, in turn. `large`: SIZE.large (sign-in and /register). */
-export function Logo({ size, symbolOnly = false, on = "dark", animate = false, idle, large = false }:
-  { size?: number; symbolOnly?: boolean; on?: "dark" | "light"; animate?: boolean; idle?: boolean; large?: boolean }) {
+ *  logo: SIZE.header). `symbolOnly`: the k alone, carrying its point. `on`: the background it stands on. Without it
+ *  (`"theme"`) the logo follows the page's theme (#673): each shape carries the on-dark file's colour as its fill and
+ *  `light-dark(on-light, on-dark)` over it, so the light theme (tokens.css `color-scheme: light`) draws Design's on-light
+ *  file, with no extra request, no class and no stylesheet rule. Both files have the same paths (brand.test.tsx), so
+ *  every layer keeps its place. A browser without `light-dark()` keeps the on-dark fill. `animate`: play the load
+ *  motion if no logo has played it yet. `idle`: after it, the point hops and the arm redraws, in turn. `large`:
+ *  SIZE.large (sign-in and /register). */
+export function Logo({ size, symbolOnly = false, on = "theme", animate = false, idle, large = false }:
+  { size?: number; symbolOnly?: boolean; on?: "dark" | "light" | "theme"; animate?: boolean; idle?: boolean; large?: boolean }) {
   const kind = symbolOnly ? "symbol" : "word";
-  const m = mark(kind, on), role = ROLES[kind];
+  const m = mark(kind, on === "light" ? "light" : "dark"), role = ROLES[kind];
+  const lit = on === "theme" ? mark(kind, "light") : null;
+  /** A shape's colour: the file's, and with the theme, the on-light file's in the light theme. */
+  const paint = (i: number, key: "fill" | "stroke" = "fill"): CSSProperties | undefined =>
+    lit && lit.parts[i].fill !== m.parts[i].fill ? { [key]: `light-dark(${lit.parts[i].fill}, ${m.parts[i].fill})` } : undefined;
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   const [moving, setMoving] = useState(() => animate && !played && !reducedMotion());
   useEffect(() => { if (moving) played = true; }, [moving]);
@@ -71,14 +79,14 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
   const style: CSSProperties = { aspectRatio: `${w} / ${h}`, ...(size ? { height: size } : null) };
   const time = (k: keyof typeof TIMING): CSSProperties => ({ animationDelay: `${TIMING[k][0]}s`, animationDuration: `${TIMING[k][1]}s` });
   const dot = circle(m.parts[role.point].d), arm = capsule(m.parts[role.arm].d);
-  const pt = m.parts[role.point], split = hops && !!dot && !!arm;
+  const split = hops && !!dot && !!arm;
   const letters = (
     <svg className={`logo${symbolOnly ? "" : " logo-word"}${large ? " logo-lg" : ""}${moving ? " logo-moving" : ""}`} viewBox={`${x} ${y} ${w} ${h}`} role="img" aria-label={BRAND} style={style}>
       <g transform={`translate(${m.shift[0]} ${m.shift[1]})`}>
         {moving && <defs>{(["stem", "leg", "arm"] as const).map((k) => <clipPath key={k} id={`${id}${k}`}><path d={m.parts[role[k]].d} /></clipPath>)}</defs>}
         {m.parts.map((p, i) => {
           const path = (extra?: { className: string; style: CSSProperties }) =>
-            <path key={i} fill={p.fill} fillRule={p.evenodd ? "evenodd" : undefined} d={p.d} {...extra} />;
+            <path key={i} fill={p.fill} fillRule={p.evenodd ? "evenodd" : undefined} d={p.d} {...extra} style={paint(i) || extra ? { ...paint(i), ...extra?.style } : undefined} />;
           if (!moving) return split && (i === role.point || i === role.arm || i === role.leg) ? null : path();
           const k = i === role.stem ? "stem" : i === role.leg ? "leg" : i === role.arm ? "arm" : null;
           if (k) {
@@ -90,7 +98,7 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
           return path();
         })}
         {moving && dot && <circle className="logo-pulse" cx={dot.c[0]} cy={dot.c[1]} r={dot.r} fill="none" stroke={m.parts[role.point].fill} strokeWidth={2.5}
-          style={time("pulse")} onAnimationEnd={() => setMoving(false)} />}
+          style={{ ...paint(role.point, "stroke"), ...time("pulse") }} onAnimationEnd={() => setMoving(false)} />}
       </g>
     </svg>
   );
@@ -121,7 +129,7 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
   const clip = [at(K, K), at(K, -K), at(0, -K), ...Array.from({ length: 19 }, (_, i) => {
     const t = ((i - 9) * Math.PI) / 18; return at(-arm!.r * Math.cos(t), arm!.r * Math.sin(t), 0.75);
   }), at(0, K)];
-  const shape = (p: Mark["parts"][number]) => <path fill={p.fill} d={p.d} transform={`translate(${sx} ${sy})`} />;
+  const shape = (i: number) => <path fill={m.parts[i].fill} d={m.parts[i].d} transform={`translate(${sx} ${sy})`} style={paint(i)} />;
   const paused = hidden ? { animationPlayState: "paused" } : null;
   return (
     <span className="logo-box">
@@ -129,14 +137,14 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
       <span className="logo-clip" style={{ clipPath: `polygon(${clip.join(",")})` }}>
         <svg className="logo-arm" viewBox={vb} aria-hidden="true"
           style={{ "--fx": pc(fx, w), "--fy": pc(fy, h), ...paused } as CSSProperties}>
-          {shape(ap)}
+          {shape(role.arm)}
         </svg>
       </span>
-      <svg className="logo-leg" viewBox={vb} aria-hidden="true">{shape(m.parts[role.leg])}</svg>
+      <svg className="logo-leg" viewBox={vb} aria-hidden="true">{shape(role.leg)}</svg>
       {/* the hop rises 60% of the point's height (--up, in % of this box) and squashes about the point's foot */}
       <svg className="logo-hop" viewBox={vb} aria-hidden="true"
         style={{ "--up": `${round(-60 * ((2 * r) / h))}%`, transformOrigin: `${pc(cx - x, w)} ${round(((cy + r - y) / h) * 100 - lift)}%`, ...paused } as CSSProperties}>
-        {shape(pt)}
+        {shape(role.point)}
       </svg>
     </span>
   );
