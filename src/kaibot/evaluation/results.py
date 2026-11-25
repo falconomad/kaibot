@@ -63,22 +63,47 @@ class Row:
     meta: dict = field(default_factory=dict)  # universe_mode, cost_model, engine, run_at, code_sha, prereg
 
 
-def portable(text: str, root: Path | str | None = None) -> str:
+def portable(text: str, root: Path | str | None = None, data: Path | str | None = None) -> str:
     """`text` with no absolute path of this machine in it (issue #594): a file is written into the repository.
 
-    A path inside the repository root becomes repo-relative (the root itself `.`); any other path under the home
-    folder starts with `~`. A path matches only whole (`/Users/ab` never matches inside `/Users/abc`), both as
-    given and resolved (macOS `/private/...`, symlinked clones)."""
+    A path inside the data folder the script read becomes `data/...` (#452: the research Mac's results carried
+    `~/Projects/kaibot/data/...` when the script ran from another checkout than the one holding the data); a path
+    inside the repository root becomes repo-relative (the root itself `.`); any other path under the home folder
+    starts with `~`. Each folder is matched as given, resolved (macOS `/private/...`, symlinked clones) and spelled
+    with `~` (a path an earlier run already made portable). A path matches only whole (`/Users/ab` never matches
+    inside `/Users/abc`)."""
+    home = Path.home()
+
     def spellings(p: Path) -> list[str]:
-        return sorted({str(p), str(p.resolve())} - {"", "/", "."}, key=len, reverse=True)
+        out = {str(p), str(p.resolve())}
+        for s in list(out):
+            if Path(s).is_relative_to(home) and Path(s) != home:
+                out.add("~/" + str(Path(s).relative_to(home)))
+        return sorted(out - {"", "/", ".", "~"}, key=len, reverse=True)
 
     end = r"(?![\w.-])"
-    for base in spellings(Path(root)) if root is not None else []:
-        text = re.sub(re.escape(base) + "/", "", text)
-        text = re.sub(re.escape(base) + end, ".", text)
-    for base in spellings(Path.home()):
+    for base, short in ([(data, "data")] if data is not None else []) + ([(root, ".")] if root is not None else []):
+        for s in spellings(Path(base)):
+            text = re.sub(re.escape(s) + "/", "" if short == "." else f"{short}/", text)
+            text = re.sub(re.escape(s) + end, short, text)
+    for base in sorted({str(home), str(home.resolve())} - {"", "/"}, key=len, reverse=True):
         text = re.sub(re.escape(base) + end, "~", text)
     return text
+
+
+def reports_as_of(found: list[tuple[Path, dict]]) -> str | None:
+    """#452: the time of the newest report read (its `run_at`, else the stamp in its name), so a page written twice
+    from the same reports is the same file byte for byte. None when no report has a time."""
+    times = []
+    for f, rep in found:
+        if isinstance(rep.get("run_at"), str) and rep["run_at"]:
+            times.append(pd.Timestamp(rep["run_at"]))
+        elif _stamp(f.name):
+            times.append(pd.Timestamp(_stamp(f.name)))
+    if not times:
+        return None
+    t = max(x.tz_localize("UTC") if x.tzinfo is None else x.tz_convert("UTC") for x in times)
+    return t.isoformat(timespec="seconds")
 
 
 def reports(folder: Path | str) -> list[tuple[Path, dict]]:

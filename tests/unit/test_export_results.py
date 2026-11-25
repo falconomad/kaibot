@@ -153,8 +153,9 @@ def _files_with(folder: Path, needle: str) -> list[str]:
 @pytest.mark.parametrize("where", ["home", "repository"])
 def test_no_generated_file_holds_this_machines_home_folder(data: Path, tmp_path_factory, monkeypatch,  # noqa: F811
                                                            where: str):
-    """Issue #594: the registry's source line and the copied pages carried /Users/<name>/...; every file both
-    scripts write is repo-relative (data under the repository) or starts with ~ (data elsewhere in the home)."""
+    """Issue #594: the registry's source line and the copied pages carried /Users/<name>/...; #452: and then
+    ~/Projects/kaibot/data/... when the data folder was not under the root the script ran from. Every file both
+    scripts write names the data folder `data/`, wherever it is."""
     home = data.parent  # the fixture's data folder sits in this "home folder"
     monkeypatch.setenv("HOME", str(home))
     root = ROOT
@@ -170,7 +171,8 @@ def test_no_generated_file_holds_this_machines_home_folder(data: Path, tmp_path_
     written = sorted(p.name for p in folder.rglob("*") if p.is_file())
     assert "gate_v3_rescore.json" in written and "README.md" in written and "experiments_core_pit_summary.md" in written
     assert _files_with(folder, str(home)) == [] and _files_with(folder, str(home.resolve())) == []
-    source = f"{data.name}/trials.jsonl" if where == "repository" else f"~/{data.name}/trials.jsonl"
+    source = "data/trials.jsonl"
+    assert _files_with(folder, "~/") == []
     assert f'"file {source}: 7 rows"' in (folder / "gate_v3_rescore.json").read_text()
     assert f"read {source}" in (folder / "as_reported" / "experiments_core_pit_summary.md").read_text()
 
@@ -180,3 +182,65 @@ def test_portable_matches_whole_paths_only(monkeypatch, tmp_path: Path):
     repo = tmp_path / "ab" / "kaibot"
     text = f"{repo}/data/x.json {repo} {tmp_path}/ab/notes {tmp_path}/abc/other"
     assert results.portable(text, repo) == f"data/x.json . ~/notes {tmp_path}/abc/other"
+
+
+def test_portable_names_the_data_folder_and_knows_the_tilde_spelling(monkeypatch, tmp_path: Path):
+    """#452: a path an earlier run already shortened to ~/... still becomes repo-relative or `data/`."""
+    monkeypatch.setenv("HOME", str(tmp_path / "ab"))
+    repo, store = tmp_path / "ab" / "wt", tmp_path / "ab" / "kaibot" / "data"
+    text = (f"{store}/trials.jsonl ~/kaibot/data/trials.jsonl ~/wt/docs/x.md ~/wt ~/wtx/y "
+            f"{repo}/config/gate_v3.yaml ~/kaibot/data-old/z {store}")
+    assert results.portable(text, repo, store) == ("data/trials.jsonl data/trials.jsonl docs/x.md . ~/wtx/y "
+                                                  "config/gate_v3.yaml ~/kaibot/data-old/z data")
+
+
+def _tree(folder: Path) -> dict[str, bytes]:
+    return {str(p.relative_to(folder)): p.read_bytes() for p in sorted(folder.rglob("*")) if p.is_file()}
+
+
+def test_the_same_reports_give_the_same_files_byte_for_byte(data: Path, tmp_path_factory):  # noqa: F811
+    """#452: the time on every page is the newest report's own, never the clock, so a rerun changes nothing."""
+    one, two = tmp_path_factory.mktemp("first"), tmp_path_factory.mktemp("second")
+    for folder in (one, two):
+        export_results.main(["--data", str(data), "--out", str(folder)])
+        gate_v3_rescore.main(["--data", str(data), "--out", str(folder)])
+    assert _tree(one) == _tree(two) and len(_tree(one)) > 10
+    newest = results.reports_as_of(results.reports(data / "reports"))
+    assert newest and f"Written {newest} by" in (one / "README.md").read_text()
+    assert json.loads((one / "gate_v3_rescore.json").read_text())["generated_at"] == newest
+
+
+def test_every_run_gets_a_small_summary_on_the_research_window_only(out):
+    """#452: one file per report (not only the newest of each kind), marks on 2017-05-01..2024-12-31 only."""
+    store, folder, res = out
+    with_base = sorted(f.stem for f, rep in results.reports(store / "reports")
+                       if any(r.role == "base" for r in results.rows(f, rep)))
+    assert sorted(p.stem for p in (folder / "runs").glob("*.json")) == with_base and len(with_base) >= 2
+    assert "[`runs/`](runs/)" in (folder / "README.md").read_text()
+    for f in (folder / "runs").glob("*.json"):
+        assert f.stat().st_size < 20_000, f.name
+        s = json.loads(f.read_text())
+        assert s["report"] == f"{f.stem}.json" and s["research_window"] == ["2017-05-01", "2024-12-31"]
+        for acc in s["accounts"]:
+            w = acc["research_window"]
+            assert w is None or w["window"][1] <= "2024-12-31", "no hold-out session in a summary"
+            assert acc["trials_for_rule"] >= 0
+    tm = [json.loads(f.read_text()) for f in (folder / "runs").glob("core_balanced_trend_momentum_pit_*.json")]
+    acc = tm[-1]["accounts"][0]
+    assert acc["rule"] == "trend_momentum" and acc["control"]["percentile"] is not None
+    w = acc["research_window"]
+    assert {"cagr", "alpha", "alpha_t", "beta", "mean_exposure", "exposure_matched_spy_cagr"} <= set(w)
+    assert w["mean_exposure"] == pytest.approx(0.4) and acc["neighbours"]
+
+
+HOME_PATH = r"(/Users/[^/\s]+|/home/[^/\s]+|~)/"
+
+
+def test_no_committed_result_names_a_home_folder():
+    """#452: the committed results carry no path of the research Mac (HOW_TO.md is the owner's own commands)."""
+    import re
+
+    folder = ROOT / "docs" / "research" / "results"
+    bad = [f"{p.relative_to(folder)}:{i}" for p in sorted(folder.rglob("*")) if p.is_file() and p.name != "HOW_TO.md"
+           for i, line in enumerate(p.read_text().splitlines(), 1) if re.search(HOME_PATH, line)]
+    assert bad == []
