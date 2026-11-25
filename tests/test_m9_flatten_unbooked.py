@@ -61,6 +61,7 @@ def _engine(*, records=(), venue=None, ledger=None, om_run=7, om_fail=False, ven
                             book=lambda rid: _Book(ledger or {})), _rid=lambda: 7, now=lambda: _NOW,
                         _md_sleeves=lambda: {("trend_momentum", s): None for s in sleeves})
     e._om_unsettled = lambda: core.Engine._om_unsettled(e)
+    e._om_unbooked_sale = lambda: core.Engine._om_unbooked_sale(e)
     return e
 
 
@@ -94,6 +95,17 @@ def test_unbooked_shares_the_venue_does_not_hold_leave_nothing_to_sell():
     activity, when it comes, is a reconciliation difference (#529), not a sale."""
     assert flat(_engine(records=[_rec("b1")], venue={}))
     assert flat(_engine(records=[_rec("b1")], venue={"B": 10.0}, ledger={"B": 10.0}))  # the venue holds only booked
+
+
+def test_a_filled_sale_whose_activity_has_not_arrived_keeps_the_run_591():
+    """#591 (seed 796524965): the sale filled at the venue (no B there any more), its activity is late, the ledger
+    still holds the 23 shares. The venue holds less than the ledger, so the buy rule above would end the run, and
+    with it the sync that books the sale: the run waits for the booking instead."""
+    sale = _rec("s1", side="sell")
+    assert not flat(_engine(records=[sale], venue={}, ledger={"B": 23.0}, sleeves=("B",)))
+    assert not flat(_engine(records=[sale], venue={}))
+    sale.booked = 23.0  # booked: the ledger is flat, nothing is left to wait for
+    assert flat(_engine(records=[sale], venue={}))
 
 
 def test_an_unreadable_venue_or_order_manager_never_ends_the_run():

@@ -1749,7 +1749,13 @@ class Engine:
         the run is ended no sync sends its cancel again or books its fill), and no finished order whose filled shares
         the ledger has not booked yet while the venue holds more of that symbol than the ledger (those shares are
         sold once the fill is booked; a fill that is never reported is the owner's to book, #529). Unbooked shares
-        the venue does not hold (sold by a fail-safe meanwhile) leave nothing to sell and do not keep the run."""
+        the venue does not hold (sold by a fail-safe meanwhile) leave nothing to sell and do not keep the run.
+
+        #591: a finished SALE of the run whose fill is not booked yet keeps the run too (`_om_unbooked_sale`). The
+        venue holds less than the ledger then, so the check below passed it, and once the run is ended no sync
+        books that fill: the ended run's ledger kept the sold shares and missed the proceeds for good. It waits as
+        an unbooked buy does, with the same bound (`_cmd_unbooked_aged`: from the order's next day the owner books
+        or writes off the fill, #529)."""
         if self.pos or self._md_exits:
             return False
         symbols = {k[1] for k in self._md_sleeves()}
@@ -1757,7 +1763,7 @@ class Engine:
         if unsettled is None:
             return False
         open_orders, unbooked = unsettled
-        if open_orders:
+        if open_orders or self._om_unbooked_sale():
             return False
         if not symbols and not unbooked:
             return True
@@ -1805,6 +1811,19 @@ class Engine:
                           "(issue #529); the run is not ended with the shares at the venue"}, rid)
         except Exception as e:  # an alarm must never lose the command
             log.warning("command %s (id %s): the aged-fill check failed (%s)", kind, cid, e)
+
+    def _om_unbooked_sale(self) -> bool:
+        """#591: does the run's daily-path order manager hold a finished sale whose filled shares are not booked
+        yet? True also when it cannot be read (never end a run on a read that failed)."""
+        om = getattr(self.daily, "om", None) if self.daily is not None else None
+        rid = self._rid()
+        if om is None or rid is None or om.run_id != rid:
+            return False
+        try:
+            return any(r.side == "sell" for r in list(om.settling.values()))
+        except Exception as e:
+            log.warning("flatten and stop: the order manager could not be read (%s): not ended yet", e)
+            return True
 
     def _om_unsettled(self) -> tuple[list[str], set[str]] | None:
         """#533: (client ids of the run's open non-stop orders, symbols of its finished orders with fills not booked
