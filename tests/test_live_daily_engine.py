@@ -453,9 +453,108 @@ def test_the_send_window_reads_the_calendar_once_per_session_not_per_tick():
     lv = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
                       prev_session=lambda d: d, session_close=close)
     d = date(2026, 11, 27)
-    assert lv.send_until(d) == time(15, 57)  # unreadable: the normal window
+    assert lv.send_until(d) == time(12, 57)  # unreadable: the local calendar's early close (QA-Ops audit, 25 Nov)
     assert [lv.send_until(d) for _ in range(5)] == [time(12, 57)] * 5
     assert calls == [d, d]
+
+
+# ---------------------------------------------------------------- QA-Ops audit (25 Nov 2026): early-close fallback
+
+
+def _unreadable_calendar(events=None):
+    def close(d):
+        raise RuntimeError("calendar unreachable")
+
+    return ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
+                        prev_session=lambda d: d, session_close=close,
+                        event=(lambda kind, body: events.append((kind, body))) if events is not None else
+                        (lambda kind, body: None))
+
+
+@pytest.mark.parametrize("day", ["2026-11-27", "2026-12-24"])
+def test_a_failed_calendar_read_on_an_early_close_sends_before_the_1300_close(day):
+    """A failed read on the day after Thanksgiving (27 Nov 2026) or Christmas Eve (24 Dec 2026): the local calendar
+    gives the 13:00 close, so the window is 12:50-12:57 ET and nothing is sent at 15:50 (after the close)."""
+    from datetime import date, datetime, time
+
+    events: list = []
+    lv = _unreadable_calendar(events)
+    d = date.fromisoformat(day)
+    assert (lv.send_from(d), lv.send_until(d)) == (time(12, 50), time(12, 57))
+    assert lv.policy_for(d).close == time(13, 0)
+    et = ld.NY
+    assert lv.in_window(datetime.combine(d, time(12, 52), et))
+    for hm in (time(12, 57), time(13, 0), time(15, 50), time(15, 55)):
+        assert not lv.in_window(datetime.combine(d, hm, et))
+    assert events == []  # the local calendar knew the day: no alarm (a warning in the log)
+
+
+def test_a_failed_calendar_read_on_a_regular_day_keeps_the_1550_window():
+    from datetime import date, time
+
+    lv = _unreadable_calendar()
+    assert (lv.send_from(date(2026, 11, 25)), lv.send_until(date(2026, 11, 25))) == (time(15, 50), time(15, 57))
+
+
+def test_the_engines_calendar_without_a_close_is_a_failed_read():
+    """A broker calendar with no row (or no close) for the day is a failed read in the live engine, so the local
+    calendar decides, not 16:00. A replay's calendar that names no close still means the regular close."""
+    from datetime import date, time
+
+    d = date(2026, 11, 27)
+    with pytest.raises(ValueError):
+        ld.engine_close(None, d)
+    with pytest.raises(ValueError):
+        ld.engine_close({"date": str(d)}, d)
+    assert ld.engine_close({"close": "13:00"}, d) == time(13, 0)
+    lv = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
+                      prev_session=lambda d: d, session_close=lambda day: ld.engine_close(None, day))
+    assert lv.send_until(d) == time(12, 57) and lv.send_until(date(2026, 11, 30)) == time(15, 57)
+    replay = ld.LiveDaily(None, Journal(), lambda: None, [], None, None, next_session=lambda d: d,
+                          prev_session=lambda d: d)
+    assert replay.send_until(date(2023, 7, 3)) == time(15, 57)
+
+
+def test_no_calendar_at_all_is_taken_as_a_possible_early_close_with_one_event():
+    """Outside the local calendar's years and the broker's calendar unreadable: nothing after 12:57 ET (the window of
+    an early close, 12:50-12:57), and one `multi_day_close_unknown` event per session, not one per tick."""
+    from datetime import date, datetime, time
+
+    events: list = []
+    lv = _unreadable_calendar(events)
+    d = date(2030, 7, 1)  # a regular Monday, past LOCAL_CLOSE_YEARS
+    assert d.year not in ld.LOCAL_CLOSE_YEARS
+    for _ in range(4):
+        assert (lv.send_from(d), lv.send_until(d)) == (time(12, 50), time(12, 57))
+    assert not lv.in_window(datetime.combine(d, time(15, 52), ld.NY))
+    assert not lv.in_window(datetime.combine(d, time(12, 58), ld.NY))
+    assert [k for k, _ in events] == ["multi_day_close_unknown"]
+    body = events[0][1]
+    assert body["session"] == "2030-07-01" and (body["send_from"], body["send_until"]) == ("12:50", "12:57")
+    assert "calendar unreachable" in body["error"]
+
+
+def test_the_local_early_closes_match_the_deadman_table_and_the_nyse_rules():
+    """LOCAL_EARLY_CLOSES is the same as migration 0017's 13:00 rows and kaibot.ingest.nyse_sessions' early closes,
+    for every year it covers."""
+    import re
+    from datetime import date, time, timedelta
+
+    from kaibot.engine.config import ROOT
+    from kaibot.ingest import nyse_sessions
+
+    sql = (ROOT / "migrations" / "0017_deadman_early_close.sql").read_text()
+    table = {date.fromisoformat(d) for d, c in re.findall(r"\('(\d{4}-\d{2}-\d{2})', '?([0-9:]+|null)'?", sql)
+             if c == "13:00"}
+    years = set(ld.LOCAL_CLOSE_YEARS)
+    assert {d for d in table if d.year in years} == set(ld.LOCAL_EARLY_CLOSES)
+    assert set(ld.LOCAL_EARLY_CLOSES.values()) == {time(13, 0)}
+    d, rules = date(min(years), 1, 1), set()
+    while d.year <= max(years):
+        if nyse_sessions.early_close(d):
+            rules.add(d)
+        d += timedelta(days=1)
+    assert rules == set(ld.LOCAL_EARLY_CLOSES)
 
 
 # ---------------------------------------------------------------- #211: follow-ups of the QA-Ops review of #207

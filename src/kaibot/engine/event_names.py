@@ -142,6 +142,9 @@ PENDING: tuple[Event, ...] = (
     # QA-Ops (24-25 Nov 2026 incident, engine/gap.py): the engine was not running for more than an hour while it
     # should have been (no clean stop: a sleep, a power cut, a crash), seen at the next start or on waking
     Event("engine_gap", "warn", "The engine was not running for over an hour (the Mac asleep or off?)"),
+    # QA-Ops audit (25 Nov 2026): the calendar unreadable and no local close for the day: sent as on an early close
+    Event("multi_day_close_unknown", "warn",
+          "Session close unknown: multi-day orders sent only in the early-close window (12:50-12:57 ET)"),
 )
 
 ROUTINE: tuple[Event, ...] = (

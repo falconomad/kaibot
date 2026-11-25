@@ -159,6 +159,31 @@ log = logging.getLogger("kaibot.engine.daily")
 # the venue to fill them (and to work a partial fill's remainder) before the close.
 SEND_FROM, SEND_UNTIL = minus(REGULAR_CLOSE, NEAR_CLOSE_MIN), minus(REGULAR_CLOSE, 3)  # 15:50 / 15:57 ET
 SEND_LAST_MIN = 3
+# QA-Ops audit (25 Nov 2026): the send window's fallback when the broker's calendar cannot be read. NYSE's early
+# closes (13:00 ET) as NYSE Group announced them for 2026-2028 (23 Dec 2025), the same rows as the dead-man's table
+# (migrations/0017_deadman_early_close.sql; tests check the two agree and match kaibot.ingest.nyse_sessions). A day
+# in LOCAL_CLOSE_YEARS that is not listed closes at 16:00. Extend it every year with that table and
+# config/macro_calendar.yaml. A day outside those years, with the calendar unreadable, is taken as a possible early
+# close: the send window is UNKNOWN_CLOSE's (12:50-12:57 ET), so nothing is ever sent after an early close, and a
+# `multi_day_close_unknown` event says so once per session.
+LOCAL_EARLY_CLOSES: dict[date, time] = {
+    date(2026, 11, 27): time(13, 0),  # the day after Thanksgiving
+    date(2026, 12, 24): time(13, 0),  # Christmas Eve
+    date(2027, 11, 26): time(13, 0),  # the day after Thanksgiving (24 Dec 2027 is the Christmas holiday)
+    date(2028, 7, 3): time(13, 0),    # the day before Independence Day
+    date(2028, 11, 24): time(13, 0),  # the day after Thanksgiving
+}
+LOCAL_CLOSE_YEARS = range(2026, 2029)
+UNKNOWN_CLOSE = time(13, 0)  # the earliest close a regular session has
+
+
+def local_close(day: date) -> time | None:
+    """The session's close from the local table (LOCAL_EARLY_CLOSES), or None for a day outside its years."""
+    if day.year not in LOCAL_CLOSE_YEARS:
+        return None
+    return LOCAL_EARLY_CLOSES.get(day, REGULAR_CLOSE)
+
+
 DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel", "md_review", "md_unfilled")
 PREOPEN_FROM, PREOPEN_UNTIL = time(8, 30), time(9, 31)  # #131: the pre-open review runs before the session
 REVIEW_WAIT_UNTIL_S = 300.0  # the send stops waiting for a running review 5 minutes before the window ends
@@ -530,7 +555,8 @@ class LiveDaily:
         self.next_session, self.prev_session = next_session, prev_session
         self.known_order_ids = known_order_ids
         self.session_close = session_close  # the session's close (ET wall time), for early-close days
-        self._closes: dict[date, time | None] = {}  # the session's close, read once (send_until)
+        self._closes: dict[date, time] = {}  # the session's close, read once (send_until)
+        self._close_said: set[date] = set()  # sessions whose close came from the fallback (said once)
         self.store = store  # the Supabase replica: a second, durable record of a retirement (halt rows)
         self.reenable = reenable  # KAIBOT_REENABLE as read from the environment at start-up (used once)
         self._store_cache: dict[str, dict | None] = {}
@@ -1189,26 +1215,47 @@ class LiveDaily:
             self._data = {k: self.load(k, now)}  # one evening's view at a time
         return self._data[k]
 
-    def _close(self, day: date) -> time | None:
-        """The session's close from the calendar (None: unreadable, or a normal 16:00 close not given)."""
-        if day in self._closes:  # one calendar read per session (QA-Ops second key: not one per tick)
-            close = self._closes[day]
+    def _close(self, day: date) -> time:
+        """The session's close: the broker's calendar, read once per session (QA-Ops second key: not one per tick).
+        `session_close` gives None for a regular 16:00 close it does not name (the replays' and tests' calendars).
+        When the read fails (it raises; the engine's raises too when the broker has no close for the day), it is
+        read again at the next call and meanwhile the local table (`local_close`) gives the close; outside its years
+        the earliest close, UNKNOWN_CLOSE (13:00 ET), so the window is 12:50-12:57 ET and never after an early
+        close, with one `multi_day_close_unknown` event per session."""
+        if day in self._closes:
+            return self._closes[day]
+        try:
+            read = self.session_close(day)
+        except Exception as e:
+            why = f"{type(e).__name__}: {e}"[:160]
         else:
-            try:
-                close = self.session_close(day)
-            except Exception:
-                close = None  # unreadable: 15:45, read again at the next call
-            else:
-                self._closes = {day: close}
+            self._closes = {day: read or REGULAR_CLOSE}
+            return self._closes[day]
+        close = local_close(day)
+        if close is None:
+            close = UNKNOWN_CLOSE
+            if day not in self._close_said:
+                self._close_said.add(day)
+                log.error("session close of %s unknown (calendar: %s; no local calendar for %d): taken as a possible "
+                          "early close, multi-day orders only %s-%s ET", day, why, day.year,
+                          minus(close, NEAR_CLOSE_MIN).strftime("%H:%M"), minus(close, SEND_LAST_MIN).strftime("%H:%M"))
+                self.event("multi_day_close_unknown", {
+                    "session": str(day), "error": why, "assumed_close": close.strftime("%H:%M"),
+                    "send_from": minus(close, NEAR_CLOSE_MIN).strftime("%H:%M"),
+                    "send_until": minus(close, SEND_LAST_MIN).strftime("%H:%M")})
+        elif day not in self._close_said:
+            self._close_said.add(day)
+            log.warning("session close of %s from the local calendar (calendar: %s): %s ET", day, why,
+                        close.strftime("%H:%M"))
         return close
 
     def policy_for(self, day: date) -> ExecutionPolicy:
         """The session's execution style: near-close DAY market orders (issue #333), against its close."""
-        close = self._close(day)
-        return ExecutionPolicy("near_close", close=min(close or REGULAR_CLOSE, REGULAR_CLOSE))
+        return ExecutionPolicy("near_close", close=min(self._close(day), REGULAR_CLOSE))
 
     def send_from(self, day: date) -> time:
-        """15:50 ET, or on an early-close day the close minus 10 minutes (issue #333)."""
+        """15:50 ET, or on an early-close day the close minus 10 minutes (issue #333): 12:50 ET, also on a day whose
+        close is unknown (`_close`)."""
         return minus(self.policy_for(day).close, NEAR_CLOSE_MIN)
 
     def send_until(self, day: date) -> time:
@@ -2230,7 +2277,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
     return LiveDaily(engine.broker, engine.journal, engine.now, rules if rules is not None else current, load,
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
-                     known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
+                     known_order_ids=known_ids, session_close=lambda d: engine_close(engine.broker.calendar(str(d)), d),
                      store=engine.store, reenable=switches.get(REENABLE_FLAG), ca=ca, review=review,
                      shadow=shadow, note=note, filing_flags=filing_flags,
                      quotes=quotes if quotes is not None else presend_quotes(engine), entry_checks=entry_checks)
@@ -2263,6 +2310,15 @@ def calendar_close(cal: dict | None) -> time | None:
         return time(int(hh), int(mm))
     except ValueError:
         return None
+
+
+def engine_close(cal: dict | None, day: date) -> time:
+    """The live engine's session close: the broker's calendar row's close. QA-Ops audit (25 Nov 2026): a missing row
+    or close is a failed read (it raises), so LiveDaily falls back to its local calendar instead of 16:00."""
+    close = calendar_close(cal)
+    if close is None:
+        raise ValueError(f"the broker's calendar has no close for {day}")
+    return close
 
 
 def rules_for(names: Sequence[str], pol: RiskPolicy, level: str) -> list[Rule]:
