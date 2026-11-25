@@ -416,6 +416,7 @@ class Engine:
         self.error_streak = 0
         self.clean_ticks = 0  # M9 1.7: ticks in a row that did not raise while the `engine_errors` kill is set
         self._drift_seen: dict = {}
+        self._positions_unread: str | None = None  # audit 2 5.10: why the drift check's last read failed
         self.run: dict | None = None
         self.day: Day | None = None
         self.pos = Positions()
@@ -734,8 +735,24 @@ class Engine:
         return self.lease is None or bool(self.lease.ok)
 
     def _check_drift(self) -> None:
-        """S18: the engine's book must match the broker's. Any difference stops new entries."""
-        broker_pos = self.broker.positions()
+        """S18: the engine's book must match the broker's. Any difference stops new entries.
+
+        Audit 2, 5.10 (the 1.5 residual): a read of the broker's positions that fails no longer fails the minute
+        (which kept the whole send, sales included, behind this step while the endpoint was down). It is contained
+        here: the `positions` hold stops new buys until a read works again (fail closed for buys), sales and stops
+        go on, and the minute completes. One `engine_error` event per spell; the hold is let go at the next read."""
+        try:
+            broker_pos = self.broker.positions()
+        except Exception as e:  # noqa: BLE001 - contained: buys held (below), the tick goes on
+            why = f"broker positions unreadable ({type(e).__name__}: {str(e)[:120]}): no new buys"
+            if self._positions_unread is None:
+                log.error("drift check: %s", why)
+                self.store.event("engine_error", {"step": "drift_check", "error": why[:300]}, self._rid())
+            self._positions_unread = why
+            return
+        if self._positions_unread is not None:
+            log.warning("drift check: the broker's positions read again: buys allowed")
+            self._positions_unread = None
         self._bpos = broker_pos
         self._bpos_ts = self.now()  # #384: the time of the read, for the minute row's `mark_ts` of a broker price
         diffs = {}
@@ -1406,8 +1423,13 @@ class Engine:
                     return "data_check", why
             return None
 
+        def positions():  # audit 2 5.10: the drift check could not read the broker's positions
+            why = getattr(self, "_positions_unread", None)
+            return ("positions_unread", why) if why else None
+
         checks = {"run": run, "command": command, "account": account, "reconcile": reconcile, HALT: halt,
-                  "lease": lease, "clock": clock, "daily_stop": daily_stop, "config": config, "data_check": data_check}
+                  "lease": lease, "clock": clock, "daily_stop": daily_stop, "config": config, "data_check": data_check,
+                  "positions": positions}
         for i, source in enumerate(ENTRY_SOURCES):
             hit = checks[source]()
             if hit is None:

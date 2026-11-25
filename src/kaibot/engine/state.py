@@ -33,6 +33,11 @@ in step 1. The fail-closed halt keeps its own trigger (`Engine.kill`, step 2). T
 it holds back one rule's carried buys, not every buy, and a hold would refuse the rest (the state stays `active`;
 the heartbeat reports it as in step 3).
 
+Audit 2, 5.10: `positions` (last, so every block before it is read as before): the per-minute drift check could not
+read the broker's positions (`Engine._check_drift` contains that failure instead of failing the minute). Until a read
+works again no buy goes out, because the book is not proved to match the broker; sales and stops go on, and the
+minute completes, so the next minute's send runs first again (engine/book_loop.py).
+
 The first trigger of `halted` (`LEASE_LOST`): the engine lease is lost (another engine took it). Today the lease's
 fence (engine/fence.py) then refuses every order call, cancels included, and the main loop stops; the hold is
 taken exactly while that is so (`lease.lost`, and the engine's broker fenced by that lease), so the gate refuses
@@ -63,14 +68,14 @@ class Trading:
 # latest send found the market filter off and held its carried buys back.
 BLOCK_CODES = ("no_run", "paused", "run_not_running", "command_selling", "account_not_clean", "reconcile_difference",
                "halted", "lease_unverified", "clock_skew", "daily_stop", "config_refused", "data_check",
-               "market_filter_off")
+               "market_filter_off", "positions_unread")
 
 
 # Step 4: the switch's sources of the entry blocks, in `Engine.entry_block`'s order (the first one held is the block).
 # `halt` is the fail-closed halt's own hold (`Engine.kill`); `entry_block` words it "halted: <kind>".
 HALT = "halt"
 ENTRY_SOURCES = ("run", "command", "account", "reconcile", HALT, "lease", "clock", "daily_stop", "config",
-                 "data_check")
+                 "data_check", "positions")  # audit 2 5.10: the drift check could not read the broker's positions
 LEASE_LOST = "lease_lost"  # the first `halted` trigger: the lease's fence already refuses every order call
 
 
