@@ -153,10 +153,13 @@ def _om_with_activity(act: dict):
 
 @pytest.mark.parametrize("act", [{"side": "BUY", "qty": "10", "price": "100"},
                                  {"side": "buy", "qty": "10", "price": "NaN"},
-                                 {"side": "buy", "qty": "-10", "price": "100"}],
-                         ids=["side BUY", "price NaN", "qty -10"])
+                                 {"side": "buy", "qty": "-10", "price": "100"},
+                                 {"side": "buy", "qty": "1e308", "price": "2.5"}],
+                         ids=["side BUY", "price NaN", "qty -10", "value beyond a float 656"])
 def test_a_malformed_fill_activity_is_not_booked_545(act):
-    """#545 fixed: broker/payloads.fill refuses it; the order manager keeps it as a fill it cannot attribute."""
+    """#545 fixed: broker/payloads.fill refuses it; the order manager keeps it as a fill it cannot attribute.
+    #656 (nightly fuzz input `corpus/broker_payloads/fill-value-overflow-656`): 1e308 shares at 2.5 are each finite,
+    their value is not; booked, the ledger's cash was -inf. Refused the same way now."""
     book = _om_with_activity(act)
     assert book.cash == 10_000.0 and not book.qty_by_symbol(), \
         f"booked: cash {book.cash}, shares {book.qty_by_symbol()}"

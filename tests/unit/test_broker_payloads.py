@@ -48,6 +48,7 @@ def test_a_fill_is_either_refused_or_bookable(a):
     assert f["side"] in ("buy", "sell")
     assert _ok(f["qty"]) and f["qty"] > 0 and _ok(f["price"]) and f["price"] > 0
     assert _ok(f["fees"]) and f["fees"] >= 0
+    assert _ok(f["qty"] * f["price"] + f["fees"])  # #656: the value the ledger books
     assert f["id"] and f["order_id"] and f["symbol"]
 
 
@@ -87,6 +88,9 @@ def test_a_dividend_amount_is_finite_or_refused(v):
     ({"side": "buy", "qty": "10", "price": "100", "fees": "-1"}, False),
     ({"side": "buy", "qty": True, "price": "100"}, False),
     ({"side": "buy", "qty": "10", "price": "100", "transaction_time": "yesterday"}, False),
+    ({"side": "buy", "qty": "1e308", "price": "2.5"}, False),  # #656: finite numbers, a value beyond a float
+    ({"side": "sell", "qty": "1e200", "price": "1e200"}, False),
+    ({"side": "buy", "qty": "1e300", "price": "1e8", "fees": "1.7e308"}, False),  # with its fees
 ])
 def test_the_fill_cases(a, ok):
     a = {"id": "a1", "order_id": "o1", "symbol": "B", "transaction_time": "2026-08-03T19:50:01Z", **a}
@@ -147,7 +151,8 @@ def test_a_good_fill_is_booked():
 
 
 @pytest.mark.parametrize("bad", [{"side": "BUY"}, {"price": "NaN"}, {"qty": "-10"}, {"qty": "inf"},
-                                 {"fees": "nan"}, {"side": "sell_short"}, {"symbol": "C"}])
+                                 {"fees": "nan"}, {"side": "sell_short"}, {"symbol": "C"},
+                                 {"qty": "1e308", "price": "2.5"}])
 def test_a_refused_fill_is_not_booked_and_blocks_its_symbol(bad):
     """Never booked; kept as a fill the manager cannot attribute (the reconciliation's foreign_fill blocks buys in
     the symbol), counted, and not read as "the activities could not be read" (`errors`)."""
@@ -191,6 +196,21 @@ def test_the_ledger_never_books_a_fill_entry_with_another_side():
     for side, qty, px in (("BUY", 10.0, 10.0), ("buy", -5.0, 10.0), ("buy", 1.0, float("nan"))):
         lg.apply("fill", {"run_id": 1, "strategy": "s", "symbol": "B", "side": side, "qty": qty, "px": px})
     assert lg.book(1).cash == 1_000.0 and not lg.book(1).qty_by_symbol()
+
+
+def test_the_ledger_never_books_a_fill_whose_value_is_beyond_a_number_656():
+    """#656 (nightly fuzz, `corpus/broker_payloads/fill-value-overflow-656`): finite quantity and price, an infinite
+    value. An entry written by hand or by an older release is not booked either, nor one that would take the cash
+    past what a float holds; the fills before it stay booked."""
+    lg = Ledger()
+    lg.apply("run", {"run_id": 1, "amount": 1_000.0})
+    lg.apply("fill", {"run_id": 1, "strategy": "s", "symbol": "B", "side": "buy", "qty": 10.0, "px": 10.0})
+    for side, qty, px in (("buy", 1e308, 2.5), ("sell", 1e200, 1e200), ("buy", 1e154, 1e154),
+                          ("buy", 1e154, 1e154)):
+        lg.apply("fill", {"run_id": 1, "strategy": "s", "symbol": "B", "side": side, "qty": qty, "px": px})
+    b = lg.book(1)
+    assert math.isfinite(b.cash)
+    assert b.qty_by_symbol()["B"] in (10.0, 10.0 + 1e154)  # the first 1e154 x 1e154 fits; the second does not
 
 
 def test_a_dividend_that_is_not_finite_is_not_an_action():
