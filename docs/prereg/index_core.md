@@ -174,3 +174,54 @@ in the judged run. The hypothesis's range (SPY -3 to -1 points a year) was writt
 the book is expected to trail SPY by about two-thirds of SPY's return, with roughly a quarter of its drawdown. It
 is not expected to meet B2's return branch. A fail is reported as found. Any later change of the value is the
 stakeholder's, as a new configuration with its own amendment.
+
+## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)
+
+**Why, and what is known.** The 24 Nov 2026 runs at the 27% cap (job `index-core-2026-11-24`, #458) failed: CAGR
+3.38% and a 5.13% maximum drawdown at Hunter, with about three-quarters of the book in cash at 0%. As Amendment 3
+expected, that configuration cannot answer the question this file asks (an index core near SPY's return with a
+shallower drawdown). Product decided on 25 Nov 2026, under the stakeholder's permission to run backtests, to test
+the core once more with the index fund allowed up to **80% of the book**. This amendment is written **after** the
+27% results were seen, and the 80% value was chosen because of them. That is stated here and counted below. It is
+not a blind choice.
+
+**Research only. No setting changes.** The live index cap stays 27% at every level, the hard ceiling
+`BOOK_HARD_CEILINGS.max_index_pct` stays 27%, and `config/index_core.yaml` (27 / 27 / 27, `enabled: false`) and the
+live profiles do not change. A loader still refuses a config value above 27. The 80% cap exists only as a
+script argument, `scripts/index_core.py --index-cap 80`. That argument goes through `risk.index_core.builder(index_cap_pct=80)`,
+which validates the book against the hard ceilings with only `max_index_pct` raised (`PortfolioBuilder.index_ceiling_pct`,
+never above 97%). No live module sets it. This amendment is not a level limit: those stay the stakeholder's
+(decision 15 section 6). A pass here would not put 80% anywhere live. That would still need the stakeholder to set
+the level value and the hard ceiling, a new pull request with two keys, and the final check below.
+
+**The configuration (a new one, next to the 27% one).**
+
+| Row | 27% configuration (Amendment 3) | This amendment |
+|---|---|---|
+| 2, 4: the index cap at Hunter (judged) | 27% | **80%** under the 100% exposure cap |
+| Balanced, Careful (reported, not judged) | 27%, 27% | min(80, the level's exposure cap less the 3% reserve): **57%** and **27%** |
+| Neighbours | each at Hunter, 27% | the same five (`vol12`, `vol18`, `lookback63`, `daily`, `nocap`), each at Hunter, **80%** |
+
+Every other row is unchanged. That covers the instrument, the 15% volatility target on 21 returns, the weekly decision,
+the cuts of row 8 and the 10% band. It also covers near-close orders at the closing print, cost model v2 (Amendment 2),
+0% cash in the judged run, dividends, the $100,000 account and the point-in-time universe. The window stays the
+research window, **2017-05-01 to 2024-12-31**. The hold-out (from 2025-01-01) is not read, and `holdout.enforce`
+refuses any later `--end`. The pass marks (B1 to B6 of decision 16 section 5, judged at Hunter) are unchanged and
+nothing is loosened.
+
+**Expectation, before the run (scaled from the known 27% run, so not independent of it).** Roughly three times the
+27% exposure: CAGR about 8 to 11% a year, **SPY -6 to -3 points**, with a maximum drawdown of about 0.35 to 0.55 times
+SPY's. If that holds, B2's defensive branch (CAGR at least SPY -2 and drawdown at most 0.75 times SPY's) fails on
+return, and the growth branch fails too. A fail is reported as found. `nocap` is expected nearer SPY's return with
+about 0.8 times its drawdown.
+
+**Trials.** Six new configurations count (n_trials 1 each): the judged run at 80% and its five neighbours. Cost
+multiples, the stress fill and the two other levels are reports (n_trials 0). The six configurations of 24 Nov 2026
+(27%) stay counted. The rule `index_core` has then tried **12 configurations**, and every later reading of either
+verdict names both. Each row records `params.index_cap_pct` (80) and the row's `max_index_pct`, and the report is
+named `index_core_aggressive_<universe>_cap80_<ts>`.
+
+**What a result allows.** The 27% verdict (fail) stands, and this run does not replace it. If the 80% book passes
+B1 to B6, Product may propose a level value to the stakeholder. Nothing is opened, changed or re-run with other
+settings because of this run: another cap is a new amendment written before its run. The final check of decision 16
+section 7 needs its own opening committed to `config/holdout.yaml` before the hold-out is read.
