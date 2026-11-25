@@ -131,3 +131,17 @@ def test_the_rescore_job_is_allowed_and_queued_after_the_80_percent_runs():
     job = rr.check_job(jobs[ids.index("gate-v3-rescore-books-2026-11-25")], cfg)
     assert job.args == () and job.issue == 456
     assert ids.index("gate-v3-rescore-books-2026-11-25") > ids.index("index-core-book-80-2026-11-25")
+
+
+def test_qa_only_book_reports_are_split_off_and_a_sleeve_report_stays_in_the_sleeve_table():
+    """QA-Ops (#456): the split is by the report, so a sleeve report (its control p-value feeds the family
+    correction) is never taken for a book, and a book report never reaches the correction through its sleeve test."""
+    from kaibot.evaluation import gate_v3 as g3
+
+    gate = g3.GateV3.load()
+    for sleeve in ({"rule": "trend_momentum"}, {"rule": "trend_momentum", "gate_v3_sleeve": {"verdict": "fail"}},
+                   {"rule": "trend_momentum_sleeve"}, {}):
+        assert not gate_v3_rescore.is_book_report(gate, sleeve)
+    for book in ({"rule": "index_core"}, {"book": "index_core_trend_momentum", "sleeve": "trend_momentum"},
+                 {"rule": "anything", "gate_v3_book": {"rule": "x"}}):
+        assert gate_v3_rescore.is_book_report(gate, book)
