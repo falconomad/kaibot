@@ -22,8 +22,14 @@ Trials: n_trials 1 for the judged run and for each neighbour (six configurations
 level report of the same configuration (decision 15 section 10), each row with the pre-registration's sha256 and
 config/gate_v3.yaml's.
 
-Writes <out>/index_core_<level>_<universe>_<ts>.json, the same name .md (the book test as Markdown) and a folder
-with one daily CSV per run.
+`--index-cap 80` (Amendment 4 of the pre-registration, Product 25 Nov 2026; research only): the same runs with the
+index fund allowed up to 80% of the book at Hunter (cut to each level's exposure cap less the 3% reserve: Balanced 57,
+Careful 27), through `risk.index_core.builder(index_cap_pct=80)`. Only the pre-registered values are taken
+(`INDEX_CAPS`); 27 is the config's cap, the 24 Nov 2026 configuration. The live cap, the hard ceiling and
+config/index_core.yaml stay at 27. The report, its name (`_cap80_`) and every trial row record the cap.
+
+Writes <out>/index_core_<level>_<universe>[_cap<n>]_<ts>.json, the same name .md (the book test as Markdown) and a
+folder with one daily CSV per run.
 """
 
 from __future__ import annotations
@@ -57,6 +63,16 @@ RULE = "index_core"
 JUDGED = "aggressive"
 COSTS = (1.0, 2.0, 3.0, 0.0)
 COST_MODEL = "v2"  # broker.sim.AuctionCostsV2 in engine/daily.run_daily (#559, #572; prereg Amendment 2)
+INDEX_CAPS = (27.0, 80.0)  # the pre-registered index caps at Hunter: the config's 27 (Amendment 3) and 80 (Amendment 4)
+
+
+def cap_override(cap: float | None, cfg) -> float | None:
+    """The research index cap to pass to `risk.index_core` (None: the config's own cap, the 27% configuration)."""
+    if cap is None or cap == cfg.levels[JUDGED].max_index_pct:
+        return None
+    if cap not in INDEX_CAPS:  # argparse's choices already refuse it; a direct caller gets the same refusal
+        raise SystemExit(f"--index-cap {cap:g} is not pre-registered (docs/prereg/index_core.md: {INDEX_CAPS})")
+    return float(cap)
 
 
 def series(run, data: DailyData) -> dict[str, pd.Series]:
@@ -86,6 +102,9 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--universe", default="pit", choices=("pit", "today"))
     ap.add_argument("--universe-file", default=str(ROOT / "config" / "universe_history.yaml"))
     ap.add_argument("--fixture", action="store_true", help="the committed fixture instead of the store (CI)")
+    ap.add_argument("--index-cap", type=float, choices=INDEX_CAPS, default=None,
+                    help="the index fund's cap at Hunter, %% of the book (pre-registered: 27, the config; "
+                         "80, Amendment 4)")
     ap.add_argument("--out", default=None, help="report directory (default <data>/reports)")
     ap.add_argument("--trials", default=None, help="trial registry file (default <data>/trials.jsonl; '' = none)")
     holdout.add_argument(ap)
@@ -96,6 +115,8 @@ def main(argv: list[str] | None = None) -> dict:
     pre = prereg_mod.load(RULE)  # refuses to run while the pre-registration is missing or not committed
     gate = g3.GateV3.load()
     cfg = ic.load()
+    override = cap_override(a.index_cap, cfg)
+    index_cap = override if override is not None else cfg.levels[JUDGED].max_index_pct
     t0 = time.time()
     if a.fixture:
         market, info = dr.load_fixture(dr.FIXTURE)
@@ -114,17 +135,19 @@ def main(argv: list[str] | None = None) -> dict:
 
     def one(label: str, strat: IndexCore, level: str, *, fill: str = "base", cost: float = 1.0, n_trials: int = 0):
         t = time.time()
-        r = run_daily(strat, data, profiles[level], i0, i1, fill=fill, cost=cost, builder=ic.builder(level, cfg),
-                      cost_model=COST_MODEL)
+        b = ic.builder(level, cfg, index_cap_pct=override)
+        r = run_daily(strat, data, profiles[level], i0, i1, fill=fill, cost=cost, builder=b, cost_model=COST_MODEL)
         st = dr.run_stats(r)
         runs[label] = (r, {"label": label, "spec": strat.name, "level": level, "fill": fill, "cost": cost,
-                           "n_trials": n_trials, **st, **index_stats(r), "runtime_s": round(time.time() - t, 1)})
+                           "n_trials": n_trials,
+                           "max_index_pct": b.limits.max_index_pct, **st, **index_stats(r),
+                           "runtime_s": round(time.time() - t, 1)})
         print(f"  {label}: CAGR {st['cagr_pct']}%, max drawdown {st['max_drawdown_pct']}%, "
               f"{runs[label][1]['spy_orders']} SPY orders, {runs[label][1]['runtime_s']}s", flush=True)
         return r
 
     print(f"{RULE}: engine + SimBroker, {data.dates[i0]} to {data.dates[i1]} ({i1 - i0 + 1} sessions), "
-          f"universe {universe}", flush=True)
+          f"universe {universe}, index cap {index_cap:g}% at Hunter", flush=True)
     base = IndexCore()
     for c in COSTS:
         one(f"base|{c:g}x", base, JUDGED, cost=c, n_trials=int(c == 1.0))
@@ -154,9 +177,11 @@ def main(argv: list[str] | None = None) -> dict:
         if len(s["net"]) >= 30 else None
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
-    tag = f"{RULE}_{JUDGED}_{universe}_{run_at.strftime('%Y%m%dT%H%M%S')}"
+    cap_tag = "" if override is None else f"_cap{override:g}"
+    tag = f"{RULE}_{JUDGED}_{universe}{cap_tag}_{run_at.strftime('%Y%m%dT%H%M%S')}"
     out = {"run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "rule": RULE,
-           "prereg_sha256": pre.sha256, "gate_sha": gate.sha, "holdout": holdout.stamp(None),
+           "index_cap_pct": index_cap, "prereg_sha256": pre.sha256, "gate_sha": gate.sha,
+           "holdout": holdout.stamp(None),
            "index_core_config": str(cfg.path.relative_to(ROOT)) if cfg.path.is_relative_to(ROOT) else str(cfg.path),
            "universe": universe, "data": info, "window": [str(data.dates[i0]), str(data.dates[i1])],
            "sessions": int(i1 - i0 + 1), "source": source, "rows": [row for _, row in runs.values()],
@@ -175,7 +200,8 @@ def main(argv: list[str] | None = None) -> dict:
                 "label": f"engine {label}", "level": row["level"], "cost_model": COST_MODEL,
                 "universe_mode": universe, "code_sha": code_sha, "status": "engine", "prereg_sha256": pre.sha256,
                 "gate_sha": gate.sha, "n_trials": row["n_trials"],
-                "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"]},
+                "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"],
+                           "index_cap_pct": index_cap, "max_index_pct": row["max_index_pct"]},
                 "window": out["window"],
                 "metrics": {"cagr_pct": row["cagr_pct"], "daily_sharpe_ann": row["sharpe"],
                             "max_drawdown_pct": row["max_drawdown_pct"], "net_return_pct": row["return_pct"]}})

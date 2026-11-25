@@ -23,3 +23,11 @@ jobs:
     script: scripts/shadow_results.py
     args: []
     posts_to_issue: 371
+  - id: index-core-80-2026-11-25          # #458 prereg Amendment 4: the core at an 80% index cap (research only)
+    script: scripts/index_core.py
+    args: ["--end", "2024-12-31", "--index-cap", "80"]
+    posts_to_issue: 458
+  - id: index-core-book-80-2026-11-25     # #459 prereg Amendment 3: the book with its core at 80% (research only)
+    script: scripts/index_core_book.py
+    args: ["--end", "2024-12-31", "--index-cap", "80"]
+    posts_to_issue: 459

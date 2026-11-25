@@ -54,6 +54,12 @@ when it is within `band` of that target and fits every cut. It is exempt from th
 and volatility sizing; the outer guards check it against `max_index_pct` instead of the per-name cap. A reduction
 of the index is sent right after the sales and before every purchase, so the sleeve's buy at the same print is
 funded by it (the swap); an increase is sent last.
+
+Research ceiling for the index cap (#458 / #459, Amendment 4 of docs/prereg/index_core.md, Product 25 Nov 2026):
+the live hard ceiling `BOOK_HARD_CEILINGS.max_index_pct` is 27% and stays so. A builder in index mode may name
+`index_ceiling_pct` (27 < x <= RESEARCH_INDEX_CEILING_PCT, 97%: the 100% exposure ceiling less the 3% reserve) to
+be validated against the hard ceilings with ONLY `max_index_pct` raised to x. Every other ceiling is unchanged.
+Only `risk/index_core.py` (research only, imported by no live module) sets it; the live builders never do.
 """
 
 from __future__ import annotations
@@ -62,11 +68,12 @@ import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
-from kaibot.risk.gate import BookLimits, gap_loss_ps, validate_book
+from kaibot.risk.gate import BOOK_HARD_CEILINGS, BookLimits, gap_loss_ps, validate_book
 from kaibot.strategies.base import TargetList
 
 Key = tuple[str, str]  # (strategy, symbol)
 UNKNOWN_SECTOR = "unknown"
+RESEARCH_INDEX_CEILING_PCT = 97.0  # the most a research index cap may be (module docstring); never a live value
 
 
 @dataclass(frozen=True)
@@ -164,9 +171,20 @@ class PortfolioBuilder:
     cash_reserve: float | None = None  # ranked: purchases fit in cash + sales - this x equity (None: no cash limit)
     index_symbol: str | None = None  # #458: the index fund of an index core (None: no index mode, as before)
     sleeve_budget_pct: float | None = None  # #458/#459: everything but the index at most this % of equity
+    index_ceiling_pct: float | None = None  # research only (module docstring): the index cap's ceiling, else 27
 
     def __post_init__(self) -> None:
-        validate_book(self.limits)
+        ceil = BOOK_HARD_CEILINGS
+        if self.index_ceiling_pct is not None:
+            x = self.index_ceiling_pct
+            if self.index_symbol is None:
+                raise ValueError("index_ceiling_pct is for the index mode (a research index core) only")
+            if isinstance(x, bool) or not isinstance(x, int | float) or not math.isfinite(x) \
+                    or not BOOK_HARD_CEILINGS.max_index_pct < x <= RESEARCH_INDEX_CEILING_PCT:
+                raise ValueError(f"index_ceiling_pct={x!r} must be above {BOOK_HARD_CEILINGS.max_index_pct:g} and "
+                                 f"at most {RESEARCH_INDEX_CEILING_PCT:g}")
+            ceil = replace(BOOK_HARD_CEILINGS, max_index_pct=float(x))
+        validate_book(self.limits, ceil)
         if not (self.k > 0 and math.isfinite(self.k)) or not (0 <= self.band < 1):
             raise ValueError("k must be > 0 and band in [0, 1)")
         if self.fill not in ("pro_rata", "ranked"):

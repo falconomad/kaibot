@@ -19,6 +19,10 @@ Two parts, each one continuous $100k account per configuration through `engine.d
 Before any run, `check_budgets` compares the pre-registered budget under `books:` of config/gate_v3.yaml with the
 budget and the scaling the engine is about to run (ticket #547's check), and stops on any difference.
 
+`--index-cap 80` (Amendment 3 of docs/prereg/index_core_trend_momentum.md, Product 25 Nov 2026; research only):
+the book with its core allowed up to 80% of the book at Hunter (Balanced 57, Careful 27), as scripts/index_core.py.
+The sleeve test is not changed by it. Only the pre-registered values are taken (27, the config; 80).
+
 Trials: n_trials 1 for the judged book and each of its five neighbours (six configurations); 0 for every other row
 (the sleeve's runs re-run configurations `trend_momentum` already counted; cost, fill and level reports).
 """
@@ -68,9 +72,9 @@ def book_of(budget: float = BUDGET, core: IndexCore | None = None, name: str = B
     return OnCore(mom.VERSIONS[SLEEVE_RULE], core or IndexCore(), budget, name=name)
 
 
-def book_builder(book: OnCore, level: str, cfg, profiles):
+def book_builder(book: OnCore, level: str, cfg, profiles, index_cap: float | None = None):
     name_pct = float(profiles[SLEEVE_LEVEL].max_position_pct) * book.budget_pct / 100
-    return ic.sleeve_builder(level, book.budget_pct, book.atr_risk, name_pct, cfg)
+    return ic.sleeve_builder(level, book.budget_pct, book.atr_risk, name_pct, cfg, index_cap_pct=index_cap)
 
 
 def check_budgets(gate: g3.GateV3, book: OnCore, builder) -> dict:
@@ -109,6 +113,8 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--fixture", action="store_true")
     ap.add_argument("--control-runs", type=int, default=default_runs,
                     help=f"random control runs of the sleeve test (default {default_runs}, config/gate_v3.yaml)")
+    ap.add_argument("--index-cap", type=float, choices=core_run.INDEX_CAPS, default=None,
+                    help="the core's index cap at Hunter, %% of the book (pre-registered: 27, the config; 80)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--trials", default=None)
     holdout.add_argument(ap)
@@ -119,8 +125,10 @@ def main(argv: list[str] | None = None) -> dict:
     holdout.enforce(script=__file__, end=a.end, rule=BOOK, opening=a.open_holdout, data=data_dir)
     pre_book, pre_sleeve = prereg_mod.load(BOOK), prereg_mod.load(SLEEVE)
     cfg, profiles = ic.load(), load_profiles()
+    override = core_run.cap_override(a.index_cap, cfg)
+    index_cap = override if override is not None else cfg.levels[JUDGED].max_index_pct
     base = book_of()
-    check = check_budgets(gate, base, book_builder(base, JUDGED, cfg, profiles))
+    check = check_budgets(gate, base, book_builder(base, JUDGED, cfg, profiles, override))
     t0 = time.time()
     if a.fixture:
         market, info = dr.load_fixture(dr.FIXTURE)
@@ -140,13 +148,16 @@ def main(argv: list[str] | None = None) -> dict:
                       cost_model=core_run.COST_MODEL)  # v2 (#572; both preregs' amendments)
         st = dr.run_stats(r)
         runs[label] = (r, {"label": label, "part": part, "spec": strat.name, "level": level, "fill": fill,
-                           "cost": cost, "n_trials": n_trials, **st, **core_run.index_stats(r),
+                           "cost": cost, "n_trials": n_trials,
+                           "max_index_pct": builder.limits.max_index_pct if builder is not None else None,
+                           **st, **core_run.index_stats(r),
                            "runtime_s": round(time.time() - t, 1)})
         print(f"  {label}: CAGR {st['cagr_pct']}%, max drawdown {st['max_drawdown_pct']}%, "
               f"{runs[label][1]['runtime_s']}s", flush=True)
         return r
 
-    print(f"{BOOK}: engine + SimBroker, {data.dates[i0]} to {data.dates[i1]}, universe {universe}", flush=True)
+    print(f"{BOOK}: engine + SimBroker, {data.dates[i0]} to {data.dates[i1]}, universe {universe}, "
+          f"index cap {index_cap:g}% at Hunter", flush=True)
     # 1. the sleeve test
     rule = mom.VERSIONS[SLEEVE_RULE]
     sl = one("sleeve|1x", rule, SLEEVE_LEVEL, part="sleeve")
@@ -157,16 +168,17 @@ def main(argv: list[str] | None = None) -> dict:
                              100_000.0) if a.control_runs > 0 else None
     # 2. the book
     for c in COSTS:
-        one(f"book|{c:g}x", base, JUDGED, book_builder(base, JUDGED, cfg, profiles), cost=c, n_trials=int(c == 1.0))
-    one("book|stress", base, JUDGED, book_builder(base, JUDGED, cfg, profiles), fill="stress")
+        one(f"book|{c:g}x", base, JUDGED, book_builder(base, JUDGED, cfg, profiles, override), cost=c,
+            n_trials=int(c == 1.0))
+    one("book|stress", base, JUDGED, book_builder(base, JUDGED, cfg, profiles, override), fill="stress")
     nb_books = {"budget5": book_of(5.0, name=f"{BOOK}~budget5"),
                 **{k: book_of(core=c, name=f"{BOOK}~{k}") for k, c in
                    ((n.name.split("~")[1], n) for n in IndexCore().neighbours()) if k in ("nocap", "vol12", "vol18",
                                                                                       "lookback63")}}
     for k, b in nb_books.items():
-        one(f"book_neighbour|{k}", b, JUDGED, book_builder(b, JUDGED, cfg, profiles), n_trials=1)
+        one(f"book_neighbour|{k}", b, JUDGED, book_builder(b, JUDGED, cfg, profiles, override), n_trials=1)
     for level in ("balanced", "conservative"):
-        one(f"book_level|{level}", base, level, book_builder(base, level, cfg, profiles))
+        one(f"book_level|{level}", base, level, book_builder(base, level, cfg, profiles, override))
 
     spy_tr = data.spy_tr[i0:i1 + 1] if data.spy_tr is not None else None
     have_tr = spy_tr is not None and np.isfinite(np.asarray(spy_tr, dtype=float)).all()
@@ -198,9 +210,11 @@ def main(argv: list[str] | None = None) -> dict:
         tbill=bills, as_of=run_at, ran_budgets=check["engine"])  # #547: the budgets the engine ran
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
-    tag = f"{BOOK}_{JUDGED}_{universe}_{run_at.strftime('%Y%m%dT%H%M%S')}"
+    cap_tag = "" if override is None else f"_cap{override:g}"
+    tag = f"{BOOK}_{JUDGED}_{universe}{cap_tag}_{run_at.strftime('%Y%m%dT%H%M%S')}"
     out = {"run_at": run_at.isoformat(timespec="seconds"), "code_sha": code_sha, "book": BOOK, "sleeve": SLEEVE,
-           "prereg_sha256": {BOOK: pre_book.sha256, SLEEVE: pre_sleeve.sha256}, "gate_sha": gate.sha,
+           "index_cap_pct": index_cap, "prereg_sha256": {BOOK: pre_book.sha256, SLEEVE: pre_sleeve.sha256},
+           "gate_sha": gate.sha,
            "holdout": holdout.stamp(None), "budgets": check, "universe": universe, "data": info,
            "window": [str(data.dates[i0]), str(data.dates[i1])], "control_runs": a.control_runs,
            "source": source, "rows": [row for _, row in runs.values()], "control": control,
@@ -220,7 +234,9 @@ def main(argv: list[str] | None = None) -> dict:
                 "universe_mode": universe, "code_sha": code_sha,
                 "prereg_sha256": out["prereg_sha256"][name], "gate_sha": gate.sha, "n_trials": row["n_trials"],
                 "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"],
-                           "budget_pct": BUDGET if name == BOOK else None},
+                           "budget_pct": BUDGET if name == BOOK else None,
+                           "index_cap_pct": index_cap if name == BOOK else None,
+                           "max_index_pct": row["max_index_pct"]},
                 "window": out["window"],
                 "metrics": {"cagr_pct": row["cagr_pct"], "daily_sharpe_ann": row["sharpe"],
                             "max_drawdown_pct": row["max_drawdown_pct"], "net_return_pct": row["return_pct"]}})
