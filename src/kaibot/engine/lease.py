@@ -314,21 +314,26 @@ class EngineLease:
         outage (docs/ops/failsafe.md): the venue bounds it (shares reserved by open sells, no shorting, one client
         order id). What is left: the milliseconds between this answer and the venue's (the venue knows no token).
 
-        Audit 2, 5.8: a renewal that FAILED (no answer, not "not ours") is tried once more before an entry is
+        Audit 2, 5.8: a renewal that FAILED (no answer, not "not ours") is tried once more before an ENTRY is
         refused, when the first try failed within `FENCE_RETRY_WITHIN_S` (a blip: a refused connection, a 503).
         A try that took longer (a timeout) is not repeated, so the fence answers within that bound plus one
-        renewal call (the store's own lease timeout). A second "not ours" raises LeaseLost as the first would."""
+        renewal call (the store's own lease timeout). A reduction goes out at once, as before, without a second
+        try to wait for. A second "not ours" raises LeaseLost as the first would."""
         if self.lost:
             raise LeaseLost("The engine lease is no longer ours: no order is sent.")
         if self.held:
             t0 = self.mono()
             self.renew(force=True)  # raises LeaseLost when the tenure is gone
-            if not self.ok and self.held and self.last_error is not None \
-                    and self.mono() - t0 <= FENCE_RETRY_WITHIN_S:
-                log.warning("engine lease renewal before an order failed: trying once more")
-                self.renew(force=True)
             if self.ok:
                 return None
+            if reducing() if callable(reducing) else reducing:
+                return None  # a reduction goes out without the proof: no second try to wait for
+            if self.held and self.last_error is not None and self.mono() - t0 <= FENCE_RETRY_WITHIN_S:
+                log.warning("engine lease renewal before an entry failed: trying once more")
+                self.renew(force=True)  # raises LeaseLost when the tenure is gone
+                if self.ok:
+                    return None
+            return NOT_PROVED
         if reducing() if callable(reducing) else reducing:
             return None
         return NOT_PROVED

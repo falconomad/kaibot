@@ -100,7 +100,7 @@ def test_a_sale_is_not_held_by_the_retry_either():
     store = Flaky(t, fails=5)
     fb = FencedBroker(Venue(), lease_on(store, t))
     fb.submit(OrderRequest("B", "sell", 10, "market", "day", "kb1-x-B-20260803-sell-1"))
-    assert fb.inner.calls == [("sell", "B")]
+    assert fb.inner.calls == [("sell", "B")] and store.renews == 1  # out at once: no second try before a sale
 
 
 # ---------------------------------------------------------------- the engine: the buy goes out once at 15:52
