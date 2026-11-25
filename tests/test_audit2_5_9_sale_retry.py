@@ -21,14 +21,27 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "dst"))
 
+import world  # noqa: E402
 from scenarios import quiet  # noqa: E402
 from world import D1, D2, D3, NY, World, run_scenario  # noqa: E402
 
 from kaibot.broker.faulty import Forced  # noqa: E402
 from kaibot.engine import live_daily as ld  # noqa: E402
+from kaibot.engine.core import Engine  # noqa: E402
 from kaibot.engine.targets import Target  # noqa: E402
+from kaibot.risk.profiles import load_profiles  # noqa: E402
 
 DAY2, DAY3 = D2.replace("-", ""), D3.replace("-", "")
+
+
+@pytest.fixture(params=["book_loop", "intraday"], autouse=True)
+def engine_kind(request, monkeypatch):
+    """The DST world builds the intraday engine; the live process runs `Engine(intraday=False)` (book_loop.py).
+    The daily path under test is the same object in both: every scenario here runs on both."""
+    if request.param == "book_loop":
+        none = {level: [] for level in load_profiles()}
+        monkeypatch.setattr(world, "Engine", lambda *a, **k: Engine(*a, intraday=False, strategies=none, **k))
+    return request.param
 
 
 def venue_orders(w, symbol, side):
