@@ -682,3 +682,18 @@ def test_with_real_git_a_stray_change_is_left_exactly_as_it_was(tmp_path):
 def test_a_checkout_left_on_a_runner_branch_pauses_the_runner(tmp_path):
     res, _, popen = tick(tmp_path, [job()], run=FakeRun(branch="runner/x"))
     assert "_paused" in res and popen.cmds == []
+
+
+def test_a_non_utf8_file_name_is_held_and_the_warning_is_still_written_and_posted(tmp_path):
+    odd = RESULTS + "caf\udce9.md"  # what git status gives for a latin-1 name, decoded with surrogateescape
+    run = FakeRun(gh_ok=True, job_changes={odd: "??"})
+    res, run, _ = tick_in(tmp_path, [export_job()], run)
+    assert run.commits == [] and "\\udce9" in run.posted[0][1]
+    assert "\\udce9" in (tmp_path / "state" / "out" / "results-export-2026-11-25.md").read_text()
+
+
+def test_a_corrupt_paused_file_does_not_crash_the_tick(tmp_path):
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / rr.PAUSED).write_text("{not json")
+    res, _, _ = tick(tmp_path, [job()], run=FakeRun(changes={"x.md": "??"}))
+    assert "_paused" in res

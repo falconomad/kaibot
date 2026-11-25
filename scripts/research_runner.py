@@ -460,7 +460,9 @@ def _file_problem(root: Path, rel: str, home: str | None) -> str | None:
 
 
 def _fenced(lines: list[str]) -> str:
-    text = redact("\n".join(lines)).replace("`", "'")
+    # a non-UTF-8 file name arrives surrogate-escaped from git: shown as \udcxx, never written out raw
+    text = "\n".join(lines).encode("utf-8", "backslashreplace").decode("utf-8")
+    text = redact(text).replace("`", "'")
     return f"```text\n{text}\n```"
 
 
@@ -576,8 +578,9 @@ def paused_reason(root: Path, state: Path, run=subprocess.run) -> str | None:
         return f"the checkout is on the runner's branch {branch!r}, not main"
     if paths is None or paths:
         what = "git status failed" if paths is None else f"{len(paths)} changed path(s)"
-        p = state / PAUSED
-        held = json.loads(p.read_text()).get("job") if p.exists() else None
+        held = None
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            held = json.loads((state / PAUSED).read_text()).get("job")
         return f"the checkout is not clean ({what}{f', held after job {held}' if held else ''})"
     with contextlib.suppress(FileNotFoundError):
         (state / PAUSED).unlink()
