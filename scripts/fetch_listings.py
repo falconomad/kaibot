@@ -35,6 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.engine.config import load_env_file  # noqa: E402
 from kaibot.ingest import listings_pit as lp  # noqa: E402
 from kaibot.ingest.alt import listings as ls  # noqa: E402
@@ -195,7 +196,7 @@ def report(root: Path, now: datetime) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--env", default=os.environ.get("KAIBOT_ENV_FILE") or DEFAULT_ENV,
+    ap.add_argument("--env", default=switches.text("KAIBOT_ENV_FILE") or DEFAULT_ENV,
                     help="env file with SEC_USER_AGENT (kept outside the repo)")
     ap.add_argument("--since", type=date.fromisoformat, default=date(2016, 1, 1))
     ap.add_argument("--data", default=str(ROOT / "data" / "listings"))
@@ -207,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--eligible", type=date.fromisoformat, metavar="FIRST_SESSION")
     g.add_argument("--show", metavar="SYMBOL")
     g.add_argument("--report", action="store_true")
-    ap.add_argument("--root", default=os.environ.get("KAIBOT_DATA_DIR") or str(ROOT / "data"),
+    ap.add_argument("--root", default=switches.text("KAIBOT_DATA_DIR") or str(ROOT / "data"),
                     help="--show, --report: the data folder the nightly watch writes under")
     a = ap.parse_args(argv)
     data = Path(a.data).expanduser()

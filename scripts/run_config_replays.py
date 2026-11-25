@@ -22,6 +22,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.engine.userconfig import ConfigError, tighten  # noqa: E402
 from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.replay.config_replay import DESIGN, NoData, replay_config  # noqa: E402
@@ -72,7 +73,7 @@ def process(store, data_dir: Path, *, replay=replay_config, now=None) -> list[di
             continue
         trial = {"strategy": "dip_reversal", "params": {"kind": "config", "run_id": j["run_id"],
                                                        "config_version": j["config_version"], "body": c["body"]},
-                 "code_sha": os.environ.get("KAIBOT_CODE_SHA", "unknown"), "window_start": DESIGN[0],
+                 "code_sha": switches.text("KAIBOT_CODE_SHA") or "unknown", "window_start": DESIGN[0],
                  "window_end": DESIGN[1], "metrics": {k: res[k] for k in ("trades", "net_return_pct",
                                                                           "t_stat_per_trade", "daily_sharpe_ann")}}
         store.insert("trial", trial, returning=False)

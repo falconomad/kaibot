@@ -11,7 +11,6 @@ turnover filter is applied. VWAP is IEX-based.
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -41,8 +40,10 @@ INDEX_BLOCKING = frozenset({STALE, NO_BARS, BAD_PRICE, BAR_GAP})
 
 def data_checks_on(env: Mapping[str, str] | None = None) -> bool:
     """Whether the report-only data checks run (M12 3.11). Off by default: only KAIBOT_DATA_CHECKS=1 (or true,
-    yes, on) turns them on."""
-    return (os.environ if env is None else env).get(DATA_CHECKS_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+    yes, on) turns them on. Parsed by kaibot.common.switches (M10 1.23), as loaded at start."""
+    from kaibot.common import switches
+
+    return bool(switches.get(DATA_CHECKS_ENV, env))
 
 
 def data_block_checks(env: Mapping[str, str] | None = None) -> frozenset[str]:

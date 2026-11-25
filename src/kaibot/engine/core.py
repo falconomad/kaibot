@@ -159,10 +159,11 @@ def _fingerprint() -> str:
 
 
 def code_sha() -> str:
-    import os
+    from kaibot.common import switches  # M10 1.23 (#448): as loaded at start
 
-    if os.environ.get("KAIBOT_CODE_SHA"):
-        return os.environ["KAIBOT_CODE_SHA"]
+    sha = switches.get("KAIBOT_CODE_SHA")
+    if sha:
+        return sha
     try:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], text=True, stderr=subprocess.DEVNULL

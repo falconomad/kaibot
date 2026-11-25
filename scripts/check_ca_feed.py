@@ -26,6 +26,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 
 CA_PATH = "/v1/corporate-actions"
 
@@ -132,7 +133,7 @@ def check(case: Case, get, fields, types) -> tuple[bool, list[str]]:
 
 def main(argv: list[str] | None = None, get: Callable[[str, dict], dict] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--env", default=os.environ.get("KAIBOT_ENV_FILE"), help=".env with the Alpaca keys")
+    ap.add_argument("--env", default=switches.text("KAIBOT_ENV_FILE"), help=".env with the Alpaca keys")
     a = ap.parse_args(argv)
     if get is None:
         from kaibot.engine.alpaca import AlpacaData

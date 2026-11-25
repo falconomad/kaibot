@@ -13,7 +13,6 @@ On the Mac, from the repo root:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +21,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.ingest.certs import CERT_HINT, ensure_ca_bundle  # noqa: E402
 
 DEFAULT_ENV = "~/Projects/kaibot-secrets/.env"
@@ -46,7 +46,7 @@ def load_candidates(path: Path, group: str) -> tuple[str, list[str]]:
 
 def main(argv: list[str] | None = None, api=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--env", default=os.environ.get("KAIBOT_ENV_FILE") or DEFAULT_ENV, help=".env with the Alpaca keys")
+    ap.add_argument("--env", default=switches.text("KAIBOT_ENV_FILE") or DEFAULT_ENV, help=".env with the Alpaca keys")
     ap.add_argument("--group", default="high_beta_growth")
     ap.add_argument("--candidates", default=str(ROOT / "config" / "test_group_candidates.yaml"))
     ap.add_argument("--symbols", default="", help="comma-separated override of the candidates file")

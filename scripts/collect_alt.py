@@ -27,6 +27,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.engine.config import load_env_file  # noqa: E402
 from kaibot.ingest.alt import finra, form4, gdelt, listings, store  # noqa: E402  (finra: only for its refusal)
 
@@ -72,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--source", default="all", choices=[*RUNNERS, "all", "finra"],
                     help="finra is switched off (#623) and is refused")
     ap.add_argument("--date", type=date.fromisoformat, help="collect just this date (YYYY-MM-DD)")
-    ap.add_argument("--data", default=os.environ.get("KAIBOT_DATA_DIR") or str(ROOT / "data"))
+    ap.add_argument("--data", default=switches.text("KAIBOT_DATA_DIR") or str(ROOT / "data"))
     ap.add_argument("--listing-notice", action="append", default=[], metavar="URL",
                     help="listings: also read this Nasdaq Trader notice page (https://www.nasdaqtrader.com/...)")
     a = ap.parse_args(argv)

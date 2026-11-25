@@ -24,7 +24,6 @@ the shared `alpaca` budget (config/sources.yaml). Never prints key values.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -36,6 +35,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 from fetch_history import DEFAULT_ENV, load_env, select_symbols  # noqa: E402
 
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.common.http import HttpError  # noqa: E402
 from kaibot.ingest import daily_bars as db  # noqa: E402
 from kaibot.ingest.alpaca_history import ET, Alpaca  # noqa: E402
@@ -94,7 +94,7 @@ def print_status(root: Path, reqs: list[db.Request] | None = None) -> None:
 
 def main(argv: list[str] | None = None, api=None, now: datetime | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--env", default=os.environ.get("KAIBOT_ENV_FILE") or DEFAULT_ENV, help=".env with the Alpaca keys")
+    ap.add_argument("--env", default=switches.text("KAIBOT_ENV_FILE") or DEFAULT_ENV, help=".env with the Alpaca keys")
     ap.add_argument("--data", default="data")
     ap.add_argument("--start", default=db.START.isoformat())
     ap.add_argument("--universe", default=str(ROOT / "config" / "universe_history.yaml"))

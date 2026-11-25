@@ -58,17 +58,21 @@ class Settings:
         ]
         if missing:
             raise SystemExit(f"missing settings: {', '.join(missing)} (put them in the .env file)")
-        try:  # M10 1.23 (#448): every KAIBOT_* switch parsed and validated here, at start (fail closed)
-            sw = switches.load()
-            data_dir, engine_name = sw.data_dir, sw.engine_name
+        # M10 1.23 (#448): every KAIBOT_* switch parsed, validated and loaded once, here, at start (fail closed).
+        # From here on every reader in this process answers from that one object (common/switches.py).
+        try:
+            sw = switches.start()
         except switches.SwitchError as e:
             if strict_switches:
                 raise SystemExit(str(e)) from None
-            try:
-                data_dir, engine_name = switches.value("KAIBOT_DATA_DIR"), switches.value("KAIBOT_ENGINE_NAME")
-            except switches.SwitchError as e2:
-                raise SystemExit(str(e2)) from None
+            sw = switches.start(strict=False)
+            bad = switches.refused()
+            own = [bad[n] for n in ("KAIBOT_DATA_DIR", "KAIBOT_ENGINE_NAME") if n in bad]
+            if own:
+                switches.reset()
+                raise SystemExit(own[0]) from None
             logging.getLogger("kaibot.engine").error("%s (the watchdog starts anyway: it reads none of them)", e)
+        data_dir, engine_name = sw.data_dir, sw.engine_name
         base = os.environ.get("ALPACA_BASE_URL", PAPER_TRADING_URL).rstrip("/")
         if base != PAPER_TRADING_URL:
             raise SystemExit("Kaibot is paper-only: ALPACA_BASE_URL must be the paper endpoint")

@@ -42,6 +42,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from kaibot.broker.protocol import BrokerError, OrderRequest  # noqa: E402
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 
 NY = ZoneInfo("America/New_York")
 OUT = ROOT / "docs" / "ops" / "alpaca_idempotency_probe.md"
@@ -199,7 +200,7 @@ def report(res: dict, when: datetime) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--env", default=os.environ.get("KAIBOT_ENV_FILE"), help="the engine's .env file")
+    ap.add_argument("--env", default=switches.text("KAIBOT_ENV_FILE"), help="the engine's .env file")
     ap.add_argument("--symbol", default="SPY")
     ap.add_argument("--limit-price", type=float, default=None, help="default: half the stock's last IEX bid")
     ap.add_argument("--watch", type=float, default=15.0, help="seconds each lookup is polled")

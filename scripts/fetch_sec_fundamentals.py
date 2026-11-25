@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import os
 import re
 import sys
 import time
@@ -33,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from kaibot.common import http  # noqa: E402
+from kaibot.common import http, switches  # noqa: E402  (switches: M10 1.23, KAIBOT_* as declared there)
 from kaibot.ingest import earnings_sec as sec  # noqa: E402
 from kaibot.ingest import sec_fundamentals as sf  # noqa: E402
 from kaibot.ingest.sp500_pit import Membership  # noqa: E402
@@ -44,8 +43,7 @@ _UA = re.compile(r"^[^\s@][^@\n]*\s+[^\s@]+@[^\s@]+\.[A-Za-z]{2,}\s*$")
 
 def user_agent(env_file: str | None, environ=None) -> str:
     """KAIBOT_SEC_USER_AGENT from the environment, else from the env file (only that one line is read)."""
-    environ = os.environ if environ is None else environ
-    ua = (environ.get(UA_VAR) or "").strip()
+    ua = (switches.text(UA_VAR, environ) or "").strip()
     if not ua and env_file and Path(env_file).is_file():
         for line in Path(env_file).read_text().splitlines():
             k, sep, v = line.partition("=")
