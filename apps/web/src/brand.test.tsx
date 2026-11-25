@@ -13,7 +13,7 @@ import ts from "typescript";
 import { BRAND, NAME, REPO_DIR, brandText } from "./brand/brand";
 import { APP_COLOUR, ICONS, MANIFEST_PATH, backgroundOf, brandHtml, manifest, manifestJson } from "./brand/assets";
 import lock from "./brand/icons.lock.json";
-import { IDLE, LARGE, Logo, ROLES, TIMING, mark, resetLogoMotion } from "./components/Logo";
+import { IDLE, Logo, ROLES, SIZE, TIMING, mark, resetLogoMotion } from "./components/Logo";
 import { capsule, circle, drawnFrom } from "./brand/mark";
 import wordDark from "./brand/logo/wordmark-on-dark.svg?raw";
 import wordLight from "./brand/logo/wordmark-on-light.svg?raw";
@@ -193,9 +193,14 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
       "./pages/SignIn.tsx"]);
   });
 
-  it("the size comes from the stylesheet: 26 px on phones, 28 px above, in a 64 px and a 72 px header", () => {
-    expect(css).toMatch(/\.logo \{ display: block; flex: none; height: 28px;/);
-    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*\.logo \{ height: 26px; \}/);
+  it("the size comes from the stylesheet: 30 px on phones, 32 px above, in a 64 px and a 72 px header", () => {
+    expect(SIZE.header).toEqual({ phone: 30, wide: 32 });
+    expect(css).toMatch(/\.logo \{ display: block; flex: none; height: 32px;/);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*\.logo \{ height: 30px; \}/);
+    // the header's padding leaves at least 16 px above and below the logo, on phones and above
+    expect((64 - SIZE.header.phone) / 2).toBeGreaterThanOrEqual(16);
+    expect((72 - SIZE.header.wide) / 2).toBeGreaterThanOrEqual(16);
+    expect(css).toMatch(/@media \(min-width: 761px\) \{[^@]*header\.top \.brand \{ margin-right: 8px; \}/);
     expect(css).toMatch(/header\.top \{[^}]*min-height: 72px;/);
     expect(css).toMatch(/header\.top \{ flex-wrap: nowrap; min-height: var\(--topbar\);/);
     expect(tokens).toMatch(/--topbar: 64px;/);
@@ -267,11 +272,13 @@ describe("the logo's idle motion: the point's hop and the arm's redraw in turn (
     expect(IDLE).toEqual({ cycle: 4, offset: 2, after: 2 });
     expect(rule(".logo-hop, .logo-arm")).toBe(` will-change: transform; animation: kb-logo-hop ${IDLE.cycle}s var(--ease) ${IDLE.after}s infinite; `);
     expect(rule(".logo-arm")).toBe(" display: block; width: 100%; height: 100%; animation-name: kb-logo-arm; ");
-    expect(rule(".logo-hop")).toBe(" position: absolute; transform-origin: 50% 100%; ");
+    // the point's layer has the letters' own box, like the arm's and the leg's, so it is drawn exactly where it rests
+    expect(rule(".logo-clip, .logo-leg, .logo-hop")).toBe(" position: absolute; left: 0; top: 0; width: 100%; height: 100%; ");
+    expect(rule(".logo-hop")).toBe(" overflow: visible; ");
     for (const name of ["kb-logo-hop", "kb-logo-arm"]) {
       expect([...frames(name).matchAll(/([a-z-]+)\s*:/g)].every((m) => ["transform", "animation-timing-function"].includes(m[1])), name).toBe(true);
     }
-    expect(frames("kb-logo-hop")).toContain("translateY(-60%) scale(.94, 1.06)"); // up 60% of the point: 3.1-4.2 px
+    expect(frames("kb-logo-hop")).toContain("translateY(var(--up)) scale(.94, 1.06)"); // up 60% of the point (Logo.tsx)
     expect(frames("kb-logo-arm")).toContain("translate(var(--fx), var(--fy))"); // back along its own line, as the intro's draw
     expect(css).not.toMatch(/kb-logo-hop-rare|\.logo-hop\.rare/);
   });
@@ -317,13 +324,17 @@ describe("the logo's idle motion: the point's hop and the arm's redraw in turn (
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
   });
 
-  it("the sign-in (and /register) logo is 1.25 times the header's, on phones too", () => {
-    expect(LARGE).toBe(1.25);
+  it("the sign-in (and /register) logo is 44 px, and 40 px on phones, larger than the header's", () => {
+    expect(SIZE.large).toEqual({ phone: 40, wide: 44 });
     const big = Number(/\n\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
     const bigPhone = Number(/@media \(max-width: 760px\) \{[^@]*\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
-    expect(Math.round((big / 28) * 1000) / 1000).toBe(LARGE);
-    expect(Math.round((bigPhone / 26) * 1000) / 1000).toBe(LARGE);
-    for (const html of [render(<SignIn />), render(<Register />)]) expect(html).toContain('class="logo logo-word logo-lg');
+    expect([bigPhone, big]).toEqual([SIZE.large.phone, SIZE.large.wide]);
+    expect(SIZE.large.phone).toBeGreaterThan(SIZE.header.phone);
+    expect(SIZE.large.wide).toBeGreaterThan(SIZE.header.wide);
+    expect(css).toMatch(/\n\.brand-row \{ display: flex; align-items: center; gap: 12px; margin-bottom: 4px; \}/);
+    for (const html of [render(<SignIn />), render(<Register />)]) {
+      expect(html).toMatch(/<div class="brand-row">(<span class="logo-box">)?<svg class="logo logo-word logo-lg/);
+    }
     const run = paperRun();
     const header = render(<Shell />, { route: "*", seeds: [{ key: ["runs"], data: [run] }, { key: ["overview", 1], data: emptyOverview(run) }] });
     expect(header).not.toContain("logo-lg");

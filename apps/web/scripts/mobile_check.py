@@ -310,8 +310,8 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         fails.append(f"top bar is {header} px on a phone (want 64)")
     hdr = pg.evaluate(HEADER_JS)
     print("header parts:", hdr)
-    if not 25.5 <= hdr["logo"] <= 26.5 or hdr["pill"] != 36 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
-        fails.append(f"header parts on a phone (logo 26, Paper 36, chip 36 drawn and 44 to tap, home link 44): {hdr}")
+    if not 29.5 <= hdr["logo"] <= 30.5 or hdr["pill"] != 36 or hdr["chip"] != 36 or hdr["chipTap"] < 44 or hdr["homeTap"] < 44:
+        fails.append(f"header parts on a phone (logo 30, Paper 36, chip 36 drawn and 44 to tap, home link 44): {hdr}")
     if hdr["rows"] != 1 or abs(hdr["hug"]) > 0.5:
         fails.append(f"header: one row, and the logo's box must hug its letters: {hdr}")
     if [t[0] for t in tabs] != ["Home", "Positions", "Activity", "Engine", "More"] or any(t[1] < 48 for t in tabs):
@@ -367,7 +367,7 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     if running or early or paths != 10:
         fails.append(f"reduced motion: {running} animations run, the logo moved {early}, or its mark is not whole ({paths} paths)")
     ctx.close()
-    # 1280 px: the header is 72 px, the wordmark 28 px.
+    # 1280 px: the header is 72 px, the wordmark 32 px.
     ctx = context(browser, now, viewport={"width": 1280, "height": 800})
     ctx.add_init_script(session)
     ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
@@ -378,8 +378,8 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     wide = pg.evaluate("[Math.round(document.querySelector('header.top').getBoundingClientRect().height), "
                        "Math.round(document.querySelector('header.top .logo').getBoundingClientRect().height)]")
     print("1280 px: header", wide[0], "px, wordmark", wide[1], "px")
-    if wide != [72, 28]:
-        fails.append(f"at 1280 px the header is {wide[0]} px and the wordmark {wide[1]} px (want 72 and 28)")
+    if wide != [72, 32]:
+        fails.append(f"at 1280 px the header is {wide[0]} px and the wordmark {wide[1]} px (want 72 and 32)")
     ctx.close()
 
 
