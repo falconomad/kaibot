@@ -1693,17 +1693,17 @@ class LiveDaily:
         the rule's next decision sizes the name anew (only a session without a new target list asks). Names in
         `skip` (sold anyway) are left out, and so is a name the ledger booked a split for since that send (the
         target's shares are on the old basis): it waits for the next decision, as before."""
-        last = None
+        last, rid = None, self.account.run_id()
         for b in self._entries("md_send"):
             if b.get("strategy") == rule and b.get("session") < str(session):
                 last = b
-        if last is None:
+        if last is None or last.get("run_id") != rid:  # a reduction of another run is never this run's to send
             return []
         cuts = [(s, int(q), w) for s, q, p, w in last["targets"] if p == "resize" and int(q) > 0 and s in held
                 and s not in skip and float(held[s][0]) > int(q) + 1e-9]
         if not cuts:
             return []
-        split = {str(b.get("symbol")) for b in self._entries("split") if b.get("run_id") == self.account.run_id()
+        split = {str(b.get("symbol")) for b in self._entries("split") if b.get("run_id") == rid
                  and last["session"] < str(b.get("ex_date"))[:10] <= str(session)}
         out = [Target(rule, s, q, "resize", {"why": w}) for s, q, w in cuts if s not in split]
         if out or split:
