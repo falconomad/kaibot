@@ -103,16 +103,23 @@ def test_the_answers_are_the_same_in_another_process():
 
 
 def test_a_tag_ships_only_with_the_measured_bar():
+    """v1 (300 headlines) shipped analyst_up alone; sample v2 (860, across years) is the newer measurement and SHIPPED
+    is its outcome, recomputed here from the committed files, not copied."""
     res = M.measure()
     assert res["n"] == 300
-    assert set(res["shipped"]) == set(T.SHIPPED)
-    assert set(T.NOT_SHIPPED) == set(T.ALL_TAGS) - set(T.SHIPPED)
-    for tag in T.SHIPPED:
-        v = res["tags"][tag]
-        assert v["positives"] >= M.MIN_POSITIVES and v["precision"] >= M.MIN_PRECISION, (tag, v)
+    assert set(res["shipped"]) == {"analyst_up"} and set(res["shipped"]) <= set(T.SHIPPED)
     for tag, v in res["tags"].items():  # fewer than 20 labelled positives never ships, whatever the figure
         assert v["ships"] is False or v["positives"] >= 20, tag
         assert len(v["misses"]) <= M.WORST
+    v2 = M.measure_v2()
+    assert v2["n"] == 860
+    assert set(v2["shipped"]) == set(T.SHIPPED) == set(json.loads((M.HERE / "measure_v2.json").read_text())["shipped"])
+    assert set(T.NOT_SHIPPED) == set(T.ALL_TAGS) - set(T.SHIPPED)
+    for tag in T.SHIPPED:
+        v = v2["tags"][tag]
+        assert v["positives"] >= M.MIN_POSITIVES and v["precision"] >= M.MIN_PRECISION, (tag, v)
+    for tag in T.NOT_SHIPPED:
+        assert v2["tags"][tag]["ships"] is False, tag
 
 
 def test_the_measured_numbers_of_the_readme():
@@ -170,6 +177,7 @@ def test_control_characters_do_not_change_the_answer():
     dirty = "Citigroup​ Adjusts\tPrice  Target on Acme‮ to $440 From $410\x00"
     assert T.tags(plain) == T.tags(dirty) == {"analyst_up"}
     assert T.tags(plain.upper()) == T.tags(plain.lower()) == {"analyst_up"}
+    assert T.tags("JP Morgan Downgrades Acme to Neutral") == {"analyst_down"}  # shipped since sample v2
 
 
 def test_with_tags_is_a_read_time_copy():

@@ -96,6 +96,70 @@ def test_the_four_tags_and_only_them():
     assert F.alpaca_row(a("Acme Reports Q3 Results"), frozenset(), MON_11ET)["tags"] == []  # results is not shipped
 
 
+def test_one_tag_list_from_the_measurement_to_the_table_and_the_page():
+    """#379: the tags a headline row may carry are one list, kept in step across the layers: the measurement
+    (tagset/measure_v2.json), the tagger (tags.SHIPPED), the feed (FEED_TAGS), migration 0043's check constraint on
+    kaibot.headline.tags (so no new migration is needed while they agree) and the dashboard's Tag type."""
+    import re
+
+    from kaibot.news import tags as T
+
+    root = Path(__file__).resolve().parents[1]
+    sql = (root / "migrations" / "0043_headline_feed.sql").read_text()
+    m = re.search(r"check \(tags <@ array\[([^\]]*)\]::text\[\]\)", sql)
+    assert m, "0043's tags check constraint"
+    in_sql = frozenset(re.findall(r"'([a-z_]+)'", m.group(1)))
+    ts = (root / "apps" / "web" / "src" / "lib" / "headlines.ts").read_text()
+    t = re.search(r"export type Tag = ([^;]+);", ts)
+    in_type = frozenset(re.findall(r'"([a-z_]+)"', t.group(1)))
+    labels = re.search(r"export const TAGS: Record<Tag, string> = \{([^}]*)\}", ts, re.S)
+    in_labels = frozenset(re.findall(r"([a-z_]+):", labels.group(1)))
+    assert F.FEED_TAGS == T.SHIPPED == in_sql == in_type == in_labels
+    shipped = json.loads((Path(T.__file__).parent / "tagset" / "measure_v2.json").read_text())["shipped"]
+    assert frozenset(shipped) == F.FEED_TAGS
+
+
+@pytest.mark.parametrize("headline,want", [
+    ("Zelman Upgrades Acme to Outperform", ["analyst_up"]),
+    ("JP Morgan Downgrades Acme to Neutral, Lowers Price Target to $40", ["analyst_down"]),
+    ("Acme Names Jane Doe CFO", ["management_change"]),
+    ("Acme To Join S&P 500", ["listing"]),
+    # measured below the 95% bar on sample v2: never stored, so never shown
+    ("Acme Raises FY2026 EPS Guidance", []),
+    ("Acme To Acquire Widget Co For $2B", []),
+    ("Acme Prices $500M Senior Notes Offering", []),
+    ("FDA Approves Acme's Drug", []),
+    ("Acme Q3 EPS $1.40 Beats $1.35 Estimate, Sales $85.8B Beat $84.5B Estimate", []),
+])
+def test_each_stored_row_carries_its_shipped_tags(headline, want):
+    assert F.alpaca_row(a(headline), frozenset(), MON_11ET)["tags"] == want
+    assert F.feed_tags(headline) == want and F.alpaca_row(a(headline), frozenset(), MON_11ET)["tags"] == want
+
+
+def test_pre_open_headlines_are_stored_tagged_and_the_review_never_sees_a_tag():
+    """The pre-open review's read (NewsDesk.poll before 09:30 ET) hands what it fetched to the feed, which stores each
+    headline with its tags for the owner. The review's own evidence carries no tag: a tag reaches no prompt."""
+    from test_news_poll import T0, FakeNews
+    from test_news_poll import art as art_
+
+    assert T0.hour == 13 and T0.minute == 30  # 08:30 ET: before the open
+    clock = Clock(T0)
+    desk = NewsDesk(FakeStore(), clock=clock)
+    st = RecStore()
+    desk.feed = F.HeadlineFeed(st, clock=lambda: T0)
+    desk.source = FakeNews([art_("JP Morgan Downgrades Acme to Neutral"), art_("Acme Names Jane Doe CFO"),
+                            art_("Acme Reports Q3 Results")])
+    desk.poll(["ACME"])
+    desk.feed.step()
+    assert sorted((r["headline"], r["tags"]) for r in st.rows) == [
+        ("Acme Names Jane Doe CFO", ["management_change"]), ("Acme Reports Q3 Results", []),
+        ("JP Morgan Downgrades Acme to Neutral", ["analyst_down"])]
+    assert all(r["licence"] == "owner_only" for r in st.rows)
+    pack = desk.evidence_pack("ACME", None, T0)
+    assert pack["items"] and all("tags" not in x for x in pack["items"])
+    assert "tags" not in json.dumps(pack)
+
+
 @pytest.mark.parametrize("bad", [None, "x", {}, {"headline": "x"}, a(syms=()), a(at="soon"), a(headline="  ")])
 def test_unusable_articles_are_skipped(bad):
     assert F.alpaca_row(bad, frozenset(), MON_11ET) is None

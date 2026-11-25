@@ -7,16 +7,17 @@
 A headline is untrusted text. These functions only match fixed patterns on it; nothing written in a headline is
 ever interpreted, followed or executed, and the output is always a subset of ALL_TAGS.
 
-The tags are computed when a headline is read. Nothing is stored (no column, no migration), so a change of rules
-changes what a reader sees; RULES_VERSION says which rules produced a result.
+The tags are computed when a headline is read (with_tags), and the dashboard's headline feed (news/feed.py) also
+stores the SHIPPED ones on each kaibot.headline row at write time (migration 0043's `tags` column, whose check
+constraint lists exactly SHIPPED). RULES_VERSION says which rules produced a result.
 
 Nothing may use a tag for an order in this story. The engine, risk, strategies, broker, features and replay do not
 import this module (tests/unit/test_news_tags.py). A rule that wants a tag later declares it in its own
 pre-registration (decision 15).
 
-Measured on src/kaibot/news/tagset (300 hand-labelled headlines, labelled before these rules were written): see
-tagset/README.md for the table. A tag is in SHIPPED only with at least 20 labelled positives and precision of at
-least 95% on that sample.
+Measured on src/kaibot/news/tagset: v1 (300 hand-labelled headlines, labelled before these rules were written,
+tagset/README.md) and v2 (860 headlines across years, blind labels, tagset/measure_v2.md). A tag is in SHIPPED only
+with at least 20 labelled positives and precision of at least 95% (measure.py MIN_POSITIVES, MIN_PRECISION).
 """
 
 from __future__ import annotations
@@ -29,19 +30,18 @@ from kaibot.news import text
 RULES_VERSION = 1
 ALL_TAGS = ("results", "guidance_up", "guidance_down", "analyst_up", "analyst_down", "deal", "offering", "buyback",
             "management_change", "legal_regulatory", "listing")
-# The outcome of tagset/measure.py on headlines_v1 (README.md). Change it only together with a new measurement.
-SHIPPED: frozenset[str] = frozenset({"analyst_up"})
+# The outcome of tagset/measure.py --v2 on sample v2 (tagset/measure_v2.json "shipped", PR #597): 860 headlines
+# across 2012-2026. v1 (300 headlines, README.md) shipped analyst_up alone, for want of positives. The rules are
+# unchanged (RULES_VERSION 1); only the measurement is newer. Change it only together with a new measurement.
+SHIPPED: frozenset[str] = frozenset({"analyst_up", "analyst_down", "management_change", "listing"})
 NOT_SHIPPED: dict[str, str] = {
-    "results": "10 positives in the sample: precision not established",
-    "guidance_up": "2 positives in the sample: precision not established",
-    "guidance_down": "no positive in the sample: precision not established",
-    "analyst_down": "11 positives in the sample: precision not established",
-    "deal": "12 positives in the sample: precision not established",
-    "offering": "4 positives in the sample: precision not established",
-    "buyback": "2 positives in the sample: precision not established",
-    "management_change": "10 positives in the sample: precision not established",
-    "legal_regulatory": "19 positives in the sample: precision not established",
-    "listing": "3 positives in the sample: precision not established",
+    "results": "sample v2: precision 76% of 25 fired (bar 95%)",
+    "guidance_up": "sample v2: precision 82% of 50 fired (100% of 25 on earnings days, 64% of 25 on other days)",
+    "guidance_down": "sample v2: precision 74% of 50 fired (92% of 25 on earnings days, 56% of 25 on other days)",
+    "deal": "sample v2: precision 88% of 25 fired",
+    "offering": "sample v2: precision 80% of 25 fired",
+    "buyback": "sample v2: precision 76% of 25 fired",
+    "legal_regulatory": "sample v2: precision 88% of 25 fired",
 }
 MAX_LEN = 500
 
