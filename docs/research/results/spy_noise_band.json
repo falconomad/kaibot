@@ -859,7 +859,7 @@
         "winners_run": 346
        },
        "sources": [
-        "file ~/Projects/kaibot/data/trials.jsonl: 423 rows"
+        "file data/trials.jsonl: 423 rows"
        ]
       }
      }
@@ -2794,7 +2794,7 @@
         "winners_run": 346
        },
        "sources": [
-        "file ~/Projects/kaibot/data/trials.jsonl: 423 rows"
+        "file data/trials.jsonl: 423 rows"
        ]
       }
      }
@@ -3648,7 +3648,7 @@
         "winners_run": 346
        },
        "sources": [
-        "file ~/Projects/kaibot/data/trials.jsonl: 423 rows"
+        "file data/trials.jsonl: 423 rows"
        ]
       }
      }

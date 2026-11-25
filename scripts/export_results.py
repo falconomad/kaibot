@@ -33,6 +33,16 @@ new reads. A pre-registration with no report on this machine still gets a page t
 The one-table pages the run scripts wrote themselves (experiments_*.md, the two studies' reports) are copied
 unchanged into docs/research/results/as_reported/.
 
+Every run, not only the newest of its kind (#452): one small JSON per report in docs/research/results/runs/,
+named after the report, with each base account's marks on the research window only (CAGR, drawdown, Sharpe,
+exposure, alpha and its t, beta, SPY at the rule's exposure, idle cash in bills), its neighbours' headline and the
+trial count; and, as the run stored them on its own window, the control's percentile and the gate v2 marks (never
+recomputed). Numbers are rounded to six places.
+
+Deterministic (#452): the time written on every page is the newest report's own time, not the clock, and no path
+of this machine is written (the data folder becomes `data/`, the repository root `.`). The same reports give the
+same files byte for byte.
+
 The gate v3 marks are in docs/research/results/gate_v3_rescore.md (scripts/gate_v3_rescore.py).
 """
 
@@ -158,6 +168,8 @@ def export(data: Path, root: Path = ROOT, only: str | None = None, as_of: dateti
     gate = g3.GateV3.load(root)
     folder = data / "reports"
     found = results.reports(folder)
+    if as_of is None and (newest := results.reports_as_of(found)):
+        as_of = datetime.fromisoformat(newest)  # #452: the newest report's time, never the clock
     by_file = {f.name: (f, rep) for f, rep in found}
     every = [r for f, rep in found for r in results.rows(f, rep)]
     pool = results.spy_pool(folder)
@@ -197,13 +209,94 @@ def export(data: Path, root: Path = ROOT, only: str | None = None, as_of: dateti
                                   "family": sum(by_strategy.get(r, 0) for r in family_rules(gate, rule))},
                        "tbill": bills is not None, "reports_of_this_rule": sorted({r.report for r in mine}),
                        "runs": runs}
+    runs_of = {} if only else run_summaries(found, every, pool, gate, bills, by_strategy, names, as_of)
     written = as_reported(folder)
     for rule, page in pages.items():
         page["as_reported"] = sorted(n for n in written if rule in n or any(k in n for k in SUMMARY_OF.get(rule, ())))
     return {"generated_at": (as_of or datetime.now(UTC)).isoformat(timespec="seconds"), "gate_v3_sha": gate.sha,
             "as_reported": sorted(written),
             "research_window": [str(gate.window[0].date()), str(gate.window[1].date())], "reports_read": len(found),
-            "other_files": results.other_files(folder), "registry": registry.summary(), "pages": pages}
+            "other_files": results.other_files(folder), "registry": registry.summary(), "pages": pages,
+            "runs": runs_of}
+
+
+def _r(x):
+    """Floats rounded to six places, recursively: the summaries stay small and stable across platforms."""
+    if isinstance(x, float):
+        return None if x != x else round(x, 6)
+    if isinstance(x, dict):
+        return {k: _r(v) for k, v in x.items()}
+    if isinstance(x, list | tuple):
+        return [_r(v) for v in x]
+    return x
+
+
+def headline(s: dict | None) -> dict | None:
+    """The marks of one account on one window (the research window: never a hold-out session)."""
+    if s is None:
+        return None
+    r, ab, em, act, c = s["rule"], s["alpha_beta"], s["exposure_matched_spy"], s["active_return"], s["cash"]
+    cash = None
+    if c and "error" not in c and c["tbill_cash"]["rule"] is not None:
+        b = c["tbill_cash"]
+        cash = {"bills_a_year": c["rf"]["mean_ann"], "cagr": b["rule"]["cagr"],
+                "sharpe_above_bills": b["rule"]["sharpe"]["sharpe"], "alpha": b["alpha_beta"]["alpha"],
+                "alpha_t": b["alpha_beta"]["alpha_t"]}
+    return _r({"window": s["window"], "sessions": s["sessions"], "cagr": r["cagr"], "max_drawdown": r["max_drawdown"],
+               "sharpe": r["sharpe"]["sharpe"], "mean_exposure": s["mean_exposure"],
+               "costs_a_year": s["costs_a_year"], "alpha": ab["alpha"] if ab else None,
+               "alpha_t": ab["alpha_t"] if ab else None, "beta": ab["beta"] if ab else None,
+               "exposure_matched_spy_cagr": em["cagr"] if em else None,
+               "return_above_exposure_matched_spy": act["annualised"] if act else None,
+               "return_above_exposure_matched_spy_t": act["t"] if act else None, "idle_cash_in_bills": cash})
+
+
+CONTROL_KEYS = ("percentile", "runs", "p_value", "matched", "kind")
+NEIGHBOUR_KEYS = ("cagr", "max_drawdown", "mean_exposure", "alpha", "alpha_t", "beta")
+
+
+def _neighbour(n: results.Row, acc: dict) -> dict:
+    h = headline(acc["research_window"])
+    if h is None:
+        return {"neighbour": n.neighbour, "label": n.label, "why": acc["why"] or "not enough sessions"}
+    return {"neighbour": n.neighbour, "label": n.label, **{k: h[k] for k in NEIGHBOUR_KEYS}}
+
+
+def run_summaries(found, every, pool, gate: g3.GateV3, bills, by_strategy: dict, names: set[str],
+                  as_of: datetime | None) -> dict[str, dict]:
+    """#452: one small summary per report read, keyed by the report's file name without `.json`."""
+    out = {}
+    for f, rep in found:
+        mine = [r for r in every if r.report == f.name]
+        bases = [r for r in mine if r.role == "base"]
+        if not bases:
+            continue
+        spy = results.spy(f, rep, pool)
+        accounts = []
+        for row in sorted(bases, key=lambda r: r.label):
+            a = account(row, spy, gate, bills)
+            nb = [_neighbour(n, account(n, spy, gate, bills)) for n in sorted(mine, key=lambda r: r.label)
+                  if n.rule == row.rule and n.role == "neighbour" and n.cost in (None, 1.0, row.cost)
+                  and n.meta.get("fill") in (None, "base")]
+            rule = owner(gate, row, names)
+            c = g3.control_numbers(row.control) or {}
+            accounts.append({"label": row.label, "rule": rule, "run": results.run_kind(row),
+                             "research_window": headline(a["research_window"]),
+                             "why": a["why"] if a["research_window"] is None else None,
+                             "control_as_stored": _r({k: c.get(k) for k in CONTROL_KEYS})
+                             if c.get("percentile") is not None else None,
+                             "trials_for_rule": by_strategy.get(rule, 0), "neighbours": nb})
+        m = bases[0].meta
+        v2 = rep.get("gate_b")
+        out[f.stem] = {"report": f.name, "set": m.get("set"), "run_at": m.get("run_at"), "code_sha": m.get("code_sha"),
+                       "universe_mode": m.get("universe_mode"), "engine": m.get("engine"),
+                       "cost_model": m.get("cost_model"), "own_window": [m.get("start"), m.get("end")]
+                       if m.get("start") or m.get("end") else m.get("window"),
+                       "research_window": [str(gate.window[0].date()), str(gate.window[1].date())],
+                       "gate_v2_as_stored": _v2_lines(v2, rep.get("verdict")),
+                       "summaries_as_of": (as_of or datetime.now(UTC)).isoformat(timespec="seconds"),
+                       "accounts": accounts}
+    return out
 
 
 # ---------------------------------------------------------------- Markdown
@@ -382,6 +475,9 @@ def render_index(res: dict) -> str:
         newest = max((r["report"] for r in runs), default="-")
         out.append(f"| [{rule}]({rule}.md) | {'yes' if page['preregistered'] else 'no'} | {page['family'] or '-'} | "
                    f"{len(runs)} | {'`' + newest + '`' if runs else '-'} | {cell} |")
+    if res.get("runs"):
+        out += ["", f"Every run, one small summary per report ({len(res['runs'])} reports): [`runs/`](runs/). Marks "
+                "on the research window only; the control and the gate v2 marks as the run stored them."]
     if res.get("as_reported"):
         out += ["", "Pages the run scripts wrote themselves are copied unchanged into [`as_reported/`](as_reported/): "
                 + ", ".join(f"`{n}`" for n in res["as_reported"]) + "."]
@@ -405,17 +501,22 @@ def main(argv: list[str] | None = None) -> dict:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     for rule, page in res["pages"].items():
-        (out / f"{rule}.md").write_text(results.portable(render_page(page, res["research_window"]), a.root))
-        (out / f"{rule}.json").write_text(results.portable(json.dumps(page, indent=1, default=str), a.root))
+        (out / f"{rule}.md").write_text(results.portable(render_page(page, res["research_window"]), a.root, a.data))
+        (out / f"{rule}.json").write_text(results.portable(json.dumps(page, indent=1, default=str), a.root, a.data))
     if not a.rule:
-        (out / "README.md").write_text(results.portable(render_index(res), a.root))
+        (out / "README.md").write_text(results.portable(render_index(res), a.root, a.data))
         (out / "as_reported").mkdir(exist_ok=True)
         for name, src in as_reported(Path(a.data) / "reports").items():
             # what the run printed, unchanged but for this machine's paths (#594)
-            (out / "as_reported" / name).write_text(results.portable(src.read_text(), a.root))
+            (out / "as_reported" / name).write_text(results.portable(src.read_text(), a.root, a.data))
+        (out / "runs").mkdir(exist_ok=True)
+        for stem, summary in res["runs"].items():
+            (out / "runs" / f"{stem}.json").write_text(
+                results.portable(json.dumps(summary, indent=1, default=str, sort_keys=True), a.root, a.data) + "\n")
     with_runs = sum(bool(p["runs"]) for p in res["pages"].values())
     print(f"wrote {len(res['pages'])} pages to {out}: {with_runs} with a run on record, "
-          f"{len(res['pages']) - with_runs} without; {res['reports_read']} reports read")
+          f"{len(res['pages']) - with_runs} without; {res['reports_read']} reports read; "
+          f"{len(res['runs'])} run summaries in runs/")
     return res
 
 

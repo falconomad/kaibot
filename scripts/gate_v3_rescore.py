@@ -83,6 +83,8 @@ def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dic
     gate = g3.GateV3.load(root)
     folder = data / "reports"
     found = results.reports(folder)
+    if as_of is None and (newest := results.reports_as_of(found)):
+        as_of = datetime.fromisoformat(newest)  # #452: the newest report's time, so a rerun writes the same file
     every = [r for f, rep in found for r in results.rows(f, rep)]
     by_file = dict((f.name, (f, rep)) for f, rep in found)
     pool = results.spy_pool(folder)
@@ -221,8 +223,9 @@ def main(argv: list[str] | None = None) -> dict:
     res = rescore(Path(a.data), Path(a.root))
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "gate_v3_rescore.json").write_text(results.portable(json.dumps(res, indent=1, default=str), a.root))
-    text = results.portable(render(res), a.root)  # no path of this machine in a file of the repository (#594)
+    (out / "gate_v3_rescore.json").write_text(results.portable(json.dumps(res, indent=1, default=str), a.root,
+                                                               a.data))
+    text = results.portable(render(res), a.root, a.data)  # no path of this machine in the repository (#594, #452)
     (out / "gate_v3_rescore.md").write_text(text)
     print(text)
     print(f"wrote {out / 'gate_v3_rescore.md'} and .json: {len(res['rows'])} runs scored, "
