@@ -1325,41 +1325,115 @@ class Engine:
     def entry_reason(self) -> tuple[str, str] | None:
         """#446: `entry_block` as (code, words): the code is short and stable (engine/state.py `BLOCK_CODES`, for the
         heartbeat and the dashboard), the words are `entry_block`'s, unchanged. No broker call; with
-        KAIBOT_DAILY_CHECKS_BLOCK on, the daily-data check journals a new block once a day (`LiveDaily.data_block`)."""
+        KAIBOT_DAILY_CHECKS_BLOCK on, the daily-data check journals a new block once a day (`LiveDaily.data_block`).
+        Step 4: every block is a hold on the trading switch (`_hold_entry_blocks`), and this reads the first one held
+        (engine/state.py `ENTRY_SOURCES`): the one place `entry_block` comes from."""
+        from kaibot.engine.state import ENTRY_SOURCES, HALT
+
+        Engine._hold_entry_blocks(self)  # also for a duck-typed engine (unit tests)
+        got = Engine.trading.fget(self).first(ENTRY_SOURCES)
+        if got is None:
+            return None
+        source, code, why = got
+        if source == HALT:
+            return "halted", f"halted: {why}"
+        return code or source, why
+
+    def _hold_entry_blocks(self) -> None:
+        """#446 step 4: take or let go of each entry block's hold on the trading switch, reading each condition as
+        `entry_block` always read it, in its order, stopping at the first that blocks (so the daily-data check is
+        asked only when nothing before it blocks, as before). The holds after that one are let go (not known now).
+        The fail-closed halt is its trigger's own hold (`kill`); it is only read here. Also the first `halted`
+        trigger: the lost lease (`_hold_lease_lost`). Every entry hold is `reducing_only`: sales and protective
+        stops are never blocked by them."""
+        from kaibot.engine.state import ENTRY_SOURCES, HALT, TradingState
+
+        sw = Engine.trading.fget(self)
+        Engine._hold_lease_lost(self, sw)
+        r = TradingState.REDUCING_ONLY
         d = self.day
-        if self.run is None or self.run.get("status") != "running":
-            st = (self.run or {}).get("status")
-            return ("no_run" if self.run is None else "paused" if st == "paused" else "run_not_running",
-                    "no running run")
-        if self._cmd_waiting:  # M9 1.2: "Flatten and stop" (or a new run) is selling the book
-            return "command_selling", next(iter(self._cmd_waiting.values()))
-        if not self.account_clean:
-            return "account_not_clean", "account not clean"
-        # QA-Ops (#522): a fill difference alone (a fill on an unknown order, a fill not booked yet) stops buys in
-        # its own stock (`Reconciler.allows`, asked per order by the daily path), not the whole rebalance
-        if not self._reconciled() and self.recon.blocks_every_buy():
-            return "reconcile_difference", "ledger and broker differ (reconciliation)"
-        if self.kill:
-            return "halted", f"halted: {self.kill}"
-        if not self.lease_ok():
-            return "lease_unverified", "lease unverified"
-        if self.clock_skew is not None:  # M9 1.10
-            return "clock_skew", self._clock_block()
-        if d is not None and d.halted:
-            return "daily_stop", "daily stop"
-        if d is not None and d.refused:
-            return "config_refused", f"config refused: {d.refused}"
-        # M12 3.11 (#473): the daily-data market checks (SPY's bar late, the universe log stale, ...): None unless
-        # KAIBOT_DAILY_CHECKS_BLOCK is on (the daily path's `entry_checks`); the text starts "data check <code>"
-        fn = getattr(getattr(self, "daily", None), "data_block", None)
-        if fn is not None and getattr(self.daily, "entry_checks", None) is not None:
-            try:
-                why = fn()
-            except Exception as e:  # noqa: BLE001 - fail closed (LiveDaily.data_block never raises; belt and braces)
-                return "data_check", f"data check checks_failed: {type(e).__name__}"
-            if why:
-                return "data_check", why
-        return None
+
+        def run():
+            if self.run is None or self.run.get("status") != "running":
+                st = (self.run or {}).get("status")
+                return ("no_run" if self.run is None else "paused" if st == "paused" else "run_not_running",
+                        "no running run")
+            return None
+
+        def command():  # M9 1.2: "Flatten and stop" (or a new run) is selling the book
+            return ("command_selling", next(iter(self._cmd_waiting.values()))) if self._cmd_waiting else None
+
+        def account():
+            return None if self.account_clean else ("account_not_clean", "account not clean")
+
+        def reconcile():
+            # QA-Ops (#522): a fill difference alone (a fill on an unknown order, a fill not booked yet) stops buys in
+            # its own stock (`Reconciler.allows`, asked per order by the daily path), not the whole rebalance
+            if not self._reconciled() and self.recon.blocks_every_buy():
+                return "reconcile_difference", "ledger and broker differ (reconciliation)"
+            return None
+
+        def halt():  # the fail-closed halt: `kill` is the switch's own `halt` hold (step 2)
+            kind = self.kill
+            if kind and sw.held(HALT) != kind:  # a duck-typed engine's plain `kill` (unit tests)
+                sw.hold(HALT, r, kind)
+            elif not kind:
+                sw.release(HALT)  # nothing to let go on an Engine: its `kill` is the hold
+            return ("halted", kind) if kind else None
+
+        def lease():
+            return None if self.lease_ok() else ("lease_unverified", "lease unverified")
+
+        def clock():  # M9 1.10
+            return ("clock_skew", self._clock_block()) if self.clock_skew is not None else None
+
+        def daily_stop():
+            return ("daily_stop", "daily stop") if d is not None and d.halted else None
+
+        def config():
+            return ("config_refused", f"config refused: {d.refused}") if d is not None and d.refused else None
+
+        def data_check():
+            # M12 3.11 (#473): the daily-data market checks (SPY's bar late, the universe log stale, ...): None unless
+            # KAIBOT_DAILY_CHECKS_BLOCK is on (the daily path's `entry_checks`); the text starts "data check <code>"
+            fn = getattr(getattr(self, "daily", None), "data_block", None)
+            if fn is not None and getattr(self.daily, "entry_checks", None) is not None:
+                try:
+                    why = fn()
+                except Exception as e:  # noqa: BLE001 - fail closed (LiveDaily.data_block never raises; belt and braces)
+                    return "data_check", f"data check checks_failed: {type(e).__name__}"
+                if why:
+                    return "data_check", why
+            return None
+
+        checks = {"run": run, "command": command, "account": account, "reconcile": reconcile, HALT: halt,
+                  "lease": lease, "clock": clock, "daily_stop": daily_stop, "config": config, "data_check": data_check}
+        for i, source in enumerate(ENTRY_SOURCES):
+            hit = checks[source]()
+            if hit is None:
+                if source != HALT:
+                    sw.release(source)
+                continue
+            if source != HALT:
+                sw.hold(source, r, hit[1], code=hit[0])
+            for later in ENTRY_SOURCES[i + 1:]:
+                if later != HALT:
+                    sw.release(later)
+            return
+
+    def _hold_lease_lost(self, sw) -> None:
+        """#446 step 4, the first `halted` trigger: held while the engine lease is lost and the engine's broker is
+        fenced by that lease (engine/fence.FencedBroker). Then the fence already refuses every order call, cancels
+        included (`EngineLease.fence` raises LeaseLost), and the main loop stops: the gate refuses the same calls
+        before the fence, a cancel still reaches the fence and is refused there. Let go when the lease is not lost."""
+        from kaibot.engine.state import LEASE_LOST, TradingState
+
+        lease = getattr(self, "lease", None)
+        broker = getattr(self, "broker", None)
+        if lease is not None and getattr(lease, "lost", False) is True and getattr(broker, "lease", None) is lease:
+            sw.hold(LEASE_LOST, TradingState.HALTED, "the engine lease is no longer ours: no order is sent")
+        else:
+            sw.release(LEASE_LOST)
 
     @property
     def trading(self):
@@ -1392,10 +1466,11 @@ class Engine:
         switch's own state. Reads only. The order path's gate asks it before every order call (step 3)."""
         from kaibot.engine.state import TradingState, from_entry_block
 
+        # step 4: entry_block first (it takes and lets go of the holds, the lost lease's too), then the switch
+        derived = from_entry_block(self.entry_block())
         held = self.trading.state()
         if held.state is TradingState.HALTED:
             return held
-        derived = from_entry_block(self.entry_block())
         return derived if derived.state is not TradingState.ACTIVE else held
 
     def trading_detail(self) -> dict:
