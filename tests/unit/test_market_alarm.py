@@ -385,3 +385,24 @@ def test_a_replay_with_the_alarm_places_the_same_orders(tmp_path):
     assert [t.key for t in plain.trades] == [t.key for t in with_alarm.trades]
     assert len(calls) == len(days)
     assert sum(1 for r in with_alarm.store.tables.get("event", []) if r.get("type") == "market_alarm") == len(days)
+
+
+def test_the_queued_backfill_for_377_is_runnable_and_stays_out_of_the_hold_out():
+    """#377: the ten-year run after Amendment 1 (#596) is queued for the research runner on the owner's Mac
+    (ops/runner/queue.yaml). It must pass the runner's own check, post to #377, cover 2016 onward and end on or
+    before the research window's end, or the script would refuse it (the 23 Nov 2026 run without --end was)."""
+    import importlib.util
+
+    from kaibot.evaluation import holdout
+
+    spec = importlib.util.spec_from_file_location("research_runner", ROOT / "scripts" / "research_runner.py")
+    rr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rr)
+    jobs = [j for j in rr.load_queue() if j.get("script") == "scripts/market_alarm_report.py"]
+    job = next(j for j in jobs if j["id"] == "market-alarm-amend1-2026-11-25")
+    checked = rr.check_job(job, rr.load_allowed())
+    assert checked.issue == 377
+    args = dict(zip(checked.args[::2], checked.args[1::2], strict=True))
+    assert args == {"--start": "2016-01-01", "--end": "2024-12-31"}
+    assert date.fromisoformat(args["--end"]) <= holdout.load().research_end
+    assert not holdout.load().holds(date.fromisoformat(args["--end"]))
