@@ -1,7 +1,8 @@
 """Mobile check for the v4 PRs (docs/design/mobile_first_v4.md). Dev-only.
 
 At 375, 390 and 430 px (phone emulation) it fails on a page wider than the screen or a tap target under 44 px (inline
-text links excepted). It also prints text under 12 px, tables wider than their box and layout shift, and measures
+text links excepted), and at every width on a page that throws an uncaught error or shows under MIN_WORDS words (in
+any step, an uncaught error fails the check). It also prints text under 12 px, tables wider than their box and layout shift, and measures
 1280 and 1440 px for layout shift. It reuses the design audit's mock and measurements
 (docs/design/audit_2026-11-16/tools): every request to the placeholder Supabase URL is answered from the mock, so no
 production data, account or key is used.
@@ -67,11 +68,46 @@ OPEN = dt.datetime(2026, 11, 19, 17, 40, tzinfo=dt.UTC)    # a Thursday, 12:40 i
 CLOSED = dt.datetime(2026, 11, 19, 22, 30, tzinfo=dt.UTC)  # the same day, 17:30 in New York: after the close
 
 
+# A page that throws or shows (almost) nothing is a failure, whatever else it measures. Settings rendered blank with a
+# TypeError against this mock (the invite card read `invites.length` of the mock's catch-all answer) and the check
+# passed, as a blank page has no overflow, no small tap target and no contrast failure; it only printed words=0.
+# MIN_WORDS: with the mock the fewest words are the sign-in page's 25 and New run's 40 (every other page shows 75 or
+# more); a page that threw shows none (React unmounts the whole tree), a half-drawn one a handful.
+MIN_WORDS = 15
+# Every uncaught error on any page of any context made by context() below, as "<path>: <message>" (read by main()).
+PAGE_ERRORS: list[str] = []
+# The words a person can read on the page (visible text, as innerText has it).
+WORDS_JS = "() => ((document.body && document.body.innerText) || '').split(/\\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length"
+
+
+def watch_errors(page, into: list[str]) -> list[str]:
+    """Record every uncaught error on `page` (pageerror: an exception React did not catch, or any other) into `into`."""
+    def on_error(e):
+        if page.url.startswith("about:"):  # the init scripts run on the blank page before goto (no localStorage there)
+            return
+        path = page.url.split("://", 1)[-1].split("/", 1)[-1] if "://" in page.url else page.url
+        into.append(f"/{path}: {str(e).splitlines()[0][:200]}")
+    page.on("pageerror", on_error)
+    return into
+
+
+def alive(page, name: str, errors: list[str], fails: list[str], min_words: int = MIN_WORDS) -> int:
+    """Fail if `page` threw (anything in `errors`) or shows fewer than `min_words` words. Returns the word count."""
+    words = page.evaluate(WORDS_JS)
+    if errors:
+        fails.append(f"{name}: the page threw {len(errors)} error(s): {errors[:2]}")
+    if words < min_words:
+        fails.append(f"{name}: only {words} words on the page (fewer than {min_words}): blank or not drawn")
+    return words
+
+
 def context(browser, at: dt.datetime, **kw):
-    """A browser context whose clock reads `at` and stays there (timers and animations keep running)."""
+    """A browser context whose clock reads `at` and stays there (timers and animations keep running). Every page in it
+    records its uncaught errors in PAGE_ERRORS, so no step of the check can miss one."""
     kw.setdefault("service_workers", "block")  # #481: these checks read the pages, not the app shell's store
     ctx = browser.new_context(**kw)
     ctx.clock.set_fixed_time(at)
+    ctx.on("page", lambda pg: watch_errors(pg, PAGE_ERRORS))
     return ctx
 
 
@@ -673,6 +709,7 @@ def main(a) -> int:
                     ctx.add_init_script(session)
                 ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
                 page = ctx.new_page()
+                threw = watch_errors(page, [])
                 page.goto(audit.APP + path, wait_until="load")
                 try:
                     page.wait_for_selector("main > *, .center", timeout=8000)
@@ -682,6 +719,9 @@ def main(a) -> int:
                 if act == "lists":
                     page.get_by_role("radio", name="My lists").click()
                     page.wait_for_timeout(700)
+                alive(page, f"{name}@{w}", threw, fails)
+                for e in threw:  # reported above with the page's name; not again at the end
+                    PAGE_ERRORS.remove(e)
                 rows.append(check(page, name, w, metrics, fails))
                 ctx.close()
         if a.interact:
@@ -689,9 +729,12 @@ def main(a) -> int:
         if a.stress:
             stress(browser, dist, metrics, fails)
         browser.close()
+    # an error thrown in any other step (the interactions, the stress pages), each once
+    for e in dict.fromkeys(PAGE_ERRORS):
+        fails.append(f"a page threw: {e}")
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(rows, indent=1))
-    print("\n".join("FAIL " + f for f in fails) or "PASS: no overflow, no tap target under 44 px at 375/390/430")
+    print("\n".join("FAIL " + f for f in fails) or f"PASS: no overflow, no tap target under 44 px at 375/390/430, no page threw or showed under {MIN_WORDS} words")
     return 1 if fails else 0
 
 

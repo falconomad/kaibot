@@ -266,6 +266,15 @@ class Mock:
                     {"symbol": s, "status": "accepted", "in_catalogue": False, "reason": None, "etf": "XLP", "name": n} for s, n in [("KO", "Coca-Cola"), ("PEP", "PepsiCo"), ("PG", "Procter & Gamble"), ("MO", "Altria"), ("O", "Realty Income")]]}]
             return {"max_tickers": 40, "max_lists": 20, "min_only": 5, "lists": lists}
         if fn == "kb_check_ticker": return {"symbol": a.get("p_symbol"), "status": "accepted", "reason": None, "etf": "XLK", "in_catalogue": False, "name": "Example Corp"}
+        if fn == "kb_invite_list":
+            # the shape of migration 0046's kb_invite_list: cap, taken and the invites (always a list, '[]' when none).
+            # Before this the call fell through to the queued answer below, and the invite card threw on invites.length.
+            inv = [] if e else [
+                {"id": 2, "email": "friend@example.com", "created_at": iso(self.now - dt.timedelta(days=1)), "expires_at": iso(self.now + dt.timedelta(days=6)),
+                 "used_at": None, "revoked_at": None, "status": "open", "code": "K7Q2-M4XP", "mine": True, "can_revoke": True},
+                {"id": 1, "email": "member@example.com", "created_at": iso(self.now - dt.timedelta(days=5)), "expires_at": iso(self.now + dt.timedelta(days=2)),
+                 "used_at": iso(self.now - dt.timedelta(days=4)), "revoked_at": None, "status": "used", "code": None, "mine": True, "can_revoke": False}]
+            return {"cap": 5, "taken": 0 if e else 1, "invites": inv}
         return {"ok": True, "queued": True}
 
 

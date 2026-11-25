@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type InviteMade, type InviteRow } from "../lib/api";
+import { api, fixInviteList, type InviteMade, type InviteRow } from "../lib/api";
 import { NAME } from "../brand/brand";
 
 // "Invite someone" (stakeholder, 24 Nov 2026; migration 0045). The dashboard holds no service key, so it cannot send
@@ -55,7 +55,8 @@ function RevokeCell({ invite, onDone }: { invite: InviteRow; onDone: (msg: strin
 
 export function InviteCard() {
   const qc = useQueryClient();
-  const list = useQuery({ queryKey: ["invites"], queryFn: api.inviteList, staleTime: 30_000 });
+  // select: the answer as the card reads it, whoever fetched it (fixInviteList is idempotent; api.inviteList applies it too)
+  const list = useQuery({ queryKey: ["invites"], queryFn: api.inviteList, staleTime: 30_000, select: fixInviteList });
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "sending" | "error">("idle");
   const [err, setErr] = useState("");
@@ -94,13 +95,15 @@ export function InviteCard() {
       </section>
     );
   }
-  const left = list.data ? Math.max(0, list.data.cap - list.data.taken) : null;
+  // the places left, only when both counts came (fixInviteList makes a missing one null)
+  const cap = list.data?.cap ?? null, taken = list.data?.taken ?? null;
+  const left = cap !== null && taken !== null ? Math.max(0, cap - taken) : null;
   const link = made ? absoluteLink(made.link) : "";
   return (
     <section className="card" aria-labelledby="inv-h">
       <h2 id="inv-h">Invite someone</h2>
       <p className="muted" style={{ fontSize: 13 }}>They get a link and a code from you, and their sign-in email from {NAME} when they
-        register. Invites work once and expire in 7 days.{left !== null && ` ${left} of ${list.data!.cap} places left.`}</p>
+        register. Invites work once and expire in 7 days.{left !== null && ` ${left} of ${cap} places left.`}</p>
       <form onSubmit={create} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
         <span style={{ display: "grid", gap: 4, flex: "1 1 220px" }}>
           <label className="cap" htmlFor="inv-email">Their email</label>
@@ -130,7 +133,9 @@ export function InviteCard() {
       {!!list.data?.invites.length && (
         <table className="list" aria-label="Invites" style={{ marginTop: 10 }}>
           <thead><tr><th>Email</th><th>Status</th><th className="r">Expires</th>
-            {list.data.invites.some((i) => i.can_revoke) && <th><span className="sr-only">Revoke</span></th>}</tr></thead>
+            {/* position: relative keeps the absolute .sr-only label inside the table's sideways scroller on a phone; without
+                it the label sat past the screen edge and made the page 397 px wide at 375 and 390 px */}
+            {list.data.invites.some((i) => i.can_revoke) && <th style={{ position: "relative" }}><span className="sr-only">Revoke</span></th>}</tr></thead>
           <tbody>{list.data.invites.map((i) => (
             <tr key={i.id}><td>{i.email}</td><td>{STATUS[i.status] ?? i.status}</td>
               <td className="r num">{i.status === "open" ? new Date(i.expires_at).toLocaleDateString() : "—"}</td>
