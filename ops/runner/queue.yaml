@@ -15,7 +15,3 @@ jobs:
     script: scripts/index_core_book.py
     args: ["--end", "2024-12-31"]
     posts_to_issue: 459
-  - id: results-export-2026-11-25
-    script: scripts/export_results.py
-    args: []
-    posts_to_issue: 452
