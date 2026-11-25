@@ -188,6 +188,9 @@ def main(argv: list[str] | None = None) -> dict:
            "gate_v3_book": rep, "runtime_s": round(time.time() - t0, 1)}
     out_dir = Path(a.out or data_dir / "reports")
     (out_dir / tag).mkdir(parents=True, exist_ok=True)
+    # #456: the benchmark the book was judged against, so scripts/gate_v3_rescore.py re-scores it on the same SPY
+    pd.DataFrame({"date": [str(x.date()) for x in spy.index], "ret": spy.to_numpy(dtype=float),
+                  "ret_kind": source["benchmark"]}).to_csv(out_dir / tag / "spy_daily.csv", index=False)
     for label, (r, _) in runs.items():
         pd.DataFrame(r.book.daily).to_csv(out_dir / tag / f"daily_{label.replace('|', '_')}.csv", index=False)
     (out_dir / f"{tag}.json").write_text(json.dumps(out, indent=1, default=str))

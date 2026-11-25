@@ -19,8 +19,17 @@ What it does, per rule and kind of run (the newest report of each):
 
 A re-score is information, not a verdict: every rule here was pre-registered before decision 16, so none can
 `pass`. A mark that the existing report cannot support is shown as unknown with the reason (for example a control
-that drew from the whole universe for a rule that picks among companies with a headline). The book test has
-nothing to score yet: no combined book has been run.
+that drew from the whole universe for a rule that picks among companies with a headline).
+
+Books (#456, decision 16 section 5; the index core #458 and the core with its sleeve #459): a report that holds a
+book test (`gate_v3_book`, written by scripts/index_core.py and scripts/index_core_book.py) is NOT scored as a
+sleeve. For each book, index cap and universe, the newest report is re-scored with `gate_v3.evaluate_book` from its
+own daily files: the judged account (`base|1x` / `book|1x`), its pre-declared neighbours, the sleeve verdict its
+run stored (`gate_v3_sleeve`, the book script's sleeve test) and the budgets the engine ran. SPY is the series the
+run wrote beside its report (`spy_daily.csv`), else the longest total-return series of the folder. Nothing is
+re-run. The table shows the verdict the run gave next to the re-score and says when they differ (for example a
+report scored under an earlier `config/gate_v3.yaml`). A book report's rows never enter the sleeve table or the
+family correction. Its sleeve test is the book script's own, shown with the book.
 """
 
 from __future__ import annotations
@@ -79,17 +88,102 @@ def first_run(registry, rule: str) -> datetime | None:
         return None
 
 
+def is_book_report(gate: g3.GateV3, rep: dict) -> bool:
+    """A report of a book test (#456): it holds `gate_v3_book`, or it is named after a book under `books:`."""
+    return isinstance(rep.get("gate_v3_book"), dict) or any(
+        isinstance(rep.get(k), str) and gate.book(rep[k]) is not None for k in ("book", "rule"))
+
+
+BOOK_BASE = ("base|1x", "book|1x")  # the judged account of scripts/index_core.py / scripts/index_core_book.py
+BOOK_NEIGHBOUR = ("neighbour|", "book_neighbour|")
+
+
+def book_name(rep: dict) -> str:
+    return str(rep.get("book") or rep.get("rule") or (rep.get("gate_v3_book") or {}).get("rule") or "?")
+
+
+def book_key(rep: dict) -> tuple[str, str, str]:
+    """(book, index cap at Hunter, universe). A report written before `--index-cap` existed (#458) records no cap: it
+    ran at config/index_core.yaml's, 27% since #600 (23 Nov 2026, before any book run)."""
+    cap = rep.get("index_cap_pct", 27.0)
+    return (book_name(rep), f"{float(cap):g}%", str(rep.get("universe") or "?"))
+
+
+def rescore_books(gate: g3.GateV3, found, pool, registry, bills, root: Path, as_of) -> tuple[list, list]:
+    """(one re-scored row per book, index cap and universe: the newest report of each; the book reports that
+    could not be scored). Reads only the reports' daily files; nothing is re-run."""
+    newest: dict[tuple, tuple] = {}
+    for f, rep in found:  # oldest first, so the newest report of a key wins
+        newest[book_key(rep)] = (f, rep)
+    out, skipped = [], []
+    for key, (f, rep) in sorted(newest.items()):
+        name = key[0]
+        rows = {r.label: r for r in results.rows(f, rep)}
+        base = next((rows[k] for k in BOOK_BASE if k in rows), None)
+        spy = results.spy(f, rep, pool)
+        d = results.daily(base) if base is not None else None
+        if d is None or spy is None:
+            why = "no judged account (base|1x / book|1x) with a daily file" if d is None else \
+                "no SPY series for its sessions"
+            skipped.append({"rule": name, "run": f"book, index cap {key[1]}, {key[2]}", "report": f.name,
+                            "why": why, "summary": {}})
+            continue
+        uni = "point_in_time" if key[2] in ("pit", "point_in_time") else key[2]
+        acc = g3.Account(d["ret"], spy[0], d.get("exposure"), d.get("cost"), None, uni)
+        nb = {}
+        for label, r in rows.items():
+            if label.startswith(BOOK_NEIGHBOUR) and (nd := results.daily(r)) is not None:
+                nb[label.split("|", 1)[1]] = nd["ret"]
+        stored_sleeve = rep.get("gate_v3_sleeve") if isinstance(rep.get("gate_v3_sleeve"), dict) else None
+        listed = gate.book(name) or {}
+        if stored_sleeve is not None:
+            sleeves = {str(stored_sleeve.get("rule")): str(stored_sleeve.get("verdict"))}
+        elif not (listed.get("sleeves") or {}):
+            sleeves = {}  # a book without a return sleeve: B6 holds with the empty mapping
+        else:
+            sleeves = None  # a listed sleeve without a stored verdict: B6 unknown
+        ran = (rep.get("budgets") or {}).get("engine") if isinstance(rep.get("budgets"), dict) else None
+        if ran is None and not (listed.get("sleeves") or {}):
+            ran = {}
+        try:
+            reg = prereg.load(name, root)
+        except prereg.PreregError:
+            reg = None
+        src = rep.get("source") if isinstance(rep.get("source"), dict) else {}
+        try:
+            rep3 = g3.evaluate_book(gate, book=name, account=acc, neighbours=nb, sleeves=sleeves, prereg=reg,
+                                    source={**src, "report": f.name, "run_at": rep.get("run_at"),
+                                            "code_sha": rep.get("code_sha")},
+                                    registry=registry, first_run_at=first_run(registry, name), tbill=bills,
+                                    as_of=as_of, ran_budgets=ran)
+        except ValueError as e:
+            skipped.append({"rule": name, "run": f"book, index cap {key[1]}, {key[2]}", "report": f.name,
+                            "why": str(e), "summary": {}})
+            continue
+        stored = rep.get("gate_v3_book") if isinstance(rep.get("gate_v3_book"), dict) else {}
+        out.append({"book": name, "index_cap": key[1], "universe": key[2], "report": f.name,
+                    "run_at": rep.get("run_at"), "gate_v3": rep3, "spy": spy[1],
+                    "sleeve_test": None if stored_sleeve is None else {
+                        "rule": stored_sleeve.get("rule"), "verdict": stored_sleeve.get("verdict")},
+                    "at_run": {"verdict": stored.get("verdict"), "gate_sha": stored.get("gate_sha"),
+                               "marks": {k: (v or {}).get("met") for k, v in (stored.get("marks") or {}).items()}}})
+    return out, skipped
+
+
 def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dict:
     gate = g3.GateV3.load(root)
     folder = data / "reports"
-    found = results.reports(folder)
-    if as_of is None and (newest := results.reports_as_of(found)):
+    everything = results.reports(folder)
+    if as_of is None and (newest := results.reports_as_of(everything)):
         as_of = datetime.fromisoformat(newest)  # #452: the newest report's time, so a rerun writes the same file
+    found = [(f, rep) for f, rep in everything if not is_book_report(gate, rep)]
+    book_found = [(f, rep) for f, rep in everything if is_book_report(gate, rep)]
     every = [r for f, rep in found for r in results.rows(f, rep)]
     by_file = dict((f.name, (f, rep)) for f, rep in found)
     pool = results.spy_pool(folder)
     bills = tbill.find(data)
     registry = trials.load(None, data / "trials.jsonl")
+    books, books_skipped = rescore_books(gate, book_found, pool, registry, bills, root, as_of)
     base = results.newest_per_rule(every)
     neighbours = {}
     for r in every:
@@ -146,8 +240,9 @@ def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dic
             "window": [str(gate.window[0].date()), str(gate.window[1].date())], "level": gate.level,
             "families": {f: {"rules": list(b["rules"]), "p": fam_p[f]} for f, b in gate.families.items()},
             "holm": g3.holm(fam_p, gate.level), "rule_p": rule_p, "tbill": bills is not None,
-            "registry": registry.summary(), "reports_read": len(found), "other_files": results.other_files(folder),
-            "rows": out, "skipped": skipped}
+            "registry": registry.summary(), "reports_read": len(everything),
+            "other_files": results.other_files(folder), "rows": out, "books": books,
+            "skipped": skipped + books_skipped}
 
 
 DAGGER = "†"  # a control p-value from a report whose window ran into the hold-out
@@ -205,6 +300,42 @@ def render(res: dict) -> str:
         h = res["holm"][f]
         out.append(f"| {f} | {', '.join(body['rules'])} | {_num(body['p'], '{:.4f}')} | "
                    f"{_num(h['adjusted'] if h['known'] else None, '{:.4f}')} | {'yes' if h['rejected'] else 'no'} |")
+    out += ["", "## Books (the book test, decision 16 section 5)", ""]
+    if not res.get("books"):
+        out.append("No book report was found.")
+    else:
+        out += ["Each book is re-scored from its own daily files (nothing re-run), judged at Hunter on the research "
+                "window, with idle cash at 0% (the T-bill view is in the JSON). A report that records no index cap "
+                "ran at the config's 27% (#600). `At run` is the verdict the run itself gave. A book's sleeve test "
+                "is the one its script ran (`gate_v3_sleeve`); its rows are not "
+                "in the sleeve table or in the family correction above.", "",
+                "| Book | Index cap at Hunter | Universe | CAGR | SPY CAGR | Max drawdown | SPY max drawdown | "
+                "B1 | B2 | B3 | B4 | B5 | B6 | Sleeve test | Gate v3 | At run |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for b in res["books"]:
+            g, m = b["gate_v3"], b["gate_v3"]["marks"]
+            n = m["b2"]["numbers"]
+            same = b["at_run"]["verdict"] == g["verdict"] and all(
+                b["at_run"]["marks"].get(k) == m[k]["met"] for k in m if k in b["at_run"]["marks"])
+            at = b["at_run"]["verdict"] or "n/a"
+            if not same:
+                at += " (differs" + ("; scored under another gate_v3.yaml" if b["at_run"]["gate_sha"] not in (
+                    None, g["gate_sha"]) else "") + ")"
+            st = b["sleeve_test"]
+            out.append(f"| {b['book']} | {b['index_cap']} | {b['universe']} | {_num(n.get('cagr'))} | "
+                       f"{_num(n.get('spy_cagr'))} | {_num(n.get('max_drawdown'))} | "
+                       f"{_num(n.get('spy_max_drawdown'))} | "
+                       + " | ".join(_cell(m[k]) for k in ("b1", "b2", "b3", "b4", "b5", "b6"))
+                       + f" | {'none' if st is None else st['rule'] + ': ' + str(st['verdict'])} | {g['verdict']} "
+                       f"| {at} |")
+        out += ["", "Why a book mark is unknown or failed:", ""]
+        for b in res["books"]:
+            why = [f"{k.upper()}: {v['why']}" for k, v in b["gate_v3"]["marks"].items()
+                   if v["met"] is not True and v["why"]]
+            why += [f"provisional: {r}" for r in b["gate_v3"].get("provisional_reasons") or []]
+            if why:
+                out.append(f"- **{b['book']}** (index cap {b['index_cap']}, `{b['report']}`): " + "; ".join(why)
+                           + ".")
     if res["skipped"]:
         out += ["", "## Runs that could not be scored", "", "| Rule | Run | Report | Why |", "|---|---|---|---|"]
         out += [f"| {s['rule']} | {s['run']} | `{s['report']}` | {s['why']} |" for s in res["skipped"]]

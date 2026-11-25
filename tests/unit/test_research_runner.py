@@ -160,7 +160,8 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
     assert set(cfg.specs) == {"scripts/index_core.py", "scripts/index_core_book.py",
                               "scripts/fetch_sec_fundamentals.py", "scripts/trend_momentum_gbm.py",
                               "scripts/export_results.py", "scripts/market_alarm_report.py",
-                              "kaibot.agents.evalset.golden", "scripts/shadow_results.py"}  # #371: as the helper
+                              "kaibot.agents.evalset.golden", "scripts/shadow_results.py",  # #371: as the helper
+                              "scripts/gate_v3_rescore.py"}  # #456: reads reports, writes the re-score only
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert [t for t, s in cfg.specs.items() if s.sec] == ["scripts/fetch_sec_fundamentals.py"]
@@ -446,9 +447,11 @@ def tick_in(tmp_path, jobs, run, popen=None, files=None):
     return tick(tmp_path, jobs, run=run, popen=popen, root=root, allowed=allowed)
 
 
-def test_the_committed_allow_list_lets_only_export_results_write_and_only_under_docs_research_results():
+def test_the_committed_allow_list_lets_only_the_results_scripts_write_and_only_under_docs_research_results():
     cfg = rr.load_allowed()
-    assert {t: s.writes for t, s in cfg.specs.items() if s.writes} == {"scripts/export_results.py": (RESULTS,)}
+    assert {t: s.writes for t, s in cfg.specs.items() if s.writes} == {"scripts/export_results.py": (RESULTS,),
+                                                                     "scripts/gate_v3_rescore.py": (RESULTS,)}  # #456
+    assert not cfg.specs["scripts/gate_v3_rescore.py"].flags  # no --data / --out / --root: the defaults only
     assert "results-export-2026-11-25" in [j["id"] for j in rr.load_queue()]
 
 
