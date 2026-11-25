@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -113,13 +115,24 @@ def test_an_unwritable_folder_runs_unguarded(tmp_path):
 
 
 # ------------------------------------------------------------------ real processes
+SLEEP = shutil.which("sleep")
+
+
 @pytest.fixture
 def proc():
+    """A `sleep` whose argv[0] is `argv0`, started with ONE exec and waited for until it shows that exact command line.
+
+    #654: this used to be `bash -c 'exec -a "<argv0>" sleep 30'`, which passes through two images. Bash's own command
+    line already contains the watched word, so the wait ended at once, and while bash exec'd `sleep` the command line
+    read empty for a moment (Linux clears it until the new image's arguments are set up). A `_is_watchdog()` landing
+    in that gap saw no watchdog. Now the only image that can show the expected command line is the final one, and
+    `sleep` never changes it, so once the wait has seen it, every later read sees it too."""
     started = []
 
     def start(argv0):
-        p = subprocess.Popen(["bash", "-c", f'exec -a "{argv0}" sleep 30'])
+        p = subprocess.Popen([argv0, "30"], executable=SLEEP)
         started.append(p)
+        _wait_cmdline(p.pid, f"{argv0} 30")
         return p
 
     yield start
@@ -128,19 +141,18 @@ def proc():
         p.wait()
 
 
-def _wait_named(pid, word):
-    import time
-
-    for _ in range(50):
-        if word in (wdmod._command_of(pid) or ""):
-            return
-        time.sleep(0.05)
+def _wait_cmdline(pid, want, timeout_s=30.0):
+    """Wait until `pid` runs exactly `want`; fail (not carry on) when it never does."""
+    deadline = time.monotonic() + timeout_s
+    while (got := wdmod._command_of(pid)) != want:
+        if time.monotonic() > deadline:
+            pytest.fail(f"pid {pid} never showed {want!r} (last: {got!r})")
+        time.sleep(0.01)
 
 
 def test_liveness_needs_a_live_kaibot_watchdog_process(proc):
     wd = proc("/x/.venv/bin/python -m kaibot.engine.watchdog")
     other = proc("sleep")
-    _wait_named(wd.pid, "kaibot.engine.watchdog")
     assert wdmod._is_watchdog(wd.pid)
     assert not wdmod._is_watchdog(other.pid)  # a reused pid
     gone = subprocess.Popen(["true"])
@@ -155,7 +167,6 @@ def test_a_second_watchdog_process_exits_before_it_touches_the_broker(tmp_path, 
     import socket
 
     first = proc("python -m kaibot.engine.watchdog")
-    _wait_named(first.pid, "kaibot.engine.watchdog")
     data = tmp_path / "live"
     data.mkdir()
     (data / WATCHDOG_LOCK).write_text(json.dumps({"pid": first.pid, "host": socket.gethostname()}))
