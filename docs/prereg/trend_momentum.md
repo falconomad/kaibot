@@ -907,3 +907,43 @@ book keeps the fixed line.
    7 step 4).
 7. **Research and Gate B unchanged.** No research result is affected: the band is computed from a finished run and
    the switch is `fixed`; the bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 31 (25 Nov 2026, backend-quant, issue #454, M11 ticket 2.3, before its first run): one re-run that prices the near-close orders at the 15:50 price
+
+Written before any run of this execution model, on real data or on the fixture. It adds **one re-run of the base
+configuration**. It changes no setting of the rule, its sizing, its live orders or its Gate B record.
+
+1. **Why.** Amendment 10 item 4 lists the gap between live and research. The live path sends DAY market orders at
+   15:50 to 15:57 ET, and every research run fills them at the closing print. Decision 15 section 12, question 1
+   asks whether the ten-year test should price them "as `continuous` orders at the 15:50 price instead of `close`
+   fills at the closing print". Ticket 2.3 (#454) asks for that one re-run.
+2. **The re-run.** `scripts/near_close_1550_rerun.py`: the base version (Balanced sizing, 100% exposure cap, base
+   fill, the point-in-time universe, cost model v2), one $100,000 account through `engine/daily.run_daily` with
+   `SimBroker`, on the research window **2017-05-01 to 2024-12-31**. The hold-out is not read: `holdout.enforce`
+   refuses a later `--end`, and the minute reader opens no month after the end. It runs twice, on the same data:
+   - `close` (as every Gate B run): the near-close orders filled at the closing print, v2's close venue;
+   - `at_1550`: the same orders, the same send time and the same plan, filled at the **15:50 price**, at v2's
+     **continuous** venue (the full half-spread of the ADV bucket and the full impact, on that minute's volume).
+   Each runs at 1x and 2x costs.
+3. **The 15:50 price.** The open of the first minute bar at or after 15:50 ET and before 16:00, from
+   `data/bars_1m` (SIP minute history, older than 15 minutes when downloaded), put on the daily store's raw basis
+   by `DailyStore.panel(intraday=...)`. A session whose minute close is more than 5% from the stored close is
+   dropped by that check. This is SimBroker's own rule for a market order: "the open of the first bar at or after
+   the minute it was submitted in". The price is the one the order meets at the moment it is sent, so it reads
+   nothing after the order (point in time).
+4. **Without a 15:50 minute.** A name and session with no minute from 15:50 to 15:59 fills at the closing print,
+   still at the continuous venue's cost. Former S&P 500 members have no minute history (`docs/m0/reproduce.md`),
+   so on the point-in-time universe part of the fills fall back. The report gives the share of fills and of
+   dollars priced at a real 15:50 minute. A low share weakens the comparison, and the report says so; nothing is
+   imputed.
+5. **Trials.** `at_1550|1x` counts **n_trials 1**: it changes the fill model of a counted configuration, as the
+   SPY cost re-run did for its cost model. `close|1x` re-runs the counted base configuration, and the 2x rows are
+   cost reports, so all three count 0. Every row records `params.execution`.
+6. **Expectation, before the run.** The price move from 15:50 to the close averages about zero (Amendment 10
+   item 4), so the mean move against the orders should be near 0 bp, with a wide spread. The continuous venue
+   charges more than the closing auction (full impact instead of half), so `at_1550|1x` is expected to trail
+   `close|1x` by a few basis points a trade, a fraction of a point a year at the rule's turnover. The rule failed
+   Gate B and gate v3, and this re-run is not expected to change that.
+7. **What it is not.** It is not a verdict, and no neighbour, control or gate is run. It does not change the
+   Gate B record, the live orders or any setting. Restating the rule's verdict is Product's step, under the gate
+   in force. Whether the ten-year test should use the 15:50 pricing from now on is a separate decision.
