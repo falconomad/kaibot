@@ -7,7 +7,18 @@ from __future__ import annotations
 import contextlib
 import types
 
+import pytest
 from test_failsafe_drills import MD, QTY, Account
+
+from kaibot.engine.core import Engine
+
+
+@pytest.fixture(autouse=True)
+def _legacy_start(monkeypatch):
+    """#445 step 2: these restarts run the older flatten sale, sent without the daily path. A live engine with
+    multi-day sleeves and no daily path no longer starts (tests/test_445_daily_path_required.py), so this file
+    lifts that start-up check, here only, to keep the old path covered until step 4 deletes it with these tests."""
+    monkeypatch.setattr(Engine, "_require_daily_path", lambda self: None)
 
 
 def _fills(a, side="sell"):

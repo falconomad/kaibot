@@ -32,7 +32,7 @@ from kaibot.common import http
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.book_market import BookMarket
 from kaibot.engine.config import ROOT, Settings
-from kaibot.engine.core import CONFIG_UNREADABLE, RULES_RETRY_S, Engine
+from kaibot.engine.core import CONFIG_UNREADABLE, RULES_RETRY_S, DailyPathMissing, Engine
 from kaibot.engine.corp_guard import RecentActions
 from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
@@ -325,6 +325,7 @@ def filing_flags_from_env(env):
 
 
 EXIT_JOURNAL = 4
+EXIT_DAILY_PATH = 5  # M10 1.20 step 2 (#445): multi-day sleeves in the ledger and no daily path (KAIBOT_MULTIDAY)
 
 
 def open_journal(path) -> Journal:
@@ -487,6 +488,18 @@ def start_with_lease(eng: Engine, lease: EngineLease, adopt_journal: bool = Fals
             log.info("journal started: %d rows of run %s copied from Supabase", out["imported"], out.get("run_id"))
     eng.startup()
     return "active"
+
+
+def start_or_refuse(eng: Engine, lease: EngineLease, adopt_journal: bool = False) -> str:
+    """`start_with_lease`, and M10 1.20 step 2 (#445, Product ruling 24 Nov): an engine whose run holds multi-day
+    sleeves without the daily path (KAIBOT_MULTIDAY off) does not start. `Engine.startup` raises before any order
+    call; the lease is given back and the process exits with code 5 and a message naming the switch."""
+    try:
+        return start_with_lease(eng, lease, adopt_journal=adopt_journal)
+    except DailyPathMissing as e:
+        log.error("%s", e)
+        lease.release()  # never raises; a degraded start never held it
+        raise SystemExit(EXIT_DAILY_PATH) from None
 
 
 # ---------------------------------------------------------------- degraded start (M10 1.25, #450)
@@ -751,7 +764,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
     host = socket.gethostname()
     lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host, journal=eng.journal)
-    mode = start_with_lease(eng, lease, adopt_journal=a.adopt_journal)
+    mode = start_or_refuse(eng, lease, adopt_journal=a.adopt_journal)
     write_pid_file(settings.data_dir, host)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
     news = getattr(eng, "news_poller", None)
