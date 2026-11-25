@@ -20,6 +20,7 @@ import wordLight from "./brand/logo/wordmark-on-light.svg?raw";
 import symbolDark from "./brand/logo/symbol-on-dark.svg?raw";
 import iconDark from "./brand/logo/icon-dark.svg?raw";
 import tokens from "./v4tokens.css?raw";
+import themes from "./tokens.css?raw";
 import { Shell } from "./components/Shell";
 import { NotOwner, SignIn } from "./pages/SignIn";
 import { Register } from "./pages/Register";
@@ -172,6 +173,28 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
     expect(still(<Logo on="light" />)).toContain('fill="#2F6FDE"');
   });
 
+  it("it follows the theme (#673): the on-dark file's colours, and the on-light file's in the light theme, from one markup", () => {
+    const dark = mark("word", "dark"), light = mark("word", "light");
+    const fills = (html: string) => [...html.matchAll(/<path fill="([^"]+)"[^>]*?(?: style="fill:([^"]+)")?\/?>/g)].map((m) => [m[1], m[2]]);
+    // every shape: the dark file's fill, with light-dark(on-light, on-dark) over it, whole and split, intro and idle
+    for (const html of [still(<Logo />), still(<Logo idle />), still(<Logo symbolOnly />)]) {
+      const got = fills(html);
+      expect(got.length).toBeGreaterThan(0);
+      for (const [fill, style] of got) {
+        const i = dark.parts.findIndex((p) => p.fill === fill);
+        expect(i, fill).toBeGreaterThanOrEqual(0);
+        expect(style).toBe(`light-dark(${fill === "#4F95F0" ? "#2F6FDE" : "#0A0B0D"}, ${fill})`);
+      }
+    }
+    expect(dark.parts.map((p) => p.fill === "#4F95F0")).toEqual(light.parts.map((p) => p.fill === "#2F6FDE"));
+    // one colour only when asked for: on="dark" and on="light" draw their own file as before, with no light-dark()
+    expect(still(<Logo on="dark" />)).not.toContain("light-dark");
+    expect(still(<Logo on="light" idle />)).not.toContain("light-dark");
+    // the light theme is the one that sets color-scheme: light, which light-dark() reads; nothing else picks the file
+    expect(themes).toMatch(/:root\[data-theme="light"\] \{\n  color-scheme: light;/);
+    expect(themes).toMatch(/:root, :root\[data-theme="dark"\] \{\n  color-scheme: dark;/);
+  });
+
   it("symbolOnly draws the k with its point; size is the height of the letters", () => {
     const html = still(<Logo symbolOnly size={40} />);
     expect(html).toMatch(/^<svg class="logo" viewBox="21.57 16 76.86 88" role="img" aria-label="kaibo" style="aspect-ratio:76.86 \/ 88;height:40px"><g transform="translate\(21.57 104\)">/);
@@ -209,6 +232,17 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
     expect(css).toMatch(/header\.top \.engine-chip::before \{[^}]*inset: 4px 0;/);
     expect(css).toMatch(/\.brand \{[^}]*min-height: 44px/);
   });
+
+  it("from 1280 px the header is one row, the halt chip too: the chip gives way, never the logo or the nav (#673)", () => {
+    const wide = /@media \(min-width: 1280px\) \{([^@]*)\}\n/.exec(css)?.[1] ?? "";
+    expect(wide).toMatch(/header\.top \{ flex-wrap: nowrap; \}/);
+    expect(wide).toMatch(/nav\.topnav \{ flex: none; \}/);
+    expect(wide).toMatch(/header\.top \.engine-chip \{ min-width: 0; \}/);
+    expect(wide).toMatch(/header\.top \.trading-line b \{ white-space: nowrap; \}/);
+    expect(wide).not.toMatch(/\.logo|\.brand/);
+    expect(css).toMatch(/\.trading-line \.trading-reason \{[^}]*text-overflow: ellipsis;/);
+    expect(css).toMatch(/@media \(min-width: 761px\) \{[^@]*nav\.topnav a \{ padding: 0 8px; \}/);
+  });
 });
 
 describe("the logo's motion on load", () => {
@@ -219,11 +253,11 @@ describe("the logo's motion on load", () => {
     expect(html.match(/<clipPath /g)).toHaveLength(3);
     expect(html.match(/class="logo-draw"/g)).toHaveLength(3);
     // the stem starts its whole height below; the leg and the arm start behind the point where they meet
-    expect(html).toContain('class="logo-draw" style="--fx:0px;--fy:88px;animation-delay:0s;animation-duration:0.2s"');
+    expect(html).toContain('class="logo-draw" style="fill:light-dark(#0A0B0D, #F4F5F7);--fx:0px;--fy:88px;animation-delay:0s;animation-duration:0.2s"');
     expect(html).toContain("--fx:-41.24px;--fy:-25.61px;animation-delay:0.12s;animation-duration:0.24s");
     expect(html).toContain("--fx:-35.74px;--fy:38.26px;animation-delay:0.26s;animation-duration:0.3s");
-    expect(html).toMatch(/class="logo-pop" style="animation-delay:0.56s;animation-duration:0.18s"/);
-    expect(html).toMatch(/<circle class="logo-pulse" cx="150.65" cy="-76.5" r="9" fill="none" stroke="#4F95F0" stroke-width="2.5" style="animation-delay:0.66s;animation-duration:0.3s"/);
+    expect(html).toMatch(/class="logo-pop" style="fill:light-dark\(#2F6FDE, #4F95F0\);animation-delay:0.56s;animation-duration:0.18s"/);
+    expect(html).toMatch(/<circle class="logo-pulse" cx="150.65" cy="-76.5" r="9" fill="none" stroke="#4F95F0" stroke-width="2.5" style="stroke:light-dark\(#2F6FDE, #4F95F0\);animation-delay:0.66s;animation-duration:0.3s"/);
     // the paths themselves are still Design's, and the box is the same: nothing around the logo moves
     expect([...new Set(ds(html))].sort()).toEqual([...fileDs(wordDark)].sort());
     expect(html).toContain('viewBox="0 -88 301.55 88"');
