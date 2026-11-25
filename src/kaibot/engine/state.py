@@ -20,6 +20,24 @@ Step 3 (#446): the gate. `Engine.trading_state` is the strictest of the switch a
 engine/order_path.py asks it before every order call (`allows`): the property above is now enforced at the seam,
 not only checked by the simulation. The heartbeat's detail carries the state and the entry block's code
 (`BLOCK_CODES`) and words on every beat (`Engine.trading_detail`).
+
+Step 4 (#446; Product's ruling of 25 Nov: no owner "halted" switch for now). Every entry block is now a hold on the
+one switch, under its own source (`ENTRY_SOURCES`, in `entry_block`'s order: the run (not running, paused), a
+command selling the book, the account, the reconciliation, the fail-closed halt, the lease, clock skew, the daily
+stop, a refused owner config, the daily-data check). `Engine.entry_reason` takes or lets go of each of them
+(`Engine._hold_entry_blocks`) and then reads the first one held: `entry_block` comes from the switch alone. The
+conditions are read where they were read (on every `entry_block`), in the same order, and stop at the first that
+blocks, as before, so the daily-data check (which journals a new block) is asked exactly as often as before; the
+holds below the first are let go, so the switch holds only what is known now. All of them are `reducing_only`, as
+in step 1. The fail-closed halt keeps its own trigger (`Engine.kill`, step 2). The market filter is not one of them:
+it holds back one rule's carried buys, not every buy, and a hold would refuse the rest (the state stays `active`;
+the heartbeat reports it as in step 3).
+
+The first trigger of `halted` (`LEASE_LOST`): the engine lease is lost (another engine took it). Today the lease's
+fence (engine/fence.py) then refuses every order call, cancels included, and the main loop stops; the hold is
+taken exactly while that is so (`lease.lost`, and the engine's broker fenced by that lease), so the gate refuses
+what the fence would refuse anyway and a cancel still reaches the fence. Nothing that reaches the venue changes;
+the heartbeat says `halted` instead of `reducing_only`.
 """
 
 from __future__ import annotations
@@ -48,6 +66,14 @@ BLOCK_CODES = ("no_run", "paused", "run_not_running", "command_selling", "accoun
                "market_filter_off")
 
 
+# Step 4: the switch's sources of the entry blocks, in `Engine.entry_block`'s order (the first one held is the block).
+# `halt` is the fail-closed halt's own hold (`Engine.kill`); `entry_block` words it "halted: <kind>".
+HALT = "halt"
+ENTRY_SOURCES = ("run", "command", "account", "reconcile", HALT, "lease", "clock", "daily_stop", "config",
+                 "data_check")
+LEASE_LOST = "lease_lost"  # the first `halted` trigger: the lease's fence already refuses every order call
+
+
 def from_entry_block(why: str | None) -> Trading:
     """Step 1's map: every reason the engine gives for "no new position now" is `reducing_only`."""
     return Trading(TradingState.ACTIVE) if why is None else Trading(TradingState.REDUCING_ONLY, why)
@@ -74,14 +100,30 @@ class TradingSwitch:
 
     def __init__(self) -> None:
         self._holds: dict[str, Trading] = {}
+        self._codes: dict[str, str] = {}
 
-    def hold(self, source: str, state: TradingState, why: str) -> None:
+    def hold(self, source: str, state: TradingState, why: str, code: str | None = None) -> None:
+        """`code`: the heartbeat's short code for it (`BLOCK_CODES`), when the source has more than one (step 4)."""
         if state is TradingState.ACTIVE:
             raise ValueError("a hold is reducing_only or halted; release() lets go")
         self._holds[source] = Trading(state, why)
+        if code is None:
+            self._codes.pop(source, None)
+        else:
+            self._codes[source] = code
 
     def release(self, source: str) -> None:
         self._holds.pop(source, None)
+        self._codes.pop(source, None)
+
+    def first(self, sources) -> tuple[str, str | None, str] | None:
+        """Step 4: the first of `sources` (in their order) that holds the switch, as (source, code, why); None if none
+        does."""
+        for s in sources:
+            h = self._holds.get(s)
+            if h is not None:
+                return s, self._codes.get(s), h.why or ""
+        return None
 
     def held(self, source: str) -> str | None:
         """The reason `source` holds the switch with (None: it does not)."""
