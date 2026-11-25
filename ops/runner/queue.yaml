@@ -23,6 +23,10 @@ jobs:
     script: scripts/shadow_results.py
     args: []
     posts_to_issue: 371
+  - id: market-alarm-amend1-2026-11-25      # #377: the post-Amendment-1 run (#596): logs megacap_report M1, the 8th row
+    script: scripts/market_alarm_report.py
+    args: ["--start", "2016-01-01", "--end", "2024-12-31"]
+    posts_to_issue: 377
   - id: index-core-80-2026-11-25          # #458 prereg Amendment 4: the core at an 80% index cap (research only)
     script: scripts/index_core.py
     args: ["--end", "2024-12-31", "--index-cap", "80"]
