@@ -34,13 +34,16 @@ Restart and recovery (crash, 10-minute outage, API outage, half-written order, t
   flatten of that poll still happen.
 - **Order-path budget:** a trading call that gives up because its rate-limit slot comes after its deadline no
   longer books that slot, so it does not push other callers back.
-- **Dead-man on early closes:** migration `0017_deadman_early_close.sql` (**not applied yet; the stakeholder
-  applies it**) adds `kaibot.market_calendar_exception` (holidays and 13:00 closes, NYSE calendar 2026-2028) and
-  two more pg_cron jobs at 12:56 ET. `deadman_flatten()` then acts at the day's close minus 4 minutes and never on
-  a holiday. Before 0017, early-close days have no off-box dead-man (the GTC stops still protect positions).
+- **Dead-man on early closes:** migration `0017_deadman_early_close.sql` (**applied by Product on 13 Nov 2026**,
+  with 0014-0018; [migrations_pending.md](migrations_pending.md) is the record) adds
+  `kaibot.market_calendar_exception` (holidays and 13:00 closes, NYSE calendar 2026-2028). Its two extra pg_cron jobs
+  at 12:56 ET are gone since 0019 (applied 13 Nov 2026), which replaced all four `kaibot_deadman_*` jobs with one
+  `kaibot_deadman` job: `kaibot.deadman_check()` reads the same table, acts at the day's close minus 4 minutes
+  (12:56 ET on an early close such as Fri 27 Nov 2026) and never on a holiday.
   **Every autumn** add the next year's holidays and early closes to that table, next to `macro_calendar.yaml`.
-  Check after applying: `select jobname, schedule from cron.job where jobname like 'kaibot_deadman%';` shows four
-  jobs, and `select kaibot.deadman_flatten();` outside the due minutes returns `not 15:56 ET` (or `not 12:56 ET`).
+  Check (read-only): `select day, close_et from kaibot.market_calendar_exception where day between '2026-11-26' and
+  '2026-11-27';` gives the holiday (`close_et` null) and the 13:00 close, and `select jobname, schedule from cron.job
+  where jobname like 'kaibot_deadman%';` gives the one row `kaibot_deadman`, `* 13-21 * * 1-5`.
 
 ## A heartbeat the watchdog cannot read (M9 1.6)
 The heartbeat lives in Supabase. When the watchdog cannot **read** it (Supabase unreachable from the Mac), it asks
@@ -311,7 +314,7 @@ limit 1;` shows what it did. It never sells a multi-day position.
 | 5 | Start equity = pot + realised daily results | changed in S77 (#117) | the ledger's last mark-to-market close; unchanged here |
 | 6 | Open risk must fit in the room left before the daily stop | unchanged | `risk/gate.py` is two-key code and its open-risk budget is about intraday proposals; multi-day buys are sized by the portfolio builder (#119) under book limits (gap scenario, overnight cap). What changed: the cash a multi-day book holds is no longer counted as intraday buying power (`_decide`) |
 | 7 | Watchdog closes every position at 15:55 | changed | `engine/watchdog.py` + `engine/failsafe.py`: cancel entries, verify and re-create stops, alarm, sell intraday shares only |
-| 8 | Database dead-man deletes all positions at 15:56 | changed (file only) | `migrations/0019_deadman_overnight.sql`, **not applied**: the same plan in SQL |
+| 8 | Database dead-man deletes all positions at 15:56 | changed (file only) | `migrations/0019_deadman_overnight.sql` (applied 13 Nov 2026): the same plan in SQL |
 | 9 | One position per symbol, exits tied to the entry bracket | changed in S77/S78 | positions keyed by (strategy, symbol); one standalone protective stop per sleeve (`engine/protect.py`); unchanged here |
 | 10 | Foreign-position guard | changed | `check_account` and the drift check count the ledger's multi-day sleeves (and orders on their symbols) as known; anything else still blocks entries, including positions left by an ended run (it should have been flat) |
 | 11 | New run and run drawdown flatten everything | changed so they still do | decision 15 section 6 keeps them: `flatten_all` for `run_drawdown` and `manual` now also sells multi-day sleeves (`_flatten_md`), the fill is booked to the ledger, and a new run waits until they are sold. "Flatten and stop" likewise |
