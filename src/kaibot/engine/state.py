@@ -15,6 +15,11 @@ its own name and lets go of it; the engine's fail-closed halt (`Engine.kill`: dr
 engine errors, the start-up checks) is now the switch's `halt` hold, set and released where `kill` was. The other
 blocks are still derived (step 1). Behaviour is unchanged: `entry_block` reads the hold where it read `kill`, in the
 same order, with the same words. The owner's switch (a `kb_command` kind, a migration) is the next hold.
+
+Step 3 (#446): the gate. `Engine.trading_state` is the strictest of the switch and the derived state, and
+engine/order_path.py asks it before every order call (`allows`): the property above is now enforced at the seam,
+not only checked by the simulation. The heartbeat's detail carries the state and the entry block's code
+(`BLOCK_CODES`) and words on every beat (`Engine.trading_detail`).
 """
 
 from __future__ import annotations
@@ -33,6 +38,14 @@ class TradingState(StrEnum):
 class Trading:
     state: TradingState
     why: str | None = None
+
+
+# The heartbeat's `entry_block` codes (`Engine.entry_reason`, `Engine.trading_detail`); the words stay
+# `Engine.entry_block`'s. `market_filter_off` is not an engine block (the state stays `active`): a multi-day rule's
+# latest send found the market filter off and held its carried buys back.
+BLOCK_CODES = ("no_run", "paused", "run_not_running", "command_selling", "account_not_clean", "reconcile_difference",
+               "halted", "lease_unverified", "clock_skew", "daily_stop", "config_refused", "data_check",
+               "market_filter_off")
 
 
 def from_entry_block(why: str | None) -> Trading:

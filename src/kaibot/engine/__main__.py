@@ -678,8 +678,13 @@ def make_beat(eng: Engine, lease: EngineLease, host: str, stop: dict):
                 log.error("%s", e)
             stop.update(now=True, lease_lost=True)
             return  # the heartbeat row now belongs to the engine that holds the lease
+        try:  # #446: the trading state and the entry block, on every beat (a report: never stops the beat)
+            trading = eng.trading_detail()
+            trading = dict(trading) if isinstance(trading, dict) else {}
+        except Exception:
+            trading = {}
         try:
-            eng.store.heartbeat(eng.process, {**st, "host": host, "ts": datetime.now(UTC).isoformat(),
+            eng.store.heartbeat(eng.process, {**st, **trading, "host": host, "ts": datetime.now(UTC).isoformat(),
                                               "lease": lease.status()})
         except Exception:
             log.exception("heartbeat failed")

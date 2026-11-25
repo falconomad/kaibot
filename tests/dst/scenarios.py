@@ -15,6 +15,7 @@ from world import D0, D1, D2, D3, Outage, Scenario, et
 from kaibot.broker.faulty import NO_FAULTS, Forced
 from kaibot.broker.sim import NY
 from kaibot.engine import live_daily as ld
+from kaibot.engine import order_path
 from kaibot.engine.core import Engine
 from kaibot.engine.orders import OrderManager
 
@@ -78,6 +79,9 @@ def unbooked_fill_of_today_only(mp) -> None:
 
     mp.setattr(OrderManager, "unbooked", today_only)
     mp.setattr(ld._Gate, "allows", lambda self, symbol, side, purpose="target", qty=None: None)
+    # #446 step 3: the order seam's trading-state gate is a third guard (the same reconciliation block, asked at
+    # the send itself): it refuses the second buy too, so it is taken away with the other two
+    mp.setattr(order_path, "_gate", lambda broker, action, side, what: None)
 
 
 def watchdog_cancel_not_carried(mp) -> None:
