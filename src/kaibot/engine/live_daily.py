@@ -38,7 +38,10 @@ at the close"); on 18 Nov 2026 23 of 30 `cls` buys got nothing. A DAY market ord
 fill, and a partial fill's remainder is worked again while the order is marketable. The research venue fills it at
 the closing print at cost model v1, as it did the `cls` order (SimBroker `near_close`), so the fills of the ten-year
 runs do not change (Amendment 10 of trend_momentum, Amendment 8 of mom_12_1_band). A remainder that still expires is
-not sent again that session; a sale is sent again at the next session, and so is a buy (below).
+not sent again that session; a sale is sent again at the next session, and so is a buy (below). Audit 2, 5.9: so is a
+reduction (a `resize` down) that did not fill, at its target, until the next decision sizes the name anew
+(`_pending_cuts`); a sale the venue REFUSES is sent again at every tick to the window's end, then the
+`multi_day_sale_refused` alarm, and it is pending at the next session (a refused buy waits, as before).
 
 Carry-over (issue #363; Amendments 11 to 13 of trend_momentum, 9 to 11 of mom_12_1_band). On a session that is not a
 decision's fill session, `send` plans again what the latest decision's buys still lack: the plan's own target shares
@@ -583,6 +586,7 @@ class LiveDaily:
         self._failed_check: set[str] = set()  # rules whose last wait was a store failing the integrity check
         self._dropped: dict[str, tuple[str, str]] = {}  # rule -> (fill session, note): stocks the gate left out
         self._said: dict[str, str] = {}  # rule -> the last orders event (a retry that changes nothing is silent)
+        self._sale_alarm: date | None = None  # audit 2 5.9: the session whose refused sales were last checked
         self._missed: dict[str, tuple[str, str]] = {}  # rule -> (session, the heartbeat's plain note)
         self._synced: datetime | None = None
         self._fills_since: datetime | None = None  # M9 1.13: fills before it are not judged (recon_view)
@@ -1292,6 +1296,8 @@ class LiveDaily:
         if om is None or rid is None:
             return []
         window = self.in_window(self.now())
+        if not window:
+            self._refused_sales(session)  # audit 2 5.9: the window is over with a sale still refused: the alarm
         if not window and self._caught_up == session:
             return []
         if self.account.book_ended():
@@ -1340,10 +1346,13 @@ class LiveDaily:
                                                 "sent": [], "skipped": []})
                 done.append(r.name)
                 continue
-            # the venue said no: not sent again today (an order that never reached it is: one called lost, and
-            # audit 2 5.8: a buy the lease's fence refused because a renewal failed, sent again at the next tick)
-            refused = {x.symbol for x in self.orders_of(session) if x.strategy == r.name and x.state is St.REJECTED
-                       and not str(x.reason or "").startswith("lost") and not unproved(x.reason)}
+            # the venue said no to a BUY: not sent again today (an order that never reached it is: one called lost,
+            # and audit 2 5.8: a buy the lease's fence refused because a renewal failed, sent again at the next tick).
+            # Audit 2 5.9: a refused SALE is sent again at every tick to the window's end (`_refused_sales` then
+            # raises the alarm), under a new attempt: the venue took nothing, so there is nothing to double
+            refused = {x.symbol for x in self.orders_of(session) if x.strategy == r.name and x.side == "buy"
+                       and x.state is St.REJECTED and not str(x.reason or "").startswith("lost")
+                       and not unproved(x.reason)}
             targets = [t for t in targets if t.symbol not in refused]
             held_now = {(r.name, s): q for s, (q, _) in self.account.held(r.name).items()}
             try:
@@ -1366,7 +1375,8 @@ class LiveDaily:
             # reconciliation difference): the next tick runs the loop again on the same journalled targets
             # (audit 2 5.8: or a buy the lease's fence refused for a failed renewal: it never reached the venue)
             retry = bool(res.deferred or res.canceled or skipped or withheld) \
-                or any(x.state in UNCONFIRMED or (x.state is St.REJECTED and unproved(x.reason)) for x in res.sent)
+                or any(x.state in UNCONFIRMED or (x.state is St.REJECTED and (unproved(x.reason) or x.side == "sell"))
+                       for x in res.sent)  # (audit 2 5.9: a refused sale keeps the send open to the window's end)
             aged = [[k[1], why] for k, why in res.aged]  # QA-Ops (#524): a sale that no longer waits for an old fill
             said = repr((sent, skipped, res.deferred, res.canceled, withheld, aged))
             if self._said.get(r.name) != said:
@@ -1387,6 +1397,29 @@ class LiveDaily:
                                                 "sent": [x["coid"] for x in sent], "skipped": skipped})
                 done.append(r.name)
         return done
+
+    def _refused_sales(self, session: date) -> None:
+        """Audit 2, 5.9: after the send window of `session`, every sale (not a stop) whose LAST attempt of the
+        session the venue refused: one `multi_day_sale_refused` alarm per session (and per process). The sale is
+        not lost: it is still a target, and `_pending` sends it again at the next session. Nothing is journalled
+        when no sale was refused, and nothing is read from the venue."""
+        if self._sale_alarm == session or self._window_left(self.now()) > 0:
+            return  # before the window ends (or already said)
+        last: dict[tuple[str, str], OrderRecord] = {}
+        for x in self.orders_of(session):  # the order manager keeps them in the order they were made
+            if x.side == "sell":
+                last[(x.strategy, x.symbol)] = x
+        self._sale_alarm = session
+        bad = sorted((k, x) for k, x in last.items() if x.state is St.REJECTED
+                     and not str(x.reason or "").startswith("lost") and not unproved(x.reason))
+        if not bad:
+            return
+        sales = [[k[0], k[1], x.coid, str(x.reason or "")[:160]] for k, x in bad]
+        log.error("audit 2 5.9: sales still refused at the end of the send window of %s: %s", session, sales)
+        self.event("multi_day_sale_refused", {"session": str(session), "sales": sales,
+                                              "action": "the venue refused these sales at every try of the "
+                                                        "window: they are sent again at the next session; "
+                                                        "check the reason at the broker"})
 
     # ---------------------------------------------------------------- the pre-send gate (M9 1.16, issue #441)
     def _sizing_closes(self, rule: str, session: date, symbols: Sequence[str]) -> dict[str, float]:
@@ -1653,6 +1686,33 @@ class LiveDaily:
             return {}
         return {s: str(w) for s, q, _, w in last["targets"] if int(q) == 0 and s in held}
 
+    def _pending_cuts(self, rule: str, session: date, held: Mapping[str, tuple[float, float | None]],
+                      skip: set[str]) -> list[Target]:
+        """Audit 2, 5.9: reductions sent on an earlier session that did not fill, in whole or in part (a `resize`
+        to fewer shares than are held now): sent again at their target, as `_pending` sends a sale again, until
+        the rule's next decision sizes the name anew (only a session without a new target list asks). Names in
+        `skip` (sold anyway) are left out, and so is a name the ledger booked a split for since that send (the
+        target's shares are on the old basis): it waits for the next decision, as before."""
+        last, rid = None, self.account.run_id()
+        for b in self._entries("md_send"):
+            if b.get("strategy") == rule and b.get("session") < str(session):
+                last = b
+        if last is None or last.get("run_id") != rid:  # a reduction of another run is never this run's to send
+            return []
+        cuts = [(s, int(q), w) for s, q, p, w in last["targets"] if p == "resize" and int(q) > 0 and s in held
+                and s not in skip and float(held[s][0]) > int(q) + 1e-9]
+        if not cuts:
+            return []
+        split = {str(b.get("symbol")) for b in self._entries("split") if b.get("run_id") == rid
+                 and last["session"] < str(b.get("ex_date"))[:10] <= str(session)}
+        out = [Target(rule, s, q, "resize", {"why": w}) for s, q, w in cuts if s not in split]
+        if out or split:
+            log.warning("audit 2 5.9: unfilled reductions of %s sent again on %s: %s%s", last["session"], session,
+                        [[t.symbol, t.shares] for t in out],
+                        f" (split since, left to the next decision: {sorted(split & {c[0] for c in cuts})})"
+                        if split & {c[0] for c in cuts} else "")
+        return out
+
     def _plan(self, r: Rule, session: date, rid: int) -> dict | None:
         """The builder's targets for `session` from the decision taken after the previous close."""
         prev = self.prev_session(session)
@@ -1668,11 +1728,13 @@ class LiveDaily:
             tl = target_from_json(late["target"])
         if dec is None:
             self._no_decision(r.name, session, prev)
-        if dec is None and not pending:
+        cuts = self._pending_cuts(r.name, session, held, set(pending)) if tl is None else []
+        if dec is None and not pending and not cuts:
             return {"run_id": rid, "strategy": r.name, "session": str(session), "decided": None, "targets": [],
                     "note": "no decision"}
         if tl is None:
             plan, targets = plan_session(r.builder, None, r.name, {}, pending, None, 0, 0.0, 0.0)
+            targets += cuts  # audit 2 5.9: after the pending sales, the unfilled reductions
             if dec is None:  # no decision was taken after the last close: nothing is carried on an old plan
                 return self._planned(r, session, rid, prev, targets, None)
             sales = list(targets)  # the pending sales: they go out whatever happens to the carry-over

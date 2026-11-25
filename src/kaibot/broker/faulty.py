@@ -26,6 +26,9 @@ venue (FaultyBroker)
     rate_limit                every call of one kind is answered 429 for one minute
     clock_skew                the venue's clock reads minutes off the host's for a spell
     mark_bad                  a position's `current_price` is missing, zero, or stale by a large move
+    submit_refused            the venue refuses the order (403), nothing is taken. Only when a hand-written scenario
+                              names it (`Forced`, never drawn by the dice): `param` refusals of that symbol and side
+                              (default 1), whatever the attempt (audit 2, 5.9)
 
 market data (FaultyData.quotes_within)
     quote_stale / quote_missing / quote_zero / quote_crossed
@@ -186,6 +189,7 @@ class FaultyBroker(BrokerBase):
         self._unlisted: set[str] = set()  # client order ids missing from the open-orders list while they lag
         self._late_cancels: dict[str, datetime] = {}  # order id -> when the cancel was asked
         self._cancel_n: dict[str, int] = {}  # order id -> cancel requests seen
+        self._refused_n: dict[tuple[str, str], int] = {}  # (symbol, side) -> forced refusals given (submit_refused)
         self._seen_at: dict[str, datetime] = {}  # activity id -> when it could first have been read
         self._skew: tuple[datetime, float] | None = None  # (until, seconds)
 
@@ -232,6 +236,13 @@ class FaultyBroker(BrokerBase):
         try:
             self._limited("submit")
             also = (order.symbol, order.side)
+            refuse = self._forced("submit_refused", coid, *also) if self.armed else None
+            if refuse is not None:
+                k = (order.symbol, order.side)
+                n = self._refused_n[k] = self._refused_n.get(k, 0) + 1
+                if n <= int(refuse.param or 1):
+                    self._note("submit_refused", f"{coid} refusal {n}")
+                    raise BrokerError(403, '{"code":40310000,"message":"faulty: the venue refused the order"}')
             if self.sim.order_by_client_id(coid) is None:  # the faults of an order are decided once, at its first try
                 if self._hit("submit_timeout_lost", coid, also=also):
                     self._note("submit_timeout_lost", coid)
