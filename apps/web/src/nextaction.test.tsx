@@ -52,7 +52,7 @@ describe("Home: one 'Next' line under the pot", () => {
   it("a decision due: when its orders go out (Thanksgiving is closed); without the calendar, from the heartbeat's next open", () => {
     vi.useFakeTimers({ now: new Date(EVENING), toFake: ["Date"] });
     const due = { trend_momentum: { last_decision: SESSION, standing: { state: "due", fill_session: "2026-11-27" } } };
-    expect(text(home(beat("2026-11-25T21:59:50Z", { rules: due })))).toContain("Next: orders go out on Fri 27 Nov at 15:50 ET");
+    expect(text(home(beat("2026-11-25T21:59:50Z", { rules: due })))).toContain("Next: orders go out on Fri 27 Nov at 12:50 ET");
   });
   it("no multi-day block: no line", () => {
     vi.useFakeTimers({ now: new Date(EVENING), toFake: ["Date"] });

@@ -3,6 +3,7 @@
 // calm and neutral state; off during market hours (09:30-16:00 ET on a trading day) it is the amber warning.
 // Pure: unit-tested in nightfix.test.tsx.
 import type { Heartbeat } from "./api";
+import { OPEN_MIN, closeMin, isTradingDay } from "./nyse";
 
 /** The Mac's schedule (Berlin time, weekdays). */
 export const ENGINE_WAKE = { tz: "Europe/Berlin", h: 13, m: 45 } as const;
@@ -15,12 +16,13 @@ const parts = (d: Date, tz: string) => {
 };
 const WEEKEND = ["Sat", "Sun"];
 
-/** 09:30-16:00 ET on a trading day. Holidays and early closes: when the engine's last heartbeat said the market was
- *  closed and its next open is still ahead, the market is closed now. An engine that died while trading said nothing
- *  of the sort, so a weekday's 09:30-16:00 counts as market hours. */
+/** 09:30-16:00 ET on an NYSE trading day, 09:30-13:00 on an early close (lib/nyse.ts: holidays and early closes of
+ *  2026-2027). Also closed when the engine's last heartbeat said the market was closed and its next open is still
+ *  ahead (a closure the table does not know). An engine that died while trading said nothing of the sort, so a trading
+ *  day's hours count as market hours. */
 export function marketHours(now: Date, beat?: Pick<Heartbeat, "ts" | "detail"> | null): boolean {
   const et = parts(now, "America/New_York");
-  if (WEEKEND.includes(et.wd) || et.min < 9 * 60 + 30 || et.min >= 16 * 60) return false;
+  if (WEEKEND.includes(et.wd) || !isTradingDay(et.date) || et.min < OPEN_MIN || et.min >= closeMin(et.date)) return false;
   const next = typeof beat?.detail?.next_open === "string" ? Date.parse(beat.detail.next_open) : NaN;
   if (beat?.detail?.state === "market_closed" && Number.isFinite(next) && next > now.getTime()) return false;
   return true;

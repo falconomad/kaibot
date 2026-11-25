@@ -13,7 +13,8 @@
 // 2 s, alternating, in one 4 s cycle, the same on sign-in, /register, the app's header and New run. CSS only (app.css,
 // kb-logo-hop and kb-logo-arm share one animation-delay): the classes go on when the intro ends, so the 2 s delay counts
 // from there. The point and the arm are then each their own <svg> layer (below), so they move on the compositor.
-// Paused while the tab is hidden; none with reduced motion. Only their transforms move.
+// Paused while the tab is hidden; none with reduced motion, nor after "Pause animations" in Settings (lib/motion.ts,
+// WCAG 2.2.2), and either change applies at once. Only their transforms move.
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import wordDark from "../brand/logo/wordmark-on-dark.svg?raw";
 import wordLight from "../brand/logo/wordmark-on-light.svg?raw";
@@ -22,6 +23,7 @@ import symbolLight from "../brand/logo/symbol-on-light.svg?raw";
 import { BRAND } from "../brand/brand";
 import { capsule, circle, drawnFrom, parseMark, type Mark } from "../brand/mark";
 import { reducedMotion } from "../lib/a11y";
+import { useMotionStill } from "../lib/motion";
 
 const FILES = { word: { dark: wordDark, light: wordLight }, symbol: { dark: symbolDark, light: symbolLight } };
 const cache = new Map<string, Mark>();
@@ -65,7 +67,8 @@ export function Logo({ size, symbolOnly = false, on = "theme", animate = false, 
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   const [moving, setMoving] = useState(() => animate && !played && !reducedMotion());
   useEffect(() => { if (moving) played = true; }, [moving]);
-  const hops = !!idle && !moving && !reducedMotion();
+  const still = useMotionStill();
+  const hops = !!idle && !moving && !still;
   // Paused, not restarted, while the tab is hidden: a listener, no timer.
   const [hidden, setHidden] = useState(false);
   useEffect(() => {

@@ -191,6 +191,16 @@ function leavePrices(): void {
   setDown(false);
 }
 
+/** Sign-out or another account (lib/session.ts): the price channel and every other realtime channel are left, and the
+ *  listeners of the account before are dropped, so nothing it subscribed to reaches the next one. */
+export function stopRealtime(): void {
+  const p = priceStream;
+  leavePrices();
+  p.listeners.clear();
+  p.downs.clear();
+  void p.rt?.removeAllChannels().catch(() => []);
+}
+
 async function joinPrices(): Promise<void> {
   const p = priceStream;
   p.joining = true;

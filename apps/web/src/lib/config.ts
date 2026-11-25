@@ -5,6 +5,7 @@ import type { Level } from "./api";
 import { LEVELS } from "./model";
 import presetsJson from "../data/presets.json";
 import { brandText } from "../brand/brand";
+import { addDays, isTradingDay, tradingDayFrom } from "./nyse";
 
 export type FocusMode = "all" | "prefer" | "only";
 export type PresetKey = "default" | "big_tech" | "calm" | "custom";
@@ -350,20 +351,15 @@ export function dollars(body: ConfigBody, pot: number) {
   };
 }
 
-// ---------------------------------------------------------------- next session open (09:30 ET, weekdays)
-/** The next 09:30 ET open strictly after `now`, as YYYY-MM-DD. Market holidays are not known here; the engine simply
- * applies a version at the next real open, so the UI says "next open" and shows this date as the likely one. */
+// ---------------------------------------------------------------- next session open (09:30 ET, NYSE days)
+/** The next 09:30 ET open strictly after `now`, as YYYY-MM-DD: a weekday that is not an NYSE holiday (lib/nyse.ts). The
+ * engine applies a version at the next real open; the UI says "next open" and shows this date as the likely one. */
 export function nextOpenEt(now: Date = new Date()): string {
-  const parts = (d: Date) => Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit",
-    day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false, weekday: "short" }).formatToParts(d).map((p) => [p.type, p.value]));
-  const p = parts(now);
-  const mins = (Number(p.hour) % 24) * 60 + Number(p.minute);
-  let d = new Date(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day)));
-  const wk = (x: Date) => x.getUTCDay();
-  if (!(wk(d) >= 1 && wk(d) <= 5 && mins < SESSION_OPEN)) {
-    do d = new Date(d.getTime() + 86_400_000); while (wk(d) === 0 || wk(d) === 6);
-  }
-  return d.toISOString().slice(0, 10);
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit",
+    day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now).map((x) => [x.type, x.value]));
+  const today = `${p.year}-${p.month}-${p.day}`;
+  const mins = Number(p.hour) * 60 + Number(p.minute);
+  return isTradingDay(today) && mins < SESSION_OPEN ? today : tradingDayFrom(addDays(today, 1));
 }
 /** "Thu 12 Nov 09:30 ET" from a date or an ISO timestamp. */
 export function openLabel(isoOrDate: string): string {
