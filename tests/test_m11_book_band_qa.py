@@ -27,9 +27,6 @@ def _boom(*a, **k):
 # ---------------------------------------------------------------- fail closed: never "no stop"
 
 
-@pytest.mark.xfail(strict=True, raises=RuntimeError, reason=(
-    "QA-Ops on #652: core._book_end_check calls self._book_stop() again outside its try (the heartbeat's `stop` "
-    "block), so a loader that raises escapes the book check at every tick: no stop. Remove this mark with the fix."))
 def test_a_switch_loader_that_raises_is_the_fixed_line_and_the_book_still_ends(tmp_path, monkeypatch):
     """load_or_fixed never raises today; if it ever did (a regression), the engine must still end the book at the
     fixed line, at every later check too, not raise out of the book check."""

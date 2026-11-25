@@ -953,7 +953,10 @@ class Engine:
     def _book_stop(self) -> tuple[bstop.BookStopConfig, dict, str | None]:
         """#461: config/book_stop.yaml, read once (fail closed: a missing or invalid file is mode fixed)."""
         if self._bstop is None:
-            cfg, why = bstop.load_or_fixed(BOOK_STOP_PATH)
+            try:
+                cfg, why = bstop.load_or_fixed(BOOK_STOP_PATH)
+            except Exception as e:  # QA-Ops on #652: never "no stop", even if the loader itself regresses
+                cfg, why = bstop.FIXED, f"book_stop.yaml loader failed, the fixed line: {type(e).__name__}: {e}"
             if why is not None:
                 log.error("the multi-day book's stop: %s", why)
             self._bstop = (cfg, {}, why)
