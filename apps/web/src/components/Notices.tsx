@@ -8,8 +8,10 @@ import { Fragment, useState } from "react";
 import { MIN, poll } from "../lib/poll";
 import {
   BIG_DAY_WHY, HOW_OFTEN, KIND_LABEL, LISTING_WHY, ONLY_INFORMS, type Notice, type Notices, clock, dayName, eligibleRows,
-  fetchNotices, homeNotices, merged, noticeLine, untilText, when,
+  NOTICES_EVERY, fetchNotices, homeNotices, merged, noticeLine, noticesFreshness, untilText, when,
 } from "../lib/notices";
+import type { Freshness } from "../lib/freshness";
+import { FreshNote } from "./Fresh";
 import { Sheet } from "./Sheet";
 import { NAME } from "../brand/brand";
 import "./notices.css";
@@ -24,17 +26,18 @@ const Icon = ({ kind }: { kind: Notice["kind"] }) => (
 );
 const Chev = () => <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6 L15 12 L9 18" /></svg>;
 
-/** Home's notices: nothing while loading, on a day without notices or before migration 0035; a quiet line on error. */
+/** Home's notices: nothing while loading, on a day without notices or before migration 0035; a quiet line when the
+ *  first ask fails. When a later ask fails the rows stay, with the one freshness cue (components/Fresh.tsx) once they
+ *  are older than its rule allows, instead of vanishing behind an error line. */
 export default function MarketNotices({ tz }: { tz?: string }) {
-  const q = useQuery({ queryKey: ["market-notices"], queryFn: fetchNotices, staleTime: 10 * MIN, ...poll(30 * MIN) });
-  if (q.isError) return (
+  const q = useQuery({ queryKey: ["market-notices"], queryFn: fetchNotices, staleTime: 10 * MIN, ...poll(NOTICES_EVERY) });
+  if (!q.data) return q.isError ? (
     <p className="nt-err">Market notices could not load. <button type="button" className="link" onClick={() => { void q.refetch(); }}>Try again</button></p>
-  );
-  if (!q.data) return null;
-  return <NoticeRows data={q.data} tz={tz} />;
+  ) : null;
+  return <NoticeRows data={q.data} tz={tz} fresh={noticesFreshness(q.dataUpdatedAt, q.isError)} />;
 }
 
-export function NoticeRows({ data, tz }: { data: Notices; tz?: string }) {
+export function NoticeRows({ data, tz, fresh }: { data: Notices; tz?: string; fresh?: Freshness | null }) {
   const rows = homeNotices(data);
   if (!rows.length) return null;
   const shown = rows.slice(0, MAX_ROWS), rest = rows.length - shown.length;
@@ -42,6 +45,7 @@ export function NoticeRows({ data, tz }: { data: Notices; tz?: string }) {
     <div className="nt-rows" aria-label="Market notices">
       {shown.map((x) => <NoticeRow key={`${x.kind}-${x.flag}-${x.session}-${x.symbol ?? ""}`} n={x} data={data} tz={tz} />)}
       {rest > 0 && <MoreRow data={data} tz={tz} count={rest} />}
+      <FreshNote f={fresh} what="Market notices" />
     </div>
   );
 }

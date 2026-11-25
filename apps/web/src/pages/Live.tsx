@@ -177,7 +177,7 @@ export function Live() {
       {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
       <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} events={healthCache.data?.events} />
       <StartBanner state={startState(run, overview)} />
-      {run.kind === "paper" && <Suspense fallback={null}><Lines headlines={!ended} fresh={newsFresh} /></Suspense>}
+      {run.kind === "paper" && <Suspense fallback={null}><Lines viewer="owner" headlines={!ended} fresh={newsFresh} /></Suspense>}
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
