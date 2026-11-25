@@ -533,6 +533,13 @@ def test_no_calendar_at_all_is_taken_as_a_possible_early_close_with_one_event():
     assert body["session"] == "2030-07-01" and (body["send_from"], body["send_until"]) == ("12:50", "12:57")
     assert "calendar unreachable" in body["error"]
 
+    def broken(kind, body):
+        raise RuntimeError("store down")
+
+    lv = _unreadable_calendar()
+    lv.event = broken  # an event that cannot be written never stops the window
+    assert lv.send_until(d) == time(12, 57)
+
 
 def test_the_local_early_closes_match_the_deadman_table_and_the_nyse_rules():
     """LOCAL_EARLY_CLOSES is the same as migration 0017's 13:00 rows and kaibot.ingest.nyse_sessions' early closes,

@@ -1239,10 +1239,13 @@ class LiveDaily:
                 log.error("session close of %s unknown (calendar: %s; no local calendar for %d): taken as a possible "
                           "early close, multi-day orders only %s-%s ET", day, why, day.year,
                           minus(close, NEAR_CLOSE_MIN).strftime("%H:%M"), minus(close, SEND_LAST_MIN).strftime("%H:%M"))
-                self.event("multi_day_close_unknown", {
-                    "session": str(day), "error": why, "assumed_close": close.strftime("%H:%M"),
-                    "send_from": minus(close, NEAR_CLOSE_MIN).strftime("%H:%M"),
-                    "send_until": minus(close, SEND_LAST_MIN).strftime("%H:%M")})
+                try:  # the alarm must never be what stops the send
+                    self.event("multi_day_close_unknown", {
+                        "session": str(day), "error": why, "assumed_close": close.strftime("%H:%M"),
+                        "send_from": minus(close, NEAR_CLOSE_MIN).strftime("%H:%M"),
+                        "send_until": minus(close, SEND_LAST_MIN).strftime("%H:%M")})
+                except Exception:
+                    log.exception("multi_day_close_unknown event not written")
         elif day not in self._close_said:
             self._close_said.add(day)
             log.warning("session close of %s from the local calendar (calendar: %s): %s ET", day, why,
