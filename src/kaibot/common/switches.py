@@ -118,6 +118,9 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_SOURCES_FILE", "path", "data", "config/sources.yaml elsewhere (tests)"),
     _s("KAIBOT_HELPER_ENV_FILE", "path", "qa-ops", "#451: the helpers' env file (read by common/helper_session.py "
        "itself: the helpers' path imports nothing of the package)", readers=("src/kaibot/common/helper_session.py",)),
+    _s("KAIBOT_ENGINE_CHECKOUT", "path", "qa-ops", "QA-Ops audit (25 Nov 2026): the engine's checkout, which the "
+       "research runner refuses to run in (install_runner.sh writes it into the runner's plist)", scope="script",
+       readers=("scripts/research_runner.py",)),
     _s("KAIBOT_HOLDOUT_OPENING", "text", "backend-quant", "M11 2.6: the id of a committed hold-out opening"),
     _s("KAIBOT_ENGINE_NAME", "text", "backend-quant", "the heartbeat's process name (default 'engine')",
        default="engine", empty_ok=False),
@@ -127,6 +130,8 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     # ---- read only by scripts under scripts/ (declared with their owner; not parsed here)
     *(_s(n, "text", owner, what, scope="script") for n, owner, what in (
         ("KAIBOT_RELEASE", "qa-ops", "the pinned release (scripts/release.sh)"),
+        ("KAIBOT_RUNNER_CHECKOUT", "qa-ops", "the research runner's own checkout (install_runner.sh; default "
+         "~/Projects/kaibot-runner)"),
         ("KAIBOT_REEXEC", "qa-ops", "run_engine.sh's re-exec guard after a release switch"),
         ("KAIBOT_SERVICE_RUN", "qa-ops", "#613: the service run's pid, so run_engine.sh lets the service start it"),
         ("KAIBOT_FAKE_ET", "qa-ops", "release.sh's test clock"),
