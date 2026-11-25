@@ -17,13 +17,13 @@ tests = ["tests/unit/test_order_manager.py", "tests/unit/test_lost_resend.py", "
 source = "src/kaibot/engine/journal.py"
 tests = ["tests/test_journal.py", "tests/test_journal_followups.py", "tests/test_journal_identity.py",
          "tests/test_journal_pre0018.py", "tests/unit/test_journal_checksum.py", "tests/unit/test_journal_durability.py",
-         "tests/unit/test_journal_kind_index.py", "tests/test_replica_poison.py", "tests/crash/test_crash_points.py",
-         "tests/fuzz"]
+         "tests/unit/test_journal_kind_index.py", "tests/unit/test_journal_survivors.py", "tests/test_replica_poison.py",
+         "tests/crash/test_crash_points.py", "tests/fuzz"]
 
 [risk_caps]
 source = "src/kaibot/risk/gate.py"
 tests = ["tests/unit/test_gate.py", "tests/unit/test_gate_book.py", "tests/unit/test_gate_book_drawdown.py",
-         "tests/test_limits_one_source.py"]
+         "tests/test_limits_one_source.py", "tests/unit/test_gate_survivors.py"]
 
 [reconcile]
 source = "src/kaibot/engine/reconcile.py"
@@ -31,7 +31,8 @@ tests = ["tests/test_reconcile_engine.py", "tests/test_recon_fill_checks.py", "t
 
 [lease]
 source = "src/kaibot/engine/lease.py"
-tests = ["tests/test_engine_lease.py"]
+tests = ["tests/test_engine_lease.py", "tests/test_engine_lease_machine.py", "tests/test_lease_fencing.py",
+         "tests/unit/test_lease_renew_gap.py", "tests/unit/test_lease_survivors.py"]
 
 [watchdog]
 source = "src/kaibot/engine/watchdog.py"
