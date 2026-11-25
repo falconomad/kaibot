@@ -7,6 +7,7 @@ import { type Marks, parseMarks } from "./marks";
 import { STREAM_EVENT, STREAM_TOPIC, type Stream, parseStream } from "./stream";
 import type { Chapter, ConfigBody, ConfigResp } from "./config";
 import type { TickerCheck, TickerLists } from "./tickers";
+import { fixInviteList } from "./invites";
 export { coerce };
 
 const url = import.meta.env.VITE_SUPABASE_URL as string;
@@ -256,7 +257,9 @@ export async function meRepaired(me: () => Promise<Me | null>, repair: () => Pro
   try { made = await repair(); } catch { return first; }
   return made ? (await me()) ?? first : first;
 }
-export interface InviteList { cap: number; taken: number; invites: InviteRow[] }
+export interface InviteList { cap: number | null; taken: number | null; invites: InviteRow[] }
+export { fixInviteList };
+
 
 export const api = {
   claimOwner: () => rpc<boolean>("kb_claim_owner"),
@@ -268,7 +271,7 @@ export const api = {
   inviteCreate: (email: string) => optional(() => rpc<InviteMade>("kb_invite_create", { p_email: email })),
   inviteCheck: (code: string, email?: string) =>
     optional(() => rpc<InviteCheck>("kb_invite_check", { p_code: code, p_email: email ?? null })),
-  inviteList: () => optional(() => rpc<InviteList>("kb_invite_list")),
+  inviteList: async () => fixInviteList(await optional(() => rpc<InviteList>("kb_invite_list"))),
   /** 0046 (#635): null while the migration is not applied. */
   inviteRevoke: (id: number) => optional(() => rpc<InviteRevoked>("kb_invite_revoke", { p_id: id })),
   runs: async () => (await rpc<Run[]>("kb_runs")).map(fixRun),

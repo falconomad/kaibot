@@ -3,7 +3,7 @@
 What vitest cannot see in jsdom (no Tab key, no layout, no colours) is measured here in Chromium on a 390 px phone,
 against the design audit's mock (no production data, account or key):
 
-- every page: axe-core, all its WCAG A/AA and best-practice rules with text contrast as drawn; no serious or critical
+- every page: no uncaught error and at least mobile_check.MIN_WORDS words (a blank page passes axe); axe-core, all its WCAG A/AA and best-practice rules with text contrast as drawn; no serious or critical
   finding;
 - focus groups (Strategy): reached with the Tab key alone, a 2 px focus ring that nothing clips, Enter opens the sheet
   with focus inside, Tab stays inside, Escape closes it and focus returns; the card says open or closed
@@ -179,6 +179,7 @@ def main(a) -> int:
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         held: list = []
+        threw: list[str] = []
 
         def open_page(path: str, signed_in: bool = True):
             ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark",
@@ -187,17 +188,22 @@ def main(a) -> int:
                 ctx.add_init_script(session)
             ctx.route("**/*", handler(dist, now, held))
             pg = ctx.new_page()
+            mobile_check.watch_errors(pg, threw)  # every uncaught error on every page of this check
             pg.goto(audit.APP + path, wait_until="load")
             pg.wait_for_selector("main > *, .center", timeout=8000)
             pg.wait_for_timeout(1500)
             return ctx, pg
 
         # 1. Every page, as drawn, with the mock's data.
+        # A page that threw or shows under mobile_check.MIN_WORDS words fails here (a blank page has no axe finding).
         for name, path, act in audit.ROUTES:
+            before = len(threw)
             ctx, pg = open_page(path, signed_in=act != "signed-out")
             if act == "lists":
                 pg.get_by_role("radio", name="My lists").click()
                 pg.wait_for_timeout(700)
+            mobile_check.alive(pg, name, threw[before:], fails)
+            del threw[before:]  # reported with the page's name
             axe_ok(pg, name, fails)
             ctx.close()
 
@@ -300,7 +306,9 @@ def main(a) -> int:
             fails.append(f"stock summary: loading and the answer were not said: {said}")
         ctx.close()
         browser.close()
-    print("\n".join("FAIL " + f for f in fails) or "PASS: axe clean on every page; focus groups, My lists and the stock summary work by keyboard; targets 44 px")
+    for e in dict.fromkeys(threw):  # thrown in a later step (focus groups, My lists, the stock summary)
+        fails.append(f"a page threw: {e}")
+    print("\n".join("FAIL " + f for f in fails) or "PASS: axe clean on every page; focus groups, My lists and the stock summary work by keyboard; targets 44 px; no page threw or was blank")
     return 1 if fails else 0
 
 
