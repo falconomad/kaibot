@@ -169,6 +169,15 @@ class Account:
         self.after_close(self.open1)
 
 
+def daily_account(tmp_path, monkeypatch, **kw) -> Account:
+    """The same account WITH the daily path, as live runs (KAIBOT_MULTIDAY=on, the rule enabled), and no daily view,
+    so the rule decides nothing; B is held as in `hold_b`. M10 1.20 step 4 (#445): a multi-day sleeve is sold only
+    through the daily path's order manager, so the drills that sell B run on this account."""
+    from test_live_daily_engine import DailyAccount
+
+    return DailyAccount(tmp_path, monkeypatch, view=False, **kw)
+
+
 def beat(store, ts):
     store.upsert("heartbeat", {"process": "engine", "ts": ts.isoformat(), "detail": {}}, "process")
 
@@ -220,8 +229,8 @@ def test_an_overnight_gap_counts_toward_the_daily_stop_which_blocks_entries_and_
     assert a.broker.pos["B"]["qty"] == QTY and a.stop_b() and not a.sells("B")
 
 
-def test_flatten_and_stop_still_sells_everything(tmp_path):
-    a = Account(tmp_path)
+def test_flatten_and_stop_still_sells_everything(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     a.store.insert("command", {"kind": "flatten_and_stop", "payload": {}, "idempotency_key": "k9",
@@ -236,8 +245,8 @@ def test_flatten_and_stop_still_sells_everything(tmp_path):
     assert not a.eng._md_sleeves()
 
 
-def test_a_new_run_waits_until_the_multi_day_sleeve_is_sold(tmp_path):
-    a = Account(tmp_path)
+def test_a_new_run_waits_until_the_multi_day_sleeve_is_sold(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     a.store.insert("command", {"kind": "new_run", "payload": {"amount_usd": 8000, "level": "balanced"},
@@ -249,14 +258,12 @@ def test_a_new_run_waits_until_the_multi_day_sleeve_is_sold(tmp_path):
     assert a.eng.run["id"] != a.rid and "B" not in a.broker.pos
 
 
-def test_the_run_drawdown_end_sells_the_multi_day_sleeve_too(tmp_path):
-    a = Account(tmp_path, gap_b=0.95)
-    a.day1()
-    pol = a.eng.policies["balanced"]
-    a.eng.policies = {**a.eng.policies, "balanced": type(pol)(**{**pol.__dict__, "run_drawdown_end_pct": 1.0})}
-    a.ticks(a.open2, 0, 4)
-    assert any(h["kind"] == "run_drawdown" for h in a.store.tables["halt"])
-    assert "B" not in a.broker.pos
+# M10 1.20 step 4 (#445): `test_the_run_drawdown_end_sells_the_multi_day_sleeve_too` is gone with the older direct
+# sale it drilled. It ran without the daily path, where the run's end is measured on the whole run and sold B that
+# way; an engine with B and no daily path no longer starts. With the daily path the book has its own end and is sold
+# through the order manager (test_live_daily_engine.py::test_the_book_end_closes_the_multi_day_book_and_leaves_the_
+# intraday_run_alone); without it nothing is sold and the flatten fails closed
+# (test_live_daily_engine.py::test_without_the_daily_path_the_run_end_sells_no_sleeve_and_fails_closed).
 
 
 def test_the_account_guard_still_blocks_a_foreign_position_next_to_the_sleeve(tmp_path):

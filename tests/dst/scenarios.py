@@ -90,8 +90,24 @@ def watchdog_cancel_not_carried(mp) -> None:
 
 
 def flatten_outside_the_order_manager(mp) -> None:
-    """M9 1.8 taken away: a flatten sale goes straight to the broker and is booked only when it fills whole."""
-    mp.setattr(Engine, "_md_om", lambda self, rid: None)
+    """M9 1.8 taken away: a flatten sale goes straight to the broker and is booked only when it fills whole. Since
+    M10 1.20 step 4 (#445) the engine has no such sale any more, so the planted bug puts back the deleted one: the
+    older direct sale (`kbfl-` client id, `md_exit_intent`, booked by `_sync_md_exits` on a whole fill)."""
+    from kaibot.broker.protocol import OrderRequest
+    from kaibot.engine.failsafe import clean
+
+    def direct(self, sym, keys, reason, rid):
+        coid = f"kbfl-{clean(keys[0][0][0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
+        qty = sum(q for _, q in keys)
+        self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
+                                               "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
+        o = self._order("sell",
+                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid),
+                                                  gate=self.trading_state),
+                        coid=coid, symbol=sym, strategy=",".join(k[0] for k, _ in keys), qty=qty, reason=reason)
+        self._md_exit_sent(o, rid, keys, reason)
+
+    mp.setattr(Engine, "_md_exit_submit", direct)
 
 
 # ---------------------------------------------------------------- one scenario per finding

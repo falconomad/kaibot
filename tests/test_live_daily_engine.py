@@ -19,7 +19,7 @@ import pytest
 from test_failsafe_drills import DAY1, DAY2, MD, Account, beat, frames
 
 from kaibot.engine import live_daily as ld
-from kaibot.engine.core import Engine
+from kaibot.engine.core import Engine, FlattenIncomplete
 from kaibot.engine.daily import DailyData
 from kaibot.engine.journal import Journal
 from kaibot.risk.profiles import load_profiles, rule_book_limits
@@ -194,12 +194,21 @@ def test_the_book_end_closes_the_multi_day_book_and_leaves_the_intraday_run_alon
     assert eng.daily.account.book_ended() and eng._book_peak(a.rid) == peak  # both survive a restart
 
 
-def test_without_the_daily_path_the_run_end_is_measured_as_before(tmp_path):
-    """Flag off: the same gap ends the whole run at the intraday end, multi-day sleeve included (S80)."""
+def test_without_the_daily_path_the_run_end_sells_no_sleeve_and_fails_closed(tmp_path):
+    """Flag off, with a sleeve booked after the start (an engine that step 2 of #445 no longer starts, built here by
+    hand): the same gap reaches the run end measured on the whole run, multi-day sleeve included (S80). M10 1.20
+    step 4 (#445): the older direct sale is gone, so the flatten cancels and sends nothing for B and is incomplete
+    (`FlattenIncomplete`, counted by the main loop): the engine sends no sale of B (a 30% gap fills B's own
+    broker-held stop at the venue, as the fail-safes intend). With the daily path the book has its own end and is
+    sold through the order manager (the test above)."""
     a = Account(tmp_path, gap_b=0.7)
     a.day1()
-    a.ticks(a.open2, 0, 4)
-    assert any(h["kind"] == "run_drawdown" for h in a.store.tables["halt"])
+    errors = a.ticks(a.open2, 0, 4, catch=True)
+    assert errors and isinstance(errors[0], FlattenIncomplete) and list(errors[0].left) == ["B"]
+    assert "no order manager" in str(errors[0])
+    assert not a.sells("B")  # no market sale: only the stop, which the engine did not send now
+    assert not [o for o in a.broker.orders.values() if str(o.get("client_order_id")).startswith("kbfl-")]
+    assert not list(a.eng.journal.entries(kinds=("md_exit_intent", "md_exit")))
     assert a.eng.daily is None and not list(a.eng.journal.entries(kinds=("md_book_end", "md_book_peak")))
 
 

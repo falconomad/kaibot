@@ -17,7 +17,7 @@ from datetime import timedelta
 
 import pandas as pd
 from test_engine_soak import refuse_close, step, two_open
-from test_failsafe_drills import MD, Account
+from test_failsafe_drills import MD, daily_account
 
 from kaibot.broker.protocol import BrokerError
 from kaibot.engine import core
@@ -37,21 +37,24 @@ def _events(store, kind):
 
 
 def _refuse_sales(broker, symbol):
-    """The venue does not take a market sale of `symbol` (network error) until `state["down"]` is cleared."""
+    """The venue refuses a market sale of `symbol` until `state["down"]` is cleared. M10 1.20 step 4 (#445): the
+    sale goes through the daily path's order manager, which takes a refusal (403) as that order's answer and sends
+    a new attempt at the next pass; a sale with no answer at all is `unknown` there and is looked up by its client
+    id, never sent twice (tests/test_flatten_via_om.py)."""
     real, state = broker.submit, {"down": True, "calls": 0}
 
     def submit(req, *a, **k):
         if state["down"] and req.symbol == symbol and req.side == "sell" and req.type == "market":
             state["calls"] += 1
-            raise BrokerError(0, "sim: network down")
+            raise BrokerError(403, "sim: the venue refuses the sale")
         return real(req, *a, **k)
 
     broker.submit = submit
     return state
 
 
-def test_an_incomplete_flatten_leaves_the_command_pending_and_the_next_pass_retries(tmp_path):
-    a = Account(tmp_path)
+def test_an_incomplete_flatten_leaves_the_command_pending_and_the_next_pass_retries(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     assert a.eng.entry_block() is None
@@ -62,9 +65,12 @@ def test_an_incomplete_flatten_leaves_the_command_pending_and_the_next_pass_retr
     assert c["applied_at"] is None and "error" not in (c["payload"] or {})  # still pending, not "applied with an error"
     assert venue["calls"] == 1 and a.eng.run["status"] == "running" and "B" in a.broker.pos
     assert a.eng.entry_block() == "flatten and stop pending" and not a.eng._may_enter(60)
+    # the order manager's refused sale is closed by the next tick's sync (`md_exit_done`); the pass after it tries
+    # again under a new client id (`-flatten-2`)
+    a.ticks(a.open2, 10, 11)
     a.eng.apply_commands()  # the next loop pass tries again
     assert venue["calls"] == 2 and _row(a.store, "k9")["applied_at"] is None
-    a.ticks(a.open2, 10, 12)  # the engine goes on ticking; nothing is bought
+    a.ticks(a.open2, 11, 12)  # the engine goes on ticking; nothing is bought
     assert a.eng.run["status"] == "running" and not [o for o in a.broker.orders.values() if o["side"] == "buy"
                                                      and o["symbol"] == "B" and o["status"] == "new"]
     venue["down"] = False
@@ -80,8 +86,8 @@ def test_an_incomplete_flatten_leaves_the_command_pending_and_the_next_pass_retr
     assert len(_events(a.store, "command_flatten_and_stop")) == 1
 
 
-def test_the_run_ends_only_when_the_sale_is_booked(tmp_path):
-    a = Account(tmp_path)
+def test_the_run_ends_only_when_the_sale_is_booked(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     _cmd(a.store, "flatten_and_stop", {}, "k9")
@@ -97,8 +103,8 @@ def test_the_run_ends_only_when_the_sale_is_booked(tmp_path):
     assert "B" not in a.broker.pos and not a.eng._md_sleeves()
 
 
-def test_no_sale_is_sent_while_the_market_is_closed_and_it_goes_out_at_the_open(tmp_path):
-    a = Account(tmp_path)
+def test_no_sale_is_sent_while_the_market_is_closed_and_it_goes_out_at_the_open(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()  # 16:30 ET on DAY1, the market is closed, B is held overnight
     orders = len(a.broker.orders)
     _cmd(a.store, "flatten_and_stop", {}, "k9")
@@ -119,8 +125,8 @@ def test_no_sale_is_sent_while_the_market_is_closed_and_it_goes_out_at_the_open(
     assert _row(a.store, "k9")["applied_at"] is not None
 
 
-def test_an_unreadable_clock_sends_no_sale_and_keeps_the_command(tmp_path):
-    a = Account(tmp_path)
+def test_an_unreadable_clock_sends_no_sale_and_keeps_the_command(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     real = a.broker.clock
@@ -138,8 +144,8 @@ def test_an_unreadable_clock_sends_no_sale_and_keeps_the_command(tmp_path):
     assert len(a.sells("B")) == 1
 
 
-def test_a_new_run_whose_flatten_is_incomplete_also_waits_and_retries(tmp_path):
-    a = Account(tmp_path)
+def test_a_new_run_whose_flatten_is_incomplete_also_waits_and_retries(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     venue = _refuse_sales(a.broker, "B")
@@ -149,16 +155,17 @@ def test_a_new_run_whose_flatten_is_incomplete_also_waits_and_retries(tmp_path):
     assert c["applied_at"] is None and "error" not in c["payload"] and a.eng.run["id"] == a.rid
     assert a.eng.entry_block() == "new run pending: the old book is being sold"
     venue["down"] = False
-    a.eng.apply_commands()
-    a.ticks(a.open2, 10, 12)
+    a.ticks(a.open2, 10, 11)  # the refused sale is closed by the sync
+    a.eng.apply_commands()  # the sale goes out again
+    a.ticks(a.open2, 11, 13)
     a.eng.apply_commands()
     assert a.eng.run["id"] != a.rid and "B" not in a.broker.pos and _row(a.store, "k8")["applied_at"] is not None
     assert a.eng.entry_block() != "new run pending: the old book is being sold"
 
 
-def test_the_entry_block_survives_a_pass_that_could_not_read_the_commands(tmp_path):
+def test_the_entry_block_survives_a_pass_that_could_not_read_the_commands(tmp_path, monkeypatch):
     """JournalStore.pending_commands answers [] while Supabase is unreachable: the block must not lift then."""
-    a = Account(tmp_path)
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     _refuse_sales(a.broker, "B")
@@ -193,10 +200,7 @@ def test_the_entry_block_survives_a_restart_while_the_commands_cannot_be_read(tm
     """QA-Ops second key on #525: the block was in memory only. The engine is restarted with the command still
     pending and Supabase unreachable (`pending_commands` answers none): it must not open a position in a book the
     owner told it to sell. The block is read back from the journal and ends with the command."""
-    # #445 step 2: this venue's engine has no daily path, so with B in the book a restart is refused; the check is
-    # lifted here only, to keep the older flatten sale covered until step 4 deletes it
-    monkeypatch.setattr(core.Engine, "_require_daily_path", lambda self: None)
-    a = Account(tmp_path)
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     venue = _refuse_sales(a.broker, "B")
@@ -223,8 +227,8 @@ def test_the_entry_block_survives_a_restart_while_the_commands_cannot_be_read(tm
     assert a.eng._cmd_waiting == {}
 
 
-def test_a_waiting_command_of_an_ended_run_blocks_nothing_after_a_restart(tmp_path):
-    a = Account(tmp_path)
+def test_a_waiting_command_of_an_ended_run_blocks_nothing_after_a_restart(tmp_path, monkeypatch):
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, 10)
     _refuse_sales(a.broker, "B")
