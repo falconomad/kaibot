@@ -143,6 +143,7 @@ from kaibot.engine.execution import (
     minus,
     quote_from_alpaca,
 )
+from kaibot.engine.fence import unproved
 from kaibot.engine.orders import UNCONFIRMED, Fill, OrderBlocked, OrderManager, OrderRecord, St
 from kaibot.engine.protect import ProtectiveStops
 from kaibot.engine.reconcile import NEVER_BLOCKED, accepted_foreign
@@ -1289,9 +1290,11 @@ class LiveDaily:
                                                 "sent": [], "skipped": []})
                 done.append(r.name)
                 continue
+            # the venue said no: not sent again today (an order that never reached it is: one called lost, and
+            # audit 2 5.8: a buy the lease's fence refused because a renewal failed, sent again at the next tick)
             refused = {x.symbol for x in self.orders_of(session) if x.strategy == r.name and x.state is St.REJECTED
-                       and not str(x.reason or "").startswith("lost")}  # the venue said no: not sent again today
-            targets = [t for t in targets if t.symbol not in refused]  # (an order that never reached it is)
+                       and not str(x.reason or "").startswith("lost") and not unproved(x.reason)}
+            targets = [t for t in targets if t.symbol not in refused]
             held_now = {(r.name, s): q for s, (q, _) in self.account.held(r.name).items()}
             try:
                 mine = {i for x in om.live.values() if x.purpose != "stop" for i in x.ids}  # a stop counts
@@ -1311,8 +1314,9 @@ class LiveDaily:
             # complete unless something may still go out today: an order nobody has confirmed yet, a stop still
             # holding the shares, a cancel under way, or a target the loop skipped (entries blocked, an unresolved
             # reconciliation difference): the next tick runs the loop again on the same journalled targets
+            # (audit 2 5.8: or a buy the lease's fence refused for a failed renewal: it never reached the venue)
             retry = bool(res.deferred or res.canceled or skipped or withheld) \
-                or any(x.state in UNCONFIRMED for x in res.sent)
+                or any(x.state in UNCONFIRMED or (x.state is St.REJECTED and unproved(x.reason)) for x in res.sent)
             aged = [[k[1], why] for k, why in res.aged]  # QA-Ops (#524): a sale that no longer waits for an old fill
             said = repr((sent, skipped, res.deferred, res.canceled, withheld, aged))
             if self._said.get(r.name) != said:

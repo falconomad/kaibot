@@ -10,6 +10,11 @@ fail-safe design for a Supabase outage, docs/ops/failsafe.md). Reads pass straig
 
 `Fenced` is a BrokerError with status 403, so every caller already treats it as "refused, there is no order"
 (engine/orders.py REFUSED): the order manager marks the order rejected, it never looks for it at the venue.
+
+Audit 2, 5.8: a refusal because the renewal FAILED (`lease.NOT_PROVED`; not a lost lease) is not the venue's "no":
+the order never left this process, like one called lost. `unproved` tells such a record apart, so the daily path
+sends that buy again at its next tick of the same window (engine/live_daily.py `send`) under a new attempt. A
+refusal for a lost lease ("no longer ours") stays a refusal: the engine stops on it.
 """
 
 from __future__ import annotations
@@ -17,9 +22,15 @@ from __future__ import annotations
 import logging
 
 from kaibot.broker.protocol import BrokerBase, BrokerError, OrderRequest
-from kaibot.engine.lease import LeaseLost
+from kaibot.engine.lease import NOT_PROVED, LeaseLost
 
 log = logging.getLogger("kaibot.engine")
+
+
+def unproved(reason: str | None) -> bool:
+    """Audit 2, 5.8: is an order record's reason the fence's refusal for a failed renewal? (orders.py writes it
+    as "403: fenced: <why>".) Such an order never reached the venue."""
+    return f"fenced: {NOT_PROVED}" in str(reason or "")
 
 
 class Fenced(BrokerError):
