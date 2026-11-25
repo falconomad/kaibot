@@ -17,6 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "dst"))
 
+import world  # noqa: E402
 from fakes import FakeStore  # noqa: E402
 from scenarios import quiet  # noqa: E402
 from test_engine_lease import Time  # noqa: E402
@@ -24,8 +25,20 @@ from world import D1, NY, World, et  # noqa: E402
 
 from kaibot.broker.protocol import OrderRequest  # noqa: E402
 from kaibot.engine import lease as lease_mod  # noqa: E402
+from kaibot.engine.core import Engine  # noqa: E402
 from kaibot.engine.fence import Fenced, FencedBroker, unproved  # noqa: E402
 from kaibot.engine.lease import NOT_PROVED, EngineLease, machine_key  # noqa: E402
+from kaibot.risk.profiles import load_profiles  # noqa: E402
+
+
+@pytest.fixture(params=["book_loop", "intraday"])
+def engine_kind(request, monkeypatch):
+    """The DST world builds the intraday engine; the live process runs `Engine(intraday=False)` (book_loop.py).
+    The daily path under test is the same object in both: each engine-level test runs on both."""
+    if request.param == "book_loop":
+        none = {level: [] for level in load_profiles()}
+        monkeypatch.setattr(world, "Engine", lambda *a, **k: Engine(*a, intraday=False, strategies=none, **k))
+    return request.param
 
 
 class Venue:
@@ -133,9 +146,10 @@ def _orders(res, coid_part):
     return [t for t in res.trace if " om_intent " in t and coid_part in t]
 
 
-def test_a_renewal_failure_through_15_51_sends_the_buy_once_at_15_52():
+def test_a_renewal_failure_through_15_51_sends_the_buy_once_at_15_52(engine_kind):
     res, w, failed = run_fenced("15:50", "15:52")
     assert res.ok, res.report()
+    assert w.eng.intraday is (engine_kind == "intraday")
     assert failed and all(x.astimezone(NY).strftime("%H:%M") in ("15:50", "15:51") for x in failed)
     intents = _orders(res, "-B-20260803-buy-")
     assert [t[6:11] for t in intents] == ["15:50", "15:51", "15:52"], intents  # two refused attempts, then the buy
@@ -148,7 +162,7 @@ def test_a_renewal_failure_through_15_51_sends_the_buy_once_at_15_52():
     assert len(fills) == 1
 
 
-def test_a_renewal_failure_once_in_the_minute_is_absorbed_by_the_second_try():
+def test_a_renewal_failure_once_in_the_minute_is_absorbed_by_the_second_try(engine_kind):
     """One failed renewal, the next one fine: the buy goes out at 15:50 as on a normal day, on its first attempt."""
     w = World(quiet({D1: ("B",)}))
     replica, n = w.replica, {"left": 1}
