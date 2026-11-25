@@ -15,7 +15,7 @@ import type { ConfigBody } from "../lib/config";
 import { estShort, type Estimate } from "../lib/estimator";
 import {
   DB_UPDATE, MAX_NAME, MAX_TICKERS, MIN_ONLY, NOT_A_TICKER, POLL_LIMIT_MS, POLL_MS, addable, isMissingFunction, itemFromCheck, checkGate,
-  itemFromSaved, itemsFromBody, listWords, looksLikeTicker, needsCheck, onlyShort, parseTickers, rpcErrorText, saveBlocker, tally, withList,
+  itemFromSaved, itemsFromBody, listWords, looksLikeTicker, needsCheck, onlyShort, parseTickers, rpcErrorText, saveBlocker, savedSymbols, tally, withList,
   type Item, type SavedList,
 } from "../lib/tickers";
 import { LockIcon } from "./StrategyShared";
@@ -110,7 +110,7 @@ export function useListEditor(body: ConfigBody, edit: (b: ConfigBody) => void, u
   const cur = saved.find((l) => l.name === sel) ?? null;
   const okSyms = t.accepted.map((i) => i.symbol);
   const same = !!cur && cur.name === name.trim() && !t.refused.length && !t.checking.length
-    && [...cur.symbols.map((s) => (typeof s === "string" ? s : s.symbol))].sort().join() === [...okSyms].sort().join();
+    && savedSymbols(cur).sort().join() === [...okSyms].sort().join();
 
   return {
     lists, saved, sel, cur, name, items, draft, msg, save, del, t, same, isNew: sel === NEW,
@@ -205,8 +205,11 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
       ) : (
         <RadioGroup label="Saved lists" className="kb-lgrid" optClass="kb-lcard" value={ed.sel}
           onChange={(v) => { if (v !== ed.sel) ed.pick(ed.saved.find((l) => l.name === v) ?? null); }}
-          options={[...ed.saved.map((l) => ({ value: l.name, label: l.name, description: plural(l.symbols.length, "ticker"),
-            content: <LCard name={l.name} meta={plural(l.symbols.length, "ticker")} /> })),
+          options={[...ed.saved.map((l) => {
+            const syms = savedSymbols(l);
+            return { value: l.name, label: syms.length ? `${l.name}: ${syms.join(", ")}` : l.name, description: plural(syms.length, "ticker"),
+              content: <LCard name={l.name} meta={plural(syms.length, "ticker")} symbols={syms} /> };
+          }),
           { value: NEW, label: "New list", description: ed.isNew ? (t.total ? "Not saved yet" : "Empty") : "Start from scratch",
             content: <LCard name="New list" meta={ed.isNew ? (t.total ? "Not saved yet" : "Empty") : "Start from scratch"} /> }]} />
       )}
@@ -281,11 +284,29 @@ export function MyListsCard({ ed, mode }: { ed: ListEditor; mode: ConfigBody["fo
   );
 }
 
-function LCard({ name, meta }: { name: string; meta: string }) {
+function LCard({ name, meta, symbols }: { name: string; meta: string; symbols?: string[] }) {
   return (<>
     <span className="kb-lcard-top"><span className="kb-lcard-name">{name}</span><span aria-hidden="true" className="kb-radio" /></span>
+    {symbols && symbols.length > 0 && <LogoStack symbols={symbols} />}
     <span className="num kb-lcard-meta">{meta}</span>
   </>);
+}
+
+/** Most logos on a saved list's card; a longer list shows one fewer and "+N" for the rest. */
+export const STACK_MAX = 5;
+/** A saved list's company logos, stacked (stakeholder, 25 Nov 2026): overlapping circles, ringed in the card's colour.
+ *  The same StockBadge as the chips, so the same logo URLs, domain lookup and caches (lib/logos.ts): a ticker is looked up
+ *  once per page and kept in localStorage, so a reload or a change of selection asks nothing again. Decoration only: the
+ *  card's name carries the tickers for screen readers. */
+export function LogoStack({ symbols }: { symbols: string[] }) {
+  const shown = symbols.length > STACK_MAX ? symbols.slice(0, STACK_MAX - 1) : symbols;
+  const more = symbols.length - shown.length;
+  return (
+    <span className="kb-lstack" aria-hidden="true">
+      {shown.map((s) => <StockBadge key={s} symbol={s} size={28} />)}
+      {more > 0 && <b className="num">+{more}</b>}
+    </span>
+  );
 }
 
 /** What is said when tickers are added or a check is answered (#327). */
