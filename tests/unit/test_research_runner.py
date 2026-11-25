@@ -160,7 +160,8 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
     assert set(cfg.specs) == {"scripts/index_core.py", "scripts/index_core_book.py",
                               "scripts/fetch_sec_fundamentals.py", "scripts/trend_momentum_gbm.py",
                               "scripts/export_results.py", "scripts/market_alarm_report.py",
-                              "kaibot.agents.evalset.golden"}
+                              "kaibot.agents.evalset.golden", "scripts/shadow_results.py"}  # #371: as the helper
+    assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert [t for t, s in cfg.specs.items() if s.sec] == ["scripts/fetch_sec_fundamentals.py"]
     assert [t for t, s in cfg.specs.items() if s.env] == ["scripts/fetch_sec_fundamentals.py"]

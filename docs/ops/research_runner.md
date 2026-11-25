@@ -47,9 +47,13 @@ Allowed scripts and flags (the full patterns are in `allowed.yaml`):
 | `scripts/export_results.py` | `--rule` | 20 min; `writes: docs/research/results/`, opened as a PR by the runner (below) |
 | `scripts/market_alarm_report.py` | `--start --end --flags-only --rankings-only` | heavy, 60 min |
 | `kaibot.agents.evalset.golden` | none | the stub run only (`--live` costs money, `--record` writes a tracked file) |
+| `scripts/shadow_results.py` | none | 10 min; the helper's sign-in only, no `--env` (below) |
 
-`scripts/shadow_results.py` was asked for but does not exist. The shadow results come from `scripts/shadow_results.sh`,
-which needs `DATABASE_URL` from the secrets file, and the runner never reads that file, so the script is not listed.
+`scripts/shadow_results.py` (#371) prints the same four tables as `scripts/shadow_results.sh` without any
+write-capable key: it signs in as the helper (`~/Projects/kaibot-secrets/helper.env`, `docs/ops/helper_role.md`) and
+calls the read-only `kb_helper_shadow_results()` of migration 0047. It never gets `--env`, never reads `DATABASE_URL`
+or the service key. Until 0047 is applied it prints "migration 0047 is not applied yet" and exits 3 (the job is
+posted as `failed` with that line). Without `helper.env` it says so and exits 2.
 
 ## Files a job writes in the checkout
 

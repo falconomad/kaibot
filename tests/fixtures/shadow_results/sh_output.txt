@@ -1,0 +1,27 @@
+        rule        | sessions | first_day  |  last_day  | signals | sized_trades | sessions_with_a_trade | trades_per_session | mean_r_per_trade | up_sessions | down_sessions | mean_daily_bp_of_pot | sd_daily_bp_of_pot | t_daily | sessions_for_900_trades_at_this_rate 
+--------------------+----------+------------+------------+---------+--------------+-----------------------+--------------------+------------------+-------------+---------------+----------------------+--------------------+---------+--------------------------------------
+ news_continuation  |        2 | 2026-11-13 | 2026-11-16 |       1 |            1 |                     1 |               0.50 |           -0.250 |           0 |             1 |                -2.50 |               3.54 |   -1.00 |                                 1800
+ orb_stocks_in_play |        3 | 2026-11-13 | 2026-11-17 |       8 |            3 |                     2 |               1.00 |            0.500 |           2 |             0 |                10.00 |              10.00 |    1.73 |                                  900
+(2 rows)
+
+    day     | run_id | pot_usd  |        rule        | signals | sized | pnl_usd | avg_r | symbols_watched 
+------------+--------+----------+--------------------+---------+-------+---------+-------+-----------------
+ 2026-11-13 |      1 | 10000.00 | news_continuation  |       1 |     1 |    -5.0 | -0.25 |              75
+ 2026-11-13 |      1 | 10000.00 | orb_stocks_in_play |       2 |     1 |    10.0 |   0.5 |              75
+ 2026-11-16 |      1 | 10000.00 | news_continuation  |       0 |     0 |       0 |       |              75
+ 2026-11-16 |      1 | 10000.00 | orb_stocks_in_play |       3 |     2 |    20.0 |   0.5 |              75
+ 2026-11-17 |      2 | 20000.00 | orb_stocks_in_play |       3 |     0 |       0 |       |              75
+(5 rows)
+
+        rule        | trades | sessions_with_a_trade | symbols | mean_r | sd_r  | t_per_trade | win_pct | stopped_out | held_to_1555 | best_r | worst_r | total_r | total_r_without_best_5 | trades_for_t3_if_this_mean_were_true 
+--------------------+--------+-----------------------+---------+--------+-------+-------------+---------+-------------+--------------+--------+---------+---------+------------------------+--------------------------------------
+ news_continuation  |      1 |                     1 |       1 | -0.250 |       |             |     0.0 |           1 |            0 |  -0.25 |   -0.25 |   -0.25 |                   0.00 |                                     
+ orb_stocks_in_play |      3 |                     2 |       3 |  0.500 | 0.500 |        1.73 |    66.7 |           1 |            1 |   1.00 |    0.00 |    1.50 |                   0.00 |                                    9
+(2 rows)
+
+             finding              |    day     |        detail         
+----------------------------------+------------+-----------------------
+ shadow error                     | 2026-11-17 | minute: KeyError: XYZ
+ session without a shadow summary | 2026-11-18 | 
+(2 rows)
+

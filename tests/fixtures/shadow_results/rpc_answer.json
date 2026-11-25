@@ -1,0 +1,143 @@
+{
+ "q1": [
+  {
+   "rule": "news_continuation",
+   "sessions": "2",
+   "first_day": "2026-11-13",
+   "last_day": "2026-11-16",
+   "signals": "1",
+   "sized_trades": "1",
+   "sessions_with_a_trade": "1",
+   "trades_per_session": "0.50",
+   "mean_r_per_trade": "-0.250",
+   "up_sessions": "0",
+   "down_sessions": "1",
+   "mean_daily_bp_of_pot": "-2.50",
+   "sd_daily_bp_of_pot": "3.54",
+   "t_daily": "-1.00",
+   "sessions_for_900_trades_at_this_rate": "1800"
+  },
+  {
+   "rule": "orb_stocks_in_play",
+   "sessions": "3",
+   "first_day": "2026-11-13",
+   "last_day": "2026-11-17",
+   "signals": "8",
+   "sized_trades": "3",
+   "sessions_with_a_trade": "2",
+   "trades_per_session": "1.00",
+   "mean_r_per_trade": "0.500",
+   "up_sessions": "2",
+   "down_sessions": "0",
+   "mean_daily_bp_of_pot": "10.00",
+   "sd_daily_bp_of_pot": "10.00",
+   "t_daily": "1.73",
+   "sessions_for_900_trades_at_this_rate": "900"
+  }
+ ],
+ "q2": [
+  {
+   "day": "2026-11-13",
+   "run_id": "1",
+   "pot_usd": "10000.00",
+   "rule": "news_continuation",
+   "signals": "1",
+   "sized": "1",
+   "pnl_usd": "-5.0",
+   "avg_r": "-0.25",
+   "symbols_watched": "75"
+  },
+  {
+   "day": "2026-11-13",
+   "run_id": "1",
+   "pot_usd": "10000.00",
+   "rule": "orb_stocks_in_play",
+   "signals": "2",
+   "sized": "1",
+   "pnl_usd": "10.0",
+   "avg_r": "0.5",
+   "symbols_watched": "75"
+  },
+  {
+   "day": "2026-11-16",
+   "run_id": "1",
+   "pot_usd": "10000.00",
+   "rule": "news_continuation",
+   "signals": "0",
+   "sized": "0",
+   "pnl_usd": "0",
+   "avg_r": null,
+   "symbols_watched": "75"
+  },
+  {
+   "day": "2026-11-16",
+   "run_id": "1",
+   "pot_usd": "10000.00",
+   "rule": "orb_stocks_in_play",
+   "signals": "3",
+   "sized": "2",
+   "pnl_usd": "20.0",
+   "avg_r": "0.5",
+   "symbols_watched": "75"
+  },
+  {
+   "day": "2026-11-17",
+   "run_id": "2",
+   "pot_usd": "20000.00",
+   "rule": "orb_stocks_in_play",
+   "signals": "3",
+   "sized": "0",
+   "pnl_usd": "0",
+   "avg_r": null,
+   "symbols_watched": "75"
+  }
+ ],
+ "q3": [
+  {
+   "rule": "news_continuation",
+   "trades": "1",
+   "sessions_with_a_trade": "1",
+   "symbols": "1",
+   "mean_r": "-0.250",
+   "sd_r": null,
+   "t_per_trade": null,
+   "win_pct": "0.0",
+   "stopped_out": "1",
+   "held_to_1555": "0",
+   "best_r": "-0.25",
+   "worst_r": "-0.25",
+   "total_r": "-0.25",
+   "total_r_without_best_5": "0.00",
+   "trades_for_t3_if_this_mean_were_true": null
+  },
+  {
+   "rule": "orb_stocks_in_play",
+   "trades": "3",
+   "sessions_with_a_trade": "2",
+   "symbols": "3",
+   "mean_r": "0.500",
+   "sd_r": "0.500",
+   "t_per_trade": "1.73",
+   "win_pct": "66.7",
+   "stopped_out": "1",
+   "held_to_1555": "1",
+   "best_r": "1.00",
+   "worst_r": "0.00",
+   "total_r": "1.50",
+   "total_r_without_best_5": "0.00",
+   "trades_for_t3_if_this_mean_were_true": "9"
+  }
+ ],
+ "q4": [
+  {
+   "finding": "shadow error",
+   "day": "2026-11-17",
+   "detail": "minute: KeyError: XYZ"
+  },
+  {
+   "finding": "session without a shadow summary",
+   "day": "2026-11-18",
+   "detail": null
+  }
+ ]
+}

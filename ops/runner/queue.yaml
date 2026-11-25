@@ -19,3 +19,7 @@ jobs:
     script: scripts/export_results.py
     args: []
     posts_to_issue: 452
+  - id: shadow-results-2026-11              # #371's monthly report, as the helper (no write-capable key)
+    script: scripts/shadow_results.py
+    args: []
+    posts_to_issue: 371
