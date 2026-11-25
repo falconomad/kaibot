@@ -1202,28 +1202,37 @@ class Engine:
     def entry_block(self) -> str | None:
         """S80: why no new position may be opened now (None: it may), for the multi-day target path as for the
         intraday entries: no running run, the account not clean, a fail-closed halt, the lease, the daily stop,
-        an invalid owner config. Sales and protective stops are never blocked."""
+        an invalid owner config. Sales and protective stops are never blocked. The words of `entry_reason`."""
+        r = Engine.entry_reason(self)  # also for a duck-typed engine (unit tests)
+        return r[1] if r is not None else None
+
+    def entry_reason(self) -> tuple[str, str] | None:
+        """#446: `entry_block` as (code, words): the code is short and stable (engine/state.py `BLOCK_CODES`, for the
+        heartbeat and the dashboard), the words are `entry_block`'s, unchanged. No broker call; with
+        KAIBOT_DAILY_CHECKS_BLOCK on, the daily-data check journals a new block once a day (`LiveDaily.data_block`)."""
         d = self.day
         if self.run is None or self.run.get("status") != "running":
-            return "no running run"
+            st = (self.run or {}).get("status")
+            return ("no_run" if self.run is None else "paused" if st == "paused" else "run_not_running",
+                    "no running run")
         if self._cmd_waiting:  # M9 1.2: "Flatten and stop" (or a new run) is selling the book
-            return next(iter(self._cmd_waiting.values()))
+            return "command_selling", next(iter(self._cmd_waiting.values()))
         if not self.account_clean:
-            return "account not clean"
+            return "account_not_clean", "account not clean"
         # QA-Ops (#522): a fill difference alone (a fill on an unknown order, a fill not booked yet) stops buys in
         # its own stock (`Reconciler.allows`, asked per order by the daily path), not the whole rebalance
         if not self._reconciled() and self.recon.blocks_every_buy():
-            return "ledger and broker differ (reconciliation)"
+            return "reconcile_difference", "ledger and broker differ (reconciliation)"
         if self.kill:
-            return f"halted: {self.kill}"
+            return "halted", f"halted: {self.kill}"
         if not self.lease_ok():
-            return "lease unverified"
+            return "lease_unverified", "lease unverified"
         if self.clock_skew is not None:  # M9 1.10
-            return self._clock_block()
+            return "clock_skew", self._clock_block()
         if d is not None and d.halted:
-            return "daily stop"
+            return "daily_stop", "daily stop"
         if d is not None and d.refused:
-            return f"config refused: {d.refused}"
+            return "config_refused", f"config refused: {d.refused}"
         # M12 3.11 (#473): the daily-data market checks (SPY's bar late, the universe log stale, ...): None unless
         # KAIBOT_DAILY_CHECKS_BLOCK is on (the daily path's `entry_checks`); the text starts "data check <code>"
         fn = getattr(getattr(self, "daily", None), "data_block", None)
@@ -1231,9 +1240,9 @@ class Engine:
             try:
                 why = fn()
             except Exception as e:  # noqa: BLE001 - fail closed (LiveDaily.data_block never raises; belt and braces)
-                return f"data check checks_failed: {type(e).__name__}"
+                return "data_check", f"data check checks_failed: {type(e).__name__}"
             if why:
-                return why
+                return "data_check", why
         return None
 
     @property
@@ -1262,10 +1271,39 @@ class Engine:
             self.trading.release("halt")
 
     def trading_state(self):
-        """M10 1.21 (#446), step 1: the one trading state, derived from `entry_block` (engine/state.py)."""
-        from kaibot.engine.state import from_entry_block
+        """M10 1.21 (#446): the one trading state. The strictest of the trading switch's holds (step 2) and the state
+        derived from `entry_block` (step 1): a `halted` hold wins, then any entry block (`reducing_only`), else the
+        switch's own state. Reads only. The order path's gate asks it before every order call (step 3)."""
+        from kaibot.engine.state import TradingState, from_entry_block
 
-        return from_entry_block(self.entry_block())
+        held = self.trading.state()
+        if held.state is TradingState.HALTED:
+            return held
+        derived = from_entry_block(self.entry_block())
+        return derived if derived.state is not TradingState.ACTIVE else held
+
+    def trading_detail(self) -> dict:
+        """#446 (E1 of docs/design/ui_after_engine_v3.md; #604, #626's follow-up): what the heartbeat's detail
+        carries about trading, on every beat. `trading_state`: active, reducing_only or halted. `entry_block`: why
+        no new position may be opened now as a short code (engine/state.py `BLOCK_CODES`), or None, with its words
+        in `entry_block_why`. Only when nothing in the engine blocks: `market_filter_off` when the latest send of a
+        multi-day rule of this run found the market filter off (its carried buys held back; the daily path's
+        `market_filter_off`). Reads only; a part that cannot be read is left out, never guessed."""
+        out: dict = {}
+        try:
+            out["trading_state"] = self.trading_state().state.value
+            r = self.entry_reason()
+            if r is None and self.daily is not None:
+                off = getattr(self.daily, "market_filter_off", None)
+                hit = off() if off is not None else None
+                if hit:
+                    r = ("market_filter_off", "market filter off: " + "; ".join(
+                        f"{rule} (read at the close before {session})" for rule, session in hit)
+                         + ": carried buys on hold")
+            out["entry_block"], out["entry_block_why"] = (r[0], r[1]) if r is not None else (None, None)
+        except Exception:
+            log.exception("trading state unreadable (heartbeat)")
+        return out
 
     def _md_stops(self) -> dict:
         """(strategy, symbol) -> the price of the multi-day protective stop resting at the broker now."""
@@ -1413,7 +1451,8 @@ class Engine:
         self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
                                                "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
         o = self._order("sell",
-                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid)),
+                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid),
+                                                  gate=self.trading_state),
                         coid=coid, symbol=sym, strategy=",".join(k[0] for k, _ in keys), qty=qty, reason=reason)
         self._md_exit_sent(o, rid, keys, reason)
 

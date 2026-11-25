@@ -31,6 +31,7 @@ def test_the_engine_derives_it_from_entry_block():
 
     class E:
         trading_state = Engine.trading_state
+        trading = Engine.trading  # step 3: the switch's holds count too (none here)
 
         def __init__(self, why):
             self.why = why

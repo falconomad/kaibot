@@ -207,11 +207,13 @@ class OrderManager:
 
     def __init__(self, broker: Broker, journal, now: Callable[[], datetime], *, run_id: int | None = None,
                  on_fill: Callable[[Fill, OrderRecord], None] | None = None,
-                 position: Callable[[str], float | None] | None = None) -> None:
+                 position: Callable[[str], float | None] | None = None, gate: Callable | None = None) -> None:
         """`position(symbol)`: the ledger's shares in the symbol, all sleeves together (None: not known now), for
-        the check before an order is called lost (M9 1.11). Without it that check reads the orders and fills only."""
+        the check before an order is called lost (M9 1.11). Without it that check reads the orders and fills only.
+        `gate`: the engine's trading state (`Engine.trading_state`, #446 step 3), asked by engine/order_path before
+        every submit and replace; None (research, tools): not gated."""
         self.broker, self.journal, self.now, self.run_id = broker, journal, now, run_id
-        self.on_fill, self.position = on_fill, position
+        self.on_fill, self.position, self.gate = on_fill, position, gate
         self.orders: dict[str, OrderRecord] = {}
         self.live: dict[str, OrderRecord] = {}  # the open ones (index: ten-year research runs make many orders)
         self.bases: dict[str, int] = {}  # client id without its attempt number -> orders made for it
@@ -403,7 +405,7 @@ class OrderManager:
             "purpose": purpose, "session": session, "meta": dict(meta or {}), "created": self.now().isoformat()})
         r = self.orders[coid]
         try:
-            o = order_path.submit(self.broker, req)
+            o = order_path.submit(self.broker, req, gate=self.gate)
         except BrokerError as e:
             if e.status in REFUSED and "client_order_id" not in (e.body or ""):
                 self._state(r, St.REJECTED, reason=f"{e.status}: {_reason(e)}")
@@ -466,7 +468,7 @@ class OrderManager:
         cid = self.replacement_coid(r)
         self._state(r, St.PENDING_REPLACE, client_id=cid)  # journalled before the call (#197)
         try:
-            o = order_path.replace(self.broker, r.order_id, stop_price=stop, limit_price=limit, qty=qty,
+            o = order_path.replace(self.broker, r.order_id, gate=self.gate, stop_price=stop, limit_price=limit, qty=qty,
                                    client_order_id=cid)
         except BrokerError as e:
             self.errors.append((coid, f"replace: {e.status}: {_reason(e)}"))
@@ -483,7 +485,7 @@ class OrderManager:
         on its own (issue #11)."""
         r = self.orders[coid]
         try:
-            o = order_path.replace(self.broker, leg_id, stop_price=stop, limit_price=limit)
+            o = order_path.replace(self.broker, leg_id, gate=self.gate, stop_price=stop, limit_price=limit)
         except BrokerError as e:
             self.errors.append((coid, f"replace leg {leg_id}: {e.status}: {_reason(e)}"))
             return None

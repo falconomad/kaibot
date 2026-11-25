@@ -594,7 +594,8 @@ class LiveDaily:
         if self.om is None or self._rid != rid:
             self._rid = rid
             self.om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
-                                   position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
+                                   position=getattr(self.account, "ledger_qty", None),  # M9 1.11 (#436)
+                                   gate=getattr(self.account, "trading_state", None))  # #446 step 3
             self.stops = ProtectiveStops(self.om, run=rid)
         return self.om
 
@@ -606,7 +607,8 @@ class LiveDaily:
         if om is None:
             self._rid = rid
             self.om = om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
-                                        position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
+                                        position=getattr(self.account, "ledger_qty", None),  # M9 1.11 (#436)
+                                        gate=getattr(self.account, "trading_state", None))  # #446 step 3
             self.stops = ProtectiveStops(om, run=rid)
         return om
 
@@ -1959,6 +1961,25 @@ class LiveDaily:
                 out.append(x.coid)
         return out
 
+    def market_filter_off(self) -> list[tuple[str, str]]:
+        """#446 (heartbeat `entry_block`): the active rules of this run whose latest send found the market filter
+        off (SPY below its 200-day average at the close before it: `carry.risk_off` or, for a late send,
+        `late.risk_off` of the journalled `md_send`), each with that send's session. A send that read nothing about
+        the filter (a decision's own fill session, nothing short to carry) says nothing: not listed. Reads only."""
+        rid = self.account.run_id()
+        if rid is None:
+            return []
+        latest: dict[str, dict] = {}
+        for b in self._entries("md_send"):
+            if b.get("run_id") == rid:
+                latest[str(b.get("strategy"))] = b
+        out = []
+        for r in self.active():
+            b = latest.get(r.name)
+            if b is not None and any(isinstance(b.get(k), dict) and b[k].get("risk_off") for k in ("carry", "late")):
+                out.append((r.name, str(b.get("session"))))
+        return out
+
     def status(self, today: date | None = None) -> dict:
         """The heartbeat's `multi_day` block: the book, each rule's last decision, and a plain note when today has no
         decision (for example "no decision today: daily store not refreshed")."""
@@ -2089,6 +2110,10 @@ class EngineAccount:
 
     def run_id(self) -> int | None:
         return self.e._rid()
+
+    def trading_state(self):
+        """#446 step 3: the engine's one trading state, for the order manager's gate at the order seam."""
+        return self.e.trading_state()
 
     def equity(self) -> float:
         b = self._book()

@@ -525,12 +525,14 @@ class IntradayEngine(Engine):
         try:
             if target is None:  # exit timed by the engine (MOC): stop only, still held at the broker
                 order = self._order("entry",
-                                    lambda: order_path.submit_oto_stop(self.broker, coid, s, qty, round(stop, 2)),
+                                    lambda: order_path.submit_oto_stop(self.broker, coid, s, qty, round(stop, 2),
+                                                                             gate=self.trading_state),
                                     coid=coid, strategy=strategy, symbol=s, qty=qty, stop=round(stop, 2),
                                     signal_id=signal_id)
             else:
                 order = self._order("entry", lambda: order_path.submit_bracket(self.broker, coid, s, qty,
-                                                                                round(stop, 2), round(target, 2)),
+                                                                                round(stop, 2), round(target, 2),
+                                                                                gate=self.trading_state),
                                     coid=coid, strategy=strategy, symbol=s, qty=qty, stop=round(stop, 2),
                                     target=round(target, 2), signal_id=signal_id)
         except Exception as e:
@@ -625,14 +627,16 @@ class IntradayEngine(Engine):
                 if abs(float(leg["limit_price"]) - p.target) >= 0.01:
                     oid, px = leg["id"], round(p.target, 2)
                     p.target_order_id = self._order(
-                        "replace_limit", lambda oid=oid, px=px: order_path.replace_limit(self.broker, oid, px),
+                        "replace_limit", lambda oid=oid, px=px: order_path.replace_limit(self.broker, oid, px,
+                                                                                       gate=self.trading_state),
                         order_id=oid, symbol=p.symbol, coid=p.coid, price=px)["id"]
             elif leg.get("type") in ("stop", "stop_limit"):
                 p.stop_order_id = leg["id"]
                 if abs(float(leg["stop_price"]) - p.stop) >= 0.01:
                     oid, px = leg["id"], round(p.stop, 2)
                     p.stop_order_id = self._order(
-                        "replace_stop", lambda oid=oid, px=px: order_path.replace_stop(self.broker, oid, px),
+                        "replace_stop", lambda oid=oid, px=px: order_path.replace_stop(self.broker, oid, px,
+                                                                                     gate=self.trading_state),
                         order_id=oid, symbol=p.symbol, coid=p.coid, price=px)["id"]
         self.store.insert(
             "fill",
@@ -738,8 +742,8 @@ class IntradayEngine(Engine):
                     oid = p.stop_order_id
                     px = round(act.price, 2)
                     p.stop_order_id = self._order("replace_stop", lambda oid=oid, px=px: order_path.replace_stop(
-                        self.broker, oid, px), order_id=oid, symbol=p.symbol, strategy=p.strategy,
-                        stop=round(act.price, 2))["id"]
+                        self.broker, oid, px, gate=self.trading_state), order_id=oid, symbol=p.symbol,
+                        strategy=p.strategy, stop=round(act.price, 2))["id"]
                     p.stop = act.price
                     self.store.update("trade", {"id": p.trade_id}, {"stop_px": act.price, "features": p.features()})
                 except Exception:
@@ -765,7 +769,8 @@ class IntradayEngine(Engine):
                 p.stop_order_id = None
             try:
                 o = self._order("moc_sell",
-                                lambda p=p: order_path.submit_moc_sell(self.broker, f"{p.coid}-moc", p.symbol, p.qty),
+                                lambda p=p: order_path.submit_moc_sell(self.broker, f"{p.coid}-moc", p.symbol, p.qty,
+                                                                           gate=self.trading_state),
                                 coid=f"{p.coid}-moc", symbol=p.symbol, strategy=p.strategy, qty=p.qty)
                 p.exit_order_id, p.exit_reason = o["id"], act.reason
             except Exception as e:
@@ -784,8 +789,9 @@ class IntradayEngine(Engine):
         if any(q is not p and q.symbol == p.symbol and q.status in ("open", "pending") for q in self.pos.values()):
             o = self._sell_sleeve(p, reason)  # S77: another rule holds the stock too: sell this rule's shares only
         else:
-            o = self._order("close_position", lambda: order_path.close_position(self.broker, p.symbol), symbol=p.symbol,
-                            strategy=p.strategy, qty=p.qty, reason=reason)
+            o = self._order("close_position",
+                            lambda: order_path.close_position(self.broker, p.symbol, gate=self.trading_state),
+                            symbol=p.symbol, strategy=p.strategy, qty=p.qty, reason=reason)
         p.exit_reason = reason
         if o:
             p.exit_order_id = o["id"]
@@ -802,5 +808,6 @@ class IntradayEngine(Engine):
         p.stop_order_id = p.target_order_id = None
         coid = f"{p.coid}-x"
         return self._order("sell", lambda: order_path.submit(self.broker, OrderRequest(p.symbol, "sell", int(p.qty),
-                                                                                       "market", "day", coid)),
+                                                                                       "market", "day", coid),
+                                                             gate=self.trading_state),
                            coid=coid, symbol=p.symbol, strategy=p.strategy, qty=p.qty, reason=reason)
