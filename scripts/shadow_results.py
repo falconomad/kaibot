@@ -109,8 +109,9 @@ def render(result: dict) -> str:
 
 
 def missing_function(e: HelperError) -> bool:
-    """PostgREST's answer for an RPC it does not know (PGRST202, HTTP 404): migration 0047 is not applied."""
-    return e.status == 404
+    """PostgREST's answer for an RPC it does not know (PGRST202, HTTP 404, "Could not find the function ..."):
+    migration 0047 is not applied. Any other 404 (a wrong URL, the sign-in) is a plain failure."""
+    return e.status == 404 and "could not find the function" in str(e).lower()
 
 
 def main(argv=None, *, session: HelperSession | None = None) -> int:

@@ -137,6 +137,11 @@ def test_a_missing_function_says_the_migration_is_not_applied(capsys):
     assert "|" not in out  # no table, nothing half-printed
 
 
+def test_another_404_is_not_taken_for_a_missing_migration(capsys):
+    assert sr.main([], session=session(FakeSupabase(404, {"message": "no Route matched"}))) == 1
+    assert "not applied" not in capsys.readouterr().out
+
+
 def test_a_refusal_and_other_failures_exit_1_with_the_status(capsys):
     assert sr.main([], session=session(FakeSupabase(403, {"message": "not authorised"}))) == 1
     assert "helper 403" in capsys.readouterr().out
