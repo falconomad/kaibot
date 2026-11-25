@@ -66,7 +66,7 @@ mac_sleep() {
   local all ac v
   all="$(pmset -g 2>/dev/null || true)"
   printf '%s\n' "$all" | grep -E '^[[:space:]]*(sleep|disksleep|displaysleep|standby|powernap|autorestart)[[:space:]]' \
-    | sed -e 's/^[[:space:]]*/  /'
+    | sed -e 's/^[[:space:]]*/  /' || true
   # the AC profile's own value (pmset -g custom, "AC Power:"); a Mac without that section: the current settings
   ac="$(pmset -g custom 2>/dev/null | awk '/^AC Power:/ {on = 1; next} /^[^[:space:]].*:[[:space:]]*$/ {on = 0} on')"
   [ -n "$ac" ] || ac="$all"

@@ -142,6 +142,9 @@ def test_the_engine_reads_the_heartbeat_before_it_starts_and_watches_every_pass(
     the top of every loop pass, never able to stop the loop."""
     src = Path(engine_main.__file__).read_text()
     body = src.split("def main() -> None:", 1)[1]
+    guard = "with contextlib.suppress(Exception):"
+    assert f"{guard}  # a report only: never able to stop a start\n        gaps.before_start(" in body
+    assert f"{guard}\n        gaps.after_start()" in body
     i_before, i_start = body.index("gaps.before_start("), body.index("mode = start_or_refuse(")
     i_after, i_loop = body.index("gaps.after_start()"), body.index('while not stop["now"]:')
     assert i_before < i_start < i_after < i_loop < body.index("gaps.tick()") < body.index("beat(status)")
