@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -167,3 +168,12 @@ def test_measure_v2_does_not_ship_a_tag_with_a_false_positive_rate_above_5_perce
     (tmp_path / "labels_v2.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lab))
     res = M.measure_v2(M.load_v2(tmp_path))
     assert res["tags"]["deal"]["fired"]["fp"] == 3 and not res["tags"]["deal"]["ships"]
+
+
+def test_the_declared_draw_does_not_follow_the_newest_measurement():
+    """v2's fired strata are frozen with the draw declared in #399 (the ten tags v1 left out, in this order), so a
+    later change of tags.SHIPPED cannot change what `draw` picks from the same store and seed."""
+    assert D.DRAWN_FOR == ("results", "guidance_up", "guidance_down", "analyst_down", "deal", "offering", "buyback",
+                           "management_change", "legal_regulatory", "listing")
+    src = Path(D.__file__).read_text()
+    assert "import NOT_SHIPPED" not in src and ", NOT_SHIPPED" not in src and "in NOT_SHIPPED" not in src
