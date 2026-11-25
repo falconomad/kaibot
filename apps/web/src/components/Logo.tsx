@@ -36,8 +36,9 @@ export const ROLES = { word: { arm: 0, leg: 1, stem: 2, point: 6 }, symbol: { ar
 /** The idle motion in seconds (app.css): one cycle, the arm's turn this far into it, and the delay after the intro. */
 export const IDLE = { cycle: 4, offset: 2, after: 2 } as const;
 /** The logo's height in px (app.css .logo and .logo-lg): the app's header, and sign-in and /register (`large`), on phones
- *  (760 px wide and less) and above (stakeholder, 25 Nov 2026: "still too small"; it was 26/28 and 32.5/35). */
-export const SIZE = { header: { phone: 30, wide: 32 }, large: { phone: 40, wide: 44 } } as const;
+ *  (760 px wide and less) and above (stakeholder, 25 Nov 2026, twice: "still too small", then 25% larger again; it was
+ *  26/28 and 32.5/35, then 30/32 and 40/44). No page title is drawn larger than the header's logo (brand.test.tsx). */
+export const SIZE = { header: { phone: 37.5, wide: 40 }, large: { phone: 50, wide: 55 } } as const;
 /** The storyboard's timing in seconds: [starts at, lasts]. The pulse ends at 0.96 s. */
 export const TIMING = { stem: [0, 0.2], leg: [0.12, 0.24], arm: [0.26, 0.3], point: [0.56, 0.18], pulse: [0.66, 0.3] } as const;
 

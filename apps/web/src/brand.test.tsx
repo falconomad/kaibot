@@ -216,21 +216,45 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
       "./pages/SignIn.tsx"]);
   });
 
-  it("the size comes from the stylesheet: 30 px on phones, 32 px above, in a 64 px and a 72 px header", () => {
-    expect(SIZE.header).toEqual({ phone: 30, wide: 32 });
-    expect(css).toMatch(/\.logo \{ display: block; flex: none; height: 32px;/);
-    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*\.logo \{ height: 30px; \}/);
+  it("the size comes from the stylesheet: 37.5 px on phones, 40 px above, in a 72 px and an 80 px header", () => {
+    expect(SIZE.header).toEqual({ phone: 37.5, wide: 40 });
+    expect(css).toMatch(/\.logo \{ display: block; flex: none; height: 40px;/);
+    expect(css).toMatch(/@media \(max-width: 760px\) \{[^@]*\.logo \{ height: 37\.5px; \}/);
     // the header's padding leaves at least 16 px above and below the logo, on phones and above
-    expect((64 - SIZE.header.phone) / 2).toBeGreaterThanOrEqual(16);
-    expect((72 - SIZE.header.wide) / 2).toBeGreaterThanOrEqual(16);
+    expect((72 - SIZE.header.phone) / 2).toBeGreaterThanOrEqual(16);
+    expect((80 - SIZE.header.wide) / 2).toBeGreaterThanOrEqual(16);
     expect(css).toMatch(/@media \(min-width: 761px\) \{[^@]*header\.top \.brand \{ margin-right: 8px; \}/);
-    expect(css).toMatch(/header\.top \{[^}]*min-height: 72px;/);
+    expect(css).toMatch(/header\.top \{[^}]*min-height: 80px;/);
     expect(css).toMatch(/header\.top \{ flex-wrap: nowrap; min-height: var\(--topbar\);/);
-    expect(tokens).toMatch(/--topbar: 64px;/);
+    expect(tokens).toMatch(/--topbar: 72px;/);
     expect(css).toMatch(/\.haltbar-wrap \{[^}]*top: var\(--topbar\)/);
     expect(css).toMatch(/header\.top \.pill \{[^}]*min-height: 36px/);
     expect(css).toMatch(/header\.top \.engine-chip::before \{[^}]*inset: 4px 0;/);
     expect(css).toMatch(/\.brand \{[^}]*min-height: 44px/);
+    // on phones the larger logo takes the spacer's room, not the trading chip's label: it never truncates, its reason
+    // gives way, and under 400 px the reason is left to the halt bar (scripts/mobile_check.py measures 360 px)
+    const phone = /@media \(max-width: 760px\) \{\n {2}\/\* v4: one-row top bar([^]*?)\n\}/.exec(css)?.[1] ?? "";
+    expect(phone).toMatch(/header\.top \.spacer \{ display: none; \} header\.top \.spacer \+ \.pill \{ margin-left: auto; padding: 0 11px; \}/);
+    expect(phone).toMatch(/header\.top \.ts-chip b \{ flex: none; \}/);
+    expect(css).toMatch(/@media \(max-width: 400px\) \{ header\.top \.ts-chip \{ padding: 0 10px; \} header\.top \.ts-chip \.trading-reason \{ display: none; \} \}/);
+  });
+
+  it("the header's logo is the largest brand element on every page: no page title is set larger (25 Nov 2026)", () => {
+    const n = (re: RegExp, src = css) => Number(re.exec(src)?.[1]);
+    // Strategy and Fine-tune (.kb-h1); Positions, Activity, Engine, Report, Go / no-go and More (.page-title, --t-xl)
+    const kb = { wide: n(/\n\.kb-h1 \{ margin: 0; font-size: (\d+)px;/), phone: n(/@media \(max-width: 760px\) \{\n {2}\.kb-h1 \{ font-size: (\d+)px; \}/) };
+    expect(css).toMatch(/\n\.page-title \{[^}]*font-size: var\(--t-xl\);/);
+    const page = n(/--t-xl: (\d+)px;/, tokens);
+    expect([kb.wide, kb.phone, page]).toEqual([34, 30, 28]);
+    // at most 85% of the logo's height, on phones and above
+    expect(kb.wide).toBeLessThanOrEqual(0.85 * SIZE.header.wide);
+    expect(kb.phone).toBeLessThanOrEqual(0.85 * SIZE.header.phone);
+    expect(page).toBeLessThanOrEqual(0.85 * SIZE.header.phone);
+    // and no page sets a larger <h1> inline (the trade's name is 28 px; sign-in, /register and New run 18-20 px)
+    const sources = import.meta.glob("./pages/*.tsx", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    const inline = Object.values(sources).flatMap((src) => [...src.matchAll(/<h1 [^>]*fontSize: (\d+)/g)].map((m) => Number(m[1])));
+    expect(inline.length).toBeGreaterThan(0);
+    expect(Math.max(...inline)).toBeLessThanOrEqual(page);
   });
 
   it("from 1280 px the header is one row, the halt chip too: the chip gives way, never the logo or the nav (#673)", () => {
@@ -358,8 +382,8 @@ describe("the logo's idle motion: the point's hop and the arm's redraw in turn (
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\*, \*::before, \*::after \{ animation: none !important;/);
   });
 
-  it("the sign-in (and /register) logo is 44 px, and 40 px on phones, larger than the header's", () => {
-    expect(SIZE.large).toEqual({ phone: 40, wide: 44 });
+  it("the sign-in (and /register) logo is 55 px, and 50 px on phones, larger than the header's", () => {
+    expect(SIZE.large).toEqual({ phone: 50, wide: 55 });
     const big = Number(/\n\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
     const bigPhone = Number(/@media \(max-width: 760px\) \{[^@]*\.logo-lg \{ height: ([\d.]+)px; \}/.exec(css)?.[1]);
     expect([bigPhone, big]).toEqual([SIZE.large.phone, SIZE.large.wide]);

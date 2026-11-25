@@ -1,0 +1,3530 @@
+{
+ "home@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 1262,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 145.4,
+     "y": 13.5,
+     "r": 221.6,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 229.6,
+     "y": 9.5,
+     "r": 344,
+     "b": 53.5,
+     "h": 44,
+     "w": 114.4
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 360,
+   "b": 108,
+   "h": 44,
+   "w": 360
+  },
+  "title": {
+   "text": "Paper pot",
+   "font": 17,
+   "weight": "500",
+   "ink": 16,
+   "cap": 12,
+   "box": {
+    "x": 16,
+    "y": 304,
+    "r": 316.8,
+    "b": 329.5,
+    "h": 25.5,
+    "w": 300.8
+   }
+  },
+  "hero": {
+   "text": "$10,107.10",
+   "font": 44,
+   "weight": "700",
+   "ink": 44,
+   "cap": 32,
+   "box": {
+    "x": 16,
+    "y": 333.5,
+    "r": 316.8,
+    "b": 379.7,
+    "h": 46.2,
+    "w": 300.8
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "home@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 1246,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 148.1,
+     "y": 13.5,
+     "r": 224.2,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 232.2,
+     "y": 9.5,
+     "r": 374,
+     "b": 53.5,
+     "h": 44,
+     "w": 141.8
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 390,
+   "b": 108,
+   "h": 44,
+   "w": 390
+  },
+  "title": {
+   "text": "Paper pot",
+   "font": 17,
+   "weight": "500",
+   "ink": 16,
+   "cap": 12,
+   "box": {
+    "x": 16,
+    "y": 304,
+    "r": 316.8,
+    "b": 329.5,
+    "h": 25.5,
+    "w": 300.8
+   }
+  },
+  "hero": {
+   "text": "$10,107.10",
+   "font": 44,
+   "weight": "700",
+   "ink": 44,
+   "cap": 32,
+   "box": {
+    "x": 16,
+    "y": 333.5,
+    "r": 316.8,
+    "b": 379.7,
+    "h": 46.2,
+    "w": 300.8
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "home@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 1500,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 795.3,
+     "y": 17.5,
+     "r": 964.7,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 976.7,
+     "y": 13.5,
+     "r": 1074.7,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1086.7,
+     "y": 13.5,
+     "r": 1260,
+     "b": 57.5,
+     "h": 44,
+     "w": 173.3
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Paper pot",
+   "font": 17,
+   "weight": "500",
+   "ink": 16,
+   "cap": 12,
+   "box": {
+    "x": 32,
+    "y": 308,
+    "r": 684.5,
+    "b": 333.5,
+    "h": 25.5,
+    "w": 652.5
+   }
+  },
+  "hero": {
+   "text": "$10,107.10",
+   "font": 60,
+   "weight": "700",
+   "ink": 59,
+   "cap": 43,
+   "box": {
+    "x": 32,
+    "y": 337.5,
+    "r": 684.5,
+    "b": 400.5,
+    "h": 63,
+    "w": 652.5
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "home@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 1513,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 805.4,
+     "y": 17.5,
+     "r": 974.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 986.8,
+     "y": 13.5,
+     "r": 1084.8,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1096.8,
+     "y": 13.5,
+     "r": 1420,
+     "b": 57.5,
+     "h": 44,
+     "w": 323.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Paper pot",
+   "font": 17,
+   "weight": "500",
+   "ink": 16,
+   "cap": 12,
+   "box": {
+    "x": 92,
+    "y": 308,
+    "r": 744.5,
+    "b": 333.5,
+    "h": 25.5,
+    "w": 652.5
+   }
+  },
+  "hero": {
+   "text": "$10,107.10",
+   "font": 60,
+   "weight": "700",
+   "ink": 59,
+   "cap": 43,
+   "box": {
+    "x": 92,
+    "y": 337.5,
+    "r": 744.5,
+    "b": 400.5,
+    "h": 63,
+    "w": 652.5
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "positions@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 880,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 145.4,
+     "y": 13.5,
+     "r": 221.6,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 229.6,
+     "y": 9.5,
+     "r": 344,
+     "b": 53.5,
+     "h": 44,
+     "w": 114.4
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 360,
+   "b": 108,
+   "h": 44,
+   "w": 360
+  },
+  "title": {
+   "text": "Positions",
+   "font": 28,
+   "weight": "700",
+   "ink": 22,
+   "cap": 20,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 344,
+    "b": 166,
+    "h": 42,
+    "w": 328
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "positions@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 1084,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 148.1,
+     "y": 13.5,
+     "r": 224.2,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 232.2,
+     "y": 9.5,
+     "r": 374,
+     "b": 53.5,
+     "h": 44,
+     "w": 141.8
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 390,
+   "b": 108,
+   "h": 44,
+   "w": 390
+  },
+  "title": {
+   "text": "Positions",
+   "font": 28,
+   "weight": "700",
+   "ink": 22,
+   "cap": 20,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 374,
+    "b": 166,
+    "h": 42,
+    "w": 358
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "positions@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 1036,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 795.3,
+     "y": 17.5,
+     "r": 964.7,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 976.7,
+     "y": 13.5,
+     "r": 1074.7,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1086.7,
+     "y": 13.5,
+     "r": 1260,
+     "b": 57.5,
+     "h": 44,
+     "w": 173.3
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Positions",
+   "font": 28,
+   "weight": "700",
+   "ink": 22,
+   "cap": 20,
+   "box": {
+    "x": 32,
+    "y": 143.5,
+    "r": 1248,
+    "b": 185.5,
+    "h": 42,
+    "w": 1216
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "positions@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 1136,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 805.4,
+     "y": 17.5,
+     "r": 974.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 986.8,
+     "y": 13.5,
+     "r": 1084.8,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1096.8,
+     "y": 13.5,
+     "r": 1420,
+     "b": 57.5,
+     "h": 44,
+     "w": 323.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Positions",
+   "font": 28,
+   "weight": "700",
+   "ink": 22,
+   "cap": 20,
+   "box": {
+    "x": 92,
+    "y": 143.5,
+    "r": 1348,
+    "b": 185.5,
+    "h": 42,
+    "w": 1256
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "engine@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 1350,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 145.4,
+     "y": 13.5,
+     "r": 221.6,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 229.6,
+     "y": 9.5,
+     "r": 344,
+     "b": 53.5,
+     "h": 44,
+     "w": 114.4
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 360,
+   "b": 108,
+   "h": 44,
+   "w": 360
+  },
+  "title": {
+   "text": "Engine",
+   "font": 28,
+   "weight": "700",
+   "ink": 28,
+   "cap": 20,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 344,
+    "b": 166,
+    "h": 42,
+    "w": 328
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "engine@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 1304,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 148.1,
+     "y": 13.5,
+     "r": 224.2,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 232.2,
+     "y": 9.5,
+     "r": 374,
+     "b": 53.5,
+     "h": 44,
+     "w": 141.8
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 390,
+   "b": 108,
+   "h": 44,
+   "w": 390
+  },
+  "title": {
+   "text": "Engine",
+   "font": 28,
+   "weight": "700",
+   "ink": 28,
+   "cap": 20,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 374,
+    "b": 166,
+    "h": 42,
+    "w": 358
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "engine@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 1325,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 795.3,
+     "y": 17.5,
+     "r": 964.7,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 976.7,
+     "y": 13.5,
+     "r": 1074.7,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1086.7,
+     "y": 13.5,
+     "r": 1260,
+     "b": 57.5,
+     "h": 44,
+     "w": 173.3
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Engine",
+   "font": 28,
+   "weight": "700",
+   "ink": 28,
+   "cap": 20,
+   "box": {
+    "x": 32,
+    "y": 100,
+    "r": 1248,
+    "b": 142,
+    "h": 42,
+    "w": 1216
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "engine@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 1325,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 805.4,
+     "y": 17.5,
+     "r": 974.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 986.8,
+     "y": 13.5,
+     "r": 1084.8,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1096.8,
+     "y": 13.5,
+     "r": 1420,
+     "b": 57.5,
+     "h": 44,
+     "w": 323.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Engine",
+   "font": 28,
+   "weight": "700",
+   "ink": 28,
+   "cap": 20,
+   "box": {
+    "x": 92,
+    "y": 100,
+    "r": 1348,
+    "b": 142,
+    "h": 42,
+    "w": 1256
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "settings@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 640,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": null,
+  "letters": null,
+  "logoFont": null,
+  "haltChip": false,
+  "haltbar": null,
+  "title": null,
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "settings@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 844,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": null,
+  "letters": null,
+  "logoFont": null,
+  "haltChip": false,
+  "haltbar": null,
+  "title": null,
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "settings@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 800,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": null,
+  "letters": null,
+  "logoFont": null,
+  "haltChip": false,
+  "haltbar": null,
+  "title": null,
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "settings@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 900,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": null,
+  "letters": null,
+  "logoFont": null,
+  "haltChip": false,
+  "haltbar": null,
+  "title": null,
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "strategy@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 1748,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 145.4,
+     "y": 13.5,
+     "r": 221.6,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 229.6,
+     "y": 9.5,
+     "r": 344,
+     "b": 53.5,
+     "h": 44,
+     "w": 114.4
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 360,
+   "b": 108,
+   "h": 44,
+   "w": 360
+  },
+  "title": {
+   "text": "Strategy",
+   "font": 32,
+   "weight": "700",
+   "ink": 30,
+   "cap": 23,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 344,
+    "b": 159.2,
+    "h": 35.2,
+    "w": 328
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "strategy@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 1729,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 148.1,
+     "y": 13.5,
+     "r": 224.2,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 232.2,
+     "y": 9.5,
+     "r": 374,
+     "b": 53.5,
+     "h": 44,
+     "w": 141.8
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 390,
+   "b": 108,
+   "h": 44,
+   "w": 390
+  },
+  "title": {
+   "text": "Strategy",
+   "font": 32,
+   "weight": "700",
+   "ink": 30,
+   "cap": 23,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 374,
+    "b": 159.2,
+    "h": 35.2,
+    "w": 358
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "strategy@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 1642,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 795.3,
+     "y": 17.5,
+     "r": 964.7,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 976.7,
+     "y": 13.5,
+     "r": 1074.7,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1086.7,
+     "y": 13.5,
+     "r": 1260,
+     "b": 57.5,
+     "h": 44,
+     "w": 173.3
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Strategy",
+   "font": 40,
+   "weight": "700",
+   "ink": 38,
+   "cap": 29,
+   "box": {
+    "x": 80,
+    "y": 143.5,
+    "r": 981.1,
+    "b": 187.5,
+    "h": 44,
+    "w": 901.1
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "strategy@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 1642,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 805.4,
+     "y": 17.5,
+     "r": 974.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 986.8,
+     "y": 13.5,
+     "r": 1084.8,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1096.8,
+     "y": 13.5,
+     "r": 1420,
+     "b": 57.5,
+     "h": 44,
+     "w": 323.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Strategy",
+   "font": 40,
+   "weight": "700",
+   "ink": 38,
+   "cap": 29,
+   "box": {
+    "x": 160,
+    "y": 143.5,
+    "r": 1061.1,
+    "b": 187.5,
+    "h": 44,
+    "w": 901.1
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "fine-tune@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 3033,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 145.4,
+     "y": 13.5,
+     "r": 221.6,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 229.6,
+     "y": 9.5,
+     "r": 344,
+     "b": 53.5,
+     "h": 44,
+     "w": 114.4
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 360,
+   "b": 108,
+   "h": 44,
+   "w": 360
+  },
+  "title": {
+   "text": "Fine-tune",
+   "font": 32,
+   "weight": "700",
+   "ink": 25,
+   "cap": 23,
+   "box": {
+    "x": 16,
+    "y": 176,
+    "r": 344,
+    "b": 211.2,
+    "h": 35.2,
+    "w": 328
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "fine-tune@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 2913,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 148.1,
+     "y": 13.5,
+     "r": 224.2,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 232.2,
+     "y": 9.5,
+     "r": 374,
+     "b": 53.5,
+     "h": 44,
+     "w": 141.8
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 390,
+   "b": 108,
+   "h": 44,
+   "w": 390
+  },
+  "title": {
+   "text": "Fine-tune",
+   "font": 32,
+   "weight": "700",
+   "ink": 25,
+   "cap": 23,
+   "box": {
+    "x": 16,
+    "y": 176,
+    "r": 374,
+    "b": 211.2,
+    "h": 35.2,
+    "w": 358
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "fine-tune@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 2533,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 795.3,
+     "y": 17.5,
+     "r": 964.7,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 976.7,
+     "y": 13.5,
+     "r": 1074.7,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1086.7,
+     "y": 13.5,
+     "r": 1260,
+     "b": 57.5,
+     "h": 44,
+     "w": 173.3
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Fine-tune",
+   "font": 40,
+   "weight": "700",
+   "ink": 30,
+   "cap": 29,
+   "box": {
+    "x": 280,
+    "y": 195.5,
+    "r": 1000,
+    "b": 239.5,
+    "h": 44,
+    "w": 720
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "fine-tune@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 2533,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 805.4,
+     "y": 17.5,
+     "r": 974.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 986.8,
+     "y": 13.5,
+     "r": 1084.8,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1096.8,
+     "y": 13.5,
+     "r": 1420,
+     "b": 57.5,
+     "h": 44,
+     "w": 323.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Fine-tune",
+   "font": 40,
+   "weight": "700",
+   "ink": 30,
+   "cap": 29,
+   "box": {
+    "x": 360,
+    "y": 195.5,
+    "r": 1080,
+    "b": 239.5,
+    "h": 44,
+    "w": 720
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "new-run@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 640,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 126.8,
+     "y": 13.5,
+     "r": 203,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "How much paper money should kaibo trade?",
+   "font": 20,
+   "weight": "400",
+   "ink": 19,
+   "cap": 14,
+   "box": {
+    "x": 33,
+    "y": 187,
+    "r": 327,
+    "b": 247,
+    "h": 60,
+    "w": 294
+   }
+  },
+  "hero": {
+   "text": "",
+   "font": 32,
+   "weight": "400",
+   "ink": 0,
+   "cap": 23,
+   "box": {
+    "x": 95.9,
+    "y": 323,
+    "r": 264.1,
+    "b": 379,
+    "h": 56,
+    "w": 168.2
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "new-run@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 844,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 126.8,
+     "y": 13.5,
+     "r": 203,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "How much paper money should kaibo trade?",
+   "font": 20,
+   "weight": "400",
+   "ink": 19,
+   "cap": 14,
+   "box": {
+    "x": 33,
+    "y": 146,
+    "r": 357,
+    "b": 206,
+    "h": 60,
+    "w": 324
+   }
+  },
+  "hero": {
+   "text": "",
+   "font": 32,
+   "weight": "400",
+   "ink": 0,
+   "cap": 23,
+   "box": {
+    "x": 95.9,
+    "y": 282,
+    "r": 294.1,
+    "b": 338,
+    "h": 56,
+    "w": 198.2
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "new-run@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 800,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 149.6,
+     "y": 17.5,
+     "r": 225.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "How much paper money should kaibo trade?",
+   "font": 20,
+   "weight": "400",
+   "ink": 19,
+   "cap": 14,
+   "box": {
+    "x": 255,
+    "y": 176,
+    "r": 1025,
+    "b": 206,
+    "h": 30,
+    "w": 770
+   }
+  },
+  "hero": {
+   "text": "",
+   "font": 32,
+   "weight": "400",
+   "ink": 0,
+   "cap": 23,
+   "box": {
+    "x": 317.9,
+    "y": 234,
+    "r": 577.9,
+    "b": 290,
+    "h": 56,
+    "w": 260
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "new-run@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 900,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 149.6,
+     "y": 17.5,
+     "r": 225.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "How much paper money should kaibo trade?",
+   "font": 20,
+   "weight": "400",
+   "ink": 19,
+   "cap": 14,
+   "box": {
+    "x": 335,
+    "y": 176,
+    "r": 1105,
+    "b": 206,
+    "h": 30,
+    "w": 770
+   }
+  },
+  "hero": {
+   "text": "",
+   "font": 32,
+   "weight": "400",
+   "ink": 0,
+   "cap": 23,
+   "box": {
+    "x": 397.9,
+    "y": 234,
+    "r": 657.9,
+    "b": 290,
+    "h": 56,
+    "w": 260
+   }
+  },
+  "submit": null,
+  "card": null
+ },
+ "activity@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 4459,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 360,
+   "b": 64,
+   "h": 64,
+   "w": 360
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 145.4,
+     "y": 13.5,
+     "r": 221.6,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 229.6,
+     "y": 9.5,
+     "r": 344,
+     "b": 53.5,
+     "h": 44,
+     "w": 114.4
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 360,
+   "b": 108,
+   "h": 44,
+   "w": 360
+  },
+  "title": {
+   "text": "Activity",
+   "font": 28,
+   "weight": "700",
+   "ink": 27,
+   "cap": 20,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 344,
+    "b": 166,
+    "h": 42,
+    "w": 328
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "activity@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 4321,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 390,
+   "b": 64,
+   "h": 64,
+   "w": 390
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 16,
+     "y": 9.5,
+     "r": 118.8,
+     "b": 53.5,
+     "h": 44,
+     "w": 102.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 148.1,
+     "y": 13.5,
+     "r": 224.2,
+     "b": 49.5,
+     "h": 36,
+     "w": 76.2
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 232.2,
+     "y": 9.5,
+     "r": 374,
+     "b": 53.5,
+     "h": 44,
+     "w": 141.8
+    }
+   ]
+  ],
+  "logo": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "letters": {
+   "x": 16,
+   "y": 14.1,
+   "r": 118.8,
+   "b": 44.1,
+   "h": 30,
+   "w": 102.8
+  },
+  "logoFont": 30,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 64,
+   "r": 390,
+   "b": 108,
+   "h": 44,
+   "w": 390
+  },
+  "title": {
+   "text": "Activity",
+   "font": 28,
+   "weight": "700",
+   "ink": 27,
+   "cap": 20,
+   "box": {
+    "x": 16,
+    "y": 124,
+    "r": 374,
+    "b": 166,
+    "h": 42,
+    "w": 358
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "activity@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 4079,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1280,
+   "b": 72,
+   "h": 72,
+   "w": 1280
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 795.3,
+     "y": 17.5,
+     "r": 964.7,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 976.7,
+     "y": 13.5,
+     "r": 1074.7,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1086.7,
+     "y": 13.5,
+     "r": 1260,
+     "b": 57.5,
+     "h": 44,
+     "w": 173.3
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Activity",
+   "font": 28,
+   "weight": "700",
+   "ink": 27,
+   "cap": 20,
+   "box": {
+    "x": 32,
+    "y": 143.5,
+    "r": 1248,
+    "b": 185.5,
+    "h": 42,
+    "w": 1216
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "activity@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 4079,
+  "docOverflow": false,
+  "header": {
+   "x": 0,
+   "y": 0,
+   "r": 1440,
+   "b": 72,
+   "h": 72,
+   "w": 1440
+  },
+  "headerOverflow": false,
+  "headerRows": 1,
+  "headerKids": [
+   [
+    "brand",
+    {
+     "x": 20,
+     "y": 13.5,
+     "r": 129.6,
+     "b": 57.5,
+     "h": 44,
+     "w": 109.6
+    }
+   ],
+   [
+    "topnav",
+    {
+     "x": 149.6,
+     "y": 13.5,
+     "r": 761.4,
+     "b": 57.5,
+     "h": 44,
+     "w": 611.8
+    }
+   ],
+   [
+    "pill",
+    {
+     "x": 805.4,
+     "y": 17.5,
+     "r": 974.8,
+     "b": 53.5,
+     "h": 36,
+     "w": 169.4
+    }
+   ],
+   [
+    "chip hide-sm",
+    {
+     "x": 986.8,
+     "y": 13.5,
+     "r": 1084.8,
+     "b": 57.5,
+     "h": 44,
+     "w": 98
+    }
+   ],
+   [
+    "chip engine-chip ts-chip red",
+    {
+     "x": 1096.8,
+     "y": 13.5,
+     "r": 1420,
+     "b": 57.5,
+     "h": 44,
+     "w": 323.2
+    }
+   ]
+  ],
+  "logo": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "letters": {
+   "x": 20,
+   "y": 16.9,
+   "r": 129.6,
+   "b": 48.9,
+   "h": 32,
+   "w": 109.6
+  },
+  "logoFont": 32,
+  "haltChip": true,
+  "haltbar": {
+   "x": 0,
+   "y": 0,
+   "r": 0,
+   "b": 0,
+   "h": 0,
+   "w": 0
+  },
+  "title": {
+   "text": "Activity",
+   "font": 28,
+   "weight": "700",
+   "ink": 27,
+   "cap": 20,
+   "box": {
+    "x": 92,
+    "y": 143.5,
+    "r": 1348,
+    "b": 185.5,
+    "h": 42,
+    "w": 1256
+   }
+  },
+  "hero": null,
+  "submit": null,
+  "card": null
+ },
+ "sign-in@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 640,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 53,
+   "y": 149.8,
+   "r": 190.1,
+   "b": 189.8,
+   "h": 40,
+   "w": 137.1
+  },
+  "letters": {
+   "x": 53,
+   "y": 149.8,
+   "r": 190.1,
+   "b": 189.8,
+   "h": 40,
+   "w": 137.1
+  },
+  "logoFont": 40,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Sign in",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 53,
+    "y": 211,
+    "r": 307,
+    "b": 238,
+    "h": 27,
+    "w": 254
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 53,
+   "y": 409.5,
+   "r": 307,
+   "b": 453.5,
+   "h": 44,
+   "w": 254
+  },
+  "card": {
+   "x": 24,
+   "y": 124,
+   "r": 336,
+   "b": 516,
+   "h": 392,
+   "w": 312
+  }
+ },
+ "sign-in@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 844,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 53,
+   "y": 251.8,
+   "r": 190.1,
+   "b": 291.8,
+   "h": 40,
+   "w": 137.1
+  },
+  "letters": {
+   "x": 53,
+   "y": 251.8,
+   "r": 190.1,
+   "b": 291.8,
+   "h": 40,
+   "w": 137.1
+  },
+  "logoFont": 40,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Sign in",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 53,
+    "y": 313,
+    "r": 337,
+    "b": 340,
+    "h": 27,
+    "w": 284
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 53,
+   "y": 511.5,
+   "r": 337,
+   "b": 555.5,
+   "h": 44,
+   "w": 284
+  },
+  "card": {
+   "x": 24,
+   "y": 226,
+   "r": 366,
+   "b": 618,
+   "h": 392,
+   "w": 342
+  }
+ },
+ "sign-in@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 800,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 449,
+   "y": 227.5,
+   "r": 599.8,
+   "b": 271.5,
+   "h": 44,
+   "w": 150.8
+  },
+  "letters": {
+   "x": 449,
+   "y": 227.5,
+   "r": 599.8,
+   "b": 271.5,
+   "h": 44,
+   "w": 150.8
+  },
+  "logoFont": 44,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Sign in",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 449,
+    "y": 293,
+    "r": 831,
+    "b": 320,
+    "h": 27,
+    "w": 382
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 449,
+   "y": 491.5,
+   "r": 831,
+   "b": 535.5,
+   "h": 44,
+   "w": 382
+  },
+  "card": {
+   "x": 420,
+   "y": 202,
+   "r": 860,
+   "b": 598,
+   "h": 396,
+   "w": 440
+  }
+ },
+ "sign-in@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 900,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 529,
+   "y": 277.5,
+   "r": 679.8,
+   "b": 321.5,
+   "h": 44,
+   "w": 150.8
+  },
+  "letters": {
+   "x": 529,
+   "y": 277.5,
+   "r": 679.8,
+   "b": 321.5,
+   "h": 44,
+   "w": 150.8
+  },
+  "logoFont": 44,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Sign in",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 529,
+    "y": 343,
+    "r": 911,
+    "b": 370,
+    "h": 27,
+    "w": 382
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 529,
+   "y": 541.5,
+   "r": 911,
+   "b": 585.5,
+   "h": 44,
+   "w": 382
+  },
+  "card": {
+   "x": 500,
+   "y": 252,
+   "r": 940,
+   "b": 648,
+   "h": 396,
+   "w": 440
+  }
+ },
+ "register@360": {
+  "vw": 360,
+  "vh": 640,
+  "scrollH": 655,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 53,
+   "y": 49.8,
+   "r": 190.1,
+   "b": 89.8,
+   "h": 40,
+   "w": 137.1
+  },
+  "letters": {
+   "x": 53,
+   "y": 49.8,
+   "r": 190.1,
+   "b": 89.8,
+   "h": 40,
+   "w": 137.1
+  },
+  "logoFont": 40,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Register with an invite",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 53,
+    "y": 111,
+    "r": 307,
+    "b": 138,
+    "h": 27,
+    "w": 254
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 53,
+   "y": 524.5,
+   "r": 307,
+   "b": 568.5,
+   "h": 44,
+   "w": 254
+  },
+  "card": {
+   "x": 24,
+   "y": 24,
+   "r": 336,
+   "b": 631,
+   "h": 607,
+   "w": 312
+  }
+ },
+ "register@390": {
+  "vw": 390,
+  "vh": 844,
+  "scrollH": 844,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 53,
+   "y": 156.3,
+   "r": 190.1,
+   "b": 196.3,
+   "h": 40,
+   "w": 137.1
+  },
+  "letters": {
+   "x": 53,
+   "y": 156.3,
+   "r": 190.1,
+   "b": 196.3,
+   "h": 40,
+   "w": 137.1
+  },
+  "logoFont": 40,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Register with an invite",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 53,
+    "y": 217.5,
+    "r": 337,
+    "b": 244.5,
+    "h": 27,
+    "w": 284
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 53,
+   "y": 607,
+   "r": 337,
+   "b": 651,
+   "h": 44,
+   "w": 284
+  },
+  "card": {
+   "x": 24,
+   "y": 130.5,
+   "r": 366,
+   "b": 713.5,
+   "h": 583,
+   "w": 342
+  }
+ },
+ "register@1280": {
+  "vw": 1280,
+  "vh": 800,
+  "scrollH": 800,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 449,
+   "y": 132,
+   "r": 599.8,
+   "b": 176,
+   "h": 44,
+   "w": 150.8
+  },
+  "letters": {
+   "x": 449,
+   "y": 132,
+   "r": 599.8,
+   "b": 176,
+   "h": 44,
+   "w": 150.8
+  },
+  "logoFont": 44,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Register with an invite",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 449,
+    "y": 197.5,
+    "r": 831,
+    "b": 224.5,
+    "h": 27,
+    "w": 382
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 449,
+   "y": 587,
+   "r": 831,
+   "b": 631,
+   "h": 44,
+   "w": 382
+  },
+  "card": {
+   "x": 420,
+   "y": 106.5,
+   "r": 860,
+   "b": 693.5,
+   "h": 587,
+   "w": 440
+  }
+ },
+ "register@1440": {
+  "vw": 1440,
+  "vh": 900,
+  "scrollH": 900,
+  "docOverflow": false,
+  "header": null,
+  "headerOverflow": null,
+  "headerRows": 0,
+  "headerKids": [],
+  "logo": {
+   "x": 529,
+   "y": 182,
+   "r": 679.8,
+   "b": 226,
+   "h": 44,
+   "w": 150.8
+  },
+  "letters": {
+   "x": 529,
+   "y": 182,
+   "r": 679.8,
+   "b": 226,
+   "h": 44,
+   "w": 150.8
+  },
+  "logoFont": 44,
+  "haltChip": false,
+  "haltbar": null,
+  "title": {
+   "text": "Register with an invite",
+   "font": 18,
+   "weight": "400",
+   "ink": 17,
+   "cap": 13,
+   "box": {
+    "x": 529,
+    "y": 247.5,
+    "r": 911,
+    "b": 274.5,
+    "h": 27,
+    "w": 382
+   }
+  },
+  "hero": null,
+  "submit": {
+   "x": 529,
+   "y": 637,
+   "r": 911,
+   "b": 681,
+   "h": 44,
+   "w": 382
+  },
+  "card": {
+   "x": 500,
+   "y": 156.5,
+   "r": 940,
+   "b": 743.5,
+   "h": 587,
+   "w": 440
+  }
+ }
+}
