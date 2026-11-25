@@ -53,7 +53,7 @@ export function Register({ search = typeof window === "undefined" ? "" : window.
   return (
     <div className="center">
       <form className="card" onSubmit={submit}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><Logo animate idle="often" large />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><Logo animate idle large />
           <span className="pill">PAPER</span></div>
         {state === "sent" ? (
           <>
