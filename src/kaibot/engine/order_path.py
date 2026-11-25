@@ -9,14 +9,16 @@ them (`engine/fence.py`), and the watchdog (`engine/watchdog.py`, its own proces
 Next steps (each behaviour-neutral on its own, see the PR for #445): the retired intraday path's and the flatten's
 direct sends move onto the order manager's journal; then one start-up recovery routine.
 
-M10 1.21 step 3 (#446): the trading state's gate. The engine attaches its `trading_state` to its broker (`attach`);
-every call here except a cancel asks it first (`engine/state.allows`): in `reducing_only` no buy leaves (sales,
-replaces and cancels do), in `halted` only cancels. A refused call raises `NotAllowed`, a BrokerError with status
-403 like the lease's `Fenced`, so every caller already treats it as "refused, there is no order" (the order manager
-marks it rejected and never looks for it at the venue). A state that cannot be read counts as `reducing_only`. A
-broker with no engine attached (replays, tools, the watchdog's own client) is not gated. The engine's own checks
-(`entry_block`, `_may_enter`) are asked before any buy is built, so the gate only refuses what slipped past them:
-the issue's property ("no buy leaves in reducing, only cancels in halted") is now a guarantee, not only a test.
+M10 1.21 step 3 (#446): the trading state's gate. Every call here except a cancel takes the calling engine's
+`trading_state` (`gate=`; the engine's own calls and its order managers pass it) and asks it first
+(`engine/state.allows`): in `reducing_only` no buy leaves (sales, replaces and cancels do), in `halted` only
+cancels. A refused call raises `NotAllowed`, a BrokerError with status 403 like the lease's `Fenced`, so every
+caller already treats it as "refused, there is no order" (the order manager marks it rejected and never looks for
+it at the venue). A state that cannot be read counts as `reducing_only`. A call without a gate (an order manager no
+engine made: research, tools) is not gated. The gate belongs to the caller, not to the broker object, so two
+engines on one broker (the lease drills) each answer for their own orders. The engine's own checks (`entry_block`,
+`_may_enter`) are asked before any buy is built, so the gate only refuses what slipped past them: the issue's
+property ("no buy leaves in reducing, only cancels in halted") is now a guarantee, not only a test.
 """
 
 from __future__ import annotations
@@ -28,9 +30,6 @@ from kaibot.engine.state import TradingState, allows
 
 log = logging.getLogger("kaibot.engine")
 
-_GATE = "_kb_trading_gate"  # the key in the broker object's own __dict__ (never a broker attribute lookup)
-
-
 class NotAllowed(BrokerError):
     """The trading state refused the call: nothing was sent to the venue."""
 
@@ -39,28 +38,12 @@ class NotAllowed(BrokerError):
         super().__init__(403, msg, msg)
 
 
-def attach(broker, state_fn) -> None:
-    """The engine's trading state (`() -> Trading`), asked before every order call made through this module on this
-    broker. A later engine on the same broker (a restart in one process) replaces it."""
-    try:
-        vars(broker)[_GATE] = state_fn
-    except TypeError:  # an object without __dict__: no gate (as before)
-        log.warning("order path: broker %s takes no trading-state gate", type(broker).__name__)
-
-
-def _attached(broker):
-    try:
-        return vars(broker).get(_GATE)
-    except TypeError:
-        return None
-
-
-def _gate(broker, action: str, side: str | None, what: str) -> None:
-    fn = _attached(broker)
-    if fn is None:
+def _gate(gate, action: str, side: str | None, what: str) -> None:
+    """`gate`: the calling engine's trading state (`() -> Trading`), or None (no engine: not gated)."""
+    if gate is None:
         return
     try:
-        t = fn()
+        t = gate()
         state, why = TradingState(t.state), t.why
     except Exception as e:  # fail closed for what adds risk only: sales, replaces and cancels still go
         state, why = TradingState.REDUCING_ONLY, f"the trading state could not be read ({type(e).__name__})"
@@ -69,45 +52,45 @@ def _gate(broker, action: str, side: str | None, what: str) -> None:
         raise NotAllowed(state.value, why)
 
 
-def submit(broker, order: OrderRequest) -> dict:
-    if _attached(broker) is not None:  # a side that cannot be read is no sale: refused unless active
+def submit(broker, order: OrderRequest, gate=None) -> dict:
+    if gate is not None:  # a side that cannot be read is no sale: refused unless active
         side = getattr(order, "side", None)
-        _gate(broker, "submit", side, f"{side} {getattr(order, 'symbol', '?')}")
+        _gate(gate, "submit", side, f"{side} {getattr(order, 'symbol', '?')}")
     return broker.submit(order)
 
 
-def submit_bracket(broker, coid: str, symbol: str, qty: int, stop: float, target: float) -> dict:
-    _gate(broker, "submit", "buy", f"bracket buy {symbol}")
+def submit_bracket(broker, coid: str, symbol: str, qty: int, stop: float, target: float, gate=None) -> dict:
+    _gate(gate, "submit", "buy", f"bracket buy {symbol}")
     return broker.submit_bracket(coid, symbol, qty, stop, target)
 
 
-def submit_oto_stop(broker, coid: str, symbol: str, qty: int, stop: float) -> dict:
-    _gate(broker, "submit", "buy", f"buy {symbol} with its stop")
+def submit_oto_stop(broker, coid: str, symbol: str, qty: int, stop: float, gate=None) -> dict:
+    _gate(gate, "submit", "buy", f"buy {symbol} with its stop")
     return broker.submit_oto_stop(coid, symbol, qty, stop)
 
 
-def submit_moc_sell(broker, coid: str, symbol: str, qty: int) -> dict:
-    _gate(broker, "submit", "sell", f"market-on-close sell {symbol}")
+def submit_moc_sell(broker, coid: str, symbol: str, qty: int, gate=None) -> dict:
+    _gate(gate, "submit", "sell", f"market-on-close sell {symbol}")
     return broker.submit_moc_sell(coid, symbol, qty)
 
 
-def close_position(broker, symbol: str):
-    _gate(broker, "submit", "sell", f"close {symbol}")
+def close_position(broker, symbol: str, gate=None):
+    _gate(gate, "submit", "sell", f"close {symbol}")
     return broker.close_position(symbol)
 
 
-def replace(broker, order_id: str, **kw) -> dict:
-    _gate(broker, "replace", None, f"replace {order_id}")
+def replace(broker, order_id: str, gate=None, **kw) -> dict:
+    _gate(gate, "replace", None, f"replace {order_id}")
     return broker.replace(order_id, **kw)
 
 
-def replace_stop(broker, order_id: str, stop: float) -> dict:
-    _gate(broker, "replace", None, f"replace stop {order_id}")
+def replace_stop(broker, order_id: str, stop: float, gate=None) -> dict:
+    _gate(gate, "replace", None, f"replace stop {order_id}")
     return broker.replace_stop(order_id, stop)
 
 
-def replace_limit(broker, order_id: str, limit: float) -> dict:
-    _gate(broker, "replace", None, f"replace limit {order_id}")
+def replace_limit(broker, order_id: str, limit: float, gate=None) -> dict:
+    _gate(gate, "replace", None, f"replace limit {order_id}")
     return broker.replace_limit(order_id, limit)
 
 

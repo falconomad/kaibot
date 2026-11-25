@@ -594,7 +594,8 @@ class LiveDaily:
         if self.om is None or self._rid != rid:
             self._rid = rid
             self.om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
-                                   position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
+                                   position=getattr(self.account, "ledger_qty", None),  # M9 1.11 (#436)
+                                   gate=getattr(self.account, "trading_state", None))  # #446 step 3
             self.stops = ProtectiveStops(self.om, run=rid)
         return self.om
 
@@ -606,7 +607,8 @@ class LiveDaily:
         if om is None:
             self._rid = rid
             self.om = om = OrderManager(self.broker, self.journal, self.now, run_id=rid, on_fill=self._on_fill,
-                                        position=getattr(self.account, "ledger_qty", None))  # M9 1.11 (#436)
+                                        position=getattr(self.account, "ledger_qty", None),  # M9 1.11 (#436)
+                                        gate=getattr(self.account, "trading_state", None))  # #446 step 3
             self.stops = ProtectiveStops(om, run=rid)
         return om
 
@@ -2108,6 +2110,10 @@ class EngineAccount:
 
     def run_id(self) -> int | None:
         return self.e._rid()
+
+    def trading_state(self):
+        """#446 step 3: the engine's one trading state, for the order manager's gate at the order seam."""
+        return self.e.trading_state()
 
     def equity(self) -> float:
         b = self._book()

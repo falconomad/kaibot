@@ -67,17 +67,17 @@ BUY = OrderRequest("A", "buy", 3, "market", "day", "kb1-r-A-20261124-buy-1")
 SELL = OrderRequest("A", "sell", 3, "market", "day", "kb1-r-A-20261124-sell-1")
 # (the call, what it is to the state: action and side)
 CALLS = {
-    "submit:buy": (lambda b: order_path.submit(b, BUY), "submit", "buy"),
-    "submit:sell": (lambda b: order_path.submit(b, SELL), "submit", "sell"),
-    "submit_bracket": (lambda b: order_path.submit_bracket(b, "c", "A", 3, 9.0, 11.0), "submit", "buy"),
-    "submit_oto_stop": (lambda b: order_path.submit_oto_stop(b, "c", "A", 3, 9.0), "submit", "buy"),
-    "submit_moc_sell": (lambda b: order_path.submit_moc_sell(b, "c", "A", 3), "submit", "sell"),
-    "close_position": (lambda b: order_path.close_position(b, "A"), "submit", "sell"),
-    "replace": (lambda b: order_path.replace(b, "o1", stop_price=9.5), "replace", None),
-    "replace_stop": (lambda b: order_path.replace_stop(b, "o1", 9.5), "replace", None),
-    "replace_limit": (lambda b: order_path.replace_limit(b, "o1", 10.5), "replace", None),
-    "cancel": (lambda b: order_path.cancel(b, "o1"), "cancel", None),
-    "cancel_order": (lambda b: order_path.cancel_order(b, "o1"), "cancel", None),
+    "submit:buy": (lambda b, g=None: order_path.submit(b, BUY, gate=g), "submit", "buy"),
+    "submit:sell": (lambda b, g=None: order_path.submit(b, SELL, gate=g), "submit", "sell"),
+    "submit_bracket": (lambda b, g=None: order_path.submit_bracket(b, "c", "A", 3, 9.0, 11.0, gate=g), "submit", "buy"),
+    "submit_oto_stop": (lambda b, g=None: order_path.submit_oto_stop(b, "c", "A", 3, 9.0, gate=g), "submit", "buy"),
+    "submit_moc_sell": (lambda b, g=None: order_path.submit_moc_sell(b, "c", "A", 3, gate=g), "submit", "sell"),
+    "close_position": (lambda b, g=None: order_path.close_position(b, "A", gate=g), "submit", "sell"),
+    "replace": (lambda b, g=None: order_path.replace(b, "o1", gate=g, stop_price=9.5), "replace", None),
+    "replace_stop": (lambda b, g=None: order_path.replace_stop(b, "o1", 9.5, gate=g), "replace", None),
+    "replace_limit": (lambda b, g=None: order_path.replace_limit(b, "o1", 10.5, gate=g), "replace", None),
+    "cancel": (lambda b, g=None: order_path.cancel(b, "o1"), "cancel", None),
+    "cancel_order": (lambda b, g=None: order_path.cancel_order(b, "o1"), "cancel", None),
 }
 
 
@@ -85,13 +85,13 @@ CALLS = {
 def test_a_call_reaches_the_venue_exactly_when_the_state_allows_it(state, name):
     call, action, side = CALLS[name]
     b = Venue()
-    order_path.attach(b, lambda: Trading(state, "test"))
+    gate = lambda: Trading(state, "test")  # noqa: E731
     if allows(state, action, side):
-        call(b)
+        call(b, gate)
         assert b.calls == [name]
     else:
         with pytest.raises(order_path.NotAllowed) as e:
-            call(b)
+            call(b, gate)
         assert b.calls == []  # nothing reached the venue
         assert e.value.status == 403 and isinstance(e.value, BrokerError) and state.value in str(e.value)
 
@@ -102,10 +102,9 @@ def test_no_buy_leaves_in_reducing_only_and_only_cancels_in_halted():
                            (TradingState.HALTED, {"cancel", "cancel_order"}),
                            (TradingState.ACTIVE, set(CALLS))]:
         b = Venue()
-        order_path.attach(b, lambda state=state: Trading(state, "x"))
         for call, _, _ in CALLS.values():
             with contextlib.suppress(order_path.NotAllowed):
-                call(b)
+                call(b, lambda state=state: Trading(state, "x"))
         assert set(b.calls) == allowed, state
 
 
@@ -115,51 +114,52 @@ def test_an_unreadable_state_refuses_buys_only():
     def boom():
         raise RuntimeError("no state")
 
-    order_path.attach(b, boom)
     for call, _, _ in CALLS.values():
         try:
-            call(b)
+            call(b, boom)
         except order_path.NotAllowed as e:
             assert "could not be read" in str(e)
     assert "submit:buy" not in b.calls and "submit_bracket" not in b.calls and "submit_oto_stop" not in b.calls
     assert {"submit:sell", "close_position", "replace_stop", "cancel", "cancel_order"} <= set(b.calls)
 
 
-def test_a_broker_without_an_engine_is_not_gated():
+def test_a_call_without_a_gate_is_not_gated():
     b = Venue()
     for call, _, _ in CALLS.values():
         call(b)
     assert len(b.calls) == len(CALLS)
 
-    class Slotted:  # no __dict__: attach is a no-op, the call goes through as before
-        __slots__ = ()
 
-        def submit(self, order):
-            return {"id": "s"}
-
-    s = Slotted()
-    order_path.attach(s, lambda: Trading(TradingState.HALTED, "x"))
-    assert order_path.submit(s, BUY) == {"id": "s"}
-
-
-def test_a_later_engine_replaces_the_gate():
+def test_two_engines_on_one_broker_each_answer_for_their_own_orders():
+    """The lease drills run a degraded engine and the lease holder on one broker object: the gate is the caller's,
+    so the holder's buy goes and the degraded engine's is refused."""
     b = Venue()
-    order_path.attach(b, lambda: Trading(TradingState.HALTED, "old"))
-    order_path.attach(b, lambda: Trading(TradingState.ACTIVE))
-    order_path.submit(b, BUY)
-    assert b.calls == ["submit:buy"]
+    holder, degraded = (lambda: Trading(TradingState.ACTIVE)), (
+        lambda: Trading(TradingState.REDUCING_ONLY, "lease unverified"))
+    order_path.submit(b, BUY, gate=holder)
+    with pytest.raises(order_path.NotAllowed, match="lease unverified"):
+        order_path.submit(b, BUY, gate=degraded)
+    order_path.submit(b, SELL, gate=degraded)
+    assert b.calls == ["submit:buy", "submit:sell"]
 
 
 def test_the_order_manager_books_a_refused_buy_as_rejected_never_unknown():
     """NotAllowed is a 403: the order manager marks the order rejected (no order at the venue) and never looks for
     it there, as for the lease's fence."""
     b = Venue()
-    order_path.attach(b, lambda: Trading(TradingState.REDUCING_ONLY, "daily stop"))
-    om = OrderManager(b, Journal(), lambda: datetime(2026, 11, 24, 20, 50, tzinfo=UTC), run_id=1)
+    om = OrderManager(b, Journal(), lambda: datetime(2026, 11, 24, 20, 50, tzinfo=UTC), run_id=1,
+                      gate=lambda: Trading(TradingState.REDUCING_ONLY, "daily stop"))
     r = om.submit(BUY, strategy="trend_momentum", purpose="buy", session="2026-11-24")
     assert r.state is St.REJECTED and "daily stop" in (r.reason or "") and b.calls == []
     s = om.submit(SELL, strategy="trend_momentum", purpose="sell", session="2026-11-24")
     assert s.state is not St.REJECTED and b.calls == ["submit:sell"]
+
+
+def test_an_order_manager_without_a_gate_sends_as_before():
+    b = Venue()
+    om = OrderManager(b, Journal(), lambda: datetime(2026, 11, 24, 20, 50, tzinfo=UTC), run_id=1)
+    om.submit(BUY, strategy="trend_momentum", purpose="buy", session="2026-11-24")
+    assert b.calls == ["submit:buy"]
 
 
 # ---------------------------------------------------------------- the engine's one state and its heartbeat lines
@@ -186,23 +186,16 @@ def test_a_halted_hold_wins_over_every_entry_block_and_a_block_is_reducing_only(
     assert e.trading_state() == Trading(TradingState.REDUCING_ONLY, "account not clean")
 
 
-def test_the_engine_gates_its_own_broker():
+def test_the_engines_state_is_the_gate_its_calls_pass():
     b = Venue()
     e = _engine(broker=b)
-    e._gate_orders()
     e.kill = "broker_rejects"
     with pytest.raises(order_path.NotAllowed, match="halted: broker_rejects"):
-        order_path.submit(b, BUY)
-    order_path.submit(b, SELL)
+        order_path.submit(b, BUY, gate=e.trading_state)
+    order_path.submit(b, SELL, gate=e.trading_state)
     e.kill = None
-    order_path.submit(b, BUY)
+    order_path.submit(b, BUY, gate=e.trading_state)
     assert b.calls == ["submit:sell", "submit:buy"]
-
-
-def test_engine_init_attaches_the_gate():
-    b = Venue()
-    Engine(b, None, None, {}, set(), journal=Journal())
-    assert callable(vars(b)[order_path._GATE])
 
 
 class Day:

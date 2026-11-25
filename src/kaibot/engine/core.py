@@ -368,7 +368,6 @@ class Engine:
         intraday: bool | None = None,
     ):
         self.broker, self.market, self.store = broker, market, store
-        self._gate_orders()  # #446 step 3: every order call of this engine asks its trading state first
         if not self.intraday:  # the book's engine: a level that lists an intraday rule would never run it
             listed = sorted({n for names in (strategies or {}).values() for n in names
                              if n not in registry.RESEARCH_ONLY})
@@ -463,13 +462,7 @@ class Engine:
         self._book_peak_ts: str | None = None
 
     # ================= lifecycle =================
-    def _gate_orders(self) -> None:
-        """#446 step 3: the order path's gate (engine/order_path.py `attach`) asks this engine's trading state."""
-        if self.broker is not None:
-            order_path.attach(self.broker, self.trading_state)
-
     def startup(self) -> None:
-        self._gate_orders()  # again: the broker may have been replaced or wrapped since __init__
         self.run = self.store.active_run()
         self._restore_positions()
         self._attach_ledger()
@@ -1184,7 +1177,7 @@ class Engine:
         """S80: why no new position may be opened now (None: it may), for the multi-day target path as for the
         intraday entries: no running run, the account not clean, a fail-closed halt, the lease, the daily stop,
         an invalid owner config. Sales and protective stops are never blocked. The words of `entry_reason`."""
-        r = self.entry_reason()
+        r = Engine.entry_reason(self)  # also for a duck-typed engine (unit tests)
         return r[1] if r is not None else None
 
     def entry_reason(self) -> tuple[str, str] | None:
@@ -1432,7 +1425,8 @@ class Engine:
         self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
                                                "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
         o = self._order("sell",
-                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid)),
+                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid),
+                                                  gate=self.trading_state),
                         coid=coid, symbol=sym, strategy=",".join(k[0] for k, _ in keys), qty=qty, reason=reason)
         self._md_exit_sent(o, rid, keys, reason)
 

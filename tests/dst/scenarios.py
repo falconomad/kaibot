@@ -81,7 +81,7 @@ def unbooked_fill_of_today_only(mp) -> None:
     mp.setattr(ld._Gate, "allows", lambda self, symbol, side, purpose="target", qty=None: None)
     # #446 step 3: the order seam's trading-state gate is a third guard (the same reconciliation block, asked at
     # the send itself): it refuses the second buy too, so it is taken away with the other two
-    mp.setattr(order_path, "_gate", lambda broker, action, side, what: None)
+    mp.setattr(order_path, "_gate", lambda gate, action, side, what: None)
 
 
 def watchdog_cancel_not_carried(mp) -> None:
