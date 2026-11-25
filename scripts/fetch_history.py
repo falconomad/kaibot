@@ -18,7 +18,6 @@ Data: Alpaca SIP history >= 15 min old, shared `alpaca` budget (config/sources.y
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,6 +26,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.common.http import HttpError  # noqa: E402
 from kaibot.ingest.alpaca_history import (  # noqa: E402
     SIP_DELAY,
@@ -92,7 +92,7 @@ def parse_shard(shard: str) -> tuple[int, int]:
 
 def main(argv: list[str] | None = None, api=None, now: datetime | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--env", default=os.environ.get("KAIBOT_ENV_FILE") or DEFAULT_ENV, help=".env with the Alpaca keys")
+    ap.add_argument("--env", default=switches.text("KAIBOT_ENV_FILE") or DEFAULT_ENV, help=".env with the Alpaca keys")
     ap.add_argument("--start", default="2025-01-01")
     ap.add_argument("--data", default="data")
     ap.add_argument("--news", action="store_true")

@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sqlite3
 import sys
 from collections.abc import Callable
@@ -41,6 +40,7 @@ from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))  # run from a checkout without installing
 
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.engine.config import ROOT, load_env_file  # noqa: E402
 from kaibot.engine.execution import NY  # noqa: E402
 from kaibot.engine.journal import JournalStore, journal_path  # noqa: E402
@@ -278,7 +278,7 @@ def preview(journal_file: str | Path, daily_root: str | Path, *, now: datetime |
         ledger_runs = sorted(Ledger.fold(journal.entries(kinds=("run",))).books)
         rid = int(run["id"]) if run else (ledger_runs[-1] if ledger_runs else None)
         level = (run or {}).get("level") or "balanced"
-        flag = os.environ.get("KAIBOT_MULTIDAY", "off").strip().lower() == "on"
+        flag = bool(switches.get("KAIBOT_MULTIDAY"))
         out: dict = {"journal": journal.path, "journal_mode": journal.mode, "last_entry": journal.last,
                      "multiday_flag": flag,
                      "now": now.isoformat(), "run_id": rid, "level": level, "run_status": (run or {}).get("status"),
@@ -397,10 +397,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--now", help="pretend it is this time (ISO, with offset); default: now")
     ap.add_argument("--json", action="store_true", help="print the preview as JSON")
     a = ap.parse_args(argv)
-    load_env_file(a.env or os.environ.get("KAIBOT_ENV_FILE"))
-    jfile = Path(a.journal) if a.journal else journal_path(Path(os.environ.get("KAIBOT_DATA_DIR",
-                                                                               ROOT / "data" / "live")))
-    root = Path(a.daily_data or os.environ.get("KAIBOT_DAILY_DATA") or ROOT / "data")
+    load_env_file(a.env or switches.text("KAIBOT_ENV_FILE"))
+    jfile = Path(a.journal) if a.journal else journal_path(switches.get("KAIBOT_DATA_DIR") or ROOT / "data" / "live")
+    root = Path(a.daily_data or switches.get("KAIBOT_DAILY_DATA") or ROOT / "data")
     now = datetime.fromisoformat(a.now) if a.now else None
     if now is not None and now.tzinfo is None:
         ap.error("--now needs an offset, e.g. 2026-11-23T15:00:00-05:00")

@@ -110,7 +110,6 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import secrets
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -123,6 +122,7 @@ import pandas as pd
 
 from kaibot.broker import payloads
 from kaibot.broker.protocol import Broker
+from kaibot.common import switches  # M10 1.23 (#448): KAIBOT_REENABLE, as loaded at start
 from kaibot.engine import failsafe, standing
 from kaibot.engine.daily import (
     CARRY,
@@ -2206,7 +2206,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      EngineAccount(engine), next_session=nxt, prev_session=prev,
                      event=lambda kind, body: engine.store.event(kind, body, engine._rid()),
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
-                     store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review,
+                     store=engine.store, reenable=switches.get(REENABLE_FLAG), ca=ca, review=review,
                      shadow=shadow, note=note, filing_flags=filing_flags,
                      quotes=quotes if quotes is not None else presend_quotes(engine), entry_checks=entry_checks)
 

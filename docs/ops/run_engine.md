@@ -63,6 +63,12 @@ variable, for example `invalid settings (nothing was started): KAIBOT_MULTIDAY='
 logs it and keeps protecting the positions (it reads only `KAIBOT_DATA_DIR` and `KAIBOT_ENGINE_NAME`, strictly). Check your `.env` with `./scripts/run_engine.sh --check`
 before you deploy this release.
 
+The switches are read **once**, at start, into one typed object (`switches.start`, called by `Settings.from_env`
+after the `.env` file is read); every reader in the engine, the agents and the scripts asks that object
+(`switches.get` / `switches.text`), and a test fails on any other `os.environ` read of a `KAIBOT_*` variable. So a
+change to a switch takes effect at the next restart, never in a running engine. A `KAIBOT_*` variable that is not
+declared (a misspelt switch, such as `KAIBOT_MULTI_DAY`) is named in a warning at start and is otherwise ignored.
+
 ## Engine lease (one engine, whatever the machine)
 
 `scripts/engine_guard.sh` stops a second engine on the **same** machine. The lease stops one on **another**

@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.engine.config import PAPER_TRADING_URL, load_env_file  # noqa: E402
 
 DEFAULT_ENV = Path.home() / "Projects" / "kaibot-secrets" / ".env"
@@ -52,7 +53,7 @@ def run(http, base: str) -> int:
 
 
 def main(argv: list[str] | None = None, http=None) -> int:
-    path = Path(os.environ.get("KAIBOT_ENV_FILE") or DEFAULT_ENV)
+    path = Path(switches.text("KAIBOT_ENV_FILE") or DEFAULT_ENV)
     if not path.is_file():
         raise SystemExit(f"no .env at {path} (set KAIBOT_ENV_FILE=/path/to/.env)")
     load_env_file(path)

@@ -52,6 +52,7 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.engine.config import DATA_URL, PAPER_TRADING_URL, load_env_file  # noqa: E402
 
 DEFAULT_ENV = Path.home() / "Projects" / "kaibot-secrets" / ".env"
@@ -329,7 +330,7 @@ def main(argv: list[str] | None = None, trading=None, data_http=None, now: datet
     symbols = [s.strip().upper() for s in a.symbols.split(",") if s.strip()]
     if not symbols or a.days < 1 or a.sessions < MIN_SESSIONS:
         ap.error(f"needs a symbol, --days of at least 1 and --sessions of at least {MIN_SESSIONS}")
-    path = Path(os.environ.get("KAIBOT_ENV_FILE") or DEFAULT_ENV)
+    path = Path(switches.text("KAIBOT_ENV_FILE") or DEFAULT_ENV)
     if trading is None or data_http is None:
         if not path.is_file():
             raise SystemExit(f"no .env at {path} (set KAIBOT_ENV_FILE=/path/to/.env)")

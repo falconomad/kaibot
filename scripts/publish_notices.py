@@ -37,6 +37,7 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from kaibot.common import switches  # noqa: E402  (M10 1.23: KAIBOT_* as declared there)
 from kaibot.ingest import nyse_sessions as nyse  # noqa: E402
 
 ET = ZoneInfo("America/New_York")
@@ -212,7 +213,7 @@ def publish_as_helper(session, rows: list[dict], back: list[date], ahead: list[d
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    env = os.environ.get("KAIBOT_ENV_FILE") or str(Path.home() / "Projects/kaibot-secrets/.env")
+    env = switches.text("KAIBOT_ENV_FILE") or str(Path.home() / "Projects/kaibot-secrets/.env")
     ap.add_argument("--env", default=env)
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--now", help="ISO time with a zone (default: now); for a replay of an earlier morning")

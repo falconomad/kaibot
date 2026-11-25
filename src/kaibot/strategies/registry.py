@@ -17,7 +17,6 @@ module, add one line below, list its files under `fingerprint.strategies` in con
 from __future__ import annotations
 
 import importlib
-import os
 from dataclasses import dataclass
 
 from kaibot.strategies.base import Holding, Mode, Strategy
@@ -158,9 +157,11 @@ MULTIDAY_FLAG = "KAIBOT_MULTIDAY"
 
 
 def multi_day_enabled() -> bool:
-    """S80 (#120): the live engine accepts multi-day rules only with KAIBOT_MULTIDAY=on (default off). Read at each
-    call, from the environment only (decision 11: env-only settings)."""
-    return os.environ.get(MULTIDAY_FLAG, "off").strip().lower() == "on"
+    """S80 (#120): the live engine accepts multi-day rules only with KAIBOT_MULTIDAY=on (default off). From the
+    environment only (decision 11: env-only settings), as loaded at start (M10 1.23: common/switches.py)."""
+    from kaibot.common import switches
+
+    return bool(switches.get(MULTIDAY_FLAG))
 
 
 def registered_multi_day() -> tuple[str, ...]:

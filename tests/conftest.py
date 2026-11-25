@@ -116,3 +116,18 @@ def _no_environment_leak():
     yield
     for key in set(os.environ) - before:
         os.environ.pop(key, None)
+
+
+# ---------------------------------------------------------------- M10 1.23 (#448): the switches loaded at start
+
+
+@pytest.fixture(autouse=True)
+def _no_switches_loaded_between_tests():
+    """`Settings.from_env` loads the KAIBOT_* switches once for the process (common/switches.start). A test that
+    starts must not leave its switches for the next one: each test begins and ends with none loaded, so a reader
+    answers from the environment as that test set it."""
+    from kaibot.common import switches
+
+    switches.reset()
+    yield
+    switches.reset()

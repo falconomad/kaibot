@@ -174,7 +174,7 @@ def make_preopen_shadow(store, desk, env: Mapping[str, str] | None = None, gatew
     if gateway is None:
         from kaibot.agents.gateway import shadow_from_env
 
-        gateway = shadow_from_env(store, dict(env))
+        gateway = shadow_from_env(store, env)
     return preopen_shadow.ShadowDesk(preopen.GatewayReviewer(gateway), gateway,
                                      evidence_fn=make_preopen_evidence(desk),
                                      masked=preopen_shadow.masked_enabled(env))  # M12 3.9: the masked arm
@@ -191,5 +191,5 @@ def make_daily_note(store, env: Mapping[str, str] | None = None, gateway=None):
     if gateway is None:
         from kaibot.agents.gateway import note_from_env
 
-        gateway = note_from_env(store, dict(env))
+        gateway = note_from_env(store, env)
     return daily_note.NoteDesk(gateway)
