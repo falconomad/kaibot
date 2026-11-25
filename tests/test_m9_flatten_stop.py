@@ -189,10 +189,13 @@ def test_an_intraday_position_the_venue_refuses_to_close_keeps_the_command_pendi
     assert sorted(t["exit_reason"] for t in store.tables["trade"]) == ["manual", "manual"]
 
 
-def test_the_entry_block_survives_a_restart_while_the_commands_cannot_be_read(tmp_path):
+def test_the_entry_block_survives_a_restart_while_the_commands_cannot_be_read(tmp_path, monkeypatch):
     """QA-Ops second key on #525: the block was in memory only. The engine is restarted with the command still
     pending and Supabase unreachable (`pending_commands` answers none): it must not open a position in a book the
     owner told it to sell. The block is read back from the journal and ends with the command."""
+    # #445 step 2: this venue's engine has no daily path, so with B in the book a restart is refused; the check is
+    # lifted here only, to keep the older flatten sale covered until step 4 deletes it
+    monkeypatch.setattr(core.Engine, "_require_daily_path", lambda self: None)
     a = Account(tmp_path)
     a.day1()
     a.ticks(a.open2, 0, 10)
