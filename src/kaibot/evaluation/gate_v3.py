@@ -26,6 +26,12 @@ close before the window; the evidence-based tier of section 14 (`tier: evidence_
 S5 and S6 judged, S3 and S4 printed, verdict `evidence_based`, labelled, at most 10% of a book together); and a
 book is listed under `books:` (not in a family) with its components and sleeve budgets.
 
+Gate v3.1 (decision 18, M17 ticket 6.1, #701): book configurations are counted per book IDEA (`books.<book>.idea`;
+every book of one idea shares the count), and B2 also needs its chance test (`book.b2_chance`): a deflated test of
+the book's daily Sharpe over SPY's, with N = the idea's configurations. B2 holds only when a branch holds AND the
+chance test holds, so no verdict can turn from fail to pass. Any amendment of the pre-registration committed after
+the first logged run is "hindsight", and the verdict says so (`hindsight`, `verdict_text`).
+
 Every series is cut to the research window first. Sessions in the hold-out are dropped before any number is
 computed and are counted in the report (`sessions_in_holdout_dropped`).
 """
@@ -34,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -46,6 +53,7 @@ import yaml
 
 from kaibot.evaluation import mtm
 from kaibot.evaluation.gate_v2 import _clean, _iso, _mark, _pct, _state, _utc
+from kaibot.evaluation.metrics import expected_max_sharpe, norm_cdf
 from kaibot.evaluation.prereg import Prereg
 from kaibot.evaluation.random_control import p_from_percentile
 from kaibot.evaluation.trials import Registry, count_configurations
@@ -56,7 +64,8 @@ REQUIRED = {
     "gate_a": ("max_neighbours", "must_declare"),
     "sleeve": ("benchmark", "s1_active_return", "s2_costs", "s3_control", "s4_deflated_sharpe", "s5_universe",
                "s6_neighbours", "final_requires"),
-    "book": ("b1_return", "b2_spy", "b3_costs", "b4_universe", "b5_neighbours", "b6_sleeves", "final_requires"),
+    "book": ("b1_return", "b2_spy", "b2_chance", "b3_costs", "b4_universe", "b5_neighbours", "b6_sleeves",
+             "final_requires"),
     "holdout_check": ("band", "contaminated_before"),
     "bootstrap": ("method", "mean_block_sessions", "runs", "seed", "interval"),
     "statistics": ("periods_per_year", "sharpe_haircut", "sharpe_warning_above"),
@@ -110,6 +119,9 @@ class GateV3:
                     or not isinstance(b.get("sleeves"), dict) or not isinstance(b.get("v3_declared"), bool):
                 raise ValueError(f"config/gate_v3.yaml: books.{name} needs `components` (a list), `sleeves` (rule: "
                                  "budget %) and `v3_declared`")
+            if "idea" in b and not (isinstance(b["idea"], str) and re.fullmatch(r"[a-z][a-z0-9_]*", b["idea"])):
+                raise ValueError(f"config/gate_v3.yaml: books.{name}.idea must be a name (lower-case letters, "
+                                 "digits and underscores)")
             for rule, pct in b["sleeves"].items():
                 if isinstance(pct, bool) or not isinstance(pct, int | float) or not 0 < float(pct) <= 100:
                     raise ValueError(f"config/gate_v3.yaml: books.{name}.sleeves.{rule}: the budget must be a "
@@ -121,6 +133,17 @@ class GateV3:
         if cfg["bootstrap"]["method"] != "stationary":
             raise ValueError("config/gate_v3.yaml: only the stationary bootstrap is implemented")
         return cls(cfg, hashlib.sha256(raw).hexdigest())
+
+    @property
+    def version(self) -> str:
+        return str(self.cfg.get("version"))
+
+    def book_idea(self, name: str) -> str:
+        """#701: the idea a book tests (`books.<book>.idea`, default the book's own name)."""
+        return str((self.book(name) or {}).get("idea") or name)
+
+    def books_of_idea(self, idea: str) -> list[str]:
+        return sorted(n for n in (self.cfg.get("books") or {}) if self.book_idea(n) == idea)
 
     @property
     def level(self) -> float:
@@ -429,6 +452,60 @@ def _gate_a(gate: GateV3, rule: str, prereg: Prereg | None, registry: Registry |
     return checks, reasons
 
 
+def _first_logged(registry: Registry | None, names: Sequence[str]) -> datetime | None:
+    """The time of the earliest logged run of any of `names` in the registry (rows with an ISO `ts`)."""
+    out = None
+    for r in (registry.rows if registry is not None else ()):
+        if r.get("strategy") in names and r.get("ts"):
+            try:
+                t = _utc(datetime.fromisoformat(str(r["ts"]).replace("Z", "+00:00")))
+            except ValueError:
+                continue
+            out = t if out is None or t < out else out
+    return out
+
+
+def hindsight(prereg: Prereg | None, first_run_at: datetime | None) -> list[dict]:
+    """#701 (decision 18): the amendments of the pre-registration that were committed after the first run, so
+    whoever wrote them could have seen results. An amendment whose commit time is not known (git not asked) is
+    listed too: it is not shown to precede the run. Empty when there is no pre-registration or no run time."""
+    if prereg is None or first_run_at is None:
+        return []
+    first = _utc(first_run_at)
+    when = dict(prereg.amendment_log)
+    out = []
+    for head in prereg.amendments:
+        t = when.get(head)
+        if t is None:
+            out.append({"amendment": head, "committed_at": None,
+                        "why": "its commit time is not known, so it is not shown to precede the first run"})
+        elif _utc(t) > first:
+            out.append({"amendment": head, "committed_at": _iso(t),
+                        "why": f"committed {_iso(t)}, after the first logged run ({_iso(first)})"})
+    return out
+
+
+def verdict_text(verdict: str, late: Sequence[Mapping]) -> str:
+    """The verdict as printed: "<verdict>, hindsight (Amendment 4)" when an amendment came after the first run."""
+    if not late:
+        return verdict
+    nums = [m.group(1) for a in late if (m := re.match(r"##\s+Amendment\s+(\d+)", str(a["amendment"])))]
+    which = (("Amendments " if len(nums) > 1 else "Amendment ") + ", ".join(nums)) if nums else \
+        f"{len(late)} amendment(s)"
+    return f"{verdict}, hindsight ({which} written after the first run)"
+
+
+def book_configurations(gate: GateV3, book: str, registry: Registry | None, unlogged: int = 0) -> dict:
+    """#701 (decision 18): the configurations tried for the book's IDEA: every book listed with the same `idea`,
+    counted with `count_configurations` (not rows), plus `unlogged` (a run being judged before its rows are
+    appended). `configurations` is None without a registry."""
+    idea = gate.book_idea(book)
+    books = sorted(set(gate.books_of_idea(idea)) | {book})
+    n = None if registry is None else \
+        count_configurations([r for r in registry.rows if r.get("strategy") in books]) + int(unlogged)
+    return {"idea": idea, "books": books, "configurations": n}
+
+
 def _verdict(marks: Mapping[str, dict], reasons: Sequence[str]) -> str:
     met = [m["met"] for m in marks.values()]
     if any(v is False for v in met):
@@ -622,6 +699,8 @@ def evaluate_sleeve(gate: GateV3, *, rule: str, account: Account, pit_account: A
         part = _verdict({k: marks[k] for k in required}, reasons)
         verdict = "evidence_based" if part == "pass" else part
     label = gate.evidence.get("label", EVIDENCE_LABEL) if verdict == "evidence_based" else None
+    first = [t for t in (first_run_at and _utc(first_run_at), _first_logged(registry, [rule])) if t]
+    late = hindsight(prereg, min(first) if first else None)
     kw = gate.stats_kw
     stats = {"window": [a["net"].index[0].date().isoformat(), a["net"].index[-1].date().isoformat()],
              "kind": kind, "benchmark": gate.cfg["sleeve"]["benchmark"][kind],
@@ -635,14 +714,15 @@ def evaluate_sleeve(gate: GateV3, *, rule: str, account: Account, pit_account: A
              "cash": "Treasury bills on both sides" if a["rf"] is not None else
              "0% on both sides (no bill-rate file)",
              "calendar_years": mtm.calendar_years(a["with_cash"], a["benchmark"])}
-    return _clean({"gate": "B-sleeve", "gate_version": 3, "rule": rule, "family": gate.family_of(rule),
+    return _clean({"gate": "B-sleeve", "gate_version": gate.version, "rule": rule, "family": gate.family_of(rule),
                    "generated_at": _iso(as_of or datetime.now(UTC)), "gate_sha": gate.sha,
                    "prereg": prereg.summary() if prereg is not None else None, "gate_a": checks,
                    "source": dict(source or {}), "sessions": int(a["net"].size),
                    "sessions_before_window_dropped": a["dropped_before"],
                    "sessions_in_holdout_dropped": a["dropped_holdout"], "marks": marks,
                    "provisional": bool(reasons), "provisional_reasons": reasons,
-                   "verdict": verdict, "tier": tier, "label": label,
+                   "verdict": verdict, "verdict_text": verdict_text(verdict, late), "hindsight": late,
+                   "tier": tier, "label": label,
                    "needs_holdout_check": verdict in ("pass", "evidence_based"),
                    "can_pass": not reasons, "statistics": stats})
 
@@ -707,9 +787,51 @@ def b1(gate: GateV3, net: pd.Series) -> dict:
                  "; ".join(why))
 
 
-def b2(gate: GateV3, net: pd.Series, spy: pd.Series, intervals: bool = True) -> dict:
+def _sharpe_rows(x: np.ndarray) -> np.ndarray:
+    sd = x.std(axis=-1, ddof=1)
+    return np.where(sd > 0, x.mean(axis=-1) / np.where(sd > 0, sd, 1.0), 0.0)
+
+
+def b2_chance(gate: GateV3, net: pd.Series, spy: pd.Series, configurations: int | None) -> dict:
+    """#701 (decision 18): is the book's daily Sharpe above SPY's by more than the best of N no-skill book
+    configurations would show? N = the configurations of the book's idea.
+
+        d = SR(book) - SR(SPY) (daily, idle cash at 0% as judged); V = variance of d over the gate's paired
+        stationary-bootstrap resamples; SR0 = expected_max_sharpe(N, V); DSR = Z((d - SR0) / sqrt(V)).
+
+    The null is "no Sharpe gain over SPY": a de-levered SPY has SPY's Sharpe, so it is what a book with no timing
+    skill shows. V from the resamples is this statistic's own sampling variance, the counterpart of S4's 1/(T-1)
+    floor. Holds when DSR >= `dsr_min`. Unknown when N is not known (no registry, or no logged configuration)."""
+    c = gate.cfg["book"]["b2_chance"]
+    lim = float(c["dsr_min"])
+    limit = {"dsr_min": lim, "statistic": c.get("statistic"), "trials": c.get("trials")}
+    a, s = net.to_numpy(dtype=float), spy.to_numpy(dtype=float)
+    d = float(_sharpe_rows(a) - _sharpe_rows(s))
+    rows = bootstrap_paths(gate, a.size)
+    boot = _sharpe_rows(a[rows]) - _sharpe_rows(s[rows])
+    v = float(np.var(boot, ddof=1))
+    per = gate.stats_kw["periods"]
+    nums = {"sharpe_book": float(_sharpe_rows(a)) * math.sqrt(per), "sharpe_spy": float(_sharpe_rows(s)) *
+            math.sqrt(per), "sharpe_over_spy": d * math.sqrt(per), "se": math.sqrt(v) * math.sqrt(per),
+            "configurations": configurations}
+    if configurations is None or configurations < 1:
+        return _mark(None, nums, limit, "the trial registry holds no configuration of this book's idea, so the "
+                                        "chance test cannot count N")
+    sr0 = expected_max_sharpe(int(configurations), v)
+    tiny = math.sqrt(v) < 1e-9  # a book that is a fixed share of SPY: no spread, and no Sharpe gain to test
+    dsr = float(d - sr0 > 1e-12) if tiny else norm_cdf((d - sr0) / math.sqrt(v))
+    met = bool(dsr >= lim)
+    nums.update(hurdle=sr0 * math.sqrt(per), dsr=float(dsr),
+                psr=float(d > 1e-12) if tiny else float(norm_cdf(d / math.sqrt(v))))
+    return _mark(met, nums, limit, "" if met else
+                 f"deflated Sharpe over SPY's {dsr:.3f} is below {lim:g} (N = {configurations} configurations)")
+
+
+def b2(gate: GateV3, net: pd.Series, spy: pd.Series, intervals: bool = True,
+       configurations: int | None = None) -> dict:
     """EITHER CAGR >= SPY - 2 points with drawdown <= 0.75 x SPY's, OR CAGR >= SPY + 1 point with <= 1.1 x
-    (gate v2 mark 2, unchanged). The paired bootstrap intervals are printed, not judged."""
+    (gate v2 mark 2, unchanged), AND (gate v3.1, #701) the chance test `b2_chance` with N = `configurations`.
+    A branch alone never passes B2 any more. The paired bootstrap intervals are printed, not judged."""
     m = gate.cfg["book"]["b2_spy"]
     per = gate.stats_kw["periods"]
     c, cs = mtm.cagr(net, per), mtm.cagr(spy, per)
@@ -733,19 +855,25 @@ def b2(gate: GateV3, net: pd.Series, spy: pd.Series, intervals: bool = True) -> 
                        bootstrap_share_meeting={**{k: float(v.mean()) for k, v in ok.items()},
                                                 "either": float(np.logical_or.reduce(list(ok.values())).mean())},
                        bootstrap_share_shallower_drawdown=float((dda < dds_).mean()))
-    met = any(branch.values())
-    return _mark(met, numbers, {k: dict(b) for k, b in m.items()}, "" if met else "neither branch holds")
+    chance = b2_chance(gate, net, spy, configurations)
+    numbers["chance"] = {"met": chance["met"], **chance["numbers"], "why": chance["why"]}
+    held = any(branch.values())
+    met = _all([held, chance["met"]])
+    why = [] if held else ["neither branch holds"]
+    if chance["met"] is not True:
+        why.append(chance["why"])
+    return _mark(met, numbers, {**{k: dict(b) for k, b in m.items()}, "chance": chance["limit"]}, "; ".join(why))
 
 
-def _book_1_to_3(gate: GateV3, acc: Account) -> dict:
+def _book_1_to_3(gate: GateV3, acc: Account, configurations: int | None = None) -> dict:
     net, spy, costs, _, _ = _cut_book(gate, acc)
-    marks = {"b1": b1(gate, net), "b2": b2(gate, net, spy)}
+    marks = {"b1": b1(gate, net), "b2": b2(gate, net, spy, configurations=configurations)}
     k = float(gate.cfg["book"]["b3_costs"]["costs_multiple"])
     if costs is None:
         marks["b3"] = _mark(None, {}, {"costs_multiple": k}, "no daily cost series was supplied")
     else:
         hard = pd.Series(mtm.at_cost_multiple(net, costs, k), index=net.index)
-        m1, m2 = b1(gate, hard), b2(gate, hard, spy, intervals=False)
+        m1, m2 = b1(gate, hard), b2(gate, hard, spy, intervals=False, configurations=configurations)
         met = bool(m1["met"] and m2["met"])
         marks["b3"] = _mark(met, {"b1": m1["met"], "b2": m2["met"], "cagr": m2["numbers"]["cagr"],
                                   "max_drawdown": m2["numbers"]["max_drawdown"],
@@ -760,7 +888,7 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
                   registry: Registry | None = None, first_run_at: datetime | None = None,
                   tbill: pd.Series | None = None, as_of: datetime | None = None,
                   budgets: Mapping[str, float] | None = None,
-                  ran_budgets: Mapping[str, float] | None = None) -> dict:
+                  ran_budgets: Mapping[str, float] | None = None, unlogged_configurations: int = 0) -> dict:
     """The book test: marks B1 to B6 for the whole account that would trade.
 
     account: the combined book's run through the engine (one account: shared cash, one per-name cap), not a
@@ -769,14 +897,18 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
     risk overlay are part of the book's construction and are not listed (a book with no return sleeve passes B6
     with an empty mapping, which must be given explicitly). A sleeve's verdict `evidence_based` (decision 16
     section 14) is admitted when the book's entry under `books:` (or `budgets`) gives it a budget and all such
-    sleeves together take at most `evidence_based.book_budget_max_pct` of the book."""
+    sleeves together take at most `evidence_based.book_budget_max_pct` of the book.
+
+    Gate v3.1 (#701): B2 and B3 need the chance test with N = the configurations of the book's idea in `registry`,
+    plus `unlogged_configurations` (a run judged before its own rows are appended). No registry: B2 is unknown."""
     net, spy, costs, before, after = _cut_book(gate, account)
-    marks = _book_1_to_3(gate, account)
+    n_book = book_configurations(gate, book, registry, unlogged_configurations)
+    marks = _book_1_to_3(gate, account, n_book["configurations"])
     want = gate.cfg["book"]["b4_universe"]
     if account.universe == want:
         got, where = {k: marks[k]["met"] for k in ("b1", "b2", "b3")}, "this run is on the point-in-time universe"
     elif pit_account is not None and pit_account.universe == want:
-        got = {k: v["met"] for k, v in _book_1_to_3(gate, pit_account).items()}
+        got = {k: v["met"] for k, v in _book_1_to_3(gate, pit_account, n_book["configurations"]).items()}
         where = "a second run on the point-in-time universe"
     else:
         got, where = None, ""
@@ -865,13 +997,17 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
     if tbill is not None:
         e = mtm.align(net, account.exposure)[1] if account.exposure is not None else None
         stats["cash_yield"] = mtm.cash_views(net, spy, e, mtm.tbill_daily(tbill, net.index), **kw)
-    return _clean({"gate": "B-book", "gate_version": 3, "rule": book, "generated_at": _iso(as_of or
-                                                                                          datetime.now(UTC)),
+    first = [t for t in (first_run_at and _utc(first_run_at), _first_logged(registry, n_book["books"])) if t]
+    late = hindsight(prereg, min(first) if first else None)
+    verdict = _verdict(marks, reasons)
+    return _clean({"gate": "B-book", "gate_version": gate.version, "rule": book,
+                   "generated_at": _iso(as_of or datetime.now(UTC)),
                    "gate_sha": gate.sha, "prereg": prereg.summary() if prereg is not None else None,
                    "gate_a": checks, "source": dict(source or {}), "sessions": int(net.size),
                    "sessions_before_window_dropped": before, "sessions_in_holdout_dropped": after, "marks": marks,
-                   "provisional": bool(reasons), "provisional_reasons": reasons,
-                   "verdict": _verdict(marks, reasons), "can_pass": not reasons, "statistics": stats})
+                   "provisional": bool(reasons), "provisional_reasons": reasons, "book_configurations": n_book,
+                   "hindsight": late, "verdict": verdict, "verdict_text": verdict_text(verdict, late),
+                   "can_pass": not reasons, "statistics": stats})
 
 
 # ---------------------------------------------------------------- the final check on the hold-out
@@ -935,7 +1071,12 @@ BOOK_LABELS = {"b1": "B1. Net return positive overall and in enough calendar yea
 def _head(rep: dict, title: str, labels: Mapping[str, str]) -> list[str]:
     st, m = rep["statistics"], rep["marks"]
     out = [f"# {title}: {rep['rule']} ({st['window'][0]} to {st['window'][1]})", "",
-           f"**Verdict: {rep['verdict']}**" + (" (cannot pass)" if not rep["can_pass"] else ""), ""]
+           f"**Verdict: {rep.get('verdict_text') or rep['verdict']}**" + (" (cannot pass)" if not rep["can_pass"]
+                                                                            else ""), ""]
+    if rep.get("hindsight"):
+        out += ["Hindsight (decision 18): these amendments came after the first logged run, so they may have been "
+                "shaped by its results:", ""]
+        out += [f"- {a['amendment']}: {a['why']}" for a in rep["hindsight"]] + [""]
     if rep["provisional_reasons"]:
         out += ["This run cannot pass, whatever the marks say:", ""]
         out += [f"- {r}" for r in rep["provisional_reasons"]] + [""]
@@ -1002,7 +1143,14 @@ def render_book(rep: dict) -> str:
         out += [f"- CAGR minus SPY's: {n['cagr_vs_spy_points']:.2f} points ({n['interval_level']:.0%} bootstrap "
                 f"interval {lo:.2f} to {hi:.2f}). Drawdown over SPY's: {n['max_drawdown_vs_spy']:.2f} ({dlo:.2f} to "
                 f"{dhi:.2f}).",
-                f"- Share of resampled decades that meet B2: {_pct(n['bootstrap_share_meeting']['either'], 0)}; "
+                f"- Share of resampled decades that meet B2's branches: "
+                f"{_pct(n['bootstrap_share_meeting']['either'], 0)}; "
                 f"with a shallower drawdown than SPY: {_pct(n['bootstrap_share_shallower_drawdown'], 0)}."]
+    ch, nb = n.get("chance") or {}, rep.get("book_configurations") or {}
+    if ch:
+        out.append(f"- Chance test (gate v3.1): Sharpe {ch['sharpe_book']:.2f} against SPY's {ch['sharpe_spy']:.2f}"
+                   + (f", deflated {ch['dsr']:.3f} (hurdle {ch['hurdle']:.2f})" if ch.get("dsr") is not None else "")
+                   + f"; N = {nb.get('configurations') if nb.get('configurations') is not None else 'unknown'} "
+                     f"configurations of the idea `{nb.get('idea')}` ({', '.join(nb.get('books') or [])}).")
     out += ["", f"gate_v3.yaml sha256 `{rep['gate_sha']}`. Generated {rep['generated_at']}."]
     return "\n".join(out) + "\n"

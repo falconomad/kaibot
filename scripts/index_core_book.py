@@ -207,7 +207,10 @@ def main(argv: list[str] | None = None) -> dict:
         neighbours={k.split("|")[1]: core_run.series(r, data)["net"] for k, (r, _) in runs.items()
                     if k.startswith("book_neighbour|")},
         sleeves={SLEEVE: sleeve_rep["verdict"]}, prereg=pre_book, source=source, registry=reg, first_run_at=run_at,
-        tbill=bills, as_of=run_at, ran_budgets=check["engine"])  # #547: the budgets the engine ran
+        tbill=bills, as_of=run_at, ran_budgets=check["engine"],  # #547: the budgets the engine ran
+        # #701: this run's own configurations count in B2's N, before its rows are appended below
+        unlogged_configurations=sum(row["n_trials"] for _, row in runs.values() if row["part"] != "sleeve")
+        if trials_path is not None else 0)
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()
     cap_tag = "" if override is None else f"_cap{override:g}"

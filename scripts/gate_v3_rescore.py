@@ -30,6 +30,10 @@ run wrote beside its report (`spy_daily.csv`), else the longest total-return ser
 re-run. The table shows the verdict the run gave next to the re-score and says when they differ (for example a
 report scored under an earlier `config/gate_v3.yaml`). A book report's rows never enter the sleeve table or the
 family correction. Its sleeve test is the book script's own, shown with the book.
+
+Gate v3.1 (decision 18, #701): each book row lists N, the configurations of its book idea in the registry, which
+B2's chance test deflates by; and a verdict is printed with "hindsight" when an amendment of the pre-registration
+was committed after the first logged run.
 """
 
 from __future__ import annotations
@@ -284,7 +288,8 @@ def render(res: dict) -> str:
             f"{DAGGER if n3.get('p_value') is not None and g.get('sessions_in_holdout_dropped') else ''} | "
             f"{_num(n3.get('holm_adjusted'), '{:.4f}')} | {_num(n4.get('dsr'), '{:.3f}')}"
             f"{' (' + format(n4['configurations'], ',') + ')' if n4.get('configurations') else ''} | "
-            + " | ".join(_cell(m[k]) for k in ("s1", "s2", "s3", "s4", "s5", "s6")) + f" | {g['verdict']} |")
+            + " | ".join(_cell(m[k]) for k in ("s1", "s2", "s3", "s4", "s5", "s6"))
+            + f" | {g.get('verdict_text') or g['verdict']} |")
     out += ["", "## Why a mark is unknown or failed", ""]
     for r in res["rows"]:
         why = [f"{k.upper()}: {v['why']}" for k, v in r["gate_v3"]["marks"].items()
@@ -304,14 +309,17 @@ def render(res: dict) -> str:
     if not res.get("books"):
         out.append("No book report was found.")
     else:
-        out += ["Each book is re-scored from its own daily files (nothing re-run), judged at Hunter on the research "
+        out += ["Gate v3.1 (decision 18): B2 holds only when a branch holds and the chance test holds: the book's "
+                "Sharpe over SPY's, deflated by N, the configurations logged for the book's idea. `hindsight` in the "
+                "verdict: an amendment of the pre-registration was committed after the first logged run.", "",
+                "Each book is re-scored from its own daily files (nothing re-run), judged at Hunter on the research "
                 "window, with idle cash at 0% (the T-bill view is in the JSON). A report that records no index cap "
                 "ran at the config's 27% (#600). `At run` is the verdict the run itself gave. A book's sleeve test "
                 "is the one its script ran (`gate_v3_sleeve`); its rows are not "
                 "in the sleeve table or in the family correction above.", "",
                 "| Book | Index cap at Hunter | Universe | CAGR | SPY CAGR | Max drawdown | SPY max drawdown | "
-                "B1 | B2 | B3 | B4 | B5 | B6 | Sleeve test | Gate v3 | At run |",
-                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                "N (book idea) | B2 chance (deflated) | B1 | B2 | B3 | B4 | B5 | B6 | Sleeve test | Gate v3 | At run |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for b in res["books"]:
             g, m = b["gate_v3"], b["gate_v3"]["marks"]
             n = m["b2"]["numbers"]
@@ -322,12 +330,15 @@ def render(res: dict) -> str:
                 at += " (differs" + ("; scored under another gate_v3.yaml" if b["at_run"]["gate_sha"] not in (
                     None, g["gate_sha"]) else "") + ")"
             st = b["sleeve_test"]
+            nb, ch = g.get("book_configurations") or {}, n.get("chance") or {}
+            ncell = f"{nb['configurations']} ({nb['idea']})" if nb.get("configurations") is not None else \
+                f"? ({nb.get('idea', b['book'])})"
             out.append(f"| {b['book']} | {b['index_cap']} | {b['universe']} | {_num(n.get('cagr'))} | "
                        f"{_num(n.get('spy_cagr'))} | {_num(n.get('max_drawdown'))} | "
-                       f"{_num(n.get('spy_max_drawdown'))} | "
+                       f"{_num(n.get('spy_max_drawdown'))} | {ncell} | {_num(ch.get('dsr'), '{:.3f}')} | "
                        + " | ".join(_cell(m[k]) for k in ("b1", "b2", "b3", "b4", "b5", "b6"))
-                       + f" | {'none' if st is None else st['rule'] + ': ' + str(st['verdict'])} | {g['verdict']} "
-                       f"| {at} |")
+                       + f" | {'none' if st is None else st['rule'] + ': ' + str(st['verdict'])} | "
+                       f"{g.get('verdict_text') or g['verdict']} | {at} |")
         out += ["", "Why a book mark is unknown or failed:", ""]
         for b in res["books"]:
             why = [f"{k.upper()}: {v['why']}" for k, v in b["gate_v3"]["marks"].items()

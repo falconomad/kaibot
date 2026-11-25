@@ -173,7 +173,10 @@ def main(argv: list[str] | None = None) -> dict:
               "benchmark": "spy_total_return" if have_tr else "spy_price_only"}
     run_at = datetime.now(UTC)
     rep = g3.evaluate_book(gate, book=RULE, account=acc, neighbours=nb, sleeves={}, prereg=pre, source=source,
-                           registry=reg, first_run_at=run_at, tbill=bills, as_of=run_at) \
+                           registry=reg, first_run_at=run_at, tbill=bills, as_of=run_at,
+                           # #701: this run's own configurations count in B2's N, before its rows are appended
+                           unlogged_configurations=sum(row["n_trials"] for _, row in runs.values())
+                           if trials_path is not None else 0) \
         if len(s["net"]) >= 30 else None
     code_sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                               cwd=ROOT).stdout.strip()

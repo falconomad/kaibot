@@ -28,6 +28,12 @@ reports them as `amended_since_logged_runs`); any other edit of the text makes a
 
 A pre-registration written AFTER the first run is marked `Status: retroactive`. `require` accepts it (the run
 is logged with its hash) and `Prereg.retroactive` is true: gate v2 never lets such a rule pass Gate B.
+
+Hindsight (gate v3.1, decision 18, #701). `amendment_log` holds, for every "## Amendment n" of today's file, the
+time of the first commit that carried it. Gate v3.1 compares that time with the rule's first logged run and prints
+"hindsight" in the verdict when any amendment was committed after it (`gate_v3.hindsight`). The test is the commit
+time, not the amendment's wording: an amendment's own words can say "before any run" of one kind while results
+of another kind were already in.
 """
 
 from __future__ import annotations
@@ -86,6 +92,8 @@ class Prereg:
     first_committed_at: datetime | None = None  # first commit of the file (the pre-registration itself)
     versions: tuple[tuple[str, datetime, bool], ...] = ()  # (sha256, committed_at, amended_only), oldest first
     amendments: tuple[str, ...] = ()  # the "## Amendment n" headings of today's file
+    # #701: (heading, the first commit that carried it; None when git was not asked or no commit has it)
+    amendment_log: tuple[tuple[str, datetime | None], ...] = ()
 
     @property
     def retroactive(self) -> bool:
@@ -101,6 +109,8 @@ class Prereg:
                 "committed_at": self.committed_at.isoformat() if self.committed_at else None,
                 "first_committed_at": self.first_committed_at.isoformat() if self.first_committed_at else None,
                 "amendments": list(self.amendments),
+                "amendment_log": [{"amendment": h, "committed_at": t.isoformat() if t else None}
+                                  for h, t in self.amendment_log],
                 "versions": [{"sha256": v, "committed_at": t.isoformat(), "amended_only": a}
                              for v, t, a in self.versions]}
 
@@ -183,8 +193,8 @@ def amended_only(old: str, new: str) -> bool:
     return bool(rest) and rest.startswith("## Amendment") and all(_AMENDMENT.match(h) for h in heads)
 
 
-def _versions(path: Path, root: Path, text: str) -> tuple[tuple[str, datetime, bool], ...]:
-    """Every committed version of the file, oldest first: (sha256, commit time, today's file only amends it)."""
+def _history(path: Path, root: Path) -> list[tuple[datetime, bytes]]:
+    """Every committed version of the file, oldest first: (commit time, the file's bytes at that commit)."""
     rel = path.relative_to(root).as_posix()
     log = _git(root, "log", "--format=%H %cI", "--", rel).stdout.split("\n")
     out = []
@@ -192,8 +202,26 @@ def _versions(path: Path, root: Path, text: str) -> tuple[tuple[str, datetime, b
         commit, when = line.split(" ", 1)
         raw = subprocess.run(["git", "-C", str(root), "show", f"{commit}:{rel}"], capture_output=True,
                              timeout=20).stdout
-        out.append((hashlib.sha256(raw).hexdigest(), datetime.fromisoformat(when.strip()),
-                    amended_only(raw.decode("utf-8", errors="replace"), text)))
+        out.append((datetime.fromisoformat(when.strip()), raw))
+    return out
+
+
+def _versions(path: Path, root: Path, text: str,
+              history: list[tuple[datetime, bytes]] | None = None) -> tuple[tuple[str, datetime, bool], ...]:
+    """Every committed version of the file, oldest first: (sha256, commit time, today's file only amends it)."""
+    return tuple((hashlib.sha256(raw).hexdigest(), when, amended_only(raw.decode("utf-8", errors="replace"), text))
+                 for when, raw in (history if history is not None else _history(path, root)))
+
+
+def amendment_log(text: str, history: list[tuple[datetime, bytes]] | None = None,
+                  ) -> tuple[tuple[str, datetime | None], ...]:
+    """#701: per "## Amendment n" heading of today's file, the time of the first committed version (oldest first in
+    `history`) that carries that heading on a line of its own; None when no committed version has it."""
+    texts = [(t, raw.decode("utf-8", errors="replace").splitlines()) for t, raw in (history or [])]
+    out = []
+    for m in _AMENDMENT.finditer(text):
+        head = m.group(0).rstrip()
+        out.append((head.strip(), next((t for t, lines in texts if head in lines), None)))
     return tuple(out)
 
 
@@ -254,10 +282,11 @@ def load(rule: str, root: Path | str | None = None, *, committed: bool = True) -
         raise PreregError(f"{rel} names {len(neighbours)} neighbours; at most {MAX_NEIGHBOURS} are allowed for "
                           "the plateau check (decision 15, Gate A).")
     committed_at = _check_committed(path, root) if committed else None
-    versions = _versions(path, root, text) if committed else ()
+    history = _history(path, root) if committed else []
+    versions = _versions(path, root, text, history) if committed else ()
     return Prereg(rule, path, hashlib.sha256(raw).hexdigest(), status, when, neighbours, sections, committed_at,
                   versions[0][1] if versions else None, versions,
-                  tuple(m.group(0).strip() for m in _AMENDMENT.finditer(text)))
+                  tuple(m.group(0).strip() for m in _AMENDMENT.finditer(text)), amendment_log(text, history))
 
 
 def require(rule: str, root: Path | str | None = None, *, committed: bool = True) -> str:
