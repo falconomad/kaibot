@@ -23,6 +23,12 @@ scripts/install_runner.sh), never in the engine's. A tick refuses to run (nothin
 checkout is the engine's, or inside it, or holds it, or when data/ links into the engine's data/live or data/runner
 (the engine's checkout: KAIBOT_ENGINE_CHECKOUT, ~/Projects/kaibot, and the WorkingDirectory of the engine service's
 launchd plist, which is only read).
+
+QA-Ops audit 2 7.4 (#714): each tick rotates data/runner/*.log at 10 MB (5 kept: runner.log.1 .. .5) and pings the
+runner's own Healthchecks.io check, if one is set up (HEALTHCHECKS_RUNNER_PING_URL in the environment, or the one
+line of data/runner/healthchecks_url; never the secrets file): a success ping at the end of a good tick and every 10
+minutes while a long job runs, a /fail ping when the tick was refused, paused or could not read its queue, or when
+the disk has less than 10 GB free. StartInterval 900: the check's period is 15 minutes (docs/ops/research_runner.md).
 """
 
 from __future__ import annotations
@@ -41,12 +47,14 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+from healthcheck import Pinger, disk_free, disk_problem  # scripts/healthcheck.py (stdlib only, the same folder)
 
 ROOT = Path(__file__).resolve().parents[1]
 QUEUE = ROOT / "ops" / "runner" / "queue.yaml"
@@ -359,6 +367,12 @@ def own_checkout_problem(root: Path, engines: list[Path]) -> str | None:
 
 # ---------------------------------------------------------------- state, locks, posting
 
+LOG_MAX_BYTES = 10 * 1024 * 1024  # rotate data/runner/*.log at 10 MB
+LOG_KEEP = 5  # runner.log.1 (newest) .. runner.log.5
+PING_ENV = "HEALTHCHECKS_RUNNER_PING_URL"
+PING_FILE = "healthchecks_url"  # in data/runner: one line, the runner check's ping URL (chmod 600)
+KEEPALIVE_S = 600  # success ping while a tick runs a long job (a heavy job may take 240 minutes)
+
 
 def now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -370,6 +384,86 @@ def log(state: Path, msg: str) -> None:
         print(line, flush=True)
     with (state / "runner.log").open("a") as f:
         f.write(line + "\n")
+
+
+def rotate_logs(state: Path, max_bytes: int = LOG_MAX_BYTES, keep: int = LOG_KEEP) -> list[str]:
+    """Rotate every data/runner/*.log over `max_bytes`: x.log -> x.log.1 -> ... -> x.log.<keep> (the oldest goes).
+    Copy, then truncate in place: launchd's stdout and stderr for this tick are open on runner.log in append mode,
+    and they keep writing to the (now empty) file instead of following a renamed one. Returns the names rotated."""
+    done = []
+    for path in sorted(state.glob("*.log")):
+        try:
+            if not path.is_file() or path.is_symlink() or path.stat().st_size < max_bytes:
+                continue
+            for i in range(keep, 1, -1):
+                older = path.with_name(f"{path.name}.{i - 1}")
+                if older.exists():
+                    os.replace(older, path.with_name(f"{path.name}.{i}"))
+            shutil.copyfile(path, path.with_name(f"{path.name}.1"))
+            with path.open("r+b") as f:
+                f.truncate(0)
+            done.append(path.name)
+        except OSError as e:  # a rotation problem must never stop the tick
+            print(f"{now()} log rotation of {path.name} failed: {type(e).__name__}", file=sys.stderr, flush=True)
+    return done
+
+
+def ping_url(state: Path, env: dict | None = None) -> str:
+    """The runner check's ping URL: the environment, else the one line of data/runner/healthchecks_url; '' if none."""
+    url = ((os.environ if env is None else env).get(PING_ENV) or "").strip()
+    if not url:
+        with contextlib.suppress(OSError, UnicodeDecodeError):
+            url = (state / PING_FILE).read_text().splitlines()[0].strip() if (state / PING_FILE).exists() else ""
+    return url.rstrip("/") if url.startswith("https://") else ""
+
+
+def tick_problem(res: dict, free: int | None) -> str | None:
+    """What a person should look at after this tick, else None. A tick that found the lock busy is no problem (a
+    tick by hand beside launchd's); everything else that kept jobs from running is."""
+    for key, what in (("_refused", "refused"), ("_paused", "paused"), ("_error", "cannot read queue or allow-list")):
+        if key in res:
+            return f"runner {what}: {redact(str(res[key]))[:300]}"
+    return disk_problem(free)
+
+
+@contextlib.contextmanager
+def keepalive(pinger, every_s: float = KEEPALIVE_S):
+    """A success ping every `every_s` while the block runs (a long job), from a daemon thread."""
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(every_s):
+            pinger.send("success", "research runner: a job is running")
+
+    t = threading.Thread(target=beat, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(5)
+
+
+class _NoPing:
+    """No runner check set up: the alarms are off, and the tick says nothing about it (every 15 minutes)."""
+
+    def send(self, kind: str, body: str = "") -> None:
+        pass
+
+    def wait(self, timeout: float = 0) -> None:
+        pass
+
+
+def report(pinger, res: dict, free: int | None) -> str | None:
+    """The tick's ping: /fail with the reason, else success with what it did. Returns the problem, if any."""
+    why = tick_problem(res, free)
+    if why:
+        pinger.send("fail", f"kaibot {why}")
+    elif "_locked" not in res:
+        ran = ", ".join(f"{k} {v}" for k, v in sorted(res.items())) or "nothing to run"
+        pinger.send("success", f"research runner tick: {ran}"[:1000])
+    pinger.wait()
+    return why
 
 
 def load_done(state: Path) -> dict:
@@ -713,6 +807,8 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
         if not held:
             log(state, "another runner holds the lock; nothing to do")
             return {"_locked": "busy"}
+        for name in rotate_logs(state):
+            log(state, f"{name} reached {LOG_MAX_BYTES // 2**20} MB: rotated ({LOG_KEEP} kept)")
         if why := paused_reason(root, state, run):  # before the pull: a dirty checkout is never pulled or run in
             log(state, f"paused: {why}; no job runs until it is clean")
             return {"_paused": why}
@@ -816,7 +912,13 @@ def main(argv_: list[str] | None = None) -> int:
                 bad += 1
                 print(f"REJECT  {raw.get('id') if isinstance(raw, dict) else raw!r}: {e}")
         return 1 if bad else 0
-    res = tick(pull=not a.no_pull)
+    url = ping_url(STATE)
+    pinger = Pinger(url) if url else _NoPing()
+    with keepalive(pinger):
+        res = tick(pull=not a.no_pull)
+    if why := report(pinger, res, disk_free(str(ROOT))):
+        with contextlib.suppress(OSError):
+            log(STATE, f"alarm: {why}")
     return 3 if "_refused" in res else 1 if "_error" in res else 0
 
 

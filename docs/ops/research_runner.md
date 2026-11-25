@@ -181,6 +181,26 @@ again, links the engine's `.venv` and data folders (above), writes the plist wit
 `~/Projects/kaibot/data/runner` is left as it was (delete it whenever you like); a local `runner/<id>` branch in
 the engine's checkout from an old job that was not pushed stays there too.
 
+**The runner's alarm (audit 2 7.4, #714).** A second, free Healthchecks.io check, separate from the engine's: period
+15 minutes, grace 30 minutes. Paste its ping URL into the runner's state folder (never the secrets file, which the
+runner does not read):
+
+```bash
+printf '%s\n' 'https://hc-ping.com/<the runner check uuid>' > ~/Projects/kaibot-runner/data/runner/healthchecks_url
+chmod 600 ~/Projects/kaibot-runner/data/runner/healthchecks_url
+```
+
+Each tick then pings it. A good tick sends a success ping, and so does every 10 minutes of a long job. A tick sends
+a fail ping, with the reason, when it was refused (the engine's checkout), was paused (the checkout holds changes
+the runner will not commit), could not read the queue or the allow-list, or found less than 10 GB free on the
+disk. No pings at all (the runner unloaded, the Mac asleep, launchd stuck) turn the check red after period +
+grace. Without the file, the runner's alarms are off and nothing else changes. `HEALTHCHECKS_RUNNER_PING_URL`
+in the environment takes the file's place.
+
+**Logs are rotated.** At the start of each tick, every `data/runner/*.log` over 10 MB is copied to `<name>.1` and
+emptied in place; `.1` to `.4` move up one, and the old `.5` is dropped, so 5 are kept. The per-job logs in
+`data/runner/logs/` are overwritten by each run of the job.
+
 To remove the runner, run `~/Projects/kaibot-runner/scripts/install_runner.sh --uninstall`; `data/runner` is
 kept. The log is `~/Projects/kaibot-runner/data/runner/runner.log`. To run one tick by hand:
 `cd ~/Projects/kaibot-runner && .venv/bin/python scripts/research_runner.py`. `./scripts/install_runner.sh --prepare`
