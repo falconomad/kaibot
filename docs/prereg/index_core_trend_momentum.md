@@ -96,3 +96,28 @@ The core's index cap, as in docs/prereg/index_core.md Amendment 3: the stakehold
 every level** (issue #600). Row 1 reads "27% at every level", and row 9 reads "Hunter (27% index cap, 100% exposure
 cap)". The sleeve's 10% budget, the neighbours, the pass marks and the trial count are unchanged. With at most 27% in
 SPY and 10% in the sleeve, most of the book is cash at 0%, and the book test is judged on that.
+
+## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)
+
+The core's index cap, as in docs/prereg/index_core.md Amendment 4, which gives the reasons, the hindsight and the
+research-only scope. This amendment is written after the 24 Nov 2026 run at 27% was seen (job
+`index-core-book-2026-11-24`, #459: book CAGR 4.15%, maximum drawdown 6.61%, fail). Product decided on 25 Nov 2026 to
+test the book once more with its core allowed up to **80% of the book**: `scripts/index_core_book.py --index-cap 80`.
+
+- Row 1 and row 9: the core's index cap is **80% at Hunter** (judged), under the 100% exposure cap. Balanced and
+  Careful are reported at min(80, the exposure cap less the 3% reserve), so **57%** and **27%**.
+- The sleeve (`trend_momentum_sleeve`, 10% budget, k = 0.01%, 1.5% per name), the swap, the budget check against
+  `books:` of `config/gate_v3.yaml`, the five neighbours (each at 80%), the fill model (cost model v2) and the pass
+  marks are all unchanged. The research window is unchanged (2017-05-01 to 2024-12-31), and the hold-out is not read.
+- The sleeve test inside the script runs the same configurations as on 24 Nov 2026, with the same control seed. They
+  stay n_trials 0, as before.
+- No setting changes: the live cap and the hard ceiling stay 27%, and `config/index_core.yaml` is not touched.
+
+**Expectation, before the run.** As the core at 80% (docs/prereg/index_core.md Amendment 4: SPY -6 to -3 points
+a year, drawdown about 0.35 to 0.55 times SPY's). The sleeve moves the book by about 0.1 times its active return.
+B2 is expected to fail on return. B6 depends on the sleeve's verdict, which this change does not move.
+
+**Trials.** Six new configurations count (n_trials 1): the judged book at 80% and its five neighbours. The six of
+24 Nov 2026 stay counted, so the book `index_core_trend_momentum` has tried **12 configurations**. The trial rows
+record `params.index_cap_pct` (80), and the report is named `..._cap80_<ts>`. The 27% verdict (fail) stands. A
+pass allows only a proposal to the stakeholder, as in the core's Amendment 4.

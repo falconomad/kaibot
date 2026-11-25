@@ -9,6 +9,13 @@ live daily path's builder (`engine/live_daily.live_builder`) names no index symb
 40% sector cap, 30 names, the 1% cash floor), the level's per-name cap for the other names, the level's exposure
 cap as gross and overnight, and the index fund's own cap. `builder(level)` is the ranked fill in index mode on that
 book: k = 0.1% (the momentum rules' sizing for any other name), the 10% band, the 3% cash reserve.
+
+`index_cap_pct` (#458 / #459; Amendment 4 of docs/prereg/index_core.md and Amendment 3 of
+docs/prereg/index_core_trend_momentum.md, Product 25 Nov 2026): a RESEARCH index cap in place of the config's 27%,
+cut at each level to its exposure cap less the cash reserve (Hunter 80, Balanced 57, Careful 27 for 80). It is
+validated against the hard ceilings with only `max_index_pct` raised (`PortfolioBuilder.index_ceiling_pct`, at most
+97%). It changes no setting: `config/index_core.yaml` and `BOOK_HARD_CEILINGS` stay at 27, and the loader still
+refuses a config value above 27.
 """
 
 from __future__ import annotations
@@ -20,7 +27,7 @@ from pathlib import Path
 import yaml
 
 from kaibot.risk.gate import BOOK_HARD_CEILINGS, BookLimits, validate_book
-from kaibot.risk.portfolio import PortfolioBuilder
+from kaibot.risk.portfolio import RESEARCH_INDEX_CEILING_PCT, PortfolioBuilder
 
 DEFAULT_PATH = Path(__file__).resolve().parents[3] / "config" / "index_core.yaml"
 PROFILES = Path(__file__).resolve().parents[3] / "config" / "profiles.yaml"
@@ -82,30 +89,46 @@ def load(path: Path | str = DEFAULT_PATH) -> IndexCoreConfig:
     return IndexCoreConfig(on, syms, reserve, levels, path)
 
 
-def book_limits(level: str, cfg: IndexCoreConfig | None = None, *, name_pct: float | None = None) -> BookLimits:
+def research_ceiling(lim: BookLimits) -> float | None:
+    """The `PortfolioBuilder.index_ceiling_pct` a book needs: None at or below the live ceiling (27%)."""
+    return lim.max_index_pct if lim.max_index_pct > BOOK_HARD_CEILINGS.max_index_pct else None
+
+
+def book_limits(level: str, cfg: IndexCoreConfig | None = None, *, name_pct: float | None = None,
+                index_cap_pct: float | None = None) -> BookLimits:
     """The book an index core is tested under at `level` (module docstring). `name_pct`: the per-name cap of the
-    other names (default: the level's `max_position_pct` of config/profiles.yaml)."""
+    other names (default: the level's `max_position_pct` of config/profiles.yaml). `index_cap_pct`: the research
+    index cap (module docstring), cut to the level's exposure cap less the reserve; None: the config's cap."""
     cfg = cfg or load()
     lv = cfg.levels[level]
     if name_pct is None:
         name_pct = float(yaml.safe_load(PROFILES.read_text())["levels"][level]["max_position_pct"])
+    idx = lv.max_index_pct
+    if index_cap_pct is not None:
+        cap = index_cap_pct
+        if isinstance(cap, bool) or not isinstance(cap, int | float) or not math.isfinite(cap) \
+                or not 0 < cap <= RESEARCH_INDEX_CEILING_PCT:
+            raise ValueError(f"index_cap_pct={cap!r} must be in (0, {RESEARCH_INDEX_CEILING_PCT:g}]")
+        idx = min(float(cap), lv.exposure_pct - cfg.cash_reserve_pct)
     out = replace(BOOK_HARD_CEILINGS, max_name_pct=float(name_pct), max_gross_pct=lv.exposure_pct,
-                  max_overnight_pct=lv.exposure_pct, max_index_pct=lv.max_index_pct)
-    validate_book(out)
+                  max_overnight_pct=lv.exposure_pct, max_index_pct=idx)
+    ceil = research_ceiling(out)
+    validate_book(out, BOOK_HARD_CEILINGS if ceil is None else replace(BOOK_HARD_CEILINGS, max_index_pct=ceil))
     return out
 
 
 def builder(level: str, cfg: IndexCoreConfig | None = None, *, sleeve_budget_pct: float | None = None,
-            k: float = K, limits: BookLimits | None = None) -> PortfolioBuilder:
+            k: float = K, limits: BookLimits | None = None, index_cap_pct: float | None = None) -> PortfolioBuilder:
     """The ranked fill in index mode at `level` (or on `limits`), with the 3% cash reserve and the 10% band."""
     cfg = cfg or load()
-    return PortfolioBuilder(limits or book_limits(level, cfg), k=k, band=BAND, fill="ranked",
+    lim = limits or book_limits(level, cfg, index_cap_pct=index_cap_pct)
+    return PortfolioBuilder(lim, k=k, band=BAND, fill="ranked",
                             cash_reserve=cfg.cash_reserve_pct / 100, index_symbol=cfg.index_symbols[0],
-                            sleeve_budget_pct=sleeve_budget_pct)
+                            sleeve_budget_pct=sleeve_budget_pct, index_ceiling_pct=research_ceiling(lim))
 
 
 def sleeve_builder(level: str, budget_pct: float, sleeve_k: float, sleeve_name_pct: float,
-                   cfg: IndexCoreConfig | None = None) -> PortfolioBuilder:
+                   cfg: IndexCoreConfig | None = None, *, index_cap_pct: float | None = None) -> PortfolioBuilder:
     """#459 (docs/prereg/index_core_trend_momentum.md): the core with one return sleeve at `budget_pct` of equity,
     the sleeve scaled to its budget: k = the rule's k x budget / 100 (`sleeve_k`) and the per-name cap the rule's x
     budget / 100 (`sleeve_name_pct`), so the sleeve is the tested rule at a fraction of its size."""
@@ -113,4 +136,4 @@ def sleeve_builder(level: str, budget_pct: float, sleeve_k: float, sleeve_name_p
         raise ValueError("the budget must be in (0, 100] and the sleeve's k inside the hard ceiling")
     cfg = cfg or load()
     return builder(level, cfg, sleeve_budget_pct=budget_pct, k=sleeve_k,
-                   limits=book_limits(level, cfg, name_pct=sleeve_name_pct))
+                   limits=book_limits(level, cfg, name_pct=sleeve_name_pct, index_cap_pct=index_cap_pct))

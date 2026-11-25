@@ -29,14 +29,19 @@ sec_process_patterns:
   - fetch_sp500_history
 
 scripts:
+  # --index-cap (#458, #459): only the two pre-registered index caps at Hunter, 27 (the config, prereg Amendment 3)
+  # and 80 (research only, Amendment 4 of docs/prereg/index_core.md / Amendment 3 of index_core_trend_momentum.md,
+  # Product 25 Nov 2026). The scripts refuse any other value too. The live cap and the hard ceiling stay 27.
   scripts/index_core.py:
     heavy: true
     timeout_min: 180
-    flags: &replay_flags
-      --start: '\d{4}-\d{2}-\d{2}'
-      --end: '\d{4}-\d{2}-\d{2}'
-      --universe: 'pit|today'
-      --fixture: null
+    flags:
+      <<: &replay_flags
+        --start: '\d{4}-\d{2}-\d{2}'
+        --end: '\d{4}-\d{2}-\d{2}'
+        --universe: 'pit|today'
+        --fixture: null
+      --index-cap: '27|80'
 
   scripts/index_core_book.py:
     heavy: true
@@ -44,6 +49,7 @@ scripts:
     flags:
       <<: *replay_flags
       --control-runs: '[1-9][0-9]{0,2}'
+      --index-cap: '27|80'
 
   scripts/trend_momentum_gbm.py:
     heavy: true
