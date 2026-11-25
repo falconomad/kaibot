@@ -7,7 +7,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Logo, ROLES, mark, resetLogoMotion } from "./components/Logo";
-import { drawnFrom } from "./brand/mark";
+import { circle, drawnFrom } from "./brand/mark";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | null = null;
@@ -51,8 +51,14 @@ describe("the logo's idle motion", () => {
     expect(arm.style.getPropertyValue("--fy")).toBe(`${Math.round((fy / h) * 10000) / 100}%`);
     expect(document.querySelector("svg.logo-leg path")!.getAttribute("d")).toBe(m.parts[ROLES.word.leg].d);
     expect(document.querySelector<HTMLElement>(".logo-clip")!.style.clipPath).toMatch(/^polygon\(/);
-    expect(hop.style.left).toBe("46.97%");
-    expect(hop.style.width).toBe("5.97%");
+    // the point's layer has the letters' box and the arm's lifted viewBox (no box of its own, so nothing rounds it off);
+    // it rises 60% of the point's height and squashes about the point's foot
+    expect(hop.getAttribute("viewBox")).toBe(arm.getAttribute("viewBox"));
+    expect(hop.style.left + hop.style.width).toBe("");
+    const dot = circle(m.parts[ROLES.word.point].d)!;
+    expect(hop.style.getPropertyValue("--up")).toBe(`${Math.round(-60 * ((2 * dot.r) / h) * 100) / 100}%`);
+    expect(hop.style.getPropertyValue("--up")).toBe("-12.27%");
+    expect(hop.style.transformOrigin).toBe("49.96% 15.3%"); // where the old 46.97% + 5.97% box had its foot
   });
 
   it("a logo shown after the intro has played (the header after sign-in) gets the same motion without one", async () => {

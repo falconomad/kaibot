@@ -29,7 +29,7 @@ export function SignIn() {
   return (
     <div className="center">
       <form className="card" onSubmit={send}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><Logo animate idle large />
+        <div className="brand-row"><Logo animate idle large />
           <span className="pill">PAPER</span></div>
         {state === "sent" ? (
           <>

@@ -35,8 +35,9 @@ export function mark(kind: "word" | "symbol", on: "dark" | "light"): Mark {
 export const ROLES = { word: { arm: 0, leg: 1, stem: 2, point: 6 }, symbol: { arm: 0, point: 1, leg: 2, stem: 3 } } as const;
 /** The idle motion in seconds (app.css): one cycle, the arm's turn this far into it, and the delay after the intro. */
 export const IDLE = { cycle: 4, offset: 2, after: 2 } as const;
-/** The sign-in and /register logo is this much larger than the header's (stakeholder, 24 Nov 2026; app.css .logo-lg). */
-export const LARGE = 1.25;
+/** The logo's height in px (app.css .logo and .logo-lg): the app's header, and sign-in and /register (`large`), on phones
+ *  (760 px wide and less) and above (stakeholder, 25 Nov 2026: "still too small"; it was 26/28 and 32.5/35). */
+export const SIZE = { header: { phone: 30, wide: 32 }, large: { phone: 40, wide: 44 } } as const;
 /** The storyboard's timing in seconds: [starts at, lasts]. The pulse ends at 0.96 s. */
 export const TIMING = { stem: [0, 0.2], leg: [0.12, 0.24], arm: [0.26, 0.3], point: [0.56, 0.18], pulse: [0.66, 0.3] } as const;
 
@@ -46,9 +47,9 @@ let played = false;
 export const resetLogoMotion = () => { played = false; };
 
 /** `size`: the height of the letters in px, from the top of the k to the baseline (without it, the stylesheet sizes the
- *  logo: 26 px on phones, 28 px on wider screens). `symbolOnly`: the k alone, carrying its point. `on`: the background
+ *  logo: SIZE.header). `symbolOnly`: the k alone, carrying its point. `on`: the background
  *  it stands on; the app is dark. `animate`: play the load motion if no logo has played it yet. `idle`: after it,
- *  the point hops and the arm redraws, in turn. `large`: 25% larger than the stylesheet's size (sign-in and /register). */
+ *  the point hops and the arm redraws, in turn. `large`: SIZE.large (sign-in and /register). */
 export function Logo({ size, symbolOnly = false, on = "dark", animate = false, idle, large = false }:
   { size?: number; symbolOnly?: boolean; on?: "dark" | "light"; animate?: boolean; idle?: boolean; large?: boolean }) {
   const kind = symbolOnly ? "symbol" : "word";
@@ -98,9 +99,10 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
   // Chromium runs a transform animation on an SVG child on the main thread (style, layout and a repaint of the whole logo
   // every frame), but on an HTML-level box it runs on the compositor and repaints nothing. Same place, size and colour
   // as Design's. The arm goes under the white leg, which overlaps its lower end (as in the file), so the leg is drawn
-  // over it in a still <svg> of its own, and the rest of the letters stay below both, off any layer. The arm and the leg
-  // have the letters' own box, with their 8% lift in the viewBox rather than a transform: an <svg> is snapped to whole
-  // pixels and a layer is not redrawn for a fraction of one, so their pixels at rest are the letters' own.
+  // over it in a still <svg> of its own, and the rest of the letters stay below both, off any layer. The point, the arm
+  // and the leg all have the letters' own box, with their 8% lift in the viewBox rather than a transform: an <svg> is
+  // snapped to whole pixels and a layer is not redrawn for a fraction of one, so their pixels at rest are the letters'
+  // own. (A box the point's own size, placed in %, landed it up to 0.7 px off and cut its lower edge at some sizes.)
   const lift = symbolOnly ? 0 : 8; // .logo-word is lifted 8% of its height (app.css); the point and the arm go with it
   const vb = `${x} ${round(y + (lift / 100) * h)} ${w} ${h}`;
   const [sx, sy] = m.shift, [cx, cy] = [dot!.c[0] + sx, dot!.c[1] + sy], r = dot!.r;
@@ -131,8 +133,9 @@ export function Logo({ size, symbolOnly = false, on = "dark", animate = false, i
         </svg>
       </span>
       <svg className="logo-leg" viewBox={vb} aria-hidden="true">{shape(m.parts[role.leg])}</svg>
-      <svg className="logo-hop" viewBox={`${cx - r} ${cy - r} ${2 * r} ${2 * r}`} aria-hidden="true"
-        style={{ left: pc(cx - r - x, w), top: `${round(((cy - r - y) / h) * 100 - lift)}%`, width: pc(2 * r, w), height: pc(2 * r, h), ...paused }}>
+      {/* the hop rises 60% of the point's height (--up, in % of this box) and squashes about the point's foot */}
+      <svg className="logo-hop" viewBox={vb} aria-hidden="true"
+        style={{ "--up": `${round(-60 * ((2 * r) / h))}%`, transformOrigin: `${pc(cx - x, w)} ${round(((cy + r - y) / h) * 100 - lift)}%`, ...paused } as CSSProperties}>
         {shape(pt)}
       </svg>
     </span>
