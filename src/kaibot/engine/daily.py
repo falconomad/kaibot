@@ -146,6 +146,11 @@ class DailyData:
             self.sigma = ret.rolling(20, min_periods=20).std().to_numpy() / math.sqrt(390)
 
     sig_unfilled_c: np.ndarray = None  # set by the constructors (the adjusted close without the carry)
+    # #454 (research only, docs/prereg/trend_momentum.md Amendment 31): the 15:50 ET price of each session (the
+    # open of the first minute at or after 15:50, raw basis; NaN: none) and that minute's volume. None in every
+    # run that does not ask for `run_daily(execution="at_1550")`; set with `with_1550` (replay/minute_1550.py).
+    raw_1550: np.ndarray | None = None
+    v_1550: np.ndarray | None = None
 
     # -- builders
 
@@ -178,6 +183,18 @@ class DailyData:
     def view(self, k: int) -> DailyView:
         return DailyView(self, k)
 
+    def with_1550(self, price: np.ndarray, volume: np.ndarray) -> DailyData:
+        """#454: a copy (sharing every other array) that carries the 15:50 prices and volumes, same shape as
+        `raw_c`. Research only: for `run_daily(execution="at_1550")`."""
+        import copy
+
+        p, v = np.asarray(price, dtype=float), np.asarray(volume, dtype=float)
+        if p.shape != self.raw_c.shape or v.shape != self.raw_c.shape:
+            raise ValueError(f"15:50 arrays must be {self.raw_c.shape}, got {p.shape} and {v.shape}")
+        out = copy.copy(self)
+        out.raw_1550, out.v_1550 = p, v
+        return out
+
     def split_at(self, i: int, j: int) -> float:
         if self.split is None:
             return 1.0
@@ -189,11 +206,18 @@ class DailyData:
         s = self.sigma[i - 1, j] if i > 0 else math.nan
         return float(s) if math.isfinite(s) and s > 0 else SIGMA_FALLBACK
 
-    def bar_history(self) -> BarHistory:
+    def bar_history(self, at_1550: bool = False) -> BarHistory:
         """The venue's bars: two per session with a bar, the opening print (09:30) and the closing print (15:59,
-        the last minute, where `SimBroker` fills `cls` orders), with the first / last minute's volume."""
+        the last minute, where `SimBroker` fills `cls` orders), with the first / last minute's volume.
+
+        `at_1550` (#454, research only): a third bar at 15:50 ET, priced at the session's 15:50 price (`raw_1550`;
+        the closing print where there is none) with that minute's volume (`v_1550`; else the last minute's), so a
+        DAY market order sent at 15:50 fills there (SimBroker without `near_close`)."""
+        if at_1550 and self.raw_1550 is None:
+            raise ValueError("no 15:50 prices: DailyData.with_1550 first")
         days = pd.DatetimeIndex(self.dates.astype("datetime64[ns]"))
         t_open = (days + pd.Timedelta(hours=9, minutes=30)).tz_localize(NY).tz_convert(UTC)
+        t_1550 = (days + pd.Timedelta(hours=15, minutes=50)).tz_localize(NY).tz_convert(UTC)
         t_close = (days + pd.Timedelta(hours=15, minutes=59)).tz_localize(NY).tz_convert(UTC)
         frames = {}
         for j, sym in enumerate(self.symbols):
@@ -207,6 +231,13 @@ class DailyData:
             vf, vl = self.v_first[has, j], self.v_last[has, j]
             f = pd.DataFrame({"ts": np.r_[t_open[has], t_close[has]], "o": np.r_[o, o], "h": np.r_[o, h],
                               "l": np.r_[o, lo], "c": np.r_[o, c], "v": np.r_[vf, vl], "vw": np.r_[o, c]})
+            if at_1550:
+                p = self.raw_1550[has, j]
+                p = np.where(np.isfinite(p) & (p > 0), p, c)
+                v5 = self.v_1550[has, j]
+                v5 = np.where(np.isfinite(v5) & (v5 > 0), v5, vl)
+                f = pd.concat([f, pd.DataFrame({"ts": t_1550[has], "o": p, "h": p, "l": p, "c": p, "v": v5,
+                                                "vw": p})], ignore_index=True)
             frames[sym] = f.sort_values("ts", kind="stable").reset_index(drop=True)
         return BarHistory(frames)
 
@@ -744,7 +775,10 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     path's parity test passes the live book's builder (`engine/live_daily.live_builder`).
     `execution` (base fill only): "near_close" (default, the live path's orders since issue #333: DAY market
     orders at 15:50 ET, filled at the closing print) or "close" (`cls` orders sent at 09:00). Both give the same
-    fills, costs and equity; only the orders' type and send time differ.
+    fills, costs and equity; only the orders' type and send time differ. "at_1550" (#454, research only;
+    docs/prereg/trend_momentum.md Amendment 31): the same near-close orders, filled at the 15:50 price of
+    `DailyData.with_1550` (the closing print where a session has none) at cost model v2's continuous venue, as a
+    15:50 market order trades on a real exchange (decision 15 section 12, question 1). Base fill only.
     `carry` (#363, default on, as the live path): between decisions, the latest decision's buys the venue left
     unfilled are sent again (`carry_targets`). On this venue it never fires (see the function); False is for the
     test that shows it.
@@ -753,8 +787,13 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     2026 fees; Product, 22 Nov 2026: gate v3's final verdicts use it). The orders are the same code either way;
     only fill prices and fees differ, and through them the equity later decisions size on. Under v2 the stress fill
     prices at v2's "open" venue, which already charges twice the midday half-spread, so its extra factor is 1."""
-    if execution not in ("near_close", "close"):
-        raise ValueError("execution is near_close or close")
+    if execution not in ("near_close", "close", "at_1550"):
+        raise ValueError("execution is near_close, close or at_1550")
+    at1550 = execution == "at_1550"
+    if at1550 and data.raw_1550 is None:
+        raise ValueError("execution at_1550 needs the 15:50 prices (DailyData.with_1550)")
+    if at1550 and fill != "base":
+        raise ValueError("execution at_1550 is for the base fill only")
     if i0 < 1 or i1 >= len(data.dates) or i0 > i1:
         raise ValueError("sessions i0..i1 must lie inside the data, with i0 >= 1")
     if cost_model not in COST_MODELS:
@@ -764,7 +803,7 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         factor = 1.0
     mult = cost * factor
     tif = "cls" if where == "close" else "opg"
-    near = tif == "cls" and execution == "near_close"
+    near = tif == "cls" and execution in ("near_close", "at_1550")
     def sigma(sym: str, day) -> float:
         return data.sigma_at(data.index_of(day), data.col(sym))
 
@@ -781,8 +820,9 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
     else:
         costs = AuctionImpactCosts(sigma=sigma, mult=mult)
     clock = SimClock(_at(data.day(i0 - 1), AFTER_CLOSE) - timedelta(minutes=1))
-    broker = SimBroker(data.bar_history(), clock, costs=costs, cash=equity0, calendar=data.calendar(),
-                       cash_at="fill", near_close=NEAR_CLOSE if near else None)
+    broker = SimBroker(data.bar_history(at_1550=at1550), clock, costs=costs, cash=equity0,
+                       calendar=data.calendar(), cash_at="fill",
+                       near_close=NEAR_CLOSE if near and not at1550 else None)  # at_1550: the 15:50 bar fills
     journal = Journal(now=clock)
     led = RunLedger(strategy.name, strategy.rule, data, equity0, mult, journal, half=ledger_half)
     om = OrderManager(broker, journal, clock)
@@ -903,6 +943,8 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
         # -- the session: opening print (already traded for near-close orders), closing print
         if not near:
             broker.advance(_at(d, OPEN_BAR))
+        if at1550:  # #454: the near-close orders trade at the 15:50 bar
+            broker.advance(_at(d, NEAR_CLOSE))
         clock.set(_at(d, CLOSE_BAR))
         broker.advance(_at(d, CLOSE_BAR))
         # -- after the close: book the fills, terminal closes, marks
@@ -917,6 +959,9 @@ def run_daily(strategy, data: DailyData, pol: RiskPolicy, i0: int, i1: int, *, f
             qty, px = f.qty, f.px
             at = "close" if r.tif == "cls" or (near and (r.type, r.tif) == ("market", "day")) else "open"
             mid = float(data.raw_c[i, j] if at == "close" else data.raw_o[i, j])
+            if at1550 and (r.type, r.tif) == ("market", "day") and r.purpose != "stop":
+                p5 = float(data.raw_1550[i, j])  # #454: the 15:50 bar's price (the close where there was none)
+                at, mid = "continuous", (p5 if math.isfinite(p5) and p5 > 0 else float(data.raw_c[i, j]))
             if cost_model == "v2" and r.purpose == "stop" and r.stop is not None:
                 # #578: a protective stop's no-cost price is its level, unless the open gapped through it (then
                 # the open); its venue is v2's continuous or open one, as SimBroker priced it. Under v1 the split

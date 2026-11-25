@@ -39,3 +39,7 @@ jobs:
     script: scripts/gate_v3_rescore.py
     args: []
     posts_to_issue: 456
+  - id: near-close-1550-2026-11-25        # #454: trend_momentum at the closing print and at the 15:50 price
+    script: scripts/near_close_1550_rerun.py
+    args: ["--end", "2024-12-31"]
+    posts_to_issue: 454
