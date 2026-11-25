@@ -133,6 +133,15 @@ def _gh_on_path(monkeypatch):
     monkeypatch.setattr(rr.shutil, "which", lambda name: f"/usr/bin/{name}")
 
 
+@pytest.fixture(autouse=True)
+def _engine_elsewhere(monkeypatch, tmp_path_factory):
+    """The engine's checkout is a folder of its own in every test (on the owner's Mac the repo these tests run in
+    may BE the engine's checkout, which the runner refuses); the tests of that refusal name it themselves."""
+    elsewhere = tmp_path_factory.mktemp("engine-elsewhere")
+    monkeypatch.setenv(rr.ENGINE_CHECKOUT_ENV, str(elsewhere))
+    monkeypatch.setattr(rr, "ENGINE_SERVICE_PLIST", str(elsewhere / "no.plist"))
+
+
 def write_queue(tmp_path, jobs) -> Path:
     q = tmp_path / "queue.yaml"
     q.write_text(yaml.safe_dump({"jobs": jobs}))
@@ -402,6 +411,10 @@ def test_a_sec_job_waits_while_another_sec_fetcher_runs_on_the_mac(tmp_path):
 def test_the_runner_never_names_the_engine_its_lease_or_service_sh():
     src = (ROOT / "scripts" / "research_runner.py").read_text()
     code = src.split('"""', 2)[2]  # past the module docstring
+    # the one exception: the path of the engine service's plist, READ to know the engine's checkout (QA-Ops audit)
+    assert code.count("com.kaibot.engine.plist") == 1 and code.count("ENGINE_SERVICE_PLIST") == 2
+    assert "read_bytes()).get(\"WorkingDirectory\")" in code
+    code = code.replace('"~/Library/LaunchAgents/com.kaibot.engine.plist"', '""')
     code = "\n".join(ln for ln in code.splitlines() if "FORBIDDEN" not in ln and not ln.lstrip().startswith("#"))
     for word in ("service.sh", "launchctl", "kaibot.engine", "engine.lease", "lease.py", "shell=True", "os.system",
                  "graphql"):
@@ -410,13 +423,129 @@ def test_the_runner_never_names_the_engine_its_lease_or_service_sh():
 
 def test_the_plist_template_is_valid_and_runs_every_15_minutes(tmp_path):
     out = tmp_path / "agents"
+    runner, engine = (tmp_path / "kaibot-runner").resolve(), (tmp_path / "kaibot").resolve()
+    engine.mkdir()
+    env = {**_shell_env(tmp_path), "KAIBOT_RUNNER_CHECKOUT": str(runner), "KAIBOT_ENGINE_CHECKOUT": str(engine)}
     r = subprocess.run(["bash", str(ROOT / "scripts" / "install_runner.sh"), "--dry-run", "--out", str(out)],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
     p = plistlib.loads((out / "com.kaibot.research-runner.plist").read_bytes())
     assert p["StartInterval"] == 900 and p["Label"] == "com.kaibot.research-runner"
-    assert p["ProgramArguments"] == [f"{ROOT}/.venv/bin/python", f"{ROOT}/scripts/research_runner.py"]
-    assert p["StandardOutPath"].endswith("data/runner/runner.log")
+    assert p["ProgramArguments"] == [f"{runner}/.venv/bin/python", f"{runner}/scripts/research_runner.py"]
+    assert p["WorkingDirectory"] == str(runner) and p["StandardOutPath"] == f"{runner}/data/runner/runner.log"
+    assert p["EnvironmentVariables"]["KAIBOT_ENGINE_CHECKOUT"] == str(engine)
+
+
+def _shell_env(tmp_path) -> dict[str, str]:
+    import os
+
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    return {"PATH": os.environ["PATH"], "HOME": str(home), "LANG": "C.UTF-8", "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid", "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+
+
+# ---------------------------------------------------------------- QA-Ops audit (25 Nov 2026): the runner's own checkout
+
+
+def test_the_runner_refuses_to_run_in_the_engine_services_checkout(tmp_path):
+    """The engine service's plist names the checkout the runner is in: the tick refuses before any git call (no
+    pull) and before any job, and says so in the log; main() exits 3."""
+    root = tmp_path / "kaibot"
+    (root / "data" / "runner").mkdir(parents=True)
+    agent = tmp_path / "com.kaibot.engine.plist"
+    agent.write_bytes(plistlib.dumps({"Label": "com.kaibot.engine", "WorkingDirectory": str(root)}))
+    engines = rr.engine_checkouts(env={rr.ENGINE_CHECKOUT_ENV: str(tmp_path / "other")}, plist=str(agent))
+    assert root.resolve() in engines
+    run, popen = FakeRun(), FakePopen()
+    res = rr.tick(root=root, state=root / "data" / "runner", queue=write_queue(tmp_path, [job()]), run=run,
+                  popen=popen, python="/venv/python", engines=engines)
+    assert "_refused" in res and "is the engine's checkout" in res["_refused"]
+    assert run.calls == [] and popen.cmds == []
+    assert "refused:" in (root / "data" / "runner" / "runner.log").read_text()
+
+
+def test_the_runner_refuses_its_checkout_named_by_kaibot_engine_checkout(tmp_path, monkeypatch):
+    root = tmp_path / "kaibot"
+    root.mkdir()
+    monkeypatch.setenv(rr.ENGINE_CHECKOUT_ENV, str(root))
+    assert rr.engine_checkouts() == [root.resolve()]
+    assert "is the engine's checkout" in rr.own_checkout_problem(root, rr.engine_checkouts())
+    res = rr.tick(root=root, state=tmp_path / "state", queue=write_queue(tmp_path, [job()]), run=FakeRun(),
+                  popen=FakePopen(), python="/venv/python")
+    assert "_refused" in res and not (tmp_path / "state").exists()  # nothing created either
+
+
+def test_the_runner_checks_its_data_links_never_reach_the_engines_live_state(tmp_path):
+    engine, runner = tmp_path / "kaibot", tmp_path / "kaibot-runner"
+    for d in ("data/live", "data/runner", "data/daily", "src"):
+        (engine / d).mkdir(parents=True)
+    (runner / "data").mkdir(parents=True)
+    engines = [engine.resolve()]
+    assert rr.own_checkout_problem(runner, engines) is None
+    (runner / "data" / "daily").symlink_to(engine / "data" / "daily")  # an input, read by the jobs: fine
+    assert rr.own_checkout_problem(runner, engines) is None
+    assert "nested" in rr.own_checkout_problem(engine / "data", engines)
+    for name, target in (("live", "data/live"), ("old", "data/runner"), ("all", "data"), ("code", "src")):
+        link = runner / "data" / name
+        link.symlink_to(engine / target)
+        assert rr.own_checkout_problem(runner, engines), name
+        link.unlink()
+    shutil.rmtree(runner / "data")
+    (runner / "data").symlink_to(engine / "data")
+    assert "is a link" in rr.own_checkout_problem(runner, engines)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_install_runner_prepare_makes_a_separate_checkout_and_moves_an_old_install(tmp_path):
+    """install_runner.sh --prepare (no launchd): a second clone of the engine's origin, the engine's .venv linked,
+    data/ of its own with the old runner's state copied, the research outputs copied, the inputs linked and never
+    data/live; the engine's checkout is not changed. A second run changes nothing and the checkout stays clean."""
+    env = _shell_env(tmp_path)
+
+    def git(*a, cwd=tmp_path):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, check=True, env=env).stdout.strip()
+
+    bare, engine, runner = tmp_path / "origin.git", tmp_path / "kaibot", tmp_path / "kaibot-runner"
+    seed = tmp_path / "seed"
+    git("init", "-q", "-b", "main", str(seed))
+    for rel in ("scripts/research_runner.py", "ops/runner/com.kaibot.research-runner.plist", ".gitignore"):
+        (seed / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(ROOT / rel, seed / rel)
+    git("add", "-A", cwd=seed)
+    git("commit", "-q", "-m", "seed", cwd=seed)
+    git("clone", "-q", "--bare", str(seed), str(bare))
+    git("clone", "-q", str(bare), str(engine))
+    for d in ("data/live", "data/runner/logs", "data/daily", "data/reports", ".venv/bin"):
+        (engine / d).mkdir(parents=True)
+    (engine / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    (engine / "data" / "runner" / "done.json").write_text(json.dumps({"j1": {"status": "ok"}}))
+    (engine / "data" / "live" / "journal.sqlite").write_text("engine state")
+    (engine / "data" / "reports" / "r.json").write_text("{}")
+    (engine / "data" / "RELEASE").write_text("main\n")
+    head0 = git("rev-parse", "HEAD", cwd=engine)
+    env |= {"KAIBOT_ENGINE_CHECKOUT": str(engine), "KAIBOT_RUNNER_CHECKOUT": str(runner)}
+    cmd = ["bash", str(ROOT / "scripts" / "install_runner.sh"), "--prepare"]
+    r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert git("rev-parse", "--abbrev-ref", "HEAD", cwd=runner) == "main"
+    assert (runner / ".git").is_dir() and git("remote", "get-url", "origin", cwd=runner) == str(bare)
+    assert (runner / ".venv").resolve() == (engine / ".venv").resolve()
+    data = runner / "data"
+    assert not data.is_symlink() and not (data / "runner").is_symlink()
+    assert json.loads((data / "runner" / "done.json").read_text()) == {"j1": {"status": "ok"}}
+    assert not (data / "reports").is_symlink() and (data / "reports" / "r.json").exists()
+    assert (data / "daily").is_symlink() and (data / "daily").resolve() == (engine / "data" / "daily").resolve()
+    assert not (data / "live").exists() and not (data / "RELEASE").exists()
+    assert rr.own_checkout_problem(runner, [engine.resolve()]) is None
+    assert git("status", "--porcelain", cwd=runner) == ""  # the .venv link and data/ are ignored: the runner runs
+    assert git("status", "--porcelain", cwd=engine) == "" and git("rev-parse", "HEAD", cwd=engine) == head0
+    assert (engine / "data" / "live" / "journal.sqlite").read_text() == "engine state"
+    r2 = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    assert r2.returncode == 0 and "copied" not in r2.stdout and "linked" not in r2.stdout
+    bad = subprocess.run(cmd, capture_output=True, text=True, env=env | {"KAIBOT_RUNNER_CHECKOUT": str(engine)})
+    assert bad.returncode == 1 and "is or is inside the engine's" in bad.stderr
 
 
 # ---------------------------------------------------------------- the checkout after a job (#452 export)

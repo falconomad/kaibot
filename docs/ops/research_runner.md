@@ -4,14 +4,18 @@ Product works in the cloud, with no access to the Mac, its data or its secrets. 
 queue **approved** research commands in the repo. The Mac runs them and the results come back to GitHub as issue
 comments, so the owner doesn't have to paste anything.
 
+The runner works in a checkout of its **own**, `~/Projects/kaibot-runner` (a second clone, made by
+`install_runner.sh`), never in the engine's `~/Projects/kaibot` (QA-Ops audit, 25 Nov 2026: below).
+
 | Piece | Where |
 |---|---|
+| The runner's checkout | `~/Projects/kaibot-runner` (`KAIBOT_RUNNER_CHECKOUT`); the engine's stays `~/Projects/kaibot` |
 | Queue (Product edits this) | `ops/runner/queue.yaml` |
 | Allow-list (QA-Ops key + owner) | `ops/runner/allowed.yaml` |
 | Runner, one tick | `scripts/research_runner.py` |
 | launchd template, every 15 min | `ops/runner/com.kaibot.research-runner.plist` |
 | Install / uninstall / status | `scripts/install_runner.sh` |
-| State, outside git (`data/` is ignored) | `data/runner/done.json`, `runner.log`, `logs/<id>.log`, `out/<id>.md`, `paused.json` |
+| State, outside git (`data/` is ignored), in the runner's checkout | `data/runner/done.json`, `runner.log`, `logs/<id>.log`, `out/<id>.md`, `paused.json` |
 | Tests (fakes only, no network) | `tests/unit/test_research_runner.py` |
 
 ## How Product queues a job
@@ -30,7 +34,7 @@ comments, so the owner doesn't have to paste anything.
 2. Check it locally or in the cloud: `python scripts/research_runner.py --check` (exit 1 if any job would be
    rejected). CI runs `tests/unit/test_research_runner.py::test_the_committed_queue_is_valid`, so a bad entry fails
    the PR.
-3. Within about 15 minutes the Mac pulls `main`, runs the job, and posts on the issue a comment headed
+3. Within about 15 minutes the Mac pulls `main` into the runner's checkout, runs the job, and posts on the issue a comment headed
    `Research runner job <id>`: the status (`ok`, `failed` or `timeout`), the exit code, the minutes taken, the commit,
    and the last 150 lines of output (redacted). A rejected job gets a comment that gives the reason and is never run.
 4. To run the same thing again, add a **new** id. Ids in `done.json` are skipped forever, including jobs that
@@ -82,6 +86,37 @@ Without gh (missing or not logged in) the results are committed on the local bra
 pushed, and the checkout still goes back to clean `main`, so nothing is lost and later jobs still run. The runner
 never pushes to `main` and never pushes any branch but `runner/<job id>`.
 
+## Its own checkout (QA-Ops audit, 25 Nov 2026)
+
+Until 25 Nov 2026 the runner and the live engine shared `~/Projects/kaibot`: the runner's `git pull` every 15
+minutes, market hours included, changed the files the running engine imports lazily (about 33 imports inside
+functions), and any engine restart then ran unreviewed `main`. Now:
+
+- **Two checkouts.** The runner runs only in `~/Projects/kaibot-runner`, a second clone of the same repository
+  (not a `git worktree`: a worktree shares the engine's `.git` and cannot check out `main` beside it). It pulls,
+  commits its `runner/<id>` branches and checks out `main` there only. The engine's checkout is never pulled,
+  checked out or written by the runner.
+- **The runner refuses the engine's checkout.** Every tick first compares its checkout with the engine's
+  (`KAIBOT_ENGINE_CHECKOUT`, which `install_runner.sh` writes into the runner's plist; `~/Projects/kaibot`; and the
+  `WorkingDirectory` of `com.kaibot.engine`'s plist, which it only reads). The same folder, or one inside the other,
+  and the tick logs `refused: ...` and stops: no pull, no job (`main()` exits 3). So an old install still in the
+  engine's checkout stops by itself at its first tick after this change is on `main`, until it is moved (below).
+- **`.venv`.** `~/Projects/kaibot-runner/.venv` is a link to the engine's `.venv` (the same packages; the runner
+  never installs into it). To give the runner its own, remove the link and make one there
+  (`python3 -m venv .venv && .venv/bin/pip install --require-hashes -r requirements-research.txt`, with the ml extras
+  for `trend_momentum_gbm.py`).
+- **`data/`.** The runner has a `data/` of its own. `install_runner.sh` links into it each folder of the engine's
+  `data/` that the jobs read (`daily/`, `bars_1m/`, `earnings/`, ...), **except** `data/live` (the engine's journal and
+  state), `data/runner`, `RELEASE`, `HOLD` and `release_history.log`, which are never linked. What the jobs write
+  (`reports/`, `trials.jsonl`, `alarm/`, `fundamentals/`) is the runner's own: copied once from the engine's (an
+  APFS clone, no extra space), then written only in the runner's checkout. A tick refuses a `data/` that is itself
+  a link, or any link in it into the engine's `data/live`, `data/runner`, the whole `data/` or the engine's code. A
+  job that writes `data/live/...` writes the runner's own folder, never the engine's.
+- **The engine says when its checkout drifts.** At every start `run_engine.sh` runs `scripts/checkout_drift.sh`:
+  one `WARNING:` line in `engine.log` when the engine's checkout has uncommitted changes or is ahead of or behind
+  `origin/main` (as of the last fetch). Informational only: the engine starts either way (a pinned release is
+  behind `main` by design).
+
 ## Safety rules
 
 - **The allow-list only.** A job names a key of `allowed.yaml` and nothing else. The runner refuses an allow-list
@@ -113,10 +148,10 @@ never pushes to `main` and never pushes any branch but `runner/<job id>`.
 - **Market hours.** Allowed (stakeholder, #600, 24 Nov 2026). Heavy jobs run under `nice -n 10`, so the engine
   keeps priority.
 - **The engine.** The runner never starts, stops or restarts the engine, never touches its lease or
-  `scripts/service.sh`, and never runs launchctl. `git pull --ff-only` runs only when the checkout is on `main` and
-  clean (a dirty checkout pauses the runner, see above). If the pull fails, the failure is logged and the local
-  queue is used.
-  Pulling only updates files on disk. The engine picks up `main` only when it restarts (#600).
+  `scripts/service.sh`, and never runs launchctl. It works only in its own checkout (above) and refuses to run in
+  the engine's. `git pull --ff-only` runs only when the runner's checkout is on `main` and clean (a dirty checkout
+  pauses the runner, see above). If the pull fails, the failure is logged and the local queue is used.
+  The engine's checkout changes only when the owner (or `run_engine.sh` at a start, per the release pin) changes it.
 - **Posting.** Results go out with `gh api --method POST repos/falconomad/kaibot/issues/<n>/comments` (REST, with
   the body taken from a file). If gh is missing or not logged in, the result stays in `data/runner/out/<id>.md`
   and the log says so. A copy is kept there either way.
@@ -126,15 +161,26 @@ never pushes to `main` and never pushes any branch but `runner/<job id>`.
 
 ## One-time setup (owner, on the Mac)
 
+The same commands install the runner the first time and move an install that still runs in the engine's checkout
+(they never touch `~/Projects/kaibot` beyond reading it, and never the engine service):
+
 ```bash
-cd ~/Projects/kaibot && git checkout main && git pull --ff-only
 # gh for posting results (skip if `gh auth status` already says you are logged in)
 brew install gh
 gh auth login --hostname github.com --git-protocol https --web   # needs repo access to falconomad/kaibot
-./scripts/install_runner.sh            # installs com.kaibot.research-runner (every 15 min) and checks the queue
-./scripts/install_runner.sh --status   # loaded? gh logged in? last log lines
+git clone https://github.com/falconomad/kaibot.git ~/Projects/kaibot-runner
+~/Projects/kaibot-runner/scripts/install_runner.sh            # the runner's checkout, then com.kaibot.research-runner
+~/Projects/kaibot-runner/scripts/install_runner.sh --status   # loaded? which checkout? gh? last log lines
 ```
 
-`.venv` is the same one the research scripts already use (`.venv/bin/python`, with the research and ml extras for
-`trend_momentum_gbm.py`). To remove the runner, run `./scripts/install_runner.sh --uninstall`; `data/runner` is
-kept. The log is `data/runner/runner.log`. To run one tick by hand, use `.venv/bin/python scripts/research_runner.py`.
+`install_runner.sh` stops the old job first (it refuses while a tick is running: try again once it ends), copies
+the old `~/Projects/kaibot/data/runner` (done jobs, logs, pause) to the runner's checkout once, so no done job runs
+again, links the engine's `.venv` and data folders (above), writes the plist with the new checkout and loads it.
+`--status` prints `runner checkout:` and `engine checkout:`, and a WARNING while the two are the same. The old
+`~/Projects/kaibot/data/runner` is left as it was (delete it whenever you like); a local `runner/<id>` branch in
+the engine's checkout from an old job that was not pushed stays there too.
+
+To remove the runner, run `~/Projects/kaibot-runner/scripts/install_runner.sh --uninstall`; `data/runner` is
+kept. The log is `~/Projects/kaibot-runner/data/runner/runner.log`. To run one tick by hand:
+`cd ~/Projects/kaibot-runner && .venv/bin/python scripts/research_runner.py`. `./scripts/install_runner.sh --prepare`
+sets up the checkout without launchd (it works on Linux too).

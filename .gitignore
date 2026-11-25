@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .venv/
+# the research runner's checkout links the engine's .venv: a link is not a folder to git, so also without the /
+.venv
 .env
 .env.*
 !.env.example

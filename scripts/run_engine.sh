@@ -56,6 +56,9 @@ CODE_SHA="${RELEASE_LABEL:-$(git rev-parse --short HEAD 2>/dev/null || echo unkn
 mkdir -p data/live
 [ -n "$RELEASE_LABEL" ] && echo "Release: $RELEASE_LABEL"
 echo "$CODE_SHA $(date -u +%FT%TZ)" > data/live/running_release
+# QA-Ops audit (25 Nov 2026): one WARNING line when this checkout has uncommitted changes or is ahead of or behind
+# origin/main (informational only; the start goes on either way)
+bash scripts/checkout_drift.sh "$PWD" || true
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
 # --check (QA-Ops, the 24-25 Nov 2026 incident: the Mac mini slept 17 hours): the Mac's sleep settings (pmset -g).
