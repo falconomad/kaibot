@@ -5,7 +5,7 @@ lease, write a fresh engine heartbeat (so the dead-man never fires), replace the
 the market-notice job and some research scripts used that same key. After this setup they sign in as a separate
 "helper" user that can do four things and nothing else, and the service key stays with the engine and its watchdog.
 
-**What the helper can do** (migration `0038_helper_role.sql`):
+**What the helper can do** (migration `0038_helper_role.sql`; the last row is `0047_helper_shadow_results.sql`):
 
 | It can | Through | It cannot |
 |---|---|---|
@@ -13,6 +13,7 @@ the market-notice job and some research scripts used that same key. After this s
 | write the heartbeat row `price_stream` | `kb_helper_heartbeat` | write the `engine` or `watchdog` heartbeat |
 | publish and withdraw market notices | `kb_helper_publish_notices` | read or write any other table |
 | read nine columns of closed trades | `kb_helper_trades` | read open positions, orders, the ledger |
+| read the shadow rules' results (#371, migration 0047) | `kb_helper_shadow_results` | read `event` or `signal` rows themselves |
 
 It cannot insert a command, read or take the lease, write a halt, or touch the owner row: the helper is the
 ordinary `authenticated` role, which has no right on any `kaibot` table (migration 0004), and the dashboard's
@@ -76,6 +77,8 @@ Users > delete the user (its `kaibot.helper` row goes with it).
 
 ## What still holds the service key, and why
 
+- **`scripts/shadow_results.sh`** needs `DATABASE_URL` (the database password); `scripts/shadow_results.py` prints
+  the same tables as the helper (migration 0047) and is what the research runner runs.
 - **The engine and its watchdog**: by design (the lease, the journal's replica, the commands, the halts).
 - **`scripts/trial_registry.py`, `scripts/run_config_replays.py`, `scripts/eval_room.py --live`,
   `scripts/outage_drill.sh`**: run by hand on the Mac; they write research tables (`trial`, `replay_job`), the

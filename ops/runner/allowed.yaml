@@ -85,5 +85,10 @@ scripts:
     timeout_min: 20
     flags: {}
 
-# Asked for but not listed: scripts/shadow_results.py does not exist. The shadow results are scripts/shadow_results.sh,
-# a psql script that needs DATABASE_URL from the secrets file; the runner never reads that file, so it cannot run it.
+  # #371: the shadow rules' results, as the HELPER (docs/ops/helper_role.md): it reads only helper.env (publishable
+  # key + helper user; refused if it holds a service key), calls the read-only kb_helper_shadow_results() of
+  # migration 0047 and prints scripts/shadow_results.sh's four tables. No --env (never the engine's .env, never
+  # DATABASE_URL), no flags, no writes. Without 0047 it prints that the migration is not applied and exits 3.
+  scripts/shadow_results.py:
+    timeout_min: 10
+    flags: {}
