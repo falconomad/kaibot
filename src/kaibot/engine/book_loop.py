@@ -20,6 +20,11 @@ completed (`done_m == m - 1`). On the first tick after a (re)start, or after a m
 engine's state is older than a minute or was never checked (a daily stop, a book end or a drift first seen now):
 there the send keeps its place behind the reconcile and risk steps (fail closed).
 
+Audit 2, 5.10 (the 1.5 residual): the drift check no longer fails the minute when the broker's positions cannot be
+read (`Engine._check_drift` contains it and holds new buys only, engine/state.py `positions`). So a positions
+endpoint that is down all window costs no minute: every minute completes, the next one's send runs first, and the
+due sales go out while the buys wait for a read that works.
+
 The marks: `Engine.market` here is engine/book_market.BookMarket on the live path (minute bars of the holdings
 only), read after the send so a slow or failed read can never cost the send window (`Engine._market_update`: a
 failed read leaves the bars as they were and is reported in the heartbeat).
