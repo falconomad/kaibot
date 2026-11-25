@@ -93,7 +93,7 @@ describe("owner only", () => {
   it("Home names its viewer, and Lines takes no default", () => {
     expect(liveSrc).toMatch(/<Lines viewer="owner" headlines=\{!ended\} fresh=\{newsFresh\} \/>/);
     expect(linesSrc).toMatch(/\{ viewer: Viewer; headlines: boolean/);
-    expect(linesSrc).toMatch(/viewer === "owner" && <MarketNotices \/>/);
+    expect(linesSrc).toMatch(/viewer === "owner" && <ErrorBoundary name="Market notices"><MarketNotices \/><\/ErrorBoundary>/);
     expect(linesSrc).toMatch(/<Headlines viewer=\{viewer\}/);
   });
 });
