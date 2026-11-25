@@ -291,8 +291,27 @@ def daily_path(data=None, review=None, shadow=None, note=None):
     flags = filing_flags_from_env(os.environ)  # #375: None unless KAIBOT_FILING_FLAG=shadow
     if flags is not None:
         log.warning("8-K filing flags in SHADOW mode (KAIBOT_FILING_FLAG=shadow): logged only, no effect on orders")
+    checks = daily_entry_checks(root)  # M12 3.11 (#473): None unless KAIBOT_DAILY_CHECKS_BLOCK is on
     return lambda eng: live_daily.for_engine(eng, load, ca=ca, review=review, shadow=shadow, note=note,
-                                             filing_flags=flags)
+                                             filing_flags=flags, entry_checks=checks)
+
+
+def daily_entry_checks(root, env=None):
+    """M12 3.11 (#473): the daily-store data checks that block buys of the multi-day path (kaibot.ingest.entry_checks),
+    or None while KAIBOT_DAILY_CHECKS_BLOCK is off (the default: nothing is read, nothing changes). Sales, exits and
+    stops never ask. Takes effect at the engine's start."""
+    from kaibot.common import switches
+
+    codes = switches.value("KAIBOT_DAILY_CHECKS_BLOCK", env)
+    if not codes:
+        return None
+    from pathlib import Path
+
+    from kaibot.ingest.entry_checks import DailyEntryChecks
+
+    log.warning("daily-data checks that block buys: ON (%s; daily store %s). Sales and stops are never blocked",
+                ", ".join(codes), Path(root) / "daily")
+    return DailyEntryChecks(Path(root) / "daily", frozenset(codes))
 
 
 def filing_flags_from_env(env):
