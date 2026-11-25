@@ -12,6 +12,7 @@ import { Shell } from "./components/Shell";
 import { NotOwner, SignIn } from "./pages/SignIn";
 import { Live } from "./pages/Live";
 import { Skeleton } from "./components/Skeleton";
+import { ErrorBoundary, PageBoundary } from "./components/ErrorBoundary";
 import { ROUTE_LOADERS as load } from "./routes";
 import { STALE } from "./lib/poll";
 import { primeGlowArrival, primeGlowFromUrl } from "./lib/glow";
@@ -33,8 +34,12 @@ const Positions = lazy(() => load["/positions"]().then((m) => ({ default: m.Posi
 const Register = lazy(() => import("./pages/Register").then((m) => ({ default: m.Register })));
 const Member = lazy(() => import("./pages/Member").then((m) => ({ default: m.Member })));
 
-/** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton. */
-const page = (el: ReactNode, variant: "list" | "detail" = "list") => <Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense>;
+/** A lazy page inside the shell: while its chunk loads, the header and nav stay put and only the page area shows a skeleton.
+ *  Each page has its own error boundary (#738): a page that throws (or whose chunk fails) shows a short message with
+ *  Retry in the page area, and the header, the navigation and the halt bar keep working. */
+const page = (name: string, el: ReactNode, variant: "list" | "detail" = "list") => (
+  <PageBoundary key={name} name={name}><Suspense fallback={<Skeleton variant={variant} />}>{el}</Suspense></PageBoundary>
+);
 
 // Polls pause in hidden tabs; a refocus refetches only data older than 30 s (lib/poll.ts), so switching back to the tab
 // doesn't fire every query at once.
@@ -79,26 +84,26 @@ function Gate() {
     <Suspense fallback={<Skeleton variant="center" />}>
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<Live />} />
-        <Route path="positions" element={page(<Positions />)} />
-        <Route path="positions/:id" element={page(<TradeDetailPage />, "detail")} />
-        <Route path="activity" element={page(<Tape />)} />
-        <Route path="more" element={page(<More />)} />
+        <Route index element={<PageBoundary key="Home" name="Home"><Live /></PageBoundary>} />
+        <Route path="positions" element={page("Positions", <Positions />)} />
+        <Route path="positions/:id" element={page("Position detail", <TradeDetailPage />, "detail")} />
+        <Route path="activity" element={page("Activity", <Tape />)} />
+        <Route path="more" element={page("More", <More />)} />
         {/* v4: Trades is now Positions and Tape is Activity; old links keep working */}
         <Route path="trades" element={<Navigate to="/positions" replace />} />
         <Route path="trades/:id" element={<OldTrade />} />
         <Route path="tape" element={<Navigate to="/activity" replace />} />
         <Route path="holdings" element={<Navigate to="/positions" replace />} />
-        <Route path="report" element={page(<Report />)} />
-        <Route path="health" element={page(<Health />)} />
-        <Route path="gate" element={page(<GoNoGo />)} />
-        <Route path="strategy" element={page(<Strategy />)}>
+        <Route path="report" element={page("Report", <Report />)} />
+        <Route path="health" element={page("Engine", <Health />)} />
+        <Route path="gate" element={page("Go / no-go", <GoNoGo />)} />
+        <Route path="strategy" element={page("Strategy", <Strategy />)}>
           <Route index element={<StrategyHome />} />
           <Route path="fine-tune" element={<FineTune />} />
         </Route>
-        <Route path="settings" element={page(<Settings />)} />
+        <Route path="settings" element={page("Settings", <Settings />)} />
       </Route>
-      <Route path="start" element={<Onboarding />} />
+      <Route path="start" element={<PageBoundary key="Start" name="Start"><Onboarding /></PageBoundary>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
     </Suspense>
@@ -114,6 +119,6 @@ if (!primeGlowFromUrl()) primeGlowArrival();
 
 createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={qc}>
-    <BrowserRouter><Gate /></BrowserRouter>
+    <BrowserRouter><ErrorBoundary name="App"><Gate /></ErrorBoundary></BrowserRouter>
   </QueryClientProvider>,
 );

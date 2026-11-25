@@ -3,6 +3,7 @@
 // alone, so adding the headlines costs the first load nothing (size-budget.json is nearly full).
 import MarketNotices from "./Notices";
 import Headlines from "./Headlines";
+import { ErrorBoundary } from "./ErrorBoundary";
 import type { Freshness } from "../lib/freshness";
 import type { Viewer } from "../lib/headlines";
 
@@ -14,8 +15,9 @@ import type { Viewer } from "../lib/headlines";
 export default function Lines({ viewer, headlines, fresh }: { viewer: Viewer; headlines: boolean; fresh?: Freshness | null }) {
   return (
     <>
-      {viewer === "owner" && <MarketNotices />}
-      {headlines && <Headlines viewer={viewer} fresh={fresh} />}
+      {/* #738: one boundary each, so a broken notice row does not take the headlines (or Home) with it */}
+      {viewer === "owner" && <ErrorBoundary name="Market notices"><MarketNotices /></ErrorBoundary>}
+      {headlines && <ErrorBoundary name="Headlines"><Headlines viewer={viewer} fresh={fresh} /></ErrorBoundary>}
     </>
   );
 }

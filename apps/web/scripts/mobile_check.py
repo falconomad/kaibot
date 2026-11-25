@@ -76,6 +76,10 @@ CLOSED = dt.datetime(2026, 11, 19, 22, 30, tzinfo=dt.UTC)  # the same day, 17:30
 MIN_WORDS = 15
 # Every uncaught error on any page of any context made by context() below, as "<path>: <message>" (read by main()).
 PAGE_ERRORS: list[str] = []
+# #738: since the error boundaries (src/components/ErrorBoundary.tsx), React catches a render error, so it is no
+# pageerror and the header and nav keep the word count up. A boundary's fallback (role="alert" with data-part, the
+# boundary's name) on the page is that error: it fails the page too.
+BOUNDARY_JS = "() => [...document.querySelectorAll('[role=alert][data-part]')].map((e) => e.getAttribute('data-part'))"
 # The words a person can read on the page (visible text, as innerText has it).
 WORDS_JS = "() => ((document.body && document.body.innerText) || '').split(/\\s+/).filter((w) => /[A-Za-z0-9]/.test(w)).length"
 
@@ -92,10 +96,14 @@ def watch_errors(page, into: list[str]) -> list[str]:
 
 
 def alive(page, name: str, errors: list[str], fails: list[str], min_words: int = MIN_WORDS) -> int:
-    """Fail if `page` threw (anything in `errors`) or shows fewer than `min_words` words. Returns the word count."""
+    """Fail if `page` threw (anything in `errors`, or an error boundary's fallback is shown) or shows fewer than
+    `min_words` words. Returns the word count."""
     words = page.evaluate(WORDS_JS)
     if errors:
         fails.append(f"{name}: the page threw {len(errors)} error(s): {errors[:2]}")
+    caught = page.evaluate(BOUNDARY_JS)
+    if caught:
+        fails.append(f"{name}: a render error was caught by the error boundary of {', '.join(caught)} (see the console)")
     if words < min_words:
         fails.append(f"{name}: only {words} words on the page (fewer than {min_words}): blank or not drawn")
     return words

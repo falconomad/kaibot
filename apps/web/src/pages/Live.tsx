@@ -25,6 +25,7 @@ import { multiDayFrom } from "../lib/experiment";
 import { useMarks } from "../components/Marks";
 import { homeLine, potLive, vsSpyText } from "../lib/marks";
 import { FreshNote } from "../components/Fresh";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { bookFreshness, holdingsFreshness, newsFreshness } from "../lib/freshness";
 import { nextAction } from "../lib/nextaction";
 
@@ -179,6 +180,8 @@ export function Live() {
       <StartBanner state={startState(run, overview)} />
       {run.kind === "paper" && <Suspense fallback={null}><Lines viewer="owner" headlines={!ended} fresh={newsFresh} /></Suspense>}
 
+      {/* #738: each card has its own error boundary, so one broken card leaves the others on the page */}
+      <ErrorBoundary name="Pot">
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
           <h1 id="pot-h" className="home-label">{run.kind === "replay" ? "Pot at the end of the replay" : newer?.status === "scheduled" ? "Last run (ended)"
@@ -200,7 +203,9 @@ export function Live() {
           </div>
         )}
       </div>
+      </ErrorBoundary>
 
+      <ErrorBoundary name="Pot chart">
       <section aria-label="Pot over time" className="home-chart">
         <PotChart data={shown} start={chartStart} compact caption={caption} quiet={!!live?.live}
           base={range === "ALL" || !shown.length ? { pot: run.amount_usd, spy: run.amount_usd } : { pot: shown[0].pot, spy: shown[0].spy }}
@@ -209,8 +214,9 @@ export function Live() {
           {RANGES.filter(([k]) => ranges.includes(k)).map(([k, , label]) => <button key={k} type="button" aria-pressed={range === k} onClick={() => setRange(k)}>{label}</button>)}
         </div>}
       </section>
+      </ErrorBoundary>
 
-      {run.kind === "paper" && <TopHoldings fresh={rowsFresh} from={live?.live ? "live" : live?.engine ? "engine" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} />}
+      {run.kind === "paper" && <ErrorBoundary name="Holdings"><TopHoldings fresh={rowsFresh} from={live?.live ? "live" : live?.engine ? "engine" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} /></ErrorBoundary>}
       {note && <DailyNoteCard note={note} />}
       {run.kind === "replay" && (
         <section className="card" aria-labelledby="last-h">
