@@ -2039,9 +2039,9 @@ class LiveDaily:
                             "broker_payload)")
         if self._late:  # M12 3.11 (#473): the daily prices missed their deadline
             out["data_late"] = [dict(v) for _, v in sorted(self._late.items())]
-            for v in out["data_late"]:
-                notes.insert(0, f"daily prices for {v['session']} not in by their deadline: no decision until they "
-                                "are (run ./scripts/fetch_daily.sh)")
+            if not notes:  # a rule's own note ("no decision today: daily store not refreshed") already says it
+                notes += [f"daily prices for {v['session']} not in by their deadline: no decision until they are "
+                          "(run ./scripts/fetch_daily.sh)" for v in out["data_late"]]
         if self.entry_checks is not None:  # M12 3.11 (#473): absent while KAIBOT_DAILY_CHECKS_BLOCK is off
             try:
                 why = self.data_block()
