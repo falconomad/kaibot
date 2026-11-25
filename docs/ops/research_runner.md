@@ -44,6 +44,7 @@ Allowed scripts and flags (the full patterns are in `allowed.yaml`):
 | `scripts/index_core_book.py` | the same + `--control-runs` | heavy, 240 min |
 | `scripts/trend_momentum_gbm.py` | the same + `--cost-model --control-runs` | heavy, 240 min |
 | `scripts/fetch_sec_fundamentals.py` | `--status --build --refresh --max-age-days --limit` | SEC, gets `--env`, heavy, 120 min |
+| `scripts/fetch_listings.py` | `--since --first-bars --limit --status --build --report` | #376: SEC history (`--since`) and Alpaca first bars (`--first-bars`, paper keys); gets `--env`, sec, heavy, 120 min; writes `data/listings/` only. Not `--prices` |
 | `scripts/export_results.py` | `--rule` | 20 min; `writes: docs/research/results/`, opened as a PR by the runner (below) |
 | `scripts/market_alarm_report.py` | `--start --end --flags-only --rankings-only` | heavy, 60 min |
 | `kaibot.agents.evalset.golden` | none | the stub run only (`--live` costs money, `--record` writes a tracked file) |

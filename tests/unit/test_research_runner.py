@@ -162,11 +162,14 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               "scripts/export_results.py", "scripts/market_alarm_report.py",
                               "kaibot.agents.evalset.golden", "scripts/shadow_results.py",  # #371: as the helper
                               "scripts/gate_v3_rescore.py",  # #456: reads reports, writes the re-score only
-                              "scripts/near_close_1550_rerun.py"}  # #454: the 15:50-price re-run
+                              "scripts/near_close_1550_rerun.py",  # #454: the 15:50-price re-run
+                              "scripts/fetch_listings.py"}  # #376: the new-listing history and first bars
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
-    assert [t for t, s in cfg.specs.items() if s.sec] == ["scripts/fetch_sec_fundamentals.py"]
-    assert [t for t, s in cfg.specs.items() if s.env] == ["scripts/fetch_sec_fundamentals.py"]
+    assert sorted(t for t, s in cfg.specs.items() if s.sec) == ["scripts/fetch_listings.py",
+                                                                "scripts/fetch_sec_fundamentals.py"]
+    assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_listings.py",
+                                                                "scripts/fetch_sec_fundamentals.py"]
     assert not cfg.specs["kaibot.agents.evalset.golden"].flags  # no --live (money), no --record
     for s in cfg.specs.values():
         assert not set(s.flags) & rr.FORBIDDEN_FLAGS and 0 < s.timeout_min <= 240
@@ -206,6 +209,56 @@ def test_a_job_whose_script_is_not_on_the_allow_list_is_rejected_posted_and_neve
     assert run.posted and "rejected" in run.posted[0][1]
     assert run.posted[0][0] == "repos/falconomad/kaibot/issues/600/comments"
     assert json.loads((tmp_path / "state" / "done.json").read_text())["j1"]["status"] == "rejected"
+
+
+def test_fetch_listings_allows_only_the_history_the_first_bars_and_offline_reads():
+    """#376: `--since` (SEC history) and `--first-bars` (Alpaca, paper keys) plus the offline reads. Never --prices
+    (thousands of SEC requests), --show/--eligible, the path flags or --env; no writes (data/listings is ignored)."""
+    spec = rr.load_allowed().specs["scripts/fetch_listings.py"]
+    assert set(spec.flags) == {"--since", "--first-bars", "--limit", "--status", "--build", "--report"}
+    assert spec.env and spec.sec and spec.heavy and not spec.writes and spec.timeout_min == 120
+    assert spec.flags["--first-bars"] is None and spec.flags["--status"] is None
+    assert "fetch_listings" in rr.load_allowed().sec_patterns
+
+
+@pytest.mark.parametrize("args", [
+    ["--prices"], ["--show", "ANT"], ["--eligible", "2026-11-19"], ["--data", "/"], ["--daily", "/"], ["--root", "/"],
+    ["--env", "/etc/passwd"], ["--since", "2016-1-1"], ["--since", "16-01-01"], ["--since", "2016-13-01"],
+    ["--since", "2016-01-32"], ["--since", "1999-01-01"], ["--since", "2016-01-01 "], ["--since", "2016-01-01\n"],
+    ["--since", "$(id)"], ["--since"], ["--first-bars=1"], ["--first-bars", "x"], ["--limit", "0"],
+    ["--limit", "10000"], ["--limit", "-1"], ["--since", "2016-01-01", "--since", "2017-01-01"], ["--s", "2016"],
+    ["--first"], ["--pri"], ["--since", "٢٠١٦-٠١-٠١"],
+])
+def test_bad_fetch_listings_arguments_are_rejected(args):
+    spec = rr.load_allowed().specs["scripts/fetch_listings.py"]
+    with pytest.raises(rr.JobError):
+        rr.check_args(spec, args)
+
+
+def test_the_listing_jobs_are_queued_history_first_then_first_bars_and_get_the_secrets_path():
+    cfg = rr.load_allowed()
+    mine = [rr.check_job(j, cfg) for j in rr.load_queue() if j["script"] == "scripts/fetch_listings.py"]
+    assert [(j.id, j.args, j.issue) for j in mine] == [
+        ("listings-history-2016-2026-11-25", ("--since", "2016-01-01"), 376),
+        ("listings-first-bars-2026-11-25", ("--first-bars",), 376)]
+    for j in mine:
+        cmd = rr.argv(j, "/venv/python")
+        assert cmd[:4] == ["/usr/bin/nice", "-n", "10", "/venv/python"] and cmd[4].endswith("scripts/fetch_listings.py")
+        assert cmd[-2:] == ["--env", str(Path("~/Projects/kaibot-secrets/.env").expanduser())]
+        assert cmd.count("--env") == 1
+
+
+def test_the_listing_jobs_run_in_queue_order_and_wait_while_another_sec_fetcher_runs(tmp_path):
+    history = job("h", script="scripts/fetch_listings.py", args=["--since", "2016-01-01"], issue=376)
+    bars = job("b", script="scripts/fetch_listings.py", args=["--first-bars"], issue=376)
+    (tmp_path / "busy").mkdir()
+    (tmp_path / "free").mkdir()
+    res, _, popen = tick(tmp_path / "busy", [history, bars],
+                         run=FakeRun(ps="4242 python scripts/fetch_sec_fundamentals.py --build"))
+    assert res == {"h": "deferred", "b": "deferred"} and popen.cmds == []
+    res, _, popen = tick(tmp_path / "free", [history, bars])
+    assert res == {"h": "ok", "b": "ok"}
+    assert ["--since" in c for c in popen.cmds] == [True, False] and "--first-bars" in popen.cmds[1]
 
 
 # ---------------------------------------------------------------- arguments

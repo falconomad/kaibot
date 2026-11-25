@@ -71,6 +71,24 @@ scripts:
       --build: null
       --status: null
 
+  # #376 (S102): the new-listing history. `--since 2016-01-01` reads EDGAR's quarterly indexes (about 45 SEC
+  # requests, SEC_USER_AGENT from the .env); `--first-bars` (#664) reads first sessions from Alpaca daily bars with
+  # the paper keys (data host only, 40 a minute, resumable). Both read the env file, so the runner adds --env.
+  # Writes data/listings/ only (ignored), so no `writes`. Not --prices (a few thousand SEC requests, ~500 MB),
+  # not --show/--eligible (free text and dates for offline reads), never --data/--daily/--root/--env.
+  scripts/fetch_listings.py:
+    env: true
+    heavy: true
+    sec: true
+    timeout_min: 120
+    flags:
+      --since: '20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])'
+      --first-bars: null
+      --limit: '[1-9][0-9]{0,3}'
+      --status: null
+      --build: null
+      --report: null
+
   scripts/export_results.py:
     timeout_min: 20
     writes: [docs/research/results/]
