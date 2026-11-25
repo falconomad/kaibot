@@ -301,7 +301,7 @@ def _killed_at_1550(tmp_path, gap_b=1.0):
     return a
 
 
-def test_drill_engine_killed_at_1550_watchdog(tmp_path):
+def test_drill_engine_killed_at_1550_watchdog(tmp_path, monkeypatch):
     a = _killed_at_1550(tmp_path)
     wd = Watchdog(a.broker, a.store, now=a.clock, book=book_reader(a.jpath, a.store))
     outs = []
@@ -318,8 +318,17 @@ def test_drill_engine_killed_at_1550_watchdog(tmp_path):
     assert sum(o["closed"] == ["A"] for o in outs) == 1 and all("B" not in o["closed"] for o in outs)
     assert "A" not in a.broker.pos and a.broker.pos["B"]["qty"] == QTY
     assert [o["client_order_id"] for o in a.stop_b()] == [a.stop_coid] and not a.sells("B")
-    # the engine starts again: the sleeve is known (not foreign); A, sold by the watchdog behind the engine's back,
-    # is the known start-up difference that blocks entries until it is reconciled (S78)
+    # #445 step 2: this harness builds the engine without the daily path, so with B in the book it refuses to start
+    # (nothing sent); the watchdog keeps B's stop meanwhile
+    from kaibot.engine.core import DailyPathMissing
+
+    with pytest.raises(DailyPathMissing, match="KAIBOT_MULTIDAY=on"):
+        a.restart()
+    assert [o["client_order_id"] for o in a.stop_b()] == [a.stop_coid] and not a.sells("B")
+    # with the start-up check lifted (as with the daily path): the sleeve is known (not foreign); A, sold by the
+    # watchdog behind the engine's back, is the known start-up difference that blocks entries until it is
+    # reconciled (S78)
+    monkeypatch.setattr(Engine, "_require_daily_path", lambda self: None)
     eng = a.restart()
     assert (MD, "B") in eng._md_sleeves()
     for e in a.store.tables["event"]:

@@ -19,7 +19,8 @@ yesterday's mark-to-market close; a restart with the market closed finalises the
 
 Safety:
 - On startup, positions the engine doesn't know about block all entries (account not clean). Multi-day sleeves (the
-  ledger's, S80 #120) are known positions and keep their protective stops over the close.
+  ledger's, S80 #120) are known positions and keep their protective stops over the close. They need the daily
+  path: with sleeves in the ledger and no daily path (KAIBOT_MULTIDAY off) the engine does not start (#445 step 2).
 - The run's pot (onboarding amount) caps sizing and buying power, whatever the paper account holds.
 - Fail closed (S16/S18): unknown open orders or positions, position drift against the broker, three loop errors
   in a row, an event calendar that has run out, or three daily stops in ten sessions all stop new entries.
@@ -138,6 +139,21 @@ MD_BAR_MAX_AGE_MIN, MD_FAR_PCT, MD_AGREE_PCT, MD_BROKER_MAX_AGE_S = 5.0, 10.0, 2
 # broker's price of this tick is then used alone, as for a holding without bars. A holding measured at its last
 # close mark for MD_UNCONFIRMED_ALARM_MIN minutes on end raises an event (`multi_day_book_unconfirmed`).
 MD_BAR_DEAD_MIN, MD_UNCONFIRMED_ALARM_MIN = 15.0, 5.0
+
+
+class DailyPathMissing(RuntimeError):
+    """M10 1.20 step 2 (#445, Product ruling 24 Nov): the run's ledger holds multi-day sleeves and this engine has
+    no daily path (KAIBOT_MULTIDAY off, or no multi-day rule enabled). It refuses to start: the sleeves' sales,
+    syncs and bookings belong to the daily path's order manager, and the older flatten sale without it is not
+    used again (deleted in step 4). Raised by `Engine.startup` before any order call or start event."""
+
+    def __init__(self, run_id, symbols: list[str], flag_on: bool):
+        self.run_id, self.symbols = run_id, list(symbols)
+        fix = ("set KAIBOT_MULTIDAY=on in the engine's .env and restart" if not flag_on else
+               "KAIBOT_MULTIDAY is on but no multi-day rule is enabled in config/profiles.yaml (`multi_day.rules`): "
+               "enable the rule that holds them and restart")
+        super().__init__(f"refusing to start: run {run_id} holds multi-day sleeves ({', '.join(self.symbols)}) and "
+                         f"this engine has no daily path; {fix}. Nothing was sent; the broker-held stops stay.")
 
 
 class FlattenIncomplete(RuntimeError):
@@ -466,6 +482,7 @@ class Engine:
         self.run = self.store.active_run()
         self._restore_positions()
         self._attach_ledger()
+        self._require_daily_path()  # M10 1.20 step 2 (#445): sleeves without the daily path: no start
         self._rebuild_md_exits()  # #252: a flatten sale sent before a restart is still booked when it fills
         self._restore_cmd_waiting()  # M9 1.2 (QA-Ops, #525): a flatten command that was waiting still blocks entries
         self._recover_intraday()  # M10 1.19: nothing without the intraday path (engine/intraday.py)
@@ -478,6 +495,15 @@ class Engine:
              "positions": list(self.pos)},
             self._rid(),
         )
+
+    def _require_daily_path(self) -> None:
+        """M10 1.20 step 2 (#445): fail closed when the run's multi-day sleeves exist and the daily path does not.
+        Only reads the ledger: nothing is sent, journalled or written before it."""
+        if self.daily is not None:
+            return
+        held = self._md_sleeves()
+        if held:
+            raise DailyPathMissing(self._rid(), sorted({sym for _, sym in held}), registry.multi_day_enabled())
 
     def check_account(self) -> None:
         """Positions or open orders the engine doesn't know about block all entries (fail closed).
