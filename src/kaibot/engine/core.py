@@ -1197,6 +1197,16 @@ class Engine:
             return "daily stop"
         if d is not None and d.refused:
             return f"config refused: {d.refused}"
+        # M12 3.11 (#473): the daily-data market checks (SPY's bar late, the universe log stale, ...): None unless
+        # KAIBOT_DAILY_CHECKS_BLOCK is on (the daily path's `entry_checks`); the text starts "data check <code>"
+        fn = getattr(getattr(self, "daily", None), "data_block", None)
+        if fn is not None and getattr(self.daily, "entry_checks", None) is not None:
+            try:
+                why = fn()
+            except Exception as e:  # noqa: BLE001 - fail closed (LiveDaily.data_block never raises; belt and braces)
+                return f"data check checks_failed: {type(e).__name__}"
+            if why:
+                return why
         return None
 
     @property

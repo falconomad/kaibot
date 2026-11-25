@@ -120,6 +120,10 @@ PENDING: tuple[Event, ...] = (
     # M10 1.25 (#450): the engine started reducing only (Supabase down at start), and became fully active again
     Event("engine_degraded_start", "The engine started while its database was unreachable: selling only, no buys"),
     Event("engine_lease_confirmed", "The engine reached its database again and holds the lease"),
+    # M12 3.11 (#473): the daily prices missed their deadline; a daily-data check blocks buys, and lets go again
+    Event("multi_day_data_late", "Daily prices not in by their deadline: no multi-day decision until they are"),
+    Event("data_entry_block", "New buys blocked by a daily-data check (sales and stops go on)"),
+    Event("data_entry_unblocked", "The daily-data check passes again: buys allowed"),
 )
 
 ROUTINE: tuple[Event, ...] = (

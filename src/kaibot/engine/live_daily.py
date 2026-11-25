@@ -485,6 +485,8 @@ class _Gate:
         self.account = account
         self.opposite: dict[str, set[str]] = {}
         self.shorting: bool | None = False  # set by LiveDaily from the account before each send
+        # M12 3.11 (#473): symbol -> why the daily-data checks block a buy of it (LiveDaily.data_block); None: off
+        self.data_block: Callable[[str], str | None] | None = None
 
     def allows(self, symbol: str, side: str, purpose: str = "target", qty: float | None = None) -> str | None:
         other = {"buy": "sell", "sell": "buy"}[side]
@@ -494,6 +496,9 @@ class _Gate:
             return "shorting is on at the paper account (or unread): run ./scripts/alpaca_no_shorting.sh"
         if side == "buy":
             why = self.account.entry_block()
+            if why:
+                return f"entries blocked: {why}"
+            why = self.data_block(symbol) if self.data_block is not None else None
             if why:
                 return f"entries blocked: {why}"
         return self.account.allows(symbol, side, purpose, qty)
@@ -513,7 +518,7 @@ class LiveDaily:
                  session_close: Callable[[date], time | None] = lambda d: None,
                  store=None, reenable: str | None = None, ca=None, review=None,
                  shadow=None, note=None, filing_flags=None,
-                 quotes: Callable[[Sequence[str]], Mapping[str, dict]] | None = None) -> None:
+                 quotes: Callable[[Sequence[str]], Mapping[str, dict]] | None = None, entry_checks=None) -> None:
         """`rules`: the enabled rules with their builders, or a callable giving them now (the engine's: the run's
         level can change between sessions, and with it the book's caps). `ca`: the live-safety exclusion of
         announced corporate actions (engine/corp_guard.CorporateActionGuard; #266, Amendment 6); None: none."""
@@ -534,6 +539,15 @@ class LiveDaily:
         self._unfilled: set[str] | None = None  # client ids already reported as expired remainders (md_unfilled)
         self._presend: set[tuple[str, str]] = set()  # (rule, session) whose planned buys the fail-safes were given
         self.gate = _Gate(account)
+        # M12 3.11 (#473): kaibot.ingest.entry_checks.DailyEntryChecks, or None (KAIBOT_DAILY_CHECKS_BLOCK off: then
+        # nothing is read and nothing is blocked). Buys only: sales, stops and cancels never ask
+        self.entry_checks = entry_checks
+        if entry_checks is not None:
+            self.gate.data_block = lambda symbol: self.data_block() or self.data_block(symbol)
+        self._blocks_said: set[tuple] | None = None  # (day, code, symbol, scope) journalled (md_data_block)
+        self._market_blocked: list = []  # the market blocks at the last call (a clear is journalled once)
+        self._late: dict[str, dict] = {}  # session -> the late-data alert in force (multi_day_data_late)
+        self._late_said: set[str] = set()  # sessions already alerted in this process
         self.om: OrderManager | None = None
         self.stops: ProtectiveStops | None = None
         self._rid: int | None = None
@@ -967,6 +981,8 @@ class LiveDaily:
         rid = self.account.run_id()
         if rid is None or self.account.book_ended():
             return []
+        for k in [k for k in self._late if k < str(closed)]:  # an older session's alert ends with a newer session
+            self._late.pop(k)
         done = []
         for r in self.active():
             if self.decision(r.name, closed) is not None:
@@ -991,6 +1007,7 @@ class LiveDaily:
                 if self._waiting.get(r.name) != str(e):
                     self._waiting[r.name] = str(e)
                     self.event("multi_day_waiting", {"strategy": r.name, "session": str(closed), "why": str(e)[:200]})
+                self._late_check(closed, r.name, str(e))
                 continue
             held = {s: q for s, (q, _) in self.account.held(r.name).items()}
             hit = sorted(set(data.dropped) & set(held))
@@ -1000,8 +1017,10 @@ class LiveDaily:
                 if self._waiting.get(r.name) != why[:200]:
                     self._waiting[r.name] = why[:200]
                     self.event("multi_day_waiting", {"strategy": r.name, "session": str(closed), "why": why[:200]})
+                self._late_check(closed, r.name, why)
                 continue
             self._waiting.pop(r.name, None)
+            self._late_done(closed, r.name)
             self._failed_check.discard(r.name)
             if data.dropped:
                 text = "decided without " + ", ".join(sorted(data.dropped)) + ": daily prices failed the check ("
@@ -1030,6 +1049,98 @@ class LiveDaily:
             self._filing_observe(r.name, closed, now, [*held, *buy])
             done.append(r.name)
         return done
+
+    # ---------------------------------------------------------------- late daily prices (M12 3.11, #473)
+    def _late_check(self, closed: date, rule: str, why: str) -> None:
+        """The wait for session `closed`'s daily prices has a deadline (entry_checks.data_deadline: 03:30 ET the
+        night after it, after the nightly refresh and its catch-up). Past it, one ERROR log line and one
+        `multi_day_data_late` event per session (per process), and the heartbeat says so (`data_late`) until the
+        rule decides or a newer session takes over. An alert only: what is sent does not change."""
+        from kaibot.ingest.entry_checks import data_deadline
+
+        due = data_deadline(closed)
+        if self.now() < due:
+            return
+        k = str(closed)
+        late = self._late.setdefault(k, {"session": k, "deadline": due.isoformat(), "rules": []})
+        late["why"] = why[:200]
+        if rule not in late["rules"]:
+            late["rules"].append(rule)
+        if k in self._late_said:
+            return
+        self._late_said.add(k)
+        log.error("daily prices for %s are not usable after their deadline %s ET: no multi-day decision until they "
+                  "are (%s). Run ./scripts/fetch_daily.sh and see logs/fetch_daily.log", k, f"{due:%Y-%m-%d %H:%M}",
+                  why[:200])
+        self.event("multi_day_data_late", {"session": k, "deadline": due.isoformat(), "strategy": rule,
+                                           "why": why[:200]})
+
+    def _late_done(self, closed: date, rule: str) -> None:
+        late = self._late.get(str(closed))
+        if late is None or rule not in late["rules"]:
+            return
+        late["rules"].remove(rule)
+        log.warning("daily prices for %s arrived after their deadline: %s decides now", closed, rule)
+        if not late["rules"]:
+            self._late.pop(str(closed))
+
+    # ---------------------------------------------------------------- daily-data entry checks (M12 3.11, #473)
+    def data_block(self, symbol: str | None = None) -> str | None:
+        """Why the daily-data checks block a buy now (None: they do not; always None with the checks off). Without
+        `symbol`: the market checks (every buy; `Engine.entry_block` reads this); with it: that stock's checks
+        (`_Gate.allows`, buys only). A check that raises blocks (fail closed: `checks_failed`). Each new block is
+        journalled once a day (`md_data_block`, with its code) and is one event; a market block that lets go is
+        journalled too (`md_data_unblock`). Never raises."""
+        ec = self.entry_checks
+        if ec is None:
+            return None
+        from kaibot.ingest.entry_checks import Block, expected_session
+
+        now = self.now()
+        try:
+            if symbol is None:
+                blocks = ec.market_blocks(now, expected_session(now, self.prev_session))
+            else:
+                blocks = ec.stock_blocks(symbol)
+        except Exception as e:  # noqa: BLE001 - fail closed: no buy on data nobody could check
+            log.exception("daily-data check failed: buys are blocked until it runs again")
+            blocks = [Block("checks_failed", f"{type(e).__name__}: {e}"[:160], symbol)]
+        try:
+            self._note_blocks(now, symbol, blocks)
+        except Exception:  # the record must never be what lets a buy through or stops the tick
+            log.exception("daily-data block not journalled")
+        return blocks[0].text() if blocks else None
+
+    def _note_blocks(self, now: datetime, symbol: str | None, blocks: list) -> None:
+        from kaibot.ingest.alpaca_history import ET
+
+        day = str(now.astimezone(ET).date())
+        if self._blocks_said is None:  # after a restart: what the journal already holds (a clear ends a market block)
+            said: set[tuple] = set()
+            for _, _, kind, b in self.journal.entries(kinds=("md_data_block", "md_data_unblock")):
+                if kind == "md_data_block":
+                    said.add((b.get("day"), b.get("code"), b.get("symbol"), b.get("scope")))
+                else:
+                    said = {k for k in said if k[3] != "market"}
+            self._blocks_said = said
+        scope = "market" if symbol is None else "stock"
+        for b in blocks:
+            key = (day, b.code, b.symbol, scope)
+            if key in self._blocks_said:
+                continue
+            self._blocks_said.add(key)
+            body = {"day": day, "code": b.code, "symbol": b.symbol, "detail": b.detail, "scope": scope}
+            self.journal.append("md_data_block", body)
+            log.warning("daily-data check blocks buys: %s (sales and stops go on)", b.text())
+            self.event("data_entry_block", body)
+        if symbol is None:
+            if self._market_blocked and not blocks:
+                body = {"day": day, "codes": sorted({b.code for b in self._market_blocked})}
+                self.journal.append("md_data_unblock", body)
+                self._blocks_said = {k for k in self._blocks_said if k[3] != "market"}  # a new block is said again
+                log.info("daily-data checks pass again: buys allowed (%s cleared)", ", ".join(body["codes"]))
+                self.event("data_entry_unblocked", body)
+            self._market_blocked = list(blocks)
 
     def catch_up(self, session: date, force: bool = False) -> list[str]:
         """M9 1.3 (audit M1): `session` is open and a rule has no decision record for it, because the engine was
@@ -1926,6 +2037,17 @@ class LiveDaily:
             out["payload_refused"] = self.om.invalid_count
             notes.insert(0, f"{len(self.om.invalid)} broker answer(s) refused and not booked (Health: step "
                             "broker_payload)")
+        if self._late:  # M12 3.11 (#473): the daily prices missed their deadline
+            out["data_late"] = [dict(v) for _, v in sorted(self._late.items())]
+            if not notes:  # a rule's own note ("no decision today: daily store not refreshed") already says it
+                notes += [f"daily prices for {v['session']} not in by their deadline: no decision until they are "
+                          "(run ./scripts/fetch_daily.sh)" for v in out["data_late"]]
+        if self.entry_checks is not None:  # M12 3.11 (#473): absent while KAIBOT_DAILY_CHECKS_BLOCK is off
+            try:
+                why = self.data_block()
+                out["data_checks"] = {**self.entry_checks.status(), "entry_block": why}
+            except Exception:
+                log.exception("daily-data check status unreadable")
         if notes:
             out["note"] = "; ".join(notes)[:300]
         return out
@@ -2058,7 +2180,7 @@ def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Call
 
 def for_engine(engine, load: Callable[[date, datetime], DailyData],
                rules: Sequence[Rule] | Callable[[], Sequence[Rule]] | None = None, ca=None,
-               review=None, shadow=None, note=None, filing_flags=None, quotes=None) -> LiveDaily:
+               review=None, shadow=None, note=None, filing_flags=None, quotes=None, entry_checks=None) -> LiveDaily:
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
@@ -2086,7 +2208,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
                      known_order_ids=known_ids, session_close=lambda d: calendar_close(engine.broker.calendar(str(d))),
                      store=engine.store, reenable=os.environ.get(REENABLE_FLAG), ca=ca, review=review,
                      shadow=shadow, note=note, filing_flags=filing_flags,
-                     quotes=quotes if quotes is not None else presend_quotes(engine))
+                     quotes=quotes if quotes is not None else presend_quotes(engine), entry_checks=entry_checks)
 
 
 PRESEND_QUOTE_DEADLINE_S = 8.0  # the gate's one quote read per tick ends by then (the send window is seven ticks)

@@ -93,6 +93,10 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_DATA_CHECKS_BLOCK", "checks", "backend-quant", "M12 3.11 (#473): which minute-bar data checks block "
        "entries: off, on (all but bar_gap) or a comma list", default=(),
        choices=("stale", "no_bars", "bad_price", "unmatched_move", "bar_gap")),
+    _s("KAIBOT_DAILY_CHECKS_BLOCK", "checks", "data", "M12 3.11 (#473): which daily-store data checks block buys "
+       "of the multi-day path: off, on (all but price_jump) or a comma list (kaibot.ingest.entry_checks)",
+       default=(), choices=("benchmark_bar_missing", "daily_bar_stale", "price_not_positive", "split_not_applied",
+                            "universe_stale", "price_jump")),
     _s("KAIBOT_REENABLE", "text", "backend-quant", "the owner's word to switch a retired multi-day rule back on "
        "(read once at start)", readers=("src/kaibot/engine/live_daily.py",)),
     _s("KAIBOT_TESTWRITER", "flag", "qa-ops", "M12 3.8 (#470): the test-writing agent (spends API credit)",
@@ -225,6 +229,7 @@ class Switches:
     headline_edgar: bool
     data_checks: bool
     data_checks_block: tuple[str, ...]
+    daily_checks_block: tuple[str, ...]
     reenable: str | None
     test_writer: bool
     env_file: Path | None
