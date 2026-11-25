@@ -480,3 +480,75 @@ def store_first_bar(daily_root: Path, slack_days: int = 10) -> Callable[[str, da
 
     return first_bar
 
+
+
+# ---------------------------------------------------------------- first sessions from Alpaca (Product, 19 Nov 2026)
+# A listing outside data/daily has no first session from the store. Its first daily bar is read from Alpaca into
+# the listings store itself (data/listings/alpaca_first_bars.json), never into data/daily, which the live daily
+# engine reads (Product's answer 1 on #386).
+
+ALPACA_FIRST_BARS = "alpaca_first_bars.json"
+FIRST_BAR_KINDS = ("ipo",)  # a blank-check company trades as units first: its share's first bar is not its listing
+HISTORY_BAR_BEFORE_DAYS, HISTORY_BAR_AFTER_DAYS, HISTORY_BAR_SLACK_DAYS = 45, 20, 10
+FINAL_VERDICTS = frozenset({"first_bar", "traded_before", "not_near", "no_data"})
+
+
+def first_bar_window(filed: date) -> tuple[date, date]:
+    """The days asked for around a prospectus: from 45 days before (so that a ticker an older company held shows
+    bars from the start) to 20 days after."""
+    return filed - timedelta(days=HISTORY_BAR_BEFORE_DAYS), filed + timedelta(days=HISTORY_BAR_AFTER_DAYS)
+
+
+def first_bar_verdict(first: date | None, filed: date, window_over: bool) -> str | None:
+    """What the first Alpaca daily bar in `first_bar_window(filed)` says about a listing's first session.
+
+    `first_bar`: it lies within 10 days of the prospectus, so it is the first session. `traded_before`: the symbol
+    already traded in the first week of the window, so the bars are of an older listing under the same ticker.
+    `not_near`: the first bar is more than 10 days from the prospectus (a later ticker change, units first): no
+    first session is taken from it. `no_bars`: none in the window; final only once the window is over, else None
+    (ask again on a later run). Nothing is guessed: only `first_bar` fills a first session."""
+    start, _ = first_bar_window(filed)
+    if first is None:
+        return "no_bars" if window_over else None
+    if first <= start + timedelta(days=ls.BAR_OLD_DAYS):
+        return "traded_before"
+    if abs((first - filed).days) > HISTORY_BAR_SLACK_DAYS:
+        return "not_near"
+    return "first_bar"
+
+
+def first_bar_todo(df: pd.DataFrame, found: Mapping[str, Mapping]) -> list[dict]:
+    """History rows whose first session is worth one Alpaca request: kind `ipo`, today's ticker known and safe as a
+    URL segment, no first session from data/daily, and no final answer stored for that prospectus and ticker."""
+    out = []
+    for r in _clean(df):
+        if r["kind"] not in FIRST_BAR_KINDS or r["first_session"] is not None or not r["symbol"]:
+            continue
+        if not ls._SYMBOL.match(r["symbol"]):
+            continue
+        hit = found.get(r["accession"]) or {}
+        if hit.get("symbol") == r["symbol"] and hit.get("verdict") in FINAL_VERDICTS | {"no_bars"}:
+            continue
+        out.append(r)
+    return out
+
+
+def fill_first_sessions(df: pd.DataFrame, found: Mapping[str, Mapping]) -> pd.DataFrame:
+    """Rows with no first session from data/daily take a `first_bar` verdict of `found` ({accession: {"symbol",
+    "verdict", "first_bar"}}) when it was read for the same ticker: `first_session_source` "alpaca_bar" and
+    `available_ts` that session's close plus 15 minutes. A row from data/daily is never overwritten."""
+    out = df.copy()
+    for i, r in out.iterrows():
+        hit = found.get(r["accession"]) or {}
+        if (r["first_session"] is not None and not pd.isna(r["first_session"])) or r["kind"] not in FIRST_BAR_KINDS:
+            continue
+        if hit.get("verdict") != "first_bar" or hit.get("symbol") != r["symbol"] or not hit.get("first_bar"):
+            continue
+        first = date.fromisoformat(str(hit["first_bar"]))
+        if not nyse.is_session(first):
+            continue
+        out.at[i, "first_session"] = first
+        out.at[i, "first_session_source"] = "alpaca_bar"
+        out.at[i, "available_ts"] = pd.Timestamp(nyse.close_utc(first) + ls.BAR_DELAY)
+    out["available_ts"] = pd.to_datetime(out["available_ts"], utc=True)
+    return out

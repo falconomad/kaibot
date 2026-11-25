@@ -7,7 +7,7 @@ The CIKs, accession numbers, asset ids and every company except Anthropic and Sp
 | File | Shape of | How sure the shape is |
 |---|---|---|
 | `alpaca_assets_night1.json`, `_night2.json`, `_night3.json` | `GET /v2/assets?status=active&asset_class=us_equity` | field names and the `ipo` attribute read in Alpaca's API reference on 19 Nov 2026; no live response seen |
-| `alpaca_bars_ANT.json`, `alpaca_bars_OLD.json`, `alpaca_bars_none.json` | `GET /v2/stocks/{symbol}/bars` (1Day) | the shape `ingest/daily_bars.py` already reads |
+| `alpaca_bars_ANT.json`, `alpaca_bars_OLD.json`, `alpaca_bars_none.json`, `alpaca_bars_SPCX.json` | `GET /v2/stocks/{symbol}/bars` (1Day) | the shape `ingest/daily_bars.py` already reads |
 | `master.20261116.idx`, `master.20261118.idx`, `master.20261119.idx` | EDGAR daily index, sorted by CIK | from memory: `CIK\|Company Name\|Form Type\|Date Filed\|File Name`, date as `YYYYMMDD` |
 | `master_2026QTR2.idx`, `master_2026QTR4.idx` | EDGAR quarterly full index | from memory: the same columns, date as `YYYY-MM-DD` |
 | `CIK0009990001.json` | `data.sec.gov/submissions/CIK##########.json` | the keys of a real response seen on 19 Nov 2026 (`name`, `tickers`, `exchanges`, `sic`, `filings.recent`) |
