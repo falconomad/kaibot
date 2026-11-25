@@ -41,15 +41,15 @@ const home = (hb: Heartbeat, extra: { key: unknown[]; data: unknown }[] = []) =>
 const met = { trend_momentum: { last_decision: SESSION, standing: { state: "met", decided: "2026-11-24", fill_session: "2026-11-25", sent_on: "2026-11-25", short: [] } } };
 
 describe("Home: one 'Next' line under the pot", () => {
-  it("after the close with stocks held: the stops at the next open, from the market calendar (Thanksgiving is closed)", () => {
+  it("after the close, nothing owed: the next decision (trend_momentum has no broker stops), from the market calendar", () => {
     vi.useFakeTimers({ now: new Date(EVENING), toFake: ["Date"] });
     const html = home(beat("2026-11-25T21:59:50Z", { rules: met }), [{ key: ["market-notices"], data: CAL }]);
-    expect(html).toContain('<p class="muted home-next">Next: stops checked at the open, Fri 27 Nov 09:30 ET</p>');
+    expect(html).toContain('<p class="muted home-next">Next: next decision, orders on Wed 2 Dec at 15:50 ET</p>');
     // under the pot, in the hero
     expect(html.indexOf("home-next")).toBeGreaterThan(html.indexOf('class="hero num"'));
     expect(html.indexOf("home-next")).toBeLessThan(html.indexOf("home-chart"));
   });
-  it("a decision due: when its orders go out; without the calendar, from the heartbeat's next open", () => {
+  it("a decision due: when its orders go out (Thanksgiving is closed); without the calendar, from the heartbeat's next open", () => {
     vi.useFakeTimers({ now: new Date(EVENING), toFake: ["Date"] });
     const due = { trend_momentum: { last_decision: SESSION, standing: { state: "due", fill_session: "2026-11-27" } } };
     expect(text(home(beat("2026-11-25T21:59:50Z", { rules: due })))).toContain("Next: orders go out on Fri 27 Nov at 15:50 ET");

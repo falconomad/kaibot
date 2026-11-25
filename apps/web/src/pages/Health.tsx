@@ -186,7 +186,7 @@ export function Health() {
       <h1 className="page-title">Engine</h1>
       <div className="headline">
         <i className={chip.live ? "ok-dot live-dot" : "ok-dot"} style={{ background: chip.journal ? "var(--fail)" : chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
-        <span><b>{chip.text}</b>{beatTs ? <FreshNote f={chip.fresh} what="Engine" /> : <><br /><span className="muted">Has not checked in yet</span></>}</span>
+        <span><b>{chip.text}</b>{beatTs ? chip.fresh?.text && <><br /><FreshNote f={chip.fresh} what="Engine" inline /></> : <><br /><span className="muted">Has not checked in yet</span></>}</span>
       </div>
       {ts && <p className="trading-state" role={ts.tone === "red" ? "alert" : undefined}><span className="sr-only">Trading: </span><TradingLine s={ts} /></p>}
       {chip.journal && (

@@ -12,7 +12,7 @@ const LIVE = { live: true, asleep: false };
 const run = { kind: "paper", status: "running" };
 
 const detail = (rule: Record<string, unknown>, extra: Record<string, unknown> = {}, md: Record<string, unknown> = {}) =>
-  ({ state: "trading", ...extra, multi_day: { book: "open", rules: { trend_momentum: { last_decision: "2026-11-24", ...rule } }, ...md } });
+  ({ state: "trading", ...extra, multi_day: { book: "open", rules: { trend_momentum: { last_decision: "2026-11-24", exit: "broker_stop", ...rule } }, ...md } });
 const next = (d: unknown, over: Partial<NextInput> = {}) => nextAction({ run, detail: d, engine: LIVE, calendar: CAL, held: 7, now: NOON, ...over });
 
 describe("the calendar", () => {
@@ -59,6 +59,13 @@ describe("the next action, from the standing targets (multi_day.rules.<rule>.sta
     expect(next(detail(met), { now: EVENING })).toBe("Next: stops checked at the open, Fri 27 Nov 09:30 ET");
     expect(next(detail(met), { now: MORNING })).toBe("Next: stops checked at the open, Wed 25 Nov 09:30 ET");
     expect(next(detail(met), { now: EVENING, held: 0 })).toBe("Next: next decision, orders on Wed 2 Dec at 15:50 ET");
+  });
+  it("a rule without broker stops by design (trend_momentum sells by its list): never 'stops checked'", () => {
+    const met = { exit: "target_list", standing: { state: "met", fill_session: "2026-11-25", sent_on: "2026-11-25", short: [] } };
+    expect(next(detail(met), { now: EVENING })).toBe("Next: next decision, orders on Wed 2 Dec at 15:50 ET");
+    const noExit = { trend_momentum: { last_decision: "2026-11-24", standing: met.standing } };
+    expect(next({ state: "market_closed", multi_day: { rules: noExit } }, { now: EVENING })).toBe("Next: next decision, orders on Wed 2 Dec at 15:50 ET");
+    expect(next({ state: "market_closed", multi_day: { rules: { trend_momentum: {} } } }, { now: EVENING })).toBeNull();
   });
   it("waiting for the evening's prices, or a session without its decision yet", () => {
     expect(next(detail({ waiting: "daily store not refreshed yet", standing: { state: "met", fill_session: "2026-11-25" } }), { now: EVENING }))

@@ -15,6 +15,7 @@
 // Orders go out in the 15:50-15:57 ET window of their session (engine/live_daily.py SEND_FROM / SEND_UNTIL). On an
 // early-close day the window is earlier; the page does not know those days and says 15:50 ET.
 import { NAME } from "../brand/brand";
+import { needsStop } from "./exits";
 
 type Ev = { type: string; ts: string; payload: Record<string, unknown> | null; run_id?: number | null };
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null);
@@ -137,7 +138,10 @@ export function nextAction(x: NextInput): string | null {
   const at = (d: string) => `${when(d)} at 15:50 ET`;
   const marketOpen = isSession(today) && et.min >= OPEN && et.min < 16 * 60;
   const openDay = sessions.find((d) => d > today || (d === today && et.min < OPEN)) ?? null;
-  const stopsLine = () => (x.held && openDay ? `Next: stops checked at the open, ${dayText(openDay)} 09:30 ET` : null);
+  // only a rule whose stocks rest a stop at the broker: the momentum rules sell by their list at a close and have none
+  // by design (lib/exits.ts; the heartbeat's rules.<rule>.exit decides)
+  const stops = rules.some(([name, r]) => needsStop(name, str(r.exit, 40)));
+  const stopsLine = () => (x.held && openDay && stops ? `Next: stops checked at the open, ${dayText(openDay)} 09:30 ET` : null);
 
   const ts = engineTrading(detail);
   if (ts?.state === "halted") return `Next: nothing new, trading is halted${ts.why ? ` (${ts.why})` : ""}`;
