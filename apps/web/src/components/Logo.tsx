@@ -12,7 +12,7 @@
 // into its lower end and draws out again along its own line, 500 ms); then the point again, and so on: one motion every
 // 2 s, alternating, in one 4 s cycle, the same on sign-in, /register, the app's header and New run. CSS only (app.css,
 // kb-logo-hop and kb-logo-arm share one animation-delay): the classes go on when the intro ends, so the 2 s delay counts
-// from there. The point and the arm are then each their own small <svg> layer (below), so they move on the compositor.
+// from there. The point and the arm are then each their own <svg> layer (below), so they move on the compositor.
 // Paused while the tab is hidden; none with reduced motion. Only their transforms move.
 import { useEffect, useId, useState, type CSSProperties } from "react";
 import wordDark from "../brand/logo/wordmark-on-dark.svg?raw";
