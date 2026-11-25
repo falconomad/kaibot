@@ -296,6 +296,8 @@ def test_the_rerun_is_one_engine_run_one_trial_and_no_verdict(bars, tmp_path: Pa
     assert "not a verdict" in rep["status"] and "gate_b" not in rep and "verdict" not in rep
     row = rep["row"]
     assert row["trades"] > 0 and (root / "reports" / row["files"]["daily"]).is_file()
+    daily = pd.read_csv(root / "reports" / row["files"]["daily"])  # #677: the column gate v3's scorer reads
+    assert "exposure" in daily.columns and daily["exposure"].between(0.0, 1.0).all()
     # the same round trips as the plain v2 run, at a lower cost a side: only the spread bucket differs
     plain = se.run_stats(se.engine_run(frame, se.calendar_of(sd), [d for d in days if d <= "2017-05-19"],
                                        "spy_noise_band", "v2", level="balanced", vix=pd.Series(dtype=float),

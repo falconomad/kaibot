@@ -248,3 +248,27 @@ def test_report_summary(wf_run):
            "min_train_trades": 5, "input_sha256": wf.input_sha256, "events_sha256_tuned": "x",
            "events_sha256_default": "y", "code_sha": "z", "caveats": ["c"]}
     assert "| t-stat per trade |" in markdown(rep)
+
+
+def test_the_daily_file_carries_exposure_for_gate_v3(wf_run, tmp_path):
+    """#677: the OOS daily file has `exposure` (flat at every close: the simulator sells by the time exit), and the
+    report reader gives it to the gate v3 scorer."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+    from walk_forward import daily_frame
+
+    from kaibot.evaluation import results
+
+    wf, _ = wf_run
+    files = {}
+    for which in ("tuned", "default"):
+        books = [f.tuned if which == "tuned" else f.default for f in wf.folds]
+        d = daily_frame(books)
+        assert len(d) == sum(len(b.daily) for b in books) > 0 and (d["exposure"] == 0.0).all()
+        assert {"date", "start", "end", "pnl"} <= set(d.columns)
+        files[which] = {"daily": f"daily_{which}.csv"}
+        d.to_csv(tmp_path / files[which]["daily"], index=False)
+    f = tmp_path / "walkforward_balanced_wf_A_20261126T100000.json"
+    rep = {"experiment": "control", "files": files}
+    for row in results.rows(f, rep):
+        got = results.daily(row)
+        assert got is not None and "exposure" in got and (got["exposure"] == 0.0).all()

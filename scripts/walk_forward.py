@@ -76,6 +76,16 @@ def peak_rss_mb() -> float:
         return float("nan")
 
 
+def daily_frame(books) -> pd.DataFrame:
+    """The out-of-sample daily file of one account: every fold's session rows, plus `exposure`, the share of equity
+    invested at the close, in the format gate v3's scorer reads (`evaluation.results.daily`, issue #677). The
+    intraday simulator (`replay/sim.py`) closes every position at the time exit the same session, so the account is
+    flat at every close: 0.0."""
+    d = pd.DataFrame([r for b in books for r in b.daily])
+    d["exposure"] = 0.0
+    return d
+
+
 COST_KEYS = ("gross_pnl", "cost_spread", "cost_impact", "cost_slippage", "cost_fees")
 
 
@@ -332,7 +342,7 @@ def main() -> None:
         books = [f.tuned if which == "tuned" else f.default for f in wf.folds]
         trades = pd.DataFrame([t.__dict__ for b in books for t in b.trades],
                               columns=[f.name for f in dataclasses.fields(Trade)])  # header even with 0 trades
-        daily = pd.DataFrame([r for b in books for r in b.daily])
+        daily = daily_frame(books)
         trades.to_csv(out / f"trades_{a.level}_{tag}_{which}.csv", index=False)
         daily.to_csv(out / f"daily_{a.level}_{tag}_{which}.csv", index=False)
         tid = f"{a.level}_{tag}_{which}"
