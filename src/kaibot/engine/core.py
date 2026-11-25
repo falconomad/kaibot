@@ -1451,6 +1451,16 @@ class Engine:
             if k not in pending:
                 by_sym.setdefault(k[1], []).append((k, sl.qty))
         rid = self._rid() or (self.day.run_id if self.day else None)
+        if by_sym and (self.daily is None or rid is None):
+            # M10 1.20 step 4 (#445): a sleeve is sold only through the daily path's order manager (`_md_exit_submit`),
+            # and an engine with sleeves and no daily path does not start (step 2). Should this be reached all the
+            # same, nothing is cancelled or sent: the sleeves keep their broker-held stops and the flatten is
+            # incomplete (fail closed). No broker call and no journal entry before this check.
+            why = f"no order manager for run {rid} (no daily path): the multi-day sale is not sent"
+            log.error("flatten (%s): %s (%s)", reason, why, ", ".join(sorted(by_sym)))
+            for sym in by_sym:
+                failed[sym] = f"{sym}: {why}"
+            return
         have = None
         if by_sym:  # #266: never sell more than the venue holds (that would be a short); no read without sleeves
             try:
@@ -1489,8 +1499,9 @@ class Engine:
             try:
                 if not self.pos.on(sym):
                     # #252 follow-up: no `close_position` (it carries no client id). The symbol's open orders (its
-                    # stops) are cancelled; once none is left the sleeves' shares are sold with a client id that is
-                    # journalled first (`md_exit_intent`), so a crash after the call is matched at start-up
+                    # stops) are cancelled; once none is left the sleeves' shares are sold through the order
+                    # manager, whose client id is journalled first (`om_intent`), so a crash after the call is
+                    # matched at start-up
                     # QA-Ops (#275 on #282): the flatten's one read of the venue's positions (above) when it worked;
                     # its own name, so the next symbol still finds the whole map
                     venue_qty = (have.get(sym, 0.0) if have is not None
@@ -1520,8 +1531,7 @@ class Engine:
                     if left:
                         failed[sym] = f"{sym}: waiting for {len(left)} cancel(s) before the sale"
                         continue
-                    coid = f"kbfl-{clean(keys[0][0][0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
-                    self._md_exit_submit(sym, keys, coid, reason, rid)
+                    self._md_exit_submit(sym, keys, reason, rid)
                     failed.pop(sym, None)
                     continue
                 for k, q in keys:
@@ -1530,47 +1540,47 @@ class Engine:
                         if oo.get("symbol") == sym and oo.get("side") == "sell" and pc and pc[0] == clean(k[0]):
                             self._order("cancel", lambda oid=oo["id"]: order_path.cancel_order(self.broker, oid),
                                         order_id=oo["id"], symbol=sym, strategy=k[0])
-                    coid = f"kbfl-{clean(k[0])[:40]}-{clean(sym)[:12]}-{self.now():%Y%m%d%H%M%S}"
-                    self._md_exit_submit(sym, [(k, q)], coid, reason, rid)
+                    self._md_exit_submit(sym, [(k, q)], reason, rid)
                 failed.pop(sym, None)
             except Exception as e:
                 log.warning("flatten (%s): selling the multi-day sleeves in %s failed: %s", reason, sym, e)
                 failed[sym] = e
 
     def _md_om(self, rid):
-        """M9 1.8 (#433): the daily path's order manager for run `rid` (None without the daily path or a run id:
-        then a flatten sale goes the older way below, straight to the broker)."""
+        """M9 1.8 (#433): the daily path's order manager for run `rid`. None without the daily path or a run id:
+        then no flatten sale is sent (M10 1.20 step 4, #445: the older direct sale is gone; see `_md_exit_submit`)."""
         if self.daily is None or rid is None:
             return None
         return self.daily.manager_for(rid)
 
-    def _md_exit_submit(self, sym: str, keys: list, coid: str, reason: str, rid) -> None:
-        """The sale, with its intent journalled BEFORE the call. M9 1.8 (#433): through the order manager, one sale
-        per sleeve under the manager's deterministic id `kb<run>-<rule>-<symbol>-<day>-flatten-<n>` (an open sale
-        of the same day is reused, never doubled; a sale without an answer is `unknown` and looked up by its id);
-        the manager books every fill from the account activities at its own quantity and price, so a sale
-        cancelled after a partial fill has its filled shares in the ledger. `_md_exits` holds the sale under its
-        client id (`om`) until the manager has finished it (`_sync_md_exits`). A sale the venue refuses raises, as
-        a refused broker call did. Without the daily path: the older way (`md_exit_intent`, `coid` as given)."""
+    def _md_exit_submit(self, sym: str, keys: list, reason: str, rid) -> None:
+        """The sale, through the order manager (M9 1.8, #433): one sale per sleeve under the manager's deterministic
+        id `kb<run>-<rule>-<symbol>-<day>-flatten-<n>` (an open sale of the same day is reused, never doubled; a
+        sale without an answer is `unknown` and looked up by its id; its intent is journalled before the call). The
+        manager books every fill from the account activities at its own quantity and price, so a sale cancelled
+        after a partial fill has its filled shares in the ledger. `_md_exits` holds the sale under its client id
+        (`om`) until the manager has finished it (`_sync_md_exits`). A sale the venue refuses raises, as a refused
+        broker call did.
+
+        M10 1.20 step 4 (#445, Product ruling 24 Nov): there is no other way to sell a sleeve. The older direct sale
+        (`kbfl-` client id, `md_exit_intent`), sent when there was no order manager, is deleted: an engine whose
+        run holds multi-day sleeves and that has no daily path does not start (step 2, `DailyPathMissing`), and the
+        run id is never None here (`_flatten_md` finds sleeves only for a run). Should it be reached all the same,
+        `_flatten_md` cancels and sends nothing and counts the symbol as failed (`FlattenIncomplete`), and this raises
+        before any call: fail closed. Sales the older way already journalled are still booked when they fill
+        (`_rebuild_md_exits`, `_sync_md_exits`)."""
         om = self._md_om(rid)
-        if om is not None:
-            session = str(self.now().astimezone(_et()).date())
-            for k, q in keys:
-                c = om.next_coid(rid, k[0], sym, session, "flatten")
-                self._md_exits[c] = {"run_id": rid, "keys": [(k, q)], "reason": reason, "om": c}
-                r = om.submit(OrderRequest(sym, "sell", q, "market", "day", c), strategy=k[0], purpose="flatten",
-                              session=session, meta={"reason": reason}, override_block=True)
-                if str(r.state) == "rejected":
-                    raise BrokerError(403, f"{sym}: the venue refused the flatten sale {c} ({r.reason})")
-            return
-        qty = sum(q for _, q in keys)
-        self.journal.append("md_exit_intent", {"coid": coid, "run_id": rid, "symbol": sym, "reason": reason,
-                                               "keys": [[list(k), q] for k, q in keys], "ts": self.now().isoformat()})
-        o = self._order("sell",
-                        lambda: order_path.submit(self.broker, OrderRequest(sym, "sell", qty, "market", "day", coid),
-                                                  gate=self.trading_state),
-                        coid=coid, symbol=sym, strategy=",".join(k[0] for k, _ in keys), qty=qty, reason=reason)
-        self._md_exit_sent(o, rid, keys, reason)
+        if om is None:
+            raise RuntimeError(f"{sym}: no order manager for run {rid} (no daily path): the multi-day sale is not "
+                               "sent (M10 1.20 step 4, #445)")
+        session = str(self.now().astimezone(_et()).date())
+        for k, q in keys:
+            c = om.next_coid(rid, k[0], sym, session, "flatten")
+            self._md_exits[c] = {"run_id": rid, "keys": [(k, q)], "reason": reason, "om": c}
+            r = om.submit(OrderRequest(sym, "sell", q, "market", "day", c), strategy=k[0], purpose="flatten",
+                          session=session, meta={"reason": reason}, override_block=True)
+            if str(r.state) == "rejected":
+                raise BrokerError(403, f"{sym}: the venue refused the flatten sale {c} ({r.reason})")
 
     def _md_exit_sent(self, o: dict, rid, keys: list, reason: str) -> None:
         """#252: a multi-day flatten sale is journalled as soon as the venue has given it an id (`md_exit`), so a
@@ -1581,7 +1591,10 @@ class Engine:
                                         "ts": self.now().isoformat()})
 
     def _rebuild_md_exits(self) -> None:
-        """#252: the multi-day flatten sales journalled as sent and not yet booked or dropped (start-up)."""
+        """#252: the multi-day flatten sales journalled as sent and not yet booked or dropped (start-up). Part 1 of
+        `recover`. The order manager's sales (`om_intent`, purpose `flatten`) and, from a journal written before
+        M10 1.20 step 4 (#445), the older direct sales (`md_exit_intent`, `md_exit`, a `kbfl-` intent): no engine
+        sends those any more, but one already journalled is still booked when it fills."""
         done = {b.get("order_id") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",))}
         closed = {b.get("coid") for _, _, _, b in self.journal.entries(kinds=("md_exit_done",)) if b.get("coid")}
         sent = {b.get("coid") for _, _, _, b in self.journal.entries(kinds=("md_exit",))}

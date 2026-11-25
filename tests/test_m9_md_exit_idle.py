@@ -5,19 +5,19 @@ the fix. With no run and no session (`Engine.day is None` after the restart) `ti
 
 from __future__ import annotations
 
-from test_failsafe_drills import MD, QTY, Account
+from test_failsafe_drills import MD, QTY, Account, daily_account
 
 
 def _sells(a):
     return [b for *_, b in a.eng.journal.entries(kinds=("fill",)) if b.get("symbol") == "B" and b["side"] == "sell"]
 
 
-def _stopped_and_restarted(tmp_path, k: int) -> Account:
+def _stopped_and_restarted(tmp_path, monkeypatch, k: int) -> Account:
     """The book holds B; the run ends at minute `k` of DAY2 with B's sale sent and not filled, as the run's drawdown
     end does it (`_risk_halts`: the flatten, then the run's end). The engine dies before the sale fills and comes
     back with no run, no session and the sale rebuilt from the journal. (Until M9 1.2 "Flatten and stop" ended the
     run this way too; it now waits for the sale to be booked.)"""
-    a = Account(tmp_path)
+    a = daily_account(tmp_path, monkeypatch)
     a.day1()
     a.ticks(a.open2, 0, k)
     a.eng.flatten_all("run_drawdown")
@@ -36,8 +36,8 @@ def _booked_once(a):
     assert (MD, "B") not in a.eng.ledger.book(a.rid).sleeves and "B" not in a.broker.pos
 
 
-def test_a_sale_open_at_a_restart_after_the_run_ended_is_booked_and_a_new_run_starts(tmp_path):
-    a = _stopped_and_restarted(tmp_path, 10)
+def test_a_sale_open_at_a_restart_after_the_run_ended_is_booked_and_a_new_run_starts(tmp_path, monkeypatch):
+    a = _stopped_and_restarted(tmp_path, monkeypatch, 10)
     a.store.insert("command", {"kind": "new_run", "payload": {"amount_usd": 8000, "level": "balanced"},
                                "idempotency_key": "k8", "applied_at": None})
     for k in range(10, 13):  # the main loop: commands, then the tick
@@ -51,21 +51,22 @@ def test_a_sale_open_at_a_restart_after_the_run_ended_is_booked_and_a_new_run_st
     assert len(_sells(a)) == 1  # booked once
 
 
-def test_a_sale_that_filled_before_the_close_is_booked_by_a_restart_after_the_close(tmp_path):
-    a = _stopped_and_restarted(tmp_path, 380)
+def test_a_sale_that_filled_before_the_close_is_booked_by_a_restart_after_the_close(tmp_path, monkeypatch):
+    a = _stopped_and_restarted(tmp_path, monkeypatch, 380)
     a.after_close(a.open2)  # the market is closed: the sale filled at the venue before 16:00
     _booked_once(a)
 
 
-def test_an_unreadable_order_with_the_market_closed_does_not_stop_the_closed_branch(tmp_path):
-    a = _stopped_and_restarted(tmp_path, 380)
+def test_an_unreadable_order_with_the_market_closed_does_not_stop_the_closed_branch(tmp_path, monkeypatch):
+    a = _stopped_and_restarted(tmp_path, monkeypatch, 380)
 
     def down(oid):
         raise RuntimeError("venue unreachable")
 
     real, a.broker.order = a.broker.order, down
+    acts, a.broker.activities = a.broker.activities, lambda *a, **k: down(None)  # the order manager's fill reads
     a.after_close(a.open2)  # no raise: the closed branch (the daily decision, the preparation) goes on
     assert _sells(a) == [] and len(a.eng._md_exits) == 1
-    a.broker.order = real
+    a.broker.order, a.broker.activities = real, acts
     a.after_close(a.open2)
     _booked_once(a)
