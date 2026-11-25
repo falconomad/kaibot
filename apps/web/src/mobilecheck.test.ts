@@ -63,8 +63,9 @@ describe("the mobile check does not depend on when it runs", () => {
     expect(check).toMatch(/for w, h in PHONES:\n {8}for name, path, live in \[\("home", "\/", True\), \("positions", "\/positions", True\), \("home-fallback", "\/", False\)\]:\n {12}ctx = context\(browser, OPEN,/);
     expect(check).toMatch(/StressMock\("running", OPEN, live=live\)/);
     expect(check).toMatch(/\n {4}stress_live\(browser, dist, metrics, fails\)/);
-    // what it fails on: the line off one line or off the screen, a figure wider than its column, a row without today
-    expect(check).toMatch(/st\["lines"\] != 1 or st\["over"\] or st\["size"\] != "13px" or st\["wide"\] or st\["heroOver"\] or st\["moving"\]/);
-    expect(check).toMatch(/st\["days"\] != want/);
+    // what it fails on: a freshness line while live (#604: a live figure says nothing), a late one's line off one line
+    // or off the screen, a figure wider than its column, a row without today
+    expect(check).toMatch(/\(st\["line"\] and \(st\["lines"\] != 1 or st\["over"\] or st\["size"\] != "13px"\)\) or st\["wide"\] or st\["heroOver"\] or st\["moving"\]/);
+    expect(check).toMatch(/if live and \(st\["line"\] or st\["days"\] != want/);
   });
 });

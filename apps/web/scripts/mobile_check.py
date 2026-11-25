@@ -29,7 +29,12 @@ with its reason, and text with nowhere to break (a link, a ticker list), on the 
 
 --stress also measures the live state (stakeholder, 19 Nov 2026), with the market open: /api/marks is answered from the
 stress mock, so Home and Positions mark the crowded book at live prices. The freshness line ("Live · prices 4 s ago"),
-six-digit values and gains, each row's change today and the position sheet must fit at 375, 390 and 430 px.
+six-digit values and gains, each row's change today and the position sheet must fit at 375, 390 and 430 px. Live
+figures carry no freshness line (#604; stakeholder, 23 Nov 2026); a late one's line must fit on one line.
+
+Not in CI (#673): a full run (--interact --stress) takes about 4.5 minutes headless, because every page waits a fixed
+1.2-1.8 s for its motion and data to settle (65 page loads at five widths, then about 60 more for --interact and
+--stress). That is over the 2 minutes a check may add to the web job. Run it before a PR that changes layout.
 """
 # ruff: noqa: E501  (the browser scripts in this file are JavaScript inside strings; a few lines run past 120)
 from __future__ import annotations
@@ -197,7 +202,8 @@ BRAND_JS = r"""async () => {
     title: document.title,
     label: document.querySelector('header.top .brand')?.getAttribute('aria-label') || null,
     word: symbol?.getAttribute('aria-label') || null,
-    symbol: !!symbol && symbol.querySelectorAll('path').length === 10 && !document.querySelector('header.top .brand img'),
+    // the wordmark's ten paths: in its own <svg>, or with the point, the arm and the leg in their idle layers beside it
+    symbol: !!symbol && document.querySelectorAll('header.top .brand svg path').length === 10 && !document.querySelector('header.top .brand img'),
     logos: document.querySelectorAll('.logo').length,
     homeLabel: document.querySelector('meta[name=apple-mobile-web-app-title]')?.getAttribute('content') || null,
     manifest: m ? [m.name, m.short_name, m.display] : null,
@@ -227,6 +233,9 @@ HEADER_JS = r"""() => {
 
 # The logo's motion (docs/design/logo): which of its animations are running now.
 LOGO_MOTION = "document.getAnimations().filter(a => /^kb-logo-/.test(a.animationName) && a.playState === 'running').map(a => a.animationName)"
+# The idle motion (stakeholder, 24 Nov 2026; components/Logo.tsx IDLE): once the intro has ended, the point hops and the
+# arm redraws, in turn, for as long as the page is up. Those two run on purpose; only the intro's three must not replay.
+IDLE_MOTION = {"kb-logo-hop", "kb-logo-arm"}
 
 
 def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
@@ -267,8 +276,11 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     print("logo motion: at first paint", early, "| after 1.5 s", later, "| tab change", on_tab, "| New run", on_start, "| back", on_back)
     if early != ["kb-logo-draw", "kb-logo-pop", "kb-logo-pulse"]:
         fails.append(f"the logo's load motion did not play at first paint: {early}")
-    if later or on_tab or on_start or on_back:
-        fails.append(f"the logo moved again: after 1.5 s {later}, tab change {on_tab}, New run {on_start}, back {on_back}")
+    intro = [sorted(set(m) - IDLE_MOTION) for m in (later, on_tab, on_start, on_back)]
+    if any(intro):
+        fails.append(f"the logo's load motion played again: after 1.5 s {intro[0]}, tab change {intro[1]}, New run {intro[2]}, back {intro[3]}")
+    if set(later) != IDLE_MOTION or set(on_back) != IDLE_MOTION:
+        fails.append(f"the logo's idle motion (the hop and the arm) is not running after the intro: after 1.5 s {later}, back {on_back}")
     still = pg.evaluate("document.querySelectorAll('.logo-moving, .logo clipPath, .logo-pulse').length")
     if still:
         fails.append(f"the logo keeps {still} motion parts after it has finished")
@@ -298,7 +310,8 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
         fails.append(f"the name: tab title {brand['title']!r}, header link {brand['label']!r}, word {brand['word']!r}")
     if not brand["symbol"] or brand["logos"] != 1:
         fails.append(f"the header logo: symbol drawn={brand['symbol']}, logos={brand['logos']}")
-    if brand["manifest"] != [name, name, "browser"] or brand["homeLabel"] != name:
+    # "standalone" since the app became installable (src/brand/assets.ts; scripts/pwa_check.mjs requires it)
+    if brand["manifest"] != [name, name, "standalone"] or brand["homeLabel"] != name:
         fails.append(f"the manifest or home-screen label: {brand['manifest']}, {brand['homeLabel']!r}")
     if len(brand["icons"]) < 6 or not all(brand["icons"].values()):
         fails.append(f"an icon is missing or does not load at its size: {brand['icons']}")
@@ -367,20 +380,22 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
     if running or early or paths != 10:
         fails.append(f"reduced motion: {running} animations run, the logo moved {early}, or its mark is not whole ({paths} paths)")
     ctx.close()
-    # 1280 px: the header is 72 px, the wordmark 32 px.
-    ctx = context(browser, now, viewport={"width": 1280, "height": 800})
-    ctx.add_init_script(session)
-    ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
-    pg = ctx.new_page()
-    pg.goto(audit.APP + "/", wait_until="load")
-    pg.wait_for_selector("main > *")
-    pg.wait_for_timeout(1200)
-    wide = pg.evaluate("[Math.round(document.querySelector('header.top').getBoundingClientRect().height), "
-                       "Math.round(document.querySelector('header.top .logo').getBoundingClientRect().height)]")
-    print("1280 px: header", wide[0], "px, wordmark", wide[1], "px")
-    if wide != [72, 32]:
-        fails.append(f"at 1280 px the header is {wide[0]} px and the wordmark {wide[1]} px (want 72 and 32)")
-    ctx.close()
+    # 1280 and 1440 px: the header is one 72 px row, the wordmark 32 px, with the mock's halt chip in it (#673).
+    for w, h in DESKTOP:
+        ctx = context(browser, now, viewport={"width": w, "height": h})
+        ctx.add_init_script(session)
+        ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
+        pg = ctx.new_page()
+        pg.goto(audit.APP + "/", wait_until="load")
+        pg.wait_for_selector("main > *")
+        pg.wait_for_timeout(1200)
+        wide = pg.evaluate("[Math.round(document.querySelector('header.top').getBoundingClientRect().height), "
+                           "Math.round(document.querySelector('header.top .logo').getBoundingClientRect().height), "
+                           "!!document.querySelector('header.top .ts-chip.red')]")
+        print(f"{w} px: header", wide[0], "px, wordmark", wide[1], "px, halt chip", wide[2])
+        if wide != [72, 32, True]:
+            fails.append(f"at {w} px the header is {wide[0]} px and the wordmark {wide[1]} px, halt chip {wide[2]} (want 72, 32 and the chip)")
+        ctx.close()
 
 
 # Rows whose parts overlap or stick out: the name and the number of a row must sit side by side, inside the row.
@@ -493,8 +508,8 @@ def stress_live(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> 
     """The live state (stakeholder, 19 Nov 2026), with the market open (OPEN) and the crowded book held at the broker:
     Home, Positions and the position sheet at 375, 390 and 430 px. /api/marks is answered by the stress mock, with
     prices far from the close for the biggest holdings. Each: no overflow, no tap target under 44 px, no row whose
-    parts overlap, the freshness line on one line inside the screen, a change today on every row, and nothing that
-    loops. Once per width also the fallback (the function not answering): the engine's line, and no row says today."""
+    parts overlap, no freshness line while the prices are live (#604), a change today on every row, and nothing that
+    loops. Once per width also the fallback (the function not answering): the pot shows, and no row says today."""
     import stress_mock
     for w, h in PHONES:
         for name, path, live in [("home", "/", True), ("positions", "/positions", True), ("home-fallback", "/", False)]:
@@ -512,13 +527,15 @@ def stress_live(browser, dist: pathlib.Path, metrics: str, fails: list[str]) -> 
             print(f"stress live {name} {w}: {st}, misaligned {bad}")
             if bad:
                 fails.append(f"stress-live-{name}@{w}: {bad}")
-            if st["lines"] != 1 or st["over"] or st["size"] != "13px" or st["wide"] or st["heroOver"] or st["moving"]:
+            # #604 and the stakeholder (23 Nov 2026): no line counting seconds; a figure that is live says nothing, and a
+            # late one says so in one quiet line (components/Fresh.tsx). So the line is checked only when it is there.
+            if (st["line"] and (st["lines"] != 1 or st["over"] or st["size"] != "13px")) or st["wide"] or st["heroOver"] or st["moving"]:
                 fails.append(f"stress-live-{name}@{w}: the freshness line or a row's figures do not fit, or something loops: {st}")
             want = 3 if name == "home" else 27 if name == "positions" else 0
-            if live and (not st["live"] or not (st["line"] or "").startswith("Live · prices ") or st["days"] != want or len(st["longest"]) < 12):
-                fails.append(f"stress-live-{name}@{w}: not live, or a row has no change today, or no long figure was measured: {st}")
-            if not live and (st["live"] or not re.fullmatch(r"Updated .+ by the engine", st["line"] or "") or st["days"]):
-                fails.append(f"stress-live-{name}@{w}: the fallback does not say the engine's figure is shown, or a row says today: {st}")
+            if live and (st["line"] or st["days"] != want or len(st["longest"]) < 12):
+                fails.append(f"stress-live-{name}@{w}: live, yet a freshness line shows, or a row has no change today, or no long figure was measured: {st}")
+            if not live and (st["days"] or not st["hero"]):
+                fails.append(f"stress-live-{name}@{w}: the fallback shows no pot, or a row says today: {st}")
             if name == "positions":
                 pg.locator(".rows .row").first.click()
                 pg.wait_for_selector("[role=dialog]")
