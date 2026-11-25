@@ -1,8 +1,9 @@
 """The multi-day book's stop: today's fixed line, or the Gate C bootstrap band (decision 17; M11 ticket 2.10, #461).
 
-Pure: numbers in, a verdict out; no clock, no broker, no journal. Nothing in the engine imports this module yet:
-`config/book_stop.yaml` says `mode: fixed`, and the engine still calls `risk/gate.book_run_ended` itself. The engine
-wiring is a later, separate change (decision 17 section 7, after #534 / #536 / #538), behind this file's switch.
+Pure: numbers in, a verdict out; no clock, no broker, no journal. The engine asks `verdict` at every book check
+(`engine/core.Engine._book_end_check`, decision 17 section 7 step 3, #461). The switch is `mode` in
+`config/book_stop.yaml`; it says `fixed`, and in mode fixed the engine's stop is today's, bit for bit. The engine
+reads the file and the tables once, at its first book check, so a change takes effect at the next engine restart.
 
 - `verdict(...)` in mode "fixed" is `gate.book_run_ended(peak, equity, lim)` exactly (a property test checks it on
   every input): the line `BookLimits.run_drawdown_end_pct` below the book's peak.
@@ -15,6 +16,8 @@ wiring is a later, separate change (decision 17 section 7, after #534 / #536 / #
 - Fail closed: only `mode == "band"` with a table and finite inputs is judged by the band; any other mode, a
   non-finite peak, equity or record drawdown, or a bad session count gets the fixed line. `load_or_fixed` reads the
   config and gives the fixed mode (never "no stop") when the file is missing, unreadable or invalid.
+- Point in time (`table_unusable`, `sessions_traded`): a table is used only when its research window ended before
+  the decision's day, and the horizon counts only sessions that closed before that day, from the book's start.
 - `BandTable` holds the 95% and 99% quantiles of resampled maximum drawdowns by horizon. It refuses a table that is
   empty, out of order, outside 0..1, with a 95% line above the 99% one, or whose 99% line falls as the horizon grows.
 """
@@ -23,7 +26,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 import yaml
@@ -135,6 +140,35 @@ def table_for(cfg: BookStopConfig, rule: str, level: str, root: Path = ROOT) -> 
     if (t.rule, t.level) != (rule, level):
         raise ValueError(f"{rel} is the table of {t.rule} at {t.level}, not of {rule} at {level}")
     return t
+
+
+def table_unusable(t: BandTable, decision_day: date) -> str | None:
+    """Why the table may not judge a decision on `decision_day` (None: it may). Point in time: the table is drawn
+    from an engine + SimBroker run on a research window, and a window that has not ended before the decision's day
+    would use returns not yet known then. A table without a readable window is refused too (fail closed)."""
+    w = t.source.get("window")
+    try:
+        end = date.fromisoformat(str(w[1]))
+    except (TypeError, IndexError, KeyError, ValueError):
+        return f"the band table of {t.rule} at {t.level} records no research window"
+    if not end < decision_day:
+        return f"the band table of {t.rule} at {t.level} ends on {end}, not before {decision_day}"
+    return None
+
+
+def sessions_traded(sessions: Iterable[str], start: date, decision_day: date) -> int:
+    """The book's live record length: the distinct sessions (ISO dates) that closed on or after the book's start
+    and before `decision_day`. The session under way is not counted (its close is not known yet), and a session
+    that cannot be read as a date is not counted either (a shorter record is a stricter line)."""
+    out = set()
+    for s in sessions:
+        try:
+            d = date.fromisoformat(str(s))
+        except ValueError:
+            continue
+        if start <= d < decision_day:
+            out.add(d)
+    return len(out)
 
 
 @dataclass(frozen=True)
