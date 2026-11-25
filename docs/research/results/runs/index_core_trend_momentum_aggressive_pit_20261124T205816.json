@@ -1,0 +1,205 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.114443,
+    "percentile": 88.6,
+    "runs": 2000
+   },
+   "label": "book|1x",
+   "neighbours": [
+    {
+     "alpha": 0.007124,
+     "alpha_t": 1.130385,
+     "beta": 0.201763,
+     "cagr": 0.037517,
+     "label": "book_neighbour|budget5",
+     "max_drawdown": 0.059589,
+     "mean_exposure": 0.276266,
+     "neighbour": "budget5"
+    },
+    {
+     "alpha": 0.002925,
+     "alpha_t": 0.432832,
+     "beta": 0.242347,
+     "cagr": 0.039164,
+     "label": "book_neighbour|lookback63",
+     "max_drawdown": 0.0844,
+     "mean_exposure": 0.316937,
+     "neighbour": "lookback63"
+    },
+    {
+     "alpha": 0.000211,
+     "alpha_t": 0.049929,
+     "beta": 0.310417,
+     "cagr": 0.046558,
+     "label": "book_neighbour|nocap",
+     "max_drawdown": 0.110855,
+     "mean_exposure": 0.346457,
+     "neighbour": "nocap"
+    },
+    {
+     "alpha": 0.008699,
+     "alpha_t": 1.093488,
+     "beta": 0.20351,
+     "cagr": 0.039318,
+     "label": "book_neighbour|vol12",
+     "max_drawdown": 0.058204,
+     "mean_exposure": 0.298116,
+     "neighbour": "vol12"
+    },
+    {
+     "alpha": 0.005662,
+     "alpha_t": 0.753501,
+     "beta": 0.248183,
+     "cagr": 0.042861,
+     "label": "book_neighbour|vol18",
+     "max_drawdown": 0.072272,
+     "mean_exposure": 0.328249,
+     "neighbour": "vol18"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.007177,
+    "alpha_t": 0.909232,
+    "beta": 0.228349,
+    "cagr": 0.041461,
+    "costs_a_year": 0.000493,
+    "exposure_matched_spy_cagr": 0.044563,
+    "idle_cash_in_bills": {
+     "alpha": 0.004897,
+     "alpha_t": 0.633612,
+     "bills_a_year": 0.023208,
+     "cagr": 0.057649,
+     "sharpe_above_bills": 0.723429
+    },
+    "max_drawdown": 0.066144,
+    "mean_exposure": 0.317754,
+    "return_above_exposure_matched_spy": -0.002969,
+    "return_above_exposure_matched_spy_t": -0.869515,
+    "sessions": 1931,
+    "sharpe": 0.882413,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "index_core_trend_momentum",
+   "run": "?, point_in_time",
+   "trials_for_rule": 6,
+   "why": null
+  },
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.114443,
+    "percentile": 88.6,
+    "runs": 2000
+   },
+   "label": "sleeve|1x",
+   "neighbours": [
+    {
+     "alpha": 0.002596,
+     "alpha_t": 0.061961,
+     "beta": 0.542052,
+     "cagr": 0.075154,
+     "label": "sleeve_neighbour|exit30",
+     "max_drawdown": 0.194866,
+     "mean_exposure": 0.818808,
+     "neighbour": "exit30"
+    },
+    {
+     "alpha": -0.020425,
+     "alpha_t": -0.536493,
+     "beta": 0.747973,
+     "cagr": 0.079866,
+     "label": "sleeve_neighbour|nofilter",
+     "max_drawdown": 0.251278,
+     "mean_exposure": 0.942477,
+     "neighbour": "nofilter"
+    },
+    {
+     "alpha": -0.00528,
+     "alpha_t": -0.123326,
+     "beta": 0.534122,
+     "cagr": 0.065235,
+     "label": "sleeve_neighbour|reg125",
+     "max_drawdown": 0.248959,
+     "mean_exposure": 0.816663,
+     "neighbour": "reg125"
+    },
+    {
+     "alpha": -0.036839,
+     "alpha_t": -0.932237,
+     "beta": 0.529175,
+     "cagr": 0.032332,
+     "label": "sleeve_neighbour|reg60",
+     "max_drawdown": 0.236803,
+     "mean_exposure": 0.80604,
+     "neighbour": "reg60"
+    },
+    {
+     "alpha": 0.01194,
+     "alpha_t": 0.257743,
+     "beta": 0.565835,
+     "cagr": 0.087025,
+     "label": "sleeve_neighbour|risk15",
+     "max_drawdown": 0.175284,
+     "mean_exposure": 0.827878,
+     "neighbour": "risk15"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.009133,
+    "alpha_t": 0.21644,
+    "beta": 0.539279,
+    "cagr": 0.081939,
+    "costs_a_year": 0.003555,
+    "exposure_matched_spy_cagr": 0.104919,
+    "idle_cash_in_bills": {
+     "alpha": 0.002663,
+     "alpha_t": 0.063381,
+     "bills_a_year": 0.023208,
+     "cagr": 0.086392,
+     "sharpe_above_bills": 0.464658
+    },
+    "max_drawdown": 0.176854,
+    "mean_exposure": 0.817024,
+    "return_above_exposure_matched_spy": -0.017228,
+    "return_above_exposure_matched_spy_t": -0.495976,
+    "sessions": 1931,
+    "sharpe": 0.586396,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "trend_momentum",
+   "run": "?, point_in_time",
+   "trials_for_rule": 25,
+   "why": null
+  }
+ ],
+ "code_sha": "0945894",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "report": "index_core_trend_momentum_aggressive_pit_20261124T205816.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-24T20:58:16+00:00",
+ "set": "?",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

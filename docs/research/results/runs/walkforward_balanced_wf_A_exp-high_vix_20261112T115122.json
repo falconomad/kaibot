@@ -1,0 +1,51 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "high_vix|default",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.025705,
+    "alpha_t": -2.788739,
+    "beta": 0.038699,
+    "cagr": -0.020042,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.173971,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": -0.703437,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "high_vix",
+   "run": "walkforward, today",
+   "trials_for_rule": 0,
+   "why": null
+  }
+ ],
+ "code_sha": "23e8faf",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "walkforward_balanced_wf_A_exp-high_vix_20261112T115122.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-12T11:51:22+00:00",
+ "set": "walkforward",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

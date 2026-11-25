@@ -1,0 +1,15 @@
+{
+ "rule": "preopen_negative_news_veto",
+ "preregistered": true,
+ "family": "news_drift",
+ "generated_at": "2026-11-24T20:58:16+00:00",
+ "trials": {
+  "rule": 0,
+  "registry": 10876,
+  "family": 12
+ },
+ "tbill": true,
+ "reports_of_this_rule": [],
+ "runs": [],
+ "as_reported": []
+}

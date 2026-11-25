@@ -2,10 +2,10 @@
  "rule": "orb_stocks_in_play",
  "preregistered": true,
  "family": "opening_range_breakout",
- "generated_at": "2026-11-23T12:27:50+00:00",
+ "generated_at": "2026-11-24T20:58:16+00:00",
  "trials": {
   "rule": 4,
-  "registry": 10847,
+  "registry": 10876,
   "family": 4
  },
  "tbill": true,

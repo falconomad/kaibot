@@ -1,0 +1,189 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|0.5",
+   "neighbours": [
+    {
+     "alpha": 0.003802,
+     "alpha_t": 2.768923,
+     "beta": 0.005875,
+     "cagr": 0.004692,
+     "label": "spy_noise_band~lb10|0.5",
+     "max_drawdown": 0.005173,
+     "mean_exposure": null,
+     "neighbour": "lb10"
+    },
+    {
+     "alpha": 0.003389,
+     "alpha_t": 2.534939,
+     "beta": 0.006249,
+     "cagr": 0.004334,
+     "label": "spy_noise_band~lb20|0.5",
+     "max_drawdown": 0.003458,
+     "mean_exposure": null,
+     "neighbour": "lb20"
+    },
+    {
+     "alpha": 0.002789,
+     "alpha_t": 1.952579,
+     "beta": 0.006575,
+     "cagr": 0.003782,
+     "label": "spy_noise_band~lb30|0.5",
+     "max_drawdown": 0.006042,
+     "mean_exposure": null,
+     "neighbour": "lb30"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.003841,
+    "alpha_t": 2.831887,
+    "beta": 0.006153,
+    "cagr": 0.004773,
+    "costs_a_year": 0.001526,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.005014,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": 1.058959,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy_engine, point_in_time, 0.5",
+   "trials_for_rule": 13,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|1",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.002391,
+    "alpha_t": 1.749728,
+    "beta": 0.005835,
+    "cagr": 0.00327,
+    "costs_a_year": 0.003058,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.006247,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": 0.724302,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy_engine, point_in_time, 1",
+   "trials_for_rule": 13,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|v2",
+   "neighbours": [
+    {
+     "alpha": -0.000991,
+     "alpha_t": -0.676559,
+     "beta": 0.005032,
+     "cagr": -0.00024,
+     "label": "spy_noise_band~check15|v2",
+     "max_drawdown": 0.019398,
+     "mean_exposure": null,
+     "neighbour": "check15"
+    },
+    {
+     "alpha": 0.000101,
+     "alpha_t": 0.072302,
+     "beta": 0.005277,
+     "cagr": 0.00089,
+     "label": "spy_noise_band~exit1555|v2",
+     "max_drawdown": 0.009239,
+     "mean_exposure": null,
+     "neighbour": "exit1555"
+    },
+    {
+     "alpha": -0.0002,
+     "alpha_t": -0.142095,
+     "beta": 0.004991,
+     "cagr": 0.000545,
+     "label": "spy_noise_band~lb10|v2",
+     "max_drawdown": 0.010349,
+     "mean_exposure": null,
+     "neighbour": "lb10"
+    },
+    {
+     "alpha": -0.000504,
+     "alpha_t": -0.368062,
+     "beta": 0.005404,
+     "cagr": 0.000304,
+     "label": "spy_noise_band~lb20|v2",
+     "max_drawdown": 0.008173,
+     "mean_exposure": null,
+     "neighbour": "lb20"
+    },
+    {
+     "alpha": -0.000998,
+     "alpha_t": -0.677121,
+     "beta": 0.005755,
+     "cagr": -0.000137,
+     "label": "spy_noise_band~lb30|v2",
+     "max_drawdown": 0.013252,
+     "mean_exposure": null,
+     "neighbour": "lb30"
+    }
+   ],
+   "research_window": {
+    "alpha": -0.000144,
+    "alpha_t": -0.103741,
+    "beta": 0.00528,
+    "cagr": 0.000645,
+    "costs_a_year": 0.005704,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.008747,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": 0.14373,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy_engine, point_in_time, v2",
+   "trials_for_rule": 13,
+   "why": null
+  }
+ ],
+ "code_sha": "8b7afd0",
+ "cost_model": null,
+ "engine": "simbroker",
+ "gate_v2_as_stored": [
+  "- Gate v2 as the report stored it: verdict **fail**; marks 1: fail; 2: fail; 3: pass; 4: fail; 5: fail; 6: fail."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "spy_engine_balanced_20261121T172654.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-21T17:26:54+00:00",
+ "set": "spy_engine",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

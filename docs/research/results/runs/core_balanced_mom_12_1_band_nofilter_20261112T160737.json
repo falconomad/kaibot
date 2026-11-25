@@ -1,0 +1,114 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": null,
+    "matched": false,
+    "p_value": 0.109453,
+    "percentile": 89.5,
+    "runs": 200
+   },
+   "label": "mom_12_1_band_nofilter|base|1x|cap100|hold",
+   "neighbours": [
+    {
+     "alpha": 0.047511,
+     "alpha_t": 1.052531,
+     "beta": 0.957237,
+     "cagr": 0.183453,
+     "label": "mom_12_1_band_nofilter~exit30|base|1x|cap100|hold",
+     "max_drawdown": 0.305447,
+     "mean_exposure": 0.829402,
+     "neighbour": "exit30"
+    },
+    {
+     "alpha": 0.035113,
+     "alpha_t": 1.233685,
+     "beta": 0.466161,
+     "cagr": 0.103658,
+     "label": "mom_12_1_band_nofilter~names10|base|1x|cap100|hold",
+     "max_drawdown": 0.135366,
+     "mean_exposure": 0.405162,
+     "neighbour": "names10"
+    },
+    {
+     "alpha": 0.034803,
+     "alpha_t": 0.807315,
+     "beta": 0.926334,
+     "cagr": 0.164958,
+     "label": "mom_12_1_band_nofilter~only12|base|1x|cap100|hold",
+     "max_drawdown": 0.299981,
+     "mean_exposure": 0.805027,
+     "neighbour": "only12"
+    },
+    {
+     "alpha": 0.062747,
+     "alpha_t": 1.299217,
+     "beta": 0.910187,
+     "cagr": 0.194041,
+     "label": "mom_12_1_band_nofilter~only6|base|1x|cap100|hold",
+     "max_drawdown": 0.302464,
+     "mean_exposure": 0.841812,
+     "neighbour": "only6"
+    },
+    {
+     "alpha": 0.048449,
+     "alpha_t": 0.863499,
+     "beta": 1.146515,
+     "cagr": 0.205639,
+     "label": "mom_12_1_band_nofilter~risk15|base|1x|cap100|hold",
+     "max_drawdown": 0.350927,
+     "mean_exposure": 0.975936,
+     "neighbour": "risk15"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.029779,
+    "alpha_t": 0.673535,
+    "beta": 0.919967,
+    "cagr": 0.158014,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.118112,
+    "idle_cash_in_bills": {
+     "alpha": 0.031162,
+     "alpha_t": 0.706298,
+     "bills_a_year": 0.023208,
+     "cagr": 0.161739,
+     "sharpe_above_bills": 0.708532
+    },
+    "max_drawdown": 0.297007,
+    "mean_exposure": 0.831954,
+    "return_above_exposure_matched_spy": 0.046525,
+    "return_above_exposure_matched_spy_t": 1.073342,
+    "sessions": 1931,
+    "sharpe": 0.802195,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "mom_12_1_band",
+   "run": "core, today",
+   "trials_for_rule": 38,
+   "why": null
+  }
+ ],
+ "code_sha": "4dce03a",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks as the report stored them: 1: pass; 2: cannot be judged yet (provisional data); 3: cannot be judged yet (provisional data); 4: cannot be judged yet (provisional data); 5: cannot be judged yet (provisional data); 6: pass."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "core_balanced_mom_12_1_band_nofilter_20261112T160737.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-12T16:07:37+00:00",
+ "set": "core",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

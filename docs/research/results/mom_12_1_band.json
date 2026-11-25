@@ -2,11 +2,11 @@
  "rule": "mom_12_1_band",
  "preregistered": true,
  "family": "cross_sectional_momentum",
- "generated_at": "2026-11-23T12:27:50+00:00",
+ "generated_at": "2026-11-24T20:58:16+00:00",
  "trials": {
   "rule": 38,
-  "registry": 10847,
-  "family": 748
+  "registry": 10876,
+  "family": 760
  },
  "tbill": true,
  "reports_of_this_rule": [

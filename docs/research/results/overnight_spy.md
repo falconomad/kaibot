@@ -1,8 +1,8 @@
 # overnight_spy: results of every run on record
 
-Written 2026-11-23T12:27:50+00:00 by `scripts/export_results.py` from the reports on the research Mac. No rule was re-run. Pre-registration: `docs/prereg/overnight_spy.md`. Family in gate v3: overnight_premium.
+Written 2026-11-24T20:58:16+00:00 by `scripts/export_results.py` from the reports on the research Mac. No rule was re-run. Pre-registration: `docs/prereg/overnight_spy.md`. Family in gate v3: overnight_premium.
 
-- Trials logged: 346 configurations for this rule, 346 for its family, 10,847 in the whole registry.
+- Trials logged: 346 configurations for this rule, 346 for its family, 10,876 in the whole registry.
 - The research window is 2017-05-01 to 2024-12-31. A run's own window may go on into what is now the hold-out; those runs were made before it was frozen.
 - Gate v3 marks for these runs: [`gate_v3_rescore.md`](gate_v3_rescore.md).
 - Pages the run scripts wrote themselves, copied unchanged: [`experiments_multiday_summary.md`](as_reported/experiments_multiday_summary.md).

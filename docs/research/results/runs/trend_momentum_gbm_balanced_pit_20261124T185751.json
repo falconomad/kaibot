@@ -1,0 +1,154 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": false,
+    "p_value": 0.164418,
+    "percentile": 83.6,
+    "runs": 2000
+   },
+   "label": "reference|trend_momentum",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.008795,
+    "alpha_t": 0.208489,
+    "beta": 0.540947,
+    "cagr": 0.081802,
+    "costs_a_year": 0.002,
+    "exposure_matched_spy_cagr": 0.104514,
+    "idle_cash_in_bills": {
+     "alpha": 0.002362,
+     "alpha_t": 0.056237,
+     "bills_a_year": 0.023208,
+     "cagr": 0.086255,
+     "sharpe_above_bills": 0.463326
+    },
+    "max_drawdown": 0.174547,
+    "mean_exposure": 0.817134,
+    "return_above_exposure_matched_spy": -0.016965,
+    "return_above_exposure_matched_spy_t": -0.488019,
+    "sessions": 1931,
+    "sharpe": 0.584862,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "trend_momentum",
+   "run": "?, point_in_time",
+   "trials_for_rule": 25,
+   "why": null
+  },
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": false,
+    "p_value": 0.164418,
+    "percentile": 83.6,
+    "runs": 2000
+   },
+   "label": "rule|1x",
+   "neighbours": [
+    {
+     "alpha": 0.012037,
+     "alpha_t": 0.296606,
+     "beta": 0.506053,
+     "cagr": 0.080943,
+     "label": "neighbour|depth2",
+     "max_drawdown": 0.17373,
+     "mean_exposure": 0.820244,
+     "neighbour": "depth2"
+    },
+    {
+     "alpha": 0.041378,
+     "alpha_t": 1.051399,
+     "beta": 0.509223,
+     "cagr": 0.113947,
+     "label": "neighbour|lr10",
+     "max_drawdown": 0.158319,
+     "mean_exposure": 0.81887,
+     "neighbour": "lr10"
+    },
+    {
+     "alpha": 0.025503,
+     "alpha_t": 0.641703,
+     "beta": 0.494398,
+     "cagr": 0.094322,
+     "label": "neighbour|noscore",
+     "max_drawdown": 0.166518,
+     "mean_exposure": 0.818115,
+     "neighbour": "noscore"
+    },
+    {
+     "alpha": 0.027806,
+     "alpha_t": 0.696556,
+     "beta": 0.491934,
+     "cagr": 0.096196,
+     "label": "neighbour|refit6m",
+     "max_drawdown": 0.147798,
+     "mean_exposure": 0.817137,
+     "neighbour": "refit6m"
+    },
+    {
+     "alpha": 0.013371,
+     "alpha_t": 0.341993,
+     "beta": 0.486606,
+     "cagr": 0.07986,
+     "label": "neighbour|ridge",
+     "max_drawdown": 0.161943,
+     "mean_exposure": 0.813035,
+     "neighbour": "ridge"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.032846,
+    "alpha_t": 0.826601,
+    "beta": 0.500541,
+    "cagr": 0.103165,
+    "costs_a_year": 0.00232,
+    "exposure_matched_spy_cagr": 0.110791,
+    "idle_cash_in_bills": {
+     "alpha": 0.025508,
+     "alpha_t": 0.646625,
+     "bills_a_year": 0.023208,
+     "cagr": 0.107724,
+     "sharpe_above_bills": 0.622646
+    },
+    "max_drawdown": 0.148506,
+    "mean_exposure": 0.819663,
+    "return_above_exposure_matched_spy": -0.004559,
+    "return_above_exposure_matched_spy_t": -0.145419,
+    "sessions": 1931,
+    "sharpe": 0.753178,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "trend_momentum_gbm",
+   "run": "?, point_in_time",
+   "trials_for_rule": 6,
+   "why": null
+  }
+ ],
+ "code_sha": "525436e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "report": "trend_momentum_gbm_balanced_pit_20261124T185751.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-24T18:57:51+00:00",
+ "set": "?",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

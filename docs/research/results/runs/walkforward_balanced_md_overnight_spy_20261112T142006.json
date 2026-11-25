@@ -1,0 +1,57 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "overnight_spy|default",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.002458,
+    "alpha_t": -0.78353,
+    "beta": 0.023417,
+    "cagr": 0.001038,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.013692,
+    "idle_cash_in_bills": {
+     "alpha": -0.004854,
+     "alpha_t": -1.557128,
+     "bills_a_year": 0.023208,
+     "cagr": 0.021276,
+     "sharpe_above_bills": -0.184727
+    },
+    "max_drawdown": 0.037762,
+    "mean_exposure": 0.119377,
+    "return_above_exposure_matched_spy": -0.01265,
+    "return_above_exposure_matched_spy_t": -2.617025,
+    "sessions": 1931,
+    "sharpe": 0.109157,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "overnight_spy",
+   "run": "multiday, today",
+   "trials_for_rule": 346,
+   "why": null
+  }
+ ],
+ "code_sha": "45f0dc6",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "walkforward_balanced_md_overnight_spy_20261112T142006.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-12T14:20:06+00:00",
+ "set": "multiday",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

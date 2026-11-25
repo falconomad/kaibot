@@ -1,0 +1,82 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "orb_stocks_in_play",
+   "neighbours": [
+    {
+     "alpha": -0.156477,
+     "alpha_t": -17.490212,
+     "beta": 0.053588,
+     "cagr": -0.138274,
+     "label": "orb_stocks_in_play~stop20",
+     "max_drawdown": 0.680431,
+     "mean_exposure": null,
+     "neighbour": "stop20"
+    },
+    {
+     "alpha": -0.199002,
+     "alpha_t": -26.579834,
+     "beta": 0.014824,
+     "cagr": -0.178836,
+     "label": "orb_stocks_in_play~top10",
+     "max_drawdown": 0.779243,
+     "mean_exposure": null,
+     "neighbour": "top10"
+    },
+    {
+     "alpha": -0.151422,
+     "alpha_t": -35.544371,
+     "beta": 0.020639,
+     "cagr": -0.137933,
+     "label": "orb_stocks_in_play~top40",
+     "max_drawdown": 0.679406,
+     "mean_exposure": null,
+     "neighbour": "top40"
+    }
+   ],
+   "research_window": {
+    "alpha": -0.180183,
+    "alpha_t": -33.502694,
+    "beta": 0.017879,
+    "cagr": -0.162772,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.743799,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": -11.453916,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "orb_stocks_in_play",
+   "run": "oneshots, today",
+   "trials_for_rule": 4,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_orb_stocks_in_play_20261113T085035.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:50:35.137990+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

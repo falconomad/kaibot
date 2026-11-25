@@ -1,0 +1,51 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|v2idx",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.004406,
+    "alpha_t": 3.253181,
+    "beta": 0.006272,
+    "cagr": 0.00536,
+    "costs_a_year": 0.000947,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.004536,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": 1.18942,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy_cost_rerun, today, v2idx",
+   "trials_for_rule": 13,
+   "why": null
+  }
+ ],
+ "code_sha": "0743ef0",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2024-12-31"
+ ],
+ "report": "spy_cost_rerun_balanced_20261123T125724.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-23T12:57:24+00:00",
+ "set": "spy_cost_rerun",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

@@ -2,11 +2,11 @@
  "rule": "market_alarm_study",
  "preregistered": true,
  "family": "market_event_alarm",
- "generated_at": "2026-11-23T12:27:50+00:00",
+ "generated_at": "2026-11-24T20:58:16+00:00",
  "trials": {
-  "rule": 3,
-  "registry": 10847,
-  "family": 3
+  "rule": 7,
+  "registry": 10876,
+  "family": 7
  },
  "tbill": true,
  "reports_of_this_rule": [],

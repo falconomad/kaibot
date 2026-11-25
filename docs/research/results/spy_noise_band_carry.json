@@ -2,11 +2,11 @@
  "rule": "spy_noise_band_carry",
  "preregistered": false,
  "family": "spy_intraday_momentum",
- "generated_at": "2026-11-23T12:27:51+00:00",
+ "generated_at": "2026-11-24T20:58:16+00:00",
  "trials": {
   "rule": 2,
-  "registry": 10847,
-  "family": 14
+  "registry": 10876,
+  "family": 15
  },
  "tbill": true,
  "reports_of_this_rule": [

@@ -2,10 +2,10 @@
  "rule": "pullback_uptrend",
  "preregistered": true,
  "family": "short_term_reversal",
- "generated_at": "2026-11-23T12:27:50+00:00",
+ "generated_at": "2026-11-24T20:58:16+00:00",
  "trials": {
   "rule": 8,
-  "registry": 10847,
+  "registry": 10876,
   "family": 18
  },
  "tbill": true,

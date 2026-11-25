@@ -1,0 +1,51 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "mornings|default",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.081796,
+    "alpha_t": -5.080896,
+    "beta": 0.069516,
+    "cagr": -0.06987,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.43716,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": -1.485668,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "mornings",
+   "run": "walkforward, today",
+   "trials_for_rule": 0,
+   "why": null
+  }
+ ],
+ "code_sha": "23e8faf",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "walkforward_balanced_wf_A_exp-mornings_20261112T113047.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-12T11:30:47+00:00",
+ "set": "walkforward",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

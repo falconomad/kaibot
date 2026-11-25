@@ -1,0 +1,144 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.872255,
+    "percentile": 12.8,
+    "runs": 500
+   },
+   "label": "weekly_fall_rebound_20|base|1x|cap100",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.043113,
+    "alpha_t": -0.628256,
+    "beta": 0.977908,
+    "cagr": 0.072922,
+    "costs_a_year": 0.004459,
+    "exposure_matched_spy_cagr": 0.09317,
+    "idle_cash_in_bills": {
+     "alpha": -0.032727,
+     "alpha_t": -0.479514,
+     "bills_a_year": 0.023208,
+     "cagr": 0.084686,
+     "sharpe_above_bills": 0.354023
+    },
+    "max_drawdown": 0.55121,
+    "mean_exposure": 0.536142,
+    "return_above_exposure_matched_spy": 0.005727,
+    "return_above_exposure_matched_spy_t": 0.087536,
+    "sessions": 1931,
+    "sharpe": 0.39994,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "weekly_fall_rebound",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 10,
+   "why": null
+  },
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.055888,
+    "percentile": 94.6,
+    "runs": 500
+   },
+   "label": "weekly_fall_rebound|base|1x|cap100",
+   "neighbours": [
+    {
+     "alpha": -0.02674,
+     "alpha_t": -0.348595,
+     "beta": 1.069989,
+     "cagr": 0.097999,
+     "label": "weekly_fall_rebound~fall10|base|1x|cap100",
+     "max_drawdown": 0.585255,
+     "mean_exposure": 0.534103,
+     "neighbour": "fall10"
+    },
+    {
+     "alpha": -0.005842,
+     "alpha_t": -0.077473,
+     "beta": 0.507873,
+     "cagr": 0.051172,
+     "label": "weekly_fall_rebound~fall20|base|1x|cap100",
+     "max_drawdown": 0.505456,
+     "mean_exposure": 0.086842,
+     "neighbour": "fall20"
+    },
+    {
+     "alpha": -0.018237,
+     "alpha_t": -0.598091,
+     "beta": 0.14475,
+     "cagr": -0.000883,
+     "label": "weekly_fall_rebound~market_filter|base|1x|cap100",
+     "max_drawdown": 0.302043,
+     "mean_exposure": 0.125394,
+     "neighbour": "market_filter"
+    },
+    {
+     "alpha": -0.01746,
+     "alpha_t": -0.247135,
+     "beta": 0.633243,
+     "cagr": 0.056419,
+     "label": "weekly_fall_rebound~slots5|base|1x|cap100",
+     "max_drawdown": 0.451601,
+     "mean_exposure": 0.241567,
+     "neighbour": "slots5"
+    }
+   ],
+   "research_window": {
+    "alpha": -0.008633,
+    "alpha_t": -0.122409,
+    "beta": 0.693137,
+    "cagr": 0.074126,
+    "costs_a_year": 0.007267,
+    "exposure_matched_spy_cagr": 0.047058,
+    "idle_cash_in_bills": {
+     "alpha": 0.002935,
+     "alpha_t": 0.041874,
+     "bills_a_year": 0.023208,
+     "cagr": 0.094341,
+     "sharpe_above_bills": 0.410845
+    },
+    "max_drawdown": 0.476252,
+    "mean_exposure": 0.206892,
+    "return_above_exposure_matched_spy": 0.043981,
+    "return_above_exposure_matched_spy_t": 0.717041,
+    "sessions": 1931,
+    "sharpe": 0.430091,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "weekly_fall_rebound",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 10,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_weekly_fall_rebound_20261113T085648.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:56:48.569377+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

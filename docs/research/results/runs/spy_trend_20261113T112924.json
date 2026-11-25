@@ -1,0 +1,306 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "random_timing",
+    "matched": true,
+    "p_value": 0.884232,
+    "percentile": 11.6,
+    "runs": 500
+   },
+   "label": "spy_trend_filter|v1|base|1x",
+   "neighbours": [
+    {
+     "alpha": 0.063201,
+     "alpha_t": 1.801831,
+     "beta": 0.444283,
+     "cagr": 0.130795,
+     "label": "spy_trend_filter~band1|v1|base|1x",
+     "max_drawdown": 0.155939,
+     "mean_exposure": 0.794925,
+     "neighbour": "band1"
+    },
+    {
+     "alpha": 0.06318,
+     "alpha_t": 1.801214,
+     "beta": 0.444278,
+     "cagr": 0.130771,
+     "label": "spy_trend_filter~band1|v2|base|1x",
+     "max_drawdown": 0.155969,
+     "mean_exposure": 0.794925,
+     "neighbour": "band1"
+    },
+    {
+     "alpha": 0.044279,
+     "alpha_t": 1.248017,
+     "beta": 0.456321,
+     "cagr": 0.1114,
+     "label": "spy_trend_filter~sma150d|v1|base|1x",
+     "max_drawdown": 0.236346,
+     "mean_exposure": 0.794925,
+     "neighbour": "sma150d"
+    },
+    {
+     "alpha": 0.044244,
+     "alpha_t": 1.247033,
+     "beta": 0.456314,
+     "cagr": 0.111361,
+     "label": "spy_trend_filter~sma150d|v2|base|1x",
+     "max_drawdown": 0.236422,
+     "mean_exposure": 0.794925,
+     "neighbour": "sma150d"
+    },
+    {
+     "alpha": 0.029478,
+     "alpha_t": 0.821835,
+     "beta": 0.470901,
+     "cagr": 0.097225,
+     "label": "spy_trend_filter~sma200d|v1|base|1x",
+     "max_drawdown": 0.275071,
+     "mean_exposure": 0.8058,
+     "neighbour": "sma200d"
+    },
+    {
+     "alpha": 0.029444,
+     "alpha_t": 0.820851,
+     "beta": 0.470895,
+     "cagr": 0.097186,
+     "label": "spy_trend_filter~sma200d|v2|base|1x",
+     "max_drawdown": 0.275145,
+     "mean_exposure": 0.8058,
+     "neighbour": "sma200d"
+    },
+    {
+     "alpha": 0.028053,
+     "alpha_t": 0.770763,
+     "beta": 0.479122,
+     "cagr": 0.096877,
+     "label": "spy_trend_filter~sma250d|v1|base|1x",
+     "max_drawdown": 0.221986,
+     "mean_exposure": 0.803729,
+     "neighbour": "sma250d"
+    },
+    {
+     "alpha": 0.028018,
+     "alpha_t": 0.769789,
+     "beta": 0.479116,
+     "cagr": 0.096838,
+     "label": "spy_trend_filter~sma250d|v2|base|1x",
+     "max_drawdown": 0.222068,
+     "mean_exposure": 0.803729,
+     "neighbour": "sma250d"
+    },
+    {
+     "alpha": 0.038949,
+     "alpha_t": 1.087457,
+     "beta": 0.432241,
+     "cagr": 0.101919,
+     "label": "spy_trend_filter~weekly|v1|base|1x",
+     "max_drawdown": 0.191986,
+     "mean_exposure": 0.793889,
+     "neighbour": "weekly"
+    },
+    {
+     "alpha": 0.038873,
+     "alpha_t": 1.085254,
+     "beta": 0.432237,
+     "cagr": 0.101835,
+     "label": "spy_trend_filter~weekly|v2|base|1x",
+     "max_drawdown": 0.19216,
+     "mean_exposure": 0.793889,
+     "neighbour": "weekly"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.012452,
+    "alpha_t": 0.3404,
+    "beta": 0.496386,
+    "cagr": 0.082413,
+    "costs_a_year": 0.000374,
+    "exposure_matched_spy_cagr": 0.08355,
+    "idle_cash_in_bills": {
+     "alpha": 0.005068,
+     "alpha_t": 0.142561,
+     "bills_a_year": 0.023208,
+     "cagr": 0.086958,
+     "sharpe_above_bills": 0.532115
+    },
+    "max_drawdown": 0.27507,
+    "mean_exposure": 0.81564,
+    "return_above_exposure_matched_spy": -0.001054,
+    "return_above_exposure_matched_spy_t": -1.544455,
+    "sessions": 1931,
+    "sharpe": 0.677122,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_trend_filter",
+   "run": "spy_trend, point_in_time, costs v1",
+   "trials_for_rule": 6,
+   "why": null
+  },
+  {
+   "control_as_stored": {
+    "kind": "random_timing",
+    "matched": true,
+    "p_value": 0.884232,
+    "percentile": 11.6,
+    "runs": 500
+   },
+   "label": "spy_trend_filter|v2|base|1x",
+   "neighbours": [
+    {
+     "alpha": 0.063201,
+     "alpha_t": 1.801831,
+     "beta": 0.444283,
+     "cagr": 0.130795,
+     "label": "spy_trend_filter~band1|v1|base|1x",
+     "max_drawdown": 0.155939,
+     "mean_exposure": 0.794925,
+     "neighbour": "band1"
+    },
+    {
+     "alpha": 0.06318,
+     "alpha_t": 1.801214,
+     "beta": 0.444278,
+     "cagr": 0.130771,
+     "label": "spy_trend_filter~band1|v2|base|1x",
+     "max_drawdown": 0.155969,
+     "mean_exposure": 0.794925,
+     "neighbour": "band1"
+    },
+    {
+     "alpha": 0.044279,
+     "alpha_t": 1.248017,
+     "beta": 0.456321,
+     "cagr": 0.1114,
+     "label": "spy_trend_filter~sma150d|v1|base|1x",
+     "max_drawdown": 0.236346,
+     "mean_exposure": 0.794925,
+     "neighbour": "sma150d"
+    },
+    {
+     "alpha": 0.044244,
+     "alpha_t": 1.247033,
+     "beta": 0.456314,
+     "cagr": 0.111361,
+     "label": "spy_trend_filter~sma150d|v2|base|1x",
+     "max_drawdown": 0.236422,
+     "mean_exposure": 0.794925,
+     "neighbour": "sma150d"
+    },
+    {
+     "alpha": 0.029478,
+     "alpha_t": 0.821835,
+     "beta": 0.470901,
+     "cagr": 0.097225,
+     "label": "spy_trend_filter~sma200d|v1|base|1x",
+     "max_drawdown": 0.275071,
+     "mean_exposure": 0.8058,
+     "neighbour": "sma200d"
+    },
+    {
+     "alpha": 0.029444,
+     "alpha_t": 0.820851,
+     "beta": 0.470895,
+     "cagr": 0.097186,
+     "label": "spy_trend_filter~sma200d|v2|base|1x",
+     "max_drawdown": 0.275145,
+     "mean_exposure": 0.8058,
+     "neighbour": "sma200d"
+    },
+    {
+     "alpha": 0.028053,
+     "alpha_t": 0.770763,
+     "beta": 0.479122,
+     "cagr": 0.096877,
+     "label": "spy_trend_filter~sma250d|v1|base|1x",
+     "max_drawdown": 0.221986,
+     "mean_exposure": 0.803729,
+     "neighbour": "sma250d"
+    },
+    {
+     "alpha": 0.028018,
+     "alpha_t": 0.769789,
+     "beta": 0.479116,
+     "cagr": 0.096838,
+     "label": "spy_trend_filter~sma250d|v2|base|1x",
+     "max_drawdown": 0.222068,
+     "mean_exposure": 0.803729,
+     "neighbour": "sma250d"
+    },
+    {
+     "alpha": 0.038949,
+     "alpha_t": 1.087457,
+     "beta": 0.432241,
+     "cagr": 0.101919,
+     "label": "spy_trend_filter~weekly|v1|base|1x",
+     "max_drawdown": 0.191986,
+     "mean_exposure": 0.793889,
+     "neighbour": "weekly"
+    },
+    {
+     "alpha": 0.038873,
+     "alpha_t": 1.085254,
+     "beta": 0.432237,
+     "cagr": 0.101835,
+     "label": "spy_trend_filter~weekly|v2|base|1x",
+     "max_drawdown": 0.19216,
+     "mean_exposure": 0.793889,
+     "neighbour": "weekly"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.012413,
+    "alpha_t": 0.339319,
+    "beta": 0.496379,
+    "cagr": 0.082369,
+    "costs_a_year": 0.000415,
+    "exposure_matched_spy_cagr": 0.08355,
+    "idle_cash_in_bills": {
+     "alpha": 0.005029,
+     "alpha_t": 0.14145,
+     "bills_a_year": 0.023208,
+     "cagr": 0.086914,
+     "sharpe_above_bills": 0.531808
+    },
+    "max_drawdown": 0.275145,
+    "mean_exposure": 0.81564,
+    "return_above_exposure_matched_spy": -0.001095,
+    "return_above_exposure_matched_spy_t": -1.600749,
+    "sessions": 1931,
+    "sharpe": 0.676815,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_trend_filter",
+   "run": "spy_trend, point_in_time, costs v2",
+   "trials_for_rule": 6,
+   "why": null
+  }
+ ],
+ "code_sha": "4168cb9",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 as the report stored it, cost model v1: verdict **fail**; marks 1: pass; 2: fail; 3: fail; 4: fail; 5: fail; 6: pass.",
+  "- Gate v2 as the report stored it, cost model v2: verdict **fail**; marks 1: pass; 2: fail; 3: fail; 4: fail; 5: fail; 6: pass."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "spy_trend_20261113T112924.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T11:29:24+00:00",
+ "set": "spy_trend",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

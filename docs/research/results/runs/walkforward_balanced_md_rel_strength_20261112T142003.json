@@ -1,0 +1,57 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "rel_strength|default",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.030165,
+    "alpha_t": 1.640658,
+    "beta": 0.111823,
+    "cagr": 0.046766,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.027675,
+    "idle_cash_in_bills": {
+     "alpha": 0.028916,
+     "alpha_t": 1.584529,
+     "bills_a_year": 0.023208,
+     "cagr": 0.066984,
+     "sharpe_above_bills": 0.822422
+    },
+    "max_drawdown": 0.077494,
+    "mean_exposure": 0.167872,
+    "return_above_exposure_matched_spy": 0.01948,
+    "return_above_exposure_matched_spy_t": 1.251299,
+    "sessions": 1931,
+    "sharpe": 0.894821,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "rel_strength",
+   "run": "multiday, today",
+   "trials_for_rule": 691,
+   "why": null
+  }
+ ],
+ "code_sha": "45f0dc6",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "walkforward_balanced_md_rel_strength_20261112T142003.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-12T14:20:03+00:00",
+ "set": "multiday",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

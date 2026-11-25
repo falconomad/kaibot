@@ -1,11 +1,11 @@
 # spy_noise_band: results of every run on record
 
-Written 2026-11-23T12:27:51+00:00 by `scripts/export_results.py` from the reports on the research Mac. No rule was re-run. Pre-registration: `docs/prereg/spy_noise_band.md`. Family in gate v3: spy_intraday_momentum.
+Written 2026-11-24T20:58:16+00:00 by `scripts/export_results.py` from the reports on the research Mac. No rule was re-run. Pre-registration: `docs/prereg/spy_noise_band.md`. Family in gate v3: spy_intraday_momentum.
 
-- Trials logged: 12 configurations for this rule, 14 for its family, 10,847 in the whole registry.
+- Trials logged: 13 configurations for this rule, 15 for its family, 10,876 in the whole registry.
 - The research window is 2017-05-01 to 2024-12-31. A run's own window may go on into what is now the hold-out; those runs were made before it was frozen.
 - Gate v3 marks for these runs: [`gate_v3_rescore.md`](gate_v3_rescore.md).
-- Pages the run scripts wrote themselves, copied unchanged: [`experiments_spy_engine.md`](as_reported/experiments_spy_engine.md), [`experiments_spy_summary.md`](as_reported/experiments_spy_summary.md).
+- Pages the run scripts wrote themselves, copied unchanged: [`experiments_spy_cost_rerun.md`](as_reported/experiments_spy_cost_rerun.md), [`experiments_spy_engine.md`](as_reported/experiments_spy_engine.md), [`experiments_spy_summary.md`](as_reported/experiments_spy_summary.md).
 
 ## spy_engine, point_in_time, 0.5
 
@@ -73,6 +73,21 @@ Research window. "Against the frozen rule" is the neighbour's CAGR minus the fro
 | lb30 | 30-day lookback (needs 26 of 30) | -0.01% | -0.08 points | 1.33% | -0.03 | n/a | n/a (n/a) | -0.10% (-0.68) | 0.01 |
 | check15 | checks every 15 minutes from 10:00 to 15:45 | -0.02% | -0.09 points | 1.94% | -0.05 | n/a | n/a (n/a) | -0.10% (-0.68) | 0.01 |
 | exit1555 | the close exit becomes a sale at the open of the 15:55 bar (checks unchanged) | 0.09% | +0.02 points | 0.92% | 0.20 | n/a | n/a (n/a) | 0.01% (0.07) | 0.01 |
+
+## spy_cost_rerun, today, v2idx
+
+Report `spy_cost_rerun_balanced_20261123T125724.json`, run 2026-11-23T12:57:24+00:00 at code `0743ef0`. Account `spy_noise_band|v2idx`. Engine: research_harness. Universe: today. Cost model: v2idx. SPY series: spy_total_return.
+
+Status as the report states it: cost re-run of the configuration of issue #202; not a verdict
+
+| Window | CAGR | Max drawdown | Sharpe | Mean exposure | SPY: CAGR / drawdown | SPY at the rule's exposure: CAGR / drawdown | Return above it a year (t) | Alpha a year (t) | Beta | Costs a year |
+|---|---|---|---|---|---|---|---|---|---|---|
+| As run: 2017-05-01 to 2024-12-31 | 0.54% | 0.45% | 1.19 | n/a | 14.39% / 33.78% | n/a / n/a | n/a (n/a) | 0.44% (3.25) | 0.01 | 0.09% |
+| Research window: 2017-05-01 to 2024-12-31 | 0.54% | 0.45% | 1.19 | n/a | 14.39% / 33.78% | n/a / n/a | n/a (n/a) | 0.44% (3.25) | 0.01 | 0.09% |
+
+- Idle cash: bills paid 2.32% a year. No exposure series, so interest cannot be added; the simulated curve's Sharpe above bills is -3.64.
+- Matched random control: none in this report.
+- Gate v2 marks: none stored in this report.
 
 ## spy, point_in_time, 0.5 bp
 

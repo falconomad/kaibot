@@ -1,0 +1,114 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.213573,
+    "percentile": 78.8,
+    "runs": 500
+   },
+   "label": "trend_momentum|base|1x|cap100|hold",
+   "neighbours": [
+    {
+     "alpha": -0.000543,
+     "alpha_t": -0.012962,
+     "beta": 0.542793,
+     "cagr": 0.071911,
+     "label": "trend_momentum~exit30|base|1x|cap100|hold",
+     "max_drawdown": 0.203794,
+     "mean_exposure": 0.82003,
+     "neighbour": "exit30"
+    },
+    {
+     "alpha": -0.025945,
+     "alpha_t": -0.680606,
+     "beta": 0.746605,
+     "cagr": 0.073754,
+     "label": "trend_momentum~nofilter|base|1x|cap100|hold",
+     "max_drawdown": 0.248922,
+     "mean_exposure": 0.942313,
+     "neighbour": "nofilter"
+    },
+    {
+     "alpha": -0.015763,
+     "alpha_t": -0.366758,
+     "beta": 0.531936,
+     "cagr": 0.053737,
+     "label": "trend_momentum~reg125|base|1x|cap100|hold",
+     "max_drawdown": 0.246568,
+     "mean_exposure": 0.817202,
+     "neighbour": "reg125"
+    },
+    {
+     "alpha": -0.040705,
+     "alpha_t": -1.012205,
+     "beta": 0.520367,
+     "cagr": 0.027064,
+     "label": "trend_momentum~reg60|base|1x|cap100|hold",
+     "max_drawdown": 0.240481,
+     "mean_exposure": 0.805923,
+     "neighbour": "reg60"
+    },
+    {
+     "alpha": 0.003452,
+     "alpha_t": 0.073986,
+     "beta": 0.56453,
+     "cagr": 0.07764,
+     "label": "trend_momentum~risk15|base|1x|cap100|hold",
+     "max_drawdown": 0.188685,
+     "mean_exposure": 0.827963,
+     "neighbour": "risk15"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.009828,
+    "alpha_t": 0.232715,
+    "beta": 0.539635,
+    "cagr": 0.082757,
+    "costs_a_year": 0.001969,
+    "exposure_matched_spy_cagr": 0.10616,
+    "idle_cash_in_bills": {
+     "alpha": 0.003371,
+     "alpha_t": 0.080155,
+     "bills_a_year": 0.023208,
+     "cagr": 0.087218,
+     "sharpe_above_bills": 0.469662
+    },
+    "max_drawdown": 0.174613,
+    "mean_exposure": 0.817125,
+    "return_above_exposure_matched_spy": -0.017565,
+    "return_above_exposure_matched_spy_t": -0.505658,
+    "sessions": 1931,
+    "sharpe": 0.591407,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "trend_momentum",
+   "run": "core, point_in_time, costs v1",
+   "trials_for_rule": 25,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": "v1",
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks as the report stored them: 1: pass; 2: fail; 3: fail; 4: fail; 5: fail; 6: pass."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "core_balanced_trend_momentum_pit_20261113T084508.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:45:08+00:00",
+ "set": "core",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

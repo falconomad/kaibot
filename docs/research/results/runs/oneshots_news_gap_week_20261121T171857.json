@@ -1,0 +1,104 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.117764,
+    "percentile": 88.4,
+    "runs": 500
+   },
+   "label": "news_gap_week|base|1x|cap100",
+   "neighbours": [
+    {
+     "alpha": 0.006006,
+     "alpha_t": 0.250757,
+     "beta": 0.150918,
+     "cagr": 0.026788,
+     "label": "news_gap_week~hold10|base|1x|cap100",
+     "max_drawdown": 0.13076,
+     "mean_exposure": 0.207583,
+     "neighbour": "hold10"
+    },
+    {
+     "alpha": -0.017945,
+     "alpha_t": -1.746976,
+     "beta": 0.02799,
+     "cagr": -0.014022,
+     "label": "news_gap_week~info8k|base|1x|cap100",
+     "max_drawdown": 0.123988,
+     "mean_exposure": 0.03394,
+     "neighbour": "info8k"
+    },
+    {
+     "alpha": 0.006325,
+     "alpha_t": 0.447329,
+     "beta": 0.051449,
+     "cagr": 0.013307,
+     "label": "news_gap_week~move2|base|1x|cap100",
+     "max_drawdown": 0.099546,
+     "mean_exposure": 0.072315,
+     "neighbour": "move2"
+    },
+    {
+     "alpha": -0.06877,
+     "alpha_t": -1.22913,
+     "beta": 0.460298,
+     "cagr": -0.010416,
+     "label": "news_gap_week~relvol2|base|1x|cap100",
+     "max_drawdown": 0.526578,
+     "mean_exposure": 0.355755,
+     "neighbour": "relvol2"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.001889,
+    "alpha_t": 0.108322,
+    "beta": 0.073534,
+    "cagr": 0.011838,
+    "costs_a_year": 0.002277,
+    "exposure_matched_spy_cagr": 0.020521,
+    "idle_cash_in_bills": {
+     "alpha": 0.000914,
+     "alpha_t": 0.052764,
+     "bills_a_year": 0.023208,
+     "cagr": 0.03256,
+     "sharpe_above_bills": 0.206882
+    },
+    "max_drawdown": 0.139394,
+    "mean_exposure": 0.106643,
+    "return_above_exposure_matched_spy": -0.007672,
+    "return_above_exposure_matched_spy_t": -0.519382,
+    "sessions": 1931,
+    "sharpe": 0.260107,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "news_gap_week",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 6,
+   "why": null
+  }
+ ],
+ "code_sha": "8b7afd0",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_news_gap_week_20261121T171857.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-21T17:18:57.769089+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

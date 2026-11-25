@@ -1,0 +1,63 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.072464,
+    "percentile": 92.8,
+    "runs": 2000
+   },
+   "label": "trend_momentum|base|1x|cap100|hold",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.014537,
+    "alpha_t": 0.343949,
+    "beta": 0.54074,
+    "cagr": 0.088003,
+    "costs_a_year": 0.001994,
+    "exposure_matched_spy_cagr": 0.104621,
+    "idle_cash_in_bills": {
+     "alpha": 0.008116,
+     "alpha_t": 0.192808,
+     "bills_a_year": 0.023208,
+     "cagr": 0.092497,
+     "sharpe_above_bills": 0.500377
+    },
+    "max_drawdown": 0.169059,
+    "mean_exposure": 0.816783,
+    "return_above_exposure_matched_spy": -0.011353,
+    "return_above_exposure_matched_spy_t": -0.324403,
+    "sessions": 1931,
+    "sharpe": 0.621845,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "trend_momentum",
+   "run": "engine_core, point_in_time",
+   "trials_for_rule": 25,
+   "why": null
+  }
+ ],
+ "code_sha": "0743ef0",
+ "cost_model": null,
+ "engine": "simbroker",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks as the report stored them: 1: pass; 2: fail; 3: pass; 4: fail; 5: fail; 6: fail."
+ ],
+ "own_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "report": "engine_balanced_trend_momentum_pit_20261123T130025.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-23T13:00:25+00:00",
+ "set": "engine_core",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

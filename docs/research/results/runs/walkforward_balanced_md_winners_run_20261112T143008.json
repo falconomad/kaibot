@@ -1,0 +1,57 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "winners_run|default",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.154618,
+    "alpha_t": -7.018611,
+    "beta": 0.147736,
+    "cagr": -0.125856,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.013392,
+    "idle_cash_in_bills": {
+     "alpha": -0.153894,
+     "alpha_t": -7.049258,
+     "bills_a_year": 0.023208,
+     "cagr": -0.107933,
+     "sharpe_above_bills": -2.023722
+    },
+    "max_drawdown": 0.652623,
+    "mean_exposure": 0.107529,
+    "return_above_exposure_matched_spy": -0.145716,
+    "return_above_exposure_matched_spy_t": -6.891954,
+    "sessions": 1931,
+    "sharpe": -1.984064,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "winners_run",
+   "run": "multiday, today",
+   "trials_for_rule": 346,
+   "why": null
+  }
+ ],
+ "code_sha": "45f0dc6",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "walkforward_balanced_md_winners_run_20261112T143008.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-12T14:30:08+00:00",
+ "set": "multiday",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

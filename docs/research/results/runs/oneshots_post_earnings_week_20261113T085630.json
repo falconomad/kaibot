@@ -1,0 +1,104 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.229541,
+    "percentile": 77.2,
+    "runs": 500
+   },
+   "label": "post_earnings_week|base|1x|cap100",
+   "neighbours": [
+    {
+     "alpha": -0.00668,
+     "alpha_t": -0.189018,
+     "beta": 0.376944,
+     "cagr": 0.044519,
+     "label": "post_earnings_week~day2|base|1x|cap100",
+     "max_drawdown": 0.235158,
+     "mean_exposure": 0.364687,
+     "neighbour": "day2"
+    },
+    {
+     "alpha": -0.026236,
+     "alpha_t": -0.724181,
+     "beta": 0.549848,
+     "cagr": 0.048033,
+     "label": "post_earnings_week~hold10|base|1x|cap100",
+     "max_drawdown": 0.285314,
+     "mean_exposure": 0.520357,
+     "neighbour": "hold10"
+    },
+    {
+     "alpha": 0.001098,
+     "alpha_t": 0.045545,
+     "beta": 0.246122,
+     "cagr": 0.035827,
+     "label": "post_earnings_week~slots20|base|1x|cap100",
+     "max_drawdown": 0.15431,
+     "mean_exposure": 0.233812,
+     "neighbour": "slots20"
+    },
+    {
+     "alpha": -0.000907,
+     "alpha_t": -0.031401,
+     "beta": 0.247187,
+     "cagr": 0.033196,
+     "label": "post_earnings_week~top10pct|base|1x|cap100",
+     "max_drawdown": 0.136164,
+     "mean_exposure": 0.211508,
+     "neighbour": "top10pct"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.002682,
+    "alpha_t": 0.073954,
+    "beta": 0.38229,
+    "cagr": 0.055149,
+    "costs_a_year": 0.008211,
+    "exposure_matched_spy_cagr": 0.059902,
+    "idle_cash_in_bills": {
+     "alpha": 0.003154,
+     "alpha_t": 0.088027,
+     "bills_a_year": 0.023208,
+     "cagr": 0.070722,
+     "sharpe_above_bills": 0.446298
+    },
+    "max_drawdown": 0.244147,
+    "mean_exposure": 0.364244,
+    "return_above_exposure_matched_spy": -0.001755,
+    "return_above_exposure_matched_spy_t": -0.074213,
+    "sessions": 1931,
+    "sharpe": 0.517109,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "post_earnings_week",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 7,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_post_earnings_week_20261113T085630.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:56:30.479497+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

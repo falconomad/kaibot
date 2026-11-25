@@ -1,0 +1,114 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.540918,
+    "percentile": 46.0,
+    "runs": 500
+   },
+   "label": "pullback_uptrend|base|1x|cap100",
+   "neighbours": [
+    {
+     "alpha": 0.034567,
+     "alpha_t": 1.039725,
+     "beta": 0.38382,
+     "cagr": 0.089757,
+     "label": "pullback_uptrend~no_sma5|base|1x|cap100",
+     "max_drawdown": 0.271389,
+     "mean_exposure": 0.530118,
+     "neighbour": "no_sma5"
+    },
+    {
+     "alpha": 0.024325,
+     "alpha_t": 0.732135,
+     "beta": 0.410258,
+     "cagr": 0.082399,
+     "label": "pullback_uptrend~rsi15|base|1x|cap100",
+     "max_drawdown": 0.294883,
+     "mean_exposure": 0.554555,
+     "neighbour": "rsi15"
+    },
+    {
+     "alpha": 0.012167,
+     "alpha_t": 0.39681,
+     "beta": 0.345304,
+     "cagr": 0.060638,
+     "label": "pullback_uptrend~rsi5|base|1x|cap100",
+     "max_drawdown": 0.295266,
+     "mean_exposure": 0.46148,
+     "neighbour": "rsi5"
+    },
+    {
+     "alpha": 0.013683,
+     "alpha_t": 0.320641,
+     "beta": 0.640557,
+     "cagr": 0.100648,
+     "label": "pullback_uptrend~slots10|base|1x|cap100",
+     "max_drawdown": 0.403499,
+     "mean_exposure": 0.79863,
+     "neighbour": "slots10"
+    },
+    {
+     "alpha": 0.039403,
+     "alpha_t": 1.210641,
+     "beta": 0.401889,
+     "cagr": 0.097839,
+     "label": "pullback_uptrend~sma150|base|1x|cap100",
+     "max_drawdown": 0.248822,
+     "mean_exposure": 0.525052,
+     "neighbour": "sma150"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.034567,
+    "alpha_t": 1.039725,
+    "beta": 0.38382,
+    "cagr": 0.089757,
+    "costs_a_year": 0.013939,
+    "exposure_matched_spy_cagr": 0.08077,
+    "idle_cash_in_bills": {
+     "alpha": 0.031024,
+     "alpha_t": 0.935222,
+     "bills_a_year": 0.023208,
+     "cagr": 0.101356,
+     "sharpe_above_bills": 0.694442
+    },
+    "max_drawdown": 0.271389,
+    "mean_exposure": 0.530118,
+    "return_above_exposure_matched_spy": 0.010811,
+    "return_above_exposure_matched_spy_t": 0.336832,
+    "sessions": 1931,
+    "sharpe": 0.801252,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "pullback_uptrend",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 8,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_pullback_uptrend_20261113T085258.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:52:58.964994+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

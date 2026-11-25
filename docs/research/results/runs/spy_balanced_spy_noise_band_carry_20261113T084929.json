@@ -1,0 +1,165 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "random_timing",
+    "matched": true,
+    "p_value": 0.007984,
+    "percentile": 99.4,
+    "runs": 500
+   },
+   "label": "spy_noise_band_carry|0.5 bp",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.039627,
+    "alpha_t": 2.411531,
+    "beta": 0.106197,
+    "cagr": 0.055562,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.028158,
+    "idle_cash_in_bills": {
+     "alpha": 0.037951,
+     "alpha_t": 2.315123,
+     "bills_a_year": 0.023208,
+     "cagr": 0.075618,
+     "sharpe_above_bills": 0.903567
+    },
+    "max_drawdown": 0.098457,
+    "mean_exposure": 0.168307,
+    "return_above_exposure_matched_spy": 0.025837,
+    "return_above_exposure_matched_spy_t": 1.149405,
+    "sessions": 1931,
+    "sharpe": 0.975652,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band_carry",
+   "run": "spy, point_in_time, 0.5 bp",
+   "trials_for_rule": 2,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band_carry|1 bp",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.028264,
+    "alpha_t": 1.719528,
+    "beta": 0.104093,
+    "cagr": 0.043305,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.028158,
+    "idle_cash_in_bills": {
+     "alpha": 0.02654,
+     "alpha_t": 1.618206,
+     "bills_a_year": 0.023208,
+     "cagr": 0.063129,
+     "sharpe_above_bills": 0.698806
+    },
+    "max_drawdown": 0.101202,
+    "mean_exposure": 0.168307,
+    "return_above_exposure_matched_spy": 0.014156,
+    "return_above_exposure_matched_spy_t": 0.62732,
+    "sessions": 1931,
+    "sharpe": 0.770934,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band_carry",
+   "run": "spy, point_in_time, 1 bp",
+   "trials_for_rule": 2,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band_carry|2 bp",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.005543,
+    "alpha_t": 0.336386,
+    "beta": 0.099889,
+    "cagr": 0.019216,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.028158,
+    "idle_cash_in_bills": {
+     "alpha": 0.003722,
+     "alpha_t": 0.226281,
+     "bills_a_year": 0.023208,
+     "cagr": 0.038584,
+     "sharpe_above_bills": 0.28932
+    },
+    "max_drawdown": 0.121214,
+    "mean_exposure": 0.168307,
+    "return_above_exposure_matched_spy": -0.009202,
+    "return_above_exposure_matched_spy_t": -0.40427,
+    "sessions": 1931,
+    "sharpe": 0.361375,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band_carry",
+   "run": "spy, point_in_time, 2 bp",
+   "trials_for_rule": 2,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band_carry|model v1",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.012002,
+    "alpha_t": 0.728711,
+    "beta": 0.101106,
+    "cagr": 0.026009,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.028158,
+    "idle_cash_in_bills": {
+     "alpha": 0.010209,
+     "alpha_t": 0.621024,
+     "bills_a_year": 0.023208,
+     "cagr": 0.045505,
+     "sharpe_above_bills": 0.405441
+    },
+    "max_drawdown": 0.115074,
+    "mean_exposure": 0.168307,
+    "return_above_exposure_matched_spy": -0.002559,
+    "return_above_exposure_matched_spy_t": -0.112643,
+    "sessions": 1931,
+    "sharpe": 0.477493,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band_carry",
+   "run": "spy, point_in_time, model v1",
+   "trials_for_rule": 2,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "spy_balanced_spy_noise_band_carry_20261113T084929.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:49:29+00:00",
+ "set": "spy",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

@@ -1,0 +1,216 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "random_timing",
+    "matched": true,
+    "p_value": 0.001996,
+    "percentile": 100.0,
+    "runs": 500
+   },
+   "label": "spy_noise_band|0.5 bp",
+   "neighbours": [
+    {
+     "alpha": 0.029203,
+     "alpha_t": 2.333595,
+     "beta": 0.060927,
+     "cagr": 0.038221,
+     "label": "spy_noise_band~check15|0.5 bp",
+     "max_drawdown": 0.073406,
+     "mean_exposure": 0.0,
+     "neighbour": "check15"
+    },
+    {
+     "alpha": 0.033569,
+     "alpha_t": 2.827811,
+     "beta": 0.06036,
+     "cagr": 0.04274,
+     "label": "spy_noise_band~exit1555|0.5 bp",
+     "max_drawdown": 0.040977,
+     "mean_exposure": 0.0,
+     "neighbour": "exit1555"
+    },
+    {
+     "alpha": 0.029694,
+     "alpha_t": 2.585348,
+     "beta": 0.056321,
+     "cagr": 0.038097,
+     "label": "spy_noise_band~lb10|0.5 bp",
+     "max_drawdown": 0.055724,
+     "mean_exposure": 0.0,
+     "neighbour": "lb10"
+    },
+    {
+     "alpha": 0.028589,
+     "alpha_t": 2.410086,
+     "beta": 0.06215,
+     "cagr": 0.037896,
+     "label": "spy_noise_band~lb20|0.5 bp",
+     "max_drawdown": 0.045961,
+     "mean_exposure": 0.0,
+     "neighbour": "lb20"
+    },
+    {
+     "alpha": 0.026623,
+     "alpha_t": 2.183575,
+     "beta": 0.068597,
+     "cagr": 0.036807,
+     "label": "spy_noise_band~lb30|0.5 bp",
+     "max_drawdown": 0.034618,
+     "mean_exposure": 0.0,
+     "neighbour": "lb30"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.030157,
+    "alpha_t": 2.574311,
+    "beta": 0.06023,
+    "cagr": 0.03917,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.0,
+    "idle_cash_in_bills": {
+     "alpha": 0.031538,
+     "alpha_t": 2.662781,
+     "bills_a_year": 0.023208,
+     "cagr": 0.063284,
+     "sharpe_above_bills": 0.950401
+    },
+    "max_drawdown": 0.048032,
+    "mean_exposure": 0.0,
+    "return_above_exposure_matched_spy": 0.039275,
+    "return_above_exposure_matched_spy_t": 3.000293,
+    "sessions": 1931,
+    "sharpe": 0.950401,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy, point_in_time, 0.5 bp",
+   "trials_for_rule": 13,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|1 bp",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.018902,
+    "alpha_t": 1.606679,
+    "beta": 0.057421,
+    "cagr": 0.027103,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.0,
+    "idle_cash_in_bills": {
+     "alpha": 0.020218,
+     "alpha_t": 1.699631,
+     "bills_a_year": 0.023208,
+     "cagr": 0.050938,
+     "sharpe_above_bills": 0.667386
+    },
+    "max_drawdown": 0.057881,
+    "mean_exposure": 0.0,
+    "return_above_exposure_matched_spy": 0.027595,
+    "return_above_exposure_matched_spy_t": 2.103598,
+    "sessions": 1931,
+    "sharpe": 0.667386,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy, point_in_time, 1 bp",
+   "trials_for_rule": 13,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|2 bp",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.003602,
+    "alpha_t": -0.302521,
+    "beta": 0.051803,
+    "cagr": 0.003388,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.0,
+    "idle_cash_in_bills": {
+     "alpha": -0.002415,
+     "alpha_t": -0.20053,
+     "bills_a_year": 0.023208,
+     "cagr": 0.026675,
+     "sharpe_above_bills": 0.102177
+    },
+    "max_drawdown": 0.080791,
+    "mean_exposure": 0.0,
+    "return_above_exposure_matched_spy": 0.00424,
+    "return_above_exposure_matched_spy_t": 0.32086,
+    "sessions": 1931,
+    "sharpe": 0.102177,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy, point_in_time, 2 bp",
+   "trials_for_rule": 13,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "spy_noise_band|model v1",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.002879,
+    "alpha_t": 0.242616,
+    "beta": 0.053293,
+    "cagr": 0.010142,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": 0.0,
+    "idle_cash_in_bills": {
+     "alpha": 0.004101,
+     "alpha_t": 0.341714,
+     "bills_a_year": 0.023208,
+     "cagr": 0.033585,
+     "sharpe_above_bills": 0.263985
+    },
+    "max_drawdown": 0.074591,
+    "mean_exposure": 0.0,
+    "return_above_exposure_matched_spy": 0.010947,
+    "return_above_exposure_matched_spy_t": 0.829656,
+    "sessions": 1931,
+    "sharpe": 0.263985,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "spy_noise_band",
+   "run": "spy, point_in_time, model v1",
+   "trials_for_rule": 13,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "spy_balanced_spy_noise_band_20261113T084923.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:49:23+00:00",
+ "set": "spy",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

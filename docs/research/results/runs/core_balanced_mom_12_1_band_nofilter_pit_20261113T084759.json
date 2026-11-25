@@ -1,0 +1,114 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": true,
+    "p_value": 0.269461,
+    "percentile": 73.2,
+    "runs": 500
+   },
+   "label": "mom_12_1_band_nofilter|base|1x|cap100|hold",
+   "neighbours": [
+    {
+     "alpha": 0.002431,
+     "alpha_t": 0.055039,
+     "beta": 0.904702,
+     "cagr": 0.125092,
+     "label": "mom_12_1_band_nofilter~exit30|base|1x|cap100|hold",
+     "max_drawdown": 0.354946,
+     "mean_exposure": 0.807451,
+     "neighbour": "exit30"
+    },
+    {
+     "alpha": 0.017432,
+     "alpha_t": 0.642037,
+     "beta": 0.463191,
+     "cagr": 0.08424,
+     "label": "mom_12_1_band_nofilter~names10|base|1x|cap100|hold",
+     "max_drawdown": 0.179463,
+     "mean_exposure": 0.400823,
+     "neighbour": "names10"
+    },
+    {
+     "alpha": -0.011319,
+     "alpha_t": -0.269032,
+     "beta": 0.901781,
+     "cagr": 0.11014,
+     "label": "mom_12_1_band_nofilter~only12|base|1x|cap100|hold",
+     "max_drawdown": 0.385705,
+     "mean_exposure": 0.791303,
+     "neighbour": "only12"
+    },
+    {
+     "alpha": -0.038951,
+     "alpha_t": -1.005631,
+     "beta": 0.794567,
+     "cagr": 0.066432,
+     "label": "mom_12_1_band_nofilter~only6|base|1x|cap100|hold",
+     "max_drawdown": 0.387033,
+     "mean_exposure": 0.799685,
+     "neighbour": "only6"
+    },
+    {
+     "alpha": 0.000129,
+     "alpha_t": 0.002531,
+     "beta": 1.053233,
+     "cagr": 0.139164,
+     "label": "mom_12_1_band_nofilter~risk15|base|1x|cap100|hold",
+     "max_drawdown": 0.396404,
+     "mean_exposure": 0.942152,
+     "neighbour": "risk15"
+    }
+   ],
+   "research_window": {
+    "alpha": -0.010244,
+    "alpha_t": -0.249019,
+    "beta": 0.888248,
+    "cagr": 0.10955,
+    "costs_a_year": 0.000574,
+    "exposure_matched_spy_cagr": 0.113698,
+    "idle_cash_in_bills": {
+     "alpha": -0.008818,
+     "alpha_t": -0.215048,
+     "bills_a_year": 0.023208,
+     "cagr": 0.113973,
+     "sharpe_above_bills": 0.524321
+    },
+    "max_drawdown": 0.343258,
+    "mean_exposure": 0.7981,
+    "return_above_exposure_matched_spy": 0.005779,
+    "return_above_exposure_matched_spy_t": 0.147297,
+    "sessions": 1931,
+    "sharpe": 0.6188,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "mom_12_1_band",
+   "run": "core, point_in_time, costs v1",
+   "trials_for_rule": 38,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": "v1",
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks as the report stored them: 1: pass; 2: fail; 3: fail; 4: fail; 5: fail; 6: pass."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "core_balanced_mom_12_1_band_nofilter_pit_20261113T084759.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:47:59+00:00",
+ "set": "core",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

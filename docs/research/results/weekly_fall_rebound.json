@@ -2,10 +2,10 @@
  "rule": "weekly_fall_rebound",
  "preregistered": true,
  "family": "short_term_reversal",
- "generated_at": "2026-11-23T12:27:51+00:00",
+ "generated_at": "2026-11-24T20:58:16+00:00",
  "trials": {
   "rule": 10,
-  "registry": 10847,
+  "registry": 10876,
   "family": 18
  },
  "tbill": true,

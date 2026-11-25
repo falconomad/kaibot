@@ -1,0 +1,172 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "ath_breakout_k20|base|1x|cap100|seed60",
+   "neighbours": [],
+   "research_window": {
+    "alpha": 0.014285,
+    "alpha_t": 0.384704,
+    "beta": 0.616298,
+    "cagr": 0.099836,
+    "costs_a_year": 0.000329,
+    "exposure_matched_spy_cagr": 0.132229,
+    "idle_cash_in_bills": {
+     "alpha": 0.006438,
+     "alpha_t": 0.174205,
+     "bills_a_year": 0.023208,
+     "cagr": 0.100878,
+     "sharpe_above_bills": 0.544184
+    },
+    "max_drawdown": 0.215408,
+    "mean_exposure": 0.949994,
+    "return_above_exposure_matched_spy": -0.028464,
+    "return_above_exposure_matched_spy_t": -0.760864,
+    "sessions": 1931,
+    "sharpe": 0.684002,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "ath_breakout",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 9,
+   "why": null
+  },
+  {
+   "control_as_stored": null,
+   "label": "ath_breakout_k5|base|1x|cap100|seed11",
+   "neighbours": [],
+   "research_window": {
+    "alpha": -0.013807,
+    "alpha_t": -0.308024,
+    "beta": 0.564974,
+    "cagr": 0.060235,
+    "costs_a_year": 0.000346,
+    "exposure_matched_spy_cagr": 0.112895,
+    "idle_cash_in_bills": {
+     "alpha": -0.019847,
+     "alpha_t": -0.442919,
+     "bills_a_year": 0.023208,
+     "cagr": 0.064391,
+     "sharpe_above_bills": 0.324954
+    },
+    "max_drawdown": 0.316981,
+    "mean_exposure": 0.809849,
+    "return_above_exposure_matched_spy": -0.04512,
+    "return_above_exposure_matched_spy_t": -0.990554,
+    "sessions": 1931,
+    "sharpe": 0.44222,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "ath_breakout",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 9,
+   "why": null
+  },
+  {
+   "control_as_stored": {
+    "kind": "exposure_matched",
+    "matched": false,
+    "p_value": 0.906188,
+    "percentile": 9.4,
+    "runs": 500
+   },
+   "label": "ath_breakout|base|1x|cap100|seed171",
+   "neighbours": [
+    {
+     "alpha": -0.047755,
+     "alpha_t": -1.243251,
+     "beta": 0.634305,
+     "cagr": 0.035643,
+     "label": "ath_breakout~atr14|base|1x|cap100|seed170",
+     "max_drawdown": 0.285024,
+     "mean_exposure": 0.948223,
+     "neighbour": "atr14"
+    },
+    {
+     "alpha": -0.014251,
+     "alpha_t": -0.337731,
+     "beta": 0.644224,
+     "cagr": 0.071053,
+     "label": "ath_breakout~price5|base|1x|cap100|seed171",
+     "max_drawdown": 0.263628,
+     "mean_exposure": 0.953183,
+     "neighbour": "price5"
+    },
+    {
+     "alpha": -0.018879,
+     "alpha_t": -0.489318,
+     "beta": 0.665956,
+     "cagr": 0.070382,
+     "label": "ath_breakout~trail12|base|1x|cap100|seed196",
+     "max_drawdown": 0.264377,
+     "mean_exposure": 0.95579,
+     "neighbour": "trail12"
+    },
+    {
+     "alpha": -0.025436,
+     "alpha_t": -0.638997,
+     "beta": 0.59067,
+     "cagr": 0.051887,
+     "label": "ath_breakout~trail8|base|1x|cap100|seed182",
+     "max_drawdown": 0.282382,
+     "mean_exposure": 0.948536,
+     "neighbour": "trail8"
+    }
+   ],
+   "research_window": {
+    "alpha": -0.014251,
+    "alpha_t": -0.337731,
+    "beta": 0.644224,
+    "cagr": 0.071053,
+    "costs_a_year": 0.000368,
+    "exposure_matched_spy_cagr": 0.133475,
+    "idle_cash_in_bills": {
+     "alpha": -0.021459,
+     "alpha_t": -0.508867,
+     "bills_a_year": 0.023208,
+     "cagr": 0.072062,
+     "sharpe_above_bills": 0.359128
+    },
+    "max_drawdown": 0.263628,
+    "mean_exposure": 0.953183,
+    "return_above_exposure_matched_spy": -0.055177,
+    "return_above_exposure_matched_spy_t": -1.258989,
+    "sessions": 1931,
+    "sharpe": 0.488044,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "ath_breakout",
+   "run": "oneshots, point_in_time",
+   "trials_for_rule": 9,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_ath_breakout_20261113T085319.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:53:19.142259+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}

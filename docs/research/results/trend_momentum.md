@@ -1,11 +1,34 @@
 # trend_momentum: results of every run on record
 
-Written 2026-11-23T12:27:51+00:00 by `scripts/export_results.py` from the reports on the research Mac. No rule was re-run. Pre-registration: `docs/prereg/trend_momentum.md`. Family in gate v3: cross_sectional_momentum.
+Written 2026-11-24T20:58:16+00:00 by `scripts/export_results.py` from the reports on the research Mac. No rule was re-run. Pre-registration: `docs/prereg/trend_momentum.md`. Family in gate v3: cross_sectional_momentum.
 
-- Trials logged: 19 configurations for this rule, 748 for its family, 10,847 in the whole registry.
+- Trials logged: 25 configurations for this rule, 760 for its family, 10,876 in the whole registry.
 - The research window is 2017-05-01 to 2024-12-31. A run's own window may go on into what is now the hold-out; those runs were made before it was frozen.
 - Gate v3 marks for these runs: [`gate_v3_rescore.md`](gate_v3_rescore.md).
 - Pages the run scripts wrote themselves, copied unchanged: [`experiments_core_pit_summary.md`](as_reported/experiments_core_pit_summary.md), [`experiments_core_summary.md`](as_reported/experiments_core_summary.md).
+
+## engine_core, point_in_time
+
+Report `engine_balanced_trend_momentum_pit_20261123T130025.json`, run 2026-11-23T13:00:25+00:00 at code `0743ef0`. Account `trend_momentum|base|1x|cap100|hold`. Engine: simbroker. Universe: point_in_time. Cost model: 1.0. SPY series: spy_total_return.
+
+Status as the report states it: engine + SimBroker (decision 15): strategy plug-ins, closing-auction orders, cost model v1 with impact as pre-registered; the ledger is the documented stand-in until #117 lands
+
+| Window | CAGR | Max drawdown | Sharpe | Mean exposure | SPY: CAGR / drawdown | SPY at the rule's exposure: CAGR / drawdown | Return above it a year (t) | Alpha a year (t) | Beta | Costs a year |
+|---|---|---|---|---|---|---|---|---|---|---|
+| As run: 2017-05-01 to 2024-12-31 | 8.80% | 16.91% | 0.62 | 82% | 14.39% / 33.78% | 10.46% / 20.67% | -1.14% (-0.32) | 1.45% (0.34) | 0.54 | 0.20% |
+| Research window: 2017-05-01 to 2024-12-31 | 8.80% | 16.91% | 0.62 | 82% | 14.39% / 33.78% | 10.46% / 20.67% | -1.14% (-0.32) | 1.45% (0.34) | 0.54 | 0.20% |
+
+- Idle cash, both versions (research window): bills paid 2.32% a year and 18% of the account was idle. At 0%: CAGR 8.80%, Sharpe 0.62, alpha 1.45% (t 0.34). In bills: CAGR 9.25%, Sharpe above bills 0.50, alpha 0.81% (t 0.19). SPY's Sharpe above bills: 0.70.
+- Matched random control: percentile 92.8 of 2000 runs, p 0.0725; kind exposure_matched; drew from: candidate_pool; drawdown percentile not in the report.
+- Gate v2 marks as the report stored them: 1: pass; 2: fail; 3: pass; 4: fail; 5: fail; 6: fail.
+
+### Other accounts of the same report (the report's own numbers)
+
+| Account | Role | CAGR | Max drawdown | Sharpe | Mean exposure |
+|---|---|---|---|---|---|
+| trend_momentum|base|2x|cap100|hold | cost | 8.16% | 17.31% | 0.58 | 81.7% |
+| trend_momentum|base|3x|cap100|hold | cost | 7.92% | 17.50% | 0.57 | 81.7% |
+| trend_momentum|base|0x|cap100|hold | cost | 8.67% | 17.03% | 0.61 | 81.7% |
 
 ## core, point_in_time, costs v1
 
@@ -140,3 +163,34 @@ Research window. "Against the frozen rule" is the neighbour's CAGR minus the fro
 | trend_momentum|stress|1x|cap100|exit_approx | fill | 7.29% | 20.21% | 0.60 | 68.1% |
 | trend_momentum|stress|2x|cap100|exit_approx | cost | 6.81% | 21.08% | 0.57 | 68.1% |
 | trend_momentum|stress|3x|cap100|exit_approx | cost | 6.10% | 22.55% | 0.52 | 68.1% |
+
+## ?, point_in_time
+
+Report `index_core_trend_momentum_aggressive_pit_20261124T205816.json`, run 2026-11-24T20:58:16+00:00 at code `0945894`. Account `sleeve|1x`. Engine: research_harness. Universe: point_in_time. Cost model: 1.0. SPY series: spy_total_return.
+
+| Window | CAGR | Max drawdown | Sharpe | Mean exposure | SPY: CAGR / drawdown | SPY at the rule's exposure: CAGR / drawdown | Return above it a year (t) | Alpha a year (t) | Beta | Costs a year |
+|---|---|---|---|---|---|---|---|---|---|---|
+| As run: 2017-05-01 to 2024-12-31 | 8.19% | 17.69% | 0.59 | 82% | 14.39% / 33.78% | 10.49% / 20.62% | -1.72% (-0.50) | 0.91% (0.22) | 0.54 | 0.36% |
+| Research window: 2017-05-01 to 2024-12-31 | 8.19% | 17.69% | 0.59 | 82% | 14.39% / 33.78% | 10.49% / 20.62% | -1.72% (-0.50) | 0.91% (0.22) | 0.54 | 0.36% |
+
+- Idle cash, both versions (research window): bills paid 2.32% a year and 18% of the account was idle. At 0%: CAGR 8.19%, Sharpe 0.59, alpha 0.91% (t 0.22). In bills: CAGR 8.64%, Sharpe above bills 0.46, alpha 0.27% (t 0.06). SPY's Sharpe above bills: 0.70.
+- Matched random control: percentile 88.6 of 2000 runs, p 0.1144; kind exposure_matched; drew from: candidate_pool; drawdown percentile 99.9.
+- Gate v2 marks: none stored in this report.
+
+### Neighbours (the plateau check)
+
+Research window. "Against the frozen rule" is the neighbour's CAGR minus the frozen rule's.
+
+| Neighbour | What it changes | CAGR | Against the frozen rule | Max drawdown | Sharpe | Mean exposure | Return above SPY at its exposure (t) | Alpha (t) | Beta |
+|---|---|---|---|---|---|---|---|---|---|
+| reg60 | regression window 60 sessions (the 15%-move window stays 90) | 3.23% | -4.96 points | 23.68% | 0.29 | 81% | -6.43% (-1.92) | -3.68% (-0.93) | 0.53 |
+| reg125 | regression window 125 sessions (the 15%-move window stays 90) | 6.52% | -1.67 points | 24.90% | 0.48 | 82% | -3.25% (-0.93) | -0.53% (-0.12) | 0.53 |
+| exit30 | sell when out of the top 30% (buys still from the top 20%) | 7.52% | -0.68 points | 19.49% | 0.54 | 82% | -2.37% (-0.69) | 0.26% (0.06) | 0.54 |
+| nofilter | without the SPY 200-day market filter | 7.99% | -0.21 points | 25.13% | 0.52 | 94% | -3.00% (-0.78) | -2.04% (-0.54) | 0.75 |
+| risk15 | ATR risk 0.0015 of equity per position | 8.70% | +0.51 points | 17.53% | 0.58 | 83% | -1.36% (-0.35) | 1.19% (0.26) | 0.57 |
+
+### Other accounts of the same report (the report's own numbers)
+
+| Account | Role | CAGR | Max drawdown | Sharpe | Mean exposure |
+|---|---|---|---|---|---|
+| sleeve|2x | cost | 7.85% | 18.09% | 0.57 | 81.7% |

@@ -1,0 +1,102 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "news_continuation",
+   "neighbours": [
+    {
+     "alpha": -0.012282,
+     "alpha_t": -1.107172,
+     "beta": 0.020031,
+     "cagr": -0.00967,
+     "label": "news_continuation~move15",
+     "max_drawdown": 0.167777,
+     "mean_exposure": null,
+     "neighbour": "move15"
+    },
+    {
+     "alpha": -0.059677,
+     "alpha_t": -3.534902,
+     "beta": 0.036146,
+     "cagr": -0.053775,
+     "label": "news_continuation~relvol2",
+     "max_drawdown": 0.385978,
+     "mean_exposure": null,
+     "neighbour": "relvol2"
+    },
+    {
+     "alpha": -0.002388,
+     "alpha_t": -0.360835,
+     "beta": 0.00378,
+     "cagr": -0.001999,
+     "label": "news_continuation~relvol5",
+     "max_drawdown": 0.088912,
+     "mean_exposure": null,
+     "neighbour": "relvol5"
+    },
+    {
+     "alpha": -0.01444,
+     "alpha_t": -1.417656,
+     "beta": 0.014951,
+     "cagr": -0.012485,
+     "label": "news_continuation~stop1",
+     "max_drawdown": 0.15901,
+     "mean_exposure": null,
+     "neighbour": "stop1"
+    },
+    {
+     "alpha": -0.021274,
+     "alpha_t": -1.686329,
+     "beta": 0.027981,
+     "cagr": -0.017501,
+     "label": "news_continuation~stop2",
+     "max_drawdown": 0.204769,
+     "mean_exposure": null,
+     "neighbour": "stop2"
+    }
+   ],
+   "research_window": {
+    "alpha": -0.019178,
+    "alpha_t": -1.595503,
+    "beta": 0.020918,
+    "cagr": -0.016414,
+    "costs_a_year": null,
+    "exposure_matched_spy_cagr": null,
+    "idle_cash_in_bills": null,
+    "max_drawdown": 0.198806,
+    "mean_exposure": null,
+    "return_above_exposure_matched_spy": null,
+    "return_above_exposure_matched_spy_t": null,
+    "sessions": 1931,
+    "sharpe": -0.487167,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "news_continuation",
+   "run": "oneshots, today",
+   "trials_for_rule": 6,
+   "why": null
+  }
+ ],
+ "code_sha": "7c0123e",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2016-01-01",
+  "2026-11-06"
+ ],
+ "report": "oneshots_news_continuation_20261113T085255.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-13T08:52:55.230993+00:00",
+ "set": "oneshots",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "today"
+}

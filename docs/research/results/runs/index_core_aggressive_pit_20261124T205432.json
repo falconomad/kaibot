@@ -1,0 +1,108 @@
+{
+ "accounts": [
+  {
+   "control_as_stored": null,
+   "label": "base|1x",
+   "neighbours": [
+    {
+     "alpha": 0.006006,
+     "alpha_t": 1.13466,
+     "beta": 0.173234,
+     "cagr": 0.032136,
+     "label": "neighbour|daily",
+     "max_drawdown": 0.054625,
+     "mean_exposure": 0.233645,
+     "neighbour": "daily"
+    },
+    {
+     "alpha": 0.002223,
+     "alpha_t": 0.582601,
+     "beta": 0.190556,
+     "cagr": 0.030855,
+     "label": "neighbour|lookback63",
+     "max_drawdown": 0.069428,
+     "mean_exposure": 0.235205,
+     "neighbour": "lookback63"
+    },
+    {
+     "alpha": 3.8e-05,
+     "alpha_t": 0.063037,
+     "beta": 0.258048,
+     "cagr": 0.038709,
+     "label": "neighbour|nocap",
+     "max_drawdown": 0.096008,
+     "mean_exposure": 0.264481,
+     "neighbour": "nocap"
+    },
+    {
+     "alpha": 0.008246,
+     "alpha_t": 1.599545,
+     "beta": 0.151739,
+     "cagr": 0.031211,
+     "label": "neighbour|vol12",
+     "max_drawdown": 0.043218,
+     "mean_exposure": 0.216356,
+     "neighbour": "vol12"
+    },
+    {
+     "alpha": 0.005079,
+     "alpha_t": 1.02793,
+     "beta": 0.196135,
+     "cagr": 0.034617,
+     "label": "neighbour|vol18",
+     "max_drawdown": 0.061595,
+     "mean_exposure": 0.24694,
+     "neighbour": "vol18"
+    }
+   ],
+   "research_window": {
+    "alpha": 0.007325,
+    "alpha_t": 1.434059,
+    "beta": 0.175538,
+    "cagr": 0.033845,
+    "costs_a_year": 9e-05,
+    "exposure_matched_spy_cagr": 0.034125,
+    "idle_cash_in_bills": {
+     "alpha": 0.005805,
+     "alpha_t": 1.173134,
+     "bills_a_year": 0.023208,
+     "cagr": 0.051985,
+     "sharpe_above_bills": 0.809562
+    },
+    "max_drawdown": 0.051319,
+    "mean_exposure": 0.234623,
+    "return_above_exposure_matched_spy": -0.000271,
+    "return_above_exposure_matched_spy_t": -1.495538,
+    "sessions": 1931,
+    "sharpe": 0.968044,
+    "window": [
+     "2017-05-01",
+     "2024-12-31"
+    ]
+   },
+   "rule": "index_core",
+   "run": "?, point_in_time",
+   "trials_for_rule": 6,
+   "why": null
+  }
+ ],
+ "code_sha": "0945894",
+ "cost_model": null,
+ "engine": "research_harness",
+ "gate_v2_as_stored": [
+  "- Gate v2 marks: none stored in this report."
+ ],
+ "own_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "report": "index_core_aggressive_pit_20261124T205432.json",
+ "research_window": [
+  "2017-05-01",
+  "2024-12-31"
+ ],
+ "run_at": "2026-11-24T20:54:32+00:00",
+ "set": "?",
+ "summaries_as_of": "2026-11-24T20:58:16+00:00",
+ "universe_mode": "point_in_time"
+}
