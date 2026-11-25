@@ -491,10 +491,7 @@ class Engine:
         self._restore_positions()
         self._attach_ledger()
         self._require_daily_path()  # M10 1.20 step 2 (#445): sleeves without the daily path: no start
-        self._rebuild_md_exits()  # #252: a flatten sale sent before a restart is still booked when it fills
-        self._restore_cmd_waiting()  # M9 1.2 (QA-Ops, #525): a flatten command that was waiting still blocks entries
-        self._recover_intraday()  # M10 1.19: nothing without the intraday path (engine/intraday.py)
-        self._daily_step("startup", lambda: self.daily.startup())  # #206: its orders recovered, its fills booked
+        self.recover()  # M10 1.20 step 3 (#445): the one start-up recovery routine
         self.check_account()
         self._startup_reconcile("startup")
         self.store.event(
@@ -503,6 +500,26 @@ class Engine:
              "positions": list(self.pos)},
             self._rid(),
         )
+
+    def recover(self) -> None:
+        """M10 1.20 step 3 (#445): the engine's one start-up recovery routine. It runs once, from `startup`, after
+        the ledger is attached and the daily-path check has passed, and before the account guard and the
+        reconciliation. Its parts run in this order, each exactly as it ran from `startup` before:
+
+        1. `_rebuild_md_exits` (#252): the flatten sales journalled as sent and not yet booked, so they are booked
+           when they fill; an intent without its `md_exit` is looked up at the venue by its client id.
+        2. `_restore_cmd_waiting` (M9 1.2, #525): a flatten command that was waiting still blocks entries.
+        3. `_recover_intraday` (M10 1.19): the intraday path's orphaned entries (nothing without that path).
+        4. The daily path's start-up (#206): its order manager recovers its orders from the venue, the sleeves'
+           stops are adopted and the fills since the last start are booked (`LiveDaily.startup`; a failure is an
+           event, never a stop: `_daily_step`).
+
+        A failure of parts 1 and 2 stops the start, as before; parts 3 and 4 log and go on, as before.
+        `tests/unit/test_one_recovery.py` checks that nothing else calls them."""
+        self._rebuild_md_exits()
+        self._restore_cmd_waiting()
+        self._recover_intraday()
+        self._daily_step("startup", lambda: self.daily.startup())
 
     def _require_daily_path(self) -> None:
         """M10 1.20 step 2 (#445): fail closed when the run's multi-day sleeves exist and the daily path does not.
