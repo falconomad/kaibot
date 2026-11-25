@@ -1,6 +1,6 @@
 {
- "generated_at": "2026-11-23T12:27:54+00:00",
- "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+ "generated_at": "2026-11-25T18:07:08+00:00",
+ "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
  "window": [
   "2017-05-01",
   "2024-12-31"
@@ -21,9 +21,10 @@
     "mom_12_1_band",
     "trend_momentum_band",
     "mom_12_1_band_nofilter",
-    "rel_strength"
+    "rel_strength",
+    "trend_momentum_sleeve"
    ],
-   "p": 1.0
+   "p": 0.5072463768115942
   },
   "new_highs_breakout": {
    "rules": [
@@ -61,7 +62,8 @@
   "news_drift": {
    "rules": [
     "news_continuation",
-    "news_gap_week"
+    "news_gap_week",
+    "preopen_negative_news_veto"
    ],
    "p": null
   },
@@ -100,16 +102,16 @@
    "adjusted": 0.0718562874251497,
    "rejected": true
   },
-  "index_trend_timing": {
-   "p": 0.8842315369261478,
+  "cross_sectional_momentum": {
+   "p": 0.5072463768115942,
    "known": true,
    "rank": 2,
    "threshold": 0.009090909090909092,
    "adjusted": 1.0,
    "rejected": false
   },
-  "cross_sectional_momentum": {
-   "p": 1.0,
+  "index_trend_timing": {
+   "p": 0.8842315369261478,
    "known": true,
    "rank": 3,
    "threshold": 0.01,
@@ -190,25 +192,27 @@
   }
  },
  "rule_p": {
+  "trend_momentum": 0.07246376811594203,
   "spy_trend_filter": 0.8842315369261478,
   "mom_12_1_band_nofilter": 0.2694610778443114,
   "mom_12_1_band": 0.2554890219560878,
   "pullback_uptrend": 0.5409181636726547,
-  "trend_momentum": 0.21357285429141717,
   "weekly_fall_rebound": 0.872255489021956,
   "spy_noise_band_carry": 0.007984031936127744,
   "spy_noise_band": 0.001996007984031936
  },
  "tbill": true,
  "registry": {
-  "configurations": 10847,
-  "rows": 434,
+  "configurations": 10889,
+  "rows": 522,
   "unreadable_lines": 0,
   "by_strategy": {
    "ath_breakout": 9,
    "dip_reversal": 8286,
    "filing_flags_study": 12,
-   "market_alarm_study": 3,
+   "index_core": 12,
+   "index_core_trend_momentum": 12,
+   "market_alarm_study": 8,
    "mom_12_1_band": 38,
    "news_continuation": 6,
    "news_gap_week": 6,
@@ -217,21 +221,24 @@
    "post_earnings_week": 7,
    "pullback_uptrend": 8,
    "rel_strength": 691,
-   "spy_noise_band": 12,
+   "spy_noise_band": 13,
    "spy_noise_band_carry": 2,
    "spy_trend_filter": 6,
    "trend_highs": 1036,
-   "trend_momentum": 19,
+   "trend_momentum": 25,
+   "trend_momentum_gbm": 6,
+   "trend_momentum_sleeve": 0,
    "weekly_fall_rebound": 10,
    "winners_run": 346
   },
   "sources": [
-   "file data/trials.jsonl: 434 rows"
+   "file data/trials.jsonl: 522 rows"
   ]
  },
- "reports_read": 28,
+ "reports_read": 35,
  "other_files": [
   "filing_flags_study.json",
+  "index_cost_calibration.json",
   "market_alarm_backfill.json",
   "trial_report.json",
   "walkforward_balanced_wf_A_20261112T102028.json"
@@ -254,8 +261,8 @@
     "gate_version": 3,
     "rule": "ath_breakout",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-23T12:27:51.826283Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "ath_breakout",
      "sha256": "12fe0766f5dde9609198cc47ccdd4486ce039719ff81a9474fc33d49eadd0994",
@@ -379,7 +386,7 @@
        "family": "new_highs_breakout",
        "configurations": 1045,
        "trial_sharpes_used": 18,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 4.229691876750701e-05,
        "variance_floor": 0.0005181347150259067,
@@ -655,8 +662,8 @@
     "gate_version": 3,
     "rule": "ath_breakout",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-23T12:27:51.920692Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "ath_breakout",
      "sha256": "12fe0766f5dde9609198cc47ccdd4486ce039719ff81a9474fc33d49eadd0994",
@@ -772,7 +779,7 @@
        "family": "new_highs_breakout",
        "configurations": 1045,
        "trial_sharpes_used": 18,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 4.229691876750701e-05,
        "variance_floor": 0.0005181347150259067,
@@ -1043,8 +1050,8 @@
     "gate_version": 3,
     "rule": "ath_breakout",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-23T12:27:52.021029Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "ath_breakout",
      "sha256": "12fe0766f5dde9609198cc47ccdd4486ce039719ff81a9474fc33d49eadd0994",
@@ -1160,7 +1167,7 @@
        "family": "new_highs_breakout",
        "configurations": 1045,
        "trial_sharpes_used": 18,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 4.229691876750701e-05,
        "variance_floor": 0.0005181347150259067,
@@ -1468,11 +1475,11 @@
     "gate_version": 3,
     "rule": "mom_12_1_band",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:52.221053Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "mom_12_1_band",
-     "sha256": "4eccfa70f053ece0193b1940a8d8c1143f88a2b82a44db60183c6b7bc633f10e",
+     "sha256": "3bd535bb5cb6e6ccf3fc799fe2bdd321af66323088e103142ae2e21ce85a238f",
      "status": "pre-registered",
      "date": "2026-11-12",
      "neighbours": [
@@ -1482,7 +1489,7 @@
       "names10",
       "risk15"
      ],
-     "committed_at": "2026-11-22T11:03:29+01:00",
+     "committed_at": "2026-11-23T18:17:00+01:00",
      "first_committed_at": "2026-11-12T15:20:30+01:00",
      "amendments": [
       "## Amendment 1 (12 Nov 2026, Product, before any run on real data)",
@@ -1507,7 +1514,11 @@
       "## Amendment 20 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): \"Flatten and stop\" and a new run wait until the book is flat",
       "## Amendment 21 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again",
       "## Amendment 22 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session",
-      "## Amendment 23 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over"
+      "## Amendment 23 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over",
+      "## Amendment 24 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine",
+      "## Amendment 25 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): \"Flatten and stop\" also waits for the run's orders that are open or whose fill is not booked",
+      "## Amendment 26 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order",
+      "## Amendment 27 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came"
      ],
      "versions": [
       {
@@ -1609,6 +1620,26 @@
        "sha256": "4eccfa70f053ece0193b1940a8d8c1143f88a2b82a44db60183c6b7bc633f10e",
        "committed_at": "2026-11-22T11:03:29+01:00",
        "amended_only": true
+      },
+      {
+       "sha256": "9386df0b77354424081d1f97c79742be326ce7a9d24e3ab6f7dd54a9d30d1952",
+       "committed_at": "2026-11-23T14:19:17+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "de67cefc286e5d359cd0ef1c20a6c1346254be9fabcbef72b899780967a672f4",
+       "committed_at": "2026-11-23T17:31:47+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "81d0ae865dbe3bbd2bf43d703edfe968d4f8a2c1507e1693494f0bb9cdc433eb",
+       "committed_at": "2026-11-23T17:47:13+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "3bd535bb5cb6e6ccf3fc799fe2bdd321af66323088e103142ae2e21ce85a238f",
+       "committed_at": "2026-11-23T18:17:00+01:00",
+       "amended_only": true
       }
      ]
     },
@@ -1703,19 +1734,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.0013377680852806652,
+       "dsr": 0.0013175974575895086,
        "psr": 0.5655882673468009,
        "sharpe": 0.05974724778794075,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -2028,11 +2059,11 @@
     "gate_version": 3,
     "rule": "mom_12_1_band",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:52.405617Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "mom_12_1_band",
-     "sha256": "4eccfa70f053ece0193b1940a8d8c1143f88a2b82a44db60183c6b7bc633f10e",
+     "sha256": "3bd535bb5cb6e6ccf3fc799fe2bdd321af66323088e103142ae2e21ce85a238f",
      "status": "pre-registered",
      "date": "2026-11-12",
      "neighbours": [
@@ -2042,7 +2073,7 @@
       "names10",
       "risk15"
      ],
-     "committed_at": "2026-11-22T11:03:29+01:00",
+     "committed_at": "2026-11-23T18:17:00+01:00",
      "first_committed_at": "2026-11-12T15:20:30+01:00",
      "amendments": [
       "## Amendment 1 (12 Nov 2026, Product, before any run on real data)",
@@ -2067,7 +2098,11 @@
       "## Amendment 20 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): \"Flatten and stop\" and a new run wait until the book is flat",
       "## Amendment 21 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again",
       "## Amendment 22 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session",
-      "## Amendment 23 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over"
+      "## Amendment 23 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over",
+      "## Amendment 24 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine",
+      "## Amendment 25 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): \"Flatten and stop\" also waits for the run's orders that are open or whose fill is not booked",
+      "## Amendment 26 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order",
+      "## Amendment 27 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came"
      ],
      "versions": [
       {
@@ -2169,6 +2204,26 @@
        "sha256": "4eccfa70f053ece0193b1940a8d8c1143f88a2b82a44db60183c6b7bc633f10e",
        "committed_at": "2026-11-22T11:03:29+01:00",
        "amended_only": true
+      },
+      {
+       "sha256": "9386df0b77354424081d1f97c79742be326ce7a9d24e3ab6f7dd54a9d30d1952",
+       "committed_at": "2026-11-23T14:19:17+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "de67cefc286e5d359cd0ef1c20a6c1346254be9fabcbef72b899780967a672f4",
+       "committed_at": "2026-11-23T17:31:47+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "81d0ae865dbe3bbd2bf43d703edfe968d4f8a2c1507e1693494f0bb9cdc433eb",
+       "committed_at": "2026-11-23T17:47:13+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "3bd535bb5cb6e6ccf3fc799fe2bdd321af66323088e103142ae2e21ce85a238f",
+       "committed_at": "2026-11-23T18:17:00+01:00",
+       "amended_only": true
       }
      ]
     },
@@ -2255,19 +2310,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.019913728083034155,
+       "dsr": 0.01969332091373053,
        "psr": 0.8624762323754795,
        "sharpe": 0.397491899112157,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -2576,8 +2631,8 @@
     "gate_version": 3,
     "rule": "mom_12_1_band_nofilter",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:52.492242Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -2670,19 +2725,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.0012284252691658634,
+       "dsr": 0.0012097644116120711,
        "psr": 0.555691837519951,
        "sharpe": 0.05065548107357295,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -2996,8 +3051,8 @@
     "gate_version": 3,
     "rule": "mom_12_1_band_nofilter",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:52.551792Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -3082,19 +3137,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.016740512642812518,
+       "dsr": 0.01655041629507591,
        "psr": 0.8464046982185891,
        "sharpe": 0.3718207686390392,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -3367,8 +3422,8 @@
     "gate_version": 3,
     "rule": "news_gap_week",
     "family": "news_drift",
-    "generated_at": "2026-11-23T12:27:52.657457Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "news_gap_week",
      "sha256": "be0e75a6ac81d0609c79c3b31f45f823f9978d55ee6d4f773496fce95d47a53d",
@@ -3492,7 +3547,7 @@
        "family": "news_drift",
        "configurations": 12,
        "trial_sharpes_used": 19,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 0.0006850482688201985,
        "variance_floor": 0.0005181347150259067,
@@ -3768,8 +3823,8 @@
     "gate_version": 3,
     "rule": "overnight_spy",
     "family": "overnight_premium",
-    "generated_at": "2026-11-23T12:27:52.747870Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "overnight_spy",
      "sha256": "b35fbfe77c6e83f32c25a579099106d32e8c833b5a3fac0952ee8ba2d3f41e0f",
@@ -3875,7 +3930,7 @@
        "family": "overnight_premium",
        "configurations": 346,
        "trial_sharpes_used": 2,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 7.142857142857141e-06,
        "variance_floor": 0.0005181347150259067,
@@ -4139,8 +4194,8 @@
     "gate_version": 3,
     "rule": "post_earnings_week",
     "family": "earnings_drift",
-    "generated_at": "2026-11-23T12:27:52.851901Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "post_earnings_week",
      "sha256": "30eebcfdf16267dc786fb9a6155b4d3ce1887e4ed0531eeb566eda0d904e327c",
@@ -4264,7 +4319,7 @@
        "family": "earnings_drift",
        "configurations": 7,
        "trial_sharpes_used": 14,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 8.917015524158382e-05,
        "variance_floor": 0.0005181347150259067,
@@ -4540,8 +4595,8 @@
     "gate_version": 3,
     "rule": "pullback_uptrend",
     "family": "short_term_reversal",
-    "generated_at": "2026-11-23T12:27:52.958562Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "pullback_uptrend",
      "sha256": "57693a0de82dfcda135b01dfa9cead6c621f037eb86276563ee45d84e8aa0552",
@@ -4666,9 +4721,9 @@
        "family": "short_term_reversal",
        "configurations": 18,
        "trial_sharpes_used": 39,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 8.238759291390871e-05,
+       "variance_of_trial_sharpes": 8.238759291390872e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -4945,8 +5000,8 @@
     "gate_version": 3,
     "rule": "rel_strength",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:53.051428Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "rel_strength",
      "sha256": "2470995969d3a851b3bb56fd4c23b008efec8fbc933be541726422f662c5edcf",
@@ -5045,19 +5100,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.02913829550650171,
+       "dsr": 0.0288334864738168,
        "psr": 0.8973244973097014,
        "sharpe": 0.4592993993503554,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -5325,8 +5380,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.167512Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -5445,17 +5500,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.827700339229402,
+       "dsr": 0.8188396191684346,
        "psr": 0.9973453350002756,
        "sharpe": 0.9504013599418147,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -5466,7 +5521,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.828 is below 0.9",
+      "why": "deflated Sharpe 0.819 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -5733,8 +5788,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.277515Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -5845,17 +5900,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.5450138549400171,
+       "dsr": 0.5316749553445824,
        "psr": 0.9728686886351653,
        "sharpe": 0.6673864110534646,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -5866,7 +5921,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.545 is below 0.9",
+      "why": "deflated Sharpe 0.532 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -6133,8 +6188,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.387762Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -6245,17 +6300,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.07146740333324969,
+       "dsr": 0.0671459856862275,
        "psr": 0.6120128749028798,
        "sharpe": 0.10217691830939857,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -6266,7 +6321,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.071 is below 0.9",
+      "why": "deflated Sharpe 0.067 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -6533,8 +6588,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.495131Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -6645,17 +6700,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.15281503453429665,
+       "dsr": 0.14521042823028396,
        "psr": 0.7711249575844192,
        "sharpe": 0.26398466420591166,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -6666,7 +6721,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.153 is below 0.9",
+      "why": "deflated Sharpe 0.145 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -6933,8 +6988,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.542190Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -7019,17 +7074,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.4106998286892991,
+       "dsr": 0.39827240850014906,
        "psr": 0.9337269831472869,
        "sharpe": 0.5462033418464581,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -7040,7 +7095,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.411 is below 0.9",
+      "why": "deflated Sharpe 0.398 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -7287,8 +7342,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.589602Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -7365,17 +7420,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.20676046991029975,
+       "dsr": 0.19770127109540475,
        "psr": 0.8201696521181442,
        "sharpe": 0.3318977499602014,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -7386,7 +7441,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.207 is below 0.9",
+      "why": "deflated Sharpe 0.198 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -7633,8 +7688,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.636416Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -7711,17 +7766,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.023182924527846874,
+       "dsr": 0.02146954223549062,
        "psr": 0.4003098129546123,
        "sharpe": -0.09120060510991611,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -7732,7 +7787,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.023 is below 0.9",
+      "why": "deflated Sharpe 0.021 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -7979,8 +8034,8 @@
     "gate_version": 3,
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-23T12:27:53.683231Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -8057,17 +8112,17 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.048482414865233414,
+       "dsr": 0.04532509391636758,
        "psr": 0.5312190121048588,
        "sharpe": 0.028311686105597474,
-       "hurdle": 0.6281790683883589,
-       "n_trials": 14,
+       "hurdle": 0.6398270204256487,
+       "n_trials": 15,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 14,
+       "configurations": 15,
        "trial_sharpes_used": 0,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -8078,7 +8133,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.048 is below 0.9",
+      "why": "deflated Sharpe 0.045 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -8593,8 +8648,8 @@
     "gate_version": 3,
     "rule": "spy_trend_filter",
     "family": "index_trend_timing",
-    "generated_at": "2026-11-23T12:27:53.794164Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "spy_trend_filter",
      "sha256": "64fdba6359073b27e4e4f3023a2287c2962c06e71b7899aabf3b0e07c9d9889e",
@@ -8706,8 +8761,8 @@
        "family_members": 1,
        "family_p": 0.8842315369261478,
        "holm_adjusted": 1.0,
-       "holm_rank": 2,
-       "holm_threshold": 0.009090909090909092,
+       "holm_rank": 3,
+       "holm_threshold": 0.01,
        "families_with_a_p_value": 4,
        "bh_adjusted": 1.0,
        "bh_would_pass": false
@@ -8718,7 +8773,7 @@
        "family_wise_level": 0.1,
        "families": 12
       },
-      "why": "family p 0.8842 is above 0.0091 (Holm, 12 families, level 0.1)",
+      "why": "family p 0.8842 is above 0.0100 (Holm, 12 families, level 0.1)",
       "judged": true
      },
      "s4": {
@@ -8734,7 +8789,7 @@
        "family": "index_trend_timing",
        "configurations": 6,
        "trial_sharpes_used": 20,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 5.298558897243107e-05,
        "variance_floor": 0.0005181347150259067,
@@ -9280,8 +9335,8 @@
     "gate_version": 3,
     "rule": "spy_trend_filter",
     "family": "index_trend_timing",
-    "generated_at": "2026-11-23T12:27:53.905426Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "spy_trend_filter",
      "sha256": "64fdba6359073b27e4e4f3023a2287c2962c06e71b7899aabf3b0e07c9d9889e",
@@ -9393,8 +9448,8 @@
        "family_members": 1,
        "family_p": 0.8842315369261478,
        "holm_adjusted": 1.0,
-       "holm_rank": 2,
-       "holm_threshold": 0.009090909090909092,
+       "holm_rank": 3,
+       "holm_threshold": 0.01,
        "families_with_a_p_value": 4,
        "bh_adjusted": 1.0,
        "bh_would_pass": false
@@ -9405,7 +9460,7 @@
        "family_wise_level": 0.1,
        "families": 12
       },
-      "why": "family p 0.8842 is above 0.0091 (Holm, 12 families, level 0.1)",
+      "why": "family p 0.8842 is above 0.0100 (Holm, 12 families, level 0.1)",
       "judged": true
      },
      "s4": {
@@ -9421,7 +9476,7 @@
        "family": "index_trend_timing",
        "configurations": 6,
        "trial_sharpes_used": 20,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 5.298558897243107e-05,
        "variance_floor": 0.0005181347150259067,
@@ -9700,8 +9755,8 @@
     "gate_version": 3,
     "rule": "trend_highs",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-23T12:27:53.995227Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "trend_highs",
      "sha256": "8e3c0e55788f94ef8c4dfa2d2443c518e9d317440c1cab3d4f0f53cef6641f67",
@@ -9813,7 +9868,7 @@
        "family": "new_highs_breakout",
        "configurations": 1045,
        "trial_sharpes_used": 18,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 4.229691876750701e-05,
        "variance_floor": 0.0005181347150259067,
@@ -10076,11 +10131,11 @@
   {
    "rule": "trend_momentum",
    "scored_as": "trend_momentum",
-   "run": "core, point_in_time, costs v1",
-   "report": "core_balanced_trend_momentum_pit_20261113T084508.json",
+   "run": "engine_core, point_in_time",
+   "report": "engine_balanced_trend_momentum_pit_20261123T130025.json",
    "label": "trend_momentum|base|1x|cap100|hold",
    "evidence_rank": [
-    1,
+    0,
     0,
     1
    ],
@@ -10088,37 +10143,37 @@
     {
      "mark": 1,
      "verdict": "pass",
-     "detail": "net return 112.31%, 7 of 10 calendar years positive",
+     "detail": "net return 90.85%, 6 of 8 calendar years positive",
      "text": "net return positive overall and in at least 6 of 10 calendar years"
     },
     {
      "mark": 2,
      "verdict": "fail",
-     "detail": "CAGR 8.24%, max drawdown 18.27% against SPY total return CAGR 14.37%, max drawdown 33.78%; against price-only SPY (CAGR 12.6%, max drawdown 34.18%) it would fail",
+     "detail": "CAGR 8.8%, max drawdown 16.91% against SPY total return CAGR 14.39%, max drawdown 33.78%; against price-only SPY (CAGR 12.47%, max drawdown 34.18%) it would fail",
      "text": "either CAGR >= SPY total-return CAGR - 2 points with max drawdown <= 0.75 x SPY's, or CAGR >= SPY + 1 point with max drawdown <= 1.1 x SPY's"
     },
     {
      "mark": 3,
-     "verdict": "fail",
-     "detail": "net Sharpe at percentile 78.8 of 500 exposure-matched random portfolios (lower of the rule's run 78.8 and its names replayed 83.4; CAGR at percentile 86.6; committed exposure within 0.485 points)",
+     "verdict": "pass",
+     "detail": "net Sharpe at percentile 92.8 of 2000 exposure-matched random portfolios (lower of the rule's run 92.8 and its names replayed 94.5; CAGR at percentile 96.7; committed exposure within 0.635 points)",
      "text": "net Sharpe at or above the 90th percentile of matched random entries (same universe, liquidity filter, exposure and holding-period distribution, >= 500 runs)"
     },
     {
      "mark": 4,
      "verdict": "fail",
-     "detail": "at 2x costs mark 1 holds (net return 103.41%, 7 of 10 years positive) and mark 2 against SPY total return fails (CAGR 7.76%, max drawdown 18.25%); at 3x: net return 103.04%, CAGR 7.74%; break-even at 35.1x costs (from the 0x and 1x runs; 36.6x with the 1x trades held fixed)",
+     "detail": "at 2x costs mark 1 fails (net return 82.36%, 5 of 8 years positive) and mark 2 against SPY total return fails (CAGR 8.16%, max drawdown 17.31%); at 3x: net return 79.37%, CAGR 7.92%; break-even: costs did not lower the profit",
      "text": "marks 1-2 still hold at 2x costs (3x and break-even reported)"
     },
     {
      "mark": 5,
      "verdict": "fail",
-     "detail": "point-in-time base row: mark 1 holds (net return 112.31%, 7 of 10 years positive), mark 2 fails (CAGR 8.24%, max drawdown 18.27%)",
+     "detail": "point-in-time base row: mark 1 holds (net return 90.85%, 6 of 8 years positive), mark 2 fails (CAGR 8.8%, max drawdown 16.91%)",
      "text": "holds on the point-in-time universe, not only on today's list"
     },
     {
      "mark": 6,
-     "verdict": "pass",
-     "detail": "5 of 5 neighbours pass mark 1",
+     "verdict": "fail",
+     "detail": "2 of 5 neighbours pass mark 1; failing: reg125, exit30, nofilter",
      "text": "every pre-declared neighbour passes mark 1"
     }
    ],
@@ -10127,11 +10182,11 @@
     "gate_version": 3,
     "rule": "trend_momentum",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:54.247211Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "trend_momentum",
-     "sha256": "b0f01c5e1cebb6749a4c1969bb950be6ad61ba05dbf3b8d56d7c8b62b1f4f92d",
+     "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
      "status": "pre-registered",
      "date": "2026-11-12",
      "neighbours": [
@@ -10141,7 +10196,7 @@
       "nofilter",
       "risk15"
      ],
-     "committed_at": "2026-11-22T11:03:29+01:00",
+     "committed_at": "2026-11-25T19:17:31+01:00",
      "first_committed_at": "2026-11-12T15:20:30+01:00",
      "amendments": [
       "## Amendment 1 (12 Nov 2026, Product, before any run on real data)",
@@ -10168,7 +10223,13 @@
       "## Amendment 22 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): \"Flatten and stop\" and a new run wait until the book is flat",
       "## Amendment 23 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again",
       "## Amendment 24 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session",
-      "## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over"
+      "## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over",
+      "## Amendment 26 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine",
+      "## Amendment 27 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): \"Flatten and stop\" also waits for the run's orders that are open or whose fill is not booked",
+      "## Amendment 28 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order",
+      "## Amendment 29 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came",
+      "## Amendment 30 (25 Nov 2026, backend-quant, issue #461, M11 ticket 2.10, before its first use): the book's stop can be the Gate C bootstrap band, behind a switch that stays off",
+      "## Amendment 31 (25 Nov 2026, backend-quant, issue #454, M11 ticket 2.3, before its first run): one re-run that prices the near-close orders at the 15:50 price"
      ],
      "versions": [
       {
@@ -10280,6 +10341,645 @@
        "sha256": "b0f01c5e1cebb6749a4c1969bb950be6ad61ba05dbf3b8d56d7c8b62b1f4f92d",
        "committed_at": "2026-11-22T11:03:29+01:00",
        "amended_only": true
+      },
+      {
+       "sha256": "297618883f5c8eccd7f2081dc2474217c527d2766289b8aecaa7ba564b64a691",
+       "committed_at": "2026-11-23T14:19:17+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d29b4237d63380af8a2a56203dc59511704fbcb39aed0fc8c36900ba5db4e8d6",
+       "committed_at": "2026-11-23T17:31:47+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "282d97060aa7d3fc9c6099892e587ce85c77c03a50b3e2e7a2dd827b2bdc24ea",
+       "committed_at": "2026-11-23T17:47:13+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "c7fa1ee54640478d2ecd7ce7ceedbb7c06377ca10783d07c766ee85dcfad7fb8",
+       "committed_at": "2026-11-23T18:17:00+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "0318e2986e95db2d184fd9f4d6051a5fe2982b39103a084abfc0262a048615b0",
+       "committed_at": "2026-11-25T11:20:56+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
+       "committed_at": "2026-11-25T19:17:31+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": false,
+     "in_a_family": true,
+     "family": "cross_sectional_momentum",
+     "tier": "full"
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "not stated",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "engine_balanced_trend_momentum_pit_20261123T130025.json",
+     "run_at": "2026-11-23T13:00:25+00:00",
+     "code_sha": "0743ef0"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.011353096232696652,
+       "se": 0.0349968887877739,
+       "t": -0.3244030148377886,
+       "lags": 7,
+       "p_one_sided": 0.6271835312248877,
+       "tracking_error": 0.09508699302306092,
+       "information_ratio": -0.11939694243925927,
+       "interval": [
+        -0.06255029853177806,
+        0.045728949769377705
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.3755
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": false,
+      "numbers": {
+       "active_return_at": {
+        "1x": -0.011353096232696652,
+        "2x": -0.013347377381308742,
+        "3x": -0.015341658529920834
+       },
+       "costs_a_year": 0.001994281148612085,
+       "breakeven_multiple": -4.692826330228218
+      },
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero at 2x costs",
+      "judged": true
+     },
+     "s3": {
+      "met": false,
+      "numbers": {
+       "percentile": 92.8,
+       "runs": 2000,
+       "matched": true,
+       "p_value": 0.07246376811594203,
+       "kind": "exposure_matched",
+       "pool": null,
+       "drawdown_percentile": null,
+       "family": "cross_sectional_momentum",
+       "drew_from": "candidate_pool",
+       "family_members": 7,
+       "family_p": 0.5072463768115942,
+       "holm_adjusted": 1.0,
+       "holm_rank": 2,
+       "holm_threshold": 0.009090909090909092,
+       "families_with_a_p_value": 4,
+       "bh_adjusted": 1.0,
+       "bh_would_pass": false
+      },
+      "limit": {
+       "runs_min": 2000,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "family p 0.5072 is above 0.0091 (Holm, 12 families, level 0.1)",
+      "judged": true
+     },
+     "s4": {
+      "met": false,
+      "numbers": {
+       "dsr": 0.00022506984227785418,
+       "psr": 0.37046414357879265,
+       "sharpe": -0.11939694243925927,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
+       "trial_sharpe_var": 0.0005181347150259067,
+       "var_source": "variance of the logged trial Sharpes",
+       "family": "cross_sectional_momentum",
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
+       "sessions_judged": 1931,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
+       "variance_floor": 0.0005181347150259067,
+       "variance_floor_binds": true
+      },
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family",
+       "variance_floor": "1/(T-1)"
+      },
+      "why": "deflated Sharpe 0.000 is below 0.9",
+      "judged": true
+     },
+     "s5": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "s1": false,
+       "s2": false,
+       "s3": false,
+       "s4": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "S1 to S4 do not all hold on the point-in-time universe",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "declared": [
+        "reg60",
+        "reg125",
+        "exit30",
+        "nofilter",
+        "risk15"
+       ],
+       "results": {
+        "reg60": null,
+        "reg125": null,
+        "exit30": null,
+        "nofilter": null,
+        "risk15": null
+       },
+       "active_return": {},
+       "undeclared": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "reg60: no result supplied; reg125: no result supplied; exit30: no result supplied; nofilter: no result supplied; risk15: no result supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "cost_model is 'not stated', a pass needs 'v2'",
+     "the pre-registration does not declare its gate v3 role, kind, family and candidate pool (it predates decision 16): this is a re-score, not a verdict"
+    ],
+    "verdict": "fail",
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.8167833448691103,
+     "rule": {
+      "sessions": 1931,
+      "total_return": 0.9697088316154356,
+      "cagr": 0.09249674391983587,
+      "max_drawdown": 0.1631563082645363,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.5003773959375057,
+       "se": 0.34497682253109835,
+       "t": 1.4504667074913375,
+       "lags": 7,
+       "t_naive": 1.3851236644452902,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.25018869796875287,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.07757990604331591,
+       "vol_ann": 0.15504278705068686
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": 0.9084707639986942,
+      "cagr": 0.08800305129774899,
+      "max_drawdown": 0.1690593172815943,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6218450687365096,
+       "se": 0.3462928287643916,
+       "t": 1.7957203184233317,
+       "lags": 7,
+       "t_naive": 1.721365368057359,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3109225343682548,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.09640304070326076,
+       "vol_ann": 0.15502742652464296
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 1.212307668783605,
+      "cagr": 0.10918284653469268,
+      "max_drawdown": 0.2061373925842407,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6942876526991262,
+       "se": 0.35577993354187604,
+       "t": 1.9514525335572561,
+       "lags": 7,
+       "t_naive": 1.9218978824651787,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3471438263495631,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.08893300227601258,
+       "vol_ann": 0.1280924440039729
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.008115787020234506,
+      "alpha_se": 0.04209256943886298,
+      "alpha_t": 0.19280806870253472,
+      "beta": 0.5407796164906478,
+      "beta_se": 0.058048031102388105,
+      "r2": 0.4098124306480627,
+      "tracking_error": 0.11914042263617367,
+      "lags": 7,
+      "alpha_se_ols": 0.0430814339807303
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.11780486507819288,
+       "max_drawdown": 0.052096587158706686,
+       "partial": true,
+       "benchmark": 0.1318105866004844,
+       "excess": -0.014005721522291514
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.06880296911731032,
+       "max_drawdown": 0.15173682546377987,
+       "partial": false,
+       "benchmark": 0.003552435881411631,
+       "excess": -0.07235540499872195
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.10100081009216555,
+       "max_drawdown": 0.08160318913108544,
+       "partial": false,
+       "benchmark": 0.17682082330157467,
+       "excess": -0.07582001320940912
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.19357110084906348,
+       "max_drawdown": 0.14718794723676043,
+       "partial": false,
+       "benchmark": 0.057436629280198215,
+       "excess": 0.13613447156886527
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.30534675399858546,
+       "max_drawdown": 0.10053772320195309,
+       "partial": false,
+       "benchmark": 0.2540391232983499,
+       "excess": 0.051307630700235585
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.028254947822934584,
+       "max_drawdown": 0.10789132894720344,
+       "partial": false,
+       "benchmark": -0.17490721256431863,
+       "excess": 0.14665226474138404
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.004710975393857453,
+       "max_drawdown": 0.14434211999660695,
+       "partial": false,
+       "benchmark": 0.21640107979186807,
+       "excess": -0.21169010439801061
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.12989774677701948,
+       "max_drawdown": 0.08196503049387338,
+       "partial": false,
+       "benchmark": 0.24358746384522045,
+       "excess": -0.11368971706820097
+      }
+     ]
+    }
+   }
+  },
+  {
+   "rule": "trend_momentum",
+   "scored_as": "trend_momentum",
+   "run": "core, point_in_time, costs v1",
+   "report": "core_balanced_trend_momentum_pit_20261113T084508.json",
+   "label": "trend_momentum|base|1x|cap100|hold",
+   "evidence_rank": [
+    1,
+    0,
+    1
+   ],
+   "gate_v2": [
+    {
+     "mark": 1,
+     "verdict": "pass",
+     "detail": "net return 112.31%, 7 of 10 calendar years positive",
+     "text": "net return positive overall and in at least 6 of 10 calendar years"
+    },
+    {
+     "mark": 2,
+     "verdict": "fail",
+     "detail": "CAGR 8.24%, max drawdown 18.27% against SPY total return CAGR 14.37%, max drawdown 33.78%; against price-only SPY (CAGR 12.6%, max drawdown 34.18%) it would fail",
+     "text": "either CAGR >= SPY total-return CAGR - 2 points with max drawdown <= 0.75 x SPY's, or CAGR >= SPY + 1 point with max drawdown <= 1.1 x SPY's"
+    },
+    {
+     "mark": 3,
+     "verdict": "fail",
+     "detail": "net Sharpe at percentile 78.8 of 500 exposure-matched random portfolios (lower of the rule's run 78.8 and its names replayed 83.4; CAGR at percentile 86.6; committed exposure within 0.485 points)",
+     "text": "net Sharpe at or above the 90th percentile of matched random entries (same universe, liquidity filter, exposure and holding-period distribution, >= 500 runs)"
+    },
+    {
+     "mark": 4,
+     "verdict": "fail",
+     "detail": "at 2x costs mark 1 holds (net return 103.41%, 7 of 10 years positive) and mark 2 against SPY total return fails (CAGR 7.76%, max drawdown 18.25%); at 3x: net return 103.04%, CAGR 7.74%; break-even at 35.1x costs (from the 0x and 1x runs; 36.6x with the 1x trades held fixed)",
+     "text": "marks 1-2 still hold at 2x costs (3x and break-even reported)"
+    },
+    {
+     "mark": 5,
+     "verdict": "fail",
+     "detail": "point-in-time base row: mark 1 holds (net return 112.31%, 7 of 10 years positive), mark 2 fails (CAGR 8.24%, max drawdown 18.27%)",
+     "text": "holds on the point-in-time universe, not only on today's list"
+    },
+    {
+     "mark": 6,
+     "verdict": "pass",
+     "detail": "5 of 5 neighbours pass mark 1",
+     "text": "every pre-declared neighbour passes mark 1"
+    }
+   ],
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": 3,
+    "rule": "trend_momentum",
+    "family": "cross_sectional_momentum",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "trend_momentum",
+     "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
+     "status": "pre-registered",
+     "date": "2026-11-12",
+     "neighbours": [
+      "reg60",
+      "reg125",
+      "exit30",
+      "nofilter",
+      "risk15"
+     ],
+     "committed_at": "2026-11-25T19:17:31+01:00",
+     "first_committed_at": "2026-11-12T15:20:30+01:00",
+     "amendments": [
+      "## Amendment 1 (12 Nov 2026, Product, before any run on real data)",
+      "## Amendment 2 (12 Nov 2026, Product, before any point-in-time run)",
+      "## Amendment 3 (12 Nov 2026, Product, before any engine run or point-in-time run on real data)",
+      "## Amendment 4 (13 Nov 2026, Product, before any point-in-time or engine run on real data)",
+      "## Amendment 5 (13 Nov 2026, backend-quant, issue #203, before any run that reads the SEC earnings dates)",
+      "## Amendment 6 (16 Nov 2026, backend-quant for Product, issue #266, before the first live paper buy): a live-safety exclusion",
+      "## Amendment 7 (16 Nov 2026, backend-quant, issue #266, before any rerun on corrected data): spin-offs in the inputs, a data correction",
+      "## Amendment 8 (17 Nov 2026, backend-quant with QA-Ops's review of #275, before any rerun on corrected data): no unsourced spin-off value",
+      "## Amendment 9 (18 Nov 2026, agents-ai for Product, issue #310, before the shadow review's first run): an AI observer that cannot act",
+      "## Amendment 10 (18 Nov 2026, backend-quant, issue #333, before the second live paper session): near-close market orders on Alpaca paper",
+      "## Amendment 11 (19 Nov 2026, backend-quant, issue #363, before the third live paper session): the decision's unfilled buys are carried to the next sessions",
+      "## Amendment 12 (19 Nov 2026, QA-Ops second key on issue #363, before the third live paper session): limits on the carry-over of Amendment 11",
+      "## Amendment 13 (19 Nov 2026, backend-quant, the author's review of QA-Ops's key on issue #363, before the third live paper session): a carried buy must be in the rule's ranked universe at the previous close",
+      "## Amendment 14 (21 Nov 2026, platform, issue #441, M9 ticket 1.16, before its first live paper session): a pre-send check that can withhold a near-close order",
+      "## Amendment 15 (21 Nov 2026, QA-Ops second key on issue #441, PR #490, before the first use of Amendment 14): the pre-send check never withholds a sale",
+      "## Amendment 16 (21 Nov 2026, platform, issue #436, M9 ticket 1.11, before its first live paper session): an order is called lost only after the venue's orders, fills and position were read",
+      "## Amendment 17 (21 Nov 2026, QA-Ops second key on issue #436, PR #495, before the first use of Amendment 16): the hold of an unconfirmed order ends with the order's day",
+      "## Amendment 18 (21 Nov 2026, platform, issue #433, M9 ticket 1.8, before its first live paper session): the sale of a full flatten goes through the order manager",
+      "## Amendment 19 (22 Nov 2026, backend-quant, issue #428, before the session of Mon 23 Nov 2026): a decision the engine missed overnight is taken during the session",
+      "## Amendment 20 (22 Nov 2026, backend-quant, issue #429, before the session of Mon 23 Nov 2026): a decision whose send window was missed is sent on the next session",
+      "## Amendment 21 (22 Nov 2026, backend-quant, issue #426, M9 ticket 1.1, before its first live paper session): the book's run end is measured on confirmed prices",
+      "## Amendment 22 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): \"Flatten and stop\" and a new run wait until the book is flat",
+      "## Amendment 23 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again",
+      "## Amendment 24 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session",
+      "## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over",
+      "## Amendment 26 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine",
+      "## Amendment 27 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): \"Flatten and stop\" also waits for the run's orders that are open or whose fill is not booked",
+      "## Amendment 28 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order",
+      "## Amendment 29 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came",
+      "## Amendment 30 (25 Nov 2026, backend-quant, issue #461, M11 ticket 2.10, before its first use): the book's stop can be the Gate C bootstrap band, behind a switch that stays off",
+      "## Amendment 31 (25 Nov 2026, backend-quant, issue #454, M11 ticket 2.3, before its first run): one re-run that prices the near-close orders at the 15:50 price"
+     ],
+     "versions": [
+      {
+       "sha256": "463c17ad21a367af3854a8eadf2fa6ed16c3bedef0640d77da51f3e37ae9de12",
+       "committed_at": "2026-11-12T15:20:30+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "3012410c1d8e076a581ffa2a4a55e100f8911f949286de2cee594a2848f21061",
+       "committed_at": "2026-11-12T16:35:23+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "77caed2816c9eab6729f1784d291fafe559657a38a334d7f4a6691671d638f74",
+       "committed_at": "2026-11-12T19:14:53+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d954be379b6a36839c1bfb40b5e09969550c43b8cf466784335f8d76b4682b0f",
+       "committed_at": "2026-11-12T22:06:06+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d5b8ec5bbc57d893ee74425c2b71d87c2bcb5c90366a40f921b457284d32cbb3",
+       "committed_at": "2026-11-13T01:09:20+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "085bd56c3fa90a72e47170352ef5407e600042ca40774258bde6c7bb369a6f3b",
+       "committed_at": "2026-11-13T19:41:06+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "883cb7146ff10b77b47e60a558ce12cf1ec98299470cedd5f7d7f09b217c0119",
+       "committed_at": "2026-11-16T22:15:39+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d0a28976e996a3231838f2cce3829bd75875f86d3bf31a85d3b484ace2aeb123",
+       "committed_at": "2026-11-17T13:54:24+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "5b6ffa62b1e74a14b35e0d40e28d75b1a138555fa6fb2c6430df3cc389759ce2",
+       "committed_at": "2026-11-17T14:37:54+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "82ece8c39c1d33bd18f53e8850a200ff335356e53ca28383ef2606e860bf4da3",
+       "committed_at": "2026-11-18T16:33:59+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "7101ce8d2e222357a4c1105768c7704881a417e8ff9b2cceda2db59390378601",
+       "committed_at": "2026-11-18T23:33:07+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b2eae834812d7cd4da85bc45bc7eb5507b061c4f4dccaa318a0da9dea042a5a9",
+       "committed_at": "2026-11-19T22:58:50+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "9b7bd4e67be360839a3465f7800f4606e76c213cc80b8e04ecc429590d02360f",
+       "committed_at": "2026-11-22T01:18:56+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "977cef587d19fa60616bd53f337410a595b543999938385da3772c806676efc8",
+       "committed_at": "2026-11-22T01:41:42+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "9dd601169b81dc608b2dd6ccda76b17c2ee40e5499f1282454e1c27c6b515f61",
+       "committed_at": "2026-11-22T01:57:30+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b1729502ec0ab84405552bf26c20e337b9a3f804d8fee8728117a6c8b4a3ff0c",
+       "committed_at": "2026-11-22T02:20:28+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b0a025ebf50c64eb699880c0151a3e8b29fa6163b85a5b804556c9e22541fb1e",
+       "committed_at": "2026-11-22T02:35:45+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d1a6a1ec142852590dfcbf1328675303f86be3340b027e77b8e3b35d8ad24597",
+       "committed_at": "2026-11-22T04:05:46+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "581b371fd9a7a61df2529945db56fa823f24011d14bf5a0c0c0b4e0e19074591",
+       "committed_at": "2026-11-22T04:16:08+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "8a85e0f6c37655bb11f39fc328a9616e23c995f41bd639e01e644219d862f8c5",
+       "committed_at": "2026-11-22T05:15:54+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d4006bb3a3d7e8072914b11a182917c56687897ea81e9e92a7465b0e6be22188",
+       "committed_at": "2026-11-22T05:25:06+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b0f01c5e1cebb6749a4c1969bb950be6ad61ba05dbf3b8d56d7c8b62b1f4f92d",
+       "committed_at": "2026-11-22T11:03:29+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "297618883f5c8eccd7f2081dc2474217c527d2766289b8aecaa7ba564b64a691",
+       "committed_at": "2026-11-23T14:19:17+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d29b4237d63380af8a2a56203dc59511704fbcb39aed0fc8c36900ba5db4e8d6",
+       "committed_at": "2026-11-23T17:31:47+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "282d97060aa7d3fc9c6099892e587ce85c77c03a50b3e2e7a2dd827b2bdc24ea",
+       "committed_at": "2026-11-23T17:47:13+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "c7fa1ee54640478d2ecd7ce7ceedbb7c06377ca10783d07c766ee85dcfad7fb8",
+       "committed_at": "2026-11-23T18:17:00+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "0318e2986e95db2d184fd9f4d6051a5fe2982b39103a084abfc0262a048615b0",
+       "committed_at": "2026-11-25T11:20:56+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
+       "committed_at": "2026-11-25T19:17:31+01:00",
+       "amended_only": true
       }
      ]
     },
@@ -10374,19 +11074,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.00011272807072775076,
+       "dsr": 0.00011069389481833924,
        "psr": 0.3037606792306453,
        "sharpe": -0.18539291283481266,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -10699,11 +11399,11 @@
     "gate_version": 3,
     "rule": "trend_momentum",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-23T12:27:54.445591Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "trend_momentum",
-     "sha256": "b0f01c5e1cebb6749a4c1969bb950be6ad61ba05dbf3b8d56d7c8b62b1f4f92d",
+     "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
      "status": "pre-registered",
      "date": "2026-11-12",
      "neighbours": [
@@ -10713,7 +11413,7 @@
       "nofilter",
       "risk15"
      ],
-     "committed_at": "2026-11-22T11:03:29+01:00",
+     "committed_at": "2026-11-25T19:17:31+01:00",
      "first_committed_at": "2026-11-12T15:20:30+01:00",
      "amendments": [
       "## Amendment 1 (12 Nov 2026, Product, before any run on real data)",
@@ -10740,7 +11440,13 @@
       "## Amendment 22 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): \"Flatten and stop\" and a new run wait until the book is flat",
       "## Amendment 23 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again",
       "## Amendment 24 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session",
-      "## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over"
+      "## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over",
+      "## Amendment 26 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine",
+      "## Amendment 27 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): \"Flatten and stop\" also waits for the run's orders that are open or whose fill is not booked",
+      "## Amendment 28 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order",
+      "## Amendment 29 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came",
+      "## Amendment 30 (25 Nov 2026, backend-quant, issue #461, M11 ticket 2.10, before its first use): the book's stop can be the Gate C bootstrap band, behind a switch that stays off",
+      "## Amendment 31 (25 Nov 2026, backend-quant, issue #454, M11 ticket 2.3, before its first run): one re-run that prices the near-close orders at the 15:50 price"
      ],
      "versions": [
       {
@@ -10852,6 +11558,36 @@
        "sha256": "b0f01c5e1cebb6749a4c1969bb950be6ad61ba05dbf3b8d56d7c8b62b1f4f92d",
        "committed_at": "2026-11-22T11:03:29+01:00",
        "amended_only": true
+      },
+      {
+       "sha256": "297618883f5c8eccd7f2081dc2474217c527d2766289b8aecaa7ba564b64a691",
+       "committed_at": "2026-11-23T14:19:17+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d29b4237d63380af8a2a56203dc59511704fbcb39aed0fc8c36900ba5db4e8d6",
+       "committed_at": "2026-11-23T17:31:47+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "282d97060aa7d3fc9c6099892e587ce85c77c03a50b3e2e7a2dd827b2bdc24ea",
+       "committed_at": "2026-11-23T17:47:13+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "c7fa1ee54640478d2ecd7ce7ceedbb7c06377ca10783d07c766ee85dcfad7fb8",
+       "committed_at": "2026-11-23T18:17:00+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "0318e2986e95db2d184fd9f4d6051a5fe2982b39103a084abfc0262a048615b0",
+       "committed_at": "2026-11-25T11:20:56+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
+       "committed_at": "2026-11-25T19:17:31+01:00",
+       "amended_only": true
       }
      ]
     },
@@ -10938,19 +11674,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.003686448543804351,
+       "dsr": 0.0036358789265451383,
        "psr": 0.6873948538582408,
        "sharpe": 0.1767114545546606,
-       "hurdle": 1.1460479444899878,
-       "n_trials": 748,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
-       "configurations": 748,
-       "trial_sharpes_used": 248,
-       "whole_registry_configurations": 10847,
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 3.44657912357403e-05,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -11206,6 +11942,976 @@
    }
   },
   {
+   "rule": "trend_momentum",
+   "scored_as": "trend_momentum",
+   "run": "?, point_in_time",
+   "report": "trend_momentum_gbm_balanced_pit_20261124T185751.json",
+   "label": "reference|trend_momentum",
+   "evidence_rank": [
+    5,
+    0,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": 3,
+    "rule": "trend_momentum",
+    "family": "cross_sectional_momentum",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "trend_momentum",
+     "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
+     "status": "pre-registered",
+     "date": "2026-11-12",
+     "neighbours": [
+      "reg60",
+      "reg125",
+      "exit30",
+      "nofilter",
+      "risk15"
+     ],
+     "committed_at": "2026-11-25T19:17:31+01:00",
+     "first_committed_at": "2026-11-12T15:20:30+01:00",
+     "amendments": [
+      "## Amendment 1 (12 Nov 2026, Product, before any run on real data)",
+      "## Amendment 2 (12 Nov 2026, Product, before any point-in-time run)",
+      "## Amendment 3 (12 Nov 2026, Product, before any engine run or point-in-time run on real data)",
+      "## Amendment 4 (13 Nov 2026, Product, before any point-in-time or engine run on real data)",
+      "## Amendment 5 (13 Nov 2026, backend-quant, issue #203, before any run that reads the SEC earnings dates)",
+      "## Amendment 6 (16 Nov 2026, backend-quant for Product, issue #266, before the first live paper buy): a live-safety exclusion",
+      "## Amendment 7 (16 Nov 2026, backend-quant, issue #266, before any rerun on corrected data): spin-offs in the inputs, a data correction",
+      "## Amendment 8 (17 Nov 2026, backend-quant with QA-Ops's review of #275, before any rerun on corrected data): no unsourced spin-off value",
+      "## Amendment 9 (18 Nov 2026, agents-ai for Product, issue #310, before the shadow review's first run): an AI observer that cannot act",
+      "## Amendment 10 (18 Nov 2026, backend-quant, issue #333, before the second live paper session): near-close market orders on Alpaca paper",
+      "## Amendment 11 (19 Nov 2026, backend-quant, issue #363, before the third live paper session): the decision's unfilled buys are carried to the next sessions",
+      "## Amendment 12 (19 Nov 2026, QA-Ops second key on issue #363, before the third live paper session): limits on the carry-over of Amendment 11",
+      "## Amendment 13 (19 Nov 2026, backend-quant, the author's review of QA-Ops's key on issue #363, before the third live paper session): a carried buy must be in the rule's ranked universe at the previous close",
+      "## Amendment 14 (21 Nov 2026, platform, issue #441, M9 ticket 1.16, before its first live paper session): a pre-send check that can withhold a near-close order",
+      "## Amendment 15 (21 Nov 2026, QA-Ops second key on issue #441, PR #490, before the first use of Amendment 14): the pre-send check never withholds a sale",
+      "## Amendment 16 (21 Nov 2026, platform, issue #436, M9 ticket 1.11, before its first live paper session): an order is called lost only after the venue's orders, fills and position were read",
+      "## Amendment 17 (21 Nov 2026, QA-Ops second key on issue #436, PR #495, before the first use of Amendment 16): the hold of an unconfirmed order ends with the order's day",
+      "## Amendment 18 (21 Nov 2026, platform, issue #433, M9 ticket 1.8, before its first live paper session): the sale of a full flatten goes through the order manager",
+      "## Amendment 19 (22 Nov 2026, backend-quant, issue #428, before the session of Mon 23 Nov 2026): a decision the engine missed overnight is taken during the session",
+      "## Amendment 20 (22 Nov 2026, backend-quant, issue #429, before the session of Mon 23 Nov 2026): a decision whose send window was missed is sent on the next session",
+      "## Amendment 21 (22 Nov 2026, backend-quant, issue #426, M9 ticket 1.1, before its first live paper session): the book's run end is measured on confirmed prices",
+      "## Amendment 22 (22 Nov 2026, backend-quant, issue #427, M9 ticket 1.2, before its first live paper session): \"Flatten and stop\" and a new run wait until the book is flat",
+      "## Amendment 23 (22 Nov 2026, backend-quant, issue #491, before its first live paper session): a cancel the venue never received is sent again",
+      "## Amendment 24 (22 Nov 2026, backend-quant, issue #507, before its first live paper session): no order for a sleeve while an earlier order's fill is not booked, whatever its session",
+      "## Amendment 25 (22 Nov 2026, backend-quant, issue #526, QA on #485, M9 ticket 1.6, before the next multi-day session): a buy the watchdog cancelled is carried over",
+      "## Amendment 26 (22 Nov 2026, backend-quant, issue #444, M10 ticket 1.19, before its first live paper session): the rule runs on its own loop; the retired intraday rule leaves the live engine",
+      "## Amendment 27 (22 Nov 2026, backend-quant, issue #533, before its first live paper session): \"Flatten and stop\" also waits for the run's orders that are open or whose fill is not booked",
+      "## Amendment 28 (22 Nov 2026, backend-quant, issue #535, before its first live paper session): an order called lost that the venue fills later is booked to its order",
+      "## Amendment 29 (22 Nov 2026, backend-quant, issue #529, before its first live paper session): the owner books or accepts a fill whose report never came",
+      "## Amendment 30 (25 Nov 2026, backend-quant, issue #461, M11 ticket 2.10, before its first use): the book's stop can be the Gate C bootstrap band, behind a switch that stays off",
+      "## Amendment 31 (25 Nov 2026, backend-quant, issue #454, M11 ticket 2.3, before its first run): one re-run that prices the near-close orders at the 15:50 price"
+     ],
+     "versions": [
+      {
+       "sha256": "463c17ad21a367af3854a8eadf2fa6ed16c3bedef0640d77da51f3e37ae9de12",
+       "committed_at": "2026-11-12T15:20:30+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "3012410c1d8e076a581ffa2a4a55e100f8911f949286de2cee594a2848f21061",
+       "committed_at": "2026-11-12T16:35:23+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "77caed2816c9eab6729f1784d291fafe559657a38a334d7f4a6691671d638f74",
+       "committed_at": "2026-11-12T19:14:53+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d954be379b6a36839c1bfb40b5e09969550c43b8cf466784335f8d76b4682b0f",
+       "committed_at": "2026-11-12T22:06:06+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d5b8ec5bbc57d893ee74425c2b71d87c2bcb5c90366a40f921b457284d32cbb3",
+       "committed_at": "2026-11-13T01:09:20+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "085bd56c3fa90a72e47170352ef5407e600042ca40774258bde6c7bb369a6f3b",
+       "committed_at": "2026-11-13T19:41:06+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "883cb7146ff10b77b47e60a558ce12cf1ec98299470cedd5f7d7f09b217c0119",
+       "committed_at": "2026-11-16T22:15:39+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d0a28976e996a3231838f2cce3829bd75875f86d3bf31a85d3b484ace2aeb123",
+       "committed_at": "2026-11-17T13:54:24+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "5b6ffa62b1e74a14b35e0d40e28d75b1a138555fa6fb2c6430df3cc389759ce2",
+       "committed_at": "2026-11-17T14:37:54+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "82ece8c39c1d33bd18f53e8850a200ff335356e53ca28383ef2606e860bf4da3",
+       "committed_at": "2026-11-18T16:33:59+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "7101ce8d2e222357a4c1105768c7704881a417e8ff9b2cceda2db59390378601",
+       "committed_at": "2026-11-18T23:33:07+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b2eae834812d7cd4da85bc45bc7eb5507b061c4f4dccaa318a0da9dea042a5a9",
+       "committed_at": "2026-11-19T22:58:50+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "9b7bd4e67be360839a3465f7800f4606e76c213cc80b8e04ecc429590d02360f",
+       "committed_at": "2026-11-22T01:18:56+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "977cef587d19fa60616bd53f337410a595b543999938385da3772c806676efc8",
+       "committed_at": "2026-11-22T01:41:42+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "9dd601169b81dc608b2dd6ccda76b17c2ee40e5499f1282454e1c27c6b515f61",
+       "committed_at": "2026-11-22T01:57:30+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b1729502ec0ab84405552bf26c20e337b9a3f804d8fee8728117a6c8b4a3ff0c",
+       "committed_at": "2026-11-22T02:20:28+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b0a025ebf50c64eb699880c0151a3e8b29fa6163b85a5b804556c9e22541fb1e",
+       "committed_at": "2026-11-22T02:35:45+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d1a6a1ec142852590dfcbf1328675303f86be3340b027e77b8e3b35d8ad24597",
+       "committed_at": "2026-11-22T04:05:46+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "581b371fd9a7a61df2529945db56fa823f24011d14bf5a0c0c0b4e0e19074591",
+       "committed_at": "2026-11-22T04:16:08+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "8a85e0f6c37655bb11f39fc328a9616e23c995f41bd639e01e644219d862f8c5",
+       "committed_at": "2026-11-22T05:15:54+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d4006bb3a3d7e8072914b11a182917c56687897ea81e9e92a7465b0e6be22188",
+       "committed_at": "2026-11-22T05:25:06+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "b0f01c5e1cebb6749a4c1969bb950be6ad61ba05dbf3b8d56d7c8b62b1f4f92d",
+       "committed_at": "2026-11-22T11:03:29+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "297618883f5c8eccd7f2081dc2474217c527d2766289b8aecaa7ba564b64a691",
+       "committed_at": "2026-11-23T14:19:17+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "d29b4237d63380af8a2a56203dc59511704fbcb39aed0fc8c36900ba5db4e8d6",
+       "committed_at": "2026-11-23T17:31:47+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "282d97060aa7d3fc9c6099892e587ce85c77c03a50b3e2e7a2dd827b2bdc24ea",
+       "committed_at": "2026-11-23T17:47:13+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "c7fa1ee54640478d2ecd7ce7ceedbb7c06377ca10783d07c766ee85dcfad7fb8",
+       "committed_at": "2026-11-23T18:17:00+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "0318e2986e95db2d184fd9f4d6051a5fe2982b39103a084abfc0262a048615b0",
+       "committed_at": "2026-11-25T11:20:56+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
+       "committed_at": "2026-11-25T19:17:31+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": false,
+     "in_a_family": true,
+     "family": "cross_sectional_momentum",
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "not stated",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "trend_momentum_gbm_balanced_pit_20261124T185751.json",
+     "run_at": "2026-11-24T18:57:51+00:00",
+     "code_sha": "525436e"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.016965327951298893,
+       "se": 0.03476363677087236,
+       "t": -0.48801936526715023,
+       "lags": 7,
+       "p_one_sided": 0.6872319378071732,
+       "tracking_error": 0.0950816080740748,
+       "information_ratio": -0.17842912309688527,
+       "interval": [
+        -0.06796450846945702,
+        0.040245737461063656
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.3075
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": false,
+      "numbers": {
+       "active_return_at": {
+        "1x": -0.016965327951298893,
+        "2x": -0.018965115449788364,
+        "3x": -0.020964902948277825
+       },
+       "costs_a_year": 0.0019997874984894683,
+       "breakeven_multiple": -7.483565360876394
+      },
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero at 2x costs",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {
+       "percentile": 83.6,
+       "runs": 2000,
+       "matched": false,
+       "p_value": 0.16441779110444776,
+       "kind": "exposure_matched",
+       "pool": "candidate_pool",
+       "drawdown_percentile": 98.9,
+       "family": "cross_sectional_momentum",
+       "drew_from": "candidate_pool"
+      },
+      "limit": {
+       "runs_min": 2000,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the control did not fill every slot, so it is not matched",
+      "judged": true
+     },
+     "s4": {
+      "met": false,
+      "numbers": {
+       "dsr": 0.00011935865436430037,
+       "psr": 0.31053498330215706,
+       "sharpe": -0.17842912309688527,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
+       "trial_sharpe_var": 0.0005181347150259067,
+       "var_source": "variance of the logged trial Sharpes",
+       "family": "cross_sectional_momentum",
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
+       "sessions_judged": 1931,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
+       "variance_floor": 0.0005181347150259067,
+       "variance_floor_binds": true
+      },
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family",
+       "variance_floor": "1/(T-1)"
+      },
+      "why": "deflated Sharpe 0.000 is below 0.9",
+      "judged": true
+     },
+     "s5": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "s1": false,
+       "s2": false,
+       "s3": null,
+       "s4": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "S1 to S4 do not all hold on the point-in-time universe",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "declared": [
+        "reg60",
+        "reg125",
+        "exit30",
+        "nofilter",
+        "risk15"
+       ],
+       "results": {
+        "reg60": null,
+        "reg125": null,
+        "exit30": null,
+        "nofilter": null,
+        "risk15": null
+       },
+       "active_return": {},
+       "undeclared": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "reg60: no result supplied; reg125: no result supplied; exit30: no result supplied; nofilter: no result supplied; risk15: no result supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'not stated', a pass needs 'v2'",
+     "the pre-registration does not declare its gate v3 role, kind, family and candidate pool (it predates decision 16): this is a re-score, not a verdict"
+    ],
+    "verdict": "fail",
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.8171336540262247,
+     "rule": {
+      "sessions": 1931,
+      "total_return": 0.8850992216821123,
+      "cagr": 0.0862549201477627,
+      "max_drawdown": 0.1687886324777622,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.46332624992294397,
+       "se": 0.34418547551009004,
+       "t": 1.3461528242476961,
+       "lags": 7,
+       "t_naive": 1.282560240205405,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.23166312496147198,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.07185552167650941,
+       "vol_ann": 0.15508623068185703
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": 0.8266869510500099,
+      "cagr": 0.08180199566769253,
+      "max_drawdown": 0.17454713355870644,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.5848622765746612,
+       "se": 0.3454599818993699,
+       "t": 1.692995736753751,
+       "lags": 7,
+       "t_naive": 1.618991158077986,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.2924311382873306,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.09069266151013786,
+       "vol_ann": 0.15506669713987
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 1.2104274883354487,
+      "cagr": 0.10905978114307269,
+      "max_drawdown": 0.2059901082845098,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6934559260687398,
+       "se": 0.355593444692947,
+       "t": 1.9501369792335042,
+       "lags": 7,
+       "t_naive": 1.919595531784571,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3467279630343699,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.08882084962780828,
+       "vol_ann": 0.1280843472365161
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.0023622813615133006,
+      "alpha_se": 0.04200586074487308,
+      "alpha_t": 0.056236946931307034,
+      "beta": 0.5410063263560401,
+      "beta_se": 0.058285110494836256,
+      "r2": 0.40992635391587784,
+      "tracking_error": 0.11916230372557919,
+      "lags": 7,
+      "alpha_se_ols": 0.04308934622988799
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.11780486507819288,
+       "max_drawdown": 0.052096587158706686,
+       "partial": true,
+       "benchmark": 0.1318105866004844,
+       "excess": -0.014005721522291514
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.06254557697738439,
+       "max_drawdown": 0.1460167568302151,
+       "partial": false,
+       "benchmark": 0.0003467464964075351,
+       "excess": -0.06289232347379192
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.08334539398627783,
+       "max_drawdown": 0.09178114352298028,
+       "partial": false,
+       "benchmark": 0.17684581578628134,
+       "excess": -0.09350042180000351
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.18975351269168295,
+       "max_drawdown": 0.14708126933682364,
+       "partial": false,
+       "benchmark": 0.06018826500457397,
+       "excess": 0.12956524768710898
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.29952379424442066,
+       "max_drawdown": 0.10023601816996064,
+       "partial": false,
+       "benchmark": 0.2531333950857553,
+       "excess": 0.046390399158665385
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.026948483630430675,
+       "max_drawdown": 0.10777325973635488,
+       "partial": false,
+       "benchmark": -0.17405790767885687,
+       "excess": 0.1471094240484262
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": -0.01274390068700293,
+       "max_drawdown": 0.1544393692273427,
+       "partial": false,
+       "benchmark": 0.21625077451492047,
+       "excess": -0.2289946752019234
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.11800623133495569,
+       "max_drawdown": 0.09468118450556118,
+       "partial": false,
+       "benchmark": 0.24302356887338705,
+       "excess": -0.12501733753843136
+      }
+     ]
+    }
+   }
+  },
+  {
+   "rule": "trend_momentum_gbm",
+   "scored_as": "trend_momentum_gbm",
+   "run": "?, point_in_time",
+   "report": "trend_momentum_gbm_balanced_pit_20261124T185751.json",
+   "label": "rule|1x",
+   "evidence_rank": [
+    5,
+    0,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": 3,
+    "rule": "trend_momentum_gbm",
+    "family": "cross_sectional_momentum",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "trend_momentum_gbm",
+     "sha256": "f8c737f6c1b9447d1d511952293fffffd467910b3a238b4e6e6be88beebefa07",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "depth2",
+      "lr10",
+      "noscore",
+      "refit6m",
+      "ridge"
+     ],
+     "committed_at": "2026-11-22T19:19:13+01:00",
+     "first_committed_at": "2026-11-22T19:19:13+01:00",
+     "amendments": [
+      "## Amendment 1 (22 Nov 2026, QA-Ops review of #576, before any code and any run): the correction, the hold-out and the model's reach, stated"
+     ],
+     "versions": [
+      {
+       "sha256": "f8c737f6c1b9447d1d511952293fffffd467910b3a238b4e6e6be88beebefa07",
+       "committed_at": "2026-11-22T19:19:13+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "in_a_family": true,
+     "family": "cross_sectional_momentum",
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "not stated",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "trend_momentum_gbm_balanced_pit_20261124T185751.json",
+     "run_at": "2026-11-24T18:57:51+00:00",
+     "code_sha": "525436e"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.00455890700796535,
+       "se": 0.03135009287336472,
+       "t": -0.14541925047496854,
+       "lags": 7,
+       "p_one_sided": 0.5578100667332136,
+       "tracking_error": 0.08597008070794267,
+       "information_ratio": -0.053028995325162684,
+       "interval": [
+        -0.05066584345422926,
+        0.04591777610322065
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.454
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": false,
+      "numbers": {
+       "active_return_at": {
+        "1x": -0.00455890700796535,
+        "2x": -0.006878792763883875,
+        "3x": -0.009198678519802399
+       },
+       "costs_a_year": 0.002319885755918522,
+       "breakeven_multiple": -0.9651428939268251
+      },
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero at 2x costs",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {
+       "percentile": 83.6,
+       "runs": 2000,
+       "matched": false,
+       "p_value": 0.16441779110444776,
+       "kind": "exposure_matched",
+       "pool": "candidate_pool",
+       "drawdown_percentile": 98.9,
+       "family": "cross_sectional_momentum",
+       "drew_from": "candidate_pool"
+      },
+      "limit": {
+       "runs_min": 2000,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the control did not fill every slot, so it is not matched",
+      "judged": true
+     },
+     "s4": {
+      "met": false,
+      "numbers": {
+       "dsr": 0.00044177826425924663,
+       "psr": 0.4416245551614688,
+       "sharpe": -0.053028995325162684,
+       "hurdle": 1.1477196472751043,
+       "n_trials": 760,
+       "trial_sharpe_var": 0.0005181347150259067,
+       "var_source": "variance of the logged trial Sharpes",
+       "family": "cross_sectional_momentum",
+       "configurations": 760,
+       "trial_sharpes_used": 282,
+       "whole_registry_configurations": 10889,
+       "sessions_judged": 1931,
+       "variance_of_trial_sharpes": 3.946968959462334e-05,
+       "variance_floor": 0.0005181347150259067,
+       "variance_floor_binds": true
+      },
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family",
+       "variance_floor": "1/(T-1)"
+      },
+      "why": "deflated Sharpe 0.000 is below 0.9",
+      "judged": true
+     },
+     "s5": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "s1": false,
+       "s2": false,
+       "s3": null,
+       "s4": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "S1 to S4 do not all hold on the point-in-time universe",
+      "judged": true
+     },
+     "s6": {
+      "met": false,
+      "numbers": {
+       "declared": [
+        "depth2",
+        "lr10",
+        "noscore",
+        "refit6m",
+        "ridge"
+       ],
+       "results": {
+        "depth2": false,
+        "lr10": true,
+        "noscore": false,
+        "refit6m": false,
+        "ridge": false
+       },
+       "active_return": {
+        "depth2": -0.0227285417356387,
+        "lr10": 0.007315979304209372,
+        "noscore": -0.011588732171620916,
+        "refit6m": -0.012472190641050714,
+        "ridge": -0.025819934925356617
+       },
+       "undeclared": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "depth2: active return -2.27% a year; noscore: active return -1.16% a year; refit6m: active return -1.25% a year; ridge: active return -2.58% a year",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'not stated', a pass needs 'v2'"
+    ],
+    "verdict": "fail",
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.8196627168360044,
+     "rule": {
+      "sessions": 1931,
+      "total_return": 1.1901146073999276,
+      "cagr": 0.10772438519876615,
+      "max_drawdown": 0.1460167568302162,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6226456458111769,
+       "se": 0.3425271781774106,
+       "t": 1.817799244790672,
+       "lags": 7,
+       "t_naive": 1.7235814918477963,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.31132282290558844,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0898058868672368,
+       "vol_ann": 0.14423273891241709
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": 1.121974327258357,
+      "cagr": 0.10316467794336592,
+      "max_drawdown": 0.14850620817499205,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.7531782549482712,
+       "se": 0.34411489284673513,
+       "t": 2.1887406520464903,
+       "lags": 7,
+       "t_naive": 2.0849163710119982,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3765891274741356,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.10862587821652864,
+       "vol_ann": 0.14422333292666442
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 1.3088413853361582,
+      "cagr": 0.11538237269732221,
+      "max_drawdown": 0.20258526874954608,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.7431652739708817,
+       "se": 0.3539421726441758,
+       "t": 2.0996799234715624,
+       "lags": 7,
+       "t_naive": 2.0571988581586504,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.37158263698544086,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.09436479387520216,
+       "vol_ann": 0.12697686124513338
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.025507924858791706,
+      "alpha_se": 0.039447797708600935,
+      "alpha_t": 0.6466248140699151,
+      "beta": 0.5005609763006353,
+      "beta_se": 0.05927758469604809,
+      "r2": 0.40572700086908187,
+      "tracking_error": 0.11121654274602795,
+      "lags": 7,
+      "alpha_se_ols": 0.040216141909364914
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.11780486507819288,
+       "max_drawdown": 0.052096587158706686,
+       "partial": true,
+       "benchmark": 0.1318105866004844,
+       "excess": -0.014005721522291514
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.06254557697738439,
+       "max_drawdown": 0.1460167568302151,
+       "partial": false,
+       "benchmark": 0.0003467464964075351,
+       "excess": -0.06289232347379192
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.14725955359050702,
+       "max_drawdown": 0.0734663670380965,
+       "partial": false,
+       "benchmark": 0.17635638633088946,
+       "excess": -0.02909683274038244
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.22738094146744037,
+       "max_drawdown": 0.11887377694973345,
+       "partial": false,
+       "benchmark": 0.0972892846215776,
+       "excess": 0.13009165684586277
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.3305916621241842,
+       "max_drawdown": 0.08794034049167454,
+       "partial": false,
+       "benchmark": 0.2631859459962298,
+       "excess": 0.06740571612795443
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.08148276241857033,
+       "max_drawdown": 0.10649743413044022,
+       "partial": false,
+       "benchmark": -0.17261641918173887,
+       "excess": 0.09113365676316854
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.08372299460266075,
+       "max_drawdown": 0.1084057464153928,
+       "partial": false,
+       "benchmark": 0.2156535724667219,
+       "excess": -0.13193057786406115
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.12062221734583534,
+       "max_drawdown": 0.08747737132640887,
+       "partial": false,
+       "benchmark": 0.24344252462431304,
+       "excess": -0.1228203072784777
+      }
+     ]
+    }
+   }
+  },
+  {
    "rule": "weekly_fall_rebound",
    "scored_as": "weekly_fall_rebound",
    "run": "oneshots, point_in_time",
@@ -11222,8 +12928,8 @@
     "gate_version": 3,
     "rule": "weekly_fall_rebound",
     "family": "short_term_reversal",
-    "generated_at": "2026-11-23T12:27:54.551964Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "weekly_fall_rebound",
      "sha256": "77f35d6ed77a3eb34dd190bf421cf287ead6ce8df10081e349ebf6c4020b9c56",
@@ -11347,9 +13053,9 @@
        "family": "short_term_reversal",
        "configurations": 18,
        "trial_sharpes_used": 39,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 8.238759291390871e-05,
+       "variance_of_trial_sharpes": 8.238759291390872e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -11623,8 +13329,8 @@
     "gate_version": 3,
     "rule": "weekly_fall_rebound",
     "family": "short_term_reversal",
-    "generated_at": "2026-11-23T12:27:54.644893Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "weekly_fall_rebound",
      "sha256": "77f35d6ed77a3eb34dd190bf421cf287ead6ce8df10081e349ebf6c4020b9c56",
@@ -11748,9 +13454,9 @@
        "family": "short_term_reversal",
        "configurations": 18,
        "trial_sharpes_used": 39,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": 8.238759291390871e-05,
+       "variance_of_trial_sharpes": 8.238759291390872e-05,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -12019,8 +13725,8 @@
     "gate_version": 3,
     "rule": "winners_run",
     "family": "intraday_dip_reversal",
-    "generated_at": "2026-11-23T12:27:54.737860Z",
-    "gate_sha": "e55a96ee62e9e66690b8561da85c9a6d4e5a7565b1c49f19bf689a4f18cf23e4",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
     "prereg": {
      "rule": "winners_run",
      "sha256": "d0c908698baf765c08acb17cfa8335373484ed43a5a1fbe97a0413c9790d5159",
@@ -12126,7 +13832,7 @@
        "family": "intraday_dip_reversal",
        "configurations": 8632,
        "trial_sharpes_used": 14,
-       "whole_registry_configurations": 10847,
+       "whole_registry_configurations": 10889,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": 0.0013031418977847555,
        "variance_floor": 0.0005181347150259067,
@@ -12374,6 +14080,2174 @@
    }
   }
  ],
+ "books": [
+  {
+   "book": "index_core",
+   "index_cap": "27%",
+   "universe": "pit",
+   "report": "index_core_aggressive_pit_20261124T205432.json",
+   "run_at": "2026-11-24T20:54:32+00:00",
+   "gate_v3": {
+    "gate": "B-book",
+    "gate_version": 3,
+    "rule": "index_core",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "index_core",
+     "sha256": "216f91f0258caf4d8bb92c331262ec99e9a31128022efe4784cbef3311d4099b",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "vol12",
+      "vol18",
+      "lookback63",
+      "daily",
+      "nocap"
+     ],
+     "committed_at": "2026-11-25T18:48:39+01:00",
+     "first_committed_at": "2026-11-23T17:32:28+01:00",
+     "amendments": [
+      "## Amendment 1 (22 Nov 2026, QA-Ops, before any run on real data)",
+      "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 3 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)"
+     ],
+     "versions": [
+      {
+       "sha256": "97aca41b52fb33879d9befbd1cf56c4c7e1815d794fee18d2fcaca8305b297f2",
+       "committed_at": "2026-11-23T17:32:28+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "e36e537d096fef8d837c94671063dd54f41b8528f07fda096ae3dc3428e35074",
+       "committed_at": "2026-11-23T22:06:40+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "216f91f0258caf4d8bb92c331262ec99e9a31128022efe4784cbef3311d4099b",
+       "committed_at": "2026-11-25T18:48:39+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "listed_as_book": true,
+     "components": [
+      "index_core",
+      "volatility_cap"
+     ],
+     "sleeve_budgets": {},
+     "budgets_as_pre_registered": true
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "v2",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "index_core_aggressive_pit_20261124T205432.json",
+     "run_at": "2026-11-24T20:54:32+00:00",
+     "code_sha": "0945894"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "b1": {
+      "met": true,
+      "numbers": {
+       "total_return": 0.29052776390523594,
+       "positive_years": 6,
+       "years": 8,
+       "years_not_counted": []
+      },
+      "limit": {
+       "total_return_above": 0.0,
+       "positive_years_min": 5,
+       "years_min": 8
+      },
+      "why": ""
+     },
+     "b2": {
+      "met": false,
+      "numbers": {
+       "cagr": 0.033844918800234325,
+       "spy_cagr": 0.14390087660986994,
+       "cagr_vs_spy_points": -11.005595780963562,
+       "max_drawdown": 0.05131899028751985,
+       "spy_max_drawdown": 0.3377737502311541,
+       "max_drawdown_vs_spy": 0.15193303284343412,
+       "branch": {
+        "defensive": false,
+        "growth": false
+       },
+       "cagr_vs_spy_points_interval": [
+        -20.242264059670173,
+        -2.2230622824082005
+       ],
+       "max_drawdown_vs_spy_interval": [
+        0.1446110412292259,
+        0.25639245713985265
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_meeting": {
+        "defensive": 0.0435,
+        "growth": 0.0105,
+        "either": 0.0435
+       },
+       "bootstrap_share_shallower_drawdown": 1.0
+      },
+      "limit": {
+       "defensive": {
+        "cagr_vs_spy_points_min": -2.0,
+        "max_drawdown_vs_spy_max": 0.75
+       },
+       "growth": {
+        "cagr_vs_spy_points_min": 1.0,
+        "max_drawdown_vs_spy_max": 1.1
+       }
+      },
+      "why": "neither branch holds"
+     },
+     "b3": {
+      "met": false,
+      "numbers": {
+       "b1": true,
+       "b2": false,
+       "cagr": 0.03375235454455083,
+       "max_drawdown": 0.051351827654215754,
+       "breakeven_multiple": 371.7616149224341
+      },
+      "limit": {
+       "costs_multiple": 2.0
+      },
+      "why": "neither branch holds"
+     },
+     "b4": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "b1": true,
+       "b2": false,
+       "b3": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "B1 to B3 do not all hold on the point-in-time universe"
+     },
+     "b5": {
+      "met": true,
+      "numbers": {
+       "declared": [
+        "vol12",
+        "vol18",
+        "lookback63",
+        "daily",
+        "nocap"
+       ],
+       "results": {
+        "vol12": true,
+        "vol18": true,
+        "lookback63": true,
+        "daily": true,
+        "nocap": true
+       }
+      },
+      "limit": {
+       "neighbours_pass": "b1"
+      },
+      "why": ""
+     },
+     "b6": {
+      "met": true,
+      "numbers": {
+       "sleeves": {},
+       "evidence_based_budget_pct": 0,
+       "labels": {},
+       "missing_verdicts": []
+      },
+      "limit": {
+       "every_return_sleeve": "pass",
+       "or": "evidence_based",
+       "evidence_based_budget_max_pct": 10.0
+      },
+      "why": ""
+     }
+    },
+    "provisional": false,
+    "provisional_reasons": [],
+    "verdict": "fail",
+    "can_pass": true,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "book": {
+      "sessions": 1931,
+      "total_return": 0.29052776390523594,
+      "cagr": 0.033844918800234325,
+      "max_drawdown": 0.05131899028751985,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.9680441904146875,
+       "se": 0.3651934980170684,
+       "t": 2.6507706070096653,
+       "lags": 7,
+       "t_naive": 2.679699217547453,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.48402209520734374,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.03390035461199614,
+       "vol_ann": 0.035019428810862466
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8249779930680892,
+       "se": 0.36038885188813896,
+       "t": 2.289132942780799,
+       "lags": 7,
+       "t_naive": 2.2836693865921736,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4124889965340446,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.15139675526972318,
+       "vol_ann": 0.18351611381375085
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.007324505161044747,
+      "alpha_se": 0.005107534926066934,
+      "alpha_t": 1.4340587518380408,
+      "beta": 0.17553777426474415,
+      "beta_se": 0.015041364497684869,
+      "r2": 0.8461969707281163,
+      "tracking_error": 0.013737384168057311,
+      "lags": 7,
+      "alpha_se_ols": 0.004969345008396318
+     },
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.03488224919511573,
+       "max_drawdown": 0.005577930729837366,
+       "partial": true,
+       "benchmark": 0.13781744964820075,
+       "excess": -0.10293520045308502
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.008918500006795615,
+       "max_drawdown": 0.04282477575068411,
+       "partial": false,
+       "benchmark": -0.04457358635932729,
+       "excess": 0.03565508635253167
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.06272186310919037,
+       "max_drawdown": 0.01767978812155291,
+       "partial": false,
+       "benchmark": 0.3113380845482949,
+       "excess": -0.24861622143910456
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.031143427524251477,
+       "max_drawdown": 0.05131899028751996,
+       "partial": false,
+       "benchmark": 0.18492176844733743,
+       "excess": -0.15377834092308595
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.06681156821557277,
+       "max_drawdown": 0.013680137964393269,
+       "partial": false,
+       "benchmark": 0.28617675399217557,
+       "excess": -0.2193651857766028
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.03785098445223267,
+       "max_drawdown": 0.049330312031208856,
+       "partial": false,
+       "benchmark": -0.1817168462164639,
+       "excess": 0.14386586176423122
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.058586863578786286,
+       "max_drawdown": 0.02675296211345457,
+       "partial": false,
+       "benchmark": 0.26189550634703496,
+       "excess": -0.20330864276824867
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.056748877370098594,
+       "max_drawdown": 0.022625774722954572,
+       "partial": false,
+       "benchmark": 0.24885149723075384,
+       "excess": -0.19210261986065524
+      }
+     ],
+     "cash_yield": {
+      "rf": {
+       "mean_ann": 0.023207689544754384,
+       "total": 0.19220120969453447,
+       "sessions": 1931
+      },
+      "mean_idle_share": 0.7653774382013376,
+      "zero_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 0.29052776390523594,
+        "cagr": 0.033844918800234325,
+        "max_drawdown": 0.05131899028751985,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9680441904146875,
+         "se": 0.3651934980170684,
+         "t": 2.6507706070096653,
+         "lags": 7,
+         "t_naive": 2.679699217547453,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.48402209520734374,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.03390035461199614,
+         "vol_ann": 0.035019428810862466
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8249779930680892,
+         "se": 0.36038885188813896,
+         "t": 2.289132942780799,
+         "lags": 7,
+         "t_naive": 2.2836693865921736,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4124889965340446,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.15139675526972318,
+         "vol_ann": 0.18351611381375085
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.007324505161044747,
+        "alpha_se": 0.005107534926066934,
+        "alpha_t": 1.4340587518380408,
+        "beta": 0.17553777426474415,
+        "beta_se": 0.015041364497684869,
+        "r2": 0.8461969707281163,
+        "tracking_error": 0.013737384168057311,
+        "lags": 7,
+        "alpha_se_ols": 0.004969345008396318
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 0.2932092846540064,
+        "cagr": 0.034125007435865884,
+        "max_drawdown": 0.051286152103141025,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.975625942927183,
+         "se": 0.36499304489088635,
+         "t": 2.672998723082089,
+         "lags": 7,
+         "t_naive": 2.700686706007736,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4878129714635915,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.034171474360547203,
+         "vol_ann": 0.03502518009927257
+        }
+       }
+      },
+      "tbill_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 0.4745253483975711,
+        "cagr": 0.05198491124342075,
+        "max_drawdown": 0.0507919233074241,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8095623724801735,
+         "se": 0.3615273998333736,
+         "t": 2.239283586398423,
+         "lags": 7,
+         "t_naive": 2.240996513972846,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.40478118624008674,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.02835285638573971,
+         "vol_ann": 0.035022448361672204
+        }
+       },
+       "simulated_excess": {
+        "sessions": 1931,
+        "total_return": 0.29052776390523594,
+        "cagr": 0.033844918800234325,
+        "max_drawdown": 0.05131899028751985,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.3124196057719411,
+         "se": 0.35220403036100534,
+         "t": 0.8870415408129042,
+         "lags": 7,
+         "t_naive": 0.8648268141301705,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.15620980288597056,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.010955406519962206,
+         "vol_ann": 0.0350663220795413
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.6998684270142707,
+         "se": 0.35530166507709315,
+         "t": 1.9697865104640409,
+         "lags": 7,
+         "t_naive": 1.9373463472291637,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3499342135071353,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12845180717768928,
+         "vol_ann": 0.18353707957034346
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.005804586804945485,
+        "alpha_se": 0.004947929826049382,
+        "alpha_t": 1.1731344236909058,
+        "beta": 0.17553874932723104,
+        "beta_se": 0.015041470962706159,
+        "r2": 0.8462537890898981,
+        "tracking_error": 0.013736030768844254,
+        "lags": 7,
+        "alpha_se_ols": 0.004966978374185907
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 0.4775890650089256,
+        "cagr": 0.05226990290659228,
+        "max_drawdown": 0.050759067537322955,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8171679301443912,
+         "se": 0.3613198746674217,
+         "t": 2.2616191010709183,
+         "lags": 7,
+         "t_naive": 2.2620498988530193,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4085839650721956,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.028623976134290775,
+         "vol_ann": 0.0350282666247475
+        }
+       },
+       "cash_added_cagr": 0.018139992443186426
+      }
+     }
+    }
+   },
+   "spy": "spy_total_return",
+   "sleeve_test": null,
+   "at_run": {
+    "verdict": "fail",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "marks": {
+     "b1": true,
+     "b2": false,
+     "b3": false,
+     "b4": false,
+     "b5": true,
+     "b6": true
+    }
+   }
+  },
+  {
+   "book": "index_core",
+   "index_cap": "80%",
+   "universe": "pit",
+   "report": "index_core_aggressive_pit_cap80_20261125T180328.json",
+   "run_at": "2026-11-25T18:03:28+00:00",
+   "gate_v3": {
+    "gate": "B-book",
+    "gate_version": 3,
+    "rule": "index_core",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "index_core",
+     "sha256": "216f91f0258caf4d8bb92c331262ec99e9a31128022efe4784cbef3311d4099b",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "vol12",
+      "vol18",
+      "lookback63",
+      "daily",
+      "nocap"
+     ],
+     "committed_at": "2026-11-25T18:48:39+01:00",
+     "first_committed_at": "2026-11-23T17:32:28+01:00",
+     "amendments": [
+      "## Amendment 1 (22 Nov 2026, QA-Ops, before any run on real data)",
+      "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 3 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)"
+     ],
+     "versions": [
+      {
+       "sha256": "97aca41b52fb33879d9befbd1cf56c4c7e1815d794fee18d2fcaca8305b297f2",
+       "committed_at": "2026-11-23T17:32:28+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "e36e537d096fef8d837c94671063dd54f41b8528f07fda096ae3dc3428e35074",
+       "committed_at": "2026-11-23T22:06:40+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "216f91f0258caf4d8bb92c331262ec99e9a31128022efe4784cbef3311d4099b",
+       "committed_at": "2026-11-25T18:48:39+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "listed_as_book": true,
+     "components": [
+      "index_core",
+      "volatility_cap"
+     ],
+     "sleeve_budgets": {},
+     "budgets_as_pre_registered": true
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "v2",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "index_core_aggressive_pit_cap80_20261125T180328.json",
+     "run_at": "2026-11-25T18:03:28+00:00",
+     "code_sha": "aea3752"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "b1": {
+      "met": true,
+      "numbers": {
+       "total_return": 1.0888278890534808,
+       "positive_years": 6,
+       "years": 8,
+       "years_not_counted": []
+      },
+      "limit": {
+       "total_return_above": 0.0,
+       "positive_years_min": 5,
+       "years_min": 8
+      },
+      "why": ""
+     },
+     "b2": {
+      "met": false,
+      "numbers": {
+       "cagr": 0.10090043235972712,
+       "spy_cagr": 0.14390087660986994,
+       "cagr_vs_spy_points": -4.300044425014282,
+       "max_drawdown": 0.15326839202158982,
+       "spy_max_drawdown": 0.3377737502311541,
+       "max_drawdown_vs_spy": 0.4537605184437844,
+       "branch": {
+        "defensive": false,
+        "growth": false
+       },
+       "cagr_vs_spy_points_interval": [
+        -9.886254065688222,
+        0.7325923227239017
+       ],
+       "max_drawdown_vs_spy_interval": [
+        0.42192733967602536,
+        0.7419075469343256
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_meeting": {
+        "defensive": 0.214,
+        "growth": 0.044,
+        "either": 0.214
+       },
+       "bootstrap_share_shallower_drawdown": 1.0
+      },
+      "limit": {
+       "defensive": {
+        "cagr_vs_spy_points_min": -2.0,
+        "max_drawdown_vs_spy_max": 0.75
+       },
+       "growth": {
+        "cagr_vs_spy_points_min": 1.0,
+        "max_drawdown_vs_spy_max": 1.1
+       }
+      },
+      "why": "neither branch holds"
+     },
+     "b3": {
+      "met": false,
+      "numbers": {
+       "b1": true,
+       "b2": false,
+       "cagr": 0.10062502303575616,
+       "max_drawdown": 0.15350933593105665,
+       "breakeven_multiple": 381.89069321379066
+      },
+      "limit": {
+       "costs_multiple": 2.0
+      },
+      "why": "neither branch holds"
+     },
+     "b4": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "b1": true,
+       "b2": false,
+       "b3": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "B1 to B3 do not all hold on the point-in-time universe"
+     },
+     "b5": {
+      "met": true,
+      "numbers": {
+       "declared": [
+        "vol12",
+        "vol18",
+        "lookback63",
+        "daily",
+        "nocap"
+       ],
+       "results": {
+        "vol12": true,
+        "vol18": true,
+        "lookback63": true,
+        "daily": true,
+        "nocap": true
+       }
+      },
+      "limit": {
+       "neighbours_pass": "b1"
+      },
+      "why": ""
+     },
+     "b6": {
+      "met": true,
+      "numbers": {
+       "sleeves": {},
+       "evidence_based_budget_pct": 0,
+       "labels": {},
+       "missing_verdicts": []
+      },
+      "limit": {
+       "every_return_sleeve": "pass",
+       "or": "evidence_based",
+       "evidence_based_budget_max_pct": 10.0
+      },
+      "why": ""
+     }
+    },
+    "provisional": false,
+    "provisional_reasons": [],
+    "verdict": "fail",
+    "can_pass": true,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "book": {
+      "sessions": 1931,
+      "total_return": 1.0888278890534808,
+      "cagr": 0.10090043235972712,
+      "max_drawdown": 0.15326839202158982,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.9660502013012093,
+       "se": 0.36493651094408214,
+       "t": 2.6471733365402663,
+       "lags": 7,
+       "t_naive": 2.674179540739211,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.48302510065060467,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.10169968205799287,
+       "vol_ann": 0.1052737030860402
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8249779930680892,
+       "se": 0.36038885188813896,
+       "t": 2.289132942780799,
+       "lags": 7,
+       "t_naive": 2.2836693865921736,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4124889965340446,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.15139675526972318,
+       "vol_ann": 0.18351611381375085
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.021688368101550757,
+      "alpha_se": 0.015310433419142178,
+      "alpha_t": 1.416574404381945,
+      "beta": 0.5284876403982154,
+      "beta_se": 0.04502265411682403,
+      "r2": 0.8487470507369514,
+      "tracking_error": 0.04095287222611558,
+      "lags": 7,
+      "alpha_se_ols": 0.014814243285817574
+     },
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.10689872829849567,
+       "max_drawdown": 0.016507359756665174,
+       "partial": true,
+       "benchmark": 0.13781744964820075,
+       "excess": -0.03091872134970508
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.028553851251705953,
+       "max_drawdown": 0.12428270707323774,
+       "partial": false,
+       "benchmark": -0.04457358635932729,
+       "excess": 0.016019735107621336
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.1969621345927668,
+       "max_drawdown": 0.05270685160429667,
+       "partial": false,
+       "benchmark": 0.3113380845482949,
+       "excess": -0.11437594995552813
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.08980720417995003,
+       "max_drawdown": 0.14707486049259355,
+       "partial": false,
+       "benchmark": 0.18492176844733743,
+       "excess": -0.0951145642673874
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.21366419811028647,
+       "max_drawdown": 0.040840597879949425,
+       "partial": false,
+       "benchmark": 0.28617675399217557,
+       "excess": -0.0725125558818891
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.12278182016586348,
+       "max_drawdown": 0.15326839202159004,
+       "partial": false,
+       "benchmark": -0.1817168462164639,
+       "excess": 0.058935026050600414
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.1852632905962659,
+       "max_drawdown": 0.07938644003315698,
+       "partial": false,
+       "benchmark": 0.26189550634703496,
+       "excess": -0.07663221575076906
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.18011669215125825,
+       "max_drawdown": 0.06723225107281983,
+       "partial": false,
+       "benchmark": 0.24885149723075384,
+       "excess": -0.06873480507949559
+      }
+     ],
+     "cash_yield": {
+      "rf": {
+       "mean_ann": 0.023207689544754384,
+       "total": 0.19220120969453447,
+       "sessions": 1931
+      },
+      "mean_idle_share": 0.2969221246559042,
+      "zero_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.0888278890534808,
+        "cagr": 0.10090043235972712,
+        "max_drawdown": 0.15326839202158982,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9660502013012093,
+         "se": 0.36493651094408214,
+         "t": 2.6471733365402663,
+         "lags": 7,
+         "t_naive": 2.674179540739211,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.48302510065060467,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.10169968205799287,
+         "vol_ann": 0.1052737030860402
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8249779930680892,
+         "se": 0.36038885188813896,
+         "t": 2.289132942780799,
+         "lags": 7,
+         "t_naive": 2.2836693865921736,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4124889965340446,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.15139675526972318,
+         "vol_ann": 0.18351611381375085
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.021688368101550757,
+        "alpha_se": 0.015310433419142178,
+        "alpha_t": 1.416574404381945,
+        "beta": 0.5284876403982154,
+        "beta_se": 0.04502265411682403,
+        "r2": 0.8487470507369514,
+        "tracking_error": 0.04095287222611558,
+        "lags": 7,
+        "alpha_se_ols": 0.014814243285817574
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.101500357086203,
+        "cagr": 0.10176975742660543,
+        "max_drawdown": 0.15302738414990746,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9734147368319813,
+         "se": 0.36473027741105596,
+         "t": 2.6688618881369415,
+         "lags": 7,
+         "t_naive": 2.694565738285581,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.48670736841599066,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.1024910553908939,
+         "vol_ann": 0.10529022369689543
+        }
+       }
+      },
+      "tbill_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.1909846007498839,
+        "cagr": 0.10778180002895854,
+        "max_drawdown": 0.14928751292392128,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8072465248424082,
+         "se": 0.3612294515166072,
+         "t": 2.2347195707692618,
+         "lags": 7,
+         "t_naive": 2.234585881933186,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4036232624212041,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.08498782944787735,
+         "vol_ann": 0.10528113386981604
+        }
+       },
+       "simulated_excess": {
+        "sessions": 1931,
+        "total_return": 1.0888278890534808,
+        "cagr": 0.10090043235972712,
+        "max_drawdown": 0.15326839202158982,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7479638523669616,
+         "se": 0.36002840901082256,
+         "t": 2.077513422960124,
+         "lags": 7,
+         "t_naive": 2.070482081074132,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3739819261834808,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.07875473396595893,
+         "vol_ann": 0.10529216581354357
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.6998684270142707,
+         "se": 0.35530166507709315,
+         "t": 1.9697865104640409,
+         "lags": 7,
+         "t_naive": 1.9373463472291637,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3499342135071353,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12845180717768928,
+         "vol_ann": 0.18353707957034346
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.017103208793022153,
+        "alpha_se": 0.014821853088788233,
+        "alpha_t": 1.1539183859513233,
+        "beta": 0.5284831887257871,
+        "beta_se": 0.04502167512691569,
+        "r2": 0.8488068588022426,
+        "tracking_error": 0.04094766478634296,
+        "lags": 7,
+        "alpha_se_ols": 0.014806763969144203
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.2042766446343527,
+        "cagr": 0.10865654669604674,
+        "max_drawdown": 0.14904537618478209,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8146339404932612,
+         "se": 0.36101626860115005,
+         "t": 2.2565020231630255,
+         "lags": 7,
+         "t_naive": 2.255035415265759,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4073169702466306,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.08577920278077839,
+         "vol_ann": 0.10529785038030584
+        }
+       },
+       "cash_added_cagr": 0.00688136766923142
+      }
+     }
+    }
+   },
+   "spy": "spy_total_return",
+   "sleeve_test": null,
+   "at_run": {
+    "verdict": "fail",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "marks": {
+     "b1": true,
+     "b2": false,
+     "b3": false,
+     "b4": false,
+     "b5": true,
+     "b6": true
+    }
+   }
+  },
+  {
+   "book": "index_core_trend_momentum",
+   "index_cap": "27%",
+   "universe": "pit",
+   "report": "index_core_trend_momentum_aggressive_pit_20261124T205816.json",
+   "run_at": "2026-11-24T20:58:16+00:00",
+   "gate_v3": {
+    "gate": "B-book",
+    "gate_version": 3,
+    "rule": "index_core_trend_momentum",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "index_core_trend_momentum",
+     "sha256": "cd739b923327fc848af89bb064d1c57bb3e2cbbab2ff0d23593ef6b387d8f939",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "budget5",
+      "nocap",
+      "vol12",
+      "vol18",
+      "lookback63"
+     ],
+     "committed_at": "2026-11-25T18:48:39+01:00",
+     "first_committed_at": "2026-11-23T17:47:35+01:00",
+     "amendments": [
+      "## Amendment 1 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)"
+     ],
+     "versions": [
+      {
+       "sha256": "13c52e2acd9bff4fee24a28079f9a7aaf75332b1997a7de499a9a5117fe1d32d",
+       "committed_at": "2026-11-23T17:47:35+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "923cbff0e9899ac8bcebaca7fd8307c0f017441571fe940dd3013ef5d3883c0a",
+       "committed_at": "2026-11-23T22:06:40+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "cd739b923327fc848af89bb064d1c57bb3e2cbbab2ff0d23593ef6b387d8f939",
+       "committed_at": "2026-11-25T18:48:39+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "listed_as_book": true,
+     "components": [
+      "index_core",
+      "volatility_cap",
+      "trend_momentum_sleeve"
+     ],
+     "sleeve_budgets": {
+      "trend_momentum_sleeve": 10.0
+     },
+     "budgets_as_pre_registered": true
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "v2",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "index_core_trend_momentum_aggressive_pit_20261124T205816.json",
+     "run_at": "2026-11-24T20:58:16+00:00",
+     "code_sha": "0945894"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "b1": {
+      "met": true,
+      "numbers": {
+       "total_return": 0.36519476955575003,
+       "positive_years": 6,
+       "years": 8,
+       "years_not_counted": []
+      },
+      "limit": {
+       "total_return_above": 0.0,
+       "positive_years_min": 5,
+       "years_min": 8
+      },
+      "why": ""
+     },
+     "b2": {
+      "met": false,
+      "numbers": {
+       "cagr": 0.04146148204491329,
+       "spy_cagr": 0.14390087660986994,
+       "cagr_vs_spy_points": -10.243939456495665,
+       "max_drawdown": 0.06614354083427032,
+       "spy_max_drawdown": 0.3377737502311541,
+       "max_drawdown_vs_spy": 0.19582202817420022,
+       "branch": {
+        "defensive": false,
+        "growth": false
+       },
+       "cagr_vs_spy_points_interval": [
+        -19.032324460408308,
+        -1.9249955550580393
+       ],
+       "max_drawdown_vs_spy_interval": [
+        0.1888398753068844,
+        0.35950676251972297
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_meeting": {
+        "defensive": 0.051,
+        "growth": 0.0105,
+        "either": 0.051
+       },
+       "bootstrap_share_shallower_drawdown": 1.0
+      },
+      "limit": {
+       "defensive": {
+        "cagr_vs_spy_points_min": -2.0,
+        "max_drawdown_vs_spy_max": 0.75
+       },
+       "growth": {
+        "cagr_vs_spy_points_min": 1.0,
+        "max_drawdown_vs_spy_max": 1.1
+       }
+      },
+      "why": "neither branch holds"
+     },
+     "b3": {
+      "met": false,
+      "numbers": {
+       "b1": true,
+       "b2": false,
+       "cagr": 0.04094816107175703,
+       "max_drawdown": 0.06622378070304813,
+       "breakeven_multiple": 83.34083622321486
+      },
+      "limit": {
+       "costs_multiple": 2.0
+      },
+      "why": "neither branch holds"
+     },
+     "b4": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "b1": true,
+       "b2": false,
+       "b3": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "B1 to B3 do not all hold on the point-in-time universe"
+     },
+     "b5": {
+      "met": true,
+      "numbers": {
+       "declared": [
+        "budget5",
+        "nocap",
+        "vol12",
+        "vol18",
+        "lookback63"
+       ],
+       "results": {
+        "budget5": true,
+        "nocap": true,
+        "vol12": true,
+        "vol18": true,
+        "lookback63": true
+       }
+      },
+      "limit": {
+       "neighbours_pass": "b1"
+      },
+      "why": ""
+     },
+     "b6": {
+      "met": false,
+      "numbers": {
+       "sleeves": {
+        "trend_momentum_sleeve": "fail"
+       },
+       "evidence_based_budget_pct": 0,
+       "labels": {},
+       "missing_verdicts": []
+      },
+      "limit": {
+       "every_return_sleeve": "pass",
+       "or": "evidence_based",
+       "evidence_based_budget_max_pct": 10.0
+      },
+      "why": "trend_momentum_sleeve: fail"
+     }
+    },
+    "provisional": false,
+    "provisional_reasons": [],
+    "verdict": "fail",
+    "can_pass": true,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "book": {
+      "sessions": 1931,
+      "total_return": 0.36519476955575003,
+      "cagr": 0.04146148204491329,
+      "max_drawdown": 0.06614354083427032,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8824132038332957,
+       "se": 0.35991426104376606,
+       "t": 2.451731702084439,
+       "lags": 7,
+       "t_naive": 2.442659121638531,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.44120660191664784,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.04174828072476295,
+       "vol_ann": 0.04731148689004656
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8249779930680892,
+       "se": 0.36038885188813896,
+       "t": 2.289132942780799,
+       "lags": 7,
+       "t_naive": 2.2836693865921736,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4124889965340446,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.15139675526972318,
+       "vol_ann": 0.18351611381375085
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.0071769084614294555,
+      "alpha_se": 0.007893372367689631,
+      "alpha_t": 0.9092322175002264,
+      "beta": 0.22834949270704205,
+      "beta_se": 0.019886392280912542,
+      "r2": 0.7845404059568577,
+      "tracking_error": 0.021966560274436026,
+      "lags": 7,
+      "alpha_se_ols": 0.007946157384549757
+     },
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.045819650750253516,
+       "max_drawdown": 0.00757350159505743,
+       "partial": true,
+       "benchmark": 0.13781744964820075,
+       "excess": -0.09199779889794724
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.015212211284186261,
+       "max_drawdown": 0.054538610302050206,
+       "partial": false,
+       "benchmark": -0.04457358635932729,
+       "excess": 0.029361375075141027
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.07061359613587115,
+       "max_drawdown": 0.02760620832345817,
+       "partial": false,
+       "benchmark": 0.3113380845482949,
+       "excess": -0.24072448841242378
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.04470254529356099,
+       "max_drawdown": 0.06614354083426988,
+       "partial": false,
+       "benchmark": 0.18492176844733743,
+       "excess": -0.14021922315377644
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.09657985233661082,
+       "max_drawdown": 0.025107127958612585,
+       "partial": false,
+       "benchmark": 0.28617675399217557,
+       "excess": -0.18959690165556475
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.043818740593857486,
+       "max_drawdown": 0.056992763165050975,
+       "partial": false,
+       "benchmark": -0.1817168462164639,
+       "excess": 0.1378981056226064
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.05956265880912959,
+       "max_drawdown": 0.03999952549729335,
+       "partial": false,
+       "benchmark": 0.26189550634703496,
+       "excess": -0.20233284753790537
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.06674992669053004,
+       "max_drawdown": 0.02841242138894473,
+       "partial": false,
+       "benchmark": 0.24885149723075384,
+       "excess": -0.1821015705402238
+      }
+     ],
+     "cash_yield": {
+      "rf": {
+       "mean_ann": 0.023207689544754384,
+       "total": 0.19220120969453447,
+       "sessions": 1931
+      },
+      "mean_idle_share": 0.6822463466463857,
+      "zero_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 0.36519476955575003,
+        "cagr": 0.04146148204491329,
+        "max_drawdown": 0.06614354083427032,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8824132038332957,
+         "se": 0.35991426104376606,
+         "t": 2.451731702084439,
+         "lags": 7,
+         "t_naive": 2.442659121638531,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.44120660191664784,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.04174828072476295,
+         "vol_ann": 0.04731148689004656
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8249779930680892,
+         "se": 0.36038885188813896,
+         "t": 2.289132942780799,
+         "lags": 7,
+         "t_naive": 2.2836693865921736,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4124889965340446,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.15139675526972318,
+         "vol_ann": 0.18351611381375085
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.0071769084614294555,
+        "alpha_se": 0.007893372367689631,
+        "alpha_t": 0.9092322175002264,
+        "beta": 0.22834949270704205,
+        "beta_se": 0.019886392280912542,
+        "r2": 0.7845404059568577,
+        "tracking_error": 0.021966560274436026,
+        "lags": 7,
+        "alpha_se_ols": 0.007946157384549757
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 0.39665972149124795,
+        "cagr": 0.04456305805938343,
+        "max_drawdown": 0.07137250872401002,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.947185661782662,
+         "se": 0.36562358627885255,
+         "t": 2.590603279790231,
+         "lags": 7,
+         "t_naive": 2.6219595157777578,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.473592830891331,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.04471772414998956,
+         "vol_ann": 0.04721114978221698
+        }
+       }
+      },
+      "tbill_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 0.536465863240279,
+        "cagr": 0.057649272895793136,
+        "max_drawdown": 0.06567900325633746,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7234289965745576,
+         "se": 0.35620851872665454,
+         "t": 2.0309143620725667,
+         "lags": 7,
+         "t_naive": 2.002565725064206,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3617144982872788,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.034230192313900544,
+         "vol_ann": 0.04731658874054095
+        }
+       },
+       "simulated_excess": {
+        "sessions": 1931,
+        "total_return": 0.36519476955575003,
+        "cagr": 0.04146148204491329,
+        "max_drawdown": 0.06614354083427032,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.3970919133279342,
+         "se": 0.3498313194797012,
+         "t": 1.1350953765904177,
+         "lags": 7,
+         "t_naive": 1.0992131350774972,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.1985459566639671,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.018803332632729014,
+         "vol_ann": 0.047352595209362726
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.6998684270142707,
+         "se": 0.35530166507709315,
+         "t": 1.9697865104640409,
+         "lags": 7,
+         "t_naive": 1.9373463472291637,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3499342135071353,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12845180717768928,
+         "vol_ann": 0.18353707957034346
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.0048973514692720235,
+        "alpha_se": 0.007729256418585269,
+        "alpha_t": 0.6336122395287818,
+        "beta": 0.2283567782277438,
+        "beta_se": 0.019887025980077386,
+        "r2": 0.784600524984964,
+        "tracking_error": 0.021965863870837654,
+        "lags": 7,
+        "alpha_se_ols": 0.007942903787332018
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 0.5718725753288041,
+        "cagr": 0.06079855674068613,
+        "max_drawdown": 0.06811822050766125,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7879158432351063,
+         "se": 0.3615683063354898,
+         "t": 2.1791618054709136,
+         "lags": 7,
+         "t_naive": 2.1810755020448926,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.39395792161755316,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.037199635739127164,
+         "vol_ann": 0.04721270178600427
+        }
+       },
+       "cash_added_cagr": 0.016187790850879846
+      }
+     }
+    }
+   },
+   "spy": "spy_total_return",
+   "sleeve_test": {
+    "rule": "trend_momentum_sleeve",
+    "verdict": "fail"
+   },
+   "at_run": {
+    "verdict": "fail",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "marks": {
+     "b1": true,
+     "b2": false,
+     "b3": false,
+     "b4": false,
+     "b5": true,
+     "b6": false
+    }
+   }
+  },
+  {
+   "book": "index_core_trend_momentum",
+   "index_cap": "80%",
+   "universe": "pit",
+   "report": "index_core_trend_momentum_aggressive_pit_cap80_20261125T180708.json",
+   "run_at": "2026-11-25T18:07:08+00:00",
+   "gate_v3": {
+    "gate": "B-book",
+    "gate_version": 3,
+    "rule": "index_core_trend_momentum",
+    "generated_at": "2026-11-25T18:07:08Z",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "prereg": {
+     "rule": "index_core_trend_momentum",
+     "sha256": "cd739b923327fc848af89bb064d1c57bb3e2cbbab2ff0d23593ef6b387d8f939",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "budget5",
+      "nocap",
+      "vol12",
+      "vol18",
+      "lookback63"
+     ],
+     "committed_at": "2026-11-25T18:48:39+01:00",
+     "first_committed_at": "2026-11-23T17:47:35+01:00",
+     "amendments": [
+      "## Amendment 1 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)"
+     ],
+     "versions": [
+      {
+       "sha256": "13c52e2acd9bff4fee24a28079f9a7aaf75332b1997a7de499a9a5117fe1d32d",
+       "committed_at": "2026-11-23T17:47:35+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "923cbff0e9899ac8bcebaca7fd8307c0f017441571fe940dd3013ef5d3883c0a",
+       "committed_at": "2026-11-23T22:06:40+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "cd739b923327fc848af89bb064d1c57bb3e2cbbab2ff0d23593ef6b387d8f939",
+       "committed_at": "2026-11-25T18:48:39+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "listed_as_book": true,
+     "components": [
+      "index_core",
+      "volatility_cap",
+      "trend_momentum_sleeve"
+     ],
+     "sleeve_budgets": {
+      "trend_momentum_sleeve": 10.0
+     },
+     "budgets_as_pre_registered": true
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "v2",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "index_core_trend_momentum_aggressive_pit_cap80_20261125T180708.json",
+     "run_at": "2026-11-25T18:07:08+00:00",
+     "code_sha": "aea3752"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "b1": {
+      "met": true,
+      "numbers": {
+       "total_return": 1.2049474683041947,
+       "positive_years": 6,
+       "years": 8,
+       "years_not_counted": []
+      },
+      "limit": {
+       "total_return_above": 0.0,
+       "positive_years_min": 5,
+       "years_min": 8
+      },
+      "why": ""
+     },
+     "b2": {
+      "met": false,
+      "numbers": {
+       "cagr": 0.10870057177252912,
+       "spy_cagr": 0.14390087660986994,
+       "cagr_vs_spy_points": -3.5200304837340823,
+       "max_drawdown": 0.16117554978862014,
+       "spy_max_drawdown": 0.3377737502311541,
+       "max_drawdown_vs_spy": 0.47717014622456694,
+       "branch": {
+        "defensive": false,
+        "growth": false
+       },
+       "cagr_vs_spy_points_interval": [
+        -8.806490440758417,
+        1.3125611355284859
+       ],
+       "max_drawdown_vs_spy_interval": [
+        0.46112298995759504,
+        0.8244222289424818
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_meeting": {
+        "defensive": 0.266,
+        "growth": 0.0615,
+        "either": 0.2675
+       },
+       "bootstrap_share_shallower_drawdown": 0.9985
+      },
+      "limit": {
+       "defensive": {
+        "cagr_vs_spy_points_min": -2.0,
+        "max_drawdown_vs_spy_max": 0.75
+       },
+       "growth": {
+        "cagr_vs_spy_points_min": 1.0,
+        "max_drawdown_vs_spy_max": 1.1
+       }
+      },
+      "why": "neither branch holds"
+     },
+     "b3": {
+      "met": false,
+      "numbers": {
+       "b1": true,
+       "b2": false,
+       "cagr": 0.10798446479804746,
+       "max_drawdown": 0.1613147406591483,
+       "breakeven_multiple": 160.2647597901523
+      },
+      "limit": {
+       "costs_multiple": 2.0
+      },
+      "why": "neither branch holds"
+     },
+     "b4": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "b1": true,
+       "b2": false,
+       "b3": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "B1 to B3 do not all hold on the point-in-time universe"
+     },
+     "b5": {
+      "met": true,
+      "numbers": {
+       "declared": [
+        "budget5",
+        "nocap",
+        "vol12",
+        "vol18",
+        "lookback63"
+       ],
+       "results": {
+        "budget5": true,
+        "nocap": true,
+        "vol12": true,
+        "vol18": true,
+        "lookback63": true
+       }
+      },
+      "limit": {
+       "neighbours_pass": "b1"
+      },
+      "why": ""
+     },
+     "b6": {
+      "met": false,
+      "numbers": {
+       "sleeves": {
+        "trend_momentum_sleeve": "fail"
+       },
+       "evidence_based_budget_pct": 0,
+       "labels": {},
+       "missing_verdicts": []
+      },
+      "limit": {
+       "every_return_sleeve": "pass",
+       "or": "evidence_based",
+       "evidence_based_budget_max_pct": 10.0
+      },
+      "why": "trend_momentum_sleeve: fail"
+     }
+    },
+    "provisional": false,
+    "provisional_reasons": [],
+    "verdict": "fail",
+    "can_pass": true,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "book": {
+      "sessions": 1931,
+      "total_return": 1.2049474683041947,
+      "cagr": 0.10870057177252912,
+      "max_drawdown": 0.16117554978862014,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.9406994498512307,
+       "se": 0.3626505412733873,
+       "t": 2.5939557309031454,
+       "lags": 7,
+       "t_naive": 2.6040046566818544,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.47034972492561533,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.11007317324005443,
+       "vol_ann": 0.11701205231645691
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8249779930680892,
+       "se": 0.36038885188813896,
+       "t": 2.289132942780799,
+       "lags": 7,
+       "t_naive": 2.2836693865921736,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4124889965340446,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.15139675526972318,
+       "vol_ann": 0.18351611381375085
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.022041041733986185,
+      "alpha_se": 0.017660517411761886,
+      "alpha_t": 1.2480405426460992,
+      "beta": 0.5814664346619136,
+      "beta_se": 0.04972053317445697,
+      "r2": 0.8316421921501107,
+      "tracking_error": 0.048024159027099896,
+      "lags": 7,
+      "alpha_se_ols": 0.01737220216194177
+     },
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.11711167145789125,
+       "max_drawdown": 0.017701928754461527,
+       "partial": true,
+       "benchmark": 0.13781744964820075,
+       "excess": -0.0207057781903095
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.03472119336956592,
+       "max_drawdown": 0.13392620635547103,
+       "partial": false,
+       "benchmark": -0.04457358635932729,
+       "excess": 0.009852392989761372
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.20289874382647266,
+       "max_drawdown": 0.06175924620525186,
+       "partial": false,
+       "benchmark": 0.3113380845482949,
+       "excess": -0.10843934072182226
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.0990316062786798,
+       "max_drawdown": 0.16117554978861992,
+       "partial": false,
+       "benchmark": 0.18492176844733743,
+       "excess": -0.08589016216865764
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.2431951392130991,
+       "max_drawdown": 0.05193809021294271,
+       "partial": false,
+       "benchmark": 0.28617675399217557,
+       "excess": -0.04298161477907647
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.12179134307330819,
+       "max_drawdown": 0.15330901711470424,
+       "partial": false,
+       "benchmark": -0.1817168462164639,
+       "excess": 0.0599255031431557
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.1870392535953027,
+       "max_drawdown": 0.09248544044984863,
+       "partial": false,
+       "benchmark": 0.26189550634703496,
+       "excess": -0.07485625275173224
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.19345908637381237,
+       "max_drawdown": 0.07304112148130282,
+       "partial": false,
+       "benchmark": 0.24885149723075384,
+       "excess": -0.055392410856941465
+      }
+     ],
+     "cash_yield": {
+      "rf": {
+       "mean_ann": 0.023207689544754384,
+       "total": 0.19220120969453447,
+       "sessions": 1931
+      },
+      "mean_idle_share": 0.2150595541745619,
+      "zero_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.2049474683041947,
+        "cagr": 0.10870057177252912,
+        "max_drawdown": 0.16117554978862014,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9406994498512307,
+         "se": 0.3626505412733873,
+         "t": 2.5939557309031454,
+         "lags": 7,
+         "t_naive": 2.6040046566818544,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.47034972492561533,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.11007317324005443,
+         "vol_ann": 0.11701205231645691
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8249779930680892,
+         "se": 0.36038885188813896,
+         "t": 2.289132942780799,
+         "lags": 7,
+         "t_naive": 2.2836693865921736,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4124889965340446,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.15139675526972318,
+         "vol_ann": 0.18351611381375085
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.022041041733986185,
+        "alpha_se": 0.017660517411761886,
+        "alpha_t": 1.2480405426460992,
+        "beta": 0.5814664346619136,
+        "beta_se": 0.04972053317445697,
+        "r2": 0.8316421921501107,
+        "tracking_error": 0.048024159027099896,
+        "lags": 7,
+        "alpha_se_ols": 0.01737220216194177
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.2607387477856014,
+        "cagr": 0.11232193056268214,
+        "max_drawdown": 0.16746215779774976,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9661143978873373,
+         "se": 0.36470765233270086,
+         "t": 2.6490104929468528,
+         "lags": 7,
+         "t_naive": 2.674357247029192,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.48305719894366866,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.1133755821268107,
+         "vol_ann": 0.11735212970093002
+        }
+       }
+      },
+      "tbill_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.2790188276746943,
+        "cagr": 0.11349157746608118,
+        "max_drawdown": 0.16100024885239406,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7814112887204772,
+         "se": 0.3588776011162885,
+         "t": 2.177375479243892,
+         "lags": 7,
+         "t_naive": 2.163069867781564,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3907056443602386,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.09144120087859946,
+         "vol_ann": 0.11702057827745228
+        }
+       },
+       "simulated_excess": {
+        "sessions": 1931,
+        "total_return": 1.2049474683041947,
+        "cagr": 0.10870057177252912,
+        "max_drawdown": 0.16117554978862014,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7444920762191392,
+         "se": 0.35813091026648564,
+         "t": 2.0788266381842377,
+         "lags": 7,
+         "t_naive": 2.0608716563446223,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3722460381095696,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.08712822514802045,
+         "vol_ann": 0.11703042642239553
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.6998684270142707,
+         "se": 0.35530166507709315,
+         "t": 1.9697865104640409,
+         "lags": 7,
+         "t_naive": 1.9373463472291637,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3499342135071353,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12845180717768928,
+         "vol_ann": 0.18353707957034346
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.016751177289026295,
+        "alpha_se": 0.017162105253974304,
+        "alpha_t": 0.9760560864260609,
+        "beta": 0.5814633926189401,
+        "beta_se": 0.04971946708232588,
+        "r2": 0.8317023141654909,
+        "tracking_error": 0.048019081947468,
+        "lags": 7,
+        "alpha_se_ols": 0.01736380367772011
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.3366828146983716,
+        "cagr": 0.11712849138480075,
+        "max_drawdown": 0.16374533347925968,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8073043586979507,
+         "se": 0.36085793144228995,
+         "t": 2.2371805864742607,
+         "lags": 7,
+         "t_naive": 2.2347459751799406,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.40365217934897535,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.09474360976535574,
+         "vol_ann": 0.11735798121808932
+        }
+       },
+       "cash_added_cagr": 0.004791005693552064
+      }
+     }
+    }
+   },
+   "spy": "spy_total_return",
+   "sleeve_test": {
+    "rule": "trend_momentum_sleeve",
+    "verdict": "fail"
+   },
+   "at_run": {
+    "verdict": "fail",
+    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "marks": {
+     "b1": true,
+     "b2": false,
+     "b3": false,
+     "b4": false,
+     "b5": true,
+     "b6": false
+    }
+   }
+  }
+ ],
  "skipped": [
   {
    "rule": "control",
@@ -12494,6 +16368,21 @@
     "trades": 1109,
     "positive_years": 4,
     "n_years": 10
+   }
+  },
+  {
+   "rule": "spy_noise_band",
+   "run": "spy_cost_rerun, today, v2idx",
+   "report": "spy_cost_rerun_balanced_20261123T125724.json",
+   "why": "the daily file has no exposure column",
+   "summary": {
+    "cagr_pct": 0.54,
+    "return_pct": 4.18,
+    "sharpe": 1.19,
+    "max_drawdown_pct": 0.45,
+    "trades": 888,
+    "positive_years": 8,
+    "n_years": 8
    }
   },
   {
