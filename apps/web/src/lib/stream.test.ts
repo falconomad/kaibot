@@ -1,7 +1,7 @@
 // Streamed prices (lib/stream.ts): the relay's broadcast over the 10 s poll, and the silent fallback after 5 s.
 import { describe, expect, it } from "vitest";
 import type { Marks } from "./marks";
-import { STREAM_STALE_MS, applyStream, mergeStream, parseStream, streamLive, PAUSED_MS, pricesPaused } from "./stream";
+import { STREAM_STALE_MS, applyStream, mergeStream, parseStream, streamLive } from "./stream";
 
 const NOW = Date.parse("2026-11-19T17:40:00Z");
 const POLL: Marks = { at: NOW - 4_000, by: { XOM: { qty: 20, price: 158.68, prevClose: 160.58 }, TMO: { qty: 4, price: 686.36, prevClose: 690 } } };
@@ -42,21 +42,5 @@ describe("applyStream: the stream over the poll", () => {
   it("a newer message wins; a stock only the older one carries keeps its price", () => {
     const m = mergeStream(msg({ XOM: 1, TMO: 2 }, NOW - 1_000), msg({ XOM: 3 }, NOW)!);
     expect(m).toMatchObject({ at: NOW, prices: { XOM: 3, TMO: 2 } });
-  });
-});
-
-describe("prices paused (stakeholder, 23 Nov 2026: one quiet cue instead of a line counting seconds)", () => {
-  const T = Date.parse("2026-11-23T17:40:00Z");
-  it("fresh prices, or the market closed: not paused", () => {
-    expect(pricesPaused(true, { XOM: T - 1_000, TMO: T - 59_000 }, false, T)).toBe(false);
-    expect(pricesPaused(true, { XOM: T - PAUSED_MS }, false, T)).toBe(false);  // a minute exactly is not more than a minute
-    expect(pricesPaused(false, { XOM: T - 600_000 }, true, T)).toBe(false);   // closed: the figures are the close
-    expect(pricesPaused(true, {}, false, T)).toBe(false);                     // no price yet: nothing has paused
-  });
-  it("a held stock with no price for more than 60 s, or a stream that dropped: paused", () => {
-    expect(PAUSED_MS).toBe(60_000);
-    expect(pricesPaused(true, { XOM: T - 1_000, TMO: T - 60_001 }, false, T)).toBe(true);
-    expect(pricesPaused(true, { XOM: T - 1_000 }, true, T)).toBe(true);
-    expect(pricesPaused(true, {}, true, T)).toBe(true);
   });
 });

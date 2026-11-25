@@ -32,7 +32,9 @@ import { poll } from "../lib/poll";
 import { type Unfilled, exitKinds, unfilledFrom, unfilledLine } from "../lib/engineevents";
 import { exitOf } from "../lib/exits";
 import { multiDayFrom } from "../lib/experiment";
-import { DayChange, PricesPaused, useMarks } from "../components/Marks";
+import { DayChange, useMarks } from "../components/Marks";
+import { FreshNote } from "../components/Fresh";
+import { holdingsFreshness } from "../lib/freshness";
 import { type BuyState, buyState, buyStateText, carriesFrom } from "../lib/carry";
 import { carriedText, carriedToday, carryHold, carryHoldText, currentPlans, sessionDate } from "../lib/plantoday";
 import { planNotes } from "../lib/planlate";
@@ -122,7 +124,7 @@ export function Positions() {
         {/* #359: no count while the book loads or failed (a "0 open" there reads as data); a space keeps the line's height */}
         <p className="muted num" style={{ margin: 0 }}>{countKnown ? <>{open.length} open{open.length ? <> · <Tick value={invested} from={from}>{money(invested)}</Tick> invested</> : ""}
           {open.length && pot ? ` · ${Math.round((invested / pot) * 100)}% of the pot` : ""}</> : "\u00a0"}</p>
-        <PricesPaused paused={mk.paused} />
+        {open.some((o) => o.kind === "book") && <FreshNote f={paper && ["running", "paused"].includes(run.status) ? holdingsFreshness(live, b?.session, mk.watching, mk.pricesAt) : null} what="Holdings" />}
         {line && <p className={`muted num ${line.ended ? "loss" : ""}`} style={{ margin: 0 }} title={`peak ${money(line.peak)}, now ${money(line.equity)}`}>Multi-day book: {lineText(line)}</p>}
         {run.kind === "paper" && (
           <div className="seg" role="tablist" aria-label="Show" onKeyDown={onTabKeys}>

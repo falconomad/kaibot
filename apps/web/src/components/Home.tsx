@@ -18,6 +18,9 @@ import { type PricedBook, markOf } from "../lib/marks";
 import { DayChange } from "./Marks";
 import { Tick } from "./Tick";
 import { NAME, REPO_DIR } from "../brand/brand";
+import type { Freshness } from "../lib/freshness";
+import { FreshNote } from "./Fresh";
+import { dataLate, dayText, lateText } from "../lib/nextaction";
 
 type Tone = "breach" | "warn" | "info" | "neutral" | "exp";
 
@@ -49,9 +52,11 @@ export const allRed = (risk: { items: string[]; red?: string[] }) =>
  *  then the experiment (or the test phase when no experiment runs). Never hidden; only their explanations are.
  *  Memoised: a streamed price re-renders Home about once a second and none of these rows depends on it. Of the engine
  *  chip only `asleep` and `note` are read here (its `sub` counts seconds). */
-export const HomeStatus = memo(function HomeStatus({ run, overview, risk, engineLive, engine, book }: {
+export const HomeStatus = memo(function HomeStatus({ run, overview, risk, engineLive, engine, book, events }: {
   run: Run; overview: Overview; risk: { severity: "ok" | "warn" | "breach"; items: string[]; red?: string[] } | undefined;
   engineLive: boolean; book: Book | undefined;
+  /** kb_health's events when a page already fetched them (a `multi_day_data_late` while the engine is not live) */
+  events?: LateEvents;
   /** The header chip's state (Shell.engineChip): asleep outside market hours is a calm row, not the warning. */
   engine?: { asleep: boolean; note: string; journal?: boolean };
 }) {
@@ -107,7 +112,7 @@ export const HomeStatus = memo(function HomeStatus({ run, overview, risk, engine
         <p><Link to="/positions">Positions</Link></p>
       </StatusRow>,
     );
-  rows.push(...noDecisionRows(md));
+  rows.push(...noDecisionRows(md, engineLive ? null : events));
   if (run.kind === "replay")
     rows.push(
       <StatusRow key="replay" tone="neutral" title="Replay, not live trading" text="Replay on past data, not live trading">
@@ -137,12 +142,31 @@ export const HomeStatus = memo(function HomeStatus({ run, overview, risk, engine
     );
   return rows.length ? <div className="status-rows">{rows}</div> : null;
 }, (a, b) => a.run === b.run && a.overview === b.overview && a.risk === b.risk && a.engineLive === b.engineLive && a.book === b.book
-  && a.engine?.asleep === b.engine?.asleep && a.engine?.note === b.engine?.note);
+  && a.events === b.events && a.engine?.asleep === b.engine?.asleep && a.engine?.note === b.engine?.note);
+
+type LateEvents = Parameters<typeof dataLate>[1];
+
+/** #645 (M12 3.11): the daily prices of a session missed their deadline (03:30 ET the night after it): the heartbeat's
+ *  `multi_day.data_late`, or a `multi_day_data_late` event while the engine is not live. One amber row per session; it
+ *  replaces the rule's own "no decision today: daily store not refreshed" row, which says the same (one row per
+ *  cause). Home and Engine. */
+function lateRows(md: ReturnType<typeof multiDayFrom>, events?: LateEvents): { rows: ReactNode[]; late: boolean } {
+  const late = md ? dataLate(md.raw, events) : [];
+  return { late: late.length > 0, rows: late.slice(0, 1).map((l) => (
+    <StatusRow key={`late-${l.session}`} tone="warn" title="Waiting for the daily prices" text={lateText(l)}>
+      <p>{NAME} decides after a close from that day's prices. The prices for {dayText(l.session)} were due by 03:30 ET and are not in yet,
+        so the multi-day rule makes no new decision until they arrive. Sales and safety stops go on as usual.</p>
+      <p className="muted">At the Mac: run <code className="num">./scripts/fetch_daily.sh</code> and see <code className="num">logs/fetch_daily.log</code>.</p>
+    </StatusRow>
+  )) };
+}
 
 /** Product, 16 Nov 2026: a skipped decision (the daily prices were not refreshed, or their check failed) is a fact the
  *  stakeholder sees without a tap: the rule's decision for that session did not happen. Home and Engine. */
-export function noDecisionRows(md: ReturnType<typeof multiDayFrom>): ReactNode[] {
-  return [...caRows(md), ...(md?.rules ?? []).filter((r) => !r.retired && r.note && /^no decision today/i.test(r.note)).map((r) => (
+export function noDecisionRows(md: ReturnType<typeof multiDayFrom>, events?: LateEvents): ReactNode[] {
+  const late = lateRows(md, events);
+  return [...caRows(md), ...late.rows, ...(md?.rules ?? []).filter((r) => !r.retired && r.note && /^no decision today/i.test(r.note)
+    && !(late.late && /daily store not refreshed/i.test(r.note))).map((r) => (
     <StatusRow key={`nd-${r.rule}`} tone="warn" title="No decision today" text={`No decision today: ${ruleName(r.rule)} skipped its decision`}>
       <p>{noDecisionText(r.note!)}</p>
       <p className="muted">{ruleName(r.rule)} decides after a close and trades at the next close. This session's decision was skipped, so it bought and
@@ -220,7 +244,8 @@ export function holdingRows(positions: Record<string, IntradayPos>, book: Book |
   return rows.sort((a, b) => b[0] - a[0]).map((r) => r[1]);
 }
 
-export function TopHoldings({ rows, max, top = 3, waiting = false, from }: { rows: HoldingRowData[]; max: number | null; top?: number;
+export function TopHoldings({ rows, max, top = 3, waiting = false, from, fresh }: { rows: HoldingRowData[]; max: number | null; top?: number;
+  /** #604: how fresh the rows' figures are (lib/freshness.ts bookFreshness); nothing shows while they are live */ fresh?: Freshness | null;
   /** The first live prices are on their way: keep the place of each book row's "today" line. */ waiting?: boolean;
   /** Where the book rows' figures come from ("live" or "close"), for Tick: a change of source does not tint. */ from?: string }) {
   return (
@@ -229,6 +254,7 @@ export function TopHoldings({ rows, max, top = 3, waiting = false, from }: { row
         <h2 id="hold-top-h">{rows.length ? `Holding ${rows.length}${max ? ` of ${max}` : ""}` : "Holding nothing"}</h2>
         <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 6 L15 12 L9 18" /></svg>
       </Link>
+      {rows.length > 0 && <FreshNote f={fresh} what="Holdings" />}
       {rows.length ? (
         <ul className="hold-rows">
           {rows.slice(0, top).map((r) => (

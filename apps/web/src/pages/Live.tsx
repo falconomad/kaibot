@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, memo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Meter, engineChip, useRunCtx } from "../components/Shell";
@@ -22,8 +22,11 @@ import { DailyNoteCard } from "../components/DailyNote";
 import { engineDetail } from "../components/Experiment";
 import { dailyNote, showNote } from "../lib/engineevents";
 import { multiDayFrom } from "../lib/experiment";
-import { PricesPaused, useMarks } from "../components/Marks";
+import { useMarks } from "../components/Marks";
 import { homeLine, potLive, vsSpyText } from "../lib/marks";
+import { FreshNote } from "../components/Fresh";
+import { bookFreshness, holdingsFreshness, newsFreshness } from "../lib/freshness";
+import { nextAction } from "../lib/nextaction";
 
 // #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
 // The market notices and the headline line (migration 0043): one chunk of their own, not first load
@@ -112,6 +115,9 @@ export function Live() {
   // #311: the daily note's event comes with kb_health's events. Home does not fetch them for it (the first load stays
   // lean); it reads them when Engine or Activity already did, and the heartbeat's copy otherwise.
   const healthCache = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: false });
+  // #604: the market calendar for the "Next" line, from the market notices' answer when that chunk has fetched it
+  // (kb_market_notices `sessions`); never asked for here.
+  const calendar = useQuery<{ sessions?: string[] } | null>({ queryKey: ["market-notices"], queryFn: skipToken });
   if (overviewError) return <ErrorState what="The run overview" error={overviewError} retry={retryOverview} />;
   if (trades.isError) return <ErrorState what="Trades" error={trades.error} retry={() => trades.refetch()} />;
   if (!overview || trades.isPending) return <Skeleton variant="dashboard" />;
@@ -154,6 +160,13 @@ export function Live() {
   const note = noteNow && showNote(noteNow) ? noteNow : null;
   const allTime = pot - run.amount_usd;
   const src = live?.fresh?.kind ?? "none";
+  // #604: one freshness rule for the pot, the holdings and the headlines (lib/freshness.ts); words only when not live
+  const potFresh = run.kind === "paper" && !ended ? bookFreshness(live?.fresh, mk.watching, mk.pricesAt) : null;
+  const rowsFresh = run.kind === "paper" && !ended ? holdingsFreshness(live, book?.session, mk.watching, mk.pricesAt) : null;
+  const beat = overview.heartbeat.find((h) => h.process === "engine");
+  const newsFresh = newsFreshness(beat?.detail, !chip.asleep);
+  const next = nextAction({ run, detail: beat?.detail, engine: chip, held: book?.positions.length ?? 0,
+    events: (healthCache.data?.events ?? []).filter((e) => e.run_id === null || e.run_id === run.id), calendar: calendar.data?.sessions });
   const chartStart = range === "ALL" ? run.amount_usd : shown[0]?.pot ?? run.amount_usd;
   // fewer than 5 closes: say why the line barely moves (the share of the pot in stocks at the last close)
   const caption = run.kind === "paper" ? chartCaption(c.filter((p) => !p.live).length,
@@ -162,9 +175,9 @@ export function Live() {
   return (
     <>
       {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
-      <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} />
+      <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} events={healthCache.data?.events} />
       <StartBanner state={startState(run, overview)} />
-      {run.kind === "paper" && <Suspense fallback={null}><Lines headlines={!ended} /></Suspense>}
+      {run.kind === "paper" && <Suspense fallback={null}><Lines headlines={!ended} fresh={newsFresh} /></Suspense>}
 
       <div className="home-band">
         <section aria-labelledby="pot-h" className="home-hero">
@@ -177,7 +190,8 @@ export function Live() {
             {live && <Tick value={live.dayPnl} from={src} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
             <span className="muted desk-only">{vsSpyText(vsSpy, spyAt)}</span>
           </div>
-          <PricesPaused paused={mk.paused} />
+          <FreshNote f={potFresh} what="Pot" />
+          {next && <p className="muted home-next">{next}</p>}
         </section>
         {lv && meters && run.kind === "paper" && (
           <div className="desk-only meters home-meters" aria-label="Limits">
@@ -196,7 +210,7 @@ export function Live() {
         </div>}
       </section>
 
-      {run.kind === "paper" && <TopHoldings from={live?.live ? "live" : live?.engine ? "engine" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} />}
+      {run.kind === "paper" && <TopHoldings fresh={rowsFresh} from={live?.live ? "live" : live?.engine ? "engine" : "close"} rows={rows} max={book?.positions.length ? null : lv?.maxPositions ?? null} waiting={mk.waiting} />}
       {note && <DailyNoteCard note={note} />}
       {run.kind === "replay" && (
         <section className="card" aria-labelledby="last-h">

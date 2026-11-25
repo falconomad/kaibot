@@ -88,7 +88,7 @@ describe("N2: a damaged-journal stop is never shown as asleep", () => {
     const html = render(<Health />, { ctx: ctxFor(run, { overview: { ...emptyOverview(run), heartbeat: [beat] } }),
       seeds: [{ key: ["health"], data: health }, { key: ["llm_budget"], data: budget }] });
     const t = text(html);
-    expect(t).toMatch(/^Engine Stopped — journal damaged Checked in .* Trading: Stopped — journal damaged · needs you at the Mac/);
+    expect(t).toMatch(/^Engine Stopped — journal damaged Trading: Stopped — journal damaged · needs you at the Mac/);
     expect(t).toContain("kaibo stopped because its journal is damaged · needs you at the Mac");
     expect(t).not.toMatch(/asleep/i);
     expect(hasAlert(html)).toBe(true);

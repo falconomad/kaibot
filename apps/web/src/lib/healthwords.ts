@@ -69,3 +69,14 @@ export function refusedPayloadText(type: string, p: Payload): string | null {
   if (type !== "multi_day_error" || str(p?.step) !== "broker_payload") return null;
   return "A broker answer was refused and not booked — orders may have gone out; check the books";
 }
+
+/** #645 (M12 3.11): `multi_day_data_late` {session, deadline, strategy, why}: the daily prices of `session` missed their
+ *  deadline (03:30 ET the night after it), so the multi-day rule makes no decision until they arrive. Null for every
+ *  other event. */
+export function dataLateText(type: string, p: Payload): string | null {
+  if (type !== "multi_day_data_late") return null;
+  const s = str(p?.session, 10);
+  const day = s && /^\d{4}-\d{2}-\d{2}$/.test(s)
+    ? new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${s}T12:00:00Z`)) : null;
+  return `The daily prices${day ? ` for ${day}` : ""} missed their deadline: no multi-day decision until they arrive`;
+}
