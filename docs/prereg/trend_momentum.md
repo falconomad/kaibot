@@ -871,3 +871,39 @@ text is Amendment 27 of mom_12_1_band.
    decided by the engine alone.
 3. **Research and Gate B unchanged.** The research venue lists every fill's activity with the fill, so nothing is
    ever unbooked there; the bit-identity test of the momentum rules passes unchanged.
+
+## Amendment 30 (25 Nov 2026, backend-quant, issue #461, M11 ticket 2.10, before its first use): the book's stop can be the Gate C bootstrap band, behind a switch that stays off
+
+Written on 25 Nov 2026, before the band judges any live paper session. It adds a second way to measure the book's
+run end (decision 17, `docs/decisions/17_book_stop.md`, section 7 step 3) behind the switch `mode` in
+`config/book_stop.yaml`, which stays `fixed`. With the switch at `fixed` nothing changes: no rule, decision, target,
+share count or stop (item 5). mom_12_1_band is not amended: it is off and has no band table, so in either mode its
+book keeps the fixed line.
+
+1. **Why.** The stakeholder replaced the permanent book stop (#461, 21 Nov 2026). The fixed line is 1.5 times one
+   test's drawdown and the same on day 5 and in year 8; the band is the 99% line of this rule's own resampled
+   drawdowns over as many sessions as the live record (decision 17 sections 1 and 2).
+2. **The rule in mode `band`.** At each book check the engine asks `risk/book_stop.verdict`: the book's current
+   drawdown from its journalled peak against the 99% line of its committed table at h sessions (at least
+   `min_sessions`, 20), for this rule at the run's level. The end is confirmed exactly as before (two checks at
+   least a minute apart, journalled) and does what it does today: the book is sold and the rule retired. The 95%
+   line is a record only (`md_book_band_alert`, once a day); nothing is sold. The committed table is #602's
+   (`docs/research/results/book_bands/trend_momentum_aggressive.json`, the 23 Nov engine + SimBroker run at the
+   100% cap, research window 2017-05-01 to 2024-12-31); the other levels have no table and keep their fixed line.
+3. **The ceiling (#600, stakeholder, 23 Nov 2026).** The line is never above 27% at any level: it is capped at
+   `ceiling_pct` (27) and at `BOOK_HARD_CEILINGS.run_drawdown_end_pct` (27) whatever the file says, and a file whose
+   `ceiling_pct` is above 27 is refused (then the fixed line). The raw 99% line of the table passes 27% from 378
+   sessions; there it is 27%.
+4. **Point in time.** A table is used only when its research window ended before the decision's New York day. The
+   horizon h counts the sessions that closed from the book's start (its first journalled peak) to the day before
+   the decision; the session under way is not counted. The file and the tables are read once, at the engine's
+   first book check: an edit takes effect at the next engine restart (#600, 24 Nov 2026).
+5. **Fail closed.** A missing, unreadable or invalid `config/book_stop.yaml`, mode `fixed`, a missing or unreadable
+   table, a table for another rule or level, a table without a window or whose window has not ended, a book of more
+   than one rule, or a non-finite input: the fixed line of today (13 / 21 / 27% by level), never "no stop".
+6. **Not in this amendment.** The pause for review instead of the retirement and keeping an index core at the end
+   (decision 17 section 4) are not wired: in mode `band` the end still sells everything and retires the rule, the
+   stricter of the two. Turning the switch to `band` is the stakeholder's own reviewed change (decision 17 section
+   7 step 4).
+7. **Research and Gate B unchanged.** No research result is affected: the band is computed from a finished run and
+   the switch is `fixed`; the bit-identity test of the momentum rules passes unchanged.

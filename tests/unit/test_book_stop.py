@@ -1,7 +1,7 @@
 """Decision 17 (M11 ticket 2.10, #461): the multi-day book's stop as the Gate C bootstrap band, behind a switch that
 is `fixed` (today's stop) in the repository. Written before any engine wiring (CLAUDE.md: tests first for a risk
-rule): the fixed mode is `gate.book_run_ended` on every input, the band mode behaves as the record says, and
-nothing live reads the new file yet."""
+rule): the fixed mode is `gate.book_run_ended` on every input and the band mode behaves as the record says. The
+engine wiring (#461) and its tests: tests/test_m11_book_band.py."""
 
 from __future__ import annotations
 
@@ -32,7 +32,9 @@ TABLE = bs.BandTable("index_core", "aggressive", (5, 20, 60, 252, 1000), (0.04, 
 
 
 def test_the_repository_keeps_todays_stop():
-    assert CFG.mode == "fixed" and CFG.tables == {}
+    assert CFG.mode == "fixed"  # #461: the switch; the committed table (#602) is read only in mode band
+    tm = "docs/research/results/book_bands/trend_momentum_aggressive.json"
+    assert CFG.tables == {"trend_momentum": {"aggressive": tm}} and (ROOT / tm).is_file()
     assert (CFG.retire_quantile, CFG.alert_quantile, CFG.ceiling_pct, CFG.min_sessions) == (0.99, 0.95, 27.0, 20)
     assert BOOK_HARD_CEILINGS.run_drawdown_end_pct == 27.0  # the fixed line's ceiling is unchanged
     text = (ROOT / "docs" / "decisions" / "17_book_stop.md").read_text()
@@ -41,20 +43,13 @@ def test_the_repository_keeps_todays_stop():
         assert phrase in text, phrase
 
 
-def test_no_engine_code_reads_the_band_yet():
-    """The wiring is a later two-key change (decision 17 section 7): today only research code imports it. Every
-    file under src/ is checked (a dynamic import or a registry would name the module), and the module is not
-    imported by importing the engine."""
+def test_only_the_engines_book_check_reads_the_band():
+    """#461 (decision 17 section 7 step 3): the engine's book check is the one live user of the module. Every file
+    under src/ is checked (a dynamic import or a registry would name the module)."""
     own = ROOT / "src" / "kaibot" / "risk" / "book_stop.py"
     users = [p.relative_to(ROOT) for p in (ROOT / "src").rglob("*") if p.is_file() and p != own
              and p.suffix in (".py", ".yaml", ".yml", ".json", ".toml", ".cfg") and "book_stop" in p.read_text()]
-    assert users == []
-    import subprocess
-    code = ("import sys, kaibot.engine.core, kaibot.engine.__main__, kaibot.risk.gate; "
-            "print('kaibot.risk.book_stop' in sys.modules)")
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=ROOT,
-                         env={"PYTHONPATH": str(ROOT / "src"), "PATH": "/usr/bin:/bin"}, check=True)
-    assert out.stdout.strip() == "False"
+    assert [str(p) for p in users] == ["src/kaibot/engine/core.py"]
 
 
 def test_a_missing_or_bad_config_fails_closed_to_the_fixed_stop(tmp_path: Path):

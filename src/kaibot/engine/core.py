@@ -76,9 +76,9 @@ from kaibot.engine.reconcile import (
 )
 from kaibot.engine.userconfig import ConfigError, Rules, defaults, tighten
 from kaibot.evaluation import gate_report
+from kaibot.risk import book_stop as bstop
 from kaibot.risk.gate import (
     RiskPolicy,
-    book_run_ended,
     drawdown_pct,
     intraday_equity,
     run_drawdown_reached,
@@ -89,6 +89,10 @@ from kaibot.strategies.base import Holding, Strategy, new_scan, note_scan
 __all__ = ["Engine", "FlattenIncomplete", "new_scan", "note_scan"]  # the scan counters live in strategies/base.py
 
 log = logging.getLogger("kaibot.engine")
+# #461 (decision 17 section 7 step 3): the multi-day book's stop switch and band tables (risk/book_stop.py), read
+# once per engine at its first book check, so an edit takes effect at the next restart. Missing or invalid: mode fixed.
+BOOK_STOP_PATH = bstop.DEFAULT_PATH
+BOOK_STOP_ROOT = ROOT
 
 FIRST_ENTRY_M = 5  # 09:35
 PAUSE_AFTER_LOSSES, PAUSE_MINUTES = 3, 60
@@ -460,6 +464,10 @@ class Engine:
         self._breach_rid: int | None = None  # the run whose journalled breach `_breach` was read for
         self.book_line: dict | None = None  # #229: the multi-day book's peak and stop line (heartbeat)
         self._book_peak_ts: str | None = None
+        self._book_start: tuple[int, str] | None = None  # #461: (run, ts of its first journalled peak)
+        # #461: (config, (rule, level) -> table or why not, why the file was not usable), read at the first check
+        self._bstop: tuple[bstop.BookStopConfig, dict, str | None] | None = None
+        self._band_alerted: tuple[int, str] | None = None  # #461: (run, day) of the last band alert
 
     # ================= lifecycle =================
     def startup(self) -> None:
@@ -938,7 +946,61 @@ class Engine:
             if e.get("run_id") == rid:
                 peak = float(e["peak"])
                 self._book_peak_ts = e.get("ts")
+                if self._book_start is None or self._book_start[0] != rid:
+                    self._book_start = (rid, str(e.get("ts")))  # #461: the book's start, its first peak
         return peak
+
+    def _book_stop(self) -> tuple[bstop.BookStopConfig, dict, str | None]:
+        """#461: config/book_stop.yaml, read once (fail closed: a missing or invalid file is mode fixed)."""
+        if self._bstop is None:
+            cfg, why = bstop.load_or_fixed(BOOK_STOP_PATH)
+            if why is not None:
+                log.error("the multi-day book's stop: %s", why)
+            self._bstop = (cfg, {}, why)
+        return self._bstop
+
+    def _band_table(self, rules: Sequence[str], level: str) -> tuple[bstop.BandTable | None, str | None]:
+        """#461: the committed band table of the book (one rule) at the run's level, read once; or None and why not.
+        Never raises: a missing or unreadable file means the fixed line."""
+        cfg, tables, _ = self._book_stop()
+        if len(rules) != 1:
+            return None, f"mode band, but the book has {len(rules)} rules and a table is per rule: the fixed line"
+        key = (rules[0], level)
+        if key not in tables:
+            try:
+                t = bstop.table_for(cfg, *key, root=BOOK_STOP_ROOT)
+                tables[key] = t if t is not None else (
+                    f"mode band, but no band table is committed for {key[0]} at {key[1]}: the fixed line")
+            except Exception as e:
+                tables[key] = f"mode band, but the band table of {key[0]} at {key[1]} is unusable ({e}): the fixed line"
+                log.error("the multi-day book's stop: %s", tables[key])
+        t = tables[key]
+        return (t, None) if isinstance(t, bstop.BandTable) else (None, t)
+
+    def _book_verdict(self, rid: int, b, rules: Sequence[str], peak: float, equity: float, lim, now: datetime):
+        """#461 (decision 17 sections 3 and 7): the book's stop at this check, `risk/book_stop.verdict`. Mode fixed
+        (the default) is `gate.book_run_ended` exactly. Mode band judges the book by its band table, point in time:
+        a table whose research window has not ended before today is refused, and the horizon counts the sessions
+        closed since the book's start (its first journalled peak) before today. The measured drawdown is the
+        current one from the journalled peak: a past fall that was not a confirmed breach then never ends the book
+        later (the line only grows with the horizon, and the end needs two checks a minute apart, now)."""
+        cfg, _, _ = self._book_stop()
+        table, why, sessions = None, None, 0
+        if cfg.mode == "band":
+            table, why = self._band_table(rules, self.level())
+            day = now.astimezone(_et()).date()
+            if table is not None and (why := bstop.table_unusable(table, day)) is not None:
+                table = None
+            if table is not None:
+                start = day
+                if self._book_start is not None and self._book_start[0] == rid:
+                    with contextlib.suppress(ValueError, TypeError):
+                        start = datetime.fromisoformat(self._book_start[1]).astimezone(_et()).date()
+                sessions = bstop.sessions_traded((c.session for c in b.closes), start, day)
+        v = bstop.verdict(peak, equity, lim, cfg=cfg, table=table, sessions=sessions)
+        if why is not None and v.mode == "fixed":
+            v = replace(v, why=why)
+        return v
 
     def _book_line_marked(self) -> None:
         """Product, 19 Nov 2026: the book line (and its peak) at the close marks, after the close and for a heartbeat
@@ -1000,6 +1062,7 @@ class Engine:
         if peak is None:  # the pot: the book's equity before its first trade
             peak = float(b.amount)
             self._book_peak_ts = now.isoformat()
+            self._book_start = (rid, self._book_peak_ts)
             self.journal.append("md_book_peak", {"run_id": rid, "peak": round(peak, 2), "ts": self._book_peak_ts})
         if equity > peak + 0.005:
             # M9 1.1 (audit R1): the peak never comes down, so one high reading must not set it. At the close
@@ -1022,10 +1085,22 @@ class Engine:
                                                      "ts": self._book_peak_ts})
         elif not at_close:
             self._peak_try = None  # a reading at or below the peak in between: start over
+        # #461: the stop at this check (mode fixed: the level's line `end`, exactly as before)
+        lim = replace(rules[0].builder.limits, run_drawdown_end_pct=end)
+        try:
+            v = self._book_verdict(rid, b, [r.name for r in rules], peak, equity, lim, now)
+        except Exception as e:  # never "no stop": any failure of the band is today's fixed line
+            log.exception("the multi-day book's stop: the band failed, the fixed line")
+            v = replace(bstop.verdict(peak, equity, lim, cfg=bstop.FIXED), why=f"the band failed ({e}): the fixed line")
+        band = v.mode == "band"
+        end_pct = round(v.line * 100, 3) if band else end
         # #229, reporting only: the book's distance to its stop line, repeated in every heartbeat (`_daily_status`)
         self.book_line = {"run_id": rid, "equity": round(equity, 2), "peak": round(peak, 2),
                           "peak_ts": self._book_peak_ts, "drawdown_pct": round(drawdown_pct(peak, equity), 2),
-                          "end_pct": end, "ended": False}
+                          "end_pct": end_pct, "ended": False}
+        if self._book_stop()[0].mode == "band":  # mode fixed: the heartbeat is unchanged
+            self.book_line["stop"] = {"mode": v.mode, "why": v.why, "horizon": v.horizon,
+                                      "alert_pct": None if v.alert_line is None else round(v.alert_line * 100, 3)}
         if unconfirmed and not at_close:  # M9 1.1: holdings whose live price was not used (at the last close mark)
             self.book_line["unconfirmed"] = list(unconfirmed)
         if why is not None:
@@ -1034,7 +1109,16 @@ class Engine:
             self._breach, self._breach_rid = self._journalled_breach(rid), rid
         if at_close:  # after the close: the line and the peak only (see `_book_line_marked`)
             return
-        if not book_run_ended(peak, equity, replace(rules[0].builder.limits, run_drawdown_end_pct=end)):
+        if band and v.alert and not v.end:  # decision 17 section 3: the 95% line, a record only; nothing is sold
+            key = (rid, str(now.astimezone(_et()).date()))
+            if self._band_alerted != key:
+                self._band_alerted = key
+                log.warning("the multi-day book is past its band's 95%% line: %s", v.why)
+                self.journal.append("md_book_band_alert", {
+                    "run_id": rid, "drawdown_pct": round(v.drawdown * 100, 3),
+                    "alert_pct": round(float(v.alert_line or 0) * 100, 3), "end_pct": end_pct, "horizon": v.horizon,
+                    "ts": now.isoformat()})
+        if not v.end:
             if self._breach is not None:
                 self.journal.append("md_book_breach_clear", {"run_id": rid, "peak": round(peak, 2),
                                                              "equity": round(equity, 2), "ts": self.now().isoformat()})
@@ -1052,13 +1136,13 @@ class Engine:
             self._breach = (rid, now)
             self.journal.append("md_book_breach", {"run_id": rid, "peak": round(peak, 2), "equity": round(equity, 2),
                                                    "drawdown_pct": round(drawdown_pct(peak, equity), 3),
-                                                   "end_pct": end, "ts": now.isoformat(),
+                                                   "end_pct": end_pct, "ts": now.isoformat(),
                                                    "action": "confirmed or dropped at the next check"})
             return
         if (now - self._breach[1]).total_seconds() < BREACH_CONFIRM_S:
             return
         self._breach = None
-        self._book_end(rid, peak, equity, end, [r.name for r in rules])
+        self._book_end(rid, peak, equity, end_pct, [r.name for r in rules], stop=v if band else None)
 
     def _unconfirmed_alarm(self, rid: int, now: datetime, unconfirmed: Sequence[str]) -> None:
         """QA-Ops second key on #527: a holding measured at its last close mark (its live price was rejected, or it
@@ -1100,7 +1184,8 @@ class Engine:
         except (KeyError, ValueError):
             return None
 
-    def _book_end(self, rid: int, peak: float, equity: float, end: float, rules: list[str]) -> None:
+    def _book_end(self, rid: int, peak: float, equity: float, end: float, rules: list[str],
+                  stop: bstop.StopVerdict | None = None) -> None:
         """The multi-day book reached its run end. Exactly this, in this order:
         1. `md_book_end` in the journal (from now on the daily path decides and sends nothing in this run);
         2. a `book_drawdown` halt row and a `multi_day_book_ended` event;
@@ -1113,6 +1198,8 @@ class Engine:
         dd = drawdown_pct(peak, equity)
         body = {"run_id": rid, "rules": rules, "peak": round(peak, 2), "equity": round(equity, 2),
                 "drawdown_pct": round(dd, 3), "end_pct": end, "ts": self.now().isoformat()}
+        if stop is not None:  # #461: the band ended it (decision 17 section 4); mode fixed: the body is unchanged
+            body.update({"why": "band_99", "horizon": stop.horizon, "line_pct": round(stop.line * 100, 3)})
         self.journal.append("md_book_end", body)
         reason = (f"multi-day book drawdown {dd:.1f}% reached its end of {end:g}% (peak {peak:,.2f}, now "
                   f"{equity:,.2f}): no new multi-day trades in this run, the book is sold at market")

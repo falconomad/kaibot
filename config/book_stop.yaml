@@ -1,13 +1,17 @@
 # The multi-day book's stop (decision 17, docs/decisions/17_book_stop.md; M11 ticket 2.10, issue #461). Read by
-# kaibot.risk.book_stop (load_or_fixed: a missing or invalid file means mode fixed, never "no stop").
+# kaibot.risk.book_stop (load_or_fixed: a missing or invalid file means mode fixed, never "no stop"), and by the engine
+# (engine/core.Engine._book_end_check) once, at its first book check: an edit takes effect at the next engine restart.
 #
 # mode: fixed  -> today's stop, unchanged: the book ends at BookLimits.run_drawdown_end_pct below its peak
 #                 (13 / 21 / 27% by level, decision 15 section 11; risk/gate.book_run_ended) and is retired.
 # mode: band   -> the Gate C bootstrap band of decision 17: the book ends when its live drawdown reaches the 99% line
 #                 of its own engine + SimBroker run's resampled drawdowns over the same number of sessions.
 #
-# STAYS `fixed` until decision 17 section 7 is done: the band tables committed, the engine wiring merged with two
-# keys (after #534 / #536 / #538), and the stakeholder's go. Today no engine code reads this file.
+# THE SWITCH is `mode`. It STAYS `fixed` (today's stop, bit for bit) until the stakeholder's go (decision 17 section
+# 7 step 4, #600): setting `mode: band` is its own reviewed change. The engine wiring is #461 (step 3). In mode band
+# the line is never above 27% (ceiling_pct, and BOOK_HARD_CEILINGS whatever this file says) at any level, a book
+# without a usable table keeps the fixed line, and a table is used only when its research window ended before the
+# decision's day (pre-registration: docs/prereg/trend_momentum.md Amendment 30).
 version: 1
 mode: fixed
 band:
@@ -19,8 +23,10 @@ band:
   keep_index_core: true            # PROPOSAL: at the end, a book with an index core sells its sleeves, keeps SPY
   review_sessions: 5               # PROPOSAL: Product reviews a paused book within this many sessions
   bootstrap: {method: stationary, mean_block_sessions: 20, runs: 2000, seed: 15}  # = config/gate_v2.yaml gate_c
-# Committed band tables, one per rule and level (scripts/book_stop_bands.py writes them on the Mac). Empty today:
-# a book without a table keeps the fixed line in either mode.
+# Committed band tables, one per rule and level (scripts/book_stop_bands.py writes them on the Mac). Read only in
+# mode band; a book without a table keeps the fixed line in either mode.
 #   <rule>:
 #     <level>: docs/research/results/book_bands/<rule>_<level>.json
-tables: {}
+tables:
+  trend_momentum:
+    aggressive: docs/research/results/book_bands/trend_momentum_aggressive.json  # #602 (99% line capped at 27)
