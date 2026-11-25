@@ -51,8 +51,9 @@ export const resetLogoMotion = () => { played = false; };
  *  (`"theme"`) the logo follows the page's theme (#673): each shape carries the on-dark file's colour as its fill and
  *  `light-dark(on-light, on-dark)` over it, so the light theme (tokens.css `color-scheme: light`) draws Design's on-light
  *  file, with no extra request, no class and no stylesheet rule. Both files have the same paths (brand.test.tsx), so
- *  every layer keeps its place. A browser without `light-dark()` keeps the on-dark fill. `animate`: play the load motion if no logo has played it yet. `idle`: after it,
- *  the point hops and the arm redraws, in turn. `large`: SIZE.large (sign-in and /register). */
+ *  every layer keeps its place. A browser without `light-dark()` keeps the on-dark fill. `animate`: play the load
+ *  motion if no logo has played it yet. `idle`: after it, the point hops and the arm redraws, in turn. `large`:
+ *  SIZE.large (sign-in and /register). */
 export function Logo({ size, symbolOnly = false, on = "theme", animate = false, idle, large = false }:
   { size?: number; symbolOnly?: boolean; on?: "dark" | "light" | "theme"; animate?: boolean; idle?: boolean; large?: boolean }) {
   const kind = symbolOnly ? "symbol" : "word";
