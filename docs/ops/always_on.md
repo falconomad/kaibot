@@ -19,6 +19,9 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
      logged in).
    - System Settings > Energy: "Start up automatically after a power failure" on; "Prevent automatic sleeping when
      the display is off" on.
+   - Never sleep on power (24-25 Nov 2026: the Mac fell asleep at 23:45 and the engine was off for 17 hours). In
+     Terminal: `sudo pmset -c sleep 0 disksleep 0`. `./scripts/run_engine.sh --check` shows the settings and prints
+     a FAILED line (and exits 1) while system sleep on AC power is not 0.
    - Docker mode only: Docker Desktop > Settings > General > "Start Docker Desktop when you sign in" on.
 4. **Install once**, outside 09:30-16:00 New York time (15:30-22:00 Berlin), with no engine running in a terminal:
    ```
@@ -34,8 +37,25 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
 
 | Agent (`~/Library/LaunchAgents`) | When | What |
 |---|---|---|
-| `com.kaibot.engine` | at login, every weekday at 15:00 Mac time, and about a minute after a crash | `scripts/service_run.sh engine` → `scripts/run_engine.sh` (Docker or Python, chosen at install). The engine itself waits for the broker's session (holidays and early closes come from Alpaca's calendar), so starting early is harmless. It keeps running overnight and over the weekend; `caffeinate` keeps the Mac awake while it runs. |
+| `com.kaibot.engine` | at login, every weekday at 15:00 Mac time, and about a minute after a crash | `scripts/service_run.sh engine` → `scripts/run_engine.sh` (Docker or Python, chosen at install). The engine itself waits for the broker's session (holidays and early closes come from Alpaca's calendar), so starting early is harmless. It keeps running overnight and over the weekend; `caffeinate -i -s -w <engine pid>` keeps the Mac awake while it runs (next section). |
 | `com.kaibot.daily` | 03:15 Tuesday-Saturday (after each US session is complete) | rotate logs, back up local files, refresh the daily bar store (`scripts/fetch_daily.sh`; skip with `KAIBOT_DAILY_FETCH=0` in the `.env` or the plist; only 0 or 1 counts) |
+
+**Keeping the Mac awake.** For each engine run the service holds power assertions, `caffeinate -i -s -w <pid of
+run_engine.sh>`, in their own process group: they start with the run (so they also cover the release checkout and
+the install or image build) and end when the engine exits, cleanly or not, or with the service. `-s` ("prevent
+system sleep") is the one that matters on a Mac mini: it holds back system sleep itself, and macOS honours it only on
+AC power, which a Mac mini always is. `-i` ("prevent idle sleep") only holds back the idle timer, but on any power
+source, so it still holds if a UPS ever tells macOS it is on battery. The nightly job holds the same pair for its
+own run. Neither stops a sleep chosen from the Apple menu, so the `pmset` setting above stays the first guard; the
+assertions are the second (`service.sh logs`: "keeping the Mac awake while the engine runs"). A start by hand keeps
+its own `caffeinate -is`.
+
+**When the engine was off anyway** (a sleep, a power cut, a crash) for more than an hour, the engine says so once,
+as an `engine_gap` event (Health page, severity warn, with `gap_s`, `since` and `until`) and an `engine gap: ...`
+line that sends a Healthchecks.io fail ping. It looks at every start (the last heartbeat is more than an hour old and
+was not a clean stop's: `service.sh stop` and `hold` are clean, so they never count) and while it runs (two loop
+passes more than an hour apart: the Mac slept with the engine running and has just woken). `src/kaibot/engine/gap.py`.
+Until the next kb_health migration lists it (`event_names.PENDING`), the event is in the database and the log only.
 
 Never two engines: the service checks for an engine started by hand (`engine_guard.sh`), keeps a pid lock
 (`data/live/service.pid`), and the engine's database lease refuses a second engine on any machine. If you start one
@@ -100,7 +120,7 @@ sends short pings (10 s timeout, in the background); it is not on the order path
 |---|---|
 | start | every engine start |
 | success | every 5 minutes while the engine process is alive and not stalled |
-| fail, with the log line | a halt (daily stop, drift, kill switch, …), lease lost or refused, a refused session, an incomplete flatten, an unclean paper account, the watchdog cancelling entries or flattening, the engine exiting with an error, the engine not ticking for 10 minutes during the session, the nightly job failing, and M9's alerts: a row skipped by the replica (`replica poison`), a replica backlog of ten minutes, the engine's clock differing from the broker's (`clock skew`), a yearly calendar ending within 30 days (at most once per kind per 30 minutes) |
+| fail, with the log line | a halt (daily stop, drift, kill switch, …), lease lost or refused, a refused session, an incomplete flatten, an unclean paper account, the watchdog cancelling entries or flattening, the engine exiting with an error, the engine not ticking for 10 minutes during the session, the nightly job failing, an engine gap of more than an hour (`engine gap:`), and M9's alerts: a row skipped by the replica (`replica poison`), a replica backlog of ten minutes, the engine's clock differing from the broker's (`clock skew`), a yearly calendar ending within 30 days (at most once per kind per 30 minutes) |
 | log | the nightly job finished (shown on the check's page, does not change its state) |
 
 No pings at all (Mac off, asleep, offline, service stopped) turns the check red after period + grace (about 20
@@ -123,6 +143,7 @@ dead-man cover a dead engine during the session (`docs/ops/failsafe.md`).
 | `kaibot engine refused to start (exit code 5)` every ~6 minutes | The run holds multi-day shares and the engine has no daily path: set `KAIBOT_MULTIDAY=on` in the `.env` (`docs/ops/run_engine.md`, "When a start is refused"). The service waits 5 minutes between tries; the next one starts by itself once it is fixed. |
 | `kaibot halt: …` | Read the reason on the dashboard. Entries stay off for the session; positions are still managed. |
 | `kaibot stalled` | Process alive but no tick for 10 minutes. `./scripts/service.sh restart`. |
+| `kaibot engine_gap: engine gap: no engine heartbeat for …` | The engine was off or frozen for that long (usually the Mac asleep). `./scripts/run_engine.sh --check` (any FAILED mac_sleep line: `sudo pmset -c sleep 0 disksleep 0`); check the dashboard for a late or missed multi-day decision and `logs/fetch_daily.log` for the nightly refresh (run `./scripts/fetch_daily.sh` by hand if it is missing: resumable, it skips what it has). |
 | "waiting for Docker Desktop" in the log | Open Docker Desktop; the service starts within a minute after it is up. |
 | A bad release | `./scripts/release.sh <previous tag> --force` then `./scripts/service.sh restart`. The previous tags are in `./scripts/release.sh --show`. |
 | Restore local files | Backups are in `~/Projects/kaibot-backups/kaibot-<date>.tar.gz` (30 days). `tar -xzf <file>` into a temporary folder and copy back what you need (with the engine stopped). The price-history cache is not backed up: it downloads again. |

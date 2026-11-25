@@ -207,6 +207,7 @@ export const EVENT_SEVERITY: Record<string, EventSeverity> = {
   multi_day_data_late: "warn",
   data_entry_block: "warn",
   data_entry_unblocked: "info",
+  engine_gap: "warn",
   cash_merger_booked: "info",
   config_applied: "info",
   custom_tickers: "info",

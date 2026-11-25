@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start the Kaibot engine on this machine and keep it (and the Mac) awake while it runs.
 #   ./scripts/run_engine.sh            run (Docker if it's running, otherwise Python 3.12+)
-#   ./scripts/run_engine.sh --check    test keys and connections, then exit
+#   ./scripts/run_engine.sh --check    test keys and connections and the Mac's sleep setting, then exit
 #   ./scripts/run_engine.sh --docker | --python   force one way
 # Trades the release pinned with scripts/release.sh (data/RELEASE, or KAIBOT_RELEASE=<tag|main>); nothing pinned:
 # pulls main as before. Always-on (launchd, alarms, backups): scripts/install_service.sh, docs/ops/always_on.md.
@@ -58,6 +58,36 @@ mkdir -p data/live
 echo "$CODE_SHA $(date -u +%FT%TZ)" > data/live/running_release
 
 awake() { if command -v caffeinate >/dev/null 2>&1; then caffeinate -is "$@"; else "$@"; fi; }
+# --check (QA-Ops, the 24-25 Nov 2026 incident: the Mac mini slept 17 hours): the Mac's sleep settings (pmset -g).
+# System sleep must be 0 (never) on AC power, else a FAILED line and --check exits 1. Not a Mac: skipped.
+mac_sleep() {
+  echo "mac_sleep (pmset -g):"
+  if ! command -v pmset >/dev/null 2>&1; then echo "  no pmset (not a Mac): skipped"; return 0; fi
+  local all ac v
+  all="$(pmset -g 2>/dev/null || true)"
+  printf '%s\n' "$all" | grep -E '^[[:space:]]*(sleep|disksleep|displaysleep|standby|powernap|autorestart)[[:space:]]' \
+    | sed -e 's/^[[:space:]]*/  /'
+  # the AC profile's own value (pmset -g custom, "AC Power:"); a Mac without that section: the current settings
+  ac="$(pmset -g custom 2>/dev/null | awk '/^AC Power:/ {on = 1; next} /^[^[:space:]].*:[[:space:]]*$/ {on = 0} on')"
+  [ -n "$ac" ] || ac="$all"
+  v="$(printf '%s\n' "$ac" | awk '$1 == "sleep" {print $2; exit}')"
+  if [ "$v" = 0 ]; then
+    echo "  system sleep on AC power: 0 (never): ok"; return 0
+  fi
+  echo "  FAILED: system sleep on AC power is ${v:-unknown}, not 0: the Mac can fall asleep and stop the engine"
+  echo "  (heartbeat, nightly bar refresh). Fix: sudo pmset -c sleep 0 disksleep 0 (docs/ops/always_on.md)."
+  return 1
+}
+finish() {  # the engine through caffeinate; with --check, then the Mac's sleep settings
+  [ "$CHECK" = 1 ] || { awake "$@"; return; }
+  local rc=0
+  awake "$@" || rc=$?
+  if ! mac_sleep; then
+    echo "Fix the FAILED line above (the Mac's sleep setting), then run --check again."
+    [ "$rc" != 0 ] || rc=1
+  fi
+  exit "$rc"
+}
 # Never two engines at once (one paper account would trade twice): refuse if one already runs on this machine.
 if [ "$CHECK" = 0 ]; then ./scripts/engine_guard.sh || exit 1; fi
 # The watchdog (separate process, own broker client) is left running when the engine stops or crashes:
@@ -78,7 +108,7 @@ if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 
   DAILY_HOST="${DAILY_HOST:-$PWD/data}"
   DAILY_MOUNT=()
   [ -d "$DAILY_HOST/daily" ] && DAILY_MOUNT=(-v "$DAILY_HOST/daily:/kaibot-daily/daily:ro" -e KAIBOT_DAILY_DATA=/kaibot-daily)
-  awake docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env ${DAILY_MOUNT[@]+"${DAILY_MOUNT[@]}"} \
+  finish docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env ${DAILY_MOUNT[@]+"${DAILY_MOUNT[@]}"} \
     -v "$ENV_FILE:/secrets/.env:ro" -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
 else
   PY="$(command -v python3.13 || command -v python3.12 || command -v python3 || true)"
@@ -105,5 +135,5 @@ else
   fi
   KAIBOT_ENV_FILE="$ENV_FILE" KAIBOT_DATA_DIR="$PWD/data/live" PYTHONPATH="$PWD/src" \
     KAIBOT_CODE_SHA="$CODE_SHA" \
-    awake .venv/bin/python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
+    finish .venv/bin/python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
 fi

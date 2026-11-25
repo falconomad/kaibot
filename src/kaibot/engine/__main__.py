@@ -37,6 +37,7 @@ from kaibot.engine.corp_guard import RecentActions
 from kaibot.engine.dividends import ExDateDividends
 from kaibot.engine.events import load_calendar
 from kaibot.engine.fence import FencedBroker
+from kaibot.engine.gap import GapWatch
 from kaibot.engine.journal import (
     BootstrapError,
     DurabilityError,
@@ -784,7 +785,11 @@ def main() -> None:
     signal.signal(signal.SIGTERM, lambda *_: stop.update(now=True))
     host = socket.gethostname()
     lease = EngineLease(eng.store, holder_id(settings.data_dir, host), host, journal=eng.journal)
+    # QA-Ops (24-25 Nov 2026 incident): the last heartbeat, read before this engine writes its own (engine/gap.py)
+    gaps = GapWatch(eng.store, eng._rid, host, process=eng.process)
+    gaps.before_start(getattr(eng.store, "remote", None) or eng.store)
     mode = start_or_refuse(eng, lease, adopt_journal=a.adopt_journal)
+    gaps.after_start()  # one engine_gap event if the engine was down more than an hour without a clean stop
     write_pid_file(settings.data_dir, host)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
     news = getattr(eng, "news_poller", None)
@@ -819,6 +824,8 @@ def main() -> None:
 
     eng.on_progress = lambda st: beat(st)  # long steps (history load) report progress
     while not stop["now"]:
+        with contextlib.suppress(Exception):
+            gaps.tick()  # a pass more than an hour after the last one: the process was frozen (the Mac asleep)
         try:
             if lease.lost:  # #477: the fence (or a renewal) found the tenure gone: nothing more is sent
                 raise LeaseLost("The engine lease is no longer ours (found by the order fence). Stopping.")
