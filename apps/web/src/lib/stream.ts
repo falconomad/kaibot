@@ -55,15 +55,3 @@ export function applyStream(marks: Marks | null, s: Stream | null | undefined, n
   }
   return n ? { ...marks, by, streamAt: s.at } : marks;
 }
-
-/** "Prices paused" (stakeholder, 23 Nov 2026: no "prices 1 s ago" lines, one quiet safety cue instead). While the
- *  market is open, a held stock with no price for longer than this, or a stream that was joined and dropped, pauses
- *  the prices. */
-export const PAUSED_MS = 60_000;
-
-/** Are the live prices paused at `now`? `open`: market hours (the same rule as the poll); `last`: when each held stock
- *  last got a price, from the poll or the stream; `down`: the stream's channel was joined and then lost. Never while
- *  closed (the figures are the close then), and never before the first price (nothing has paused yet). */
-export function pricesPaused(open: boolean, last: Record<string, number>, down: boolean, now = Date.now()): boolean {
-  return open && (down || Object.values(last).some((at) => now - at > PAUSED_MS));
-}

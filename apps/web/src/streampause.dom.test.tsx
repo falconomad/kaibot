@@ -45,7 +45,7 @@ const tab = async (state: "hidden" | "visible") => {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
   await act(async () => { document.dispatchEvent(new Event("visibilitychange", { bubbles: true })); });
 };
-const paused = () => document.querySelector(".paused")?.textContent ?? null;
+const paused = () => document.querySelector(".fresh")?.textContent ?? null;
 /** The channel as api.prices hands it out: who holds it now, how often it was let go, one relay broadcast, and a drop
  *  of the joined channel (api.prices' second argument, #601). */
 const channel = () => {
@@ -121,12 +121,12 @@ describe("the price stream while the app is hidden", () => {
     expect(page()).not.toContain("Prices paused");
   });
 
-  it("a dropped channel shows 'Prices paused'; hidden then shown, the rejoined channel is not down", async () => {
+  it("a dropped channel alone is not late (#604: the 10 s poll goes on); hidden then shown, the channel is joined again", async () => {
     const c = channel();
     await mount(<Live />, { ctx: ctxFor(run, { overview }), seeds });
     await pass(50);
     await c.drop();
-    expect(paused()).toBe("Prices paused");                    // #601: a joined channel that is lost is a pause
+    expect(paused()).toBeNull();                               // the poll still prices XOM: the figures are live
     await tab("hidden");
     expect(paused()).toBeNull();
     await pass(30_000);

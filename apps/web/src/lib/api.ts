@@ -172,7 +172,7 @@ const PRICES_LEAVE_MS = 2_000;
 const priceStream: {
   listeners: Set<(s: Stream) => void>; rt: RealtimeClient | null; ch: RealtimeChannel | null; joining: boolean;
   leaveTimer: ReturnType<typeof setTimeout> | null;
-  /** `joined`: the channel was subscribed once; `down`: it was, and is lost now (lib/stream.pricesPaused). */
+  /** `joined`: the channel was subscribed once; `down`: it was, and is lost now. */
   joined: boolean; down: boolean; downs: Set<(down: boolean) => void>;
 } = { listeners: new Set(), rt: null, ch: null, joining: false, leaveTimer: null, joined: false, down: false, downs: new Set() };
 

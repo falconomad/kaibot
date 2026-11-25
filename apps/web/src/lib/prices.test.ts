@@ -113,7 +113,7 @@ describe("api.prices: one shared private channel", () => {
   });
 });
 
-describe("api.prices: the stream's state for 'Prices paused' (lib/stream.pricesPaused)", () => {
+describe("api.prices: the stream's state (joined, then lost)", () => {
   it("a refusal by the owner policy is no stream here, not a drop: never down, and the channel is left", async () => {
     for (const msg of ["Unauthorized: You do not have permissions to read from this Channel topic: kb:prices", "new row violates row-level security policy"]) {
       rt.state.channels = [];

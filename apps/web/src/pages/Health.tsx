@@ -20,7 +20,8 @@ import { findExperiment, multiDayFrom } from "../lib/experiment";
 import { NAME } from "../brand/brand";
 import { caEvent } from "../lib/corpactions";
 import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevents";
-import { clearedAt, clearedFrom, clockSkewText, commandEventText, haltClearedText, refusedPayloadText } from "../lib/healthwords";
+import { clearedAt, clearedFrom, clockSkewText, commandEventText, dataLateText, haltClearedText, refusedPayloadText } from "../lib/healthwords";
+import { FreshNote } from "../components/Fresh";
 import { reconLine, reconcileFrom } from "../lib/reconcile";
 import { ReconcileAccept } from "../components/ReconcileAccept";
 import { EVENT_LABELS } from "../lib/eventNames";
@@ -185,7 +186,7 @@ export function Health() {
       <h1 className="page-title">Engine</h1>
       <div className="headline">
         <i className={chip.live ? "ok-dot live-dot" : "ok-dot"} style={{ background: chip.journal ? "var(--fail)" : chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
-        <span><b>{chip.text}</b><br /><span className="muted">{beatTs ? `Checked in ${ageText(ageS(beatTs))}` : "Has not checked in yet"}</span></span>
+        <span><b>{chip.text}</b>{beatTs ? chip.fresh?.text && <><br /><FreshNote f={chip.fresh} what="Engine" inline /></> : <><br /><span className="muted">Has not checked in yet</span></>}</span>
       </div>
       {ts && <p className="trading-state" role={ts.tone === "red" ? "alert" : undefined}><span className="sr-only">Trading: </span><TradingLine s={ts} /></p>}
       {chip.journal && (
@@ -204,7 +205,7 @@ export function Health() {
             <p className="muted">{NAME} applies its limits by itself. Open trades keep their stop at the broker.</p>
           </StatusRow>
         )}
-        {noDecisionRows(md)}
+        {noDecisionRows(md, chip.live ? null : h.events)}
       </div>
 
       <h2 className="section-h">Safety checks</h2>
@@ -359,7 +360,7 @@ function eventText(e: HealthData["events"][number]): string {
   const cmd = commandEventText(e.type, e.payload);
   if (cmd) return cmd;
   if (e.type.startsWith("command_")) return `You asked to ${commandText(e.type.slice("command_".length))}`;
-  const refused = refusedPayloadText(e.type, e.payload);
+  const refused = refusedPayloadText(e.type, e.payload) ?? dataLateText(e.type, e.payload);
   if (refused) return refused;
   const ca = caEvent(e); // #266 corporate actions (kb_health lists them once 0021 is applied)
   if (ca) return ca.head;

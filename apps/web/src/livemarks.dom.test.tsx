@@ -5,8 +5,9 @@
 // - the tab is hidden: no request; the prices on screen go stale after 30 s and the page falls back by itself;
 // - the market is closed: no request at all, however long the page stays up; the open arrives: the first request;
 // - a request that fails is not tried again before the next poll, and the last answer is dropped at 30 s;
-// - no line says how old the prices are (stakeholder, 23 Nov 2026); "Prices paused" shows, while the market is open,
-//   when a held stock has had no price for more than a minute or the stream dropped, and goes when prices come back.
+// - no line says how old the prices are while they are live (stakeholder, 23 Nov 2026); the shared freshness cue
+//   (#604, lib/freshness.ts) says "A few minutes old" while the market is open and a held stock has had no price for
+//   more than a minute, and goes when prices come back. A dropped stream alone is not late: the 10 s poll goes on.
 // And axe on Home and Positions in the live state and in the fallback (the other states are in a11y/pages.test.tsx).
 import { act } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,7 +58,9 @@ const pass = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync
 const page = () => (document.body.textContent ?? "").replace(/\s+/g, " ");
 /** Any line about the figures' age, as the page had before 23 Nov 2026. */
 const AGE = /s ago|ago by the engine|Live ·|At [A-Za-z']+ close|Updated/;
-const paused = () => document.querySelector(".paused")?.textContent ?? null;
+/** The freshness cue, or null when every figure is live. */
+const paused = () => document.querySelector(".fresh")?.textContent ?? null;
+const LATE = /^(Pot|Holdings): A few minutes old$/;
 const tab = async (state: "hidden" | "visible") => {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
   await act(async () => { window.dispatchEvent(new Event("visibilitychange")); });
@@ -111,8 +114,11 @@ describe("the market is open and the tab is visible", () => {
     expect(page()).toContain("$3,212.40+$0.60");
     expect(page()).not.toMatch(/% today/);
     expect(page()).not.toMatch(AGE);
-    await pass(120_000);
-    expect(paused()).toBeNull();                               // no live prices here at all: nothing has paused
+    await pass(60_000);
+    expect(paused()).toBeNull();                               // no prices here at all, and the minute row is live
+    await pass(60_000);
+    // the pot is the engine's minute row, written 2.6 min ago by now (this page's overview is not polled here)
+    expect(paused()).toBe("Pot: A few minutes old");
     expect(document.querySelector(".hold-end .day")).toBeNull(); // the kept place is given back
   });
 
@@ -232,14 +238,14 @@ describe("a hidden tab is not paused prices", () => {
     expect(asked.marks.mock.calls.length).toBeGreaterThanOrEqual(7);
     expect(paused()).toBeNull();
   });
-  it("back, and the answer fails: the old prices are paused then", async () => {
+  it("back, and the answer fails: the old prices are 'a few minutes old' then", async () => {
     asked.marks.mockImplementationOnce(xom(158.68)).mockRejectedValue(new TypeError("Failed to fetch"));
     await start(OPEN);
     await tab("hidden");
     await pass(90_000);
     await tab("visible");
     await pass(50);
-    expect(paused()).toBe("Prices paused");
+    expect(paused()).toMatch(LATE);
   });
 });
 
@@ -325,21 +331,19 @@ describe("streamed prices (scripts/price_stream.py over Supabase Realtime)", () 
     expect(paused()).toBeNull();
   });
 
-  it("the stream drops while the market is open: 'Prices paused' until it joins again; never while closed", async () => {
+  it("the stream drops while the poll goes on: nothing is said, the 10 s poll keeps the prices live", async () => {
     const c = channel();
     asked.marks.mockImplementation(xom(158.68));
     await start(OPEN);
     await c.send({ XOM: 159.18 });
     expect(paused()).toBeNull();
     await c.drop(true);
-    expect(paused()).toBe("Prices paused");
-    expect(document.querySelector(".paused")?.getAttribute("role")).toBe("status");
-    expect(page()).not.toMatch(AGE);
-    await c.drop(false);                                       // supabase-js joined again
+    await pass(90_000);
     expect(paused()).toBeNull();
+    expect(page()).not.toMatch(AGE);
   });
 
-  it("no price for a held stock for more than a minute (stream and poll both silent): paused; a price ends it", async () => {
+  it("no price for a held stock for more than a minute (stream and poll both silent): 'a few minutes old'; a price ends it", async () => {
     const c = channel();
     asked.marks.mockImplementationOnce(xom(158.68, 0)).mockRejectedValue(new TypeError("Failed to fetch"));
     await start(OPEN);
@@ -347,7 +351,8 @@ describe("streamed prices (scripts/price_stream.py over Supabase Realtime)", () 
     await pass(59_900);
     expect(paused()).toBeNull();                               // under a minute since the last streamed price
     await pass(200);
-    expect(paused()).toBe("Prices paused");                    // drawn by itself, at the minute, with no new render
+    expect(paused()).toMatch(LATE);                            // drawn by itself, at the minute, with no new render
+    expect(document.querySelector(".fresh")?.getAttribute("role")).toBe("status");
     await c.send({ XOM: 159.1 });
     expect(paused()).toBeNull();
   });
@@ -355,10 +360,10 @@ describe("streamed prices (scripts/price_stream.py over Supabase Realtime)", () 
   it("a stream never makes stale polled figures live, and the channel is left when the market closes", async () => {
     const c = channel();
     asked.marks.mockImplementationOnce(xom(158.68)).mockRejectedValue(new TypeError("Failed to fetch"));
-    await start("2026-11-19T20:59:00Z");                       // 15:59 in New York
+    await start("2026-11-19T20:59:00Z", overview({ ledger: { ts: "2026-11-19T20:58:40Z", cash: 94960, positions: {}, equity_venue: 94960, equity_shadow: 94960 } }));  // 15:59 in New York
     for (let i = 0; i < 29; i++) { await c.send({ XOM: 159 }); await pass(1_000); }
     expect(page()).not.toMatch(AGE);                          // the poll is 30 s old: not live, stream or not
-    expect(paused()).toBeNull();                               // but the stream still prices XOM: not paused
+    expect(paused()).toBeNull();                               // the stream still prices XOM, the minute row is fresh
     expect(page()).toContain("Paper pot$94,960.00");           // the engine's figure, not the streamed price
     expect(c.left).toBe(0);
     await pass(60_000);                                        // 16:00 has passed
@@ -367,7 +372,7 @@ describe("streamed prices (scripts/price_stream.py over Supabase Realtime)", () 
 });
 
 describe("axe: the live state and its fallback", () => {
-  it("Home and Positions: no serious or critical finding, live, in the fallback and paused; no line about the age", async () => {
+  it("Home and Positions: no serious or critical finding, live, in the fallback and late; no line about the age while live", async () => {
     for (const [marks, old] of [[await xom(158.68)(), 2_000], [null, 0], [await xom(158.68)(), 61_000]] as const) {
       vi.useFakeTimers({ now: new Date(OPEN), toFake: ["Date"] });
       const m = marks && { ...marks, at: Date.now() - old };
@@ -376,8 +381,7 @@ describe("axe: the live state and its fallback", () => {
       const pos = render(<Positions />, { ctx: ctxFor(run, { overview: overview() }), seeds: all, path: "/positions", route: "/positions" });
       vi.useRealTimers();
       for (const html of [home, pos]) {
-        expect(html).not.toMatch(/class="fresh/);
-        expect(html.includes('<p class="paused" role="status">Prices paused</p>')).toBe(old > 60_000);
+        expect(/class="fresh recent"[^>]*>.*?A few minutes old<\/p>/.test(html)).toBe(old > 60_000);
       }
       expect(lines(await audit(home))).toEqual([]);
       expect(lines(await audit(pos))).toEqual([]);

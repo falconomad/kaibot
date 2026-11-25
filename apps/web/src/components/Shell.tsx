@@ -19,6 +19,8 @@ import { BRAND, NAME } from "../brand/brand";
 import { Logo } from "./Logo";
 import { CREDIT_URL } from "../lib/logos";
 import { type HealthEvent, JOURNAL_REASON, journalDamaged } from "../lib/journalstop";
+import { EVERY, type Freshness, freshness } from "../lib/freshness";
+import { FreshNote } from "./Fresh";
 
 /** Required attribution for the company logos (AllInvestView's free ticker-logo CDN, stakeholder 18 Nov 2026): one
  *  visible, plain link on every screen that shows logos, phones included. Never hidden, never rel nofollow, sponsored
@@ -118,7 +120,10 @@ export interface EngineChip { dot: string; text: string; sub: string; live: bool
   /** The Home row's words for an engine that is not live. */
   note: string;
   /** N2 (ui_after_engine_v3): stopped by a damaged journal. Never "asleep": red, needs the owner at the Mac. */
-  journal?: boolean }
+  journal?: boolean;
+  /** #604: how old the heartbeat is (lib/freshness.ts), while the engine should be beating: absent when it is live, or
+   *  asleep or off on purpose. */
+  fresh?: Freshness }
 
 /** `events`: kb_health's events when the page has them (a damaged-journal stop is only visible there). */
 export function engineChip(o: Overview | undefined, run: Run, events?: HealthEvent[]): EngineChip {
@@ -137,14 +142,11 @@ export function engineChip(o: Overview | undefined, run: Run, events?: HealthEve
     if (c.kind !== "offline")
       return { dot: "var(--text-3)", text: c.kind === "asleep" ? "Engine asleep" : "Engine off", sub: c.wake ? `starts ${c.wake}` : "market closed",
         live: false, asleep: true, note: c.text };
-    return { dot: "var(--stale)", text: "Engine offline", sub: `last seen ${ago(age)}`, live: false, asleep: false, note: c.text };
+    const fresh = freshness(Date.parse(beat.ts), EVERY.heartbeat, now.getTime());
+    return { dot: "var(--stale)", text: "Engine offline", sub: fresh.text ?? "", live: false, asleep: false, note: c.text, fresh };
   }
   return { dot: state === "error" ? "var(--warn)" : "var(--live)", text: STATE_TEXT[state] ?? state,
     sub: beat.detail?.host ?? "", live: true, asleep: false, note: "" };
-}
-
-function ago(s: number) {
-  return s < 120 ? `${Math.round(s)} s ago` : s < 7200 ? `${Math.round(s / 60)} min ago` : `${Math.round(s / 3600)} h ago`;
 }
 
 /** N1: the trading-state line is a lazy chunk (the first load has no room for it): the engine chip shows until it is
@@ -263,13 +265,14 @@ export function Shell() {
         {ts && tsm ? (
           <Link to="/health" className={`chip engine-chip ts-chip ${ts.tone}`} title={`${tsm.tradingLine(ts)} · ${chip.text} · ${chip.sub}`}>
             <span className="sr-only">Trading: </span><tsm.TradingLine s={ts} />
+            <FreshNote f={chip.fresh} what="Engine" inline className="hide-sm" />
           </Link>
         ) : (
           <Link to="/health" className="chip engine-chip" title={chip.sub}>
             <span className="sr-only">Engine: </span>
             <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
               style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
-            <b>{chip.text}</b> <span className="num hide-sm">{chip.sub}</span>
+            <b>{chip.text}</b> {chip.fresh ? <FreshNote f={chip.fresh} what="Engine" inline className="hide-sm" /> : <span className="num hide-sm">{chip.sub}</span>}
           </Link>
         )}
       </header>

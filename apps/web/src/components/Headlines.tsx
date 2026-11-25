@@ -13,6 +13,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { MIN, poll } from "../lib/poll";
 import { DWELL_MS, type Headline, SOURCE_LABEL, STATIC_ROWS, TAGS, type Viewer, age, fetchHeadlines, nextIndex } from "../lib/headlines";
 import "./headlines.css";
+import type { Freshness } from "../lib/freshness";
+import { FreshNote } from "./Fresh";
 
 const FADE_MS = 300;
 
@@ -30,10 +32,11 @@ function useReducedMotion(): boolean {
 
 /** Home's headlines: nothing while loading, without headlines or before migration 0043; nothing on an error either
  *  (the line is extra, never a reason for an error row). Polls every 2 minutes, only while the tab is visible. */
-export default function Headlines({ viewer = "owner" }: { viewer?: Viewer }) {
+/** `fresh` (#604): the news feed's freshness; the card says it when the feed is not live. */
+export default function Headlines({ viewer = "owner", fresh }: { viewer?: Viewer; fresh?: Freshness | null }) {
   const q = useQuery({ queryKey: ["headlines", viewer], queryFn: () => fetchHeadlines(viewer), staleTime: MIN, retry: 1, ...poll(2 * MIN) });
   if (!q.data?.length) return null;
-  return <HeadlineCard items={q.data} />;
+  return <HeadlineCard items={q.data} fresh={fresh} />;
 }
 
 function Line({ h, now }: { h: Headline; now: number }) {
@@ -60,7 +63,7 @@ function Open({ h }: { h: Headline }) {
   );
 }
 
-export function HeadlineCard({ items, now = Date.now() }: { items: Headline[]; now?: number }) {
+export function HeadlineCard({ items, now = Date.now(), fresh }: { items: Headline[]; now?: number; fresh?: Freshness | null }) {
   const reduce = useReducedMotion();
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -95,6 +98,7 @@ export function HeadlineCard({ items, now = Date.now() }: { items: Headline[]; n
             <li key={`${h.source}-${h.id}-${h.headline}`} className="hl-item"><span className="hl-body"><Line h={h} now={now} /></span><Open h={h} /></li>
           ))}
         </ul>
+        <FreshNote f={fresh} what="Headlines" />
       </section>
     );
   const h = items[at];
@@ -113,6 +117,7 @@ export function HeadlineCard({ items, now = Date.now() }: { items: Headline[]; n
         <Open h={h} />
       </div>
       {n > 1 && <p className="hl-count" aria-hidden="true">{paused ? "Paused · " : ""}{at + 1} of {n}</p>}
+      <FreshNote f={fresh} what="Headlines" />
     </section>
   );
 }
