@@ -139,6 +139,9 @@ PENDING: tuple[Event, ...] = (
     Event("multi_day_data_late", "warn", "Daily prices not in by their deadline: no multi-day decision until they are"),
     Event("data_entry_block", "warn", "New buys blocked by a daily-data check (sales and stops go on)"),
     Event("data_entry_unblocked", "info", "The daily-data check passes again: buys allowed"),
+    # QA-Ops (24-25 Nov 2026 incident, engine/gap.py): the engine was not running for more than an hour while it
+    # should have been (no clean stop: a sleep, a power cut, a crash), seen at the next start or on waking
+    Event("engine_gap", "warn", "The engine was not running for over an hour (the Mac asleep or off?)"),
 )
 
 ROUTINE: tuple[Event, ...] = (

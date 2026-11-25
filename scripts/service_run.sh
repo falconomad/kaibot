@@ -270,6 +270,30 @@ stream_end() {  # $1 = the loop's pid: give it 15 s to stop the relay, then end 
   rm -f "$STREAM_PID"; return 0
 }
 
+# ---- keep the Mac awake while the engine runs (QA-Ops, the 24-25 Nov 2026 incident: the Mac mini fell asleep at
+# 23:45 Berlin, the engine's heartbeat stopped for about 17 hours and the nightly bar refresh did not run). One power
+# assertion pair for the whole engine run, held by `caffeinate -i -s -w <pid of run_engine.sh>`: it ends by itself
+# when that process ends (a crash, a stop, the service killed), and keep_awake_end ends it once the engine has exited.
+# -s ("PreventSystemSleep") is the one that matters on a Mac mini: it holds back system sleep itself, and macOS
+# honours it only on AC power, which a Mac mini always is. -i ("PreventUserIdleSystemSleep") only holds back the idle
+# timer, but it holds on any power source: it covers the case -s does not (a UPS that tells macOS it is on battery).
+# run_engine.sh's own `caffeinate -is` around the engine stays (a start by hand); this one also covers the
+# release checkout, the pip install or the image build before it, in its own process group. Not a Mac (no
+# caffeinate): said once per run, nothing else changes.
+KEEP_AWAKE_PID=""
+keep_awake() {  # keep_awake PID
+  if ! command -v caffeinate >/dev/null 2>&1; then
+    say "no caffeinate on this machine (not a Mac?): nothing holds it awake while the engine runs"; return 0
+  fi
+  caffeinate -i -s -w "$1" </dev/null >/dev/null 2>&1 &
+  KEEP_AWAKE_PID=$!
+  say "keeping the Mac awake while the engine runs (caffeinate -i -s -w $1, pid $KEEP_AWAKE_PID)"
+}
+keep_awake_end() {
+  [ -n "$KEEP_AWAKE_PID" ] || return 0
+  kill "$KEEP_AWAKE_PID" 2>/dev/null; wait "$KEEP_AWAKE_PID" 2>/dev/null; KEEP_AWAKE_PID=""; return 0
+}
+
 # #643 follow-up: exit code 5, the start was refused because the run holds multi-day sleeves and this engine has no
 # daily path. Every try refuses again until the .env is fixed, so the service waits before it exits (and launchd
 # starts it again): one line and one alarm per try, about every 6 minutes instead of every minute. The pid lock is
@@ -322,6 +346,7 @@ run_engine() {
   set -m  # the engine gets its own process group, so a stop reaches caffeinate, python or docker in one signal
   KAIBOT_SERVICE_RUN=$$ ./scripts/run_engine.sh ${flag[@]+"${flag[@]}"} </dev/null &  # #613: the service's own run
   child=$!
+  keep_awake "$child"  # its own process group too: a stop reaches the engine, and caffeinate ends with it
   if py="$(python_for_alarms)"; then
     "$py" scripts/healthcheck.py --env-file "$ENV_FILE" watch --pid "$child" \
       --log "$LOG_DIR/engine.log" --log "$LOG_DIR/watchdog.log" </dev/null 2>>"$LOG_DIR/healthcheck.log" &
@@ -361,6 +386,7 @@ run_engine() {
   # trap, a SIGINT that came while a foreground command ran (the pinger's 2 s, an alarm) was dropped by bash once
   # that command ended normally, and the service sat out the whole code-5 back-off instead of stopping.
   trap 'stopping=1' INT TERM HUP
+  keep_awake_end  # the engine has exited: the Mac may sleep again (the -w would end it within a second anyway)
   [ -n "$checks" ] && checks_end "$checks"
   [ -n "$streamer" ] && stream_end "$streamer"
   [ -n "$pinger" ] && { sleep 2; kill "$pinger" 2>/dev/null; }
@@ -381,7 +407,7 @@ run_engine() {
 }
 
 run_daily() {
-  command -v caffeinate >/dev/null 2>&1 && caffeinate -i -w $$ &
+  command -v caffeinate >/dev/null 2>&1 && caffeinate -i -s -w $$ &  # -s too: as the engine (keep_awake)
   local failed=() done_mark="data/live/daily_job.$(date +%F)"
   mkdir -p logs
   if [ ! -f "$done_mark" ]; then  # the 07:45 catch-up run does only the refresh

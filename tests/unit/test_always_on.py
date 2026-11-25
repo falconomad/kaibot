@@ -241,6 +241,9 @@ def test_success_pings_every_five_minutes_not_at_once():
      "orders until they agree", "clock_skew"),
     ("ERROR calendar expiring: macro_calendar ends 2027-12-31 (in 29 days): extend config/macro_calendar.yaml",
      "calendar_expiring"),
+    # QA-Ops (24-25 Nov 2026 incident): engine/gap.py's line, as the engine logs it
+    ("WARNING engine gap: no engine heartbeat for 17 h 05 min (2026-11-24T22:45 to 2026-11-25T15:50; the last "
+     "heartbeat before this start was not a clean stop's).", "engine_gap"),
 ])
 def test_alarm_lines_send_fail(line, kind):
     p = Pings()
@@ -1119,3 +1122,151 @@ def test_a_stop_reaches_the_relay_too(relay_env):
         p.kill()
     assert p.returncode == 0 and "stopped (on request)" in out
     assert gone(pid) and "worker-term" in (tmp / "worker.calls").read_text()
+
+
+# ---------------------------------------------------------------- keep the Mac awake (24-25 Nov 2026 incident)
+# The Mac mini fell asleep at 23:45 Berlin and the engine's heartbeat stopped for about 17 hours. service_run.sh now
+# holds `caffeinate -i -s -w <engine pid>` for the whole engine run, and `run_engine.sh --check` reports the Mac's sleep
+# settings (pmset -g), FAILED when system sleep on AC power is not 0. Linux CI: fake caffeinate and pmset on PATH.
+FAKE_CAFFEINATE = """#!/bin/bash
+echo "$$ $*" >> {tmp}/caffeinate.calls
+trap 'echo caffeinate-term >> {tmp}/caffeinate.calls; exit 0' TERM
+while [ "$1" ]; do [ "$1" = -w ] && w="$2"; shift; done
+[ -n "$w" ] || exit 64
+while kill -0 "$w" 2>/dev/null; do sleep 0.1; done
+echo caffeinate-done >> {tmp}/caffeinate.calls
+"""
+
+
+@pytest.fixture
+def awake(wrapper):
+    r, env, tmp = wrapper
+    bin_ = tmp / "awake-bin"
+    bin_.mkdir()
+    (bin_ / "caffeinate").write_text(FAKE_CAFFEINATE.format(tmp=tmp))
+    (bin_ / "caffeinate").chmod(0o755)
+    (r / "scripts/run_engine.sh").write_text(
+        f"#!/bin/bash\necho $$ > {tmp}/engine.pid\ntrap 'echo got-int >> {tmp}/ran; exit 0' INT\n"
+        f"echo up >> {tmp}/ran\nfor _ in $(seq ${{FAKE_SECONDS:-2}}0); do sleep 0.1; done\nexit ${{FAKE_CODE:-0}}\n")
+    return r, {**env, "KAIBOT_TICKER_CHECKS": "0", "PATH": f"{bin_}:{env['PATH']}"}, tmp
+
+
+def caffeinate_calls(tmp):
+    return (tmp / "caffeinate.calls").read_text().splitlines()
+
+
+def _wait_gone(pid, limit_s=5.0):
+    end = time.time() + limit_s
+    while time.time() < end and not gone(pid):
+        time.sleep(0.1)
+    return gone(pid)
+
+
+@pytest.mark.parametrize("code", [0, 3])
+def test_the_service_holds_a_system_sleep_assertion_for_the_engine_and_lets_go_when_it_ends(awake, code):
+    """-s (PreventSystemSleep, honoured on AC power: a Mac mini always is) and -i (idle sleep, on any power), -w on
+    the engine's own process (the run_engine.sh the service started), ended when the engine exits, cleanly or not."""
+    r, env, tmp = awake
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "FAKE_CODE": str(code)})
+    assert x.returncode == (0 if code == 0 else 1), x.stdout
+    engine = (tmp / "engine.pid").read_text().strip()
+    first = caffeinate_calls(tmp)[0].split()
+    assert first[1:] == ["-i", "-s", "-w", engine]
+    assert f"keeping the Mac awake while the engine runs (caffeinate -i -s -w {engine}, pid {first[0]})" in x.stdout
+    assert _wait_gone(int(first[0]))  # never outlives the engine run
+
+
+def test_a_stop_ends_the_assertion_with_the_engine(awake):
+    r, env, tmp = awake
+    p = subprocess.Popen(["bash", "scripts/service_run.sh", "engine"], cwd=r, stdout=subprocess.PIPE, text=True,
+                         env={**{k: v for k, v in os.environ.items() if not k.startswith("KAIBOT_")}, **env,
+                              "FAKE_SECONDS": "30"})
+    for _ in range(100):
+        if (tmp / "caffeinate.calls").exists() and (tmp / "engine.pid").exists():
+            break
+        time.sleep(0.1)
+    time.sleep(0.5)
+    pid = int(caffeinate_calls(tmp)[0].split()[0])
+    assert not gone(pid)  # held while the engine runs
+    p.send_signal(__import__("signal").SIGINT)
+    out, _ = p.communicate(timeout=30)
+    assert p.returncode == 0 and "stopped (on request)" in out, out
+    assert _wait_gone(pid) and "got-int" in (tmp / "ran").read_text()
+
+
+def test_without_caffeinate_the_service_says_so_once_and_runs_the_engine_as_before(wrapper):
+    r, env, tmp = wrapper
+    if shutil.which("caffeinate", path=env["PATH"]):
+        pytest.skip("a real caffeinate is on PATH (macOS)")
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_TICKER_CHECKS": "0"})
+    assert x.returncode == 0 and (tmp / "ran").read_text().count("ran") == 1
+    assert x.stdout.count("no caffeinate on this machine") == 1
+
+
+PMSET = """#!/bin/bash
+echo "$*" >> {tmp}/pmset.calls
+case "$*" in
+  "-g custom")
+    [ -n "${{FAKE_NO_AC:-}}" ] && {{ echo " sleep                ${{FAKE_SLEEP:-0}}"; exit 0; }}
+    printf 'AC Power:\\n Sleep On Power Button 1\\n disksleep            0\\n sleep                %s\\n' \\
+      "${{FAKE_AC_SLEEP:-0}}"
+    printf 'UPS Power:\\n sleep                10\\n' ;;
+  -g)
+    printf 'System-wide power settings:\\nCurrently in use:\\n standby              0\\n'
+    printf ' sleep                %s (sleep prevented by caffeinate, powerd)\\n' "${{FAKE_SLEEP:-0}}"
+    printf ' disksleep            0\\n displaysleep         10\\n' ;;
+esac
+"""
+
+
+@pytest.fixture
+def pmset(repo):
+    r, env, tmp = repo
+    bin_ = Path(env["PATH"].split(":")[0])
+    (bin_ / "pmset").write_text(PMSET.format(tmp=tmp))
+    (bin_ / "pmset").chmod(0o755)
+    return r, env, tmp
+
+
+def test_check_reports_the_macs_sleep_settings_and_passes_with_sleep_0_on_ac(pmset):
+    r, env, tmp = pmset
+    x = sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, {**env, "FAKE_SLEEP": "0"})
+    assert x.returncode == 0, x.stdout + x.stderr
+    assert "mac_sleep (pmset -g):" in x.stdout and "  sleep                0 (sleep prevented" in x.stdout
+    assert "  displaysleep         10" in x.stdout and "system sleep on AC power: 0 (never): ok" in x.stdout
+    assert "FAILED" not in x.stdout
+    run = [c for c in (tmp / "docker.calls").read_text().splitlines() if c.startswith("run --rm --name kaibot-engine")]
+    assert run[-1].endswith("python -m kaibot.engine --check")  # the engine's own check ran first, as before
+
+
+@pytest.mark.parametrize("ac, now", [("10", "0"), ("1", "1")])
+def test_check_fails_when_system_sleep_on_ac_is_not_0(pmset, ac, now):
+    """The AC profile decides (pmset -g custom), not what happens to be in use: a Mac mini runs on AC."""
+    r, env, tmp = pmset
+    x = sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, {**env, "FAKE_AC_SLEEP": ac, "FAKE_SLEEP": now})
+    assert x.returncode == 1
+    assert f"FAILED: system sleep on AC power is {ac}, not 0" in x.stdout
+    assert "sudo pmset -c sleep 0 disksleep 0" in x.stdout
+    assert x.stdout.rstrip().endswith("then run --check again.")
+
+
+def test_check_reads_the_current_settings_on_a_mac_without_an_ac_section(pmset):
+    r, env, tmp = pmset
+    ok = sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, {**env, "FAKE_NO_AC": "1", "FAKE_SLEEP": "0"})
+    assert ok.returncode == 0 and "0 (never): ok" in ok.stdout
+    bad = sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, {**env, "FAKE_NO_AC": "1", "FAKE_SLEEP": "5"})
+    assert bad.returncode == 1 and "is 5, not 0" in bad.stdout
+
+
+def test_without_pmset_the_check_skips_the_sleep_report(repo):
+    r, env, tmp = repo
+    if shutil.which("pmset", path=env["PATH"]):
+        pytest.skip("a real pmset is on PATH (macOS)")
+    x = sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, env, check=True)
+    assert "no pmset (not a Mac): skipped" in x.stdout
+
+
+def test_a_normal_start_never_asks_pmset(pmset):
+    r, env, tmp = pmset
+    sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "FAKE_AC_SLEEP": "10"}, check=True)
+    assert not (tmp / "pmset.calls").exists()

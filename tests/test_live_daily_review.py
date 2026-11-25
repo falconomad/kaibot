@@ -113,6 +113,6 @@ def test_the_docker_engine_gets_the_daily_store_read_only():
     from pathlib import Path
 
     sh = (Path(__file__).resolve().parents[1] / "scripts" / "run_engine.sh").read_text()
-    run = sh[sh.index("awake docker run"):].split("\n")[0]
+    run = sh[sh.index("finish docker run"):].split("\n")[0]  # finish: awake, then --check's mac_sleep
     assert "DAILY_MOUNT" in run
     assert '-v "$DAILY_HOST/daily:/kaibot-daily/daily:ro" -e KAIBOT_DAILY_DATA=/kaibot-daily' in sh

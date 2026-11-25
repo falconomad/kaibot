@@ -50,6 +50,8 @@ ALERTS = [
     ("replica_backlog", re.compile(r"replica backlog: ")),
     ("clock_skew", re.compile(r"clock skew: ")),  # not "clock skew over: ..."
     ("calendar_expiring", re.compile(r"calendar expiring: ")),
+    # QA-Ops (24-25 Nov 2026 incident): the engine was down or frozen (the Mac asleep) for more than an hour
+    ("engine_gap", re.compile(r"engine gap: ")),
 ]
 TICK = re.compile(r" tick \{")
 MINUTE = re.compile(r"'minute': (-?\d+)")

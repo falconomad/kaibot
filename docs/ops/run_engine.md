@@ -21,12 +21,16 @@ One-time:
 Every trading day, before 15:30 Berlin (09:30 New York):
 ```
 cd ~/Projects/kaibot
-./scripts/run_engine.sh --check   # keys, account, Supabase: prints a short report
+./scripts/run_engine.sh --check   # keys, account, Supabase, the Mac's sleep setting: prints a short report
 ./scripts/run_engine.sh           # runs until Ctrl-C; keeps the Mac awake while it runs
 ```
 - Start it at least 30 minutes before the open: it loads ~70 sessions of history first (a few minutes the
   first time, seconds afterwards).
 - `caffeinate` keeps the Mac awake on power. Closing the lid still sleeps a MacBook unless an external screen is attached.
+- `--check` ends with `mac_sleep`: the `pmset -g` settings, and a FAILED line (exit code 1) while system sleep on AC
+  power is not 0. Fix: `sudo pmset -c sleep 0 disksleep 0` (`docs/ops/always_on.md`).
+- After more than an hour without the engine (no clean stop: the Mac asleep, a power cut, a crash), the next start or
+  the first loop pass after waking writes one `engine_gap` event with the gap's length (`src/kaibot/engine/gap.py`).
 - If the Mac sleeps or the engine stops: open trades keep their stop-loss and target at Alpaca. The 15:55 close-out
   does not happen; the engine closes any position left from an earlier day at the first tick of the next open.
   The dashboard shows "Engine offline" after 90 seconds without a heartbeat.
