@@ -26,7 +26,7 @@ What appears:
 |---|---|
 | `README.md` | The index: every pre-registration, its runs on record, the headline numbers |
 | `<rule>.md`, `<rule>.json` | Per kind of run, from the newest report: what the run was, CAGR, drawdown, Sharpe, mean exposure, SPY on the same sessions, SPY at the rule's exposure, alpha with its t, beta, idle cash both ways, the control's percentile, the gate v2 marks as stored, the trial count, and the neighbours |
-| `runs/<report>.json` | Every run, not only the newest of its kind (#452): one small file per report with each base account's marks on the research window only (CAGR, drawdown, Sharpe, exposure, alpha and its t, beta, SPY at the rule's exposure, idle cash in bills), its neighbours' headline, the control's percentile, the gate v2 marks as stored and the trial count |
+| `runs/<report>.json` | Every run, not only the newest of its kind (#452): one small file per report with each base account's marks on the research window only (CAGR, drawdown, Sharpe, exposure, alpha and its t, beta, SPY at the rule's exposure, idle cash in bills), its neighbours' headline and the trial count; the control's percentile and the gate v2 marks as the run stored them on its own window |
 | `as_reported/` | The one-table pages the run scripts printed (`experiments_*.md`, the two studies' reports), copied unchanged |
 | `gate_v3_rescore.md`, `.json` | Every run scored under gate v3 (decision 16) |
 | `index_cost_calibration.md` | The index-fund spread table of ticket 2.3, once measured |

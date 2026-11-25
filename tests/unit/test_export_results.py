@@ -227,7 +227,7 @@ def test_every_run_gets_a_small_summary_on_the_research_window_only(out):
             assert acc["trials_for_rule"] >= 0
     tm = [json.loads(f.read_text()) for f in (folder / "runs").glob("core_balanced_trend_momentum_pit_*.json")]
     acc = tm[-1]["accounts"][0]
-    assert acc["rule"] == "trend_momentum" and acc["control"]["percentile"] is not None
+    assert acc["rule"] == "trend_momentum" and acc["control_as_stored"]["percentile"] is not None
     w = acc["research_window"]
     assert {"cagr", "alpha", "alpha_t", "beta", "mean_exposure", "exposure_matched_spy_cagr"} <= set(w)
     assert w["mean_exposure"] == pytest.approx(0.4) and acc["neighbours"]
@@ -244,3 +244,10 @@ def test_no_committed_result_names_a_home_folder():
     bad = [f"{p.relative_to(folder)}:{i}" for p in sorted(folder.rglob("*")) if p.is_file() and p.name != "HOW_TO.md"
            for i, line in enumerate(p.read_text().splitlines(), 1) if re.search(HOME_PATH, line)]
     assert bad == []
+
+
+def test_the_time_on_a_page_skips_a_report_whose_time_cannot_be_read(tmp_path: Path):
+    found = [(tmp_path / "a_20261110T100000.json", {"run_at": "not a time"}), (tmp_path / "b.json", {}),
+             (tmp_path / "c.json", {"run_at": "2026-11-12T09:00:00+01:00"})]
+    assert results.reports_as_of(found) == "2026-11-12T08:00:00+00:00"
+    assert results.reports_as_of([(tmp_path / "b.json", {})]) is None

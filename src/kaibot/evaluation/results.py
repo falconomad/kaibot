@@ -96,10 +96,14 @@ def reports_as_of(found: list[tuple[Path, dict]]) -> str | None:
     from the same reports is the same file byte for byte. None when no report has a time."""
     times = []
     for f, rep in found:
-        if isinstance(rep.get("run_at"), str) and rep["run_at"]:
-            times.append(pd.Timestamp(rep["run_at"]))
-        elif _stamp(f.name):
-            times.append(pd.Timestamp(_stamp(f.name)))
+        for t in (rep.get("run_at"), _stamp(f.name)):
+            try:
+                x = pd.Timestamp(t)
+            except (TypeError, ValueError):  # not a time: try the name's stamp, else skip the report
+                continue
+            if not pd.isna(x):  # a missing time or an empty stamp is NaT
+                times.append(x)
+                break
     if not times:
         return None
     t = max(x.tz_localize("UTC") if x.tzinfo is None else x.tz_convert("UTC") for x in times)

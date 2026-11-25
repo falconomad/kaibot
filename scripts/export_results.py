@@ -35,8 +35,9 @@ unchanged into docs/research/results/as_reported/.
 
 Every run, not only the newest of its kind (#452): one small JSON per report in docs/research/results/runs/,
 named after the report, with each base account's marks on the research window only (CAGR, drawdown, Sharpe,
-exposure, alpha and its t, beta, SPY at the rule's exposure, idle cash in bills), its neighbours' headline, the
-control's percentile, the gate v2 marks as stored and the trial count. Numbers are rounded to six places.
+exposure, alpha and its t, beta, SPY at the rule's exposure, idle cash in bills), its neighbours' headline and the
+trial count; and, as the run stored them on its own window, the control's percentile and the gate v2 marks (never
+recomputed). Numbers are rounded to six places.
 
 Deterministic (#452): the time written on every page is the newest report's own time, not the clock, and no path
 of this machine is written (the data folder becomes `data/`, the repository root `.`). The same reports give the
@@ -250,6 +251,7 @@ def headline(s: dict | None) -> dict | None:
                "return_above_exposure_matched_spy_t": act["t"] if act else None, "idle_cash_in_bills": cash})
 
 
+CONTROL_KEYS = ("percentile", "runs", "p_value", "matched", "kind")
 NEIGHBOUR_KEYS = ("cagr", "max_drawdown", "mean_exposure", "alpha", "alpha_t", "beta")
 
 
@@ -281,7 +283,7 @@ def run_summaries(found, every, pool, gate: g3.GateV3, bills, by_strategy: dict,
             accounts.append({"label": row.label, "rule": rule, "run": results.run_kind(row),
                              "research_window": headline(a["research_window"]),
                              "why": a["why"] if a["research_window"] is None else None,
-                             "control": _r({k: c.get(k) for k in ("percentile", "runs", "p_value", "matched", "kind")})
+                             "control_as_stored": _r({k: c.get(k) for k in CONTROL_KEYS})
                              if c.get("percentile") is not None else None,
                              "trials_for_rule": by_strategy.get(rule, 0), "neighbours": nb})
         m = bases[0].meta
@@ -474,8 +476,8 @@ def render_index(res: dict) -> str:
         out.append(f"| [{rule}]({rule}.md) | {'yes' if page['preregistered'] else 'no'} | {page['family'] or '-'} | "
                    f"{len(runs)} | {'`' + newest + '`' if runs else '-'} | {cell} |")
     if res.get("runs"):
-        out += ["", f"Every run, one small summary per report ({len(res['runs'])} reports, research window only): "
-                "[`runs/`](runs/)."]
+        out += ["", f"Every run, one small summary per report ({len(res['runs'])} reports): [`runs/`](runs/). Marks "
+                "on the research window only; the control and the gate v2 marks as the run stored them."]
     if res.get("as_reported"):
         out += ["", "Pages the run scripts wrote themselves are copied unchanged into [`as_reported/`](as_reported/): "
                 + ", ".join(f"`{n}`" for n in res["as_reported"]) + "."]
