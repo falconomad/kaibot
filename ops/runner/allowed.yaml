@@ -77,10 +77,6 @@ scripts:
     flags:
       --rule: '[a-z0-9_]{1,64}'
 
-  # #456: the gate v3 re-score of the reports already on the Mac (sleeves and, since #456, books). It runs no rule,
-  # loads no price bar and logs no trial; it reads data/reports, data/trials.jsonl and the T-bill file, and writes
-  # docs/research/results/gate_v3_rescore.md and .json (opened as a PR by the runner). No flags: --data, --out and
-  # --root are never allowed.
   # #454 (docs/prereg/trend_momentum.md Amendment 31): trend_momentum's base configuration at the closing print and
   # at the 15:50 price (reads data/daily and data/bars_1m up to --end; the hold-out guard refuses a later end).
   scripts/near_close_1550_rerun.py:
@@ -89,6 +85,10 @@ scripts:
     flags:
       <<: *replay_flags
 
+  # #456: the gate v3 re-score of the reports already on the Mac (sleeves and, since #456, books). It runs no rule,
+  # loads no price bar and logs no trial; it reads data/reports, data/trials.jsonl and the T-bill file, and writes
+  # docs/research/results/gate_v3_rescore.md and .json (opened as a PR by the runner). No flags: --data, --out and
+  # --root are never allowed.
   scripts/gate_v3_rescore.py:
     timeout_min: 20
     writes: [docs/research/results/]

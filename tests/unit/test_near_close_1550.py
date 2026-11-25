@@ -256,3 +256,49 @@ def test_live_code_never_asks_for_the_1550_execution():
             if p.name not in ("daily.py", "minute_1550.py") and ("at_1550" in p.read_text()
                                                                   or "minute_1550" in p.read_text())]
     assert hits == []
+
+
+# ---------------------------------------------------------------- QA-Ops: the default path is bit-for-bit the old one
+
+# Fingerprints of fixture runs computed on the engine BEFORE #454's change (commit 59c332e, PR #668's head) and
+# frozen here: each is sha256 over every fill (session, symbol, side, qty, px to 1e-6, fees to 1e-6, reason) and
+# every session's end equity (to 1e-4). The default execution, `close`, the stress fill, a cost multiple, cost
+# models v1 and v2 and the index core's builder must all give exactly these. A deliberate later engine change
+# updates them in its own pull request and says why.
+PRE_1550 = {"near_close_v1": "9f88cbe1fc118043", "near_close_v2": "3dd4000218901bf4",
+            "close_v2": "3dd4000218901bf4", "stress_v2": "8f80086c9b2ad133",
+            "near_close_v2_2x": "b82a8b0b91946a3a", "index_core_v2": "4f21469c01d42a3e"}
+
+
+def _digest(r) -> str:
+    import hashlib
+
+    rows = [[f["i"], f["symbol"], f["side"], f["qty"], round(float(f["px"]), 6), round(float(f.get("fees") or 0), 6),
+             str(f.get("reason"))] for f in r.fills]
+    rows += [[round(float(d["end"]), 4)] for d in r.book.daily]
+    return hashlib.sha256(json.dumps(rows).encode()).hexdigest()[:16]
+
+
+def test_qa_every_default_run_is_identical_to_the_engine_before_the_1550_option(fixture_data):
+    from kaibot.risk import index_core as ic
+    from kaibot.strategies.index_core import IndexCore
+
+    data, i0, i1 = fixture_data
+    pol, tm = load_profiles(), mom.VERSIONS[RULE]
+    cases = {"near_close_v1": {}, "near_close_v2": {"cost_model": "v2"},
+             "close_v2": {"cost_model": "v2", "execution": "close"},
+             "stress_v2": {"cost_model": "v2", "fill": "stress"},
+             "near_close_v2_2x": {"cost_model": "v2", "cost": 2.0}}
+    got = {k: _digest(run_daily(tm, data, pol["balanced"], i0, i1, **kw)) for k, kw in cases.items()}
+    got["index_core_v2"] = _digest(run_daily(IndexCore(), data, pol["aggressive"], i0, i1, cost_model="v2",
+                                             builder=ic.builder("aggressive")))
+    assert got == PRE_1550
+
+
+def test_qa_the_default_venue_has_two_bars_a_session_and_no_1550_bar(fixture_data):
+    data, _, _ = fixture_data
+    bars = data.bar_history()
+    assert bars.frames
+    for f in bars.frames.values():
+        et = pd.to_datetime(f["ts"], utc=True).dt.tz_convert("America/New_York")
+        assert set(zip(et.dt.hour, et.dt.minute, strict=True)) <= {(9, 30), (15, 59)}
