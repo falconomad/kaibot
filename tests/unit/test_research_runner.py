@@ -1,10 +1,13 @@
 """scripts/research_runner.py: the allow-list is enforced, bad arguments are rejected, done jobs are skipped, output
-is redacted, the lock holds and two SEC jobs never run at once. Subprocess fakes only: no network, no git, no gh."""
+is redacted, the lock holds and two SEC jobs never run at once, and a job's results become a PR (never a push to
+main) while any other change pauses the runner. Subprocess fakes for git and gh (no network); two tests use real git
+against a local bare remote."""
 
 from __future__ import annotations
 
 import json
 import plistlib
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,10 +22,19 @@ import research_runner as rr  # noqa: E402
 
 
 class FakeRun:
-    """subprocess.run: gh missing or logged in, ps output, git; records every call."""
+    """subprocess.run: gh missing or logged in, ps output, and a small fake git checkout; records every call.
 
-    def __init__(self, *, gh_ok=False, ps=""):
+    `changes` maps a path to its two-letter `git status --porcelain` code at the start of the tick; `job_changes`
+    are added when a job runs. A commit moves the staged paths onto the current branch; switching back to main
+    leaves them there (as git does for files committed on another branch)."""
+
+    def __init__(self, *, gh_ok=False, ps="", changes=None, job_changes=None, branch="main", head="a" * 40,
+                 origin="a" * 40, pr_ok=True, push_ok=True):
         self.calls, self.gh_ok, self.ps, self.posted = [], gh_ok, ps, []
+        self.changes, self.branch, self.head, self.origin = dict(changes or {}), branch, head, origin
+        self.job_changes = dict(job_changes or {})
+        self.branches, self.staged, self.commits, self.pushes, self.prs = {"main"}, set(), [], [], []
+        self.pr_ok, self.push_ok, self.envs = pr_ok, push_ok, []
 
     def __call__(self, cmd, **kw):
         self.calls.append(list(cmd))
@@ -31,13 +43,59 @@ class FakeRun:
             if cmd[1] == "auth":
                 rc = 0 if self.gh_ok else 1
             else:
-                self.posted.append((cmd[4], json.loads(Path(cmd[cmd.index("--input") + 1]).read_text())["body"]))
+                payload = json.loads(Path(cmd[cmd.index("--input") + 1]).read_text())
+                if cmd[4].endswith("/pulls"):
+                    self.prs.append(payload)
+                    rc = 0 if self.pr_ok else 1
+                    out = json.dumps({"html_url": "https://github.com/falconomad/kaibot/pull/9001", "number": 9001})
+                else:
+                    self.posted.append((cmd[4], payload["body"]))
         elif cmd[0] == "ps":
             out = self.ps
         elif cmd[0] == "git":
-            out = "main" if "--abbrev-ref" in cmd else "a" * 40
+            self.envs.append(kw.get("env"))
+            rc, out = self.git(cmd)
         return subprocess.CompletedProcess(cmd, rc, out, "")
 
+    def job_ran(self):
+        self.changes |= self.job_changes
+
+    def git(self, cmd):
+        args = list(cmd[3:])  # past `git -C <root>`
+        while args and args[0] == "-c":
+            args = args[2:]
+        verb = args[0]
+        if verb == "status":
+            return 0, "".join(f"{code} {p}\0" for p, code in self.changes.items())
+        if verb == "rev-parse":
+            if args[1:] == ["--abbrev-ref", "HEAD"]:
+                return 0, self.branch
+            if args[1:] == ["HEAD"]:
+                return 0, self.head
+            ref = args[-1]
+            if ref == "refs/remotes/origin/main":
+                return 0, self.origin
+            return (0, self.head) if ref.removeprefix("refs/heads/") in self.branches else (1, "")
+        if verb == "checkout":
+            if "-b" in args:
+                self.branches.add(args[-1])
+            self.branch = args[-1]
+            return 0, ""
+        if verb == "add":
+            self.staged |= set(args[args.index("--") + 1:])
+            return 0, ""
+        if verb == "commit":
+            files = {p: self.changes.pop(p) for p in sorted(self.staged)}
+            self.commits.append({"branch": self.branch, "message": args[args.index("-m") + 1], "files": files})
+            self.staged = set()
+            return 0, ""
+        if verb == "push":
+            self.pushes.append(args)
+            return (0 if self.push_ok else 1), ""
+        if verb == "branch":
+            self.branches.discard(args[-1])
+            return 0, ""
+        return 0, ""
 
 class FakeProc:
     def __init__(self, popen, cmd, out, hang):
@@ -56,8 +114,8 @@ class FakeProc:
 class FakePopen:
     """subprocess.Popen: writes `output` to the job's log and exits with `rc`; tracks concurrency."""
 
-    def __init__(self, output="done\n", rc=0, hang=False):
-        self.output, self.rc, self.hang = output, rc, hang
+    def __init__(self, output="done\n", rc=0, hang=False, on_run=None):
+        self.output, self.rc, self.hang, self.on_run = output, rc, hang, on_run
         self.cmds, self.kwargs, self.running, self.peak = [], [], 0, 0
 
     def __call__(self, cmd, **kw):
@@ -65,6 +123,8 @@ class FakePopen:
         self.kwargs.append(kw)
         self.running += 1
         self.peak = max(self.peak, self.running)
+        if self.on_run:
+            self.on_run()  # what the job changes in the checkout
         return FakeProc(self, cmd, kw["stdout"], self.hang)
 
 
@@ -81,6 +141,8 @@ def write_queue(tmp_path, jobs) -> Path:
 
 def tick(tmp_path, jobs, run=None, popen=None, **kw):
     run, popen = run or FakeRun(), popen or FakePopen()
+    if popen.on_run is None and isinstance(run, FakeRun):
+        popen.on_run = run.job_ran
     res = rr.tick(state=tmp_path / "state", queue=write_queue(tmp_path, jobs), pull=False, run=run, popen=popen,
                   python="/venv/python", **kw)
     return res, run, popen
@@ -352,3 +414,286 @@ def test_the_plist_template_is_valid_and_runs_every_15_minutes(tmp_path):
     assert p["StartInterval"] == 900 and p["Label"] == "com.kaibot.research-runner"
     assert p["ProgramArguments"] == [f"{ROOT}/.venv/bin/python", f"{ROOT}/scripts/research_runner.py"]
     assert p["StandardOutPath"].endswith("data/runner/runner.log")
+
+
+# ---------------------------------------------------------------- the checkout after a job (#452 export)
+
+RESULTS = "docs/research/results/"
+
+
+def mini_root(tmp_path) -> tuple[Path, Path]:
+    """A repository root with only scripts/export_results.py, and an allow-list naming it with `writes:`."""
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True, exist_ok=True)
+    (root / "scripts" / "export_results.py").write_text((ROOT / "scripts" / "export_results.py").read_text())
+    allowed = tmp_path / "allowed.yaml"
+    allowed.write_text(yaml.safe_dump({"repo": "falconomad/kaibot", "scripts": {"scripts/export_results.py": {
+        "timeout_min": 20, "flags": {"--rule": "[a-z0-9_]{1,64}"}, "writes": [RESULTS]}}}))
+    return root, allowed
+
+
+def export_job(jid="results-export-2026-11-25"):
+    return job(jid, script="scripts/export_results.py", args=[], issue=452)
+
+
+def tick_in(tmp_path, jobs, run, popen=None, files=None):
+    """A tick in mini_root, with `files` (path -> text) written into the checkout before settling."""
+    root, allowed = mini_root(tmp_path)
+    for rel, text in (files or {}).items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text)
+    return tick(tmp_path, jobs, run=run, popen=popen, root=root, allowed=allowed)
+
+
+def test_the_committed_allow_list_lets_only_export_results_write_and_only_under_docs_research_results():
+    cfg = rr.load_allowed()
+    assert {t: s.writes for t, s in cfg.specs.items() if s.writes} == {"scripts/export_results.py": (RESULTS,)}
+    assert "results-export-2026-11-25" in [j["id"] for j in rr.load_queue()]
+
+
+@pytest.mark.parametrize("writes", ["data/", "docs/research/results", "/docs/x/", "docs/../src/", "src/kaibot/",
+                                    "docs/", ".github/workflows/", ["docs/ok/", 7], "scripts/"])
+def test_writes_must_be_a_folder_under_docs(tmp_path, writes):
+    root, _ = mini_root(tmp_path)
+    a = tmp_path / "bad.yaml"
+    a.write_text(yaml.safe_dump({"repo": "o/r", "scripts": {"scripts/export_results.py": {"writes": writes}}}))
+    with pytest.raises(rr.JobError):
+        rr.load_allowed(a, root)
+
+
+def test_changes_only_in_the_allowed_folder_become_a_branch_and_a_pr_and_the_checkout_is_clean_main(tmp_path):
+    changes = {RESULTS + "README.md": " M", RESULTS + "runs/new.json": "??", RESULTS + "old.md": " D"}
+    run = FakeRun(gh_ok=True, job_changes=changes)
+    res, run, _ = tick_in(tmp_path, [export_job()], run,
+                          files={RESULTS + "README.md": "# results\n", RESULTS + "runs/new.json": "{}\n"})
+    assert res == {"results-export-2026-11-25": "ok"}
+    (c,) = run.commits
+    assert c["branch"] == "runner/results-export-2026-11-25" and set(c["files"]) == set(changes)
+    assert c["message"].startswith("Research runner: results of job results-export-2026-11-25")
+    assert "research runner" in c["message"].lower()
+    (push,) = run.pushes
+    assert push[-2:] == ["https://github.com/falconomad/kaibot.git",
+                         "refs/heads/runner/results-export-2026-11-25:refs/heads/runner/results-export-2026-11-25"]
+    (pr,) = run.prs
+    assert pr["head"] == "runner/results-export-2026-11-25" and pr["base"] == "main"
+    assert "research runner" in pr["body"] and "#452" in pr["body"]
+    assert run.branch == "main" and run.changes == {}  # back on main, nothing left
+    (path, body), = run.posted
+    assert path == "repos/falconomad/kaibot/issues/452/comments"
+    assert "pull request https://github.com/falconomad/kaibot/pull/9001" in body
+    done = json.loads((tmp_path / "state" / "done.json").read_text())["results-export-2026-11-25"]
+    assert done["checkout"] == "pr" and done["pr"].endswith("/pull/9001")
+    assert not (tmp_path / "state" / rr.PAUSED).exists()
+    commit = next(cmd for cmd in run.calls if "commit" in cmd)
+    assert "user.email=research-runner@users.noreply.github.com" in commit and "--no-verify" in commit
+
+
+def test_nothing_is_ever_pushed_to_main(tmp_path):
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    pushes = [c for c in run.calls if c[0] == "git" and "push" in c]
+    assert pushes and all(not any(a.endswith(":refs/heads/main") or a in ("main", "HEAD", "HEAD:main")
+                                  for a in c[c.index("push"):]) for c in pushes)
+    assert all(c[-1].startswith("refs/heads/runner/") for c in pushes)
+    assert not [c for c in run.calls if c[0] == "git" and ("reset" in c and "--hard" in c or "clean" in c)]
+
+
+@pytest.mark.parametrize("stray", ["src/kaibot/engine/x.py", "data.csv", "docs/research/other.md",
+                                   "docs/research/results_x/a.md", "docs/research/results/a b.md"])
+def test_a_change_anywhere_else_is_not_committed_the_checkout_is_left_and_the_runner_stops(tmp_path, stray):
+    changes = {RESULTS + "README.md": " M", stray: "??"}
+    run = FakeRun(gh_ok=True, job_changes=changes)
+    res, run, popen = tick_in(tmp_path, [export_job("e1"), export_job("after")], run,
+                              files={RESULTS + "README.md": "# results\n"})
+    assert res == {"e1": "ok"} and len(popen.cmds) == 1  # the next job did not run
+    assert run.commits == [] and run.pushes == [] and run.prs == [] and run.changes == changes
+    assert not [c for c in run.calls if c[0] == "git" and c[3] in ("checkout", "add", "reset", "clean", "restore")]
+    (_, body), = run.posted
+    assert "**Warning:**" in body and "runs no more jobs" in body and stray.replace("`", "'") in body
+    assert json.loads((tmp_path / "state" / rr.PAUSED).read_text())["job"] == "e1"
+    assert json.loads((tmp_path / "state" / "done.json").read_text())["e1"]["checkout"] == "held"
+    # the next ticks run nothing (and do not pull) while the checkout is dirty, then resume once it is clean
+    res, run2, popen = tick_in(tmp_path, [export_job("e1"), export_job("after")], FakeRun(gh_ok=True, changes=changes))
+    assert "_paused" in res and popen.cmds == [] and run2.posted == []
+    res, _, popen = tick_in(tmp_path, [export_job("e1"), export_job("after")], FakeRun(gh_ok=True))
+    assert res == {"after": "ok"} and not (tmp_path / "state" / rr.PAUSED).exists()
+
+
+def test_a_job_without_writes_that_changes_the_checkout_pauses_the_runner(tmp_path):
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "README.md": " M"})
+    res, run, _ = tick(tmp_path, [job("a"), job("b")], run=run)
+    assert res == {"a": "ok"} and run.commits == [] and (tmp_path / "state" / rr.PAUSED).exists()
+
+
+@pytest.mark.parametrize("kw", [{"branch": "feature"}, {"origin": "b" * 40}])
+def test_off_main_or_ahead_of_origin_the_changes_are_held(tmp_path, kw):
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"}, **kw)
+    res, run, _ = tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    assert run.commits == [] and run.pushes == [] and "**Warning:**" in run.posted[0][1]
+
+
+@pytest.mark.parametrize("text", ["key: ghp_abcdefghijklmnopqrstuvwxyz0123456789\n", "wrote {home}/Projects/x\n",
+                                  "contact someone@example.org\n"])
+def test_a_written_file_with_a_secret_or_the_home_path_is_never_published(tmp_path, text):
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    res, run, _ = tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": text.format(home=Path.home())})
+    assert run.commits == [] and run.pushes == [] and run.prs == []
+    assert "may not be published" in run.posted[0][1] and str(Path.home()) not in run.posted[0][1]
+
+
+def test_a_link_written_into_the_results_folder_is_never_committed(tmp_path):
+    root, allowed = mini_root(tmp_path)
+    (root / RESULTS).mkdir(parents=True)
+    (root / RESULTS / "x.md").symlink_to(Path.home())
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "x.md": "??"})
+    tick(tmp_path, [export_job()], run=run, root=root, allowed=allowed)
+    assert run.commits == [] and "not a regular file" in run.posted[0][1]
+
+
+def test_the_commit_message_pr_and_comment_are_redacted(tmp_path):
+    home = str(Path.home())
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    out = f"wrote {home}/Projects/kaibot/docs/research/results/a.md\nANTHROPIC_API_KEY=sk-ant-api03-abcdefghijklmnop\n"
+    tick_in(tmp_path, [export_job()], run, popen=FakePopen(output=out), files={RESULTS + "a.md": "x\n"})
+    texts = [run.commits[0]["message"], run.prs[0]["title"], run.prs[0]["body"], run.posted[0][1]]
+    for t in texts:
+        assert home not in t and "sk-ant-" not in t and "api03" not in t
+    assert "~/Projects/kaibot" in run.posted[0][1]
+
+
+def test_without_gh_the_results_stay_on_a_local_branch_and_the_checkout_is_still_clean(tmp_path):
+    run = FakeRun(gh_ok=False, job_changes={RESULTS + "a.md": "??"})
+    res, run, _ = tick_in(tmp_path, [export_job(), job("after", script="scripts/export_results.py", args=[])],
+                          run, files={RESULTS + "a.md": "x\n"})
+    assert res == {"results-export-2026-11-25": "ok", "after": "ok"}  # not paused: nothing was lost
+    assert run.pushes == [] and run.prs == [] and [c["branch"] for c in run.commits] == [
+        "runner/results-export-2026-11-25", "runner/after"]
+    assert {"runner/results-export-2026-11-25", "runner/after"} <= run.branches  # kept: not pushed
+    assert run.branch == "main" and run.changes == {}
+    assert "not pushed" in (tmp_path / "state" / "out" / "results-export-2026-11-25.md").read_text()
+
+
+def test_the_push_uses_gh_credentials_and_the_runner_s_own_environment_never_reaches_a_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "ghp_secretsecretsecret")
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    _, run, popen = tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    push = next(c for c in run.calls if c[0] == "git" and "push" in c)
+    assert "credential.helper=!/usr/bin/gh auth git-credential" in push
+    assert not [a for a in push if "ghp_" in a] and "GH_TOKEN" not in popen.kwargs[0]["env"]
+
+
+def test_a_failed_pr_still_leaves_clean_main_and_says_so(tmp_path):
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"}, pr_ok=False)
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    assert run.branch == "main" and run.changes == {} and "opening the pull request failed" in run.posted[0][1]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_with_real_git_the_pr_branch_holds_only_the_results_and_data_is_untouched(tmp_path):
+    """Real git against a local bare remote (gh still faked): the branch has only the results, main is unchanged,
+    the checkout is clean main again, and ignored data/ files survive."""
+    root, allowed = mini_root(tmp_path)
+    bare = tmp_path / "remote.git"
+
+    def git(*a, cwd=root):
+        return subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+    git("init", "-q", "--bare", "-b", "main", str(bare), cwd=tmp_path)
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.invalid")
+    git("config", "user.name", "t")
+    (root / ".gitignore").write_text("data/\n")
+    (root / RESULTS).mkdir(parents=True)
+    (root / RESULTS / "README.md").write_text("old\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "init")
+    git("remote", "add", "origin", str(bare))
+    git("push", "-q", "origin", "main")
+    git("fetch", "-q", "origin")
+    main0 = git("rev-parse", "HEAD")
+    (root / "data").mkdir()
+    (root / "data" / "keep.txt").write_text("owner's data\n")
+
+    fake = FakeRun(gh_ok=True)
+
+    def run(cmd, **kw):
+        if cmd[0] == "git":
+            fake.calls.append(list(cmd))
+            if "push" in cmd:
+                cmd = [str(bare) if a.startswith("https://github.com/") else a for a in cmd]
+            return subprocess.run(cmd, **kw)
+        return fake(cmd, **kw)
+
+    class WritingPopen(FakePopen):
+        def __call__(self, cmd, **kw):
+            (root / RESULTS / "README.md").write_text("new\n")
+            (root / RESULTS / "runs").mkdir(exist_ok=True)
+            (root / RESULTS / "runs" / "r1.json").write_text("{}\n")
+            return super().__call__(cmd, **kw)
+
+    res = rr.tick(root=root, state=root / "data" / "runner", queue=write_queue(tmp_path, [export_job()]),
+                  allowed=allowed, pull=False, run=run, popen=WritingPopen(), python="/venv/python")
+    assert res == {"results-export-2026-11-25": "ok"}
+    assert git("status", "--porcelain", "--untracked-files=all") == ""
+    assert git("rev-parse", "--abbrev-ref", "HEAD") == "main" and git("rev-parse", "HEAD") == main0
+    assert (root / RESULTS / "README.md").read_text() == "old\n" and (root / "data" / "keep.txt").exists()
+    assert git("rev-parse", "main", cwd=bare) == main0  # nothing pushed to main
+    br = "runner/results-export-2026-11-25"
+    changed = git("diff", "--name-only", "main", br, cwd=bare).splitlines()
+    assert sorted(changed) == [RESULTS + "README.md", RESULTS + "runs/r1.json"]
+    assert git("log", "-1", "--format=%an <%ae>%n%s", br, cwd=bare).startswith(
+        "Kaibot research runner <research-runner@users.noreply.github.com>\nResearch runner: results of job")
+    assert fake.prs[0]["head"] == br and "pull/9001" in fake.posted[0][1]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_with_real_git_a_stray_change_is_left_exactly_as_it_was(tmp_path):
+    root, allowed = mini_root(tmp_path)
+    for a in (["init", "-q", "-b", "main"], ["config", "user.email", "t@example.invalid"],
+              ["config", "user.name", "t"]):
+        subprocess.run(["git", *a], cwd=root, check=True)
+    (root / "notes.md").write_text("tracked\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=root, check=True)
+    fake = FakeRun(gh_ok=True)
+
+    def run(cmd, **kw):
+        return subprocess.run(cmd, **kw) if cmd[0] == "git" else fake(cmd, **kw)
+
+    class WritingPopen(FakePopen):
+        def __call__(self, cmd, **kw):
+            (root / RESULTS).mkdir(parents=True, exist_ok=True)
+            (root / RESULTS / "a.md").write_text("result\n")
+            (root / "notes.md").write_text("edited by hand\n")
+            (root / "scratch.txt").write_text("untracked\n")
+            return super().__call__(cmd, **kw)
+
+    before = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout
+    res = rr.tick(root=root, state=tmp_path / "state", queue=write_queue(tmp_path, [export_job(), job("b")]),
+                  allowed=allowed, pull=False, run=run, popen=WritingPopen(), python="/venv/python")
+    assert res == {"results-export-2026-11-25": "ok"}
+    assert (root / "notes.md").read_text() == "edited by hand\n" and (root / "scratch.txt").exists()
+    assert (root / RESULTS / "a.md").read_text() == "result\n"
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout == before
+    assert subprocess.run(["git", "branch", "--list", "runner/*"], cwd=root, capture_output=True,
+                          text=True).stdout == ""
+
+
+def test_a_checkout_left_on_a_runner_branch_pauses_the_runner(tmp_path):
+    res, _, popen = tick(tmp_path, [job()], run=FakeRun(branch="runner/x"))
+    assert "_paused" in res and popen.cmds == []
+
+
+def test_a_non_utf8_file_name_is_held_and_the_warning_is_still_written_and_posted(tmp_path):
+    odd = RESULTS + "caf\udce9.md"  # what git status gives for a latin-1 name, decoded with surrogateescape
+    run = FakeRun(gh_ok=True, job_changes={odd: "??"})
+    res, run, _ = tick_in(tmp_path, [export_job()], run)
+    assert run.commits == [] and "\\udce9" in run.posted[0][1]
+    assert "\\udce9" in (tmp_path / "state" / "out" / "results-export-2026-11-25.md").read_text()
+
+
+def test_a_corrupt_paused_file_does_not_crash_the_tick(tmp_path):
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / rr.PAUSED).write_text("{not json")
+    res, _, _ = tick(tmp_path, [job()], run=FakeRun(changes={"x.md": "??"}))
+    assert "_paused" in res

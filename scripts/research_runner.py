@@ -13,6 +13,9 @@ its process group; SEC jobs never run two at once (a second lock, and a check fo
 
 The last lines of output are redacted (keys, tokens, emails, URLs with credentials) and posted as a comment on the
 job's issue with `gh api` when gh is installed and logged in; the same text is always kept in data/runner/out/<id>.md.
+After each job the checkout is checked: changes only inside the job's `writes:` folders (allowed.yaml) are committed
+on runner/<job id>, pushed (that branch only, never main) and opened as a pull request, and the checkout goes back to
+main; any other change is left as it is and the runner runs no more jobs until the checkout is clean.
 The runner does not touch the engine, its lease or scripts/service.sh. Runbook: docs/ops/research_runner.md.
 """
 
@@ -24,8 +27,10 @@ import fcntl
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -52,6 +57,14 @@ FORBIDDEN_FLAGS = {"--env", "--data", "--out", "--root", "--trials", "--open-hol
 MAX_ARGS, MAX_ARG_LEN = 24, 128
 JOB_ENV_KEYS = ("HOME", "PATH", "LANG", "LC_ALL", "TMPDIR", "TZ", "SSL_CERT_FILE")
 NICE = ("/usr/bin/nice", "-n", "10")
+# A job's own output folder in the checkout (allowed.yaml `writes:`): only under docs/, always ending in "/".
+WRITES_RE = re.compile(r"docs/[a-z0-9_-]{1,64}(/[a-z0-9_-]{1,64}){0,5}/")
+# A changed path the runner may commit: plain ASCII names only (no spaces, quotes, backticks or "..").
+SAFE_PATH_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}(/[A-Za-z0-9_.-]{1,128}){0,15}")
+MAX_COMMIT_FILES, MAX_FILE_BYTES = 400, 2_000_000
+BRANCH_PREFIX = "runner/"
+PAUSED = "paused.json"           # in data/runner: set while the checkout holds changes the runner will not commit
+GIT_USER = ("Kaibot research runner", "research-runner@users.noreply.github.com")  # never the owner's own email
 
 
 class JobError(ValueError):
@@ -66,6 +79,7 @@ class Spec:
     heavy: bool = False
     sec: bool = False
     timeout_min: float = 60.0
+    writes: tuple[str, ...] = ()     # folders the job may change in the checkout; committed to a PR, never to main
 
 
 @dataclass(frozen=True)
@@ -121,8 +135,12 @@ def load_allowed(path: Path = ALLOWED, root: Path = ROOT) -> Config:
             if not re.search(r"add_argument\(\s*['\"]" + re.escape(flag) + r"['\"]", source):
                 raise JobError(f"allowed.yaml: {target}: {flag} is not an add_argument option of the script")
             flags[flag] = None if pat is None else re.compile(str(pat), re.ASCII)
+        writes = raw.get("writes") or []
+        writes = [writes] if isinstance(writes, str) else writes
+        if not isinstance(writes, list) or not all(isinstance(w, str) and WRITES_RE.fullmatch(w) for w in writes):
+            raise JobError(f"allowed.yaml: {target}: writes must be folders under docs/ ending in '/'")
         specs[target] = Spec(target, flags, bool(raw.get("env")), bool(raw.get("heavy")), bool(raw.get("sec")),
-                             float(raw.get("timeout_min", 60)))
+                             float(raw.get("timeout_min", 60)), tuple(writes))
     return Config(repo, specs, int(doc.get("max_jobs_per_run", 5)), int(doc.get("tail_lines", 150)),
                   tuple(str(p) for p in doc.get("sec_process_patterns") or ()))
 
@@ -255,7 +273,8 @@ def comment(job: Job, res: dict, sha: str) -> str:
     head = (f"**Research runner** job `{job.id}`: `{job.spec.target}` {' '.join(job.args)}\n\n"
             f"status **{res['status']}**, exit {res.get('rc')}, {res.get('minutes', 0):.1f} min, main @ `{sha[:12]}`, "
             f"finished {res.get('finished', '')}\n\n")
-    return head + f"Last {len(out.splitlines())} lines (redacted):\n\n{fence}text\n{out}\n{fence}\n"
+    note = f"{res['checkout_note']}\n" if res.get("checkout_note") else ""
+    return head + note + f"Last {len(out.splitlines())} lines (redacted):\n\n{fence}text\n{out}\n{fence}\n"
 
 
 def rejected_comment(jid: str, reason: str) -> str:
@@ -331,22 +350,27 @@ def gh_ready(run=subprocess.run) -> bool:
         return False
 
 
-def post(repo: str, issue: int, body: str, state: Path, run=subprocess.run) -> bool:
-    """POST the comment through the REST API with gh (body from a JSON file, never on a command line)."""
-    if not gh_ready(run):
-        return False
-    fd, tmp = tempfile.mkstemp(dir=state, prefix=".comment.", suffix=".json")
+def gh_post(endpoint: str, payload: dict, state: Path, run=subprocess.run) -> str | None:
+    """POST to the REST API with gh (the payload from a JSON file, never on a command line). Its stdout, or None."""
+    fd, tmp = tempfile.mkstemp(dir=state, prefix=".gh.", suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump({"body": body[:60000]}, f)
-        r = run(["gh", "api", "--method", "POST", f"repos/{repo}/issues/{int(issue)}/comments", "--input", tmp],
-                capture_output=True, text=True, timeout=60)
-        return r.returncode == 0
+            json.dump(payload, f)
+        r = run(["gh", "api", "--method", "POST", endpoint, "--input", tmp], capture_output=True, text=True,
+                timeout=60)
+        return r.stdout if r.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
     finally:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
+
+
+def post(repo: str, issue: int, body: str, state: Path, run=subprocess.run) -> bool:
+    """POST the comment on the issue (REST)."""
+    if not gh_ready(run):
+        return False
+    return gh_post(f"repos/{repo}/issues/{int(issue)}/comments", {"body": body[:60000]}, state, run) is not None
 
 
 def git_pull(root: Path, run=subprocess.run) -> str:
@@ -370,6 +394,198 @@ def head_sha(root: Path, run=subprocess.run) -> str:
                    timeout=30).stdout.strip() or "unknown"
     except (OSError, subprocess.SubprocessError):
         return "unknown"
+
+
+# ---------------------------------------------------------------- the checkout after a job
+
+
+def _git_env(full: bool = False) -> dict[str, str]:
+    """git's environment: the job's short list (or, for the push only, the runner's own, so gh can log in)."""
+    env = dict(os.environ) if full else job_env()
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONUNBUFFERED", None)
+    env |= {"GIT_TERMINAL_PROMPT": "0", "GIT_LITERAL_PATHSPECS": "1"}
+    return env
+
+
+def _git(root: Path, *args: str, run=subprocess.run, full_env: bool = False, timeout: int = 120):
+    """One git command (an argv, no shell). A CompletedProcess; returncode -1 when git could not be run."""
+    cmd = ["git", "-C", str(root), *args]
+    try:
+        return run(cmd, capture_output=True, text=True, errors="surrogateescape", timeout=timeout,
+                   env=_git_env(full_env))
+    except (OSError, subprocess.SubprocessError) as e:
+        return subprocess.CompletedProcess(cmd, -1, "", type(e).__name__)
+
+
+def checkout_changes(root: Path, run=subprocess.run) -> list[str] | None:
+    """Every changed path in the checkout: tracked (staged or not), deleted, renamed (both names) and untracked.
+    Files git ignores (data/, .venv/) are not changes. None when git status fails (treated as not clean)."""
+    r = _git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none", run=run)
+    if r.returncode != 0:
+        return None
+    paths: list[str] = []
+    tokens = iter(r.stdout.split("\0"))
+    for entry in tokens:
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if "R" in entry[:2] or "C" in entry[:2]:  # a rename or copy: the next token is the old name
+            paths.append(next(tokens, ""))
+    return paths
+
+
+def inside_writes(path: str, writes: tuple[str, ...]) -> bool:
+    return (bool(SAFE_PATH_RE.fullmatch(path)) and not {"..", "."} & set(path.split("/"))
+            and any(path.startswith(w) for w in writes))
+
+
+def _file_problem(root: Path, rel: str, home: str | None) -> str | None:
+    """Why a file the job wrote may not be published (a link, too big, not text, or something redaction would hide)."""
+    p = root / rel
+    if not os.path.lexists(p):
+        return None  # deleted: committing the deletion publishes nothing
+    st = os.lstat(p)
+    if not stat.S_ISREG(st.st_mode):
+        return "not a regular file (a link or a folder)"
+    if st.st_size > MAX_FILE_BYTES:
+        return f"larger than {MAX_FILE_BYTES // 1_000_000} MB"
+    try:
+        text = p.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return "not UTF-8 text"
+    if redact(text, home) != text:
+        return "holds text that redaction would hide (a key, token, email or the home path)"
+    return None
+
+
+def _fenced(lines: list[str]) -> str:
+    # a non-UTF-8 file name arrives surrogate-escaped from git: shown as \udcxx, never written out raw
+    text = "\n".join(lines).encode("utf-8", "backslashreplace").decode("utf-8")
+    text = redact(text).replace("`", "'")
+    return f"```text\n{text}\n```"
+
+
+def _hold(paths: list[str], why: str) -> dict:
+    shown = paths[:20] + ([f"... and {len(paths) - 20} more"] if len(paths) > 20 else [])
+    note = (f"**Warning:** the job left changes in the checkout on the research Mac that the runner will not "
+            f"commit: {why}. The runner left them as they are and **runs no more jobs** until the checkout is "
+            f"clean again (the owner commits, moves or removes them; nothing was deleted).\n\n{_fenced(shown)}\n")
+    return {"checkout": "held", "note": note, "reason": redact(why)[:300]}
+
+
+def _pr_text(job: Job, res: dict, sha: str, paths: list[str]) -> tuple[str, str, str]:
+    """The commit message, the PR title and the PR body (all redacted; no home path, no secrets)."""
+    folders = ", ".join(job.spec.writes)
+    title = f"Research runner: results of job {job.id} ({job.spec.target})"
+    cmd = " ".join([job.spec.target, *job.args])
+    what = (f"The research runner on the research Mac ran `{cmd}` (job {job.id}, status {res['status']}, exit "
+            f"{res.get('rc')}, main @ {sha[:12]}) and committed the {len(paths)} changed file(s) it wrote under "
+            f"{folders}. The runner never pushes to main; review and merge this pull request to keep the results.")
+    message = f"{title}\n\n{what}\n"
+    shown = paths[:60] + ([f"... and {len(paths) - 60} more"] if len(paths) > 60 else [])
+    body = f"{what}\n\nJob comment: #{job.issue}\n\nFiles:\n\n{_fenced(shown)}\n"
+    return redact(message), redact(title), redact(body)
+
+
+def settle_checkout(job: Job, res: dict, sha: str, cfg: Config, root: Path, state: Path,
+                    run=subprocess.run, home: str | None = None) -> dict:
+    """After a job: a clean checkout stays as it is. Changes only inside the job's `writes` folders are committed on
+    runner/<id>, pushed with gh's credentials to that branch (never main), opened as a PR, and the checkout goes
+    back to main (only those paths change on disk). Any other change, or anything unexpected, is held: nothing is
+    committed or removed, and the runner pauses until the checkout is clean."""
+    paths = checkout_changes(root, run)
+    if paths is None:
+        return _hold([], "git status failed")
+    if not paths:
+        return {"checkout": "clean", "note": ""}
+    outside = [p for p in paths if not inside_writes(p, job.spec.writes)]
+    if outside:
+        where = ", ".join(job.spec.writes) or "nothing (no writes: folder in allowed.yaml)"
+        return _hold(outside, f"{len(outside)} changed path(s) outside the job's output folders ({where})")
+    if len(paths) > MAX_COMMIT_FILES:
+        return _hold(paths, f"more than {MAX_COMMIT_FILES} changed files")
+    if (b := _git(root, "rev-parse", "--abbrev-ref", "HEAD", run=run).stdout.strip()) != "main":
+        return _hold(paths, f"the checkout is on {b!r}, not main")
+    head = _git(root, "rev-parse", "HEAD", run=run).stdout.strip()
+    upstream = _git(root, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/main", run=run).stdout.strip()
+    if not head or head != upstream:
+        return _hold(paths, "local main is not origin/main (local commits, or the last pull failed)")
+    bad = [f"{p}: {why}" for p in paths if (why := _file_problem(root, p, home))]
+    if bad:
+        return _hold(bad, f"{len(bad)} file(s) may not be published")
+    branch = BRANCH_PREFIX + job.id
+    if _git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", run=run).returncode == 0:
+        return _hold(paths, f"a local branch {branch} already exists")
+    message, title, body = _pr_text(job, res, sha, paths)
+
+    if _git(root, "checkout", "-q", "-b", branch, run=run).returncode != 0:
+        return _hold(paths, f"could not create the branch {branch}")
+    committed = all(_git(root, "add", "-A", "--", *paths[i:i + 100], run=run).returncode == 0
+                    for i in range(0, len(paths), 100))
+    committed = committed and _git(
+        root, "-c", f"user.name={GIT_USER[0]}", "-c", f"user.email={GIT_USER[1]}", "-c", "commit.gpgsign=false",
+        "commit", "-q", "--no-verify", "-m", message, run=run).returncode == 0
+    if not committed:  # back to main with the changes still on disk (same commit), and pause
+        _git(root, "reset", "-q", run=run)
+        _git(root, "checkout", "-q", "main", run=run)
+        _git(root, "branch", "-q", "-D", branch, run=run)
+        return _hold(paths, "git could not commit them")
+
+    pushed, url = False, None
+    gh = shutil.which("gh")
+    if gh and gh_ready(run):
+        helper = f"!{shlex.quote(gh)} auth git-credential"
+        dest = f"https://github.com/{cfg.repo}.git"
+        refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+        if not branch.startswith(BRANCH_PREFIX) or not refspec.startswith(f"refs/heads/{BRANCH_PREFIX}"):
+            raise RuntimeError("the runner never pushes to main")  # unreachable: ids cannot make "main"
+        pushed = _git(root, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "push", "--no-verify",
+                      "--porcelain", dest, refspec, run=run, full_env=True, timeout=180).returncode == 0
+        if pushed:
+            out = gh_post(f"repos/{cfg.repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body},
+                          state, run)
+            with contextlib.suppress(ValueError, TypeError, AttributeError):
+                u = json.loads(out or "")["html_url"]
+                url = u if re.fullmatch(rf"https://github\.com/{re.escape(cfg.repo)}/pull/[0-9]+", u) else None
+
+    # back to clean main: the branch holds the files, and main == origin/main, so switching back changes only them
+    _git(root, "checkout", "-q", "main", run=run)
+    after = checkout_changes(root, run)
+    on = _git(root, "rev-parse", "--abbrev-ref", "HEAD", run=run).stdout.strip()
+    if after is None or after or on != "main":
+        return _hold(after or [], f"the checkout is not clean main after the commit (branch {branch} kept)")
+    if pushed:
+        _git(root, "branch", "-q", "-D", branch, run=run)
+    files = f"{len(paths)} file(s) under {', '.join(job.spec.writes)}"
+    if url:
+        note = f"Results: {files} committed on `{branch}`, pull request {url}. The checkout is back on clean main."
+        return {"checkout": "pr", "note": note + "\n", "pr": url}
+    if pushed:
+        note = (f"Results: {files} pushed to the branch `{branch}`, but opening the pull request failed; open it "
+                f"from that branch. The checkout is back on clean main.")
+        return {"checkout": "pushed", "note": note + "\n"}
+    note = (f"Results: {files} committed on the local branch `{branch}` on the research Mac, **not pushed** (gh is "
+            f"missing, not logged in, or the push failed). The checkout is back on clean main.")
+    return {"checkout": "committed", "note": note + "\n"}
+
+
+def paused_reason(root: Path, state: Path, run=subprocess.run) -> str | None:
+    """Why no job may start: the checkout is not clean. Clears data/runner/paused.json once it is clean again."""
+    paths = checkout_changes(root, run)
+    branch = _git(root, "rev-parse", "--abbrev-ref", "HEAD", run=run).stdout.strip()
+    if branch.startswith(BRANCH_PREFIX):  # a results commit that did not get back to main
+        return f"the checkout is on the runner's branch {branch!r}, not main"
+    if paths is None or paths:
+        what = "git status failed" if paths is None else f"{len(paths)} changed path(s)"
+        held = None
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            held = json.loads((state / PAUSED).read_text()).get("job")
+        return f"the checkout is not clean ({what}{f', held after job {held}' if held else ''})"
+    with contextlib.suppress(FileNotFoundError):
+        (state / PAUSED).unlink()
+        log(state, "the checkout is clean again; jobs resume")
+    return None
 
 
 # ---------------------------------------------------------------- running a job
@@ -414,6 +630,9 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
         if not held:
             log(state, "another runner holds the lock; nothing to do")
             return {"_locked": "busy"}
+        if why := paused_reason(root, state, run):  # before the pull: a dirty checkout is never pulled or run in
+            log(state, f"paused: {why}; no job runs until it is clean")
+            return {"_paused": why}
         if pull:
             log(state, git_pull(root, run))
         try:
@@ -453,14 +672,18 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
                         did[job.id] = "deferred"
                         log(state, f"{job.id}: deferred, another SEC job is running ({other or 'sec.lock held'})")
                         continue
-                    _execute(job, cfg, state, done, did, sha, python, run, popen)
+                    held = _execute(job, cfg, state, done, did, sha, python, run, popen, root)
             else:
-                _execute(job, cfg, state, done, did, sha, python, run, popen)
+                held = _execute(job, cfg, state, done, did, sha, python, run, popen, root)
             ran += 1
+            if held:
+                log(state, f"paused after {job.id}: the checkout holds changes the runner will not commit")
+                break
     return did
 
 
-def _execute(job, cfg, state, done, did, sha, python, run, popen) -> None:
+def _execute(job, cfg, state, done, did, sha, python, run, popen, root) -> bool:
+    """Run one job, settle the checkout, post the result. True when the runner must pause (changes held)."""
     done[job.id] = {"status": "started", "started": now(), "script": job.spec.target}
     save_done(state, done)  # before the run: a job that crashes the Mac is not started again by the next tick
     cmd = argv(job, python)
@@ -471,14 +694,21 @@ def _execute(job, cfg, state, done, did, sha, python, run, popen) -> None:
     except OSError as e:
         res = {"status": "failed", "rc": None, "minutes": 0.0, "finished": now(), "error": type(e).__name__}
     res["tail"] = tail(logfile, cfg.tail_lines) if logfile.exists() else ""
+    settled = settle_checkout(job, res, sha, cfg, root, state, run)
+    res["checkout_note"] = settled["note"]
+    if settled["checkout"] == "held":
+        (state / PAUSED).write_text(json.dumps({"job": job.id, "since": now(), "reason": settled["reason"]}))
     body = comment(job, res, sha)
     posted = _deliver(cfg, state, job.id, job.issue, body, run)
-    done[job.id] = {k: v for k, v in res.items() if k != "tail"} | {"script": job.spec.target, "posted": posted}
+    done[job.id] = ({k: v for k, v in res.items() if k not in ("tail", "checkout_note")}
+                    | {"script": job.spec.target, "posted": posted, "checkout": settled["checkout"]}
+                    | ({"pr": settled["pr"]} if settled.get("pr") else {}))
     save_done(state, done)
     did[job.id] = res["status"]
     log(state, f"{job.id}: {res['status']} rc={res['rc']}; "
                + (f"posted on #{job.issue}" if posted else f"NOT posted (gh missing or not logged in); "
-                  f"see {state / 'out' / (job.id + '.md')}"))
+                  f"see {state / 'out' / (job.id + '.md')}") + f"; checkout {settled['checkout']}")
+    return settled["checkout"] == "held"
 
 
 def _deliver(cfg, state, jid, issue, body, run) -> bool:

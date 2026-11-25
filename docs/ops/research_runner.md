@@ -11,7 +11,7 @@ comments, so the owner doesn't have to paste anything.
 | Runner, one tick | `scripts/research_runner.py` |
 | launchd template, every 15 min | `ops/runner/com.kaibot.research-runner.plist` |
 | Install / uninstall / status | `scripts/install_runner.sh` |
-| State, outside git (`data/` is ignored) | `data/runner/done.json`, `runner.log`, `logs/<id>.log`, `out/<id>.md` |
+| State, outside git (`data/` is ignored) | `data/runner/done.json`, `runner.log`, `logs/<id>.log`, `out/<id>.md`, `paused.json` |
 | Tests (fakes only, no network) | `tests/unit/test_research_runner.py` |
 
 ## How Product queues a job
@@ -44,12 +44,39 @@ Allowed scripts and flags (the full patterns are in `allowed.yaml`):
 | `scripts/index_core_book.py` | the same + `--control-runs` | heavy, 240 min |
 | `scripts/trend_momentum_gbm.py` | the same + `--cost-model --control-runs` | heavy, 240 min |
 | `scripts/fetch_sec_fundamentals.py` | `--status --build --refresh --max-age-days --limit` | SEC, gets `--env`, heavy, 120 min |
-| `scripts/export_results.py` | `--rule` | 20 min; writes `docs/research/results/` in the Mac's checkout (not committed by the runner) |
+| `scripts/export_results.py` | `--rule` | 20 min; `writes: docs/research/results/`, opened as a PR by the runner (below) |
 | `scripts/market_alarm_report.py` | `--start --end --flags-only --rankings-only` | heavy, 60 min |
 | `kaibot.agents.evalset.golden` | none | the stub run only (`--live` costs money, `--record` writes a tracked file) |
 
 `scripts/shadow_results.py` was asked for but does not exist. The shadow results come from `scripts/shadow_results.sh`,
 which needs `DATABASE_URL` from the secrets file, and the runner never reads that file, so the script is not listed.
+
+## Files a job writes in the checkout
+
+Some jobs write tracked files: `scripts/export_results.py` rewrites `docs/research/results/`. Left on disk, they
+made the next `git pull --ff-only` fail and every later job stall until the owner committed by hand. After every job
+the runner now looks at the checkout (`git status --porcelain -z --untracked-files=all`; ignored paths such as
+`data/` and `.venv/` are not changes):
+
+- **Clean:** nothing to do.
+- **Changes only inside the job's `writes:` folders** (per script in `allowed.yaml`, folders under `docs/` only):
+  the runner checks each file (a regular file, at most 2 MB, UTF-8, and nothing in it that redaction would hide:
+  no key, token, email or home path), commits them on a new branch `runner/<job id>` as
+  "Kaibot research runner" (a noreply address, never the owner's), pushes **that branch only** to
+  `https://github.com/falconomad/kaibot.git` with gh's credentials (`gh auth git-credential`), opens a pull request
+  with `gh api --method POST repos/falconomad/kaibot/pulls`, and puts the PR link in the job's result comment.
+  Then `git checkout main`: local `main` was checked to equal `origin/main` before the commit, so switching back
+  changes only the committed paths on disk. There is no `git reset --hard` and no `git clean`, so `data/` and any
+  other untracked file are never touched. The commit message and PR body say they came from the research runner
+  and are redacted like comments. The PR is reviewed and merged like any other.
+- **Anything else** (a change outside those folders, a file that fails the checks, the checkout not on `main`, local
+  `main` not equal to `origin/main`, a git error): nothing is committed, moved or removed. The result comment
+  carries a **Warning** with the paths, `data/runner/paused.json` records the job, and the runner runs no more
+  jobs (and does not pull) until the checkout is clean. Once it is, the next tick logs "jobs resume" and carries on.
+
+Without gh (missing or not logged in) the results are committed on the local branch `runner/<job id>` and not
+pushed, and the checkout still goes back to clean `main`, so nothing is lost and later jobs still run. The runner
+never pushes to `main` and never pushes any branch but `runner/<job id>`.
 
 ## Safety rules
 
@@ -82,8 +109,9 @@ which needs `DATABASE_URL` from the secrets file, and the runner never reads tha
 - **Market hours.** Allowed (stakeholder, #600, 24 Nov 2026). Heavy jobs run under `nice -n 10`, so the engine
   keeps priority.
 - **The engine.** The runner never starts, stops or restarts the engine, never touches its lease or
-  `scripts/service.sh`, and never runs launchctl. `git pull --ff-only` runs only when the checkout is on `main`. If
-  the pull fails (for example because of a local change), the failure is logged and the local queue is used.
+  `scripts/service.sh`, and never runs launchctl. `git pull --ff-only` runs only when the checkout is on `main` and
+  clean (a dirty checkout pauses the runner, see above). If the pull fails, the failure is logged and the local
+  queue is used.
   Pulling only updates files on disk. The engine picks up `main` only when it restarts (#600).
 - **Posting.** Results go out with `gh api --method POST repos/falconomad/kaibot/issues/<n>/comments` (REST, with
   the body taken from a file). If gh is missing or not logged in, the result stays in `data/runner/out/<id>.md`
