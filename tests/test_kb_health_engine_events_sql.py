@@ -53,10 +53,10 @@ DYNAMIC_SITES = {
     ("src/kaibot/engine/watchdog.py", "kind"),
     # engine/fetch.py (audit 2, 5.12): its `event=` callback, a pass-through of daily_fetch / daily_fetch_failed
     ("src/kaibot/engine/fetch.py", "kind"),
-    # engine/commands.py (moved from engine/core.py, #694): f"command_{kind}" for every command the engine applies;
-    # engine/core.py: f"{a.kind}_booked" for corporate actions
+    # engine/commands.py and engine/corporate.py (moved from engine/core.py, #694): f"command_{kind}" for every
+    # command the engine applies, f"{a.kind}_booked" for corporate actions
     ("src/kaibot/engine/commands.py", 'f"command_{kind}"'),
-    ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),
+    ("src/kaibot/engine/corporate.py", 'f"{a.kind}_booked"'),
 }
 FALLBACK_RE = re.compile(r'"event":\s*"([a-z_0-9]+)"')
 AGENT_EVENT_RE = re.compile(r'^EVENT\s*=\s*"([a-z_0-9]+)"', re.M)
