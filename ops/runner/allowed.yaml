@@ -89,6 +89,36 @@ scripts:
       --build: null
       --report: null
 
+  # #708 (audit 2 6.8): the re-runs of the 11 runs the gate v3 re-score could not score (no exposure column; #678
+  # added the column to these writers). Strict patterns: --end is the last research session ONLY (the hold-out guard
+  # refuses later ends as well), and only the rules and experiments of those runs. Nothing else of these scripts:
+  # no --start, --level, --grid, --costs, --control-runs, --has or --summary; their defaults are the earlier runs'.
+  # Every re-run logs trial rows, so it counts in the registry (walk_forward: the tuned row's n_trials is the whole
+  # grid x folds; oneshots: n_trials 1 per configuration at the base fill and 1x; spy_cost_rerun: n_trials 1).
+  # walk_forward.py requires --env (FRED key for the VIX file; the runner adds the path, never opens it).
+  # Not scripts/spy_engine.py: the runner refuses any target named *_engine.* (FORBIDDEN_TARGET), so its three runs
+  # are for the owner to start by hand (#708).
+  scripts/walk_forward.py:
+    env: true
+    heavy: true
+    timeout_min: 90
+    flags:
+      --end: '2024-12-31'
+      --experiment: 'control|high_vix|mornings|mornings_wide_stop|wide_stop'
+
+  scripts/oneshots.py:
+    heavy: true
+    timeout_min: 60
+    flags:
+      --end: '2024-12-31'
+      --rule: 'news_continuation|orb_stocks_in_play'
+
+  scripts/spy_cost_rerun.py:
+    heavy: true
+    timeout_min: 120
+    flags:
+      --end: '2024-12-31'
+
   scripts/export_results.py:
     timeout_min: 20
     writes: [docs/research/results/]

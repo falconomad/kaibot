@@ -181,13 +181,16 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               "kaibot.agents.evalset.golden", "scripts/shadow_results.py",  # #371: as the helper
                               "scripts/gate_v3_rescore.py",  # #456: reads reports, writes the re-score only
                               "scripts/near_close_1550_rerun.py",  # #454: the 15:50-price re-run
-                              "scripts/fetch_listings.py"}  # #376: the new-listing history and first bars
+                              "scripts/fetch_listings.py",  # #376: the new-listing history and first bars
+                              # #708: the re-runs of the unscored runs (research window only, strict patterns)
+                              "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py"}
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert sorted(t for t, s in cfg.specs.items() if s.sec) == ["scripts/fetch_listings.py",
                                                                 "scripts/fetch_sec_fundamentals.py"]
     assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_listings.py",
-                                                                "scripts/fetch_sec_fundamentals.py"]
+                                                                "scripts/fetch_sec_fundamentals.py",
+                                                                "scripts/walk_forward.py"]  # #708: FRED (VIX)
     assert not cfg.specs["kaibot.agents.evalset.golden"].flags  # no --live (money), no --record
     for s in cfg.specs.values():
         assert not set(s.flags) & rr.FORBIDDEN_FLAGS and 0 < s.timeout_min <= 240
@@ -895,3 +898,97 @@ def test_a_corrupt_paused_file_does_not_crash_the_tick(tmp_path):
     (tmp_path / "state" / rr.PAUSED).write_text("{not json")
     res, _, _ = tick(tmp_path, [job()], run=FakeRun(changes={"x.md": "??"}))
     assert "_paused" in res
+
+
+# ---------------------------------------------------------------- #708 (audit 2 6.8): the registry in every PR
+
+
+def test_trials_stamp_hashes_the_registry_and_counts_its_rows(tmp_path):
+    import hashlib
+
+    assert rr.trials_stamp(tmp_path) == {"path": "data/trials.jsonl", "present": False}
+    assert "**missing**" in rr.trials_line(rr.trials_stamp(tmp_path))
+    f = tmp_path / "data" / "trials.jsonl"
+    f.parent.mkdir()
+    raw = b'{"trial_id": "a"}\n\n{"trial_id": "b"}\n' * 40_000  # more than one read chunk
+    f.write_bytes(raw)
+    st = rr.trials_stamp(tmp_path)
+    assert st == {"path": "data/trials.jsonl", "present": True, "sha256": hashlib.sha256(raw).hexdigest(),
+                  "rows": 80_000, "bytes": len(raw), "ends_with_newline": True}
+    line = rr.trials_line(st)
+    assert st["sha256"] in line and "80000 rows" in line and "cut-off" not in line
+    f.write_bytes(raw + b'{"trial_id": "c"')  # a crashed run's half row is counted and flagged
+    st = rr.trials_stamp(tmp_path)
+    assert st["rows"] == 80_001 and not st["ends_with_newline"] and "cut-off" in rr.trials_line(st)
+    assert rr.redact(rr.trials_line(st)) == rr.trials_line(st)  # a lower-case hex hash is never redacted
+
+
+def test_every_results_commit_and_pr_carries_the_registrys_hash_and_row_count(tmp_path):
+    import hashlib
+
+    raw = b'{"trial_id": "a"}\n{"trial_id": "b"}\n{"trial_id": "c"}\n'
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    res, run, _ = tick_in(tmp_path, [export_job()], run,
+                          files={RESULTS + "a.md": "x\n", "data/trials.jsonl": raw.decode()})
+    assert res == {"results-export-2026-11-25": "ok"}
+    want = f"sha256 `{hashlib.sha256(raw).hexdigest()}`, 3 rows, {len(raw)} bytes"
+    (c,) = run.commits
+    (pr,) = run.prs
+    assert want in c["message"] and want in pr["body"]
+    assert "data/trials.jsonl" not in c["files"]  # the registry itself is never committed, only its stamp
+
+
+def test_a_results_pr_still_opens_when_the_registry_is_missing(tmp_path):
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    (pr,) = run.prs
+    assert "Trial registry (data/trials.jsonl): **missing**" in pr["body"]
+
+
+ELEVEN = {"scripts/walk_forward.py": [["--experiment", e] for e in
+                                      ("control", "high_vix", "mornings", "mornings_wide_stop", "wide_stop")],
+          "scripts/oneshots.py": [["--rule", "news_continuation"], ["--rule", "orb_stocks_in_play"]],
+          "scripts/spy_cost_rerun.py": [[]]}
+
+
+def test_the_708_reruns_are_queued_on_the_research_window_only_and_say_they_count():
+    cfg = rr.load_allowed()
+    jobs = [rr.check_job(j, cfg) for j in rr.load_queue() if j.get("posts_to_issue") == 708]
+    got = {}
+    for j in jobs:
+        got.setdefault(j.spec.target, []).append([a for a in j.args if a not in ("--end", "2024-12-31")])
+        assert j.args[:2] == ("--end", "2024-12-31")
+    assert got == ELEVEN  # 8 jobs: 5 walk-forward, 2 one-shots, the cost re-run (the 3 spy_engine runs: by hand)
+    text = (ROOT / "ops" / "runner" / "queue.yaml").read_text()
+    assert "EACH RE-RUN LOGS TRIAL ROWS AND COUNTS IN THE TRIAL REGISTRY" in text
+    assert sum("counts in the" in ln for ln in text.splitlines() if "-exposure-2026-11-26" in ln) == 8
+
+
+@pytest.mark.parametrize("script, args", [
+    ("scripts/walk_forward.py", ["--end", "2025-01-02", "--experiment", "control"]),
+    ("scripts/walk_forward.py", ["--end", "2024-12-30", "--experiment", "control"]),
+    ("scripts/walk_forward.py", ["--end", "2024-12-31", "--experiment", "control|x"]),
+    ("scripts/walk_forward.py", ["--end", "2024-12-31", "--costs", "v2"]),
+    ("scripts/walk_forward.py", ["--end", "2024-12-31", "--start", "2010-01-01"]),
+    ("scripts/oneshots.py", ["--end", "2024-12-31", "--rule", "trend_highs"]),
+    ("scripts/oneshots.py", ["--end", "2024-12-31", "--rule", "news_continuation", "--control-runs", "1"]),
+    ("scripts/oneshots.py", ["--summary"]),
+    ("scripts/spy_cost_rerun.py", ["--end", "2026-11-06"]),
+    ("scripts/spy_cost_rerun.py", ["--end", "2024-12-31", "--level", "aggressive"]),
+])
+def test_the_708_entries_take_nothing_but_their_own_runs(script, args):
+    cfg = rr.load_allowed()
+    with pytest.raises(rr.JobError):
+        rr.check_job({"id": "x", "script": script, "args": args, "posts_to_issue": 708}, cfg)
+
+
+def test_spy_engine_stays_off_the_allow_list():
+    """The runner never runs a target named like the engine (FORBIDDEN_TARGET), so #708's three spy_engine runs
+    are the owner's to start; the allow-list cannot name it."""
+    assert rr.FORBIDDEN_TARGET.search("scripts/spy_engine.py")
+    assert "scripts/spy_engine.py" not in rr.load_allowed().specs
+    assert cfg_env("scripts/walk_forward.py") and not cfg_env("scripts/oneshots.py")
+
+
+def cfg_env(target: str) -> bool:
+    return rr.load_allowed().specs[target].env

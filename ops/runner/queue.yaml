@@ -63,3 +63,38 @@ jobs:
     script: scripts/gate_v3_rescore.py      # merge only after #744, #749, #752, #758 and #765 are on main
     args: []
     posts_to_issue: 701
+  # #708 (audit 2 6.8): re-runs of the runs the re-score could not score (no exposure column), with #678's writers,
+  # on the research window only. EACH RE-RUN LOGS TRIAL ROWS AND COUNTS IN THE TRIAL REGISTRY (data/trials.jsonl):
+  # it is a new run of an already-registered configuration, not a replacement of the old row (append-only).
+  - id: wf-control-exposure-2026-11-26        # dip_reversal walk-forward, experiment control; counts in the registry
+    script: scripts/walk_forward.py
+    args: ["--end", "2024-12-31", "--experiment", "control"]
+    posts_to_issue: 708
+  - id: wf-high-vix-exposure-2026-11-26       # experiment high_vix; counts in the trial registry (tuned + default)
+    script: scripts/walk_forward.py
+    args: ["--end", "2024-12-31", "--experiment", "high_vix"]
+    posts_to_issue: 708
+  - id: wf-mornings-exposure-2026-11-26       # experiment mornings; counts in the trial registry (tuned + default)
+    script: scripts/walk_forward.py
+    args: ["--end", "2024-12-31", "--experiment", "mornings"]
+    posts_to_issue: 708
+  - id: wf-mornings-wide-stop-exposure-2026-11-26   # experiment mornings_wide_stop; counts in the trial registry
+    script: scripts/walk_forward.py
+    args: ["--end", "2024-12-31", "--experiment", "mornings_wide_stop"]
+    posts_to_issue: 708
+  - id: wf-wide-stop-exposure-2026-11-26      # experiment wide_stop; counts in the trial registry (tuned + default)
+    script: scripts/walk_forward.py
+    args: ["--end", "2024-12-31", "--experiment", "wide_stop"]
+    posts_to_issue: 708
+  - id: oneshots-news-continuation-exposure-2026-11-26   # intraday one-shot; counts in the trial registry
+    script: scripts/oneshots.py
+    args: ["--end", "2024-12-31", "--rule", "news_continuation"]
+    posts_to_issue: 708
+  - id: oneshots-orb-exposure-2026-11-26      # orb_stocks_in_play one-shot; counts in the trial registry
+    script: scripts/oneshots.py
+    args: ["--end", "2024-12-31", "--rule", "orb_stocks_in_play"]
+    posts_to_issue: 708
+  - id: spy-cost-rerun-exposure-2026-11-26    # spy_noise_band v2idx cost re-run; counts in the trial registry (n_trials 1)
+    script: scripts/spy_cost_rerun.py
+    args: ["--end", "2024-12-31"]
+    posts_to_issue: 708
