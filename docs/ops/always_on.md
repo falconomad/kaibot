@@ -92,25 +92,58 @@ the check on the website if you stop on purpose for longer.
 
 ## Pinned releases
 
-The engine trades a **tagged release**, not whatever is on `main`. Product tags a merged commit
-(`git tag v2026.11.13 && git push --tags`); then, **outside market hours**:
+The engine should trade a **tagged release**, not whatever is on `main` (#121; audit 2 5.2, #682).
+
+**Making a release (CI).** GitHub > Actions > **release** > Run workflow (branch `main`), or
+`gh workflow run release.yml --ref main`. The workflow (`.github/workflows/release.yml`) tags main's head commit
+with an annotated tag `rel-YYYYMMDD-N` (N counts that UTC day's releases from 1), and **only** when the `ci` and
+`supply-chain` runs of that commit's push to main both completed with success; otherwise it fails and tags nothing.
+If the newest `rel-*` tag already names main's head it makes no second tag. It runs no repository code (only
+`gh api`). You may also make one by hand, annotated or signed: `git tag -s rel-20261126-1 -m "..." <sha>` then
+`git push origin rel-20261126-1`.
+
+**Pinning it on the Mac (one command), outside market hours:**
 
 ```
-./scripts/release.sh v2026.11.13      # refused 09:30-16:00 New York time unless you add --force
+./scripts/release.sh --latest         # pin the newest rel-* tag; refused 09:30-16:00 New York time unless --force
 ./scripts/service.sh restart          # switch now; otherwise it switches at the next start
 ```
 
+Or a named tag: `./scripts/release.sh rel-20261126-1`. `release.sh` refuses a tag that is lightweight (not
+annotated or signed) or whose commit is not on `main` (`origin/main`), at the pin and again at every start.
+
 - The pin is stored in `data/RELEASE` (not in git); `data/release_history.log` lists every promotion.
-- At every start `run_engine.sh` checks out the pinned tag and records it: `Release: v2026.11.13@abc1234` in the log,
-  in `data/live/running_release`, and as `code_sha` on the `engine_start` event, every heartbeat and every
-  risk-gate decision (`gate_run`).
-- A tag that does not exist, or local edits in `~/Projects/kaibot`, stop the start with a message (nothing trades).
-- `./scripts/release.sh --show` shows the pin and history.
-- **Escape hatch:** `./scripts/release.sh main` (or `KAIBOT_RELEASE=main ./scripts/run_engine.sh` for one start)
-  follows `main` again, pulling at every start. `./scripts/release.sh --clear` removes the pin; with no pin the
-  engine behaves exactly as before #121 (pulls `main`).
+- At every start `run_engine.sh` checks out the pinned tag and records it: `Release: rel-20261126-1@abc1234` in the
+  log, in `data/live/running_release`, and as `code_sha` on the `engine_start` event, every heartbeat and every
+  risk-gate decision (`gate_run`). The full commit goes to `data/live/running_commit`.
+- **The ticker-check worker and the price relay follow the same pin.** They run from the same checkout, and
+  `service_run.sh` starts (and restarts) them only once that start's `running_commit` exists and equals the
+  checkout's HEAD. If the tree moved under a running engine (a hand `git checkout` or `git pull`), they do not start
+  on it: `ticker_checks.log` / `price_stream.log` say "not starting on code the engine does not run" once, until the
+  next engine start. Their "started" line names the commit (`code abc1234`). A release older than #682 does not
+  write `running_commit`: on such a tag the two helpers wait (said in their logs) and the engine runs normally.
+- A tag that does not exist, is lightweight or is off main, or local edits in `~/Projects/kaibot`, stop the start with
+  a message (nothing trades).
+- `./scripts/release.sh --show` shows the pin, the follow-main setting, the newest `rel-*` tag and the history.
 - With a pin, `~/Projects/kaibot` is on a detached HEAD. That is normal; `git checkout main` gets you back for
   reading code, and the next start checks the pin out again.
+
+**Unpinned: `KAIBOT_FOLLOW_MAIN`.** With nothing pinned (or `./scripts/release.sh main`, `--clear`,
+`KAIBOT_RELEASE=main`) a start pulls and runs `main`, **only while `KAIBOT_FOLLOW_MAIN=1`**. Product decision
+(26 Nov 2026): the default is `1` for now, because the stakeholder wants fast deploys (#600). Every unpinned start
+then writes three `WARNING: UNPINNED ENGINE` lines to `engine.log` naming the one-command pin. Unpinned, a crash
+restart (launchd, about 60 s) can start code nobody promoted, also mid-session: that is the risk of #682.
+`KAIBOT_FOLLOW_MAIN=0` (in the `.env`, or the service's environment) makes an unpinned start refuse (exit 1, a
+`REFUSED` line, the service retries every minute and alarms), so the engine runs only pinned releases. Only `0` and
+`1` count; any other value keeps the default and says so.
+
+Turning the pin on for good (the owner's call, outside market hours):
+
+```
+./scripts/release.sh --latest && echo 'KAIBOT_FOLLOW_MAIN=0' >> ~/Projects/kaibot-secrets/.env && ./scripts/service.sh restart
+```
+
+Back to following main: `./scripts/release.sh --clear` and remove the `KAIBOT_FOLLOW_MAIN=0` line (or set it to 1).
 
 ## Alarms (free, Healthchecks.io)
 
@@ -143,13 +176,13 @@ dead-man cover a dead engine during the session (`docs/ops/failsafe.md`).
 | Symptom | Do this |
 |---|---|
 | Healthchecks "down", no fail message | The Mac is off, asleep or offline, or the service is stopped. `./scripts/service.sh status`. After a power cut the Mac restarts, logs in and starts the engine by itself. |
-| `kaibot engine exited with code N` repeating | `./scripts/service.sh logs`. Code 3 = the lease (another engine runs somewhere: `docs/ops/run_engine.md`, "Engine lease"). Code 1 at start = a key missing in `.env`, a missing release tag or local edits. Code 4 = the journal (`docs/ops/ledger.md`). It retries every minute; fix and wait, or `hold` while you look. |
+| `kaibot engine exited with code N` repeating | `./scripts/service.sh logs`. Code 3 = the lease (another engine runs somewhere: `docs/ops/run_engine.md`, "Engine lease"). Code 1 at start = a key missing in `.env`, a missing, lightweight or off-main release tag, an unpinned start with `KAIBOT_FOLLOW_MAIN=0` (`./scripts/release.sh --latest`), or local edits. Code 4 = the journal (`docs/ops/ledger.md`). It retries every minute; fix and wait, or `hold` while you look. |
 | `kaibot engine refused to start (exit code 5)` every ~6 minutes | The run holds multi-day shares and the engine has no daily path: set `KAIBOT_MULTIDAY=on` in the `.env` (`docs/ops/run_engine.md`, "When a start is refused"). The service waits 5 minutes between tries; the next one starts by itself once it is fixed. |
 | `kaibot halt: …` | Read the reason on the dashboard. Entries stay off for the session; positions are still managed. |
 | `kaibot stalled` | Process alive but no tick for 10 minutes. `./scripts/service.sh restart`. |
 | `kaibot engine_gap: engine gap: no engine heartbeat for …` | The engine was off or frozen for that long (usually the Mac asleep). `./scripts/run_engine.sh --check` (any FAILED mac_sleep line: `sudo pmset -c sleep 0 disksleep 0`); check the dashboard for a late or missed multi-day decision and `logs/fetch_daily.log` for the nightly refresh (run `./scripts/fetch_daily.sh` by hand if it is missing: resumable, it skips what it has). |
 | "waiting for Docker Desktop" in the log | Open Docker Desktop; the service starts within a minute after it is up. |
-| A bad release | `./scripts/release.sh <previous tag> --force` then `./scripts/service.sh restart`. The previous tags are in `./scripts/release.sh --show`. |
+| A bad release | `./scripts/release.sh <previous rel-* tag> --force` then `./scripts/service.sh restart`. The previous tags are in `./scripts/release.sh --show` and `git tag --list 'rel-*'`. |
 | Restore local files | Backups are in `~/Projects/kaibot-backups/kaibot-<date>-<time>.tar.gz` (30 days), and encrypted off the Mac once set up. `./scripts/restore_drill.sh --keep --into ~/kaibot-restore` rebuilds and checks them in that folder; copy back what you need with the engine stopped ([backup_restore.md](backup_restore.md)). The price-history cache is not backed up: it downloads again. |
 
 ## Backups

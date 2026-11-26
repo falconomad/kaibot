@@ -3,8 +3,10 @@
 #   ./scripts/run_engine.sh            run (Docker if it's running, otherwise Python 3.12+)
 #   ./scripts/run_engine.sh --check    test keys and connections and the Mac's sleep setting, then exit
 #   ./scripts/run_engine.sh --docker | --python   force one way
-# Trades the release pinned with scripts/release.sh (data/RELEASE, or KAIBOT_RELEASE=<tag|main>); nothing pinned:
-# pulls main as before. Always-on (launchd, alarms, backups): scripts/install_service.sh, docs/ops/always_on.md.
+# Trades the release pinned with scripts/release.sh (data/RELEASE, or KAIBOT_RELEASE=<tag|main>). Nothing pinned (or
+# `main`): pulls main only while KAIBOT_FOLLOW_MAIN=1 (default 1 for now, #600), with WARNING lines at every start;
+# KAIBOT_FOLLOW_MAIN=0 refuses an unpinned start (audit 2 5.2, #682). One-command pin: ./scripts/release.sh --latest.
+# Always-on (launchd, alarms, backups): scripts/install_service.sh, docs/ops/always_on.md.
 # Stop with Ctrl-C. Open trades keep their stop-loss at Alpaca either way.
 # With the always-on service running it refuses (but --check): use ./scripts/service.sh restart (#613).
 set -euo pipefail
@@ -44,7 +46,8 @@ done
 grep -qE "^SUPABASE_SERVICE(_ROLE)?_KEY=" "$ENV_FILE" || {
   echo "Missing SUPABASE_SERVICE_KEY in $ENV_FILE (Supabase → Project Settings → API keys → Secret key, sb_secret_…)"; exit 1; }
 # Pinned release (#121, docs/ops/always_on.md): with data/RELEASE or KAIBOT_RELEASE set, trade that tag (or main).
-# Nothing pinned: pull main, as before.
+# Nothing pinned: pull main, as before, but only while KAIBOT_FOLLOW_MAIN=1 (release.sh --apply refuses otherwise and
+# prints the WARNING lines when it goes on: #682).
 HEAD_BEFORE="$(git rev-parse HEAD 2>/dev/null || echo none)"
 RELEASE_LABEL="$(bash scripts/release.sh --apply)" || exit 1
 if [ -z "$RELEASE_LABEL" ]; then
@@ -56,6 +59,10 @@ CODE_SHA="${RELEASE_LABEL:-$(git rev-parse --short HEAD 2>/dev/null || echo unkn
 mkdir -p data/live
 [ -n "$RELEASE_LABEL" ] && echo "Release: $RELEASE_LABEL"
 echo "$CODE_SHA $(date -u +%FT%TZ)" > data/live/running_release
+# #682: the full commit this start runs. service_run.sh removes it before each start; the ticker-check worker and the
+# price relay start only once it is here and equals the checkout's HEAD, so they run the engine's release, not a tree
+# that moved (or was not checked out yet).
+git rev-parse HEAD > data/live/running_commit 2>/dev/null || rm -f data/live/running_commit
 # QA-Ops audit (25 Nov 2026): one WARNING line when this checkout has uncommitted changes or is ahead of or behind
 # origin/main (informational only; the start goes on either way)
 bash scripts/checkout_drift.sh "$PWD" || true

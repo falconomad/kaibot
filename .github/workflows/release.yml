@@ -1,0 +1,74 @@
+name: release
+# Audit 2 5.2 (#682): a release is an annotated tag `rel-YYYYMMDD-N` on a commit of main that passed CI. Made on demand
+# (Actions > release > Run workflow, or `gh workflow run release.yml --ref main`), and only when the `ci` and
+# `supply-chain` runs of main's head commit (the push to main) both completed with success. N counts the releases of
+# that UTC day from 1. Nothing here deploys: the Mac pins a tag with `./scripts/release.sh --latest` (or a named tag),
+# which again refuses a lightweight tag or one whose commit is not on main. Runbook: docs/ops/always_on.md.
+#
+# The one job holds a token that can write the repository's contents (to create the tag), so it runs no repository
+# code: no checkout, no install, only `gh api` calls to the REST API (tests/unit/test_ci_supply_chain.py). It can
+# only run from main's own copy of this file (the `if:` below): a dispatch on another branch does nothing.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:  # one at a time, so two dispatches never pick the same N
+  group: release
+  cancel-in-progress: false
+jobs:
+  tag:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write  # to create the tag object and its ref: the only thing this job writes
+      actions: read  # to read whether ci and supply-chain passed on the commit
+    steps:
+      - name: tag main's head when ci and supply-chain passed on it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          sha=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          case "$sha" in *[!0-9a-f]*|"") echo "::error::could not read main's head commit"; exit 1 ;; esac
+          echo "main is at $sha"
+          for wf in ci.yml supply-chain.yml; do
+            got=$(gh api "repos/$REPO/actions/workflows/$wf/runs?head_sha=$sha&branch=main&event=push&per_page=1" \
+                    --jq '.workflow_runs[0] | "\(.status) \(.conclusion) \(.html_url)"')
+            echo "$wf on $sha: $got"
+            case "$got" in
+              "completed success "*) ;;
+              *) echo "::error::$wf has not passed on main's head $sha ($got): no release. Wait for it, or fix main."
+                 exit 1 ;;
+            esac
+          done
+          # the newest rel-* tag already names this commit: nothing to do (no second name for the same code)
+          newest=$(gh api --paginate "repos/$REPO/git/matching-refs/tags/rel-" --jq '.[].ref' \
+                     | sed 's|^refs/tags/||' | sort -V | tail -n 1)
+          if [ -n "$newest" ]; then
+            obj=$(gh api "repos/$REPO/git/ref/tags/$newest" --jq '"\(.object.type) \(.object.sha)"')
+            at=${obj#* }
+            [ "${obj%% *}" = tag ] && at=$(gh api "repos/$REPO/git/tags/$at" --jq .object.sha)
+            if [ "$at" = "$sha" ]; then
+              echo "$newest already names $sha: no new tag. Pin it with ./scripts/release.sh --latest" \
+                | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+          day=$(date -u +%Y%m%d)
+          n=$(gh api --paginate "repos/$REPO/git/matching-refs/tags/rel-$day-" --jq '.[].ref' \
+                | sed -n "s|^refs/tags/rel-$day-\([0-9][0-9]*\)$|\1|p" | sort -n | tail -n 1)
+          name="rel-$day-$(( ${n:-0} + 1 ))"
+          message="kaibot release $name: main at $sha; ci and supply-chain passed on it. Made by $ACTOR ($RUN_URL)."
+          tag=$(gh api --method POST "repos/$REPO/git/tags" -f tag="$name" -f message="$message" -f object="$sha" \
+                  -f type=commit --jq .sha)
+          gh api --method POST "repos/$REPO/git/refs" -f ref="refs/tags/$name" -f sha="$tag" --silent
+          {
+            echo "Made the annotated tag \`$name\` on \`$sha\`."
+            echo
+            echo "On the Mac, outside 09:30-16:00 New York time: \`./scripts/release.sh --latest\` then"
+            echo "\`./scripts/service.sh restart\` (docs/ops/always_on.md)."
+          } | tee -a "$GITHUB_STEP_SUMMARY"

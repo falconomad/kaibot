@@ -82,6 +82,26 @@ rotate() {  # copy-truncate (launchd keeps its log files open in append mode); k
   cp "$f" "$f.1" && : >"$f" && gzip -f "$f.1"
 }
 
+# ---- #682 (audit 2 5.2): the ticker-check worker and the price relay run the engine's release. They run from this
+# checkout's tree, so each (re)start waits until run_engine.sh has checked out the pinned release (or pulled main)
+# and written the commit it runs to data/live/running_commit (removed before every engine start, below), and starts
+# only while the checkout's HEAD is still that commit. A tree that moved under a running engine (a hand checkout or
+# pull) does not start them on code the engine does not run: they wait, said once in their log, until the next
+# engine start.
+ENGINE_COMMIT=data/live/running_commit
+code_problem() {  # "" when the checkout's HEAD is the commit this engine run started on; else why not
+  local want have
+  want="$(cat "$ENGINE_COMMIT" 2>/dev/null)"
+  have="$(git -C "$REPO" rev-parse HEAD 2>/dev/null)"
+  if [ -z "$want" ]; then echo "waiting for the engine's release checkout (no $ENGINE_COMMIT yet)"
+  elif [ -z "$have" ]; then echo "cannot read the checkout's commit (git rev-parse HEAD failed)"
+  elif [ "$want" != "$have" ]; then
+    echo "the checkout is at ${have:0:7}, not at the engine's ${want:0:7}: not starting on code the engine does not run"
+  fi
+  return 0
+}
+code_at() { git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown; }
+
 # ---- the ticker-check worker (M5 S68, #96): answers the dashboard's ticker checks (My lists) within seconds while
 # the engine service is up, market hours or not. A separate, read-only process (asset record, daily bars, Finnhub
 # industry under the config/sources.yaml budgets; it never trades). Restarted when it dies (5 s, doubling to 5 min);
@@ -122,12 +142,17 @@ checks_stop_worker() {
 }
 
 checks_loop() {  # checks_loop ENGINE_PID WRAPPER_PID: in the background, output to the worker's log only
-  local engine="$1" parent="$2" delay=5 started code
+  local engine="$1" parent="$2" delay=5 started code why
   alive() { kill -0 "$engine" 2>/dev/null && kill -0 "$parent" 2>/dev/null; }
   nap() { local i; for ((i = 0; i < $1; i++)); do alive || return 1; sleep 1; done; }
   trap 'checks_stop_worker; say "ticker-check worker stopped with the engine"; exit 0' TERM INT HUP
   nap "${KAIBOT_CHECKS_START_DELAY:-10}" || exit 0  # let run_engine.sh check out the release and build first
   while alive; do
+    why="$(code_problem)"
+    if [ -n "$why" ]; then  # #682: only the engine's release
+      [ "$(cat "$CHECKS_NOTE" 2>/dev/null)" = "$why" ] || { say "ticker-check worker: $why"; echo "$why" > "$CHECKS_NOTE"; }
+      nap 1 || break; continue
+    fi
     if ! checks_cmd; then
       local why="cannot start the ticker-check worker yet: no .venv with the engine's packages"
       [ "$MODE" = docker ] && why="$why and no kaibot-engine image"
@@ -137,7 +162,7 @@ checks_loop() {  # checks_loop ENGINE_PID WRAPPER_PID: in the background, output
     rm -f "$CHECKS_NOTE"; started=$SECONDS
     "${W_CMD[@]}" </dev/null &
     W_PID=$!; echo "$W_PID" > "$CHECKS_PID"
-    say "ticker-check worker started (pid $W_PID, $W_KIND)"
+    say "ticker-check worker started (pid $W_PID, $W_KIND, code $(code_at))"
     while alive && kill -0 "$W_PID" 2>/dev/null; do sleep 1; done
     alive || break
     wait "$W_PID"; code=$?; W_PID=""; rm -f "$CHECKS_PID"
@@ -225,12 +250,17 @@ stream_stop_relay() {
 }
 
 stream_loop() {  # stream_loop ENGINE_PID WRAPPER_PID: in the background, output to the relay's log only
-  local engine="$1" parent="$2" delay=5 started code
+  local engine="$1" parent="$2" delay=5 started code why
   alive() { kill -0 "$engine" 2>/dev/null && kill -0 "$parent" 2>/dev/null; }
   nap() { local i; for ((i = 0; i < $1; i++)); do alive || return 1; sleep 1; done; }
   trap 'stream_stop_relay; say "price relay stopped with the engine"; exit 0' TERM INT HUP
   nap "${KAIBOT_STREAM_START_DELAY:-15}" || exit 0  # after run_engine.sh has checked out the release
   while alive; do
+    why="$(code_problem)"
+    if [ -n "$why" ]; then  # #682: only the engine's release
+      [ "$(cat "$STREAM_NOTE" 2>/dev/null)" = "$why" ] || { say "price relay: $why"; echo "$why" > "$STREAM_NOTE"; }
+      nap 1 || break; continue
+    fi
     if ! stream_cmd; then
       local why="cannot start the price relay yet: no Python 3.11+ with the repo's src"
       [ "$MODE" = docker ] && why="$why and no kaibot-engine image"
@@ -240,7 +270,7 @@ stream_loop() {  # stream_loop ENGINE_PID WRAPPER_PID: in the background, output
     rm -f "$STREAM_NOTE"; started=$SECONDS
     "${S_CMD[@]}" </dev/null &
     S_PID=$!; echo "$S_PID" > "$STREAM_PID"
-    say "price relay started (pid $S_PID, $S_KIND)"
+    say "price relay started (pid $S_PID, $S_KIND, code $(code_at))"
     while alive && kill -0 "$S_PID" 2>/dev/null; do sleep 1; done
     alive || break
     wait "$S_PID"; code=$?; S_PID=""; rm -f "$STREAM_PID"
@@ -336,7 +366,7 @@ run_engine() {
   if [ "$MODE" = docker ] && ! docker info >/dev/null 2>&1; then
     note_once "waiting for Docker Desktop (Settings > General > Start Docker Desktop when you sign in)"; exit 1
   fi
-  echo $$ > "$lock"; rm -f "$NOTE"
+  echo $$ > "$lock"; rm -f "$NOTE" "$ENGINE_COMMIT"  # #682: run_engine.sh writes the commit of this start
   rotate "$LOG_DIR/engine.log" 10000000; rotate "$LOG_DIR/watchdog.log" 10000000
   rotate "$CHECKS_LOG" 10000000; rotate "$STREAM_LOG" 10000000
 

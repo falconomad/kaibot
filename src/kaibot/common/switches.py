@@ -136,6 +136,8 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     # ---- read only by scripts under scripts/ (declared with their owner; not parsed here)
     *(_s(n, "text", owner, what, scope="script") for n, owner, what in (
         ("KAIBOT_RELEASE", "qa-ops", "the pinned release (scripts/release.sh)"),
+        ("KAIBOT_FOLLOW_MAIN", "qa-ops", "audit 2 5.2 (#682): may an unpinned start follow main (1, the default for "
+         "now, with WARNING lines) or is it refused (0)? release.sh, from the environment or the .env"),
         ("KAIBOT_RUNNER_CHECKOUT", "qa-ops", "the research runner's own checkout (install_runner.sh; default "
          "~/Projects/kaibot-runner)"),
         ("KAIBOT_REEXEC", "qa-ops", "run_engine.sh's re-exec guard after a release switch"),
