@@ -258,7 +258,9 @@ def test_the_listing_jobs_are_queued_history_first_then_first_bars_and_get_the_s
     mine = [rr.check_job(j, cfg) for j in rr.load_queue() if j["script"] == "scripts/fetch_listings.py"]
     assert [(j.id, j.args, j.issue) for j in mine] == [
         ("listings-history-2016-2026-11-25", ("--since", "2016-01-01"), 376),
-        ("listings-first-bars-2026-11-25", ("--first-bars",), 376)]
+        ("listings-first-bars-2026-11-25", ("--first-bars",), 376),
+        ("listings-history-2016-2026-11-26", ("--since", "2016-01-01"), 376),  # again after #376's index fix
+        ("listings-first-bars-2026-11-26", ("--first-bars",), 376)]
     for j in mine:
         cmd = rr.argv(j, "/venv/python")
         assert cmd[:4] == ["/usr/bin/nice", "-n", "10", "/venv/python"] and cmd[4].endswith("scripts/fetch_listings.py")

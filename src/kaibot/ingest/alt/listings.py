@@ -181,11 +181,31 @@ def parse_assets(doc: object) -> list[dict]:
     return sorted(out.values(), key=lambda r: (r["symbol"], r["id"]))
 
 
+# The column line of EDGAR's master index. The two indexes spell its last column differently: the daily index
+# (daily-index/.../master.YYYYMMDD.idx) writes "File Name", the quarterly one (full-index/YYYY/QTRn/master.idx)
+# writes "Filename" (#376: a check for "File Name" alone refused every quarter since 2016).
+_INDEX_COLUMNS = re.compile(r"^CIK\|Company Name\|Form Type\|Date Filed\|(?:File Name|Filename)[ \t]*\r?$", re.M)
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_TOKEN = re.compile(r"[A-Za-z0-9_\-]{24,}")
+ANSWER_CHARS = 80
+
+
+def describe_answer(r: http.Response) -> str:
+    """What a server answered, for an error message: status, content type, size and the first 80 characters,
+    whitespace collapsed, e-mail addresses and long tokens redacted, anything unprintable replaced."""
+    text = " ".join(r.body[:2000].decode("latin-1").split())
+    text = _TOKEN.sub("<redacted>", _EMAIL.sub("<email>", text))
+    text = "".join(c if c.isprintable() else "?" for c in text)[:ANSWER_CHARS]
+    ctype = "".join(c for c in r.content_type if c.isprintable())[:60] or "no content-type"
+    return f"HTTP {r.status}, {ctype}, {len(r.body)} bytes, starts {text!r}"
+
+
 def parse_master_index(text: str, forms: Iterable[str] = FORMS) -> list[dict]:
-    """EDGAR's master index (`CIK|Company Name|Form Type|Date Filed|File Name`) -> the rows of `forms`. The daily
-    index writes the date as YYYYMMDD, the quarterly one as YYYY-MM-DD; both are read. Other lines are skipped;
-    a text without the column line is not an index (ValueError)."""
-    if "CIK|Company Name|Form Type|Date Filed|File Name" not in text[:4000]:
+    """EDGAR's master index (`CIK|Company Name|Form Type|Date Filed|File Name`, the quarterly one ending in
+    `Filename`) -> the rows of `forms`. The daily index writes the date as YYYYMMDD, the quarterly one as
+    YYYY-MM-DD; both are read. Other lines are skipped; a text without the column line is not an index
+    (ValueError)."""
+    if not _INDEX_COLUMNS.search(text[:4000]):
         raise ValueError("not an EDGAR master index (no column line)")
     forms = frozenset(forms)
     out = []
@@ -201,6 +221,14 @@ def parse_master_index(text: str, forms: Iterable[str] = FORMS) -> list[dict]:
         out.append({"cik": f[0].zfill(10), "company": f[1].strip()[:300], "form": f[2], "filed": filed,
                     "accession": f[4].rsplit("/", 1)[-1][:-4], "path": f[4]})
     return out
+
+
+def master_index_rows(r: http.Response, forms: Iterable[str] = FORMS) -> list[dict]:
+    """`parse_master_index` of a response; when it is not an index, the error says what SEC answered instead."""
+    try:
+        return parse_master_index(r.body.decode("latin-1"), forms)
+    except ValueError as e:
+        raise ValueError(f"{e}; SEC answered {describe_answer(r)}") from None
 
 
 def index_floor(day: date) -> datetime:
@@ -491,7 +519,7 @@ def collect_edgar(root: Path, creds: Creds, now: datetime, day: date | None = No
             missing.append(d)
             continue
         avail = index_available_ts(d, now, r.last_modified())
-        for x in parse_master_index(r.body.decode("latin-1")):
+        for x in master_index_rows(r):
             key = f"edgar:{x['cik']}:{x['accession']}"
             paths[key] = x["path"]
             rows[key] = _row(key, "edgar_index", "filing", company=x["company"], cik=x["cik"], form=x["form"],

@@ -24,6 +24,8 @@ daily bar store (data/daily). For a listing the store does not hold, --first-bar
 Alpaca (paper keys from the env file, one request per listing of kind `ipo`, at most 40 a minute so that a running
 engine keeps its room) into data/listings/alpaca_first_bars.json, never into data/daily (Product, 19 Nov 2026).
 Resumable: a final answer is never asked again. Otherwise the first session stays empty. Nothing is guessed.
+Three quarters in a row that fail the same way stop the run (the rest are not asked); an answer that is not an
+index is named in the error (status, content type, size, its first 80 characters, redacted).
 The engine reads none of it. See docs/ops/listings.md.
 """
 
@@ -32,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import UTC, date, datetime
@@ -45,12 +48,13 @@ from kaibot.engine.config import load_env_file  # noqa: E402
 from kaibot.ingest import listings_pit as lp  # noqa: E402
 from kaibot.ingest import nyse_sessions as nyse  # noqa: E402
 from kaibot.ingest.alt import listings as ls  # noqa: E402
-from kaibot.ingest.earnings_sec import TICKERS_URL, sec_getter  # noqa: E402
+from kaibot.ingest.earnings_sec import TICKERS_URL, sec_response_getter  # noqa: E402
 
 DEFAULT_ENV = "~/Projects/kaibot-secrets/.env"
 FULL_INDEX_URL = "https://www.sec.gov/Archives/edgar/full-index/{y}/QTR{q}/master.idx"
 FIRST_BARS_PER_MIN = 40  # the slow rate of fetch_daily.sh while the engine runs; Alpaca allows 200 a minute
 MAX_ERRORS_IN_A_ROW = 5
+MAX_SAME_FAILURES = 3  # quarters failing with the same error in a row: stop, do not ask the rest (#376)
 
 
 def quarters(since: date, today: date) -> list[tuple[int, int]]:
@@ -95,6 +99,7 @@ def build(data: Path, daily: Path, extra: dict | None = None) -> dict:
     tickers = lp.cik_tickers(json.loads(tick.read_text())) if tick.is_file() else {}
     df = lp.ipo_history(_rows(sec), tickers, lp.store_first_bar(daily), _covers(sec))
     df = lp.fill_first_sessions(df, _first_bars(data))
+    data.mkdir(parents=True, exist_ok=True)  # a first run whose every request failed has no folder yet
     lp.write_history(df, data / "ipos.parquet")
     per_year = df["prospectus_filed"].map(lambda d: d.year).value_counts().sort_index()
     meta = {"built_at": datetime.now(UTC).isoformat(timespec="seconds"), "rows": int(len(df)),
@@ -112,36 +117,54 @@ def build(data: Path, daily: Path, extra: dict | None = None) -> dict:
 def fetch(data: Path, daily: Path, ua: str, since: date, today: date | None = None, prices: bool = False) -> dict:
     t0 = time.monotonic()
     today = today or datetime.now(ls.ET).date()
-    get = sec_getter(ua)
+    get = sec_response_getter(ua)
     sec = data / "sec"
     requests, errors = 0, {}
     todo = quarters(since, today)
     print(f"{len(todo)} quarters since {since}; one request each to EDGAR (finished quarters are cached)…", flush=True)
+    last, same = "", 0
     for y, q in todo:
         p = _extract(sec, y, q)
         if p.is_file() and (y, q) != todo[-1]:
             continue
         try:
-            rows = ls.parse_master_index(get(FULL_INDEX_URL.format(y=y, q=q)).decode("latin-1"))
+            rows = ls.master_index_rows(get(FULL_INDEX_URL.format(y=y, q=q)))
         except Exception as e:  # noqa: BLE001  (one bad quarter must not stop the run; the next run reads it)
-            errors[f"{y}Q{q}"] = f"{type(e).__name__}: {str(e)[:160]}"
+            errors[f"{y}Q{q}"] = f"{type(e).__name__}: {str(e)[:300]}"
             print(f"  {y} Q{q}: not read ({errors[f'{y}Q{q}']})", flush=True)
+            sig = failure_signature(errors[f"{y}Q{q}"])
+            same = same + 1 if sig == last else 1
+            last = sig
+            if same >= MAX_SAME_FAILURES:
+                errors["stopped"] = (f"{same} quarters in a row failed the same way; the other quarters and the "
+                                     "ticker table were not asked (the next run starts again from the first "
+                                     "quarter not cached)")
+                print(f"  {errors['stopped']}", flush=True)
+                break
             continue
         finally:
             requests += 1
+        last, same = "", 0
         _atomic(p, json.dumps([{**r, "filed": r["filed"].isoformat()} for r in rows]))
         print(f"  {y} Q{q}: {len(rows)} filings kept, {time.monotonic() - t0:.0f} s", flush=True)
-    try:
-        body = get(TICKERS_URL)
-        lp.cik_tickers(json.loads(body))  # validate before it replaces the cached table
-        _atomic(sec / "company_tickers.json", body.decode("utf-8"))
-    except Exception as e:  # noqa: BLE001
-        errors["company_tickers"] = f"{type(e).__name__}: {str(e)[:160]}"
-    requests += 1
-    if prices:
+    if "stopped" not in errors:
+        try:
+            body = get(TICKERS_URL).body
+            lp.cik_tickers(json.loads(body))  # validate before it replaces the cached table
+            _atomic(sec / "company_tickers.json", body.decode("utf-8"))
+        except Exception as e:  # noqa: BLE001
+            errors["company_tickers"] = f"{type(e).__name__}: {str(e)[:300]}"
+        requests += 1
+    if prices and "stopped" not in errors:
         requests += fetch_prices(data, ua, errors)
     return build(data, daily, {"requests_this_run": requests, "seconds": round(time.monotonic() - t0),
                                "errors": errors, "since": since.isoformat()})
+
+
+def failure_signature(error: str) -> str:
+    """An error with its quarter (the URL's YYYY/QTRn) and the answer's size taken out, so that the same failure of
+    two quarters compares equal (a block page carries a reference id of its own, past the 80 characters quoted)."""
+    return re.sub(r"\b\d+ bytes\b", "N bytes", re.sub(r"\b\d{4}/QTR[1-4]\b", "YYYY/QTRn", error))
 
 
 def fetch_prices(data: Path, ua: str, errors: dict) -> int:

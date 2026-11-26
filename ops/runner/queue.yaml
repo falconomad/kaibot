@@ -51,3 +51,11 @@ jobs:
     script: scripts/fetch_listings.py
     args: ["--first-bars"]
     posts_to_issue: 376
+  - id: listings-history-2016-2026-11-26    # #376: again after the column-line fix (the 25 Nov run refused all 44 quarters)
+    script: scripts/fetch_listings.py
+    args: ["--since", "2016-01-01"]
+    posts_to_issue: 376
+  - id: listings-first-bars-2026-11-26      # #376 step 1b: first sessions from Alpaca bars, after the history above
+    script: scripts/fetch_listings.py
+    args: ["--first-bars"]
+    posts_to_issue: 376

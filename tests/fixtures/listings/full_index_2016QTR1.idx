@@ -1,0 +1,17 @@
+Description:           Master Index of EDGAR Dissemination Feed
+Last Data Received:    March 31, 2016
+Comments:              webmaster@sec.gov
+Anonymous FTP:         ftp://ftp.sec.gov/edgar/
+Cloud HTTP:            https://www.sec.gov/Archives/
+
+ 
+ 
+ 
+CIK|Company Name|Form Type|Date Filed|Filename
+--------------------------------------------------------------------------------
+1000045|EXAMPLE FINANCIAL INC|10-Q|2016-02-09|edgar/data/1000045/0001193125-16-454400.txt
+1000045|EXAMPLE FINANCIAL INC|4|2016-02-11|edgar/data/1000045/0001000045-16-000003.txt
+9990101|Example Holdings Corp|S-1|2016-01-21|edgar/data/9990101/0009990101-16-000001.txt
+9990101|Example Holdings Corp|S-1/A|2016-02-24|edgar/data/9990101/0009990101-16-000002.txt
+9990101|Example Holdings Corp|424B4|2016-03-17|edgar/data/9990101/0009990101-16-000003.txt
+9990102|Example Blank Check Acquisition Corp|S-1|2016-03-02|edgar/data/9990102/0009990102-16-000001.txt

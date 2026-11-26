@@ -20,7 +20,7 @@ import pytest
 import yaml
 from alt_helpers import FakeClock, FakeNet
 
-from kaibot.common import ratelimit
+from kaibot.common import http, ratelimit
 from kaibot.ingest import listings_pit as lp
 from kaibot.ingest import nyse_sessions as nyse
 from kaibot.ingest.alt import listings as ls
@@ -440,6 +440,11 @@ def _script():
     return mod
 
 
+def _answers(get):
+    """A bytes getter as `sec_response_getter` answers: an `http.Response` of 200, text/plain."""
+    return lambda url: http.Response(200, {"content-type": "text/plain"}, get(url))
+
+
 def test_fetch_listings_is_resumable_and_reads_one_file_a_quarter(tmp_path, monkeypatch):
     script = _script()
     urls: list[str] = []
@@ -451,9 +456,9 @@ def test_fetch_listings_is_resumable_and_reads_one_file_a_quarter(tmp_path, monk
             return fx(name)
         y, q = url.split("/full-index/")[1].split("/")[:2]
         p = FIX / f"master_{y}{q}.idx"
-        return p.read_bytes() if p.is_file() else b"CIK|Company Name|Form Type|Date Filed|File Name\n"
+        return p.read_bytes() if p.is_file() else b"CIK|Company Name|Form Type|Date Filed|Filename\n"
 
-    monkeypatch.setattr(script, "sec_getter", lambda ua: get)
+    monkeypatch.setattr(script, "sec_response_getter", lambda ua: _answers(get))
     data = tmp_path / "listings"
     meta = script.fetch(data, tmp_path / "daily", "Kaibot ops@example.com", D(2016, 1, 1), today=D(2026, 11, 20))
     assert len(urls) == 45 and meta["requests_this_run"] == 45  # 44 quarters and the ticker table
@@ -516,9 +521,9 @@ def _history_on_disk(tmp_path, monkeypatch, script):
             return fx(name)
         y, q = url.split("/full-index/")[1].split("/")[:2]
         p = FIX / f"master_{y}{q}.idx"
-        return p.read_bytes() if p.is_file() else b"CIK|Company Name|Form Type|Date Filed|File Name\n"
+        return p.read_bytes() if p.is_file() else b"CIK|Company Name|Form Type|Date Filed|Filename\n"
 
-    monkeypatch.setattr(script, "sec_getter", lambda ua: get)
+    monkeypatch.setattr(script, "sec_response_getter", lambda ua: _answers(get))
     data = tmp_path / "listings"
     script.fetch(data, tmp_path / "daily", "Kaibot ops@example.com", D(2026, 4, 1), today=D(2026, 11, 20))
     return data
@@ -667,3 +672,119 @@ def test_trading_code_never_imports_the_listing_watch():
     for mod in (ls, lp):  # and the watch itself imports no trading code
         assert not any(m.startswith(("kaibot.engine", "kaibot.risk", "kaibot.strategies", "kaibot.broker",
                                      "kaibot.features", "kaibot.replay")) for m in _imports(Path(mod.__file__)))
+
+
+# ---------------------------------------------------------------- #376: every quarter refused on the owner's Mac
+
+
+def test_the_quarterly_index_column_line_is_filename_and_is_read():
+    """The quarterly full index writes `Filename`, the daily one `File Name`. The check knew only the second, so the
+    runner's job of 25 Nov refused all 44 quarters with "no column line"."""
+    real = fx("full_index_2016QTR1.idx").decode()
+    assert "|Date Filed|Filename\n" in real and "File Name" not in real  # the shape SEC serves
+    rows = ls.parse_master_index(real)
+    assert [(r["form"], r["filed"]) for r in rows] == [
+        ("S-1", D(2016, 1, 21)), ("S-1/A", D(2016, 2, 24)), ("424B4", D(2016, 3, 17)), ("S-1", D(2016, 3, 2))]
+    assert rows[0]["cik"] == "0009990101" and rows[0]["accession"] == "0009990101-16-000001"
+    assert ls.parse_master_index(fx("master.20261116.idx").decode())  # the daily spelling still reads
+    assert ls.parse_master_index(real.replace("\n", "\r\n"))  # and CRLF line ends
+    cols = "CIK|Company Name|Form Type|Date Filed|Filename"
+    for bad in (cols + "s\n", "x " + cols + "\n"):
+        with pytest.raises(ValueError):
+            ls.parse_master_index(bad)
+
+
+def test_an_answer_that_is_not_an_index_says_what_sec_returned():
+    block = http.Response(200, {"content-type": "text/html; charset=utf-8"}, fx("sec_block_page.html"))
+    with pytest.raises(ValueError) as e:
+        ls.master_index_rows(block)
+    msg = str(e.value)
+    assert msg.startswith("not an EDGAR master index (no column line); "
+                          "SEC answered HTTP 200, text/html; charset=utf-8,")
+    quoted = msg.split(" starts ", 1)[1]
+    assert quoted.startswith("'<!DOCTYPE html PUBLIC") and len(quoted) == ls.ANSWER_CHARS + 2  # 80 characters, quoted
+    secret = http.Response(503, {}, b"  ops@example.com\n\tkey=AKIAABCDEFGHIJKLMNOPQRSTUV\x00 down  ")
+    d = ls.describe_answer(secret)
+    assert d == f"HTTP 503, no content-type, {len(secret.body)} bytes, starts '<email> key=<redacted>? down'"
+    assert "example.com" not in d and "AKIA" not in d
+
+
+def _fetch_with(tmp_path, monkeypatch, answer):
+    script = _script()
+    urls: list[str] = []
+
+    def get(url: str) -> http.Response:
+        urls.append(url)
+        return answer(url)
+
+    monkeypatch.setattr(script, "sec_response_getter", lambda ua: get)
+    meta = script.fetch(tmp_path / "listings", tmp_path / "daily", "Kaibot ops@example.com", D(2016, 1, 1),
+                        today=D(2026, 11, 20))
+    return script, urls, meta
+
+
+def test_three_identical_failures_stop_the_run_instead_of_asking_all_44_quarters(tmp_path, monkeypatch, capsys):
+    page = fx("sec_block_page.html")
+
+    asked = []
+
+    def block(url):  # each page has a reference id of its own (another length), past the 80 characters quoted
+        asked.append(url)
+        return http.Response(200, {"content-type": "text/html"}, page.replace(b"0.5e3a4b17", b"9" * len(asked)))
+
+    script, urls, meta = _fetch_with(tmp_path, monkeypatch, block)
+    assert len(urls) == 3 and meta["requests_this_run"] == 3  # no 4th quarter, no ticker table
+    assert set(meta["errors"]) == {"2016Q1", "2016Q2", "2016Q3", "stopped"}
+    assert "SEC answered HTTP 200, text/html" in meta["errors"]["2016Q1"]
+    assert meta["errors"]["2016Q1"] != meta["errors"]["2016Q2"]  # not equal as text, the same failure all the same
+    assert meta["rows"] == 0
+    out = capsys.readouterr().out
+    assert "3 quarters in a row failed the same way" in out and "2016 Q4" not in out
+
+
+def test_the_same_http_error_of_different_quarters_counts_as_identical(tmp_path, monkeypatch):
+    def denied(url):
+        raise http.HttpError(403, url, "Forbidden")
+
+    script, urls, meta = _fetch_with(tmp_path, monkeypatch, denied)
+    assert len(urls) == 3 and "stopped" in meta["errors"] and "HTTP 403" in meta["errors"]["2016Q3"]
+    assert script.failure_signature(meta["errors"]["2016Q1"]) == script.failure_signature(meta["errors"]["2016Q2"])
+
+
+def test_different_or_interrupted_failures_do_not_stop_the_run(tmp_path, monkeypatch):
+    real = fx("full_index_2016QTR1.idx")
+    ok = http.Response(200, {"content-type": "text/plain"}, b"CIK|Company Name|Form Type|Date Filed|Filename\n")
+
+    def answer(url):
+        if url.endswith("company_tickers.json"):
+            return http.Response(200, {"content-type": "application/json"}, fx("company_tickers.json"))
+        y, q = url.split("/full-index/")[1].split("/")[:2]
+        if (y, q) == ("2016", "QTR1"):
+            return http.Response(200, {"content-type": "text/plain"}, real)
+        if y == "2017" and q in ("QTR1", "QTR2", "QTR4"):  # two the same, a success, the same again: never 3 in a row
+            return http.Response(200, {"content-type": "text/html"}, b"<html>busy</html>")
+        if y == "2018":
+            raise http.HttpError(500 + int(q[-1]), url, "varies")  # four failures, each different
+        return ok
+
+    _, urls, meta = _fetch_with(tmp_path, monkeypatch, answer)
+    assert len(urls) == 45 and "stopped" not in meta["errors"]  # every quarter and the ticker table
+    assert set(meta["errors"]) == {"2017Q1", "2017Q2", "2017Q4", "2018Q1", "2018Q2", "2018Q3", "2018Q4"}
+    assert meta["quarters"] == 44 - 7
+    kept = json.loads((tmp_path / "listings" / "sec" / "full-index" / "2016Q1.json").read_text())
+    assert [r["form"] for r in kept] == ["S-1", "S-1/A", "424B4", "S-1"]  # the real-format quarter was kept
+
+
+def test_fetch_listings_reads_the_user_agent_the_runner_declares(tmp_path, monkeypatch):
+    """The --env file's SEC_USER_AGENT is what fetch() sends (fetch_sec_fundamentals reads KAIBOT_SEC_USER_AGENT;
+    the runner's env file holds both). Not the cause of #376: a missing one stops before any request."""
+    script = _script()
+    seen = []
+    monkeypatch.delenv("SEC_USER_AGENT", raising=False)
+    env = tmp_path / "x.env"
+    env.write_text('SEC_USER_AGENT="Kaibot research ops@example.com"\n')
+    monkeypatch.setattr(script, "fetch", lambda data, daily, ua, since, prices=False: seen.append(ua) or {
+        "rows": 0, "by_kind": {}, "with_symbol": 0, "with_first_session": 0, "first_session_from_alpaca": 0,
+        "with_offer_price": 0, "errors": {}})
+    assert script.main(["--env", str(env), "--data", str(tmp_path / "l")]) == 0
+    assert seen == ["Kaibot research ops@example.com"]
