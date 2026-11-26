@@ -128,7 +128,6 @@ class CrashWorld(World):
         self.fuse = Points(at, phase)
         self.remote.on_write = self.fuse  # (built with the world's own fuse)
         self.restarted = False
-        self.recoveries = 0  # starts that ran Engine.recover with something left to recover
 
     def at(self, t, run: bool = True) -> None:
         if not self.restarted and t >= RESTART and self.eng is not None:
@@ -209,9 +208,12 @@ KNOWN: dict[int, str] = {
 
 
 def known(effects: list[tuple[str, str]], k: int, phase: str) -> int | None:
-    """The open issue a failing crash point is put down to, or None."""
+    """The open issue a failing crash point is put down to, or None: #775 for a kill between an order's intent and
+    its venue call (after the `om_intent`, before the `venue.submit` that follows it) in the last window (D2's)."""
     what = effects[k - 1][0]
-    if (phase == "after" and what == "journal.om_intent") or (phase == "before" and what.startswith("venue.submit")):
+    call = effects[k][0] if phase == "after" and what == "journal.om_intent" and k < len(effects) else \
+        what if phase == "before" else ""
+    if call.startswith("venue.submit ") and f"-{D2.replace('-', '')}-" in call:
         return next(iter(KNOWN), None)
     return None
 
