@@ -211,9 +211,6 @@ KNOWN: dict[int, str] = {
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
          "a watchdog flatten of the shares while their buy is still unbooked leaves a difference only the owner "
          "can accept (the venue's sale is a foreign fill, then the late booking puts the shares in the ledger)",
-    746: "no kill in a week with the broker's calendar down (only pauses): a process started after the session's "
-         "neighbours were last read cannot find the previous session (`prev_session` has no local fallback) and "
-         "sends nothing in the window, and one started during the outage cannot start its day",
 }
 
 
@@ -353,9 +350,7 @@ class Scenario:
                 arm = et(day, week.close(day)) + timedelta(minutes=rs.randrange(30, 420), seconds=rs.randrange(60))
                 hours = rs.choice((2, 5, 9, 14, 17, 19))
                 outages.append(Outage(arm, hours * 60 + rs.randrange(60), kill=False, mac=True,
-                                      restart=rs.random() < 0.5 and not week.calendar_down))
-        if week.calendar_down:  # KNOWN 746: the process lives through the calendar's outage (a kill is a pause)
-            outages = [o if not o.kill else Outage(o.arm, max(o.down, 2), kill=False) for o in outages]
+                                      restart=rs.random() < 0.5))
         flatten = None
         if r.random() < 0.15:
             day = r.choice((D2, D2, D3))
