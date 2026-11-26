@@ -42,6 +42,12 @@ def pytest_configure(config: pytest.Config) -> None:
     from kaibot.engine import event_names
 
     event_names.STRICT = True  # M10 1.22 (#447): an event name the registry lacks fails the test that writes it
+    # audit 2 7.6 (#716): the machine-wide rate-limit windows of this test process (and each xdist worker) live in a
+    # temp folder of their own, never in the repo's data/ratelimit, and never shared with a running engine
+    if not os.environ.get("KAIBOT_RATELIMIT_DIR"):
+        import tempfile
+
+        os.environ["KAIBOT_RATELIMIT_DIR"] = tempfile.mkdtemp(prefix="kaibot-ratelimit-")
     if os.environ.get("KAIBOT_TEST_PG_AUTO") != "1":
         return
     worker = getattr(config, "workerinput", None)

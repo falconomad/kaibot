@@ -321,7 +321,7 @@ def test_a_job_sees_a_short_fixed_environment_without_tokens(tmp_path, monkeypat
     _, _, popen = tick(tmp_path, [job()])
     env = popen.kwargs[0]["env"]
     assert env["PYTHONPATH"] == "src" and "GH_TOKEN" not in env and "ANTHROPIC_API_KEY" not in env
-    assert set(env) <= set(rr.JOB_ENV_KEYS) | {"PYTHONPATH", "PYTHONUNBUFFERED"}
+    assert set(env) <= set(rr.JOB_ENV_KEYS) | {"PYTHONPATH", "PYTHONUNBUFFERED", "KAIBOT_RATELIMIT_DIR"}
     kw = popen.kwargs[0]
     assert kw.get("shell") is not True and kw["start_new_session"] is True and kw["stdin"] == subprocess.DEVNULL
 

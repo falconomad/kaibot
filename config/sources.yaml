@@ -26,7 +26,7 @@ market_data:
                      note: "ticker -> company website for the cdn.tickerlogos.com logos (#330, #331); only scripts/fetch_symbol_meta.py --fill-domains, paced at one call every 1.2 s, and the dashboard (apps/web/api/logo-domain.ts, its own limit of 50/min); never in the engine"}
   yfinance:         {use: offline_research_only, auth: none, note: "unofficial; never in the live decision path"}
 fundamentals_filings:
-  sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts"}
+  sec_edgar:        {use: core, auth: user_agent_with_email, limit: "10 req/s fair access", budget_per_s: 5, shared_budget_per_s: 8, note: "shared by every SEC host (www.sec.gov, data.sec.gov): Atom feed, submissions, Form 4, companyfacts. 5 a second per process, and 8 a second for all processes on the machine together (a file lock in data/ratelimit, #716): SEC counts 10 a second per IP"}
   sec_earnings_8k:  {use: research_earnings_dates, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files), www.sec.gov/files/company_tickers.json, www.sec.gov/Archives/edgar/cik-lookup-data.txt",
                      note: "requests count against sec_edgar; scripts/fetch_earnings_dates.sh: about 2,000 on the first run, about 700 per --refresh; research store data/earnings, never in the live path"}
   sec_filings_8k:   {use: research_8k_items, endpoint: "data.sec.gov/submissions/CIK##########.json (+ older files)",
