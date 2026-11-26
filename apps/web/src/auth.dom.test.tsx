@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { all, doing, mount, q, reducedMotionOn, settle, unmount } from "./a11y/dom";
 import { SignIn } from "./pages/SignIn";
-import { NOT_OPEN, REASON, REFUSED, Register, codeFromUrl } from "./pages/Register";
+import { NOT_OPEN, NOT_USABLE, REASON, REFUSED, Register, codeFromUrl } from "./pages/Register";
 import { InviteCard, NOT_APPLIED, REVOKE_NOT_APPLIED, mailto } from "./components/InviteCard";
 import { Member } from "./pages/Member";
 import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, NO_ACCOUNT, isNoAccount, isSignupRefused, takeAttempt } from "./lib/attempts";
@@ -127,6 +127,28 @@ describe("registration: /register?code=...", () => {
     await submit();
     expect(rec.otp).not.toHaveBeenCalled();
     expect(alert()).toBe(REASON[reason]);
+  });
+
+  it("0048 (#721): the check says only ok, so every refusal gets one message, and nothing is sent", async () => {
+    for (const answer of [{ ok: false }, { ok: false, reason: null }, { ok: false, reason: "something new" }, { ok: false, reason: "constructor" }]) {
+      rec.check.mockResolvedValue(answer);
+      rec.otp.mockClear();
+      await mount(<Register search="?code=ABCD-1234-ABCD-1234" />);
+      await fill();
+      await submit();
+      expect(rec.otp).not.toHaveBeenCalled();
+      expect(alert()).toBe(NOT_USABLE);
+    }
+    expect(NOT_USABLE).not.toMatch(/email|account/i);
+  });
+
+  it("0048: an answer of ok alone (no reason) lets the registration go on", async () => {
+    rec.check.mockResolvedValue({ ok: true });
+    rec.otp.mockResolvedValue({ error: null });
+    await mount(<Register search="?code=ABCD-1234-ABCD-1234" />);
+    await fill();
+    await submit();
+    expect(rec.otp).toHaveBeenCalledTimes(1);
   });
 
   it("a good code and email: Supabase's own email creates the account, with the name and the code", async () => {
@@ -276,12 +298,22 @@ describe("the invite card", () => {
 describe("an invited member's page", () => {
   it("shows their name, the invite card and sign-out; no run, headline or control", async () => {
     rec.list.mockResolvedValue({ cap: 5, taken: 3, invites: [] });
-    await mount(<Member name="Fran" />);
+    await mount(<Member name="Fran" canInvite />);
     await settle();
     const t = text(document.body);
     expect(t).toContain("Welcome, Fran");
     expect(t).toContain("Invite someone");
     expect(t).not.toMatch(/headline|kill|pause|stop trading|positions/i);
+  });
+
+  it("0048 (#721): a member who may not invite (kb_me can_invite false) gets no invite card and reads no invites", async () => {
+    rec.list.mockClear();
+    await mount(<Member name="Fran" canInvite={false} />);
+    await settle();
+    const t = text(document.body);
+    expect(t).toContain("Welcome, Fran");
+    expect(t).not.toContain("Invite someone");
+    expect(rec.list).not.toHaveBeenCalled();
   });
 
   it("reads nothing but its own invites (the database refuses everything else anyway)", async () => {

@@ -124,7 +124,9 @@ def db():
 def _member(uid: str = MEMBER, email: str = "member@example.com", name: str = "Mia") -> None:
     code = j(f"select public.kb_invite_create('{email}');")["code"]
     signup(uid, email, name, confirm=True, code=code)
-    assert j(f"select public.kb_invite_check('{code}');")["reason"] == "used"
+    # 0048 (#721): the check answers only ok; the invite itself says it was used, and by whom
+    assert j(f"select public.kb_invite_check('{code}');") == {"ok": False}
+    assert psql(f"select used_by from kaibot.invite where code = '{code}';", role=None) == uid
 
 
 @needs_pg
@@ -140,10 +142,12 @@ def test_invite_create_check_and_the_link(db):
     ok = j(f"select public.kb_invite_check('{typed}');", role="anon", uid="")
     assert ok["ok"] is True and "email" not in ok
     assert j(f"select public.kb_invite_check('{inv['code']}', 'FRIEND@example.com');", role="anon", uid="")["ok"]
+    # 0048 (#721): the answer is ok and nothing else, and the email is ignored (it was an oracle: email_mismatch)
+    assert ok == {"ok": True}
     bad = j(f"select public.kb_invite_check('{inv['code']}', 'someone@example.com');", role="anon", uid="")
-    assert bad == {"ok": False, "reason": "email_mismatch"}
-    assert j("select public.kb_invite_check('0000-0000-0000-0000');", role="anon", uid="")["reason"] == "unknown"
-    assert j("select public.kb_invite_check(null);", role="anon", uid="")["reason"] == "unknown"
+    assert bad == {"ok": True}
+    assert j("select public.kb_invite_check('0000-0000-0000-0000');", role="anon", uid="") == {"ok": False}
+    assert j("select public.kb_invite_check(null);", role="anon", uid="") == {"ok": False}
     listed = j("select public.kb_invite_list();")
     assert listed["cap"] == 5 and [i["status"] for i in listed["invites"]] == ["open"]
     with pytest.raises(AssertionError, match="not an email"):
@@ -157,7 +161,7 @@ def test_an_invite_expires_after_seven_days(db):
                 role=None)
     assert days == "7"
     psql(f"update kaibot.invite set expires_at = now() - interval '1 second' where code = '{inv['code']}';", role=None)
-    assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="")["reason"] == "expired"
+    assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="") == {"ok": False}
     # an expired invite admits nobody, and a new one gets a new code
     with pytest.raises(AssertionError, match="invite only"):
         signup(NEWBIE, "late@example.com", code=inv["code"])
@@ -185,16 +189,15 @@ def test_who_may_invite(db):
         psql("select public.kb_invite_create('x@example.com');", uid=HELPERX)
     psql(f"delete from kaibot.helper where user_id = '{HELPERX}'; "
          f"delete from auth.users where id in ('{HELPERX}', '{STRANGER}');", role=None)  # their seats back
-    # an invited member may invite, and sees only their own invites; the owner sees all
+    # 0048 (#721, Product 25 Nov 2026): an invited member may not invite (no chained invites); the owner sees all
     _member()
     assert j("select public.kb_me();", uid=MEMBER)["name"] == "Mia"
-    # (one invite only: the other SQL tests' up to three accounts and this member must fit in the cap of 5)
-    j("select public.kb_invite_create('friend-of-mia@example.com');", uid=MEMBER)
-    mine = j("select public.kb_invite_list();", uid=MEMBER)["invites"]
-    assert [(i["email"], i["mine"]) for i in mine] == [("friend-of-mia@example.com", True)]
+    assert j("select public.kb_me();", uid=MEMBER)["can_invite"] is False
+    for call in ("kb_invite_create('friend-of-mia@example.com')", "kb_invite_list()"):
+        with pytest.raises(AssertionError, match="not authorised"):
+            psql(f"select public.{call};", uid=MEMBER)
     everyone = j("select public.kb_invite_list();")["invites"]
-    assert [i["email"] for i in everyone] == ["friend-of-mia@example.com", "member@example.com"]
-    assert [i["mine"] for i in everyone] == [False, True]
+    assert [(i["email"], i["mine"]) for i in everyone] == [("member@example.com", True)]
     # nobody reads the tables directly
     for uid in (OWNER, MEMBER):
         for t in ("kaibot.invite", "kaibot.profile"):
@@ -231,8 +234,9 @@ def test_the_trigger_refuses_signups_without_an_invite(db):
 def test_registration_with_another_email_than_the_invited_one_is_refused(db):
     inv = j("select public.kb_invite_create('invited@example.com');")
     # the page asks first, and the database refuses anyway if the page is skipped
-    assert j(f"select public.kb_invite_check('{inv['code']}', 'other@example.com');", role="anon", uid="")["reason"] \
-        == "email_mismatch"
+    # (0048: the check ignores the email and says only ok, so it cannot be used to test which address a code is for)
+    assert j(f"select public.kb_invite_check('{inv['code']}', 'other@example.com');", role="anon", uid="") \
+        == {"ok": True}
     with pytest.raises(AssertionError, match="invite only"):
         signup(NEWBIE, "other@example.com", "Mallory", code=inv["code"])
     # the invited email without the code (someone who only knows the address) is refused too
@@ -253,13 +257,13 @@ def test_registration_marks_the_invite_used_once_the_email_is_confirmed(db):
     assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="")["ok"] is True
     assert j("select public.kb_me();", uid=NEWBIE)["member"] is False
     psql(f"update auth.users set email_confirmed_at = now() where id = '{NEWBIE}';", role=None, direct=False)
-    assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="")["reason"] == "used"
+    assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="") == {"ok": False}
     assert j("select public.kb_me();", uid=NEWBIE) == {"owner": False, "member": True, "helper": False,
-                                                        "name": "Nora", "can_invite": True}
+                                                        "name": "Nora", "can_invite": False}
     # a later confirmation (or any other update) changes nothing; the used code admits nobody else
     psql(f"update auth.users set email_confirmed_at = now() where id = '{NEWBIE}';", role=None, direct=False)
     assert psql("select count(*) from kaibot.profile;", role=None) == "1"
-    with pytest.raises(AssertionError, match="has an account already"):
+    with pytest.raises(AssertionError, match="an invite can't be made for this email"):  # 0048: one generic refusal
         psql("select public.kb_invite_create('newbie@example.com');", uid=OWNER)
 
 
