@@ -823,13 +823,15 @@ def test_gh_and_the_push_use_only_the_runner_s_token_never_the_owner_s_login(tmp
     assert (tmp_path / "state" / "gh").stat().st_mode & 0o777 == 0o700
 
 
-@pytest.mark.parametrize("problem", ["missing", "mode", "classic", "gh-login", "link"])
-def test_without_a_good_runner_token_nothing_is_pushed_or_posted(tmp_path, monkeypatch, _runner_token, problem):
-    """#711: no file, a file others can read, a classic token (every repository of the account), gh's own login
-    token (the owner's full login) or a link: the runner falls back to nothing (results stay local, said why)."""
+@pytest.mark.parametrize("problem", ["mode", "classic", "gh-login", "link", "dangling-link"])
+def test_a_bad_runner_token_file_refuses_and_never_falls_back(tmp_path, monkeypatch, _runner_token, problem):
+    """#711: a file others can read, a classic token (every repository of the account), gh's own login token (the
+    owner's full login), a link or a dangling link: the runner uses nothing, never the owner's login (results stay
+    local, said why). Only a file that is not there at all falls back (next test)."""
     f = _runner_token
-    if problem == "missing":
+    if problem == "dangling-link":
         f.unlink()
+        f.symlink_to(f.with_name("gone"))
     elif problem == "mode":
         f.chmod(0o644)
     elif problem == "classic":
@@ -848,6 +850,49 @@ def test_without_a_good_runner_token_nothing_is_pushed_or_posted(tmp_path, monke
     assert [c["branch"] for c in run.commits] == ["runner/results-export-2026-11-25"] and run.branch == "main"
     text = (tmp_path / "state" / "runner.log").read_text()
     assert "not pushed:" in text and "not posted to GitHub:" in text and "gho_" not in text and "ghp_" not in text
+    assert "owner login in use" not in text and "the runner token is refused" in text
+
+
+def _gh_envs(run_cls=None):
+    envs = []
+
+    class Spy(FakeRun):
+        def __call__(self, cmd, **kw):
+            if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                envs.append(kw.get("env"))
+            return super().__call__(cmd, **kw)
+    return Spy, envs
+
+
+def test_without_a_token_file_the_owner_login_is_used_with_a_warning_each_tick(tmp_path, monkeypatch, _runner_token):
+    """Product (26 Nov 2026): until the owner installs the token nothing stops. No token file at all, and none ever
+    used: gh and the push run with the owner's own environment (gh's login) as before #711, and every tick says so."""
+    _runner_token.unlink()
+    monkeypatch.setenv("GH_CONFIG_DIR", str(tmp_path / "owners-gh"))
+    Spy, envs = _gh_envs()
+    run = Spy(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    assert run.pushes and run.prs and run.posted  # works as today
+    assert envs and all(e["GH_CONFIG_DIR"] == str(tmp_path / "owners-gh") and e.get("GH_TOKEN") != TOKEN
+                        for e in envs)
+    text = (tmp_path / "state" / "runner.log").read_text()
+    assert text.count("WARNING: owner login in use") == 1 and "runner_token.sh --install" in text
+    assert not (tmp_path / "state" / rr.TOKEN_SEEN).exists()
+
+
+def test_once_a_token_was_used_the_owner_login_is_never_used_again(tmp_path, monkeypatch, _runner_token):
+    """The first tick with a valid token writes data/runner/runner_token_in_use; with the file gone afterwards the
+    runner refuses (no gh call at all), it does not go back to the owner's login."""
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    assert run.pushes and (tmp_path / "state" / rr.TOKEN_SEEN).exists()
+    _runner_token.unlink()
+    monkeypatch.setenv("GH_TOKEN", "gho_ownerslogin0000000000")
+    run2 = FakeRun(gh_ok=True)
+    tick(tmp_path, [job("next")], run=run2)
+    assert not [c for c in run2.calls if c[0] == "gh"] and run2.posted == []
+    text = (tmp_path / "state" / "runner.log").read_text()
+    assert "a runner token was in use before" in text and text.count("owner login in use") == 0
 
 
 def test_the_token_never_reaches_a_job_or_the_posted_text(tmp_path):

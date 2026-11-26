@@ -189,7 +189,7 @@ functions), and any engine restart then ran unreviewed `main`. Now:
 ## Its own GitHub token (audit 2 7.1, #711)
 
 Until #711 the runner pushed its `runner/<id>` branches and posted comments with the owner's own `gh auth login`,
-which can do anything the owner can, `main` included. Now it uses **only** a fine-grained personal access token
+which can do anything the owner can, `main` included. Now it uses a fine-grained personal access token
 for this one repository, read from `~/Projects/kaibot-secrets/runner_gh_token` (outside the repository; mode 600;
 `KAIBOT_RUNNER_GH_TOKEN_FILE` names another file). Every gh call and the push get it as `GH_TOKEN`, with an empty gh
 config folder of the runner's own (`data/runner/gh`), so gh cannot fall back to the owner's login; every other git
@@ -197,6 +197,19 @@ credential helper is switched off for the push. The runner refuses a file that i
 can be read by others, or holds anything but a fine-grained token (`github_pat_...`): a classic token (`ghp_`,
 every repository of the account) and gh's own login token (`gho_`) are refused. Then nothing is pushed or posted,
 the results stay on the local `runner/<id>` branch and in `data/runner/out/`, and `runner.log` says why.
+
+**Until the token is installed (Product, 26 Nov 2026: nothing may stop working while the owner's setup waits).**
+
+| The token file | What the runner uses | Said where |
+|---|---|---|
+| not there at all, and no token was ever used | the owner's `gh auth login`, exactly as before #711 | `runner.log`: one `WARNING: owner login in use ...` per tick; `install_runner.sh --status`: "owner login in use; install runner token" |
+| there and valid | the runner's token only; the first use writes `data/runner/runner_token_in_use` | |
+| not there, but a token was used before (`runner_token_in_use` exists) | nothing: no push, no post; **never** the owner's login again | `runner.log` and `--status` ("MISSING after it was in use") |
+| there but bad (a link, a dangling link, another owner, readable by others, a classic or gh-login token) | nothing: refused, **never** a fall-back to the owner's login | `runner.log` ("the runner token is refused") and `--status` ("REFUSED") |
+
+So the owner's login stops being used the moment a valid token is installed, and a mistake in the file can only
+stop the pushes, never widen them. To go back to the owner's login deliberately (not recommended), delete both the
+token file and `data/runner/runner_token_in_use`.
 
 **What the token can do, and what it cannot be limited to.** Fine-grained tokens are limited by repository and by
 permission, **not by branch**: "Contents: write" lets the token push any branch or tag of the repository. So the
@@ -222,8 +235,8 @@ or a second "machine" GitHub account would limit it further; not done here.
    ```
    It writes `~/Projects/kaibot-secrets/runner_gh_token` (mode 600) and runs `--check`: mode, kind, the login it
    signs in as, that it reaches `falconomad/kaibot`, its expiry, and main's rules.
-3. **Nothing else changes for the runner.** It ignores your own `gh auth login` from now on (you may keep it for
-   yourself). `install_runner.sh --status` shows the token check.
+3. **Nothing else changes for the runner.** From its first tick with the token it ignores your own `gh auth login`
+   for good (you may keep it for yourself). `install_runner.sh --status` shows the token check.
 4. **Main's ruleset (audit 2 5.1, the owner's action).** github.com/falconomad/kaibot > Settings > Rules >
    Rulesets > New branch ruleset: name `main`, Enforcement **Active**, target **Default branch**; tick **Restrict
    deletions**, **Require a pull request before merging** with **Require review from Code Owners**, **Require status

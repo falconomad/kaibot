@@ -155,9 +155,19 @@ case "$ACTION" in
            ".venv -> $(readlink "$used/.venv" 2>/dev/null || echo 'its own')"
       LOG="$used/data/runner/runner.log"
     fi
-    # #711: the runner pushes and posts only with its own token, never with this user's gh login
-    bash "$HERE/scripts/runner_token.sh" --check 2>&1 | sed 's/^/runner token: /' ||
-      echo "runner token: not usable: results go to data/runner/out/<id>.md (./scripts/runner_token.sh --install)"
+    # #711: the runner's own token. Product (26 Nov 2026): with no token file at all (and none ever used), the runner
+    # still uses this user's gh login, with a WARNING each tick; once a token was used, never again
+    TOKEN_FILE="${KAIBOT_RUNNER_GH_TOKEN_FILE:-$HOME/Projects/kaibot-secrets/runner_gh_token}"
+    if [ ! -e "$TOKEN_FILE" ] && [ ! -L "$TOKEN_FILE" ]; then
+      if [ -f "$RUNNER/data/runner/runner_token_in_use" ]; then
+        echo "runner token: MISSING after it was in use: nothing is pushed or posted (./scripts/runner_token.sh --install)"
+      else
+        echo "runner token: WARNING owner login in use; install runner token (./scripts/runner_token.sh --install)"
+      fi
+    else
+      bash "$HERE/scripts/runner_token.sh" --check 2>&1 | sed 's/^/runner token: /' ||
+        echo "runner token: REFUSED: nothing is pushed or posted until it is fixed (./scripts/runner_token.sh --check)"
+    fi
     tail -n 20 "$LOG" 2>/dev/null || true; exit 0;;
 esac
 
@@ -188,9 +198,12 @@ plutil -lint "$PLIST" >/dev/null
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 if [ -n "$was" ] && ! within "$was" "$RUNNER"; then say "moved $LABEL from $was to $RUNNER"; fi
 say "installed $LABEL: every 15 minutes from $RUNNER (the engine's checkout $ENGINE is never pulled or run in)"
+TOKEN_FILE="${KAIBOT_RUNNER_GH_TOKEN_FILE:-$HOME/Projects/kaibot-secrets/runner_gh_token}"
 if bash "$HERE/scripts/runner_token.sh" --check >/dev/null 2>&1; then
   say "the runner's own GitHub token works: results are pushed and posted with it (#711)"
+elif [ ! -e "$TOKEN_FILE" ] && [ ! -L "$TOKEN_FILE" ]; then
+  say "WARNING owner login in use; install runner token: ./scripts/runner_token.sh --install (#711)"
 else
-  say "no usable runner token: results go to data/runner/out/<id>.md (./scripts/runner_token.sh --install; #711)"
+  say "the runner token is refused: nothing is pushed or posted until it is fixed (./scripts/runner_token.sh --check)"
 fi
 "$RUNNER/.venv/bin/python" "$RUNNER/scripts/research_runner.py" --check --no-pull || say "queue.yaml has jobs that will be rejected (see above)"

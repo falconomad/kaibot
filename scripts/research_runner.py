@@ -13,10 +13,12 @@ its process group; SEC jobs never run two at once (a second lock, and a check fo
 
 The last lines of output are redacted (keys, tokens, emails, URLs with credentials) and posted as a comment on the
 job's issue with `gh api` when gh is installed and the runner's own token works; the same text is always kept in
-data/runner/out/<id>.md. Audit 2 7.1 (#711): gh and the push use ONLY the runner's fine-grained token
+data/runner/out/<id>.md. Audit 2 7.1 (#711): gh and the push use the runner's fine-grained token
 (~/Projects/kaibot-secrets/runner_gh_token, mode 600, or KAIBOT_RUNNER_GH_TOKEN_FILE) as GH_TOKEN, with an empty gh
-config folder of its own (data/runner/gh), never the owner's `gh auth login`; without a usable token nothing is
-pushed or posted. That file is the one thing the runner reads from the secrets folder, and no job ever sees it.
+config folder of its own (data/runner/gh). Until that file exists (and none was ever used) the owner's gh login is
+used as before, with a WARNING each tick; once a valid token was used, never again. A token file that is there but
+bad is refused: nothing is pushed or posted, and there is no fall-back. That file is the one thing the runner
+reads from the secrets folder, and no job ever sees it.
 After each job the checkout is checked: changes only inside the job's `writes:` folders (allowed.yaml) are committed
 on runner/<job id>, pushed (that branch only, never main) and opened as a pull request, and the checkout goes back to
 main; any other change is left as it is and the runner runs no more jobs until the checkout is clean.
@@ -107,6 +109,12 @@ DEFAULT_ENGINE_CHECKOUT = "~/Projects/kaibot"
 GH_TOKEN_FILE_ENV = "KAIBOT_RUNNER_GH_TOKEN_FILE"
 DEFAULT_GH_TOKEN_FILE = "~/Projects/kaibot-secrets/runner_gh_token"
 FINE_GRAINED_RE = re.compile(r"github_pat_[A-Za-z0-9_]{20,250}")
+# Product (26 Nov 2026): until the owner installs the token, nothing may stop working. With NO token file (and none
+# ever used) the runner goes on with the owner's gh login as before, with one WARNING per tick. Once a valid token
+# has been used, this marker in data/runner is written and the owner's login is never used again, even if the file
+# later goes missing. A token file that exists but is not valid (a link, wrong owner or mode, a classic or gh-login
+# token) is refused and never falls back.
+TOKEN_SEEN = "runner_token_in_use"
 ENGINE_SERVICE_PLIST = "~/Library/LaunchAgents/com.kaibot.engine.plist"
 # Folders of the engine's data/ a link in the runner's data/ may never point into (the engine's state, the old runner's)
 ENGINE_DATA_PRIVATE = ("live", "runner")
@@ -544,8 +552,10 @@ def runner_token(env: dict | None = None) -> tuple[str | None, str]:
     path = Path(env.get(GH_TOKEN_FILE_ENV) or DEFAULT_GH_TOKEN_FILE).expanduser()
     try:
         st = path.lstat()
-    except OSError:
+    except FileNotFoundError:
         return None, f"no runner token file {path} (scripts/runner_token.sh --install)"
+    except OSError:
+        return None, f"{path} cannot be checked"
     if not stat.S_ISREG(st.st_mode):
         return None, f"{path} is not a regular file"
     if st.st_uid != os.getuid():
@@ -563,13 +573,51 @@ def runner_token(env: dict | None = None) -> tuple[str | None, str]:
     return token, ""
 
 
+def token_file_missing(env: dict | None = None) -> bool:
+    """True only when there is nothing at all at the token file's path (not even a dangling link)."""
+    env = os.environ if env is None else env
+    try:
+        Path(env.get(GH_TOKEN_FILE_ENV) or DEFAULT_GH_TOKEN_FILE).expanduser().lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def gh_credentials(state: Path, env: dict | None = None) -> tuple[str, dict[str, str] | None, str]:
+    """Which GitHub identity gh and the push use (#711): ("token", env, "") with the runner's own token; ("owner",
+    env, why) with the owner's gh login, ONLY while no token file exists and none was ever used (Product, 26 Nov
+    2026: nothing stops before the setup); ("refused", None, why) otherwise. Never both, never a fall-back from a
+    token file that is there but bad."""
+    token, why = runner_token(env)
+    seen = Path(state) / TOKEN_SEEN
+    if token is not None:
+        if not seen.exists():
+            with contextlib.suppress(OSError):
+                seen.write_text(f"{now()} the runner's own token is in use: the owner's gh login is never used "
+                                "again (#711)\n")
+        return "token", _token_env(state, token, env), ""
+    if not token_file_missing(env):
+        return "refused", None, why
+    if seen.exists():
+        return "refused", None, (f"{why}; a runner token was in use before ({seen.name}), so the owner's gh login "
+                                 "is not used")
+    base = dict(os.environ if env is None else env)
+    base.pop("PYTHONPATH", None)
+    base.pop("PYTHONUNBUFFERED", None)
+    base["GIT_TERMINAL_PROMPT"] = "0"
+    return "owner", base, why
+
+
 def gh_env(state: Path, env: dict | None = None) -> dict[str, str] | None:
-    """The environment of every gh call and of the push: the job's short list, the runner's token as GH_TOKEN and an
-    empty gh config folder of the runner's own (data/runner/gh), so neither gh nor git can fall back to the owner's
-    login. None when there is no usable token (`runner_token`)."""
-    token, _ = runner_token(env)
-    if token is None:
-        return None
+    """The environment of every gh call and of the push (`gh_credentials`), or None when nothing may be used."""
+    return gh_credentials(state, env)[1]
+
+
+def _token_env(state: Path, token: str, env: dict | None) -> dict[str, str]:
+    """The job's short list, the runner's token as GH_TOKEN and an empty gh config folder of the runner's own
+    (data/runner/gh), so neither gh nor git can fall back to the owner's login."""
     cfg = Path(state) / "gh"
     with contextlib.suppress(OSError):
         cfg.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -612,9 +660,9 @@ def gh_post(endpoint: str, payload: dict, state: Path, run=subprocess.run, env: 
 
 def post(repo: str, issue: int, body: str, state: Path, run=subprocess.run) -> bool:
     """POST the comment on the issue (REST), with the runner's token only (#711)."""
-    env = gh_env(state)
-    if env is None:
-        log(state, f"not posted to GitHub: {runner_token()[1]}")
+    mode, env, why = gh_credentials(state)
+    if mode == "refused":
+        log(state, f"not posted to GitHub: {why}")
     if not gh_ready(run, env):
         return False
     return gh_post(f"repos/{repo}/issues/{int(issue)}/comments", {"body": body[:60000]}, state, run,
@@ -826,9 +874,9 @@ def settle_checkout(job: Job, res: dict, sha: str, cfg: Config, root: Path, stat
 
     pushed, url = False, None
     gh = shutil.which("gh")
-    genv = gh_env(state)
-    if genv is None:
-        log(state, f"not pushed: {runner_token()[1]}")
+    mode, genv, why = gh_credentials(state)
+    if mode == "refused":
+        log(state, f"not pushed: {why}")
     if gh and gh_ready(run, genv):
         helper = f"!{shlex.quote(gh)} auth git-credential"
         dest = f"https://github.com/{cfg.repo}.git"
@@ -1020,6 +1068,12 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
             return {"_paused": why}
         if pull:
             log(state, git_pull(root, run))
+        mode, _, why = gh_credentials(state)
+        if mode == "owner":  # #711, Product 26 Nov 2026: once per tick until the token is installed
+            log(state, f"WARNING: owner login in use: the runner pushes and posts with the owner's gh login ({why}). "
+                       "Install the runner token: scripts/runner_token.sh --install (docs/ops/research_runner.md)")
+        elif mode == "refused":
+            log(state, f"WARNING: the runner token is refused ({why}): nothing is pushed or posted until it is fixed")
         try:
             cfg = load_allowed(allowed, root)
             jobs = load_queue(queue)

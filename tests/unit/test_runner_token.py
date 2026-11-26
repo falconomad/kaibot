@@ -88,3 +88,31 @@ def test_codeowners_makes_the_runner_and_ci_owner_reviewed():
     owned = {p: o for p, *o in lines}
     for path in ("/ops/runner/", "/scripts/research_runner.py", "/.github/"):
         assert owned.get(path) == ["@falconomad"], path
+
+
+def test_install_runner_status_says_which_identity_the_runner_uses(tmp_path):
+    """Product (26 Nov 2026): no token file yet means the owner's login, said on --status; a token that was in use
+    and is gone, or a bad one, means nothing is pushed (never the owner's login)."""
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    for name, body in (("launchctl", "exit 1"), ("uname", "echo Darwin")):  # --status without macOS
+        (bin_ / name).write_text(f"#!/bin/sh\n{body}\n")
+        (bin_ / name).chmod(0o755)
+    env = {"HOME": str(tmp_path), "PATH": f"{bin_}:{os.environ['PATH']}",
+           "KAIBOT_RUNNER_CHECKOUT": str(tmp_path / "runner"), "KAIBOT_ENGINE_CHECKOUT": str(tmp_path / "engine")}
+
+    def status():
+        x = subprocess.run(["bash", str(ROOT / "scripts" / "install_runner.sh"), "--status"], env=env,
+                           capture_output=True, text=True, timeout=60)
+        return [ln for ln in (x.stdout + x.stderr).splitlines() if ln.startswith("runner token")]
+
+    assert status() == ["runner token: WARNING owner login in use; install runner token "
+                        "(./scripts/runner_token.sh --install)"]
+    (tmp_path / "runner/data/runner").mkdir(parents=True)
+    (tmp_path / "runner/data/runner/runner_token_in_use").write_text("x\n")
+    assert "MISSING after it was in use" in status()[0]
+    f = tmp_path / "Projects/kaibot-secrets/runner_gh_token"
+    f.parent.mkdir(parents=True)
+    f.write_text("ghp_" + "d" * 36 + "\n")
+    f.chmod(0o600)
+    assert status()[-1].startswith("runner token: REFUSED")
