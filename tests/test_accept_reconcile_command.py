@@ -60,7 +60,8 @@ def test_every_earlier_kind_is_kept_and_new_run_stays_with_kb_new_run():
 
 def test_the_engine_applies_every_kind_the_dashboard_can_queue():
     """Ticket 1.15 whitelists command kinds in the engine: `accept_reconcile` must be in whatever list there is."""
-    core = (ROOT / "src/kaibot/engine/core.py").read_text()
+    # #694: the engine's constants (COMMAND_KINDS) are in engine/core_common.py, imported back into core.py
+    core = "".join((ROOT / "src/kaibot/engine" / f).read_text() for f in ("core.py", "core_common.py"))
     body = core[core.index("def apply_commands"):core.index("def _new_run")]
     assert "kind == ACCEPT_COMMAND" in body
     for name in ("COMMAND_KINDS", "KNOWN_COMMANDS", "ALLOWED_COMMANDS"):  # a whitelist, when one exists
