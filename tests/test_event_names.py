@@ -157,3 +157,23 @@ def test_the_dashboard_gets_every_severity():
     ts = TS.read_text()
     for e in (*en.HEALTH, *en.PENDING, *en.ROUTINE):
         assert f'  {e.name}: "{e.severity}",' in ts, e.name
+
+
+def test_a_failing_warning_write_never_fails_the_event_that_was_written(monkeypatch):
+    """Second-key review: the unregistered_event write raising (Supabase down) is logged; the caller goes on."""
+    from kaibot.engine.store import Store
+
+    monkeypatch.setattr(en, "STRICT", False)
+    monkeypatch.setattr(en, "_said", set())
+    rows = []
+    s = Store("http://localhost", "k")
+    s._chain_loaded = True
+
+    def insert(table, row, returning=True):
+        if row["type"] == "unregistered_event":
+            raise RuntimeError("supabase down")
+        rows.append(row)
+
+    monkeypatch.setattr(s, "insert", insert)
+    s.event("brand_new_event", {})
+    assert [r["type"] for r in rows] == ["brand_new_event"]

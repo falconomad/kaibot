@@ -820,7 +820,10 @@ class JournalStore:
                               "prev_hash": self._prev_hash, "hash": h}, returning=False)
         self._prev_hash = h
         if first:  # audit 2, 5.13 (#693): an unregistered name, the first time: one visible warning after it
-            self.event("unregistered_event", event_names.unregistered(kind), run_id)
+            try:
+                self.event("unregistered_event", event_names.unregistered(kind), run_id)
+            except Exception:  # the event itself is written: the warning about it must never fail its caller
+                event_names.log.exception("unregistered_event for %r not written", kind)
 
     def pending_commands(self) -> list[dict]:
         """The dashboard's commands. Supabase down: none (they wait there), and the loop goes on."""
