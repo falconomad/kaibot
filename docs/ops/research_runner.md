@@ -72,7 +72,8 @@ the runner now looks at the checkout (`git status --porcelain -z --untracked-fil
   the runner checks each file (a regular file, at most 2 MB, UTF-8, and nothing in it that redaction would hide:
   no key, token, email or home path), commits them on a new branch `runner/<job id>` as
   "Kaibot research runner" (a noreply address, never the owner's), pushes **that branch only** to
-  `https://github.com/falconomad/kaibot.git` with gh's credentials (`gh auth git-credential`), opens a pull request
+  `https://github.com/falconomad/kaibot.git` with the runner's own token (below; `gh auth git-credential` with
+  `GH_TOKEN`), opens a pull request
   with `gh api --method POST repos/falconomad/kaibot/pulls`, and puts the PR link in the job's result comment.
   Then `git checkout main`: local `main` was checked to equal `origin/main` before the commit, so switching back
   changes only the committed paths on disk. There is no `git reset --hard` and no `git clean`, so `data/` and any
@@ -83,7 +84,7 @@ the runner now looks at the checkout (`git status --porcelain -z --untracked-fil
   carries a **Warning** with the paths, `data/runner/paused.json` records the job, and the runner runs no more
   jobs (and does not pull) until the checkout is clean. Once it is, the next tick logs "jobs resume" and carries on.
 
-Without gh (missing or not logged in) the results are committed on the local branch `runner/<job id>` and not
+Without gh, or without a usable runner token (below), the results are committed on the local branch `runner/<job id>` and not
 pushed, and the checkout still goes back to clean `main`, so nothing is lost and later jobs still run. The runner
 never pushes to `main` and never pushes any branch but `runner/<job id>`.
 
@@ -129,7 +130,8 @@ functions), and any engine restart then ran unreviewed `main`. Now:
   `--env`, `--data`, `--out`, `--root`, `--trials`, `--universe-file`, `--open-holdout`, `--live` and `--record`
   can never be allowed. Every allowed flag must be a real `add_argument` option in the script's source. argparse
   expands abbreviations (`--d` becomes `--data`), so an abbreviation can never slip through.
-- **Secrets.** The runner never opens `~/Projects/kaibot-secrets/.env`. For a script marked `env` it adds
+- **Secrets.** The runner never opens `~/Projects/kaibot-secrets/.env`. The one file it reads from that folder is
+  its own GitHub token, `runner_gh_token` (below), which no job ever sees. For a script marked `env` it adds
   `--env <that path>`, and the script reads only the line it needs. A job starts with a short, fixed environment
   (`HOME PATH LANG LC_ALL TMPDIR TZ SSL_CERT_FILE`, plus `PYTHONPATH`). The runner's own environment, including any
   `GH_TOKEN`, is never passed on.
@@ -175,11 +177,83 @@ functions), and any engine restart then ran unreviewed `main`. Now:
   pauses the runner, see above). If the pull fails, the failure is logged and the local queue is used.
   The engine's checkout changes only when the owner (or `run_engine.sh` at a start, per the release pin) changes it.
 - **Posting.** Results go out with `gh api --method POST repos/falconomad/kaibot/issues/<n>/comments` (REST, with
-  the body taken from a file). If gh is missing or not logged in, the result stays in `data/runner/out/<id>.md`
-  and the log says so. A copy is kept there either way.
+  the body taken from a file), signed in with the runner's own token only. If gh is missing or there is no usable
+  token, the result stays in `data/runner/out/<id>.md` and the log says why ("not posted to GitHub: ..."). A copy
+  is kept there either way.
 - **Trust boundary.** Anyone who can push to `main` can queue jobs, and could also change the runner or the
   allow-list. Changes to `allowed.yaml` and `scripts/research_runner.py` need the QA-Ops key, and the owner should
-  see them before they merge.
+  see them before they merge: `.github/CODEOWNERS` (#711) makes `ops/runner/**`, `scripts/research_runner.py`,
+  `scripts/runner_token.sh`, `scripts/install_runner.sh` and `.github/**` owner-reviewed, which GitHub enforces once
+  main's ruleset requires a code owner's review (step 4 below).
+
+## Its own GitHub token (audit 2 7.1, #711)
+
+Until #711 the runner pushed its `runner/<id>` branches and posted comments with the owner's own `gh auth login`,
+which can do anything the owner can, `main` included. Now it uses a fine-grained personal access token
+for this one repository, read from `~/Projects/kaibot-secrets/runner_gh_token` (outside the repository; mode 600;
+`KAIBOT_RUNNER_GH_TOKEN_FILE` names another file). Every gh call and the push get it as `GH_TOKEN`, with an empty gh
+config folder of the runner's own (`data/runner/gh`), so gh cannot fall back to the owner's login; every other git
+credential helper is switched off for the push. The runner refuses a file that is a link, belongs to another user,
+can be read by others, or holds anything but a fine-grained token (`github_pat_...`): a classic token (`ghp_`,
+every repository of the account) and gh's own login token (`gho_`) are refused. Then nothing is pushed or posted,
+the results stay on the local `runner/<id>` branch and in `data/runner/out/`, and `runner.log` says why.
+
+**Until the token is installed (Product, 26 Nov 2026: nothing may stop working while the owner's setup waits).**
+
+| The token file | What the runner uses | Said where |
+|---|---|---|
+| not there at all, and no token was ever used | the owner's `gh auth login`, exactly as before #711 | `runner.log`: one `WARNING: owner login in use ...` per tick; `install_runner.sh --status`: "owner login in use; install runner token" |
+| there and valid | the runner's token only; the first use writes `data/runner/runner_token_in_use` | |
+| not there, but a token was used before (`runner_token_in_use` exists) | nothing: no push, no post; **never** the owner's login again | `runner.log` and `--status` ("MISSING after it was in use") |
+| there but bad (a link, a dangling link, another owner, readable by others, a classic or gh-login token) | nothing: refused, **never** a fall-back to the owner's login | `runner.log` ("the runner token is refused") and `--status` ("REFUSED") |
+
+So the owner's login stops being used the moment a valid token is installed, and a mistake in the file can only
+stop the pushes, never widen them. To go back to the owner's login deliberately (not recommended), delete both the
+token file and `data/runner/runner_token_in_use`.
+
+**What the token can do, and what it cannot be limited to.** Fine-grained tokens are limited by repository and by
+permission, **not by branch**: "Contents: write" lets the token push any branch or tag of the repository. So the
+branch limit comes from two other places: the runner's own code pushes only `refs/heads/runner/<id>` (and refuses
+anything else), and **main's ruleset** (step 4) refuses a direct push to `main` from anyone, this token included.
+Without that ruleset the token can push to `main`: `runner_token.sh --check` says so in a WARNING line. A GitHub App
+or a second "machine" GitHub account would limit it further; not done here.
+
+**Setup (owner, about 10 minutes, any time; no secret goes into the repository or a chat):**
+
+1. **Make the token.** github.com > Settings > Developer settings > Personal access tokens > **Fine-grained tokens**
+   > Generate new token:
+   - Token name `kaibot-research-runner`; Expiration 90 days (put a reminder in your calendar to renew it);
+   - Resource owner `falconomad`; Repository access **Only select repositories** > `falconomad/kaibot`;
+   - Repository permissions: **Contents: Read and write** (push `runner/<id>`), **Pull requests: Read and write**
+     (open the PR), **Issues: Read and write** (post the result comment). Metadata: Read is added by GitHub.
+     Nothing else: no Workflows (so it can never change `.github/workflows/`), no Administration, no Actions, no
+     Secrets. No account permissions.
+   - Generate, and copy the token (shown once).
+2. **Install it on the Mac** (the paste is not shown and not kept in the shell history):
+   ```bash
+   ~/Projects/kaibot-runner/scripts/runner_token.sh --install
+   ```
+   It writes `~/Projects/kaibot-secrets/runner_gh_token` (mode 600) and runs `--check`: mode, kind, the login it
+   signs in as, that it reaches `falconomad/kaibot`, its expiry, and main's rules.
+3. **Nothing else changes for the runner.** From its first tick with the token it ignores your own `gh auth login`
+   for good (you may keep it for yourself). `install_runner.sh --status` shows the token check.
+4. **Main's ruleset (audit 2 5.1, the owner's action).** github.com/falconomad/kaibot > Settings > Rules >
+   Rulesets > New branch ruleset: name `main`, Enforcement **Active**, target **Default branch**; tick **Restrict
+   deletions**, **Require a pull request before merging** with **Require review from Code Owners**, **Require status
+   checks to pass** (`python`, `migrations-record` and the `supply-chain` checks), **Block force pushes**. Bypass
+   list: empty, or "Repository admin" set to **For pull requests only**, never "Always": the token acts as you (an
+   admin), and an "Always" bypass would let it push to `main`. Note that GitHub never lets an author approve their
+   own pull request, so with Code Owner review required, a PR under your own login that touches the paths above
+   needs that "for pull requests only" bypass to merge (the #600 trust question in the audit).
+5. **Check it:** `~/Projects/kaibot-runner/scripts/runner_token.sh --check` ends with "main's rules: ...
+   pull_request ...: a direct push to main is refused". The ticket's test, once that line shows: from a scratch
+   clone, `GH_TOKEN=$(cat ~/Projects/kaibot-secrets/runner_gh_token) git -c credential.helper= -c
+   'credential.helper=!gh auth git-credential' push origin HEAD:main` after an empty commit
+   (`git commit --allow-empty -m probe`) must be refused with "protected branch" / "repository rule violations".
+
+To retire it: `./scripts/runner_token.sh --remove` and delete the token on GitHub (Settings > Developer settings).
+Not done in #711: running the runner as a separate macOS user that cannot read the secrets folder (the issue's
+second half); until then a job could still read files of the owner's user (see "Safety rules").
 
 ## One-time setup (owner, on the Mac)
 
@@ -187,12 +261,12 @@ The same commands install the runner the first time and move an install that sti
 (they never touch `~/Projects/kaibot` beyond reading it, and never the engine service):
 
 ```bash
-# gh for posting results (skip if `gh auth status` already says you are logged in)
+# gh for posting results; the runner signs in with its own token, not with a gh login (#711)
 brew install gh
-gh auth login --hostname github.com --git-protocol https --web   # needs repo access to falconomad/kaibot
 git clone https://github.com/falconomad/kaibot.git ~/Projects/kaibot-runner
 ~/Projects/kaibot-runner/scripts/install_runner.sh            # the runner's checkout, then com.kaibot.research-runner
-~/Projects/kaibot-runner/scripts/install_runner.sh --status   # loaded? which checkout? gh? last log lines
+~/Projects/kaibot-runner/scripts/runner_token.sh --install   # its own token ("Its own GitHub token" above)
+~/Projects/kaibot-runner/scripts/install_runner.sh --status   # loaded? which checkout? the token? last log lines
 ```
 
 `install_runner.sh` stops the old job first (it refuses while a tick is running: try again once it ends), copies

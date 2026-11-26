@@ -12,7 +12,13 @@ fixed list (no tokens of the runner's own). Heavy jobs run under `nice -n 10`; e
 its process group; SEC jobs never run two at once (a second lock, and a check for other SEC fetchers on the Mac).
 
 The last lines of output are redacted (keys, tokens, emails, URLs with credentials) and posted as a comment on the
-job's issue with `gh api` when gh is installed and logged in; the same text is always kept in data/runner/out/<id>.md.
+job's issue with `gh api` when gh is installed and the runner's own token works; the same text is always kept in
+data/runner/out/<id>.md. Audit 2 7.1 (#711): gh and the push use the runner's fine-grained token
+(~/Projects/kaibot-secrets/runner_gh_token, mode 600, or KAIBOT_RUNNER_GH_TOKEN_FILE) as GH_TOKEN, with an empty gh
+config folder of its own (data/runner/gh). Until that file exists (and none was ever used) the owner's gh login is
+used as before, with a WARNING each tick; once a valid token was used, never again. A token file that is there but
+bad is refused: nothing is pushed or posted, and there is no fall-back. That file is the one thing the runner
+reads from the secrets folder, and no job ever sees it.
 After each job the checkout is checked: changes only inside the job's `writes:` folders (allowed.yaml) are committed
 on runner/<job id>, pushed (that branch only, never main) and opened as a pull request, and the checkout goes back to
 main; any other change is left as it is and the runner runs no more jobs until the checkout is clean.
@@ -96,6 +102,19 @@ GIT_USER = ("Kaibot research runner", "research-runner@users.noreply.github.com"
 ENGINE_CHECKOUT_ENV = "KAIBOT_ENGINE_CHECKOUT"
 RATELIMIT_DIR_ENV = "KAIBOT_RATELIMIT_DIR"
 DEFAULT_ENGINE_CHECKOUT = "~/Projects/kaibot"
+# Audit 2 7.1 (#711): the runner's own GitHub credential, a fine-grained token for falconomad/kaibot only, in a file
+# outside the repository (mode 600, the runner's user). gh and git get it as GH_TOKEN with an empty gh config folder
+# of the runner's own, so the owner's `gh auth login` is never used. No file, or a bad one: nothing is pushed or
+# posted (results stay local, as without gh). docs/ops/research_runner.md, scripts/runner_token.sh.
+GH_TOKEN_FILE_ENV = "KAIBOT_RUNNER_GH_TOKEN_FILE"
+DEFAULT_GH_TOKEN_FILE = "~/Projects/kaibot-secrets/runner_gh_token"
+FINE_GRAINED_RE = re.compile(r"github_pat_[A-Za-z0-9_]{20,250}")
+# Product (26 Nov 2026): until the owner installs the token, nothing may stop working. With NO token file (and none
+# ever used) the runner goes on with the owner's gh login as before, with one WARNING per tick. Once a valid token
+# has been used, this marker in data/runner is written and the owner's login is never used again, even if the file
+# later goes missing. A token file that exists but is not valid (a link, wrong owner or mode, a classic or gh-login
+# token) is refused and never falls back.
+TOKEN_SEEN = "runner_token_in_use"
 ENGINE_SERVICE_PLIST = "~/Library/LaunchAgents/com.kaibot.engine.plist"
 # Folders of the engine's data/ a link in the runner's data/ may never point into (the engine's state, the old runner's)
 ENGINE_DATA_PRIVATE = ("live", "runner")
@@ -524,24 +543,113 @@ def other_sec_running(patterns, run=subprocess.run) -> str | None:
     return None
 
 
-def gh_ready(run=subprocess.run) -> bool:
-    if not shutil.which("gh"):
+def runner_token(env: dict | None = None) -> tuple[str | None, str]:
+    """(the runner's fine-grained token, "") or (None, why not). #711: the file of KAIBOT_RUNNER_GH_TOKEN_FILE (else
+    ~/Projects/kaibot-secrets/runner_gh_token) must be a regular file (not a link) of this user, mode 600 or tighter,
+    holding one fine-grained token (github_pat_...). A classic token (ghp_) reaches every repository of the account and
+    gh's own login (gho_) is the owner's full login: both are refused, as is anything else. Never logged."""
+    env = os.environ if env is None else env
+    path = Path(env.get(GH_TOKEN_FILE_ENV) or DEFAULT_GH_TOKEN_FILE).expanduser()
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return None, f"no runner token file {path} (scripts/runner_token.sh --install)"
+    except OSError:
+        return None, f"{path} cannot be checked"
+    if not stat.S_ISREG(st.st_mode):
+        return None, f"{path} is not a regular file"
+    if st.st_uid != os.getuid():
+        return None, f"{path} belongs to another user"
+    if st.st_mode & 0o077:
+        return None, f"{path} is readable by others (mode {stat.S_IMODE(st.st_mode):o}): chmod 600 it"
+    try:
+        token = path.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError):
+        return None, f"{path} cannot be read"
+    if not FINE_GRAINED_RE.fullmatch(token):
+        kind = {"ghp_": "a classic token", "gho_": "gh's own login token", "ghs_": "an app installation token",
+                "ghu_": "a user-to-server token"}.get(token[:4], "not a token")
+        return None, f"{path} holds {kind}, not a fine-grained token (github_pat_...)"
+    return token, ""
+
+
+def token_file_missing(env: dict | None = None) -> bool:
+    """True only when there is nothing at all at the token file's path (not even a dangling link)."""
+    env = os.environ if env is None else env
+    try:
+        Path(env.get(GH_TOKEN_FILE_ENV) or DEFAULT_GH_TOKEN_FILE).expanduser().lstat()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def gh_credentials(state: Path, env: dict | None = None) -> tuple[str, dict[str, str] | None, str]:
+    """Which GitHub identity gh and the push use (#711): ("token", env, "") with the runner's own token; ("owner",
+    env, why) with the owner's gh login, ONLY while no token file exists and none was ever used (Product, 26 Nov
+    2026: nothing stops before the setup); ("refused", None, why) otherwise. Never both, never a fall-back from a
+    token file that is there but bad."""
+    token, why = runner_token(env)
+    seen = Path(state) / TOKEN_SEEN
+    if token is not None:
+        if not seen.exists():
+            with contextlib.suppress(OSError):
+                seen.write_text(f"{now()} the runner's own token is in use: the owner's gh login is never used "
+                                "again (#711)\n")
+        return "token", _token_env(state, token, env), ""
+    if not token_file_missing(env):
+        return "refused", None, why
+    if seen.exists():
+        return "refused", None, (f"{why}; a runner token was in use before ({seen.name}), so the owner's gh login "
+                                 "is not used")
+    base = dict(os.environ if env is None else env)
+    base.pop("PYTHONPATH", None)
+    base.pop("PYTHONUNBUFFERED", None)
+    base["GIT_TERMINAL_PROMPT"] = "0"
+    return "owner", base, why
+
+
+def gh_env(state: Path, env: dict | None = None) -> dict[str, str] | None:
+    """The environment of every gh call and of the push (`gh_credentials`), or None when nothing may be used."""
+    return gh_credentials(state, env)[1]
+
+
+def _token_env(state: Path, token: str, env: dict | None) -> dict[str, str]:
+    """The job's short list, the runner's token as GH_TOKEN and an empty gh config folder of the runner's own
+    (data/runner/gh), so neither gh nor git can fall back to the owner's login."""
+    cfg = Path(state) / "gh"
+    with contextlib.suppress(OSError):
+        cfg.mkdir(mode=0o700, parents=True, exist_ok=True)
+    out = job_env(env)
+    out.pop("PYTHONPATH", None)
+    out.pop("PYTHONUNBUFFERED", None)
+    out |= {"GH_TOKEN": token, "GH_CONFIG_DIR": str(cfg), "GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1",
+            "GIT_TERMINAL_PROMPT": "0"}
+    return out
+
+
+def gh_ready(run=subprocess.run, env: dict | None = None) -> bool:
+    """gh is installed and the runner's token signs in. `env`: `gh_env(...)`; None (no token) is never ready."""
+    if env is None or not shutil.which("gh"):
         return False
     try:
         return run(["gh", "auth", "status", "--hostname", "github.com"], capture_output=True, text=True,
-                   timeout=30).returncode == 0
+                   timeout=30, env=env).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
 
-def gh_post(endpoint: str, payload: dict, state: Path, run=subprocess.run) -> str | None:
+def gh_post(endpoint: str, payload: dict, state: Path, run=subprocess.run, env: dict | None = None) -> str | None:
     """POST to the REST API with gh (the payload from a JSON file, never on a command line). Its stdout, or None."""
+    if env is None:
+        return None
     fd, tmp = tempfile.mkstemp(dir=state, prefix=".gh.", suffix=".json")
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(payload, f)
         r = run(["gh", "api", "--method", "POST", endpoint, "--input", tmp], capture_output=True, text=True,
-                timeout=60)
+                timeout=60, env=env)
         return r.stdout if r.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
@@ -551,10 +659,14 @@ def gh_post(endpoint: str, payload: dict, state: Path, run=subprocess.run) -> st
 
 
 def post(repo: str, issue: int, body: str, state: Path, run=subprocess.run) -> bool:
-    """POST the comment on the issue (REST)."""
-    if not gh_ready(run):
+    """POST the comment on the issue (REST), with the runner's token only (#711)."""
+    mode, env, why = gh_credentials(state)
+    if mode == "refused":
+        log(state, f"not posted to GitHub: {why}")
+    if not gh_ready(run, env):
         return False
-    return gh_post(f"repos/{repo}/issues/{int(issue)}/comments", {"body": body[:60000]}, state, run) is not None
+    return gh_post(f"repos/{repo}/issues/{int(issue)}/comments", {"body": body[:60000]}, state, run,
+                   env) is not None
 
 
 def git_pull(root: Path, run=subprocess.run) -> str:
@@ -583,21 +695,21 @@ def head_sha(root: Path, run=subprocess.run) -> str:
 # ---------------------------------------------------------------- the checkout after a job
 
 
-def _git_env(full: bool = False) -> dict[str, str]:
-    """git's environment: the job's short list (or, for the push only, the runner's own, so gh can log in)."""
-    env = dict(os.environ) if full else job_env()
+def _git_env(push_env: dict | None = None) -> dict[str, str]:
+    """git's environment: the job's short list, or for the push only `gh_env` (the runner's token, #711)."""
+    env = dict(push_env) if push_env is not None else job_env()
     env.pop("PYTHONPATH", None)
     env.pop("PYTHONUNBUFFERED", None)
     env |= {"GIT_TERMINAL_PROMPT": "0", "GIT_LITERAL_PATHSPECS": "1"}
     return env
 
 
-def _git(root: Path, *args: str, run=subprocess.run, full_env: bool = False, timeout: int = 120):
+def _git(root: Path, *args: str, run=subprocess.run, push_env: dict | None = None, timeout: int = 120):
     """One git command (an argv, no shell). A CompletedProcess; returncode -1 when git could not be run."""
     cmd = ["git", "-C", str(root), *args]
     try:
         return run(cmd, capture_output=True, text=True, errors="surrogateescape", timeout=timeout,
-                   env=_git_env(full_env))
+                   env=_git_env(push_env))
     except (OSError, subprocess.SubprocessError) as e:
         return subprocess.CompletedProcess(cmd, -1, "", type(e).__name__)
 
@@ -762,17 +874,23 @@ def settle_checkout(job: Job, res: dict, sha: str, cfg: Config, root: Path, stat
 
     pushed, url = False, None
     gh = shutil.which("gh")
-    if gh and gh_ready(run):
+    mode, genv, why = gh_credentials(state)
+    if mode == "refused":
+        log(state, f"not pushed: {why}")
+    if gh and gh_ready(run, genv):
         helper = f"!{shlex.quote(gh)} auth git-credential"
         dest = f"https://github.com/{cfg.repo}.git"
         refspec = f"refs/heads/{branch}:refs/heads/{branch}"
         if not branch.startswith(BRANCH_PREFIX) or not refspec.startswith(f"refs/heads/{BRANCH_PREFIX}"):
             raise RuntimeError("the runner never pushes to main")  # unreachable: ids cannot make "main"
-        pushed = _git(root, "-c", "credential.helper=", "-c", f"credential.helper={helper}", "push", "--no-verify",
-                      "--porcelain", dest, refspec, run=run, full_env=True, timeout=180).returncode == 0
+        # every other helper off (a url-specific one from `gh auth setup-git` or the keychain included): only gh,
+        # and gh only with the runner's token (GH_TOKEN, its own empty config folder)
+        pushed = _git(root, "-c", "credential.helper=", "-c", "credential.https://github.com.helper=",
+                      "-c", f"credential.helper={helper}", "push", "--no-verify",
+                      "--porcelain", dest, refspec, run=run, push_env=genv, timeout=180).returncode == 0
         if pushed:
             out = gh_post(f"repos/{cfg.repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body},
-                          state, run)
+                          state, run, genv)
             with contextlib.suppress(ValueError, TypeError, AttributeError):
                 u = json.loads(out or "")["html_url"]
                 url = u if re.fullmatch(rf"https://github\.com/{re.escape(cfg.repo)}/pull/[0-9]+", u) else None
@@ -794,7 +912,8 @@ def settle_checkout(job: Job, res: dict, sha: str, cfg: Config, root: Path, stat
                 f"from that branch. The checkout is back on clean main.")
         return {"checkout": "pushed", "note": note + "\n"}
     note = (f"Results: {files} committed on the local branch `{branch}` on the research Mac, **not pushed** (gh is "
-            f"missing, not logged in, or the push failed). The checkout is back on clean main.")
+            f"missing, the runner's token is missing or refused, or the push failed). The checkout is back on clean "
+            f"main.")
     return {"checkout": "committed", "note": note + "\n"}
 
 
@@ -949,6 +1068,12 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
             return {"_paused": why}
         if pull:
             log(state, git_pull(root, run))
+        mode, _, why = gh_credentials(state)
+        if mode == "owner":  # #711, Product 26 Nov 2026: once per tick until the token is installed
+            log(state, f"WARNING: owner login in use: the runner pushes and posts with the owner's gh login ({why}). "
+                       "Install the runner token: scripts/runner_token.sh --install (docs/ops/research_runner.md)")
+        elif mode == "refused":
+            log(state, f"WARNING: the runner token is refused ({why}): nothing is pushed or posted until it is fixed")
         try:
             cfg = load_allowed(allowed, root)
             jobs = load_queue(queue)

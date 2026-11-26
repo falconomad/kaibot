@@ -127,6 +127,9 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_ENGINE_CHECKOUT", "path", "qa-ops", "QA-Ops audit (25 Nov 2026): the engine's checkout, which the "
        "research runner refuses to run in (install_runner.sh writes it into the runner's plist)", scope="script",
        readers=("scripts/research_runner.py",)),
+    _s("KAIBOT_RUNNER_GH_TOKEN_FILE", "path", "qa-ops", "audit 2 7.1 (#711): the research runner's fine-grained GitHub "
+       "token file (default ~/Projects/kaibot-secrets/runner_gh_token, mode 600)", scope="script",
+       readers=("scripts/research_runner.py",)),
     _s("KAIBOT_HOLDOUT_OPENING", "text", "backend-quant", "M11 2.6: the id of a committed hold-out opening"),
     _s("KAIBOT_ENGINE_NAME", "text", "backend-quant", "the heartbeat's process name (default 'engine')",
        default="engine", empty_ok=False),
