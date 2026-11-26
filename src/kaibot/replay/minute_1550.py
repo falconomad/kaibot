@@ -14,9 +14,13 @@ continuous session at that minute's price, not at the closing print the daily ru
 - `c`: the session's last regular-hours close, which the store uses to check the split basis (a session more than
   5% away from the stored close is dropped and counted).
 
+Months the full history lacks are read from `data/bars_1550/symbol=<key>/<YYYY-MM>.parquet` (issue #794,
+`ingest/minute_pit.py`: the 15:45-15:59 ET minutes of every point-in-time member, former members included, keyed as
+the daily store keys them). Their `c` is the window's last close (15:59 when it traded), for the same check.
+
 `arrays` returns the 15:50 price and volume as (sessions x symbols) arrays on the raw basis of a `DailyData`. A key
-without minute files (a former member keyed SYMBOL@ASOF, which has none) is NaN throughout, and the run fills it at
-the closing print, counted.
+without minute files (Alpaca has none for it; `scripts/fetch_minute_pit.py --report` flags it) is NaN
+throughout, and the run fills it at the closing print, counted.
 
 Hold-out: `end` is required, and no month file after `end`'s month is opened, so nothing from the hold-out is read.
 """
@@ -40,8 +44,9 @@ def session_1550(data_dir: Path | str, symbol: str, start=None, end=None) -> pd.
     if end is None:
         raise ValueError("end is required: the reader never opens a month after it (the hold-out)")
     last_month = str(np.datetime64(end, "M"))
-    files = sorted((Path(data_dir) / "bars_1m" / f"symbol={symbol}").glob("*.parquet"))
-    files = [f for f in files if f.stem <= last_month]
+    full = {f.stem: f for f in (Path(data_dir) / "bars_1m" / f"symbol={symbol}").glob("*.parquet")}
+    near = {f.stem: f for f in (Path(data_dir) / "bars_1550" / f"symbol={symbol}").glob("*.parquet")}
+    files = [f for _, f in sorted({**near, **full}.items()) if f.stem <= last_month]  # the full month wins
     if start is not None:
         files = [f for f in files if f.stem >= str(np.datetime64(start, "M"))]
     if not files:

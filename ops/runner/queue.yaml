@@ -118,3 +118,30 @@ jobs:
     script: scripts/gate_v3_rescore.py        # v3.1 table with the #708 re-runs, #706's B7 and #710's 97% runs; it
     args: []                                  # must stay after index-core-book-97-2026-11-26 (runs no rule, no trial)
     posts_to_issue: 701
+  # #794 (decision 19 option B): the 15:50 minutes of the whole point-in-time universe. --status first (offline, the
+  # plan and its request count), then up to four 220-minute parts at 40 requests a minute (resumable: a part that
+  # finds nothing left only prints the coverage report), then the report on its own.
+  - id: minute-pit-status-2026-11-26
+    script: scripts/fetch_minute_pit.py
+    args: ["--status"]
+    posts_to_issue: 794
+  - id: minute-pit-part1-2026-11-26
+    script: scripts/fetch_minute_pit.py
+    args: ["--max-minutes", "220"]
+    posts_to_issue: 794
+  - id: minute-pit-part2-2026-11-26
+    script: scripts/fetch_minute_pit.py
+    args: ["--max-minutes", "220"]
+    posts_to_issue: 794
+  - id: minute-pit-part3-2026-11-26
+    script: scripts/fetch_minute_pit.py
+    args: ["--max-minutes", "220"]
+    posts_to_issue: 794
+  - id: minute-pit-part4-2026-11-26
+    script: scripts/fetch_minute_pit.py
+    args: ["--max-minutes", "220"]
+    posts_to_issue: 794
+  - id: minute-pit-report-2026-11-26
+    script: scripts/fetch_minute_pit.py
+    args: ["--report"]
+    posts_to_issue: 794
