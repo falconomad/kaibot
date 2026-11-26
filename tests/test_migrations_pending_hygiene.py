@@ -14,7 +14,12 @@ Rules (docs/ops/hygiene.md, "Migration record"):
   exists, and a list entry's "step N" names the row of its own migration;
 - no migration header claims a status (`-- APPLIED ...` or `-- NOT APPLIED ...`): the status lives only in
   `docs/ops/migrations_pending.md`, because a header cannot be updated when Product applies the file (Product on
-  #368; the seven stale headers of #361 were fixed there).
+  #368; the seven stale headers of #361 were fixed there);
+- no other runbook in `docs/ops/` calls a migration file `not applied` or `pending` when the record says applied
+  (audit 2 ticket 5.6, #686: `failsafe.md` still said 0017 and 0019 were "not applied" two weeks after both were).
+
+CI runs this file twice: inside the full suite and as its own read-only `migrations-record` job (ci.yml), so the
+check can be required on `main` by name.
 """
 
 from __future__ import annotations
@@ -35,6 +40,10 @@ STEP_REF_RE = re.compile(r"\bsteps? (\d+)(?:-(\d+))? below\b")
 ROW_RE = re.compile(r"^\| (\d+) \| `migrations/([^`]+)`")
 SUMMARY_RE = re.compile(r"Last checked against main on [^()]+\(([^()]*)\)")
 STATUS_RE = re.compile(r"^--\s*(NOT APPLIED|APPLIED)\b")
+# a backticked migration file, then within the same clause (no `.`, `;` or `|`) "not applied", "not yet applied" or
+# "pending": a status claim about that file
+DOC_CLAIM_RE = re.compile(r"`(?:migrations/)?(\d{4})_[a-z0-9_]+\.sql`[^.;|`]{0,40}?\b(not (?:yet )?applied|pending)\b",
+                          re.I)
 
 
 @dataclass
@@ -202,6 +211,22 @@ def check(doc: str, files: dict[str, str]) -> list[str]:
     return problems
 
 
+def other_doc_claims(status: dict[str, str], docs: dict[str, str]) -> list[str]:
+    """Runbooks ({name: text}) that call a migration `not applied` or `pending` while the record says applied."""
+    problems = []
+    for name, text in sorted(docs.items()):
+        for i, line in enumerate(text.splitlines(), 1):
+            for m in DOC_CLAIM_RE.finditer(line):
+                if status.get(m[1]) == "applied":
+                    problems.append(f"docs: {name}:{i} says {m[1]} is {m[2].lower()}; "
+                                    f"migrations_pending.md says applied")
+    return problems
+
+
+def _other_docs() -> dict[str, str]:
+    return {p.name: p.read_text() for p in sorted(DOC.parent.glob("*.md")) if p != DOC}
+
+
 def _fmt(nums: set[str]) -> str:
     """{'0001', '0002', '0003', '0005'} -> '0001-0003,0005'."""
     runs: list[list[int]] = []
@@ -221,6 +246,25 @@ def _repo_files() -> dict[str, str]:
 
 def test_migrations_pending_agrees_with_the_migration_files():
     assert check(DOC.read_text(), _repo_files()) == []
+
+
+def test_no_runbook_calls_an_applied_migration_not_applied():
+    """#686: failsafe.md said 0017 (and 0019) were "not applied"; the record says both were applied on 13 Nov 2026."""
+    assert other_doc_claims(parse(DOC.read_text()).status, _other_docs()) == []
+
+
+@pytest.mark.parametrize(("line", "found"), [
+    ("migration `0001_a.sql` (**not applied yet; the stakeholder applies it**)", True),
+    ("| `migrations/0002_b.sql`, **not applied**: the same plan in SQL |", True),
+    ("`0002_b.sql` is pending", True),
+    ("`0003_c.sql` (**not applied**)", False),  # pending in the record: a true claim
+    ("`0001_a.sql` (applied 13 Nov 2026). Until 0047 is applied it is not applied yet", False),
+    ("Until 0047 is applied it prints \"migration 0047 is not applied yet\"", False),  # no file named
+    ("`0002_b.sql` | the dashboard waits for a pending command", False),  # another cell
+])
+def test_the_runbook_check_reads_a_claim_only_where_one_is_made(line, found):
+    status = parse(GOOD_DOC).status
+    assert bool(other_doc_claims(status, {"x.md": line})) is found
 
 
 # ---------- the checker catches each kind of drift ----------

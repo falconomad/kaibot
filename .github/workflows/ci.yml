@@ -48,6 +48,18 @@ jobs:
     steps:
       - run: test "$RESULT" = success
         env: {RESULT: "${{ needs.python-tests.result }}"}
+  migrations-record:  # audit 2 5.6 (#686): read-only, repo only (no database, no secret, no network but the install)
+    # migrations/ numbered 0001.. without a gap, one entry each in docs/ops/migrations_pending.md, the summary line
+    # agreeing, and no runbook in docs/ops/ calling an applied migration "not applied". Also inside the suite; its
+    # own job so it can be a required check by name.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with: {persist-credentials: false}
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+        with: {version: "0.11.32", enable-cache: true}
+      - run: uv sync --locked
+      - run: uv run pytest -q -p no:xdist tests/test_migrations_pending_hygiene.py
   hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
     runs-on: ubuntu-latest
     steps:
