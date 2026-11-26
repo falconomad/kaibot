@@ -108,9 +108,13 @@ SAID = {  # the journal entries the trace shows, with the fields that tell the s
 # Engine defects the simulation found that are still open: issue -> what the generator leaves out so that every
 # seed does not trip over the same one. Each has a strict xfail in test_dst.py; remove both when the issue is fixed.
 KNOWN: dict[int, str] = {
+    # Audit 2, 5.13 fixed #529's first half: the decision in force now sells a buy booked after it
+    # (LiveDaily._booked_late; test_a_buy_booked_a_day_late_is_sold_by_the_decision_taken_meanwhile passes). The
+    # second half is still open, so the generator still leaves the fault out: with it drawn (1500 in DROP_MINUTES),
+    # 205 of 206 seeds pass and seed 172 fails on exactly this
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
-         "a fill booked a day late is not sold by the decision taken meanwhile, and a watchdog flatten of the "
-         "unbooked shares leaves a difference only the owner can accept",
+         "a watchdog flatten of the shares while their buy is still unbooked leaves a difference only the owner "
+         "can accept (the venue's sale is a foreign fill, then the late booking puts the shares in the ledger)",
 }
 
 
