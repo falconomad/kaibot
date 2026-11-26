@@ -46,14 +46,15 @@ def test_0029_is_0021_with_only_the_three_types_added():
     assert "grant execute on function public.kb_health() to authenticated;" in tail_new
 
 
-def test_0029_is_superseded_only_by_0031_0033_0036_and_0039():
-    """0031 (the news poller's events), 0033 (the engine's health events), 0036 (the dynamically named ones) and
-    0039 (M9's replica, clock and calendar events) re-create kb_health; each one's own test checks it against the
-    one before."""
+def test_0029_is_superseded_only_by_0031_0033_0036_0039_and_0055():
+    """0031 (the news poller's events), 0033 (the engine's health events), 0036 (the dynamically named ones), 0039
+    (M9's replica, clock and calendar events) and 0055 (#693: unregistered_event and the rest of PENDING) re-create
+    kb_health; each one's own test checks it against the one before."""
     later = sorted(p.name for p in (ROOT / "migrations").glob("*.sql")
                    if p.name > M29.name and "kb_health" in p.read_text())
     assert later == ["0031_kb_health_news_feed_events.sql", "0033_kb_health_engine_health_events.sql",
-                     "0036_kb_health_dynamic_events.sql", "0039_kb_health_m9_events.sql"]
+                     "0036_kb_health_dynamic_events.sql", "0039_kb_health_m9_events.sql",
+                     "0055_kb_health_unregistered_event_alert.sql"]
 
 
 def test_0029_has_no_destructive_statement():

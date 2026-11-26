@@ -84,6 +84,7 @@ the broker-held stops, the watchdog and the dead-man keep protecting open positi
 | 3 | The engine lease: another engine runs, or the lease could not be checked. | Tries again every minute (a standby). | See [Engine lease](#engine-lease-one-engine-whatever-the-machine) below. |
 | 4 | The journal was refused (not durable, stale, damaged, or another journal ran meanwhile). | Tries again every minute and names the journal each time. | [ledger.md](ledger.md). |
 | 5 | `refusing to start: run N holds multi-day sleeves (…) and this engine has no daily path; …` (M10 1.20 step 2, #445). The active run's ledger holds multi-day shares, and this engine was started with `KAIBOT_MULTIDAY` off (or unset), or with it on but no multi-day rule enabled in `config/profiles.yaml` (`multi_day.rules`). Without the daily path nothing could sell, sync or book those sleeves, so the engine does not start. The lease is given back. | Waits 5 minutes before it exits (`KAIBOT_REFUSED_BACKOFF_S`, 300 s), so one line `engine refused to start (exit code 5): …` and one alarm come about every 6 minutes, not every minute. A stop during the wait ends it at once. | Set `KAIBOT_MULTIDAY=on` in the engine's `.env` (or enable the rule that holds the sleeves, as the line says). The next try starts by itself; `./scripts/service.sh restart` starts it at once. `./scripts/run_engine.sh --check` reports it beforehand: `daily_path: FAILED: a start would be refused (exit code 5): …`. |
+| 6 | `REFUSED: this image is … (commit …); the host promoted …` (M20 9.3, #727). Only an engine **image** started with `KAIBOT_REQUIRE_PROMOTED=1` (the VM): its build is not the release this host promoted (`data/live/promoted`, written by `./scripts/release.sh <tag>`), or it was not built from a release. Nothing was started: no lease, no broker call. | The container's restart policy tries again; each try is refused the same way. | Promote and build the same release: `./scripts/release.sh --latest && ./scripts/build_image.sh --latest`, then restart ([always_on.md](always_on.md#pinned-releases)). |
 
 `./scripts/run_engine.sh --check` asks the exit-code-5 question read-only (`daily_path`): with the daily path on,
 or no multi-day sleeve in the active run's ledger, it prints `daily_path: on|off`, the sleeves it found and
@@ -154,6 +155,26 @@ keeps coming, **an engine is alive somewhere**. Find it before touching the row:
 Never delete the row or shorten `expires_at` while `renewed_at` is moving. The running engine would notice at
 its next heartbeat and stop (`lease lost`), but in the seconds before that both engines could act on the account.
 Do not copy `data/live/engine_holder_id` to another machine: two machines with the same id would both be let in.
+
+### Two hosts side by side (the cloud move, M20 9.6, #730)
+
+During the cut-over the Mac and the VM may both run an engine on the one paper account. Only the host the lease row
+names can send: every order is preceded by a renewal with its tenure's epoch (above), so the other host's orders stop
+at its own fence. The deterministic simulation plays it (`tests/dst/test_dst_two_hosts.py`, every pull request), with
+two real engine processes on one simulated venue and Supabase, each with its own data folder, holder id, machine and
+fence, and every venue write attributed to its host:
+
+| Scenario | What must follow (checked) |
+|---|---|
+| The VM is started while the Mac runs; the Mac freezes at 15:45 ET with a sale due in the 15:50 window; the journal is copied to the VM | every VM start before that is refused (`LeaseHeld`, exit 3) and sends nothing; the VM takes the lease once it expired and sends the window's orders; the woken Mac's sale is refused at its fence (nothing reaches the venue), it stops (`lease lost`, exit 3), every later start is refused (exit 3); every venue write is made by the host the lease named at that moment |
+| The runbook's clean cut-over: Mac stopped cleanly after the close, journal copied, VM started; the Mac's launcher comes back the next morning | the VM takes the free lease at once; every Mac start is refused (exit 3) and sends nothing |
+| The roll-back: the VM stopped cleanly; the Mac's launcher is still loaded with its old journal | the lease is free, but every Mac start finds its journal stale (`IdentityError`, exit 4), gives the lease back and sends nothing, until the VM's journal is copied back; then the Mac trades the next session |
+
+Two planted bugs prove the scenario's reach: without the loop's renewal before the tick the fence alone stops the
+woken Mac; with the fence taken away too, the Mac's sale reaches the venue on the VM's lease and the one-sender check
+fails. No migration is needed: 0041 (machine) and 0042 (epoch) already do this. What the lease cannot do is tell a
+stale journal from a current one; the journal's identity check does (exit 4, [ledger.md](ledger.md)), so the journal
+moves with the engine, and `data/live/engine_holder_id` never does.
 
 ### What the lease does not do
 - It does not replace `engine_guard.sh`: two engines on the same machine share one holder id.

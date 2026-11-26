@@ -7,15 +7,19 @@
 #   ./scripts/release.sh --clear              remove the pin: follow main (same as main)
 #   ./scripts/release.sh --show               print the pin, what is checked out and the history
 #   ./scripts/release.sh --apply              used by run_engine.sh: check out the pin, print its label
+#   ./scripts/release.sh --verify <tag>       is <tag> a release (annotated, on main)? exit 0, or 1 and the reason
 # The pin lives in data/RELEASE (not tracked by git); KAIBOT_RELEASE=<tag|main> overrides it for one start.
 # A tag is accepted only when it is annotated (or signed) and its commit is on main (origin/main when there is one).
 # Unpinned (no pin, or `main`) the engine follows main only while KAIBOT_FOLLOW_MAIN=1 (the service's environment,
 # else the .env; default 1 for now, #600) and says so loudly at every start; KAIBOT_FOLLOW_MAIN=0 refuses to start
 # an unpinned engine. Every promotion is appended to data/release_history.log. Runbook: docs/ops/always_on.md.
+# M20 9.3 (#727): pinning a tag also writes data/live/promoted ("<tag> <full commit>"), the record an engine image
+# checks before it starts (scripts/engine_entry.sh, KAIBOT_REQUIRE_PROMOTED=1 on the VM); `main` and --clear remove it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PIN_FILE=data/RELEASE
 HISTORY=data/release_history.log
+PROMOTED=data/live/promoted  # the engine container's /data/promoted
 
 in_market_hours() {  # weekday 09:30-16:00 New York time (holidays are not known here: use --force)
   local dow hm
@@ -122,20 +126,26 @@ apply() {  # stdout: the label to record ("" when nothing is pinned); messages o
 
 case "${1:-}" in
   --apply) apply; exit ;;
+  --verify)
+    [ -n "${2:-}" ] || { echo "usage: release.sh --verify <tag>"; exit 2; }
+    git rev-parse -q --verify "refs/tags/$2^{commit}" >/dev/null 2>&1 \
+      || git fetch -q --tags 2>/dev/null || true
+    check_tag "$2"; exit ;;
   --show)
     echo "pinned:      $(pin || true)${KAIBOT_RELEASE:+ (from KAIBOT_RELEASE)}"
     [ -n "$(pin)" ] || echo "             (nothing pinned: every start pulls main while KAIBOT_FOLLOW_MAIN=1)"
     echo "follow main: KAIBOT_FOLLOW_MAIN=$(follow_main_value 2>/dev/null) (1: an unpinned start follows main; 0: refused)"
     echo "newest rel:  $(latest_tag)"
     echo "checked out: $(git describe --tags --always 2>/dev/null) ($(git rev-parse --short HEAD))"
+    echo "promoted:    $(cat "$PROMOTED" 2>/dev/null || echo 'nothing (an image with KAIBOT_REQUIRE_PROMOTED=1 refuses to start)')"
     [ -f data/live/running_release ] && echo "last start:  $(cat data/live/running_release)"
     [ -f "$HISTORY" ] && { echo "history (last 5):"; tail -n5 "$HISTORY"; }
     exit 0 ;;
   --clear)
-    rm -f "$PIN_FILE"; mkdir -p data
+    rm -f "$PIN_FILE" "$PROMOTED"; mkdir -p data
     echo "$(date -u +%FT%TZ) cleared by $(id -un)" >> "$HISTORY"
     echo "Pin removed: the engine follows main at every start (only while KAIBOT_FOLLOW_MAIN=1)."; exit 0 ;;
-  ""|-h|--help) sed -n '2,15p' "$0"; exit 2 ;;
+  ""|-h|--help) sed -n '2,17p' "$0"; exit 2 ;;
 esac
 
 REL="$1"; FORCE=0
@@ -159,9 +169,11 @@ if [ "$REL" != main ]; then
 else
   echo "Note: 'main' is not a release: every start follows main (only while KAIBOT_FOLLOW_MAIN=1; with 0 it refuses)."
 fi
-mkdir -p data
+mkdir -p data/live
 echo "$REL" > "$PIN_FILE"
 SHA="$([ "$REL" = main ] && echo main || git rev-parse --short "$REL^{commit}")"
+if [ "$REL" = main ]; then rm -f "$PROMOTED"
+else echo "$REL $(git rev-parse "refs/tags/$REL^{commit}")" > "$PROMOTED.tmp" && mv "$PROMOTED.tmp" "$PROMOTED"; fi
 echo "$(date -u +%FT%TZ) $REL $SHA by $(id -un)$([ "$FORCE" = 1 ] && echo ' (forced)')" >> "$HISTORY"
 echo "Pinned $REL ($SHA). The engine switches to it at its next start."
 echo "To switch now (outside market hours): ./scripts/service.sh restart  (or Ctrl-C and ./scripts/run_engine.sh)"

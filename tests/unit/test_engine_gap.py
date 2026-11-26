@@ -132,8 +132,8 @@ def test_a_failing_event_write_never_reaches_the_engine():
     assert w.after_start()["gap_s"] == 3 * 3600
 
 
-def test_engine_gap_is_a_registered_pending_health_event_with_a_severity():
-    assert "engine_gap" in {e.name for e in event_names.PENDING}
+def test_engine_gap_is_a_registered_health_event_with_a_severity():
+    assert "engine_gap" in event_names.HEALTH_NAMES  # kb_health lists it since 0055 (#693)
     assert event_names.severity("engine_gap") == "warn"
 
 

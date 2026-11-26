@@ -221,14 +221,27 @@ def test_a_buy_booked_late_that_the_decision_wants_is_kept():
     assert not any(" om_intent " in t and "side=sell" in t for t in res.trace), res.report()
 
 
-@pytest.mark.xfail(strict=True, reason="engine bug #529, second half (seed 172 with the fault drawn): a watchdog "
-                                       "flatten of shares whose buy is still unbooked leaves a ledger-venue difference")
+WATCHDOG_529 = quiet({D1: ("B",), D2: ("C",)}, watchdog=True, outages=(Outage(et(D2, "15:58"), 2, kill=False),),
+                     forced=(Forced("fill_dropped", "|B|buy", 1500),))
+
+
 def test_a_watchdog_flatten_of_unbooked_shares_is_booked_against_the_late_buy():
-    """Audit 2, 5.13: what is left of #529. B's buy fills at D1's close and its activity is hidden for 1500 minutes;
-    the engine pauses over D2's close, and the watchdog closes the venue's B, which the ledger does not have yet.
-    On D3 the buy is booked: the ledger holds B, the venue does not (its sale is a foreign fill)."""
-    assert 529 in KNOWN
-    res = run_scenario(quiet({D1: ("B",), D2: ("C",)}, watchdog=True,
-                             outages=(Outage(et(D2, "15:58"), 2, kill=False),),
-                             forced=(Forced("fill_dropped", "|B|buy", 1500),)))
+    """Audit 2, 5.13 (#693): #529's watchdog half (seed 172 with the fault drawn). B's buy fills at D1's close and
+    its activity is hidden for 1500 minutes; the engine pauses over D2's close, and the watchdog closes the venue's
+    B, which the ledger does not have yet. On D3 the buy is booked, and the watchdog's sale (its close record names
+    the order) is booked against it: the ledger and the venue agree, with no owner, and nothing is sold twice."""
+    assert 529 not in KNOWN
+    res = run_scenario(WATCHDOG_529)
     assert res.ok, res.report()
+    booked = [t for t in res.trace if " fill " in t and "side=sell" in t]
+    assert len(booked) == 1 and "qty=23.0" in booked[0] and "coid=" not in booked[0], res.report()
+    assert not any(" om_intent " in t and "side=sell" in t and "-B-" in t for t in res.trace), res.report()
+
+
+def test_without_the_close_record_the_watchdog_sale_waits_for_the_owner(monkeypatch):
+    """The teeth: the same scenario without the watchdog's close record ends with the #529 difference."""
+    from kaibot.engine import watchdog as wd
+
+    monkeypatch.setattr(wd.Watchdog, "_note_close", lambda self, symbol, o: None)
+    res = run_scenario(WATCHDOG_529)
+    assert any("foreign_fill" in v for v in res.violations), res.report()

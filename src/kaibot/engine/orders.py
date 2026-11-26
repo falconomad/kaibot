@@ -59,7 +59,7 @@ import contextlib
 import logging
 import math
 import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -801,6 +801,33 @@ class OrderManager:
             out.append(f)
             if self.on_fill is not None:
                 self.on_fill(f, r)
+        return out
+
+    # ---------------------------------------------------------------- 5.13 (#693): a fail-safe's sale, booked
+    def book_failsafe_sale(self, aid: str, parts: Sequence[tuple[str, float]], *, session: str,
+                           reason: str) -> list[dict]:
+        """Audit 2, 5.13 (#693, #529's watchdog half): the fill `aid`, kept in `foreign` (an order this manager does
+        not know), is a sale the watchdog made (its close record names the order): booked as the ledger's `fill`
+        entries of this run, one per sleeve in `parts` [(strategy, shares)], at the activity's price, its fee
+        shared by shares, under the activity's id (so it is read and booked once, also after a restart). Purpose
+        `flatten`, like the engine's own flatten sales. The caller has checked that the sleeves hold the shares.
+        Returns the journalled bodies (the caller folds them into the engine's ledger)."""
+        a = self.foreign.get(aid)
+        if a is None or a.get(payloads.INVALID) or self.run_id is None or str(a.get("side")) != "sell":
+            return []
+        total = sum(q for _, q in parts)
+        if total <= 1e-9 or abs(total - float(a["qty"])) > 1e-9:
+            return []
+        fees = float(a.get("fees") or 0.0)
+        out = []
+        for strategy, q in parts:
+            body = {"run_id": self.run_id, "activity": aid, "strategy": strategy, "symbol": str(a["symbol"]),
+                    "side": "sell", "qty": float(q), "px": float(a["price"]), "fees": fees * float(q) / total,
+                    "ts": a.get("transaction_time"), "purpose": "flatten", "session": session,
+                    "order_id": str(a.get("order_id")), "by": "watchdog", "reason": str(reason)[:200]}
+            self._append("fill", body)
+            out.append({k: v for k, v in body.items() if v is not None})
+        self.foreign.pop(aid, None)
         return out
 
     # ---------------------------------------------------------------- #529: the owner's word on an unbooked fill

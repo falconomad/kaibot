@@ -7,8 +7,16 @@ COPY requirements-engine.txt .
 RUN pip install --no-cache-dir --require-hashes -r requirements-engine.txt  # hash-locked export of uv.lock (#122)
 COPY src ./src
 COPY config ./config
+COPY scripts/engine_entry.sh ./scripts/engine_entry.sh
+# M20 9.3 (#727): scripts/build_image.sh builds from a rel-* tag and passes both. CODE_SHA is what every heartbeat and
+# decision records ("<tag>@<short>"); BUILD_COMMIT is the full commit the entry compares with the host's promotion.
 ARG CODE_SHA=unknown
-ENV PYTHONPATH=/app/src KAIBOT_DATA_DIR=/data KAIBOT_CODE_SHA=${CODE_SHA} PYTHONUNBUFFERED=1
+ARG BUILD_COMMIT=unknown
+ENV PYTHONPATH=/app/src KAIBOT_DATA_DIR=/data KAIBOT_CODE_SHA=${CODE_SHA} KAIBOT_BUILD_COMMIT=${BUILD_COMMIT} \
+    PYTHONUNBUFFERED=1
+LABEL org.opencontainers.image.source="https://github.com/falconomad/kaibot"
 VOLUME /data
 USER 1000:1000
-CMD ["python", "-m", "kaibot.engine"]
+# the engine starts only the build its host promoted when KAIBOT_REQUIRE_PROMOTED=1 (exit 6 otherwise); the watchdog
+# (compose's `command`) runs python directly
+CMD ["sh", "/app/scripts/engine_entry.sh"]

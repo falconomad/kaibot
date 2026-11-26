@@ -218,13 +218,9 @@ SAID = {  # the journal entries the trace shows, with the fields that tell the s
 # Engine defects the simulation found that are still open: issue -> what the generator leaves out so that every
 # seed does not trip over the same one. Each has a strict xfail (test_dst.py, or its kind's file); remove both then.
 KNOWN: dict[int, str] = {
-    # Audit 2, 5.13 fixed #529's first half: the decision in force now sells a buy booked after it
-    # (LiveDaily._booked_late; test_a_buy_booked_a_day_late_is_sold_by_the_decision_taken_meanwhile passes). The
-    # second half is still open, so the generator still leaves the fault out: with it drawn (1500 in DROP_MINUTES),
-    # 205 of 206 seeds pass and seed 172 fails on exactly this
-    529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
-         "a watchdog flatten of the shares while their buy is still unbooked leaves a difference only the owner "
-         "can accept (the venue's sale is a foreign fill, then the late booking puts the shares in the ledger)",
+    # #529 is fixed (audit 2, 5.13, #693): a buy booked after the decision is sold by the decision in force
+    # (LiveDaily._booked_late), and a watchdog close of its shares before the booking is booked against it
+    # (LiveDaily._book_failsafe_closes); the generator draws the 1500-minute activity delay (faulty.DROP_MINUTES)
     # #780 is fixed: a spin-off's new ticker, which the daily store never has, is sold in the session's own window
     # as a full-position sale, unsized, and the rest of the send goes out (test_dst_corporate_actions.py)
 }
@@ -642,6 +638,7 @@ class World:
         self.mac_asleep: Outage | None = None  # the Mac sleeps (audit 2, 5.17)
         self._last_pass: datetime | None = None  # the world's last moment with the Mac awake
         self.slept = 0.0  # seconds the Mac slept: the monotonic clock did not run then
+        self.host = ("dst", "H-dst", "UUID-DST")  # the engine's machine: host name, lease holder id, OS machine id
         self.lease = None  # the engine process's lease (Scenario.lease)
         self.gaps = None  # its gap watch
         self.beat = None  # its heartbeat, which renews the lease (engine/__main__.make_beat)
@@ -805,9 +802,10 @@ class World:
         gaps = GapWatch(eng.store, eng._rid, "dst", process=eng.process, now=self.clock)
         with contextlib.suppress(Exception):
             gaps.before_start(self.remote)
-        lease = EngineLease(eng.store, "H-dst", "dst",
+        host, holder, os_id = self.host  # the machine (M20 9.6: tests/dst/test_dst_two_hosts.py runs two)
+        lease = EngineLease(eng.store, holder, host,
                             mono=self.mono, wall=lambda: self.clock().timestamp(), journal=eng.journal,
-                            machine=machine_key("dst", "UUID-DST"))
+                            machine=machine_key(host, os_id))
         lease.acquire()  # LeaseUnavailable / LeaseHeld: the process exits, launchd starts it again
         eng.lease = lease
         main.fence_orders(eng, lease)

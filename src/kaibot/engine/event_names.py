@@ -24,7 +24,9 @@ or the books disagree: the owner should look). It is declared here once and gene
 At run time `note` never stops the engine: an unregistered name is written as before and logged once (the event
 is the record; losing it would be worse). Audit 2, 5.13 (#693): the first time a name is seen, the store also writes
 one visible `unregistered_event` warning (a health event) naming it, so a name the registry lacks shows on the
-dashboard instead of only in a log line. Only the tests make it an error (`STRICT`).
+dashboard instead of only in a log line. Since 0055 kb_health lists it (warn), and the dead-man's tick sends one
+Healthchecks.io `/fail` ping per new `unregistered_event` row, on the alert path of 0051's dead-man alerts. Only the
+tests make it an error (`STRICT`).
 """
 
 from __future__ import annotations
@@ -126,9 +128,7 @@ HEALTH: tuple[Event, ...] = (
           "Some holdings have had no confirmed price for a while (the last close is used)"),
     Event("multi_day_unbooked_aged", "warn",
           "A sale stopped waiting for an earlier day's trade that never reached the books"),
-)
-
-PENDING: tuple[Event, ...] = (
+    # 0055 (audit 2, 5.13, #693): the events PENDING held, and the booking of a watchdog sale (#529's watchdog half)
     # Audit 2, 5.13 (#693): an event name the registry lacks was written (once per name and process): a code fault
     Event("unregistered_event", "warn", "The engine wrote an event its registry does not know (tell the team)"),
     # M10 1.24 (#449): a journal snapshot that was not written (memory and a full fold differ) or not used at a start
@@ -162,7 +162,13 @@ PENDING: tuple[Event, ...] = (
     # #746: the broker's calendar unreadable: the session's days and hours from the engine's local NYSE calendar
     Event("calendar_local", "warn",
           "Broker calendar unreadable: the session's days and hours come from the engine's local NYSE calendar"),
+    # Audit 2, 5.13 (#693, #529's watchdog half): a sale the watchdog made of shares the books held, or came to hold
+    # (a buy booked late), booked to those sleeves instead of waiting for the owner
+    Event("watchdog_close_booked", "warn",
+          "A sale the watchdog made while the engine was down was booked to the books"),
 )
+
+PENDING: tuple[Event, ...] = ()
 
 ROUTINE: tuple[Event, ...] = (
     Event("cash_merger_booked", "info", why="a cash merger booked (S78)"),

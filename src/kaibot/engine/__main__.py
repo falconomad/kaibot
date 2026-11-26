@@ -721,8 +721,9 @@ def make_beat(eng: Engine, lease: EngineLease, host: str, stop: dict):
         except Exception:
             trading = {}
         try:
+            # M20 9.3 (#727): the build in every beat, also "starting" and "error" ones (a tick's status has it too)
             eng.store.heartbeat(eng.process, {**st, **trading, "host": host, "ts": datetime.now(UTC).isoformat(),
-                                              "lease": lease.status()})
+                                              "lease": lease.status(), "code_sha": getattr(eng, "code", None)})
         except Exception:
             log.exception("heartbeat failed")
 

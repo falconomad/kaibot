@@ -149,6 +149,10 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
         ("KAIBOT_RELEASE", "qa-ops", "the pinned release (scripts/release.sh)"),
         ("KAIBOT_FOLLOW_MAIN", "qa-ops", "audit 2 5.2 (#682): may an unpinned start follow main (1, the default for "
          "now, with WARNING lines) or is it refused (0)? release.sh, from the environment or the .env"),
+        ("KAIBOT_REQUIRE_PROMOTED", "qa-ops", "M20 9.3 (#727): the engine image starts only the build its host "
+         "promoted (1, the VM) or any build (0, the default); engine_entry.sh, from the environment or the .env"),
+        ("KAIBOT_BUILD_COMMIT", "qa-ops", "M20 9.3 (#727): the full commit an engine image was built from (the "
+         "Dockerfile's BUILD_COMMIT, set by build_image.sh); engine_entry.sh compares it with data/live/promoted"),
         ("KAIBOT_RUNNER_CHECKOUT", "qa-ops", "the research runner's own checkout (install_runner.sh; default "
          "~/Projects/kaibot-runner)"),
         ("KAIBOT_REEXEC", "qa-ops", "run_engine.sh's re-exec guard after a release switch"),
