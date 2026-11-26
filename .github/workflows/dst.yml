@@ -3,7 +3,8 @@
 # checked after every pass. The ordinary `ci` run pays for three seeds, the regression seeds and the planted bugs;
 # this workflow is the search:
 #   seeds        every pull request and main: seeds 1 to 200 (the same for everyone: a pull request is never turned
-#                red by a draw another did not get) on four processes, about three minutes
+#                red by a draw another did not get) on four processes, about three minutes; then every crash point
+#                of the real engine (tests/crash/test_engine_crash_points.py, audit 2 5.19), about four minutes
 #   nightly-soak fresh seeds for 20 minutes, then the hunt for the planted bugs with random seeds; a failing seed
 #                opens an issue (or adds a comment to the open one) with the seed and the command that runs it again
 # A seed that fails is added to tests/dst/regression_seeds.txt and stays there.
@@ -26,7 +27,7 @@ jobs:
   seeds:
     if: github.event_name == 'push' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 15  # the bound: 200 seeds take about three minutes
+    timeout-minutes: 20  # the bound: 200 seeds take about three minutes, the crash sweep about four
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with: {persist-credentials: false}
@@ -36,6 +37,9 @@ jobs:
       - name: 200 seeds, the regression seeds, the planted bugs
         env: {KAIBOT_DST_SEEDS: "200"}
         run: uv run pytest tests/dst -q -p no:cacheprovider -n 4 --dist worksteal --durations=5
+      - name: every crash point of the real engine (audit 2 5.19, #699; about four minutes)
+        env: {KAIBOT_ENGINE_CRASH: "all"}
+        run: uv run pytest tests/crash/test_engine_crash_points.py -q -p no:cacheprovider -n 4 --dist worksteal -rxX
   nightly-soak:
     # runs the repository's code with a read-only token; `soak-report` (no repository code) writes the issue (#561)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
