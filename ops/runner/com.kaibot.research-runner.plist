@@ -17,6 +17,10 @@
 	<key>WorkingDirectory</key><string>__REPO__</string>
 	<key>StartInterval</key><integer>900</integer>
 	<key>RunAtLoad</key><false/>
+	<!-- audit 2 7.8 (#718): the runner and its jobs yield to the engine. Background: macOS throttles their CPU and
+	     disk use when anything else wants them; LowPriorityIO: their disk reads and writes go last. -->
+	<key>ProcessType</key><string>Background</string>
+	<key>LowPriorityIO</key><true/>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>PATH</key><string>__PATH__</string>
