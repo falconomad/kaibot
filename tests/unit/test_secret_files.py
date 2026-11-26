@@ -82,7 +82,7 @@ def test_the_ticker_worker_never_holds_the_trading_pair(files, monkeypatch):
     body = src[src.index("def load_keys"):src.index("def legacy_keys")]
     assert "Settings.from_env" not in body and "load_env_file" not in body and "os.environ" not in body
     main = src[src.index("def main"):]
-    assert main.index("data_env_path(a.data_env).exists()") < main.index("load_keys(") < main.index("legacy_keys(")
+    assert main.index("data_env_present(a.data_env)") < main.index("load_keys(") < main.index("legacy_keys(")
     with pytest.raises(SystemExit, match="no market-data key file"):
         tc.load_keys(str(engine), str(data.with_name("none.env")))
 
@@ -145,3 +145,20 @@ def test_the_check_passes_only_for_a_second_account_and_prints_no_secret(files, 
     helper.write_text(helper.read_text() + f"ALPACA_API_KEY={TRADING[0]}\n")
     rows = dk.check(str(data), str(helper), str(engine), opener)
     assert [n for n, ok, _ in rows if not ok] == ["helper.env holds no trading pair and no service key"]
+
+
+def test_a_dangling_link_at_data_env_is_data_mode_and_refused(tmp_path):
+    """Anything at the data file's path means data mode: a dangling link or a folder stops the helper instead of
+    sending it back to the trading key."""
+    from kaibot.common.secret_files import data_env_present
+    link = tmp_path / "data.env"
+    link.symlink_to(tmp_path / "gone")
+    assert data_env_present(str(link))
+    with pytest.raises(SystemExit, match="not a regular file"):
+        data_keys(str(link))
+    folder = tmp_path / "dir.env"
+    folder.mkdir()
+    assert data_env_present(str(folder))
+    with pytest.raises(SystemExit, match="not a regular file"):
+        data_keys(str(folder))
+    assert not data_env_present(str(tmp_path / "none.env"))

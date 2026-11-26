@@ -73,11 +73,20 @@ def data_env_path(path: str | None = None) -> Path:
     return Path(os.path.expanduser(path or os.environ.get(DATA_ENV) or DEFAULT_DATA_ENV))
 
 
+def data_env_present(path: str | None = None) -> bool:
+    """Is there anything at the data file's path (a file, a directory, even a dangling link)? Then the helpers are in
+    data mode and never fall back to the trading key: a bad entry stops them (`data_keys`) instead (#712)."""
+    return os.path.lexists(data_env_path(path))
+
+
 def data_keys(path: str | None = None) -> tuple[str, str]:
     """(key, secret) of the data pair, or SystemExit with what to do. Refuses a data file that holds the trading pair
     or a service key: the point of the file is that the process reading it cannot have them."""
     p = data_env_path(path)
-    if not p.exists():
+    if not p.is_file():
+        if os.path.lexists(p):
+            raise SystemExit(f"{p} is not a regular file (a dangling link or a folder?): fix it; with data.env in "
+                             "place the helpers never use the trading key (docs/ops/secrets.md)")
         raise SystemExit(f"no market-data key file {p}: the helpers no longer use the trading key "
                          "(docs/ops/secrets.md, 'The data key')")
     bad = names_in(p) & set(TRADING_NAMES + SERVICE_NAMES)

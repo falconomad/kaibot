@@ -199,6 +199,10 @@ def test_with_data_env_the_relay_refuses_rather_than_fall_back(tmp_path, monkeyp
     for extra in ("ALPACA_API_KEY=X\n", "ALPACA_SECRET=Y\n", "SUPABASE_SERVICE_KEY=sb_secret_x\n"):
         with pytest.raises(SystemExit, match="remove it"):
             ps.build_http(str(engine_env), str(_helper_file(tmp_path)), str(_data_file(tmp_path, extra)))
+    dangling = tmp_path / "data-link.env"
+    dangling.symlink_to(tmp_path / "gone.env")  # something is there: data mode, so no fall-back to the trading key
+    with pytest.raises(SystemExit, match="not a regular file"):
+        ps.build_http(str(engine_env), str(_helper_file(tmp_path, alpaca=True)), str(dangling))
     import os
     assert "ALPACA_API_KEY" not in os.environ and "SUPABASE_SERVICE_KEY" not in os.environ
 

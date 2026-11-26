@@ -1287,6 +1287,15 @@ def test_with_data_env_but_no_helper_env_the_box_still_gets_no_engine_env(relay_
     assert ":/secrets/.env:ro" not in run and env["KAIBOT_ENV_FILE"] not in run
 
 
+def test_a_dangling_data_env_link_never_brings_the_engines_env_into_the_box(relay_env, fake_docker):
+    sec = relay_env[2] / "Projects/kaibot-secrets"
+    (sec / "data.env").unlink()
+    (sec / "data.env").symlink_to(sec / "gone.env")
+    run, env, _ = _docker_relay_run(relay_env, fake_docker, data_env=True)
+    assert ":/secrets/.env:ro" not in run and env["KAIBOT_ENV_FILE"] not in run
+    assert "--tmpfs /secrets/data.env" in run  # the relay then refuses: not a regular file
+
+
 def test_without_data_env_the_relay_container_is_as_before(relay_env, fake_docker):
     run, env, tmp = _docker_relay_run(relay_env, fake_docker, data_env=False)
     assert "/secrets/data.env:ro" not in run  # a missing file is never mounted (it would become a folder)

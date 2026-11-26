@@ -81,11 +81,11 @@ def main() -> None:
     ap.add_argument("--once", action="store_true", help="answer what is pending, then exit")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    from kaibot.common.secret_files import data_env_path
+    from kaibot.common.secret_files import data_env_path, data_env_present
     from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
     from kaibot.engine.store import Store
 
-    if data_env_path(a.data_env).exists():
+    if data_env_present(a.data_env):
         k = load_keys(a.env, a.data_env)  # never the trading pair (#712)
         log.info("ticker checks: Alpaca with the market-data key of the second paper account (no trading key here)")
     else:

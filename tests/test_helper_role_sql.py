@@ -69,7 +69,7 @@ def test_the_relay_and_the_publisher_never_read_the_service_key_on_the_helper_pa
     relay = (ROOT / "scripts" / "price_stream.py").read_text()
     build = relay[relay.index("def build_http"):relay.index("def main()")]
     # #712: the data.env branch (before the WARNING of the old path) reads no service key, no trading key, no .env
-    data_branch = build[build.index("if data_env_path(data_file).exists():"):build.index('log.warning("WARNING: no')]
+    data_branch = build[build.index("if data_env_present(data_file):"):build.index('log.warning("WARNING: no')]
     assert "helper_env(helper_file)" in data_branch and "data_keys(" in data_branch
     assert not any(x in data_branch for x in ("SERVICE", "os.environ", "load_env_file", "ALPACA_API_KEY",
                                               "keep_trading"))

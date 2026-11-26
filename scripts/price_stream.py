@@ -65,7 +65,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from kaibot.common.helper_session import HelperError, HelperSession, helper_env  # noqa: E402
-from kaibot.common.secret_files import data_env_path, data_keys  # noqa: E402
+from kaibot.common.secret_files import data_env_path, data_env_present, data_keys  # noqa: E402
 from kaibot.engine.config import DEFAULT_SUPABASE_URL, PAPER_TRADING_URL, load_env_file  # noqa: E402
 
 log = logging.getLogger("price_stream")
@@ -692,7 +692,7 @@ def build_http(env_file: str | None, helper_file: str | None = None,
     trading key in this process. A bad data file, or no helpers' file, stops the relay (no fall-back).
     Without data.env (Product, 26 Nov 2026: nothing stops before the owner's setup): as before #712, with a WARNING:
     the helpers' file with its paper keys, else the engine's .env with the service key."""
-    if data_env_path(data_file).exists():
+    if data_env_present(data_file):
         henv = helper_env(helper_file)  # the trading pair, if still in it, is skipped
         if henv is None:
             raise SystemExit("data.env exists but there is no helpers' env file (helper.env): with the data key the "

@@ -132,6 +132,9 @@ checks_cmd() {  # W_CMD and W_KIND for this machine; 1 when it cannot run yet (n
     # The .env is mounted for its Supabase key only: the worker skips the trading pair's lines (#712)
     local data=()
     [ -f "$DATA_ENV" ] && data=(-v "$DATA_ENV:/secrets/data.env:ro")
+    # anything else at that path (a dangling link, a folder): the worker must stop, not fall back; an empty
+    # /secrets/data.env folder inside the box does that (the worker refuses a data path that is not a file)
+    { [ -e "$DATA_ENV" ] || [ -L "$DATA_ENV" ]; } && [ ! -f "$DATA_ENV" ] && data=(--tmpfs /secrets/data.env)
     W_KIND=docker; W_CMD=(docker run --rm --init --name "$CHECKS_BOX" -e KAIBOT_ENV_FILE=/secrets/.env
       -v "$ENV_FILE:/secrets/.env:ro" ${data[@]+"${data[@]}"}
       -v "$REPO/scripts/run_ticker_checks.py:/app/scripts/run_ticker_checks.py:ro"
@@ -242,8 +245,9 @@ stream_cmd() {  # S_CMD and S_KIND; 1 when it cannot run yet. Needs Python 3.11+
     # service key and the trading key stay out). Without it, as before #712: the helpers' file, else the .env
     local secrets=(-v "$ENV_FILE:/secrets/.env:ro")
     [ -f "$HELPER_ENV" ] && secrets=(-v "$HELPER_ENV:/secrets/helper.env:ro")
-    if [ -f "$DATA_ENV" ]; then  # never the .env once data.env exists, whatever else is missing
-      secrets=(-v "$DATA_ENV:/secrets/data.env:ro")
+    if [ -e "$DATA_ENV" ] || [ -L "$DATA_ENV" ]; then  # never the .env once data.env exists, whatever is missing
+      secrets=(--tmpfs /secrets/data.env)  # not a regular file: the relay refuses it, no fall-back
+      [ -f "$DATA_ENV" ] && secrets=(-v "$DATA_ENV:/secrets/data.env:ro")
       [ -f "$HELPER_ENV" ] && secrets+=(-v "$HELPER_ENV:/secrets/helper.env:ro")
     fi
     S_KIND=docker; S_CMD=(docker run --rm --init --name "$STREAM_BOX" "${secrets[@]}"
