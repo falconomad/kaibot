@@ -85,6 +85,27 @@ def source_of(row: results.Row, spy_kind: str | None) -> dict:
             "code_sha": row.meta.get("code_sha")}
 
 
+def holdout_sessions(gate: g3.GateV3, row: results.Row) -> int:
+    """Sessions of the row's daily file after the research window (its control saw them)."""
+    d = results.daily(row)
+    return 0 if d is None else int((d.index > gate.window[1]).sum())
+
+
+def holm_check(gate: g3.GateV3, name: str, row: results.Row, pool) -> tuple[float | None, list[str]]:
+    """#704: the row's control p-value and why it may not enter Holm (empty: it may)."""
+    f, rep = row_report(row)
+    spy = results.spy(f, rep, pool) if f is not None else None
+    return g3.holm_input(gate, name, row.control, source_of(row, spy[1] if spy else None),
+                         holdout_sessions(gate, row))
+
+
+_REPORTS: dict[str, tuple] = {}
+
+
+def row_report(row: results.Row) -> tuple:
+    return _REPORTS.get(row.report, (None, None))
+
+
 def first_run(registry, rule: str) -> datetime | None:
     stamps = sorted(str(r["ts"]) for r in registry.rows if r.get("strategy") == rule and r.get("ts"))
     try:
@@ -185,6 +206,8 @@ def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dic
     book_found = [(f, rep) for f, rep in everything if is_book_report(gate, rep)]
     every = [r for f, rep in found for r in results.rows(f, rep)]
     by_file = dict((f.name, (f, rep)) for f, rep in found)
+    _REPORTS.clear()
+    _REPORTS.update(by_file)
     pool = results.spy_pool(folder)
     bills = tbill.find(data)
     registry = trials.load(None, data / "trials.jsonl")
@@ -196,19 +219,26 @@ def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dic
                 None, "base"):
             neighbours.setdefault((r.report, r.rule), {})[r.neighbour] = r
 
-    # pass 1: one p-value per rule, from its best-evidenced run with a usable control
+    # pass 1: one p-value per rule, from its best-evidenced run whose p-value may enter Holm (#704, decision 18
+    # s.8: final_requires met, enough runs, a matched control, no hold-out session). Every other p-value is kept
+    # greyed out: shown, never in the correction (it counts as 1 there)
     rule_p: dict[str, float | None] = {}
+    greyed: dict[str, dict] = {}
     for row in sorted(base.values(), key=evidence_rank):
         name = gate_rule(gate, row)
-        entry = gate.rule(name)
-        n = g3.control_numbers(row.control)
-        if name in rule_p or entry is None or n is None or n["p_value"] is None or not n["matched"]:
+        if name in rule_p or gate.rule(name) is None:
             continue
-        timing = entry["kind"] == "timing" and str(n.get("kind") or "").startswith("random_timing")
-        if n["runs"] >= gate.cfg["sleeve"]["s3_control"]["random_runs_min"] and (
-                timing or entry.get("existing_control") in g3.SCORABLE_CONTROLS):
-            rule_p[name] = n["p_value"]
+        p, why = holm_check(gate, name, row, pool)
+        if p is None:
+            continue
+        if not why:
+            rule_p[name] = p
+            greyed.pop(name, None)
+        elif name not in greyed:
+            greyed[name] = {"p": p, "why": why, "report": row.report, "label": row.label}
     fam_p = g3.family_p(gate, rule_p)
+    fam_grey = {f: {r: greyed[r] for r in b["rules"] if r in greyed and r not in rule_p}
+                for f, b in gate.families.items()}
 
     # pass 2: the marks
     out, skipped = [], []
@@ -238,13 +268,16 @@ def rescore(data: Path, root: Path = ROOT, as_of: datetime | None = None) -> dic
             skipped.append({"rule": rule, "run": kind, "report": row.report, "why": str(e), "summary": row.summary})
             continue
         v2 = rep.get("gate_b")
+        hp, hwhy = holm_check(gate, name, row, pool)
         out.append({"rule": rule, "scored_as": name, "run": kind, "report": row.report, "label": row.label,
                     "evidence_rank": list(evidence_rank(row))[:3], "gate_v2": v2 if isinstance(v2, list | dict)
-                    else None, "gate_v3": rep3})
+                    else None, "gate_v3": rep3,
+                    "holm_input": {"p": hp, "enters_holm": hp is not None and not hwhy, "why_not": hwhy}})
     return {"generated_at": (as_of or datetime.now(UTC)).isoformat(timespec="seconds"), "gate_sha": gate.sha,
             "window": [str(gate.window[0].date()), str(gate.window[1].date())], "level": gate.level,
-            "families": {f: {"rules": list(b["rules"]), "p": fam_p[f]} for f, b in gate.families.items()},
-            "holm": g3.holm(fam_p, gate.level), "rule_p": rule_p, "tbill": bills is not None,
+            "families": {f: {"rules": list(b["rules"]), "p": fam_p[f], "greyed": fam_grey[f]}
+                         for f, b in gate.families.items()},
+            "holm": g3.holm(fam_p, gate.level), "rule_p": rule_p, "rule_p_greyed": greyed, "tbill": bills is not None,
             "registry": registry.summary(), "reports_read": len(everything),
             "other_files": results.other_files(folder), "rows": out, "books": books,
             "skipped": skipped + books_skipped}
@@ -259,6 +292,21 @@ def _cell(mark: dict) -> str:
 
 def _num(x, fmt="{:.2%}") -> str:
     return "n/a" if x is None else fmt.format(x)
+
+
+def _pcell(r: dict, n3: dict) -> str:
+    """The control p of a sleeve row; greyed out (italics) when it may not enter Holm (#704)."""
+    p = n3.get("p_value")
+    if p is None:
+        return "n/a"
+    cell = f"{p:.4f}{DAGGER if r['gate_v3'].get('sessions_in_holdout_dropped') else ''}"
+    return cell if (r.get("holm_input") or {}).get("enters_holm") else f"_{cell} (greyed)_"
+
+
+def _hcell(r: dict, n3: dict) -> str:
+    if n3.get("holm_adjusted") is None:
+        return "n/a"
+    return _num(n3["holm_adjusted"], "{:.4f}") if (r.get("holm_input") or {}).get("enters_holm") else "_greyed_"
 
 
 def render(res: dict) -> str:
@@ -285,9 +333,8 @@ def render(res: dict) -> str:
         out.append(
             f"| {r['rule']} | {r['run']} | {_num(g['statistics']['mean_exposure'], '{:.0%}')} | "
             f"{_num(n1['annualised'])} | {_num(n1['interval'][0])} to {_num(n1['interval'][1])} | {n1['t']:.2f} | "
-            f"{_num((n2.get('active_return_at') or {}).get('2x'))} | {_num(n3.get('p_value'), '{:.4f}')}"
-            f"{DAGGER if n3.get('p_value') is not None and g.get('sessions_in_holdout_dropped') else ''} | "
-            f"{_num(n3.get('holm_adjusted'), '{:.4f}')} | {_num(n4.get('dsr'), '{:.3f}')}"
+            f"{_num((n2.get('active_return_at') or {}).get('2x'))} | {_pcell(r, n3)} | "
+            f"{_hcell(r, n3)} | {_num(n4.get('dsr'), '{:.3f}')}"
             f"{' (' + format(n4['configurations'], ',') + ')' if n4.get('configurations') else ''} | "
             + " | ".join(_cell(m[k]) for k in ("s1", "s2", "s3", "s4", "s5", "s6"))
             + f" | {g.get('verdict_text') or g['verdict']} |")
@@ -295,17 +342,27 @@ def render(res: dict) -> str:
     for r in res["rows"]:
         why = [f"{k.upper()}: {v['why']}" for k, v in r["gate_v3"]["marks"].items()
                if v["met"] is not True and v["why"]]
+        hi = r.get("holm_input") or {}
+        if hi.get("p") is not None and not hi.get("enters_holm"):
+            why.append("control p greyed out, not in Holm: " + ", ".join(hi.get("why_not") or []))
         if why:
             out.append(f"- **{r['rule']}** ({r['run']}): " + "; ".join(why) + ".")
     out += ["", "## Rule families and the correction", "",
             f"Holm's step-down at a family-wise level of {res['level']:g} over {len(res['families'])} families. A "
             "family's p-value is the smallest control p-value of its rules times the number of rules it lists; a "
             "family without a usable control counts as 1.", "",
-            "| Family | Rules | Family p | Holm-adjusted | Clears the level |", "|---|---|---|---|---|"]
+            "Gate v3.1 (decision 18 section 8): only a p-value from a run that meets `final_requires` (the engine "
+            "with SimBroker, cost model v2, data repairs, SPY total return), with enough control runs, a matched "
+            "control (at most 0.5% of slots unfilled) and no hold-out session enters Holm. Every other p-value is "
+            "shown greyed out, in italics with the reason, and counts as 1.", "",
+            "| Family | Rules | Family p (in Holm) | Holm-adjusted | Clears the level | Greyed out (not in Holm) |",
+            "|---|---|---|---|---|---|"]
     for f, body in res["families"].items():
         h = res["holm"][f]
+        grey = "; ".join(f"_{r} p {g['p']:.4f}: {', '.join(g['why'])}_" for r, g in (body.get("greyed") or {}).items())
         out.append(f"| {f} | {', '.join(body['rules'])} | {_num(body['p'], '{:.4f}')} | "
-                   f"{_num(h['adjusted'] if h['known'] else None, '{:.4f}')} | {'yes' if h['rejected'] else 'no'} |")
+                   f"{_num(h['adjusted'] if h['known'] else None, '{:.4f}')} | {'yes' if h['rejected'] else 'no'} | "
+                   f"{grey or '-'} |")
     out += ["", "## Books (the book test, decision 16 section 5)", ""]
     if not res.get("books"):
         out.append("No book report was found.")

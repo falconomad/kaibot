@@ -53,6 +53,11 @@ sleeve:
   s3_control:                      # skill against chance, corrected across rule families
     random_runs_min: 500           # a family of ONE rule
     random_runs_min_several_rules: 2000   # amendment 1 (decision 16 s.15): a family of two or more rules
+    unfilled_slots_max_share: 0.005       # gate v3.1 (decision 18 s.8, #704): a control still counts as matched
+                                          # with at most 0.5% of its slots unfilled over all its runs, its
+                                          # committed exposure within tolerance in every run (written after #474)
+    holm_inputs: final_requires    # gate v3.1 (decision 18 s.8): only p-values of runs that meet final_requires,
+                                   # with enough runs, a matched control and no hold-out session enter Holm
     pool: candidate_pool           # names drawn from the rule's own candidate pool (timing sleeves: random times)
     statistic: sharpe_p_value      # (1 + random Sharpes at or above the rule's) / (runs + 1)
     within_family: bonferroni      # the family's p-value = its smallest member p-value x the number of members

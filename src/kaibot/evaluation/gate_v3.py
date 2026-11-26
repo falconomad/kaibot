@@ -130,6 +130,13 @@ class GateV3:
         if isinstance(cap, bool) or not isinstance(cap, int | float) or not 0 <= float(cap) <= EVIDENCE_BUDGET_MAX_PCT:
             raise ValueError(f"config/gate_v3.yaml: evidence_based.book_budget_max_pct={cap!r} must be a number in "
                              f"[0, {EVIDENCE_BUDGET_MAX_PCT:g}] (decision 16 section 14; it may only be lowered)")
+        s3c = cfg["sleeve"]["s3_control"]
+        share = s3c.get("unfilled_slots_max_share", 0.0)
+        if isinstance(share, bool) or not isinstance(share, int | float) or not 0.0 <= float(share) <= 0.005:
+            raise ValueError("config/gate_v3.yaml: s3_control.unfilled_slots_max_share must be in [0, 0.005] "
+                             "(decision 18 section 8; it may only be lowered)")
+        if (s3c.get("holm_inputs") or "final_requires") != "final_requires":
+            raise ValueError("config/gate_v3.yaml: s3_control.holm_inputs must be final_requires (decision 18 s.8)")
         if (cfg["sleeve"]["s4_deflated_sharpe"].get("trial_sharpes") or "active_return") != "active_return":
             raise ValueError("config/gate_v3.yaml: s4_deflated_sharpe.trial_sharpes must be active_return (decision "
                              "18 section 6: S4 tests the active return, so its variance comes from active Sharpes)")
@@ -261,10 +268,65 @@ def control_numbers(control: Any) -> dict | None:
     p = c.get("p_value", inner.get("p_value"))
     if pct is not None and runs and (p is None or "sharpe_percentile" in c):
         p = p_from_percentile(float(pct), runs)  # the percentile used (the lower of the two) decides
+    gap = c.get("committed_exposure_gap_pts") if isinstance(c.get("committed_exposure_gap_pts"), Mapping) else {}
+    unfilled = inner.get("unfilled", c.get("unfilled"))
     return {"percentile": None if pct is None else float(pct), "runs": runs, "matched": bool(c.get("matched")),
+            # #704: what the control tolerance reads (decision 18 s.8)
+            "slots": c.get("slots", inner.get("slots")), "unfilled": None if unfilled is None else int(unfilled),
+            "exposure_gap_max_pts": gap.get("max"), "exposure_tolerance_pts": c.get("exposure_tolerance_pts"),
             "p_value": None if p is None else float(p), "kind": c.get("kind"),
             "pool": c.get("pool", inner.get("pool")),
             "drawdown_percentile": c.get("drawdown_percentile", inner.get("drawdown_percentile"))}
+
+
+def control_matched(gate: GateV3, n: Mapping) -> tuple[bool, str]:
+    """#704 (decision 18 s.8): the control is matched as stored, or within the pre-registered tolerance: at most
+    `unfilled_slots_max_share` of its slots left unfilled over ALL runs together (so no single run left more), with
+    the money committed per session still within the control's own exposure tolerance in every run. (matched, the
+    reading used)."""
+    if n.get("matched"):
+        return True, "matched"
+    share = gate.cfg["sleeve"]["s3_control"].get("unfilled_slots_max_share")
+    slots, unfilled = n.get("slots"), n.get("unfilled")
+    gap, tol = n.get("exposure_gap_max_pts"), n.get("exposure_tolerance_pts")
+    if share is None or not slots or unfilled is None or gap is None or tol is None:
+        return False, "the control did not fill every slot, so it is not matched"
+    allowed = math.floor(float(share) * int(slots) + 1e-9)
+    if 0 < unfilled <= allowed and float(gap) <= float(tol):
+        return True, (f"{unfilled} of {slots} slots unfilled over all runs, within the tolerance of {allowed} "
+                      f"({float(share):.1%}); committed exposure within {float(tol):g} pts in every run")
+    if float(gap) > float(tol):
+        return False, f"the control's committed exposure is off by up to {float(gap):g} pts, more than {float(tol):g}"
+    return False, (f"the control left {unfilled} of {slots} slots unfilled over all runs, more than the tolerance "
+                   f"of {allowed} ({float(share):.1%})")
+
+
+def holm_input(gate: GateV3, rule: str, control: Any, source: Mapping | None, holdout_sessions: int,
+               control_source: str | None = None) -> tuple[float | None, list[str]]:
+    """#704 (decision 18 s.8): (the rule's control p-value, the reasons it may NOT enter Holm). Only a p-value from
+    a run that meets `sleeve.final_requires` (the engine with SimBroker, cost model v2, data repairs, SPY total
+    return), with enough control runs for its family, a matched control (within the tolerance) drawn from the
+    rule's own pool or random times, and a window that stays on the research window enters the correction. Any
+    other p-value is shown greyed out and counts as 1 in Holm."""
+    n = control_numbers(control)
+    if n is None or n["p_value"] is None:
+        return None, ["no control p-value"]
+    why = [f"{k} is {(source or {}).get(k, 'not stated')!r}, Holm needs {v!r}"
+           for k, v in gate.cfg["sleeve"]["final_requires"].items() if (source or {}).get(k) != v]
+    need = control_runs_for(gate, rule)
+    if n["runs"] < need:
+        why.append(f"{n['runs']} control runs, {need} needed")
+    ok, how = control_matched(gate, n)
+    if not ok:
+        why.append(how)
+    entry = gate.rule(rule) or {}
+    timing = entry.get("kind") == "timing" and str(n.get("kind") or "").startswith("random_timing")
+    drew = n["pool"] if n["pool"] not in (None, "universe") else (control_source or entry.get("existing_control"))
+    if not timing and drew not in SCORABLE_CONTROLS:
+        why.append(f"the control drew from {drew or 'an unstated pool'}, not the rule's own candidate pool")
+    if holdout_sessions:
+        why.append(f"its window ran {holdout_sessions} sessions into the hold-out")
+    return n["p_value"], why
 
 
 def control_runs_for(gate: GateV3, rule: str) -> int:
@@ -606,8 +668,10 @@ def s3(gate: GateV3, rule: str, control: Any, other_family_p: Mapping[str, float
     n["drew_from"] = drew
     if n["runs"] < limit["runs_min"]:
         return _mark(None, n, limit, f"{n['runs']} runs, {limit['runs_min']} needed")
-    if not n["matched"]:
-        return _mark(None, n, limit, "the control did not fill every slot, so it is not matched")
+    ok, how = control_matched(gate, n)  # #704: within the pre-registered tolerance
+    n["matched_reading"] = how
+    if not ok:
+        return _mark(None, n, limit, how)
     if n["p_value"] is None:
         return _mark(None, n, limit, "the control has no percentile")
     if drew not in SCORABLE_CONTROLS:

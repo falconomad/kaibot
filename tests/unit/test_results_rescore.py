@@ -14,7 +14,6 @@ import pandas as pd
 import pytest
 
 from kaibot.engine.config import ROOT
-from kaibot.evaluation import gate_v3 as g3
 from kaibot.evaluation import results, tbill
 
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -190,11 +189,17 @@ def test_the_rescore_scores_existing_reports_without_running_anything(data: Path
     assert g["statistics"]["cash"] == "Treasury bills on both sides"
     assert by[("mom_12_1_band", "core, point_in_time, costs v2")]["gate_v3"]["marks"]["s1"]["met"] is False
     assert by[("mom_12_1_band", "core, point_in_time, costs v2")]["gate_v3"]["verdict"] == "fail"
-    # the correction: momentum's family p is its best rule's p times every rule it lists
-    members = len(g3.GateV3.load(ROOT).families["cross_sectional_momentum"]["rules"])
-    assert res["families"]["cross_sectional_momentum"]["p"] == pytest.approx(members * 2 / 501)
-    assert res["families"]["spy_intraday_momentum"]["p"] == pytest.approx(3 * 2 / 501)
+    # gate v3.1 (#704, decision 18 s.8): these runs are the research harness, 500-run controls whose windows ran
+    # into the hold-out, so their p-values are greyed out: shown, never in Holm (where the family counts as 1)
+    assert res["families"]["cross_sectional_momentum"]["p"] is None
+    assert res["families"]["spy_intraday_momentum"]["p"] is None and res["rule_p"] == {}
+    grey = res["families"]["cross_sectional_momentum"]["greyed"]["trend_momentum"]
+    assert grey["p"] == pytest.approx(2 / 501) and any("2000 needed" in w for w in grey["why"])
+    assert any("into the hold-out" in w for w in grey["why"]) and any("engine is" in w for w in grey["why"])
+    assert res["families"]["spy_intraday_momentum"]["greyed"]["spy_noise_band"]["p"] == pytest.approx(2 / 501)
     assert res["families"]["news_drift"]["p"] is None and len(res["families"]) == 12
+    assert not any(h["rejected"] for h in res["holm"].values())
+    assert tm["holm_input"]["enters_holm"] is False
     spy = by[("spy_noise_band", "spy, point_in_time, 0.5 bp")]["gate_v3"]
     assert spy["statistics"]["kind"] == "timing" and spy["marks"]["s3"]["numbers"]["drew_from"] == "random_timing"
     assert by[("spy_noise_band", "spy, point_in_time, model v1")]["gate_v3"]["marks"]["s3"]["met"] is None
@@ -202,7 +207,8 @@ def test_the_rescore_scores_existing_reports_without_running_anything(data: Path
     assert text in capsys.readouterr().out and "This is a re-score, not a verdict" in text
     assert "| trend_momentum | core, point_in_time, costs v2 |" in text and "| cross_sectional_momentum |" in text
     # the stored control p-value covers the report's whole window: where that ran into the hold-out it is marked
-    assert f"{2 / 501:.4f}{gate_v3_rescore.DAGGER} |" in text and "it has seen hold-out sessions" in text
+    assert f"_{2 / 501:.4f}{gate_v3_rescore.DAGGER} (greyed)_ |" in text and "it has seen hold-out sessions" in text
+    assert "| Greyed out (not in Holm) |" in text and "control p greyed out, not in Holm:" in text
     assert json.loads((out / "gate_v3_rescore.json").read_text())["gate_sha"] == res["gate_sha"]
     assert not (data / "trials.jsonl").read_text().count("rescore"), "a re-score logs no trial"
     assert sorted(p.name for p in data.iterdir()) == ["inputs", "out", "reports", "trials.jsonl"]  # only --out
