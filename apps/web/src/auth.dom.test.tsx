@@ -130,7 +130,7 @@ describe("registration: /register?code=...", () => {
   });
 
   it("0048 (#721): the check says only ok, so every refusal gets one message, and nothing is sent", async () => {
-    for (const answer of [{ ok: false }, { ok: false, reason: null }, { ok: false, reason: "something new" }]) {
+    for (const answer of [{ ok: false }, { ok: false, reason: null }, { ok: false, reason: "something new" }, { ok: false, reason: "constructor" }]) {
       rec.check.mockResolvedValue(answer);
       rec.otp.mockClear();
       await mount(<Register search="?code=ABCD-1234-ABCD-1234" />);

@@ -168,6 +168,18 @@ def test_the_admit_trigger_holds_the_invite_and_its_confirmation_redeems_it(db):
 
 
 @needs_pg
+def test_an_account_confirmed_as_it_is_made_redeems_in_the_same_statement(db):  # noqa: F811
+    """Supabase with email confirmation off inserts the account already confirmed: the BEFORE trigger holds the
+    invite and the AFTER trigger of the same insert redeems it."""
+    code = j("select public.kb_invite_create('auto@example.com');")["code"]
+    psql(f"""insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at)
+      values ('{NEWBIE}', 'auto@example.com', '{{"name": "Ava", "invite_code": "{code}"}}', now());""",
+         role=None, direct=False)
+    assert _used(code) == NEWBIE
+    assert j("select public.kb_me();", uid=NEWBIE)["name"] == "Ava"
+
+
+@needs_pg
 def test_an_account_with_the_invited_email_but_not_its_code_redeems_nothing(db):  # noqa: F811
     """The audit's finding: 0045/0046 picked the invite by email at confirmation. An account that reaches the invited
     address another way (made in SQL by an admin; an email changed to it) is not the invitee."""

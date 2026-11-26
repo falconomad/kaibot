@@ -23,7 +23,8 @@ export const REASON: Record<InviteReason, string> = {
  *  stranger holding a code learns nothing more (which address it is for, or whether it was used or withdrawn). */
 export const NOT_USABLE = "That code can't be used. It may be mistyped, used, withdrawn or expired (invites last 7 days). Check it, or ask for a new invite.";
 export const NOT_OPEN = "Registration isn't open yet: the database update for invites (migration 0045) hasn't been applied. Ask the owner.";
-export const REFUSED = "This invite can't create an account any more (it may have expired or the account limit is reached). Ask for a new invite.";
+// 0048: the check no longer compares the email, so a wrong address is refused here, by the database: say so first
+export const REFUSED = "This invite can't create an account with this email. Use the address the invite was sent to; if you did, the invite may have expired or the account limit is reached. Ask for a new invite.";
 
 export function codeFromUrl(search: string): string {
   return (new URLSearchParams(search).get("code") ?? "").trim().slice(0, 40);
@@ -46,7 +47,7 @@ export function Register({ search = typeof window === "undefined" ? "" : window.
       const check = await api.inviteCheck(code, email);
       if (check === null) { setErr(NOT_OPEN); setState("error"); return; }
       // before 0048 the answer carries a reason; from 0048 on it does not, and one message stands for all
-      if (!check.ok) { setErr(check.reason && check.reason in REASON ? REASON[check.reason] : NOT_USABLE); setState("error"); return; }
+      if (!check.ok) { setErr(check.reason && Object.hasOwn(REASON, check.reason) ? REASON[check.reason] : NOT_USABLE); setState("error"); return; }
       const { error } = await supa.auth.signInWithOtp({ email, options: { shouldCreateUser: true,
         data: { name: name.trim().slice(0, 60), invite_code: code.trim() }, emailRedirectTo: `${window.location.origin}/?${FROM_SIGNIN}` } });
       if (error) { setErr(isSignupRefused(error) ? REFUSED : error.message); setState("error"); return; }
