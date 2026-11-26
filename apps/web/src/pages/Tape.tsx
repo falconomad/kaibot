@@ -57,7 +57,7 @@ function rowView(it: TapeItem) {
   if (it.kind === "fill") {
     const sold = it.side === "sell";
     // 0050: a multi-day sale has no trade row, so no result: the row shows what it sold for instead
-    const result = sold && (it.source !== "multi_day" || it.pnl_usd !== null);
+    const result = sold && (it.source !== "multi_day" || it.pnl_usd != null);
     return { icon: sold ? "sold" : "bought", head: `${sold ? "Sold" : "Bought"} ${it.symbol}`,
       line: sold ? `${fillWhy(it)} · ${it.qty} at ${px(it.venue_px)}` : `${it.qty} at ${px(it.venue_px)} · ${ruleName(it.strategy)}`,
       value: result ? signedMoney(it.pnl_usd) : money(it.qty * it.venue_px), valueTone: result ? tone(it.pnl_usd) : "" };
@@ -214,21 +214,22 @@ function HaltSheet({ h }: { h: Halt }) {
 function ItemSheet({ it, exp }: { it: TapeItem; exp: Experiment | null }) {
   const label = exp ? <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{experimentView(exp).text}</span></p> : null;
   if (it.kind === "fill") {
-    // 0050: a multi-day fill has no shadow price or fees unless the engine sends them; those lines are left out
+    // 0050: a multi-day fill has no shadow price or fees unless the engine sends them (null, or a key left out): those
+    // lines are left out, never a dash
     const md = it.source === "multi_day";
-    const cost = it.shadow_px !== null ? Math.abs(it.venue_px - it.shadow_px) * it.qty + (it.fees ?? 0) : null;
+    const cost = it.shadow_px != null ? Math.abs(it.venue_px - it.shadow_px) * it.qty + (it.fees ?? 0) : null;
     return (
       <>
         {label}
         <div className="kv">
           <span>{it.side === "buy" ? "Bought" : "Sold"}</span><span /><span className="v num">{it.qty} at {px(it.venue_px)}</span>
           {md && <><span>{it.side === "buy" ? "Cost" : "Proceeds"}</span><span /><span className="v num">{money(it.qty * it.venue_px)}</span></>}
-          {it.shadow_px !== null && <><span>Shadow price</span><span /><span className="v num">{px(it.shadow_px)}</span></>}
-          {it.fees !== null && <><span>Fees</span><span /><span className="v num">{money(it.fees)}</span></>}
+          {it.shadow_px != null && <><span>Shadow price</span><span /><span className="v num">{px(it.shadow_px)}</span></>}
+          {it.fees != null && <><span>Fees</span><span /><span className="v num">{money(it.fees)}</span></>}
           {cost !== null && <><span>Costs vs the shadow model</span><span /><span className="v num">{money(cost)}</span></>}
           <span>Rule</span><span /><span className="v">{ruleName(it.strategy)}</span>
           {it.side === "sell" && <><span>Why it sold</span><span /><span className="v">{md ? fillWhy(it) : exitText(it.exit_reason)}</span></>}
-          {it.side === "sell" && (!md || it.pnl_usd !== null) && <><span>Result</span><span /><span className={`v num ${tone(it.pnl_usd)}`}>{signedMoney(it.pnl_usd)}</span></>}
+          {it.side === "sell" && (!md || it.pnl_usd != null) && <><span>Result</span><span /><span className={`v num ${tone(it.pnl_usd)}`}>{signedMoney(it.pnl_usd)}</span></>}
         </div>
         {md && it.side === "sell" && <p className="muted" style={{ fontSize: 14 }}>The result of the holding is under <Link to="/positions">Positions</Link>, Closed.</p>}
         <p className="muted" style={{ fontSize: 14 }}>{dateEt(it.ts)} {timeEt(it.ts)} ET</p>

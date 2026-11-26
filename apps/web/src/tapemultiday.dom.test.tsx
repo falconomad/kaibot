@@ -88,6 +88,14 @@ describe("Activity: the multi-day rule's buys and sells (0050)", () => {
     expect(sheet()).not.toMatch(/Why it sold|Shadow price|Fees|Positions, Closed/);
   });
 
+  it("a payload without the keys at all (not even null) is hidden the same way", async () => {
+    const { shadow_px: _s, fees: _f, pnl_usd: _p, ...bare } = XOM as Extract<TapeItem, { kind: "fill" }>;
+    await start([bare as TapeItem]);
+    expect(rows()[0]).toMatch(/^Sold XOM \| fell below its average · 20 at \$158\.86 · [^|]+ \| \$3,177\.24$/);
+    await activate(row("XOM"));
+    expect(sheet()).not.toMatch(/Shadow price|Fees|Costs vs the shadow model|Result|—|NaN/);
+  });
+
   it("an intraday fill's sheet is as before (shadow price, fees, costs, result, trade link)", async () => {
     await start([NVDA]);
     await activate(row("NVDA"));
