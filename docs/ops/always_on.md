@@ -127,7 +127,8 @@ sends short pings (10 s timeout, in the background); it is not on the order path
 
 No pings at all (Mac off, asleep, offline, service stopped) turns the check red after period + grace (about 20
 minutes). Without `HEALTHCHECKS_PING_URL` the alarms are off: one line in `healthcheck.log`, nothing else.
-The research runner has a check of its own ([research_runner.md](research_runner.md#one-time-setup-owner-on-the-mac)).
+The dead-man in Supabase has a check of its own too, pinged from the database, not the Mac
+([failsafe.md](failsafe.md#dead-man-alerts-audit-2-77-717)). The research runner has a check of its own ([research_runner.md](research_runner.md#one-time-setup-owner-on-the-mac)).
 
 ## Kill switches, strongest last
 

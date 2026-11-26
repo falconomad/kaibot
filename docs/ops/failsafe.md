@@ -12,7 +12,7 @@ and stop" sell everything.
 | Daily stop | engine | a bad day, overnight gaps included | the day's change in mark-to-market equity (start = yesterday's close mark) at the level's stop: entries blocked for the day, intraday sleeves flattened, multi-day sleeves keep their stops |
 | Engine lease | Supabase row + engine | a second engine on another machine | start-up refused while another engine's lease is live; renewal failing: no new entries; lease taken by another engine: this one stops ([run_engine.md](run_engine.md#engine-lease-one-engine-whatever-the-machine)). Supabase unreachable at start-up: a start "reducing only" when the last lease recorded in the journal was this machine's own ([Degraded start](#degraded-start-supabase-down-when-the-engine-starts-m10-125-450)); every order is preceded by a renewal with the tenure's epoch (M13 4.3, #477, `engine/fence.py`), so a paused or older process whose tenure ended sends nothing |
 | Watchdog | separate process, same machine | engine crashed or hung | heartbeat > 90 s (one that cannot be read counts only if this machine does not show the engine alive, see below): cancel open Kaibot buys (`kb...`) not yet completely filled, halt row + event; once a minute: every multi-day sleeve has its stop at the broker, a missing one is re-created; still stale at close minus 5 min (15:55 ET, 12:55 on early closes): sell the **intraday** shares only, retried until close minus 4 min |
-| Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | with 0019: heartbeat > 3 min old while the market is open: the same plan as the watchdog (cancel entries, verify and re-create stops, alarm); from close minus 4 min to the close: sell the intraday shares only. Before 0019 (0006/0017): `DELETE /v2/positions?cancel_orders=true` at close minus 4 min, i.e. the whole account |
+| Dead-man | Supabase (pg_cron + pg_net) | laptop asleep, off or offline | with 0019: heartbeat > 3 min old while the market is open: the same plan as the watchdog (cancel entries, verify and re-create stops, alarm: a halt row and, since 0051, a ping to its own Healthchecks check, [Dead-man alerts](#dead-man-alerts-audit-2-77-717)); from close minus 4 min to the close: sell the intraday shares only. Before 0019 (0006/0017): `DELETE /v2/positions?cancel_orders=true` at close minus 4 min, i.e. the whole account |
 
 Restart and recovery (crash, 10-minute outage, API outage, half-written order, two engines): see
 [outage_drill.md](outage_drill.md) and `scripts/outage_drill.sh`.
@@ -200,6 +200,51 @@ and the paper account's own figure), the ±30 min event blackout (FOMC 14:00; CP
     on the last listed day of 2028).
   It is an alert only: nothing is halted before `covers_until` passes. If the holiday table cannot be read, the
   session starts as usual and the table is read again at the next session start.
+
+## Dead-man alerts (audit 2 7.7, #717)
+
+Before migration 0051 the dead-man wrote a `kaibot.halt` row and sent nothing off the box. A dead-man that had
+itself stopped alerted nobody: the cron job gone or failing, pg_net down, the function raising, or the paper keys
+gone from Vault. Since 0051 the one pg_cron job `kaibot_deadman` runs `kaibot.deadman_tick()`. The tick runs
+`kaibot.deadman_check()` unchanged, then pings a **Healthchecks.io check of the dead-man's own** through pg_net.
+
+| Ping | When |
+|---|---|
+| success | every run (once a minute, 13:00-21:59 UTC on weekdays) when the check ran, both paper keys are in Vault and nothing is wrong: `engine alive`, `market closed`, `weekend`, `market holiday` |
+| fail, `kaibot dead-man halt: ...` | the run wrote a dead-man halt row (`engine silent ...`, or `... no paper keys in Vault ...`) |
+| fail, `kaibot dead-man acting, ...` | every run while it acts on a silent engine (reading the account, waiting for the broker's answers, acting). The check stays red until the engine beats again |
+| fail, `... no Alpaca paper keys in Vault ...` | on **every** run while a key is missing or empty, the engine alive or not. Before, a missing key was found only after the engine had gone silent |
+| fail, `kaibot dead-man FAILED: ...` | `kaibot.deadman_check` raised. Its work of that minute is rolled back, as a failed cron run's was before |
+| none | the job does not run or fails before the tick starts: the job is deleted or inactive, pg_cron or pg_net's worker is down, Supabase is down, or the tick itself is missing. The check turns red after its grace time. That is the dead-man's own failure, caught off the box |
+
+Healthchecks alerts once when the check turns red, and once when it turns green again. A ping that pg_net cannot
+queue is dropped and never stops the dead-man. Without the URL in Vault nothing is sent, and the tick is the check
+and nothing more.
+
+**Setup (owner, once, after applying 0051; about 5 minutes):**
+1. On healthchecks.io, add a check named `kaibot dead-man`. Schedule: **Cron**, expression `* 13-21 * * 1-5`, time zone
+   **UTC**, grace **10 minutes**. Under Integrations keep e-mail on and add the phone. The Healthchecks.io app,
+   Pushover, ntfy or Telegram give a push on the phone; any webhook integration works too. Copy its ping URL.
+2. In the Supabase SQL editor (never in chat or the repo):
+   ```sql
+   select vault.create_secret('https://hc-ping.com/<the dead-man check uuid>', 'kaibot_deadman_healthchecks_url');
+   ```
+3. Within two minutes, during 13:00-21:59 UTC on a weekday, the check turns green. Outside those hours,
+   `select kaibot.deadman_tick();` in the SQL editor sends one ping by hand.
+
+**Drill: a disabled Vault key produces an alert.** Do it on a weekday after the close, 16:05-16:55 ET (cron still
+runs until 21:59 UTC), with the engine running. Never do it in market hours: there the dead-man could not act
+while the key is off.
+```sql
+select vault.update_secret(id, new_name => 'kaibot_alpaca_paper_secret_drill') from vault.secrets
+ where name = 'kaibot_alpaca_paper_secret';
+select kaibot.deadman_tick();   -- 'market closed; no paper keys in Vault'; the phone gets "kaibot dead-man" down
+select vault.update_secret(id, new_name => 'kaibot_alpaca_paper_secret') from vault.secrets
+ where name = 'kaibot_alpaca_paper_secret_drill';
+select kaibot.deadman_tick();   -- 'market closed'; the check turns green
+```
+Record the time the alert reached the phone on #717. `tests/test_deadman_alerts.py` runs the same drill, and every
+ping above, on every pull request against a throwaway Postgres.
 
 ## Overnight-safe fail-safes (S80, #120)
 

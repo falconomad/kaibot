@@ -1,6 +1,6 @@
 # Pending production migrations
 
-Owner: backend-quant. Last checked against main on 25 Nov 2026 (0001-0047 applied; 0048, 0049 and 0050 pending). Pending: 0048 (step 35), 0049 (step 36), 0050 (step 37). Only the stakeholder applies production migrations
+Owner: backend-quant. Last checked against main on 25 Nov 2026 (0001-0047 applied; 0048, 0049, 0050 and 0051 pending). Pending: 0048 (step 35), 0049 (step 36), 0050 (step 37), 0051 (step 38). Only the stakeholder applies production migrations
 (or Product on his word).
 
 ## What production has now
@@ -49,6 +49,7 @@ Owner: backend-quant. Last checked against main on 25 Nov 2026 (0001-0047 applie
 - 0048: **pending** (step 35 below; the PR for #721, M19 8.3: invite hardening). After 0046. Additive; any time, also while the engine runs (the engine never touches auth.users, kaibot.invite or kaibot.profile). `kb_invite_check` answers `{"ok"}` only and ignores the email; `kb_invite_create` refuses an email with an account in one generic sentence; only the owner invites (`kaibot.can_invite`); the admit trigger holds the invite for the account it admits (`kaibot.invite.admitted_id`) and only that account's confirmation redeems it, never an expired invite. The dashboard works before and after it (the register page reads a reason when one comes; the member page shows the invite card only while `kb_me` says `can_invite`). Changes no trading behaviour.
 - 0049: **pending** (step 36 below; the PR for #723, M19 8.5). After 0007; independent of 0048 (numbered after it only). Additive; any time, also while the engine runs. `kb_overview` returns only the engine's heartbeat row (the dashboard reads no other process from it; kb_health keeps them all). The dashboard works before and after it. Changes no trading behaviour.
 - 0050: **pending** (step 37 below; the tape-multiday-fills PR, stakeholder bug of 26 Nov 2026: Activity's "Buys & sells" was empty). After 0009; independent of 0048 and 0049 (numbered after them only). Additive; any time, also while the engine runs. `kb_tape` also returns one fill item (`source: multi_day`) per `multi_day_fill` event of the run; a fill already in `kaibot.fill` for the same order is not repeated. The dashboard works before it (no multi-day rows on Activity) and after it. Changes no trading behaviour.
+- 0051: **pending** (step 38 below; the PR for #717, audit 2 7.7: the dead-man's own alerts). After 0019; independent of 0048-0050 (numbered after them only). Additive: `kaibot.deadman_check` and `deadman_act` are unchanged. The one pg_cron job `kaibot_deadman` runs `kaibot.deadman_tick()`, which runs the check and pings the dead-man's own Healthchecks.io check (URL in Vault, `kaibot_deadman_healthchecks_url`). Until that secret is stored nothing is sent and nothing changes. Any time, best outside 09:30-16:00 ET (it re-schedules the dead-man's job). Then the setup in [failsafe.md](failsafe.md#dead-man-alerts-audit-2-77-717). Changes no trading behaviour.
 
 ## Apply in this order
 
@@ -94,6 +95,7 @@ run it again. Do not reorder them.
 | 35 | `migrations/0048_invite_hardening.sql` (whole file, one transaction; the PR for #721). After 0046. Any time | `kaibot.invite.admitted_id`; `kaibot.can_invite` owner only (a member can no longer create, list or revoke invites; `kb_me.can_invite` false for them); `kb_invite_create` says "an invite can't be made for this email" for an email with an account; `kb_invite_check` answers `{"ok": bool}` only, the email ignored; the admit trigger writes `admitted_id`, the redeem trigger redeems only the invite held for the confirming account and unexpired. One apply-time update holds the open invite of a sign-up made before 0048 and not yet confirmed | No: `add column if not exists`, `create or replace function`, `revoke` and `grant`; `update kaibot.invite` once at apply time (`admitted_id` of open invites of unconfirmed accounts) and inside the triggers and `kb_invite_revoke` |
 | 36 | `migrations/0049_overview_engine_heartbeat.sql` (whole file; the PR for #723). After 0007. Any time | `public.kb_overview` re-created with one line changed: `heartbeat` is the engine's row only (`where h.process = 'engine'`); every other key is 0007's | No: one `create or replace function`, one revoke, one grant |
 | 37 | `migrations/0050_tape_multiday_fills.sql` (whole file; the tape-multiday-fills PR). After 0009. Any time | `public.kb_tape` re-created with one more union branch: a 'fill' item per `multi_day_fill` event of the run (side, qty, px, symbol, rule, coid; a sale's reason from the payload, else stop/flatten from the order id's purpose, else the decision's sell code), skipped when malformed or when `kaibot.fill` has the same order; the signal and intraday-fill branches are 0009's | No: one `create or replace function`, one revoke, one grant |
+| 38 | `migrations/0051_deadman_alerts.sql` (whole file, one transaction; the PR for #717). After 0019. Any time, best outside 09:30-16:00 ET: `psql "$DATABASE_URL" -X -1 -v ON_ERROR_STOP=1 -P pager=off -f migrations/0051_deadman_alerts.sql` | `kaibot.deadman_ping` and `kaibot.deadman_tick` (security definer, not callable by anon or authenticated); `cron.schedule('kaibot_deadman', '* 13-21 * * 1-5', 'select kaibot.deadman_tick()')` updates the one job's command (same name and schedule). The tick runs `deadman_check()` unchanged and sends success, or `/fail` with the reason: a dead-man halt, the dead-man acting, paper keys missing from Vault (checked on every run), or the check raising | No: `create or replace function`, `revoke`, and `cron.schedule` of the existing job name (its `net.http_post` is a Healthchecks ping, sent only once the URL is in Vault) |
 
 0020 is #247's (multi-day dashboard data, open). 0020 and 0021 do not depend on each other: apply them in either order.
 
@@ -190,6 +192,10 @@ select prosrc like '%admitted_id = new.id%' from pg_proc where proname = 'invite
 select prosrc not like '%profile p%' from pg_proc where proname = 'can_invite';                   -- true
 select count(*) from kaibot.invite i where i.used_at is null and i.revoked_at is null and i.expires_at > now()
    and i.invited_by not in (select user_id from kaibot.owner);   -- open invites members made before 0048 (revoke if unwanted)
+-- step 38 (0051): the dead-man's job runs the tick; the tick is not for anon or authenticated
+select command from cron.job where jobname = 'kaibot_deadman';                                     -- select kaibot.deadman_tick()
+select has_function_privilege('authenticated', 'kaibot.deadman_tick(timestamptz)', 'execute');   -- false
+select kaibot.deadman_tick();         -- outside market hours: market closed (a success ping once the URL is in Vault)
 -- step 37 (0050): the tape lists the multi-day fills
 select prosrc like '%multi_day_fill%' from pg_proc where proname = 'kb_tape';                         -- true
 -- step 36 (0049): kb_overview sends the engine's heartbeat only
