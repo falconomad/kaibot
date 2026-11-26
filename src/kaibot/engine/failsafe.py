@@ -304,13 +304,14 @@ class ReadOnlyJournal:
 
         if not self.path.exists():
             raise FileNotFoundError(self.path)
-        from kaibot.engine.journal import SUM_COLUMNS, checked
+        from kaibot.engine.journal import SUM_COLUMNS, checked, entry_has_sums
 
         db = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=2.0)
         try:
             # #496: a journal with checksums is checked here too (a changed entry raises, and the watchdog reads
-            # the ledger rows in Supabase instead); a file from before them reads as it always did
-            sums = "sum" in {r[1] for r in db.execute("pragma table_info(entry)")}
+            # the ledger rows in Supabase instead); a file from before them reads as it always did. #770: only a
+            # file that is one; a damaged schema that hides the `sum` column raises JournalCorrupt, not unchecked
+            sums = entry_has_sums(db)
             # #543: `not indexed`: a damaged kind index must not hide an entry from the watchdog, which opens no
             # `Journal` and so runs no structure check; the scan reads the rows the checksums protect
             q, args = (f"select {SUM_COLUMNS if sums else 'seq, ts, kind, body'} from entry not indexed "

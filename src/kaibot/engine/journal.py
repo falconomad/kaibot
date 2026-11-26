@@ -144,6 +144,44 @@ def check_entry(prev: str | None, seq: int, ts: str, kind: str, body: str, sum_:
             "'Checksums'.")
 
 
+# #770: the `entry` table as `pragma table_info` gives it (name, declared type, not null, primary key): what SCHEMA
+# creates, and what a journal from before the checksums (#496) has (the same without `sum`). Nothing else is a journal
+ENTRY_COLUMNS = (("seq", "INTEGER", 0, 1), ("ts", "TEXT", 1, 0), ("kind", "TEXT", 1, 0), ("body", "TEXT", 1, 0),
+                 ("sum", "TEXT", 0, 0))
+
+
+def entry_has_sums(db: sqlite3.Connection) -> bool:
+    """#770: True for a journal whose entries carry checksums, False for one from before them; JournalCorrupt for
+    any other `entry` table. A damaged byte in the file's schema (`sqlite_master`) can rename the `sum` column
+    (`body text not null,\\n  sum  text` read as a column `U` of type `sum  text`); taken for an older file, the
+    journal added a new, empty `sum` column and moved the cut-over past every entry: all of them were then accepted
+    without their checksums. A file that already recorded its cut-over (`meta.checksum_from`) had checksums, so
+    it is refused too when they are gone. Read-only: nothing is written to a file that is refused."""
+    try:
+        cols = tuple((str(r[1]), str(r[2]).upper(), int(r[3]), int(r[5]))
+                     for r in db.execute("pragma table_info(entry)"))
+        if cols == ENTRY_COLUMNS:
+            return True
+        cut = ident = None
+        if db.execute("select 1 from sqlite_master where type = 'table' and name = 'meta'").fetchone():
+            cut = db.execute("select v from meta where k = 'checksum_from'").fetchone()
+            ident = db.execute("select v from meta where k = 'journal_id'").fetchone()
+    except sqlite3.DatabaseError as e:
+        raise JournalCorrupt(f"the journal file cannot be read: {e}") from e
+    if not cols and cut is None and ident is None:
+        return True  # a new file: SCHEMA creates the table with its checksums
+    if cols == ENTRY_COLUMNS[:4] and cut is None:
+        return False
+    if not cols:  # a journal whose entry table is gone (a damaged name): never started again as an empty one
+        raise JournalCorrupt("the journal file is damaged: it has an identity and no entry table. Not folded. "
+                             "See docs/ops/ledger.md, 'Checksums'.")
+    raise JournalCorrupt(
+        "the journal file is damaged: its entry table is not the journal's (columns "
+        + ", ".join(f"{n} {t}" for n, t, _, _ in cols)[:200]
+        + ("; it recorded a checksum cut-over, so its entries had checksums" if cut is not None else "")
+        + "). Not folded. See docs/ops/ledger.md, 'Checksums'.")
+
+
 # an entry with its checksum and the checksum of the entry before it (None: the first one)
 SUM_COLUMNS = ("seq, ts, kind, body, sum, "
                "(select p.sum from entry p where p.seq < entry.seq order by p.seq desc limit 1)")
@@ -190,8 +228,13 @@ class Journal:
                 self.db.execute("pragma fullfsync=1")
                 self.db.execute("pragma checkpoint_fullfsync=1")
             self._assert_durable()
-            self.db.executescript(SCHEMA)
-            self._sum_from = self._checksum_cutover()
+            try:
+                entry_has_sums(self.db)  # #770: before SCHEMA writes anything to a file that is not a journal
+                self.db.executescript(SCHEMA)
+                self._sum_from = self._checksum_cutover()
+            except (JournalCorrupt, sqlite3.DatabaseError):
+                self.db.close()
+                raise
             if self.meta("journal_id") is None:  # a new file: a new identity, written once
                 jid = uuid.uuid4()
                 self.db.execute("insert or ignore into meta (k, v) values ('journal_id', ?), ('epoch', ?), "
@@ -210,8 +253,9 @@ class Journal:
     def _checksum_cutover(self) -> int:
         """#496: the first entry number that must carry a checksum, recorded once in `meta.checksum_from`. A file
         written before checksums gets the column now and keeps its entries as they are: they are accepted without
-        one, and every entry appended from here on is protected. Column and record are one transaction."""
-        if "sum" not in {r[1] for r in self.db.execute("pragma table_info(entry)")}:
+        one, and every entry appended from here on is protected. Column and record are one transaction.
+        #770: only a file that IS such an older journal (`entry_has_sums`); any other entry table is refused."""
+        if not entry_has_sums(self.db):
             self.db.execute("begin immediate")
             try:
                 self.db.execute("alter table entry add column sum text")

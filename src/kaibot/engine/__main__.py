@@ -20,6 +20,7 @@ import logging
 import os
 import signal
 import socket
+import sqlite3
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -337,6 +338,13 @@ def open_journal(path) -> Journal:
         return Journal(path)
     except (DurabilityError, JournalCorrupt) as e:  # #496: an entry that fails its checksum is never folded
         log.error("%s", e)
+        raise SystemExit(EXIT_JOURNAL) from None
+    except sqlite3.DatabaseError as e:
+        # #770: a file SQLite itself cannot read ("malformed database schema", "file is not a database") is a
+        # damaged journal too; a passing state (OperationalError: locked, busy) is not, and is raised as it is
+        if type(e) is not sqlite3.DatabaseError:
+            raise
+        log.error("the journal file cannot be read: %s. Not folded. See docs/ops/ledger.md, 'Checksums'.", e)
         raise SystemExit(EXIT_JOURNAL) from None
 
 

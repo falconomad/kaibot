@@ -169,3 +169,64 @@ def test_the_engine_exits_with_the_journal_code_on_a_corrupted_journal(tmp_path,
         M.open_journal(path)
     assert e.value.code == M.EXIT_JOURNAL
     assert "entry 4" in caplog.text and "checksum" in caplog.text
+
+
+def _schema(path, old, new):
+    """#770: one damaged byte in the file's schema (`sqlite_master`), as the nightly fuzzing found it."""
+    raw = path.read_bytes()
+    assert raw.count(old) == 1
+    path.write_bytes(raw.replace(old, new))
+
+
+def test_a_damaged_schema_that_hides_the_checksums_is_refused_not_taken_for_an_older_journal_770(tmp_path, caplog):
+    """#770: `body text not null,\\n  sum  text` with the newline damaged into `U` read as a column `U` and no `sum`:
+    the journal took the file for one from before checksums, added an empty `sum` and accepted every entry
+    unchecked (a changed time read back as written). Refused at open, exit code 4, the file left as it was."""
+    from kaibot.engine import __main__ as M
+
+    path, j = _journal(tmp_path)
+    j.close()
+    _raw(path, "update entry set ts = '2020-01-01T00:00:00+00:00' where seq = 2")
+    _schema(path, b"body text not null,\n  sum  text", b"body text not null,U  sum  text")
+    before = path.read_bytes()
+    with pytest.raises(JournalCorrupt, match="entry table is not the journal's"):
+        Journal(path)
+    with pytest.raises(JournalCorrupt, match="entry table is not the journal's"):
+        failsafe.ReadOnlyJournal(path).entries()
+    with pytest.raises(SystemExit) as e:
+        M.open_journal(path)
+    assert e.value.code == M.EXIT_JOURNAL and "cut-over" in caplog.text
+    assert path.read_bytes() == before  # nothing written to a refused file (no `alter table`, no schema)
+
+
+def test_a_journal_whose_entry_table_lost_its_name_is_not_started_as_an_empty_one_770(tmp_path, caplog):
+    """#770: with its triggers and index the damaged name is SQLite's own refusal (a malformed schema); without
+    them the journal's (it has an identity). Either way exit code 4 at start, the file left as it was."""
+    from kaibot.engine import __main__ as M
+
+    for bare in (False, True):
+        path, j = _journal(tmp_path / str(bare))
+        j.close()
+        db = sqlite3.connect(path, isolation_level=None)
+        if bare:
+            for name in ("entry_no_update", "entry_no_delete"):
+                db.execute(f"drop trigger {name}")
+            db.execute("drop index entry_kind_seq")
+        db.execute("pragma writable_schema = 1")  # the table's name damaged in the schema
+        db.execute("update sqlite_master set name = 'entrz', tbl_name = 'entrz', sql = replace(sql, 'TABLE entry', "
+                   "'TABLE entrz') where name = 'entry'")
+        db.close()
+        before = path.read_bytes()
+        with pytest.raises((JournalCorrupt, sqlite3.DatabaseError), match="no entry table|malformed"):
+            Journal(path)
+        with pytest.raises(SystemExit) as e:
+            M.open_journal(path)
+        assert e.value.code == M.EXIT_JOURNAL
+        assert path.read_bytes() == before
+
+
+def test_an_older_journal_is_still_taken_for_one_and_a_new_file_still_opens_770(tmp_path):
+    path = tmp_path / "old.sqlite"
+    old_journal(path, 5)
+    assert Journal(path).meta("checksum_from") == "6"
+    assert Journal(tmp_path / "new.sqlite").append("note", {"i": 1}) == 1
