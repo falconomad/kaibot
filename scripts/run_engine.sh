@@ -106,7 +106,8 @@ if [ "$CHECK" = 0 ]; then ./scripts/engine_guard.sh || exit 1; fi
 
 if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }; then
   echo "Starting with Docker…"
-  docker build -q -t kaibot-engine --build-arg CODE_SHA="$CODE_SHA" . >/dev/null
+  docker build -q -t kaibot-engine --build-arg CODE_SHA="$CODE_SHA" \
+    --build-arg BUILD_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)" . >/dev/null
   if [ "$CHECK" = 0 ] && ! docker ps -q -f name=^kaibot-watchdog$ | grep -q .; then
     docker run -d --rm --name kaibot-watchdog -e KAIBOT_ENV_FILE=/secrets/.env -v "$ENV_FILE:/secrets/.env:ro" \
       -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine.watchdog >/dev/null && echo "Watchdog started (container kaibot-watchdog)."
@@ -119,7 +120,8 @@ if [ "$MODE" = docker ] || { [ "$MODE" = auto ] && command -v docker >/dev/null 
   DAILY_MOUNT=()
   [ -d "$DAILY_HOST/daily" ] && DAILY_MOUNT=(-v "$DAILY_HOST/daily:/kaibot-daily/daily:ro" -e KAIBOT_DAILY_DATA=/kaibot-daily)
   finish docker run --rm --name kaibot-engine -e KAIBOT_ENV_FILE=/secrets/.env ${DAILY_MOUNT[@]+"${DAILY_MOUNT[@]}"} \
-    -v "$ENV_FILE:/secrets/.env:ro" -v "$PWD/data/live:/data" kaibot-engine python -m kaibot.engine ${ARGS[@]+"${ARGS[@]}"}
+    -v "$ENV_FILE:/secrets/.env:ro" -v "$PWD/data/live:/data" kaibot-engine sh /app/scripts/engine_entry.sh \
+    ${ARGS[@]+"${ARGS[@]}"}  # #727: the image's entry (the promotion check, then python -m kaibot.engine)
 else
   PY="$(command -v python3.13 || command -v python3.12 || command -v python3 || true)"
   if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then

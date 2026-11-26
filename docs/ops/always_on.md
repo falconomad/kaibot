@@ -128,6 +128,33 @@ annotated or signed) or whose commit is not on `main` (`origin/main`), at the pi
 - With a pin, `~/Projects/kaibot` is on a detached HEAD. That is normal; `git checkout main` gets you back for
   reading code, and the next start checks the pin out again.
 
+**Engine images: only the promoted build starts (M20 9.3, #727; the VM).** On a host that runs the engine as a
+Docker image instead of from a checkout, the pin above is not enough: a container could run any image. So:
+
+- **The image is built from the tag, never from the working directory:** `./scripts/build_image.sh rel-20261126-1`
+  (or `--latest`). It refuses what `release.sh` refuses (lightweight, off main; `./scripts/release.sh --verify <tag>`
+  asks the same question alone), builds from `git archive <tag>` (local edits and untracked files never reach it),
+  and tags `kaibot-engine:<tag>` and `kaibot-engine:latest`. The image carries the release as `KAIBOT_CODE_SHA`
+  (`rel-…@abc1234`, recorded in every heartbeat: `code_sha`, also in the "starting" and "error" beats) and the full
+  commit as `KAIBOT_BUILD_COMMIT` and the label `org.opencontainers.image.revision`. CI builds the same way: the
+  **image** workflow (`.github/workflows/image.yml`; Actions > image > Run workflow with the tag) builds a release
+  from its tag and checks the start below; it also runs on every pull request that touches the image's files. It
+  pushes nothing (a registry is the cloud move's, January).
+- **The host's promotion is a file:** pinning a tag (`./scripts/release.sh <tag>` or `--latest`) also writes
+  `data/live/promoted` (`<tag> <full commit>`), the container's `/data/promoted`; `main` and `--clear` remove it.
+  `--show` prints it.
+- **The image's start checks it** (`scripts/engine_entry.sh`, the image's `CMD`; `run_engine.sh --docker` starts it
+  too). With `KAIBOT_REQUIRE_PROMOTED=1` (the VM's `.env`; the process environment wins; default `0`, the Mac) an
+  image whose commit is not the promoted one, or that was not built from a release (`docker compose up --build`
+  builds one without a commit), **does not start: exit code 6**, a `REFUSED:` line naming both commits, no lease, no
+  broker call. Anything but `0`/`1` is refused too, so a typo cannot switch the check off. `--check` (read-only) runs
+  on any build. The watchdog's container is not checked (it trades nothing but protection).
+- **Deploy:** `./scripts/release.sh --latest && ./scripts/build_image.sh --latest`, then restart the engine
+  container. **Roll back:** `./scripts/release.sh <previous tag> && ./scripts/build_image.sh <previous tag>`, restart.
+  Between the two commands a restart is refused (exit 6), never run on the other build. The drill is
+  `tests/unit/test_release_promotion.py::test_deploy_and_rollback_drill`; on the VM it is a step of the cloud move's
+  runbook.
+
 **Unpinned: `KAIBOT_FOLLOW_MAIN`.** With nothing pinned (or `./scripts/release.sh main`, `--clear`,
 `KAIBOT_RELEASE=main`) a start pulls and runs `main`, **only while `KAIBOT_FOLLOW_MAIN=1`**. Product decision
 (26 Nov 2026): the default is `1` for now, because the stakeholder wants fast deploys (#600). Every unpinned start

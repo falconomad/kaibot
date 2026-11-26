@@ -481,7 +481,7 @@ def test_run_engine_default_is_unchanged(repo):
     assert built_sha(tmp) == rev(r) == rev(r, "main")
     assert (r / "data/live/running_release").read_text().split()[0] == rev(r)
     run = [c for c in (tmp / "docker.calls").read_text().splitlines() if c.startswith("run --rm --name kaibot-engine")]
-    assert run and run[-1].endswith("python -m kaibot.engine")
+    assert run and run[-1].endswith("sh /app/scripts/engine_entry.sh")  # #727: the image's entry, then the engine
 
 
 def test_run_engine_trades_the_pinned_tag(repo):
@@ -627,7 +627,7 @@ def test_run_engine_check_is_allowed_beside_the_service(fake_service):
     r, env, tmp, _ = fake_service
     sh(["bash", "scripts/run_engine.sh", "--docker", "--check"], r, env, check=True)
     calls = (tmp / "docker.calls").read_text().splitlines()
-    assert [c for c in calls if c.endswith("python -m kaibot.engine --check")]
+    assert [c for c in calls if c.endswith("sh /app/scripts/engine_entry.sh --check")]
     assert not [c for c in calls if "kaibot-watchdog" in c]
 
 
@@ -1436,7 +1436,7 @@ def test_check_reports_the_macs_sleep_settings_and_passes_with_sleep_0_on_ac(pms
     assert "  displaysleep         10" in x.stdout and "system sleep on AC power: 0 (never): ok" in x.stdout
     assert "FAILED" not in x.stdout
     run = [c for c in (tmp / "docker.calls").read_text().splitlines() if c.startswith("run --rm --name kaibot-engine")]
-    assert run[-1].endswith("python -m kaibot.engine --check")  # the engine's own check ran first, as before
+    assert run[-1].endswith("sh /app/scripts/engine_entry.sh --check")  # the engine's own check ran first, as before
 
 
 @pytest.mark.parametrize("ac, now", [("10", "0"), ("1", "1")])
