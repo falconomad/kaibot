@@ -49,11 +49,13 @@ class HelperError(RuntimeError):
         self.status = status
 
 
-def helper_env(path: str | None = None) -> dict[str, str] | None:
+def helper_env(path: str | None = None, keep_trading: bool = False) -> dict[str, str] | None:
     """The helper settings from the helpers' env file (`path`, else $KAIBOT_HELPER_ENV_FILE, else
     ~/Projects/kaibot-secrets/helper.env), or None when there is no such file (the helper path is not set up yet).
     The file is read into a dict, not into os.environ. A file that holds a service key is refused: the point of the
-    file is that the process reading it cannot have that key."""
+    file is that the process reading it cannot have that key.
+    #712: the trading pair (the setup before data.env) is skipped, unless `keep_trading` (only the price relay asks,
+    and only while there is no data.env: Product, 26 Nov 2026, nothing stops before the owner's setup)."""
     p = Path(os.path.expanduser(path or os.environ.get(HELPER_ENV) or DEFAULT_HELPER_ENV))
     if not p.exists():
         return None
@@ -61,8 +63,8 @@ def helper_env(path: str | None = None) -> dict[str, str] | None:
     for line in p.read_text().splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             k, v = line.split("=", 1)
-            if k.strip() in TRADING_NAMES:
-                continue  # #712: never kept
+            if k.strip() in TRADING_NAMES and not keep_trading:
+                continue  # #712: not kept
             env[k.strip()] = v.split(" #")[0].strip().strip('"').strip("'")
     if any(env.get(k) for k in SERVICE_NAMES):
         raise SystemExit(f"{p} holds a Supabase service key: remove it (the helpers' file must not have it)")

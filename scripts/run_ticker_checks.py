@@ -9,11 +9,12 @@ budgets of config/sources.yaml. Run it next to the engine (it is a separate proc
 
 Without --once it polls every 5 seconds, so a check on the Strategy page answers within a few seconds.
 
-Keys (audit 2 7.2, #712; docs/ops/secrets.md). Alpaca: ONLY the market-data pair of the second, empty paper account
-(data.env; common/secret_files.py), for the asset record and the bars. From the engine's .env it keeps only
-SUPABASE_URL, the Supabase service key (it answers kaibot.ticker_check rows; no helper function for them yet) and
-FINNHUB_API_KEY: the trading pair's values are never sliced out of their lines or kept, so this process never
-holds the trading key."""
+Keys (audit 2 7.2, #712; docs/ops/secrets.md). With data.env: Alpaca with ONLY the market-data pair of the second,
+empty paper account (common/secret_files.py), for the asset record and the bars; from the engine's .env it keeps
+only SUPABASE_URL, the Supabase service key (it answers kaibot.ticker_check rows; no helper function for them yet)
+and FINNHUB_API_KEY: the trading pair's values are never sliced out of their lines or kept, so this process never
+holds the trading key. Without data.env (Product, 26 Nov 2026: nothing stops before the owner's setup): as before
+#712, the engine's .env and its paper trading key, with a WARNING."""
 
 from __future__ import annotations
 
@@ -63,6 +64,16 @@ def load_keys(env_file: str, data_file: str | None) -> dict[str, str]:
             "service_key": service, "finnhub": env.get("FINNHUB_API_KEY", "")}
 
 
+def legacy_keys(env_file: str) -> dict[str, str]:
+    """Before data.env exists (Product, 26 Nov 2026): the worker's settings as before #712, from the engine's .env."""
+    os.environ.setdefault("KAIBOT_ENV_FILE", env_file)
+    from kaibot.engine.config import Settings
+
+    st = Settings.from_env()  # paper endpoint only; a live URL is refused
+    return {"alpaca_key": st.alpaca_key, "alpaca_secret": st.alpaca_secret, "supabase_url": st.supabase_url,
+            "service_key": st.supabase_service_key, "finnhub": os.environ.get("FINNHUB_API_KEY", "")}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--env", default=os.path.expanduser("~/Projects/kaibot-secrets/.env"))
@@ -70,13 +81,19 @@ def main() -> None:
     ap.add_argument("--once", action="store_true", help="answer what is pending, then exit")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    from kaibot.common.secret_files import data_env_path
     from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
     from kaibot.engine.store import Store
 
-    k = load_keys(a.env, a.data_env)  # never the trading pair (#712)
+    if data_env_path(a.data_env).exists():
+        k = load_keys(a.env, a.data_env)  # never the trading pair (#712)
+        log.info("ticker checks: Alpaca with the market-data key of the second paper account (no trading key here)")
+    else:
+        k = legacy_keys(a.env)
+        log.warning("WARNING: no market-data key file (%s): the ticker checks still use the paper TRADING key, as "
+                    "before #712. Set up data.env (docs/ops/secrets.md, 'The data key')", data_env_path(a.data_env))
     broker, data = AlpacaPaper(k["alpaca_key"], k["alpaca_secret"]), AlpacaData(k["alpaca_key"], k["alpaca_secret"])
     store = Store(k["supabase_url"], k["service_key"])
-    log.info("ticker checks: Alpaca with the market-data key of the second paper account (no trading key here)")
     kw = {"asset_fn": broker.asset,
           "bars_fn": lambda s, start, end: data.bars([s], start, end, feed="sip", timeframe="1Day").get(s),
           "industry_fn": finnhub_industry(k["finnhub"] or None)}

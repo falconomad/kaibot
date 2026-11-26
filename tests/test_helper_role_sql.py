@@ -68,9 +68,14 @@ def test_the_relay_and_the_publisher_never_read_the_service_key_on_the_helper_pa
     branch, after `helper_env(...)` returned None."""
     relay = (ROOT / "scripts" / "price_stream.py").read_text()
     build = relay[relay.index("def build_http"):relay.index("def main()")]
-    # #712: no fallback branch any more: the relay never opens the engine's .env (no service key, no trading key)
-    assert "helper_env(" in build and "data_keys(" in build
-    assert not any(x in build for x in ("SERVICE", "os.environ", "load_env_file", "ALPACA_API_KEY"))
+    # #712: the data.env branch (before the WARNING of the old path) reads no service key, no trading key, no .env
+    data_branch = build[build.index("if data_env_path(data_file).exists():"):build.index('log.warning("WARNING: no')]
+    assert "helper_env(helper_file)" in data_branch and "data_keys(" in data_branch
+    assert not any(x in data_branch for x in ("SERVICE", "os.environ", "load_env_file", "ALPACA_API_KEY",
+                                              "keep_trading"))
+    old_path = build[build.index('log.warning("WARNING: no'):]
+    helper_branch = old_path[:old_path.index("load_env_file(env_file)")]
+    assert "helper_env(" in helper_branch and "SERVICE" not in helper_branch and "os.environ" not in helper_branch
     pub = (ROOT / "scripts" / "publish_notices.py").read_text()
     main = pub[pub.index("def main("):]
     assert main.index("helper_env(") < main.index("SUPABASE_SERVICE_KEY")

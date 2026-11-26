@@ -9,7 +9,7 @@ it reads. Keep it in step when a process or a key changes.
 | File | Holds | Read by |
 |---|---|---|
 | `.env` | the **trading pair** `ALPACA_API_KEY` / `ALPACA_SECRET` of the real paper account; `SUPABASE_SERVICE_KEY`; `FRED_API_KEY`, `FINNHUB_API_KEY`, `ANTHROPIC_API_KEY`, `SEC_USER_AGENT`, `HEALTHCHECKS_PING_URL`, the other data keys of `.env.example`; the `KAIBOT_*` settings | the engine, the watchdog, the alarm pinger, the nightly job and the hand-run scripts below |
-| `helper.env` | the helper sign-in: `SUPABASE_PUBLISHABLE_KEY` (not secret), `SUPABASE_HELPER_EMAIL`, `SUPABASE_HELPER_PASSWORD`; optional `SUPABASE_URL`. **No Alpaca key** since #712; a service key is refused | the price relay, the notice job, `shadow_results.py`, `run_ablation.py --supabase`, `helper_check.py` ([helper_role.md](helper_role.md)) |
+| `helper.env` | the helper sign-in: `SUPABASE_PUBLISHABLE_KEY` (not secret), `SUPABASE_HELPER_EMAIL`, `SUPABASE_HELPER_PASSWORD`; optional `SUPABASE_URL`. Until `data.env` works it may still hold the trading pair (the setup before #712: only the price relay reads it, and only while there is no `data.env`); the owner deletes those lines once `data.env` works (setup step 7). A service key is refused | the price relay, the notice job, `shadow_results.py`, `run_ablation.py --supabase`, `helper_check.py` ([helper_role.md](helper_role.md)) |
 | `data.env` (#712) | the **data pair** `ALPACA_DATA_KEY` / `ALPACA_DATA_SECRET` of a **second, empty Alpaca paper account**. A trading pair or a service key in it is refused | the price relay, the ticker-check worker, `data_key_check.py` |
 | `runner_gh_token` (#711) | the research runner's fine-grained GitHub token | the research runner only ([research_runner.md](research_runner.md)) |
 | Supabase Vault | `kaibot_alpaca_paper_key_id`, `kaibot_alpaca_paper_secret`: the trading pair again | the database dead-man (pg_cron), which must cancel and sell on the real paper account when the Mac is gone ([failsafe.md](failsafe.md)) |
@@ -30,8 +30,8 @@ stream connection, so the relay no longer competes with anything on the trading 
 | Engine (`python -m kaibot.engine`) | `run_engine.sh`, under the always-on service (`com.kaibot.engine`) | `.env`: the trading pair, the service key, FRED, Finnhub, Anthropic (agent room), SEC user agent | `helper.env`, `data.env`, the runner token |
 | Watchdog (`kaibot.engine.watchdog`) | started by `run_engine.sh` beside the engine | `.env`: the trading pair (cancels entries, keeps stops), the service key | the others |
 | Alarm pinger (`scripts/healthcheck.py`) | beside the engine (`service_run.sh`) and in the nightly job | `.env`: `HEALTHCHECKS_PING_URL` only | everything else |
-| **Ticker-check worker** (`scripts/run_ticker_checks.py`) | beside the engine (`service_run.sh`) | `data.env`: the **data pair** (asset record, daily bars); `.env`: only `SUPABASE_URL`, the service key (it answers `kaibot.ticker_check` rows: no helper function for them yet) and `FINNHUB_API_KEY`. The trading pair's values are never sliced out of their lines or kept (`common/secret_files.read_names`); the file's text passes through memory once while it is read | **the trading pair** (#712); `helper.env`; the runner token |
-| **Price relay** (`scripts/price_stream.py`) | beside the engine when `KAIBOT_PRICE_STREAM=on` | `helper.env` (signs in as the helper; held stocks through `kb_helper_held_symbols`, migration 0053; heartbeat and broadcast through 0038) and `data.env` (the **data pair**: the clock and the IEX stream). Without either file it doesn't start | **the `.env`** (the trading pair and the service key, #712); the runner token. In Docker the box gets only the two files |
+| **Ticker-check worker** (`scripts/run_ticker_checks.py`) | beside the engine (`service_run.sh`) | **With `data.env`:** `data.env`: the **data pair** (asset record, daily bars); `.env`: only `SUPABASE_URL`, the service key (it answers `kaibot.ticker_check` rows: no helper function for them yet) and `FINNHUB_API_KEY`. The trading pair's values are never sliced out of their lines or kept (`common/secret_files.read_names`); the file's text passes through memory once while it is read. **Without `data.env`** (until the owner's setup): the `.env` and its trading pair, as before #712, with a `WARNING` at each start in `ticker_checks.log` | with `data.env`: **the trading pair** (#712); always: `helper.env`, the runner token |
+| **Price relay** (`scripts/price_stream.py`) | beside the engine when `KAIBOT_PRICE_STREAM=on` | **With `data.env`:** `helper.env` (signs in as the helper; held stocks through `kb_helper_held_symbols`, migration 0053; heartbeat and broadcast through 0038) and `data.env` (the **data pair**: the clock and the IEX stream); a trading pair still in `helper.env` is skipped; no `helper.env`, or a bad `data.env`, stops it (no fall-back). Until 0053 is applied it streams nothing (said once). **Without `data.env`** (until the owner's setup): as before #712, `helper.env` with its paper trading pair (held stocks by `GET /v2/positions`), else the `.env` with the service key, with a `WARNING` at each start in `price_stream.log` | with `data.env`: **the `.env`** and any trading pair (#712; in Docker the box gets only `helper.env` and `data.env`); always: the runner token |
 | Nightly job (`service_run.sh daily`) | `com.kaibot.daily` | `.env`: `fetch_daily.sh` reads the trading pair for SIP daily bars; the notice job (`publish_notices.py`) reads `helper.env` (else the service key) | |
 | Research runner (`scripts/research_runner.py`) | `com.kaibot.research-runner`, every 15 min | `runner_gh_token`, for GitHub only (#711). It never opens `.env`: a job marked `env` gets `--env <path>` and opens it itself | `.env`, `helper.env`, `data.env` |
 | Runner jobs (`ops/runner/allowed.yaml`) | the runner, one at a time | `shadow_results.py`, `run_ablation.py`: `helper.env`. Scripts marked `env` (the SEC and fundamentals fetchers): the one or two lines of `.env` they need | the runner token (never in a job's environment) |
@@ -58,19 +58,25 @@ and are the next candidates for `data.env`; they were not moved in #712.
    ( umask 077; printf 'ALPACA_DATA_KEY=%s\nALPACA_DATA_SECRET=%s\n' '<the second account key>' '<its secret>' > data.env )
    chmod 600 data.env
    ```
-4. **Take the trading pair out of `helper.env`**: delete its `ALPACA_API_KEY` and `ALPACA_SECRET` lines. Since
-   #712 they are skipped anyway; the check below fails until they are gone.
-5. **Check it** (prints no key; only GETs, no order):
+4. **Check it** (prints no key; only GETs, no order):
    ```bash
    cd ~/Projects/kaibot && PYTHONPATH=src python3 scripts/data_key_check.py
    ```
-   Every line `OK`: data.env holds the data pair only; helper.env holds no trading pair; the data pair signs in;
-   **the data account is not the trading account**; it holds no position; it reads market data.
-6. **Restart the service** outside 09:30-16:00 ET: `./scripts/service.sh restart`. `logs/ticker_checks.log` says
-   "market-data key of the second paper account (no trading key here)", and `logs/price_stream.log` says "signed in
-   as the helper with the market-data key".
+   Every line but one should be `OK`: data.env holds the data pair only; the data pair signs in; **the data account is
+   not the trading account**; it holds no position; it reads market data. The line "helper.env holds no trading pair"
+   stays `FAIL` until step 7.
+5. **Restart the service** outside 09:30-16:00 ET: `./scripts/service.sh restart`. From this start the two helpers
+   use the data key: `logs/ticker_checks.log` says "market-data key of the second paper account (no trading key
+   here)", and `logs/price_stream.log` says "signed in as the helper with the market-data key" (and, until 0053 is
+   applied, "migration 0053 is not applied ... streams nothing").
+6. **Watch one session**: ticker checks answer on the Strategy page, and (with 0053) the dashboard's prices stream.
+7. **Then take the trading pair out of `helper.env`**: delete its `ALPACA_API_KEY` and `ALPACA_SECRET` lines (they
+   are no longer read once `data.env` exists; nothing deletes them for you). Run `data_key_check.py` again: every
+   line `OK`.
 
-Until steps 2-3 are done, the ticker-check worker and the price relay **do not start** (each says so once in its
-log). The dashboard's ticker checks wait and its prices stay on the 10 s poll; the engine is not affected. To undo:
-there is no fallback to the trading key by design; set the files up, or leave both helpers off
-(`KAIBOT_TICKER_CHECKS=0`, `KAIBOT_PRICE_STREAM=off`).
+**Before the setup nothing stops (Product, 26 Nov 2026).** Without `data.env` the ticker-check worker and the price
+relay run exactly as before #712, on the paper trading key, and each start writes a `WARNING: no market-data key
+file ...` line in its log. The moment `data.env` exists, neither reads the trading key again: there is no fall-back
+from a `data.env` that is there but wrong (it stops the helper with a message), and with `data.env` but without
+0053 the relay streams nothing rather than read positions with the trading key (the dashboard keeps its 10 s
+prices). To go back deliberately: remove `data.env` and restart.

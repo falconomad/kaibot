@@ -79,9 +79,24 @@ def test_the_ticker_worker_never_holds_the_trading_pair(files, monkeypatch):
     assert not any(t in json.dumps(k) for t in TRADING)
     assert "ALPACA_API_KEY" not in os.environ and "KAIBOT_ENV_FILE" not in os.environ
     src = (ROOT / "scripts" / "run_ticker_checks.py").read_text()
-    assert "Settings.from_env" not in src and "load_env_file" not in src and "os.environ" not in src
+    body = src[src.index("def load_keys"):src.index("def legacy_keys")]
+    assert "Settings.from_env" not in body and "load_env_file" not in body and "os.environ" not in body
+    main = src[src.index("def main"):]
+    assert main.index("data_env_path(a.data_env).exists()") < main.index("load_keys(") < main.index("legacy_keys(")
     with pytest.raises(SystemExit, match="no market-data key file"):
         tc.load_keys(str(engine), str(data.with_name("none.env")))
+
+
+def test_without_data_env_the_ticker_worker_runs_as_before(files, monkeypatch):
+    """Product (26 Nov 2026): no data.env yet: the worker keeps the engine's .env and its paper keys, as before."""
+    engine, _, _ = files
+    monkeypatch.setattr(os, "environ", dict(os.environ))  # legacy_keys fills the environment, as before #712
+    for k in ("ALPACA_API_KEY", "ALPACA_SECRET", "SUPABASE_SERVICE_KEY", "KAIBOT_ENV_FILE", "FRED_API_KEY"):
+        os.environ.pop(k, None)
+    os.environ["FRED_API_KEY"] = "fred"
+    tc = load("run_ticker_checks")
+    k = tc.legacy_keys(str(engine))
+    assert (k["alpaca_key"], k["alpaca_secret"]) == TRADING and k["service_key"] == "sb_secret_engine"
 
 
 class Resp(io.BytesIO):

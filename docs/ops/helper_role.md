@@ -23,8 +23,8 @@ owner" function of migration 0002 answers only while there is no owner, and 0038
 owner row for a user listed as a helper. `tests/test_helper_role_sql.py` checks each of these on a scratch database.
 
 **Nothing changes for the notice job until you do the setup.** Without the helpers' env file it keeps using the
-engine's `.env` (it says "still on the service key" in its log). The price relay no longer has that fallback
-(#712): without `helper.env` and `data.env` it does not start ([secrets.md](secrets.md)).
+engine's `.env` (it says "still on the service key" in its log). The price relay too, until `data.env` exists
+(#712): from then on it uses only `helper.env` and `data.env` ([secrets.md](secrets.md)).
 
 ## One-time setup (stakeholder, about 10 minutes, any time)
 
@@ -56,8 +56,8 @@ file of step 3.
    Then `chmod 600 ~/Projects/kaibot-secrets/helper.env`. (The publishable key is not a secret: the dashboard's
    web page ships it.) **No Alpaca key here (audit 2 7.2, #712):** the relay's market-data key is the data pair of
    a second paper account in `data.env` ([secrets.md](secrets.md), "The data key"). The setup before #712 put the
-   trading pair in this file: delete those two lines; they are skipped since #712 and
-   `scripts/data_key_check.py` fails until they are gone.
+   trading pair in this file: the relay still reads it until `data.env` exists. Delete those two lines once
+   `data.env` works ([secrets.md](secrets.md), step 7); `scripts/data_key_check.py` reports them until then.
 4. **Check it.**
    ```
    cd ~/Projects/kaibot && git pull

@@ -377,12 +377,28 @@ def test_as_the_helper_only_the_clock_can_be_read_and_the_held_stocks_come_from_
             return [{"symbol": "XOM", "market_value": 3173.6}, {"symbol": "TMO", "market_value": 10.0}]
 
     helper = Helper()
-    h = ps.Http("dk", "ds", "https://x.supabase.co", None, helper=helper)
+    h = ps.Http("dk", "ds", "https://x.supabase.co", None, helper=helper, data_key=True)
     with pytest.raises(ValueError):
         h.alpaca_get("/v2/positions")
     rows = h.held_positions()
     assert helper.calls == [("kb_helper_held_symbols", {})]
     assert ps.pick_symbols(rows) == (["TMO", "XOM"], 0)
+    with pytest.raises(ValueError, match="only as the helper"):
+        ps.Http("dk", "ds", "https://x.supabase.co", "sb_secret_x", data_key=True)
+
+
+def test_with_the_data_key_and_0053_missing_nothing_is_streamed_and_it_is_said_once(caplog):
+    """The data key cannot read the trading account's positions, and the trading key must not be read once data.env
+    exists: until migration 0053 is applied the relay holds no symbol (the dashboard keeps its 10 s prices)."""
+    from kaibot.common.helper_session import HelperError
+
+    class NoFunction:
+        def rpc(self, fn, args):
+            raise HelperError(404, "Could not find the function public.kb_helper_held_symbols")
+
+    h = ps.Http("dk", "ds", "https://x.supabase.co", None, helper=NoFunction(), data_key=True)
+    assert h.held_positions() == [] and h.held_positions() == []
+    assert caplog.text.count("migration 0053 is not applied") == 1
 
 
 def test_only_two_paper_paths_can_be_read():
