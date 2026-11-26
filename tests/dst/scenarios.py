@@ -141,6 +141,37 @@ def calendar_fallback_regular_close(mp) -> None:
     mp.setattr(ld.LiveDaily, "_close", old_close)
 
 
+def lease_blip_drops_the_buy(mp) -> None:
+    """#735 taken away (audit 2, 5.8): a failed lease renewal is not tried again before an entry, and a buy the fence
+    refused for it counts as refused by the venue: not sent again that day."""
+    from kaibot.engine import lease
+
+    mp.setattr(lease, "FENCE_RETRY_WITHIN_S", -1.0)
+    mp.setattr(ld, "unproved", lambda reason: False)
+
+
+def refused_sale_not_sent_again(mp) -> None:
+    """#736 taken away (audit 2, 5.9): a sale the venue refused is not sent again that session (the target loop leaves
+    out every name with a refused sale of the session, as the send's "refused" set did for sales before #736)."""
+    from kaibot.engine.fence import unproved
+    from kaibot.engine.orders import St
+
+    real = ld.reconcile_targets
+
+    def planted(om, policy, targets, held, **kw):
+        refused = {r.symbol for r in om.orders.values() if r.session == kw.get("session") and r.side == "sell"
+                   and r.state is St.REJECTED and not str(r.reason or "").startswith("lost") and not unproved(r.reason)}
+        return real(om, policy, [t for t in targets if t.symbol not in refused], held, **kw)
+
+    mp.setattr(ld, "reconcile_targets", planted)
+
+
+def positions_read_fails_the_minute(mp) -> None:
+    """#737 taken away (audit 2, 5.10): on the book loop a failed positions read of the drift check fails the whole
+    minute again, so the send waits behind it (the retired intraday path's behaviour, `CONTAIN_DRIFT_READ`)."""
+    mp.setattr(Engine, "CONTAIN_DRIFT_READ", False)
+
+
 def flatten_outside_the_order_manager(mp) -> None:
     """M9 1.8 taken away: a flatten sale goes straight to the broker and is booked only when it fills whole. Since
     M10 1.20 step 4 (#445) the engine has no such sale any more, so the planted bug puts back the deleted one: the
