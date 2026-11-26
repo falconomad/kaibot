@@ -509,6 +509,20 @@ def opposite_orders(open_orders: Sequence[dict], mine: set[str]) -> dict[str, se
     return out
 
 
+OPEN_UNREAD = "open orders unreadable: buys wait (sales go out)"
+
+
+class _KnownStops:
+    """The target loop's `stops` while the open orders are unreadable: a sale frees the stops the manager knows
+    (`ProtectiveStops.release(..., unread_ok=True)`); see `LiveDaily.send`."""
+
+    def __init__(self, stops: ProtectiveStops) -> None:
+        self.stops = stops
+
+    def release(self, key, keep: float) -> bool:
+        return self.stops.release(key, keep, unread_ok=True)
+
+
 class _Gate:
     """The target loop's `reconciler`: the account's reconciliation, no buy while entries are blocked, and no order
     against an open opposite-side market or stop order in the symbol (Alpaca would refuse it)."""
@@ -516,6 +530,9 @@ class _Gate:
     def __init__(self, account: Account) -> None:
         self.account = account
         self.opposite: dict[str, set[str]] = {}
+        # Open orders unreadable this tick (the opposite-side check and the fail-safe stops' adoption): buys wait,
+        # sales go out (their client order id is deterministic, `OrderManager.next_coid`, so none is ever doubled)
+        self.open_unread = False
         self.shorting: bool | None = False  # set by LiveDaily from the account before each send
         # M12 3.11 (#473): symbol -> why the daily-data checks block a buy of it (LiveDaily.data_block); None: off
         self.data_block: Callable[[str], str | None] | None = None
@@ -524,6 +541,8 @@ class _Gate:
         other = {"buy": "sell", "sell": "buy"}[side]
         if other in self.opposite.get(symbol, ()):
             return f"an open {other} market or stop order in {symbol} (Alpaca refuses a wash trade): waiting"
+        if side == "buy" and self.open_unread:
+            return OPEN_UNREAD
         if side == "buy" and self.shorting is not False:
             return "shorting is on at the paper account (or unread): run ./scripts/alpaca_no_shorting.sh"
         if side == "buy":
@@ -1387,6 +1406,7 @@ class LiveDaily:
             if self._shorting_day != session:
                 self._read_shorting(session)
             self.gate.shorting = self.shorting
+            self.gate.open_unread = False  # read again below, at every tick
             if not self._drop_failsafe_stops(r.name, session):
                 continue  # a fail-safe stop still holds shares (or blocks a buy): the next tick goes on
             planned = self._send_entry(r.name, session)
@@ -1433,13 +1453,20 @@ class LiveDaily:
             try:
                 mine = {i for x in om.live.values() if x.purpose != "stop" for i in x.ids}  # a stop counts
                 self.gate.opposite = opposite_orders(self.broker.open_orders(), mine)
-            except Exception:  # unreadable: send nothing this tick (fail closed), try again at the next
-                self.event("multi_day_waiting", {"strategy": r.name, "session": str(session),
-                                                 "why": "open orders unreadable"})
-                continue
+            except Exception:
+                # Audit 2 5.10's shape for the open orders: unreadable, the due SALES still go out and the buys wait
+                # (`_Gate.open_unread`; the loop skips them, so the send stays open and the next tick tries again).
+                # A sale needs no open-orders read to be sent once: its client order id is deterministic, an open
+                # or unconfirmed one is reused (`OrderManager.next_coid`, `blocked`), a new attempt follows only a
+                # refusal, a confirmed cancel or "lost", and "lost" itself needs the open orders read
+                # (`OrderManager._lost_evidence`: unreadable is "not lost"). An opposite order the read would have
+                # shown makes the venue refuse the sale (a wash trade): nothing to double, sent again (5.9)
+                self.gate.opposite, self.gate.open_unread = {}, True
+            self._note_open_unread(r.name, session)
             self._before_send(r.name, session, targets, held_now)
             res = reconcile_targets(om, self.policy_for(session), targets, held_now, now=self.now(),
-                                    session=str(session), run=rid, reconciler=self.gate, stops=self.stops,
+                                    session=str(session), run=rid, reconciler=self.gate,
+                                    stops=_KnownStops(self.stops) if self.gate.open_unread else self.stops,
                                     sells_first=False, presend=self._gate_check(r, session, targets))
             withheld = self._note_withheld(r.name, session, rid, res.withheld)
             sent = [{"coid": x.coid, "symbol": x.symbol, "side": x.side, "qty": x.qty, "state": str(x.state),
@@ -1731,7 +1758,10 @@ class LiveDaily:
         if not sleeves:
             return True
         if self.stops.adopt(sleeves, str(session)) is None:
-            return False  # open orders unreadable: nothing is sent this tick
+            # open orders unreadable: a fail-safe stop the manager does not know yet cannot be adopted (nor
+            # cancelled) now, so the buys wait; the sales go out (a stop still holding the shares makes the venue
+            # refuse a sale: nothing to double, sent again at the next tick)
+            self.gate.open_unread = True
         left = []
         for key in sleeves:
             for x in self.stops.stops_of(key):
@@ -1750,6 +1780,18 @@ class LiveDaily:
                                                          "why": "the rule has no stop: a fail-safe stop is cancelled "
                                                                 "before the rule's orders go out"})
         return not left
+
+    def _note_open_unread(self, rule: str, session: date) -> None:
+        """One `multi_day_waiting` event per spell of unreadable open orders (not one per tick)."""
+        key, was = f"{rule}:open_unread", self._said.get(f"{rule}:open_unread")
+        if not self.gate.open_unread:
+            self._said.pop(key, None)
+            return
+        if was == str(session):
+            return
+        self._said[key] = str(session)
+        log.warning("%s: open orders unreadable in the send of %s: sales go out, buys wait", rule, session)
+        self.event("multi_day_waiting", {"strategy": rule, "session": str(session), "why": OPEN_UNREAD})
 
     def _pending(self, rule: str, session: date, held: Mapping[str, object]) -> dict[str, str]:
         """Sales sent on an earlier session that did not fill (no closing print): sent again, with their reason."""

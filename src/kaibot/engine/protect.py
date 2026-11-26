@@ -350,10 +350,13 @@ class ProtectiveStops:
         self.om.journal.append("stop_rearm", rec)
         return rec["placed"]
 
-    def release(self, key: Key, keep: float) -> bool:
-        """Before selling down to `keep` shares: True once no stop holds the shares to be sold."""
+    def release(self, key: Key, keep: float, *, unread_ok: bool = False) -> bool:
+        """Before selling down to `keep` shares: True once no stop holds the shares to be sold. `unread_ok` (the
+        daily send with the open orders unreadable): the stops the manager knows are freed and the sale may go;
+        a fail-safe stop not adopted yet still holds its shares at the venue, which then refuses the sale
+        (insufficient qty: nothing sent twice, nothing sold short), and it is adopted at the first read that works."""
         whole = int(math.floor(float(keep) + 1e-9))
-        if self.adopt({key}) is None:  # issue #188: a fail-safe stop may hold the shares; unknown: no sale yet
+        if self.adopt({key}) is None and not unread_ok:  # #188: a fail-safe stop may hold the shares; unknown: wait
             return False
         ok = True
         for r in self.stops_of(key):
