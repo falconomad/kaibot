@@ -12,7 +12,12 @@ The run (`Scenario.from_seed`) covers four evenings and three sessions:
     D3           the world is healed before the open: no more faults. The last window carries, or sends late, what
                  the earlier sessions lost, and the run must end where the latest decision wanted it
 
-and on the way, drawn from the seed: which evenings decide and what they want; when each evening's daily view
+in a week the seed draws (`Week`, audit 2 5.16): the four summer sessions of 31 Jul-6 Aug 2026 (half the seeds), or
+Thanksgiving week 2026 (a holiday on Thu 26 Nov, a 13:00 close on Fri 27 Nov; also with the broker's calendar down
+that Friday), or the March and October weeks in which New York changes its clocks while Berlin, where the Mac is, has
+not yet or already has. The new weeks run the live process's engine (`Engine(intraday=False)`, engine/book_loop.py).
+
+And on the way, drawn from the seed: which evenings decide and what they want; when each evening's daily view
 arrives (sometimes only the next morning); the faults of `FaultProfile`; an owner who may press "Flatten and stop";
 outages (the process is killed at a journal step or a venue call, counted from a moment of the run, and comes back
 after seconds, minutes, a missed window or a missed night) and pauses (the process sleeps and wakes); and the real
@@ -30,7 +35,10 @@ cases"), in the form this engine gives them:
     6 no short position, no negative cash
     7 at quiescence the ledger equals the venue, no order is unconfirmed, the replica has every row
     8 journal sequence numbers are gapless; every order at the venue had its intent journalled first
-    9 no order outside its window, and no daily view from the future
+    9 no order outside its window (the session's real one: 12:50-12:59 on a 13:00 close), and no daily view from
+      the future
+   11 a pass without an error inside a fill session's window, with its decision journalled, has journalled the send
+      (audit 2 5.16: an engine that takes an early close for a regular one waits for 15:50 and misses it; #733)
 
 and one liveness check at the end: after the healed last session the book holds exactly the names the latest
 decision wanted (or nothing, when the owner flattened).
@@ -53,12 +61,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 from fakes import FakeStore
 
 from kaibot.broker.faulty import DEFAULT_FAULTS, FaultProfile, FaultyBroker, FaultyData, FaultyStore
+from kaibot.broker.protocol import BrokerError
 from kaibot.broker.sim import NY, WORKING, SimBroker
 from kaibot.engine import failsafe
 from kaibot.engine import live_daily as ld
@@ -88,6 +98,87 @@ D0, D1, D2, D3 = "2026-07-31", "2026-08-03", "2026-08-04", "2026-08-05"
 D4 = "2026-08-06"  # the venue's calendar goes on: D3's evening has a next session to decide for
 SESSIONS = (D1, D2, D3)
 EVENINGS = (D0, D1, D2, D3)
+REGULAR_CLOSE = "16:00"
+MAC = ZoneInfo("Europe/Berlin")  # the owner's Mac: launchd runs the nightly bar refresh on its wall clock
+
+
+# ---------------------------------------------------------------- the week a seed runs in (audit 2, 5.16)
+@dataclass(frozen=True)
+class Week:
+    """The calendar of a run: the evening D0, the sessions D1-D3 and the next session D4 (the venue's calendar goes
+    on, so D3's evening has a session to decide for). `closes`: early closes, ((day, "HH:MM" ET), ...); `holidays`:
+    weekdays inside the run on which the market is closed (the world runs the engine through them, as the Mac
+    would); `calendar_down`: spells in which the broker's calendar cannot be read, ((day, "HH:MM", "HH:MM" ET), ...):
+    from just after the first read at or after the first time (that one still answers) to the second, every read
+    raises, whatever day it asks for. With "09:31" the session's start at the open has read the day's row and the
+    calendar goes down in the same second: the daily path's read of the day's close fails, and the session's close
+    comes from the calendar-unreadable fallback (#733: the local early-close table)."""
+
+    name: str
+    days: tuple[str, str, str, str, str]
+    closes: tuple = ()
+    holidays: tuple = ()
+    calendar_down: tuple = ()
+
+    @property
+    def evenings(self) -> tuple[str, ...]:
+        return self.days[:4]
+
+    @property
+    def sessions(self) -> tuple[str, ...]:
+        return self.days[1:4]
+
+    def close(self, day: str) -> str:
+        """The session's close, "HH:MM" ET."""
+        return dict(self.closes).get(str(day), REGULAR_CLOSE)
+
+    def minutes(self, day: str) -> int:
+        """The session's length in minute bars (390, or 210 on a 13:00 close)."""
+        hh, mm = (int(x) for x in self.close(day).split(":"))
+        return hh * 60 + mm - 570
+
+    def kinds(self) -> set[str]:
+        """The session types this week has (what the generator must reach)."""
+        k = set()
+        if self.closes:
+            k.add("early_close")
+        if self.holidays:
+            k.add("holiday")
+        if self.calendar_down:
+            k.add("calendar_unreadable")
+        utc = {pd.Timestamp(f"{d} 12:00", tz=NY).utcoffset() for d in self.days}
+        if len(utc) > 1:
+            k.add("dst_change")  # New York's clocks change inside the run
+        gap = {pd.Timestamp(f"{d} 12:00", tz=NY).utcoffset() - pd.Timestamp(f"{d} 12:00", tz=MAC).utcoffset()
+               for d in self.days}
+        if gap != {timedelta(hours=-6)}:
+            k.add("dst_gap")  # New York is five hours behind Berlin, not six: the Mac's schedule moves
+        return k or {"regular"}
+
+
+SUMMER = Week("summer", (D0, D1, D2, D3, D4))  # four summer sessions, the world as it was until 5.16
+# Thanksgiving week 2026: Wed 25 Nov a regular session, Thu 26 Nov closed, Fri 27 Nov closes at 13:00 ET (send window
+# 12:50-12:57), Mon 30 Nov regular; the run starts on the evening of Tue 24 Nov
+THANKSGIVING = Week("thanksgiving", ("2026-11-24", "2026-11-25", "2026-11-27", "2026-11-30", "2026-12-01"),
+                    closes=(("2026-11-27", "13:00"),), holidays=("2026-11-26",))
+# the same week with the broker's calendar unreadable for the early close: the window must come from the engine's
+# local table (live_daily.LOCAL_EARLY_CLOSES, #733), not from the regular 16:00 close
+THANKSGIVING_NO_CALENDAR = Week("thanksgiving_no_calendar", THANKSGIVING.days, closes=THANKSGIVING.closes,
+                                holidays=THANKSGIVING.holidays, calendar_down=(("2026-11-27", "09:31", "16:30"),))
+# the March gap: New York moves to summer time on Sun 8 Mar 2026, Berlin only on Sun 29 Mar. The run crosses New
+# York's change between D0 (Fri 6 Mar, EST, UTC-5) and D1 (Mon 9 Mar, EDT, UTC-4), inside the gap weeks
+MARCH_GAP = Week("march_gap", ("2026-03-06", "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12"))
+# the October gap: Berlin moves back on Sun 25 Oct 2026, New York only on Sun 1 Nov. The run starts in the gap
+# (Thu 29 Oct, Fri 30 Oct: New York five hours behind Berlin) and crosses New York's change before D2 (Mon 2 Nov, EST)
+OCTOBER_GAP = Week("october_gap", ("2026-10-29", "2026-10-30", "2026-11-02", "2026-11-03", "2026-11-04"))
+WEEKS = (SUMMER, THANKSGIVING, THANKSGIVING_NO_CALENDAR, MARCH_GAP, OCTOBER_GAP)
+WEEK_WEIGHTS = (4, 1, 1, 1, 1)  # half the seeds stay in the summer week, the other half are spread over the new ones
+
+
+def week_of(seed: int) -> Week:
+    """The week a seed runs in. Its own draw (not the scenario's stream), so a seed that stays in the summer week
+    draws exactly the scenario it drew before 5.16."""
+    return random.Random(f"kaibot-dst-week-{seed}").choices(WEEKS, weights=WEEK_WEIGHTS)[0]
 STOCKS = ("B", "C", "D")
 MD = "trend_momentum"
 AMOUNT = 50_000.0
@@ -116,6 +207,9 @@ KNOWN: dict[int, str] = {
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
          "a watchdog flatten of the shares while their buy is still unbooked leaves a difference only the owner "
          "can accept (the venue's sale is a foreign fill, then the late booking puts the shares in the ledger)",
+    746: "no kill in a week with the broker's calendar down (only pauses): a process started after the session's "
+         "neighbours were last read cannot find the previous session (`prev_session` has no local fallback) and "
+         "sends nothing in the window, and one started during the outage cannot start its day",
 }
 
 
@@ -129,6 +223,11 @@ def et(day: str, hhmm: str, sec: int = 0) -> datetime:
 
 def session_open(day: str) -> datetime:
     return et(day, "09:30")
+
+
+def mac_time(day: str, hhmm: str) -> datetime:
+    """A wall time on the owner's Mac (Berlin), in UTC."""
+    return pd.Timestamp(f"{day} {hhmm}", tz=MAC).tz_convert(UTC).to_pydatetime()
 
 
 # ---------------------------------------------------------------- the scenario of a seed
@@ -157,10 +256,23 @@ class Scenario:
     profile: FaultProfile = DEFAULT_FAULTS
     sparse: bool = True  # skip quiet minutes of the session (the loop runs, the tick is not due)
     forced: tuple = ()  # faults a hand-written scenario names (kaibot.broker.faulty.Forced)
-    heal: str = D3  # the session before whose open the faults stop
+    heal: str | None = None  # the session before whose open the faults stop (None: the week's D3)
+    week: Week = SUMMER  # audit 2, 5.16: the calendar the run is in
+    book_loop: bool = False  # the live process's engine, `Engine(intraday=False)` (engine/book_loop.py)
+
+    @property
+    def heal_day(self) -> str:
+        return self.heal or self.week.days[3]
 
     @classmethod
-    def from_seed(cls, seed: int, profile: FaultProfile = DEFAULT_FAULTS) -> Scenario:
+    def from_seed(cls, seed: int, profile: FaultProfile = DEFAULT_FAULTS, week: Week | None = None,
+                  book_loop: bool | None = None) -> Scenario:
+        """The scenario of a seed. `week`: the calendar (None: the seed's own draw, `week_of`); `book_loop`: the
+        engine (None: the live process's book loop in every week but the summer one, which keeps the engine it was
+        drawn with before 5.16)."""
+        week = week_of(seed) if week is None else week
+        book_loop = week is not SUMMER if book_loop is None else book_loop
+        D0, D1, D2, D3 = week.evenings  # noqa: N806 (the week's days, named as the module's summer ones)
         r = random.Random(f"kaibot-dst-{seed}")
         names = list(STOCKS)
         first = tuple(sorted(r.sample(names, r.choice((1, 1, 2)))))
@@ -177,43 +289,52 @@ class Scenario:
                 held = want
                 plan[day] = tuple(sorted(want))
         ready = {}
+        rw = random.Random(f"kaibot-dst-mac-{seed}")  # draws only the new weeks make (the summer stream is unchanged)
         for ev, nxt in ((D0, D1), (D1, D2), (D2, D3)):
             if r.random() < 0.12:  # the daily store is refreshed only the next morning: a late decision
                 ready[ev] = et(nxt, "09:30") + timedelta(minutes=r.choice((5, 40, 200)))
+                if week is not SUMMER and rw.random() < 0.5:
+                    # by the Mac's own night job (com.kaibot.daily, 03:15 and 07:45 on the Mac's clock,
+                    # scripts/install_service.sh): Berlin time, so in a gap week an hour later in New York
+                    ready[ev] = mac_time(nxt, rw.choice(("03:15", "07:45"))) + timedelta(minutes=rw.choice((2, 20)))
             else:
-                ready[ev] = et(ev, "16:00") + timedelta(minutes=r.choice((3, 12, 25, 70, 200)))
-        ready[D3] = et(D3, "16:10")
+                ready[ev] = et(ev, week.close(ev)) + timedelta(minutes=r.choice((3, 12, 25, 70, 200)))
+        ready[D3] = et(D3, week.close(D3)) + timedelta(minutes=10)
         outages = []
         for _ in range(r.choice((0, 1, 1, 2, 2, 3, 4))):
             day = r.choice((D1, D1, D2, D2, D0))
             where = r.random()
+            send, close = week.minutes(day) - 10, week.minutes(day)
             if day == D0 or where < 0.2:  # an evening: the decision's journal steps
-                arm = et(day, "16:00") + timedelta(minutes=r.randrange(0, 300))
+                arm = et(day, week.close(day)) + timedelta(minutes=r.randrange(0, 300))
             elif where < 0.75:  # around the send window and the fills
-                arm = session_open(day) + timedelta(minutes=r.randrange(SEND - 8, CLOSE + 3))
+                arm = session_open(day) + timedelta(minutes=r.randrange(send - 8, close + 3))
             else:
-                arm = session_open(day) + timedelta(minutes=r.randrange(-20, SEND - 8))
+                arm = session_open(day) + timedelta(minutes=r.randrange(-20, send - 8))
             down = r.choice((0, 0, 1, 1, 2, 3, 5, 9, 15, 45, 400, 1100))
             if r.random() < 0.25:
                 outages.append(Outage(arm, max(down, 2), kill=False))
             else:
                 outages.append(Outage(arm, down, effects=r.randrange(1, 25), orders_only=r.random() < 0.6,
                                       after=r.random() < 0.5))
+        if week.calendar_down:  # KNOWN 746: the process lives through the calendar's outage (a kill is a pause)
+            outages = [o if not o.kill else Outage(o.arm, max(o.down, 2), kill=False) for o in outages]
         flatten = None
         if r.random() < 0.15:
             day = r.choice((D2, D2, D3))
-            minute = r.choice((r.randrange(5, SEND), r.randrange(SEND, CLOSE)))
+            send, close = week.minutes(day) - 10, week.minutes(day)
+            minute = r.choice((r.randrange(5, send), r.randrange(send, close)))
             flatten = session_open(day) + timedelta(minutes=minute)
         scale = r.choice((0.0, 0.5, 1.0, 1.0, 1.0, 2.0))
         profile = profile.scaled(scale)
         return cls(seed, plan, ready, tuple(sorted(outages, key=lambda o: o.arm)), flatten,
-                   watchdog=r.random() < 0.5, profile=profile)
+                   watchdog=r.random() < 0.5, profile=profile, week=week, book_loop=book_loop)
 
     def wanted(self, decidable: set[str] | None = None) -> tuple:
         """What the book must hold at the end: the latest decision's names. `decidable`: the fill sessions whose
         decision the engine had a chance to take (None: all of them)."""
         last = None
-        for day in SESSIONS:
+        for day in self.week.sessions:
             if self.plan[day] is not None and (decidable is None or day in decidable):
                 last = self.plan[day]
         return () if self.flatten is not None else tuple(last or ())
@@ -242,13 +363,24 @@ class Scripted(mom.TrendMomentum):
                                     "sell": {s: "not wanted" for s in sorted(held - set(want))}}, resize=False)
 
 
-def minute_frames(seed: int) -> dict[str, pd.DataFrame]:
+def trading_days(week: Week = SUMMER) -> list[str]:
+    """The sessions of minute bars: HISTORY_DAYS before D0 to D4, the week's holidays left out."""
+    if not week.holidays:
+        days = pd.bdate_range(end=week.days[4], periods=HISTORY_DAYS + 5)
+    else:
+        days = pd.bdate_range(end=week.days[4], periods=HISTORY_DAYS + 5, freq="C", holidays=list(week.holidays))
+    return [str(d.date()) for d in days]
+
+
+def minute_frames(seed: int, week: Week = SUMMER) -> dict[str, pd.DataFrame]:
     """Minute bars of the three stocks, XLK and SPY from HISTORY_DAYS sessions before D0 to D4: gentle random walks,
-    different for every seed."""
+    different for every seed. A session has bars only while it is open (none after a 13:00 close)."""
     rng = np.random.default_rng(seed)
-    days = pd.bdate_range(end=D4, periods=HISTORY_DAYS + 5)
-    opens = np.array([pd.Timestamp(f"{d.date()} 09:30", tz=NY).tz_convert(UTC).value for d in days])
-    ts = pd.to_datetime((opens[:, None] + np.arange(390)[None, :] * 60_000_000_000).ravel(), utc=True)
+    ns = []
+    for d in trading_days(week):
+        o = pd.Timestamp(f"{d} 09:30", tz=NY).tz_convert(UTC).value
+        ns.append(o + np.arange(week.minutes(d)) * 60_000_000_000)
+    ts = pd.to_datetime(np.concatenate(ns), utc=True)
     out = {}
     for s, p0, vol in (("B", 100.0, 2.5e-4), ("C", 60.0, 3e-4), ("D", 150.0, 2e-4), ("XLK", 200.0, 2e-4),
                        ("SPY", 500.0, 1.5e-4)):
@@ -259,22 +391,24 @@ def minute_frames(seed: int) -> dict[str, pd.DataFrame]:
     return out
 
 
-def daily_from(frames: dict[str, pd.DataFrame]) -> DailyData:
+def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER) -> DailyData:
     """300 sessions of daily bars up to D4: the last ones are the minute bars' own days, the earlier ones a steady
     rise to them: enough history for the rule's averages, and steep enough against the few gentle days of minute bars
     that every stock stays above its 100-day average and SPY above its 200-day average. The carry-over and the late
     send skip a buy the rule could not make at the last close ("not buyable: trend", the market filter): by design,
     and not what this simulation is about, so the bars never give them a reason."""
     n = 300
-    dates = np.busday_offset(np.datetime64(D4), -np.arange(n)[::-1], roll="backward").astype("datetime64[D]")
+    dates = np.busday_offset(np.datetime64(week.days[4]), -np.arange(n)[::-1], roll="backward",
+                             holidays=list(week.holidays)).astype("datetime64[D]")
     symbols = [*STOCKS, "SPY"]
     c = np.zeros((n, len(symbols)))
     o = np.zeros_like(c)
     tail = HISTORY_DAYS + 5
+    ends = np.cumsum([week.minutes(d) for d in trading_days(week)])  # one past each session's last bar
     for j, s in enumerate(symbols):
         f = frames[s]
-        day_c = f["c"].to_numpy().reshape(-1, 390)[:, -1]
-        day_o = f["o"].to_numpy().reshape(-1, 390)[:, 0]
+        day_c = f["c"].to_numpy()[ends - 1]
+        day_o = f["o"].to_numpy()[np.r_[0, ends[:-1]]]
         ramp = np.linspace(day_c[0] * 0.6, day_c[0], n - tail + 1)[:-1]
         c[:, j] = np.r_[ramp, day_c]
         o[:, j] = np.r_[ramp, day_o]
@@ -290,8 +424,8 @@ class Venue(SimBroker):
 
     name = "dst"
 
-    def __init__(self, history, clock) -> None:
-        super().__init__(history, clock, cash=VENUE_CASH)
+    def __init__(self, history, clock, calendar=None) -> None:
+        super().__init__(history, clock, cash=VENUE_CASH, calendar=calendar)
         self.wash_check = True
         self.shorting_enabled = False
 
@@ -397,7 +531,9 @@ class Result:
         lines = [f"seed {s.seed}: {len(self.violations)} violation(s)", *[f"  - {v}" for v in self.violations[:12]],
                  f"plan {s.plan}  flatten {s.flatten}  watchdog {s.watchdog}",
                  f"outages {[(str(o.arm), o.down, 'kill' if o.kill else 'pause') for o in s.outages]}",
-                 f"run it again: PYTHONHASHSEED=0 PYTHONPATH=src python tests/dst/run_seed.py {s.seed}",
+                 f"week {s.week.name}  engine {'book loop' if s.book_loop else 'intraday'}",
+                 f"run it again: PYTHONHASHSEED=0 PYTHONPATH=src python tests/dst/run_seed.py {s.seed} --week "
+                 f"{s.week.name} {'--book-loop' if s.book_loop else '--intraday'}",
                  f"the last {tail} lines of the trace:", *[f"  {t}" for t in self.trace[-tail:]]]
         return "\n".join(lines)
 
@@ -410,15 +546,22 @@ class World:
         self.own_root = root is None
         self.root = Path(tempfile.mkdtemp(prefix="kb-dst-")) if root is None else root
         self.root.mkdir(parents=True, exist_ok=True)
-        self.clock = SimClock(et(D0, "16:01", 7))
-        frames = minute_frames(scenario.seed)
+        self.week = week = scenario.week
+        self.clock = SimClock(et(week.days[0], week.close(week.days[0])) + timedelta(minutes=1, seconds=7))
+        frames = minute_frames(scenario.seed, week)
         self.history = HistoricalData(frames, self.clock)
-        self.daily_all = daily_from(frames)
+        self.daily_all = daily_from(frames, week)
         self.fuse = Fuse()
-        self.sim = Venue(self.history.history, self.clock)
+        # the summer week's venue takes its calendar from the bars, as it always did; every other week names its
+        # sessions and their closes (a holiday has no row, an early close its 13:00)
+        cal = None if week is SUMMER else {d: ("09:30", week.close(d)) for d in trading_days(week)}
+        self.sim = Venue(self.history.history, self.clock, cal)
         self.broker = FaultyBroker(self.sim, scenario.seed, scenario.profile, on_write=self._venue_write,
                                    forced=scenario.forced)
         self.broker.on_fault = lambda fault, what: self.say(f"fault {fault} {what}")
+        self._calendar_went: set[str] = set()
+        if week.calendar_down:
+            self.broker.calendar = self._calendar  # an instance attribute: the wrapper's other calls are unchanged
         self.data = FaultyData(self.history, scenario.seed, scenario.profile)
         self.replica = Replica(self.clock)
         self.remote = FaultyStore(self.replica, scenario.seed, scenario.profile, now=self.clock, on_write=self.fuse)
@@ -469,9 +612,30 @@ class World:
             self.check.on_venue_write(what)
         self.fuse(phase, what)
 
+    def _calendar(self, day: str) -> dict | None:
+        """The broker's calendar as the engine reads it (Alpaca: GET /v2/calendar): during a spell of the week's
+        `calendar_down` every read is a 503, whatever day it asks for."""
+        now = self.clock()
+        for d, a, b in self.week.calendar_down:
+            if et(d, a) <= now < et(d, b):
+                if d not in self._calendar_went:
+                    self._calendar_went.add(d)  # the last read that works: the spell starts right after it
+                    self.say(f"the broker's calendar goes down until {b} ET")
+                    break
+                self.broker._note("calendar_down", str(day))
+                raise BrokerError(503, '{"message":"faulty: calendar unavailable"}')
+        return self.sim.calendar(day)
+
+    def calendar_out(self, now: datetime) -> bool:
+        """Is the broker's calendar down now (a spell of the week's `calendar_down` that has started)?"""
+        return any(d in self._calendar_went and et(d, a) <= now < et(d, b) for d, a, b in self.week.calendar_down)
+
+    def close_of(self, day: str) -> datetime:
+        return et(str(day), self.week.close(str(day)))
+
     def load(self, k: date, now: datetime):
         """The daily store: the view of the evening of session k, once it has been refreshed."""
-        if et(str(k), "16:00") > now:
+        if self.close_of(str(k)) > now:
             self.bad(f"the engine asked for the daily view of {k} before that session's close (at {now})")
         ready = self.s.ready.get(str(k))
         if ready is None or now < ready:
@@ -492,8 +656,11 @@ class World:
             store = JournalStore(journal, self.remote, live=True, mono=lambda: self.clock().timestamp())
             market = LiveMarket(self.data, list(STOCKS), {s: "XLK" for s in STOCKS}, "SPY", self.root / "hist",
                                 lambda: pd.Series(18.0, index=pd.date_range("2025-01-01", "2026-12-31")))
+            # the live process builds `Engine(intraday=False)` (engine/book_loop.py, no intraday strategies); the
+            # world's default stays the engine it was written for, which drives the same daily path
+            extra = {"intraday": False, "strategies": {lv: [] for lv in load_profiles()}} if self.s.book_loop else {}
             eng = Engine(self.broker, market, store, load_profiles(), set(), now=self.clock,
-                         daily=lambda e: ld.for_engine(e, self.load, rules=[self.rule]))
+                         daily=lambda e: ld.for_engine(e, self.load, rules=[self.rule]), **extra)
             eng.market.candidates_at = lambda m: pd.DataFrame()  # no intraday candidates: the daily path only
             eng.sleep = lambda s: None
             eng.monotonic = lambda: self.clock().timestamp()
@@ -553,6 +720,7 @@ class World:
                 return
         eng = self.eng
         self.stats["passes"] += 1
+        faults = self._faults()
         try:
             status: dict = {"state": "starting"}
             try:
@@ -578,7 +746,12 @@ class World:
         except Kill as k:
             self._killed(str(k))
             return
-        self.check.after_pass()
+        # a pass that ran without an error and without an injected fault (but the week's calendar outage)
+        self.check.after_pass(clean=status.get("state") != "error" and self._faults() == faults)
+
+    def _faults(self) -> int:
+        """How many faults have been injected so far (the week's calendar outage is not counted)."""
+        return len(self.data.log) + len(self.remote.log) + sum(f[1] != "calendar_down" for f in self.broker.log)
 
     def _could_decide(self, now: datetime) -> None:
         # #577: a run the owner starts after a close is "scheduled" until the next open, and a scheduled run decides
@@ -591,15 +764,20 @@ class World:
         if run and self._run_seen is None:
             self._run_seen = now
         if run and run.get("status") == "scheduled":
-            for day in SESSIONS:  # a session in progress that opened after the run was first seen
-                if self._run_seen <= session_open(day) <= now < et(day, "16:00"):
+            for day in self.week.sessions:  # a session in progress that opened after the run was first seen
+                if self._run_seen <= session_open(day) <= now < self.close_of(day):
                     first = self._first_due.setdefault(day, now)
                     if now - first >= ld.LATE_EVERY + timedelta(minutes=1):
                         self.bad(f"the run is still scheduled in the session of {day}, an open after it was started")
         if not run or run.get("status") not in ("running", "paused"):
             return
-        for prev, fill in zip(EVENINGS, SESSIONS, strict=False):
-            if fill in self.decidable or not (self.s.ready[prev] <= now < et(fill, "16:00")):
+        if self.calendar_out(now):
+            # a decision needs the broker's calendar (which session the view is for, which it fills): a pass while
+            # the calendar cannot be read is no chance to take it (the engine has no local calendar of sessions,
+            # only of closes: live_daily.LOCAL_EARLY_CLOSES)
+            return
+        for prev, fill in zip(self.week.evenings, self.week.sessions, strict=False):
+            if fill in self.decidable or not (self.s.ready[prev] <= now < self.close_of(fill)):
                 continue
             first = self._first_ok.setdefault(fill, now)
             if now < session_open(fill) or now - max(first, session_open(fill)) >= ld.LATE_EVERY + timedelta(minutes=1):
@@ -646,7 +824,8 @@ class World:
         self.fuse.disarm()
         self.asleep_until = None
         if self.down_until is not None and self.down_until > self.clock():
-            late = et(D3, "15:20")  # an engine that was to stay down returns before the last window at the latest
+            # an engine that was to stay down returns before the last window at the latest
+            late = self.close_of(self.s.heal_day) - timedelta(minutes=40)
             self.down_until = min(self.down_until, late)
         self.say("the world is healed: no more faults")
 
@@ -662,8 +841,8 @@ class World:
         o = session_open(day)
         for hhmm in ("09:00", "09:25"):
             self.at(et(day, hhmm, 7))
-        due = self._due(rng)
-        for k in range(CLOSE):
+        due = self._due(rng, self.week.minutes(day))
+        for k in range(self.week.minutes(day)):
             self.broker.advance(pd.Timestamp(o + timedelta(minutes=k)))
             t = o + timedelta(minutes=k + 1, seconds=7)
             busy = self.eng is None or self.asleep_until is not None or bool(self.fuse.left) \
@@ -671,20 +850,35 @@ class World:
             self.at(t, run=k in due or busy or not self.s.sparse)
             self.watchdog()
 
-    def _due(self, rng: random.Random) -> set[int]:
+    def _due(self, rng: random.Random, close: int = CLOSE) -> set[int]:
+        send = close - (CLOSE - SEND)
         due, k = {0, 1, 2}, 2
-        while k < SEND - 10:
+        while k < send - 10:
             k += rng.choice((1, 2, 3, 5, 8, 13, 21, 34))
             due.add(k)
-        return due | set(range(SEND - 10, CLOSE))
+        return due | set(range(send - 10, close))
 
     def evening(self, day: str) -> None:
         marks = {5, 20, 45, 90, 180, 300}
         ready = self.s.ready.get(day)
+        close = self.close_of(day)
         if ready is not None and ready < et(day, "23:00"):
-            marks |= {int((ready - et(day, "16:00")).total_seconds() // 60) + m for m in (1, 2)}
+            marks |= {int((ready - close).total_seconds() // 60) + m for m in (1, 2)}
+        regular = et(day, REGULAR_CLOSE)
+        if close < regular:  # an early close: the loop runs every minute of the regular window too, where a send
+            # that took the session for a regular one would go out (#733)
+            back = int((regular - close).total_seconds() // 60)
+            marks |= set(range(back - 11, back + 1))
         for m in sorted(marks):
-            self.at(et(day, "16:00", 7) + timedelta(minutes=m))
+            self.at(close + timedelta(minutes=m, seconds=7))
+
+    def closed_day(self, day: str) -> None:
+        """A weekday the market is closed (a holiday): the Mac runs the engine all the same. Before the open, at
+        what would be the open, around noon, in what would be the send window and after the close: the engine must
+        neither trade nor take that day for a session (no window, no decision for it, no fill)."""
+        for hhmm in ("08:45", "09:31", "12:00", "15:51", "15:55", "16:05", "18:00"):
+            self.at(et(day, hhmm, 7))
+            self.watchdog()
 
     def _state_seam(self):
         """Invariant 10 (M10 1.21, #446): no buy reaches the venue while the engine's one trading state is not
@@ -715,15 +909,18 @@ class World:
         rng = random.Random(f"kaibot-dst-ticks-{self.s.seed}")
         unseam = self._state_seam()
         try:
-            self.evening(D0)
-            for day in SESSIONS:
-                if day == self.s.heal:
+            self.evening(self.week.days[0])
+            for day, nxt in zip(self.week.sessions, self.week.days[2:], strict=True):
+                if day == self.s.heal_day:
                     self.clock.set(et(day, "08:00"))
                     self.heal()
                 self.session(day, rng)
                 self.evening(day)
+                for h in self.week.holidays:
+                    if day < h < nxt:
+                        self.closed_day(h)
             for m in range(1, 4):  # quiescence: the loop runs on, nothing new happens
-                self.at(et(D3, "21:10", 7) + timedelta(minutes=m))
+                self.at(et(self.week.days[3], "21:10", 7) + timedelta(minutes=m))
             self.check.at_quiescence()
         finally:
             unseam()
@@ -740,7 +937,8 @@ class World:
 
 # ---------------------------------------------------------------- the invariants
 class Checker:
-    """The nine invariants (the tenth, the trading state, is checked at the order seam: World._state_seam),
+    """The nine invariants and the eleventh (the tenth, the trading state, is checked at the order seam:
+    World._state_seam),
     checked incrementally: the journal's new entries after every pass, the venue's books
     against the engine's, and at the end the quiescence and liveness checks."""
 
@@ -756,6 +954,8 @@ class Checker:
         self.fills_qty: dict[str, float] = {}
         self.cum: dict[str, float] = {}  # venue order id -> filled quantity last seen
         self.rid: int | None = None
+        self.decided: set[str] = set()  # fill sessions with a journalled decision (a target list) of this run
+        self.sends: set[str] = set()  # sessions with a journalled md_send of this run
 
     def attach(self, eng: Engine) -> None:
         self.eng = eng
@@ -773,6 +973,7 @@ class Checker:
             if kind == "run":
                 self.rid = b.get("run_id")
             elif kind == "md_decision" and b.get("target") is not None and b.get("run_id") == self.rid:
+                self.decided.add(str(b["fill_session"]))
                 # #591: a decision the engine journalled was a chance it took, however quickly (`_could_decide`
                 # waits LATE_EVERY into the session; a late decision at 09:31 and a kill right after it is sent
                 # late on the next session, M9 1.4, and that send is what the book must show at the end)
@@ -806,6 +1007,8 @@ class Checker:
                 self.fills_cash += -sign * float(b["qty"]) * float(b["px"]) - float(b.get("fees") or 0.0)
                 self.fills_qty[b["symbol"]] = self.fills_qty.get(b["symbol"], 0.0) + sign * float(b["qty"])
             elif kind == "md_send":
+                if b.get("run_id") == self.rid:
+                    self.sends.add(str(b.get("session")))
                 for sym, shares, *_ in b.get("targets") or []:
                     self.targets[sym] = max(self.targets.get(sym, 0), int(shares))
 
@@ -824,19 +1027,57 @@ class Checker:
         parts = coid.split("-")
         purpose, day = parts[-2], parts[-3]
         now = w.clock().astimezone(NY)
+        # the session's real close (the venue's, not what the engine thinks it is): 16:00, or 13:00 on an early
+        # close; on a holiday there is no session at all
+        today = f"{now:%Y-%m-%d}"
+        close = w.close_of(today) if w.sim.calendar(today) is not None else None
         if purpose in MARKET_PURPOSES:
-            if day != f"{now:%Y%m%d}" or not (now.hour == 15 and 50 <= now.minute <= 59):
-                w.bad(f"{coid} left outside its window, at {now:%Y-%m-%d %H:%M:%S} New York")
+            if day != f"{now:%Y%m%d}" or close is None or not (close - timedelta(minutes=10) <= w.clock() < close):
+                w.bad(f"{coid} left outside its window, at {now:%Y-%m-%d %H:%M:%S} New York"
+                      + ("" if close is None or close.astimezone(NY).hour == 16
+                         else f" (the session closes at {close.astimezone(NY):%H:%M})"))
             if w.broker._skew is not None and w.broker.armed:
                 w.bad(f"{coid} was sent while the host clock and the venue's disagreed")
-        elif not (now.hour * 60 + now.minute >= 570 and now.hour < 16):
+        elif close is None or not (now.hour * 60 + now.minute >= 570 and w.clock() < close):
             w.bad(f"{coid} ({purpose}) was sent while the market was closed, at {now:%H:%M:%S}")
 
     # --- after every pass
-    def after_pass(self) -> None:
+    def after_pass(self, clean: bool = False) -> None:
         self.journal_tail()
         self.venue_side()
         self.ledger_side()
+        if clean:
+            self.window_side()
+
+    # --- 11 (audit 2, 5.16): a decided send goes out in its fill session's own window
+    def window_side(self) -> None:
+        """A pass that ran without an error and without an injected fault inside the fill session's real send window
+        (the venue's close minus 10 to minus 3 minutes: 12:50-12:57 ET on a 13:00 close), with the session's
+        decision journalled: the send of that decision is journalled by the end of the pass. A send the engine puts
+        in another window (the regular 15:50 on an early close, #733) is missed at the venue's close and only goes
+        out late, a session later.
+        Not checked once the owner pressed "Flatten and stop" or the book ended, nor while the venue's clock is
+        skewed (no order goes out then, M9 1.10)."""
+        w = self.w
+        now = w.clock()
+        day = f"{now.astimezone(NY):%Y-%m-%d}"
+        if day not in w.week.sessions or day not in self.decided or day in self.sends or w.flatten_sent:
+            return
+        close = w.close_of(day)
+        if not (close - timedelta(minutes=10) <= now < close - timedelta(minutes=3)):
+            return
+        if self.eng is None or self.eng.run is None or self.eng.run.get("status") != "running":
+            return
+        if w.broker._skew is not None and w.broker.armed:
+            return  # the host's clock and the venue's disagree: no order is sent (M9 1.10), the send waits
+        with contextlib.suppress(Exception):
+            if self.eng.daily is not None and self.eng.daily.account.book_ended():
+                return
+        self.sends.add(day)  # said once per session (the trace has the pass)
+        c = close.astimezone(NY)
+        w.bad(f"invariant 11: the decision for {day} was not sent in its window ({c - timedelta(minutes=10):%H:%M}-"
+              f"{c - timedelta(minutes=3):%H:%M} ET; the session closes at {c:%H:%M}) although a pass ran there "
+              "without an error")
 
     def after_kill(self) -> None:
         self.venue_side()
@@ -953,8 +1194,10 @@ class Checker:
             w.bad("the owner pressed Flatten and stop and the run has not ended")
 
 
-def run_seed(seed: int, profile: FaultProfile = DEFAULT_FAULTS, root: Path | None = None) -> Result:
-    return run_scenario(Scenario.from_seed(seed, profile), root)
+def run_seed(seed: int, profile: FaultProfile = DEFAULT_FAULTS, root: Path | None = None, week: Week | None = None,
+             book_loop: bool | None = None) -> Result:
+    """The run of a seed: in its own week on its own engine (`Scenario.from_seed`), unless `week` / `book_loop`."""
+    return run_scenario(Scenario.from_seed(seed, profile, week=week, book_loop=book_loop), root)
 
 
 def run_scenario(scenario: Scenario, root: Path | None = None) -> Result:

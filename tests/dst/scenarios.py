@@ -10,7 +10,9 @@ refactoring loses the fix.
 
 from __future__ import annotations
 
-from world import D0, D1, D2, D3, Outage, Scenario, et
+from datetime import time, timedelta
+
+from world import D0, D1, D2, D3, THANKSGIVING_NO_CALENDAR, Outage, Scenario, Week, et
 
 from kaibot.broker.faulty import NO_FAULTS, Forced
 from kaibot.broker.sim import NY
@@ -27,6 +29,15 @@ def quiet(plan: dict, **kw) -> Scenario:
     kw.setdefault("ready", ON_TIME)
     kw.setdefault("profile", NO_FAULTS)
     return Scenario(0, {D1: None, D2: None, D3: None, **plan}, **kw)
+
+
+def quiet_in(week: Week, plan: dict, **kw) -> Scenario:
+    """`quiet` in another week (audit 2, 5.16), on the live process's engine (the book loop) unless `kw` says so:
+    every evening's view ten minutes after that session's close."""
+    kw.setdefault("ready", {d: et(d, week.close(d)) + timedelta(minutes=10) for d in week.evenings})
+    kw.setdefault("profile", NO_FAULTS)
+    kw.setdefault("book_loop", True)
+    return Scenario(0, {**dict.fromkeys(week.sessions), **plan}, week=week, **kw)
 
 
 # ---------------------------------------------------------------- the planted bugs
@@ -89,6 +100,23 @@ def watchdog_cancel_not_carried(mp) -> None:
     mp.setattr(ld.LiveDaily, "_watchdog_cancels", lambda self: set())
 
 
+def calendar_fallback_regular_close(mp) -> None:
+    """#733 taken away (audit 2, 5.3): a calendar read that fails gives the regular 16:00 close, so on an early close
+    the window is taken to be 15:50-15:57 ET, after the venue has closed at 13:00. (Before #733 `_close` gave None
+    and `policy_for` made 16:00 of it, as here; the read was tried again at the next call.)"""
+    def old_close(self, day):
+        if day in self._closes:
+            return self._closes[day]
+        try:
+            close = self.session_close(day)
+        except Exception:
+            return time(16, 0)  # "unreadable: 15:45", the comment said; the code gave 16:00
+        self._closes = {day: close or time(16, 0)}
+        return self._closes[day]
+
+    mp.setattr(ld.LiveDaily, "_close", old_close)
+
+
 def flatten_outside_the_order_manager(mp) -> None:
     """M9 1.8 taken away: a flatten sale goes straight to the broker and is booked only when it fills whole. Since
     M10 1.20 step 4 (#445) the engine has no such sale any more, so the planted bug puts back the deleted one: the
@@ -145,6 +173,12 @@ FINDINGS: dict[str, tuple] = {
         quiet({D1: ("B",)}, watchdog=True, heal=D2, forced=(Forced("hold", "|B|buy", "never"),),
               outages=(Outage(et(D1, "15:51"), 12, kill=False),)),
         watchdog_cancel_not_carried, "the latest decision wanted ('B',)"),
+    "calendar unreadable on an early close": (
+        # audit 2, 5.16 / 5.3: Fri 27 Nov 2026 closes at 13:00; the broker's calendar goes down right after the
+        # session's start has read it (09:31 ET) until 16:30, so the daily path's read of the day's close fails and
+        # the close comes from the engine's local table (#733). The decision of 25 Nov wants C as well
+        quiet_in(THANKSGIVING_NO_CALENDAR, {"2026-11-25": ("B",), "2026-11-27": ("B", "C")}),
+        calendar_fallback_regular_close, "was not sent in its window"),
     "flatten partial fill": (
         # the owner flattens on D2; half of the sale fills, the rest never does that day
         quiet({D1: ("B",)}, flatten=et(D2, "11:00"), forced=(Forced("partial_fill", "|B|sell", 0.5),)),
