@@ -76,7 +76,8 @@ class StressMock(mock_data.Mock):
                     "exposure": {"gross": round(invested, 2), "overnight": round(invested, 2), "by_rule": [{"rule": "trend_momentum", "value": round(invested, 2), "share": 0.6}]},
                     "reconciled": {"ok": True, "ts": mock_data.iso(self.now), "positions": {}, "cash_diff": 0}}
         if fn == "kb_equity_series":
-            return [{"session": str(d), "close_equity": 10000 + i * 11.5, "marked": True} for i, d in enumerate(self.days)]
+            # gross (#719): the invested share at each close, so Home shows "the same amount in SPY" in the stress pages too
+            return [{"session": str(d), "close_equity": 10000 + i * 11.5, "marked": True, "gross": 0.6} for i, d in enumerate(self.days)]
         if fn == "kb_multiday_plan":
             return {"rules": [{"rule": "trend_momentum", "decided_after_close_of": self.session, "fills_at_close_of": str(self.today), "decides": True,
                                "sell": [{"symbol": "NFLX", "why": "rank"}, {"symbol": "SUPERLONG", "why": "trend"}],

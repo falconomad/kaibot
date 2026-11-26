@@ -16,6 +16,12 @@
 //   that close's SPY value x (SPY now / SPY's previous close)
 // so the hero's gap, the chart's last S&P point and its legend move together (homeLine). Otherwise the live point's SPY
 // stays at the last close, as before, and the page says so: "at last close" (vsSpyText, PotChart's legend).
+//
+// The same amount in SPY (#719, audit 2 8.1): the line above compares the pot with SPY fully invested, while the pot
+// holds a share of itself in stocks (27% caps and cash). Beside it, Home shows SPY held at the pot's own invested share
+// each day (lib/book.mtmCurve, gate v3's exposure-matched SPY): "Ahead of / Behind the same amount in SPY by $X"
+// (vsSameText). Its live point follows the same rule as the S&P 500 side: SPY now only when spyFactor allows it,
+// scaled by the last close's invested share; else the last close, and the words say "at last close".
 import type { Overview, Run } from "./api";
 import type { Curve } from "./model";
 import { money } from "./fmt";
@@ -97,7 +103,11 @@ export function homeLine(c: Curve[], p: Pick<PotNow, "pot"> & { fresh: Fresh | n
     const close = tail?.session === today ? curve.at(-2) : tail;
     const k = close && close.session < today ? spyFactor(spy, close.session, now) : null;
     const base = tail?.session === today ? tail.spy : tail?.spy ?? start;
-    const point: Curve = { session: today, pot: p.pot, spy: k !== null ? close!.spy * k : base, live: true, ...(k !== null ? {} : { spyClose: true }) };
+    // #719: the matched line moves by the last close's invested share of SPY's move, under the same rule (k)
+    const baseM = tail?.spyMatched;
+    const same = k !== null && close!.spyMatched !== undefined ? close!.spyMatched * (1 + (close!.exposure ?? 0) * (k - 1)) : baseM;
+    const point: Curve = { session: today, pot: p.pot, spy: k !== null ? close!.spy * k : base, live: true, ...(k !== null ? {} : { spyClose: true }),
+      ...(same !== undefined ? { spyMatched: same } : {}) };
     if (tail?.session === today) curve[curve.length - 1] = point;
     else curve.push(point);
     return { curve, end: point, spyAt: k !== null ? "live" : "close" };
@@ -111,6 +121,15 @@ export function homeLine(c: Curve[], p: Pick<PotNow, "pot"> & { fresh: Fresh | n
 export function vsSpyText(vs: number, spyAt: SpyAt, amount = true): string {
   return `${vs >= 0 ? "Ahead of" : "Behind"} the S&P 500${spyAt === "close" ? " at last close" : ""}${amount ? ` by ${money(Math.abs(vs))}` : ""}`;
 }
+
+/** "Ahead of the same amount in SPY by $1,234" (#719): the pot against SPY held at the pot's own invested share each
+ *  day. "at last close" under the same rule as vsSpyText, so the two lines never disagree about what is live. */
+export function vsSameText(vs: number, spyAt: SpyAt, amount = true): string {
+  return `${vs >= 0 ? "Ahead of" : "Behind"} the same amount in SPY${spyAt === "close" ? " at last close" : ""}${amount ? ` by ${money(Math.abs(vs))}` : ""}`;
+}
+
+/** What the "same amount in SPY" line means, for its title and the Details row. */
+export const SAME_AMOUNT_NOTE = "SPY held at the pot's own invested share each day, the rest in cash: the same amount in the market, without the stock picking";
 
 /** The book marked at the account's prices, or null when they may not be used (see the top of this file).
  *  The engine's minute ledger is not read here on purpose: what the account holds is compared with the book itself, so

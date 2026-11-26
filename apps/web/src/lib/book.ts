@@ -39,7 +39,9 @@ export interface Book {
   positions: BookPosition[];
   reconciled: { ok: boolean; ts: string | null; cashDiff: number | null; diffs: { symbol: string; ledger: number | null; broker: number | null }[] } | null;
 }
-export interface SeriesPoint { session: string; closeEquity: number; marked: boolean }
+/** `exposure` (#719): the share of the pot invested at that close, kb_equity_series `gross` (invested / the venue's
+ *  equity, as the ledger writes it), else invested / close_equity; absent when neither is sent. */
+export interface SeriesPoint { session: string; closeEquity: number; marked: boolean; exposure?: number }
 
 const obj = (v: unknown): Record<string, unknown> | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null);
 const num = (v: unknown): number | null => {
@@ -86,17 +88,28 @@ export function parseBook(raw: unknown, runId = 0): Book {
 export function parseSeries(raw: unknown): SeriesPoint[] {
   return (Array.isArray(raw) ? raw : []).flatMap((p) => {
     const o = obj(p), session = str(o?.session, 10), eq = num(o?.close_equity);
-    return o && session && eq !== null ? [{ session, closeEquity: eq, marked: o.marked === true }] : [];
+    if (!o || !session || eq === null) return [];
+    const gross = num(o.gross), inv = num(o.invested);
+    const e = gross !== null ? gross : inv !== null && eq > 0 ? inv / eq : null;
+    return [{ session, closeEquity: eq, marked: o.marked === true, ...(e !== null && e >= 0 ? { exposure: e } : {}) }];
   });
 }
 
-/** The pot line marked to market (close_equity) next to SPY from the same start (daily_result spy_ret). */
+/** The pot line marked to market (close_equity) next to SPY from the same start (daily_result spy_ret).
+ *  #719: and SPY held at the pot's own exposure, as gate v3 measures it (evaluation/mtm.exposure_matched): each
+ *  session's SPY return times the share invested at the close before it; the first session earns nothing. "What the
+ *  same amount in the market, with no stock picking, would have made." Only when the series carries an exposure; a
+ *  close without one (sessions before the ledger: the retired intraday rule was flat at every close) counts as 0. */
 export function mtmCurve(start: number, series: SeriesPoint[], daily: Pick<Daily, "session" | "spy_ret">[]): Curve[] {
   const spyRet = new Map(daily.map((d) => [d.session, d.spy_ret ?? 0]));
-  let spy = start;
+  const matched = series.some((p) => p.exposure !== undefined);
+  let spy = start, same = start, held = 0;
   return series.map((p) => {
-    spy *= 1 + (spyRet.get(p.session) ?? 0);
-    return { session: p.session, pot: p.closeEquity, spy };
+    const r = spyRet.get(p.session) ?? 0;
+    spy *= 1 + r;
+    same *= 1 + held * r;
+    held = p.exposure ?? 0;
+    return { session: p.session, pot: p.closeEquity, spy, ...(matched ? { spyMatched: same, exposure: held } : {}) };
   });
 }
 
