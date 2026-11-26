@@ -162,6 +162,8 @@ No pings at all (Mac off, asleep, offline, service stopped) turns the check red 
 minutes). Without `HEALTHCHECKS_PING_URL` the alarms are off: one line in `healthcheck.log`, nothing else.
 The dead-man in Supabase has a check of its own too, pinged from the database, not the Mac
 ([failsafe.md](failsafe.md#dead-man-alerts-audit-2-77-717)). The research runner has a check of its own ([research_runner.md](research_runner.md#one-time-setup-owner-on-the-mac)).
+Every one of these pings from a known machine. The heartbeat watched from **outside** the engine's host (any second
+machine now, a Cloud Run job after the move) is `scripts/heartbeat_watch.py`: [monitoring.md](monitoring.md) (#729).
 
 ## Kill switches, strongest last
 
