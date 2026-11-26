@@ -28,7 +28,7 @@ def test_the_run_on_the_fixture_writes_the_book_test_and_counts_six_configuratio
     rep = out["gate_v3_book"]
     assert rep["gate"] == "B-book" and rep["gate_a"]["listed_as_book"] is True
     assert rep["verdict"] != "pass"  # a fixture of one year from the research harness's data cannot pass
-    assert set(rep["marks"]) == {"b1", "b2", "b3", "b4", "b5", "b6"} and rep["marks"]["b6"]["met"] is True
+    assert set(rep["marks"]) == {"b1", "b2", "b3", "b4", "b5", "b6", "b7"} and rep["marks"]["b6"]["met"] is True
     for r in out["rows"]:
         assert r["guard_cuts"] == 0 and r["overdraft_days"] == 0
     assert (tmp_path / "out" / (out["file"].rsplit("/", 1)[1][:-5] + ".md")).is_file()

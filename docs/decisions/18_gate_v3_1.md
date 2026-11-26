@@ -29,7 +29,10 @@
   `src/kaibot/replay/spy_noise_band.py`; `tests/unit/test_gate_v3_1_timing_exposure.py`. Section 8 (#704):
   `tests/unit/test_gate_v3_1_holm_inputs.py`. Section 9 (#705):
   `docs/prereg/TEMPLATE.md`, `docs/prereg/index_core.md`, `docs/prereg/index_core_trend_momentum.md`;
-  `tests/unit/test_gate_v3_1_design_saw_holdout.py`.
+  `tests/unit/test_gate_v3_1_design_saw_holdout.py`. Section 10 (#706): `config/gate_v3.yaml` (`book.b7_control_book`),
+  `src/kaibot/evaluation/gate_v3.py`, `src/kaibot/strategies/index_core.py` (`ControlBook`),
+  `scripts/index_core_book.py`, `scripts/gate_v3_rescore.py`, `docs/prereg/index_core_trend_momentum.md`
+  (Amendment 5); `tests/unit/test_gate_v3_1_control_book.py`.
 
 ## 1. What changes (ticket 6.1)
 
@@ -181,10 +184,38 @@ its check clean.
 The two amendments change no setting, neighbour, mark or run, only the label. They are written after results, so
 gate v3.1 prints them as hindsight (section 4). That is correct, and it makes nothing easier to pass.
 
+## 10. Ticket 6.6: a sleeve is judged against the same budget in SPY, on five start offsets (#706)
+
+The audit marked this [confirmed]: "Sleeve value judged against idle cash; one path per configuration". The book
+with the `trend_momentum` sleeve at 80% earned 10.87% against the core's 10.09%, but the sleeve's selection effect
+against exposure-matched SPY was −1.14% a year and the book's alpha did not move. The 0.78 points compare the book
+with a core whose sleeve budget sits in cash at 0%. "The same budget held in SPY would probably have done as well."
+And one path decides nothing: #474 found 1–2 points a year between near-identical runs.
+
+| What | Before | After |
+|---|---|---|
+| What a sleeve's value in a book is measured against | nothing in the book test (B6 reads the sleeve test, which compares the sleeve alone with SPY at its own exposure); the reports set the book beside the core, whose sleeve budget is idle cash | the **budget-matched control book** (`strategies.index_core.ControlBook`): the same core with the same volatility cap, decided on the book's own days, with the sleeves' whole budget held in SPY. Its index cap is the core's cap plus the budget (80 + 10 = 90% at Hunter), so its SPY is w × C + B % of equity |
+| Paths | one: the run that starts on the window's first session | **five start offsets**: 0, 5, 10, 15 and 20 sessions after the window's first (`book.b7_control_book.start_offsets_sessions`; `offsets_min: 5`). At each offset the book and its control start on the same session and run to the same end. Offset 0 of the book is the judged run |
+| The mark | — | **B7**: the book's CAGR over its control book's (points) is above 0 at the **median** offset. The spread over the offsets (median, min, max, range, standard deviation) of the CAGR, the Sharpe and the drawdown differences is printed with every book verdict and in the re-score, and is not judged |
+| A book with no return sleeve (`index_core`) | — | B7 holds: there is nothing to compare |
+| A book with a return sleeve and no control book (every report before this change) | — | B7 is unknown, and unknown never passes |
+
+Hunter at 1x costs only: the control is the benchmark of the judged configuration, not of its neighbours or its
+cost reports. The control's rows and the book's rows at offsets other than 0 are logged with n_trials 0: the
+control is a benchmark, and an offset is a path of a configuration already counted. The median is judged, not the
+worst offset, because a single bad start is the noise the offsets are there to average; the minimum is printed so
+it can be read.
+
+**Effect.** B7 only adds a condition, so no verdict can turn from fail to pass. `index_core` is unchanged.
+`index_core_trend_momentum` (27% and 80%) already fails B2 and B6; its B7 is unknown in the re-score until the book
+is re-run with the control (job `index-core-book-80-control-2026-11-26`, posting to #706). The amendment that adds
+B7 to that book's pre-registration (`docs/prereg/index_core_trend_momentum.md` Amendment 5) is written after its
+results were seen, so gate v3.1 prints it as hindsight (section 4). That is correct.
+
 ## The configuration this record adopts
 
 Every gate report records the sha256 of `config/gate_v3.yaml` as `gate_sha`. A test
 (`tests/unit/test_gate_v3_1_books.py`) checks the line below against the file. Any later edit of the file must
 update this line in the same pull request, together with the section that explains the edit.
 
-config/gate_v3.yaml sha256: `1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a`
+config/gate_v3.yaml sha256: `af08d53f39f3727ca6ae5593802d904d2288b4faf127619511ed4c422d81c5f9`

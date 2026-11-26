@@ -45,7 +45,7 @@ def test_each_book_and_cap_is_rescored_once_and_matches_its_own_run(data: Path):
                        ("index_core_trend_momentum", "80%", "fixture")}
     for b in res["books"]:
         g = b["gate_v3"]
-        assert g["gate"] == "B-book" and set(g["marks"]) == {"b1", "b2", "b3", "b4", "b5", "b6"}
+        assert g["gate"] == "B-book" and set(g["marks"]) == {"b1", "b2", "b3", "b4", "b5", "b6", "b7"}
         # the re-score from the daily files and the run's own SPY gives the run's own verdict and marks
         assert g["verdict"] == b["at_run"]["verdict"]
         assert {k: v["met"] for k, v in g["marks"].items()} == b["at_run"]["marks"]
