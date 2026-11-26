@@ -86,3 +86,36 @@ missing value, never zero.
 It changes no rule, setting, gate mark, the engine, the risk gate or live paper trading. It adds no source to the
 live path. The upcoming-earnings calendar on the dashboard (a separate change) is display only and is not this
 filter.
+
+## Amendment 1 (26 Nov 2026, before any data was analysed): SUE from SEC data is the primary test
+
+Written by the Data team on Product's instruction (#797), before any Alpha Vantage answer or any join of earnings
+data to returns was looked at. It changes sections 1-3 as follows; the frozen copy, with every setting, is the rule
+file `docs/prereg/earnings_surprise_drift.md` (committed with this amendment).
+
+1. **New primary variant: SUE-SEC.** Standardized unexpected earnings with a seasonal random walk,
+   SUE = (EPS_q − EPS_{q−4}) / sd(EPS_j − EPS_{j−4}, the 8 prior quarters, at least 4). EPS: diluted EPS from the
+   XBRL store (`kaibot.data.fundamentals`), only versions filed by the entry session (point-in-time). Event: the
+   SEC 8-K Item 2.02 `report` filing (`announcements.parquet`, exact acceptance time, since 2016, former members
+   included). Universe: the point-in-time S&P 500 membership, so **no survivorship bias**. Holds 20/40/60 sessions,
+   the quintile, the 1/99 winsorisation, the 5-session window, the SPY 200-day filter, costs and gate v3.1 as in
+   section 2. Each hold is a trial.
+   - **Entry: the open of the first session after the 8-K's acceptance time AND on or after the day EPS_q is
+     available in XBRL** (filed + 1 day). Companies furnish the press release on the 8-K but tag EPS in XBRL only in
+     the 10-Q/10-K, usually days later; entering at the first open after the 8-K would read EPS_q before it was in
+     the XBRL data. The run reports the share of events where both dates coincide and the median lag.
+   - **Data work before the first run:** the XBRL store does not hold EPS yet (`ingest/sec_fundamentals.METRICS` has
+     no `EarningsPerShareDiluted`/`EarningsPerShareBasic`, and its units are USD and shares only). Adding the two
+     concepts with unit USD/shares and re-reading companyfacts is a separate data story; it changes no setting here.
+2. **The Alpha Vantage consensus surprise becomes the SECONDARY variant** (3 trials, the survivorship caveat stays:
+   today's members only). Its event time is now the SEC Item 2.02 acceptance time of the report matched to the AV
+   quarter by fiscal period (accepted after `fiscalDateEnding`, within 100 days, nearest AV's `reportedDate`, at most
+   3 sessions away), entry at the first open after it. Only when no SEC report matches is AV's `reportedDate` used,
+   with the conservative rule of section 1; the run reports the match rate. This replaces section 1's "dropped when
+   more than one session from any SEC filing".
+3. **Section 3's filter** (`no_buy_before_report`) estimates the next report from the SEC report sessions known at the
+   decision (not AV's dates), so it also covers former members.
+4. **Trials and family.** Seven trials in one family: SUE-SEC ×3, AV ×3, the filter ×1 (deflated Sharpe N = 7).
+5. **Licence.** The SEC variant and the filter use public-domain SEC data only: safe for a multi-user product. The AV
+   variant is personal, non-commercial use only and would need a commercial licence before any multi-user exposure
+   (noted on #475, M13).
