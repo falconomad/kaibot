@@ -16,6 +16,7 @@ import { ErrorBoundary, PageBoundary } from "./components/ErrorBoundary";
 import { ROUTE_LOADERS as load } from "./routes";
 import { STALE } from "./lib/poll";
 import { primeGlowArrival, primeGlowFromUrl } from "./lib/glow";
+import { startTheme } from "./lib/theme";
 
 // Lazy routes (see routes.ts). Sign-in, the shell and Home stay in the first load so the first screen is one round trip.
 const Settings = lazy(() => load["/settings"]().then((m) => ({ default: m.Settings })));
@@ -46,6 +47,10 @@ const page = (name: string, el: ReactNode, variant: "list" | "detail" = "list") 
 // doesn't fire every query at once.
 const qc = new QueryClient({ defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: true, staleTime: STALE.default,
   refetchIntervalInBackground: false } } });
+
+// The theme (#720): index.html's inline script set it before the first paint; from here it follows Settings, the device
+// (System) and other tabs.
+startTheme();
 
 // Sign-out, or another account in this tab: drop every cached answer and the realtime channels (lib/session.ts). Wired
 // before Gate subscribes, so the cache is empty before the next screen renders.

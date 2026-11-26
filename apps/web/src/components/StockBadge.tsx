@@ -13,6 +13,9 @@ export type TileColours = { bg: string | null; fg?: string; pad: number; sampled
 const PENDING = { bg: "var(--grey-50)", pad: 12 };
 export const TILES = tiles as Record<string, TileColours>;
 export const TINTS = ["#1E3A5F", "#3A2E1A", "#1F3A2C", "#3B1E2A", "#2A2540", "#1C3540", "#3A2A22", "#26323F", "#2F2440", "#3A2228"];
+/** The same ten hues for the light theme (#720), light enough for --ink initials (about 15:1): OKLCH lightness 0.91 at
+ *  each dark tint's hue (docs/design/screens/light-theme-2026-11-26). Index for index with TINTS. */
+export const LIGHT_TINTS = ["#CFE3FF", "#ECE0CC", "#CFE9DA", "#F8D7E3", "#E1DDFA", "#CEE6F1", "#EFDDD5", "#D6E3F0", "#E6DBF9", "#F4D9DF"];
 
 export const companyName = (s: string) => META[s]?.name ?? s;
 
@@ -49,10 +52,11 @@ function scheduleSample(domain: string, img: HTMLImageElement, done: () => void)
   if (idle) idle(run, { timeout: 1000 }); else setTimeout(run, 0);
 }
 
+/** The tile's two colours, as the CSS variables app.css's `.badge.ini` reads: dark, and light for the light theme. */
 function tint(s: string) {
   let h = 0;
   for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return TINTS[h % TINTS.length];
+  return { "--tint": TINTS[h % TINTS.length], "--tint-l": LIGHT_TINTS[h % TINTS.length] } as CSSProperties;
 }
 
 /** A company tile: an iOS-style squircle (app.css .badge) with the company's logo on its own colour, or its initials.
@@ -99,7 +103,7 @@ export function StockBadge({ symbol, size: base = 40, label = false }: { symbol:
   const fit = (n: number) => Math.min(Math.round(size * 0.3), Math.floor((size * 0.84) / (n * 0.72)));
   const n = Math.min(letters.length, fit(4) >= 12 ? 4 : 3);
   return (
-    <span className="badge" style={{ ...box, background: tint(symbol), fontSize: Math.max(12, fit(n)) }} {...sr}>
+    <span className="badge ini" style={{ ...box, ...tint(symbol), fontSize: Math.max(12, fit(n)) }} {...sr}>
       {label ? <span aria-hidden="true">{letters.slice(0, n)}</span> : letters.slice(0, n)}
     </span>
   );

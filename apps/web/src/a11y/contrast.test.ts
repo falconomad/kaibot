@@ -10,7 +10,7 @@ const css = `${appCss}\n${strategyCss}`;
 import tokens from "../tokens.css?raw";
 import v4 from "../v4tokens.css?raw";
 import badge from "../components/StockBadge.tsx?raw";
-import { TINTS } from "../components/StockBadge";
+import { LIGHT_TINTS, TINTS } from "../components/StockBadge";
 
 type Rgb = [number, number, number];
 const rgb = (hex: string): Rgb => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as Rgb;
@@ -19,7 +19,7 @@ export const ratio = (a: Rgb, b: Rgb) => { const [hi, lo] = [lum(a), lum(b)].sor
 /** `fg` drawn at `alpha` over `bg`. */
 const over = (fg: Rgb, bg: Rgb, alpha: number): Rgb => fg.map((v, i) => v * alpha + bg[i] * (1 - alpha)) as Rgb;
 
-// The dark theme's tokens (the only theme switched on), as declared in tokens.css.
+// The dark theme's tokens, as declared in tokens.css (the light theme's are checked at the end, #720).
 const dark = tokens.slice(tokens.indexOf(':root, :root[data-theme="dark"] {'), tokens.indexOf(':root[data-theme="light"]'));
 const T = Object.fromEntries([...dark.matchAll(/--([a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})\b/g)].map((m) => [m[1], rgb(m[2])])) as Record<string, Rgb>;
 const r = (fg: string, bg: string) => ratio(T[fg], T[bg]);
@@ -52,10 +52,10 @@ describe("text on the new screens meets 4.5:1", () => {
     ["slate", "surface-2", "the summary's dates and credit line"],
     ["ink", "surface", "a chip's ticker; a sheet's text"],
     ["loss", "loss-tint", "a refused chip's reason and its remove button"],
-    ["warn", "warn-tint", "a waiting chip's note; the Only-these warning"],
-    ["sea", "surface", "Retry and the other text buttons"],
-    ["sea", "loss-tint", "Retry on a chip that was not checked"],
-    ["sea", "warn-tint", "Retry on a waiting chip"],
+    ["warn-text", "warn-tint", "a waiting chip's note; the Only-these warning"],
+    ["sea-text", "surface", "Retry and the other text buttons"],
+    ["sea-text", "loss-tint", "Retry on a chip that was not checked"],
+    ["sea-text", "warn-tint", "Retry on a waiting chip"],
     ["sea-ink", "sea-tint", "a picked theme's or list's count"],
     ["ink", "sea-tint", "a picked theme's or list's name"],
     ["on-sea", "sea", "Add to focus, Save list"],
@@ -77,8 +77,8 @@ describe("text on the new screens meets 4.5:1", () => {
     expect(rule(".kb-chip.no")).toContain("background: var(--loss-tint)");
     expect(rule(".kb-chip-why")).toContain("color: var(--loss)");
     expect(rule(".kb-chip.slow")).toContain("background: var(--warn-tint)");
-    expect(rule(".kb-chip.slow .kb-chip-why")).toContain("color: var(--warn)");
-    expect(rule(".linkbtn")).toContain("color: var(--sea)");
+    expect(rule(".kb-chip.slow .kb-chip-why")).toContain("color: var(--warn-text)");
+    expect(rule(".linkbtn")).toContain("color: var(--sea-text)");
     expect(rule(".kb-tcard.on")).toContain("background: var(--sea-tint)");
     expect(rule(".kb-tcard.on .kb-tmeta")).toContain("color: var(--sea-ink)");
   });
@@ -142,5 +142,49 @@ describe("touch targets on the new controls are 44 px (as declared; measured in 
   it("a sheet's close button and the button at its foot", () => {
     expect(rule(".sheet-x")).toMatch(/width: var\(--tap\); min-height: var\(--tap\); height: var\(--tap\)/);
     expect(rule(".kb-peek-btn")).toContain("width: 100%");
+  });
+});
+
+// #720: the light theme is switched on (Settings: System, Dark or Light), so it meets the same bar.
+const lightBlock = tokens.slice(tokens.indexOf(':root[data-theme="light"] {'));
+const L = Object.fromEntries([...lightBlock.split("}")[0].matchAll(/--([a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})\b/g)].map((m) => [m[1], rgb(m[2])])) as Record<string, Rgb>;
+const l = (fg: string, bg: string) => ratio(L[fg], L[bg]);
+const alpha = (decl: string) => { const m = /rgba\((\d+), (\d+), (\d+), ([.\d]+)\)/.exec(decl)!; return { c: [m[1], m[2], m[3]].map(Number) as Rgb, a: Number(m[4]) }; };
+
+describe("the light theme (#720)", () => {
+  it("reads its own block", () => {
+    expect(Object.keys(L).length).toBeGreaterThan(30);
+    expect([L.paper, L.ink]).toEqual([rgb("#F4F5F7"), rgb("#0A0B0D")]);
+  });
+  const grounds = ["paper", "surface", "surface-2", "sea-tint", "loss-tint", "warn-tint", "gain-tint"];
+  for (const grey of ["ink", "slate", "stale"]) it(`--${grey} text: 4.5:1 on every ground`, () => {
+    for (const g of grounds) expect(l(grey, g), `--${grey} on --${g}`).toBeGreaterThanOrEqual(4.5);
+  });
+  it("link and warning text: 4.5:1 on the page, a card and the tints they sit on", () => {
+    for (const g of ["paper", "surface", "loss-tint", "warn-tint", "sea-tint"]) expect(l("sea-text", g), `--sea-text on --${g}`).toBeGreaterThanOrEqual(4.5);
+    for (const g of ["paper", "surface", "warn-tint"]) expect(l("warn-text", g), `--warn-text on --${g}`).toBeGreaterThanOrEqual(4.5);
+    // --sea and --warn are fills (a button, a pill), never text: the text roles above are
+    expect(l("sea", "paper")).toBeLessThan(4.5);
+    expect(css).not.toMatch(/(?:^|[;{\s])color: var\(--(?:sea|warn|amber|accent)\)/m);
+  });
+  it("--rule-strong, the edge of a switch's track, the round add button and a list card: 3:1 where the controls sit", () => {
+    for (const g of ["paper", "surface", "sea-tint"]) expect(l("rule-strong", g), `--rule-strong on --${g}`).toBeGreaterThanOrEqual(3);
+    expect(rule(".kb-tog::before")).toContain("background: var(--rule-strong)");
+    for (const g of ["paper", "surface", "surface-2"]) expect(l("control", g), `--control on --${g}`).toBeGreaterThanOrEqual(3);
+  });
+  it("the tab bar's resting label: 4.5:1 even with the darkest content scrolled under the bar", () => {
+    const { c, a } = alpha(lightBlock.split("}")[0].match(/--bar-bg: [^;]+/)![0]);
+    expect(c).toEqual(L.paper);
+    const worst = over(c, L.ink, a); // the bar over --ink (a black button, a tile's letters)
+    expect(ratio(L.stale, worst)).toBeGreaterThanOrEqual(4.5);
+    expect(ratio(L.ink, worst)).toBeGreaterThanOrEqual(4.5);
+  });
+  it("letter tiles: --ink initials on a light tint, 4.5:1 on every one, index for index with the dark tints", () => {
+    expect(LIGHT_TINTS.length).toBe(TINTS.length);
+    for (const t of LIGHT_TINTS) expect(ratio(L.ink, rgb(t)), t).toBeGreaterThanOrEqual(4.5);
+    expect(css).toContain('.badge.ini { background: var(--tint); } :root[data-theme="light"] .badge.ini { background: var(--tint-l); }');
+  });
+  it("the focus ring: 3:1 on every ground", () => {
+    for (const g of ["paper", "surface", "surface-2", "sea-tint", "loss-tint", "warn-tint"]) expect(l("focus", g), `--focus on --${g}`).toBeGreaterThanOrEqual(3);
   });
 });

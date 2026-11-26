@@ -1,7 +1,8 @@
 // Audit 2 ticket 7.3 (#713): the Content-Security-Policy in vercel.json, sent Report-Only first (violations show in
 // the browser console; nothing is blocked). It must name every origin the browser really uses, so that switching it
 // to enforcing later breaks nothing:
-// - scripts: our own files; the one inline handler in index.html (the Inter sheet's onload) by its hash;
+// - scripts: our own files; the one inline handler in index.html (the Inter sheet's onload) and the one inline script
+//   (the theme before the first paint, #720) by their hashes;
 // - images: the logo sources of components/StockBadge.tsx (tickerlogos, our list's Finnhub URLs, FMP), data: and blob:;
 // - connect: our /api/* functions ('self') and the Supabase project, over https and wss (the price stream);
 // - Alpaca is not there on purpose: only the server functions in api/ call it, never the browser.
@@ -12,6 +13,7 @@ import html from "../index.html?raw";
 import py from "../../../src/kaibot/engine/config.py?raw";
 import { TICKERLOGOS } from "./lib/logos";
 import { fmpLogo } from "./components/StockBadge";
+import { PREPAINT } from "./lib/theme";
 
 type Header = { key: string; value: string };
 const all = (VERCEL as { headers: { source: string; headers: Header[] }[] }).headers.find((h) => h.source === "/(.*)")!;
@@ -30,14 +32,17 @@ describe("Content-Security-Policy (report-only)", () => {
     expect(csp).not.toMatch(/'unsafe-inline'|'unsafe-eval'|\*/);
   });
 
-  it("allows index.html's inline handlers by hash and nothing inline else", async () => {
+  it("allows index.html's inline handler and its theme script by hash, and nothing inline else", async () => {
     const handlers = [...html.matchAll(/\son[a-z]+="([^"]*)"/g)].map((m) => m[1]);
     expect(handlers.length).toBeGreaterThan(0);
     const sha256 = async (s: string) =>
       btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))));
     const hashes = await Promise.all(handlers.map(async (h) => `'sha256-${await sha256(h)}'`));
-    expect(directive("script-src")).toEqual(["'self'", "'unsafe-hashes'", ...hashes]);
-    expect(html).not.toMatch(/<script(?![^>]*\ssrc=)[^>]*>/); // no inline <script> block
+    // the one inline <script> block: the theme before the first paint (#720, lib/theme.ts PREPAINT), by its hash
+    const blocks = [...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(blocks).toEqual([PREPAINT]);
+    const inline = await Promise.all(blocks.map(async (b) => `'sha256-${await sha256(b)}'`));
+    expect(directive("script-src")).toEqual(["'self'", "'unsafe-hashes'", ...hashes, ...inline]);
   });
 
   it("allows every logo source the badges use", () => {

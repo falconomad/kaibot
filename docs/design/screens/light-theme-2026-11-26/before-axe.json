@@ -1,0 +1,702 @@
+{
+ "home-light-390": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "",
+    "rgb(93, 100, 111)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "trades-light-390": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "",
+    "rgb(93, 100, 111)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "engine-light-390": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "More",
+    "",
+    "rgb(93, 100, 111)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "gate-light-390": {
+  "axe": [
+   "color-contrast: .acc-title > span[title=\"code: dip_reversal\"] > .retired.tag Element has insufficient color contrast of 1.53 (foreground color: #f7b746, background color: #ffeccf, font size: 9.8pt (13px), font weight: bold). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "active",
+    "rgb(10, 11, 13)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "settings-light-390": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "active",
+    "rgb(10, 11, 13)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "configure-light-390": {
+  "axe": [
+   "color-contrast: .kb-warn Element has insufficient color contrast of 1.77 (foreground color: #f7b746, background color: #ffffff, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "active",
+    "rgb(10, 11, 13)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "my-lists-light-390": {
+  "axe": [
+   "color-contrast: .kb-warn Element has insufficient color contrast of 1.77 (foreground color: #f7b746, background color: #ffffff, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "active",
+    "rgb(10, 11, 13)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "fine-tune-light-390": {
+  "axe": [
+   "color-contrast: .kb-back Element has insufficient color contrast of 4.32 (foreground color: #2f6fde, background color: #f4f5f7, font size: 11.3pt (15px), font weight: normal). Expected contrast ratio of 4.5:1",
+   "color-contrast: span[title=\"code: dip_reversal\"] > .retired.tag Element has insufficient color contrast of 1.53 (foreground color: #f7b746, background color: #ffeccf, font size: 9.8pt (13px), font weight: bold). Expected contrast ratio of 4.5:1",
+   "color-contrast: span[title=\"code: spy_late_momentum\"] > .retired.tag Element has insufficient color contrast of 1.53 (foreground color: #f7b746, background color: #ffeccf, font size: 9.8pt (13px), font weight: bold). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(93, 100, 111)"
+   ],
+   [
+    "More",
+    "active",
+    "rgb(10, 11, 13)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "sign-in-light-390": {
+  "axe": [],
+  "nav": [],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "home-light-1440": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "trades-light-1440": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "engine-light-1440": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Strategy",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "gate-light-1440": {
+  "axe": [
+   "color-contrast: .acc-title > span[title=\"code: dip_reversal\"] > .retired.tag Element has insufficient color contrast of 1.53 (foreground color: #f7b746, background color: #ffeccf, font size: 9.8pt (13px), font weight: bold). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "settings-light-1440": {
+  "axe": [],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Run & settings",
+    "active",
+    "rgb(10, 11, 13)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "configure-light-1440": {
+  "axe": [
+   "color-contrast: .kb-warn Element has insufficient color contrast of 1.77 (foreground color: #f7b746, background color: #ffffff, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "my-lists-light-1440": {
+  "axe": [
+   "color-contrast: .kb-warn Element has insufficient color contrast of 1.77 (foreground color: #f7b746, background color: #ffffff, font size: 12.0pt (16px), font weight: normal). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "fine-tune-light-1440": {
+  "axe": [
+   "color-contrast: .kb-back Element has insufficient color contrast of 4.32 (foreground color: #2f6fde, background color: #f4f5f7, font size: 11.3pt (15px), font weight: normal). Expected contrast ratio of 4.5:1",
+   "color-contrast: span[title=\"code: dip_reversal\"] > .retired.tag Element has insufficient color contrast of 1.53 (foreground color: #f7b746, background color: #ffeccf, font size: 9.8pt (13px), font weight: bold). Expected contrast ratio of 4.5:1",
+   "color-contrast: span[title=\"code: spy_late_momentum\"] > .retired.tag Element has insufficient color contrast of 1.53 (foreground color: #f7b746, background color: #ffeccf, font size: 9.8pt (13px), font weight: bold). Expected contrast ratio of 4.5:1"
+  ],
+  "nav": [
+   [
+    "Home",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Positions",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Activity",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Report",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Go / no-go",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Engine",
+    "",
+    "rgb(64, 69, 79)"
+   ],
+   [
+    "Strategy",
+    "active",
+    "rgb(10, 11, 13)"
+   ],
+   [
+    "Run & settings",
+    "",
+    "rgb(64, 69, 79)"
+   ]
+  ],
+  "theme": [
+   "light",
+   "light"
+  ]
+ },
+ "sign-in-light-1440": {
+  "axe": [],
+  "nav": [],
+  "theme": [
+   "light",
+   "light"
+  ]
+ }
+}

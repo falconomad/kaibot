@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <!-- The theme before the first paint (#720): the choice saved in Settings, or the device's light or dark. The same words as PREPAINT in src/lib/theme.ts (tested); the CSP allows it by its hash. -->
+    <script>try{var t=localStorage.getItem("kb-theme");if(t!=="dark"&&t!=="light")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t}catch(e){}</script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <!-- The name is written once, in src/brand/brand.ts; the build puts it where the BRAND placeholder stands (vite.config.ts). -->
     <title>%BRAND% · paper</title>

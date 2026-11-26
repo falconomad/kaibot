@@ -11,7 +11,7 @@
 .kb-sect { display: flex; flex-direction: column; gap: 10px; }
 .kb-card { display: flex; flex-direction: column; gap: 14px; }
 .kb-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.kb-warn { color: var(--warn); }
+.kb-warn { color: var(--warn-text); }
 .kb-ghost { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; background: transparent; font-size: 15px; }
 .kb-twocol { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; align-items: start; }
 .kb-presets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
@@ -90,7 +90,7 @@
 .kb-locked ul { margin: 8px 0 0; padding-left: 22px; font-size: 14px; color: var(--slate); }
 /* fine-tune */
 .kb-fine-head { display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
-.kb-back { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; font-weight: 600; color: var(--sea); text-decoration: none; }
+.kb-back { align-self: flex-start; display: inline-flex; align-items: center; min-height: 44px; font-size: 15px; font-weight: 600; color: var(--sea-text); text-decoration: none; }
 .kb-expand .kb-locked-rows { padding: 0 0 0 26px; }
 .kb-exclude, .kb-never { display: flex; flex-direction: column; gap: 10px; }
 .kb-exclude { padding-top: 14px; border-top: 1px solid var(--surface-2); }
@@ -188,7 +188,7 @@ dialog.kb-sheet::backdrop { background: var(--scrim); }
 .kb-lstack { display: flex; padding: 2px 0 2px 8px; }
 .kb-lstack > * { margin-left: -8px; border-radius: 50%; -webkit-mask: none; mask: none; box-shadow: 0 0 0 2px var(--surface); }
 .kb-lstack .badge::after { content: none; }
-.kb-lstack .badge:not(.logo) { letter-spacing: -.05em; color: var(--grey-50); } /* the tints are dark in both themes */
+.kb-lstack .badge:not(.logo) { letter-spacing: -.05em; } /* --ink on the theme's tint, as every tile (#720) */
 .kb-lstack b { position: relative; display: flex; align-items: center; padding: 0 7px; border-radius: 999px; background: var(--surface-2); color: var(--slate); font-size: 12px; }
 .kb-lcard[aria-checked=true] .kb-lstack > * { box-shadow: 0 0 0 2px var(--sea-tint); }
 .kb-ml-field { display: flex; flex-direction: column; gap: 6px; }
@@ -206,13 +206,13 @@ dialog.kb-sheet::backdrop { background: var(--scrim); }
 .kb-chip-sym { font-size: 15px; font-weight: 600; }
 .kb-chip-name { min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kb-chip-why { min-width: 0; font-size: 14px; color: var(--loss); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kb-chip.slow .kb-chip-why { color: var(--warn); }
+.kb-chip.slow .kb-chip-why { color: var(--warn-text); }
 .kb-chip-x { flex: none; width: 44px; min-height: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--slate);
   display: flex; align-items: center; justify-content: center; }
 .kb-chip.no .kb-chip-x { color: var(--loss); }
 .kb-chip .linkbtn { min-width: 44px; }
 .kb-ml-empty { font-size: 14px; line-height: 1.5; padding: 14px 16px; border-radius: 14px; border: 1px dashed var(--rule-strong); }
-.kb-ml-warn { display: flex; gap: 10px; padding: 12px 14px; border-radius: 14px; background: var(--warn-tint); border: 1px solid var(--warn-line); color: var(--warn);
+.kb-ml-warn { display: flex; gap: 10px; padding: 12px 14px; border-radius: 14px; background: var(--warn-tint); border: 1px solid var(--warn-line); color: var(--warn-text);
   font-size: 14px; line-height: 1.5; }
 .kb-ml-lock { display: flex; gap: 10px; padding-top: 14px; border-top: 1px solid var(--rule); font-size: 14px; color: var(--slate); line-height: 1.5; }
 .kb-ml-dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 10px 14px; font-size: 15px; }

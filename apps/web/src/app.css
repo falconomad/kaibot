@@ -173,7 +173,7 @@ table.list tr.click:hover td:first-child { border-radius: 14px 0 0 14px; } table
 table.list td.r, table.list th.r { text-align: right; }
 .tag { font-size: 13px; font-weight: 700; letter-spacing: .02em; padding: 3px 8px; border-radius: 999px; white-space: nowrap; background: var(--surface-2); color: var(--slate); }
 .tag.allow { color: var(--gain); background: var(--gain-tint); } .tag.veto { color: var(--loss); background: var(--loss-tint); }
-.tag.downgrade { color: var(--warn); background: var(--warn-tint); }
+.tag.downgrade { color: var(--warn-text); background: var(--warn-tint); }
 /* Company tiles (stakeholder, 17 Nov 2026): an iOS-style continuous-corner squircle (a superellipse, n = 5), the same for
    a logo and for the initials. The shape is a mask, so the curve is smooth at every size; a hairline (white at 8%)
    traced on the same curve keeps the tile's edge on the dark glow. The tile is drawn at its size before the logo loads,
@@ -184,6 +184,8 @@ table.list td.r, table.list th.r { text-align: right; }
   font-weight: 700; letter-spacing: -0.01em; overflow: hidden; -webkit-mask: var(--squircle) center / 100% 100% no-repeat; mask: var(--squircle) center / 100% 100% no-repeat; }
 .badge::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: var(--squircle-line) center / 100% 100% no-repeat; }
 .badge.logo { background: var(--tile-bg, var(--grey-50)); }
+/* initials: a dark tint, or its light twin in the light theme (#720), with --ink letters (StockBadge TINTS, LIGHT_TINTS) */
+.badge.ini { background: var(--tint); } :root[data-theme="light"] .badge.ini { background: var(--tint-l); }
 .badge.logo img { width: 100%; height: 100%; object-fit: contain; padding: var(--tile-pad, 12%); display: block; opacity: 0; transition: opacity var(--d-base) var(--ease); }
 .badge.logo img.loaded { opacity: 1; }
 .badge.sys { background: var(--surface-2); color: var(--text-2); }
@@ -329,7 +331,7 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
 .ev-sum { font-size: 13px; margin-top: 3px; overflow-wrap: anywhere; }
 .ev-none { font-size: 13px; margin: 4px 0 0; }
 .room .pack summary { cursor: pointer; font-size: 14px; color: var(--slate); }
-.linkbtn { height: auto; padding: 0; border: 0; background: none; color: var(--sea); text-decoration: underline; font-size: 13px; }
+.linkbtn { height: auto; padding: 0; border: 0; background: none; color: var(--sea-text); text-decoration: underline; font-size: 13px; }
 table.list tr.expand td { background: var(--paper); white-space: normal; }
 .room-line { margin-top: 4px; font-size: 13px; }
 .expand-inner { max-width: 980px; }
@@ -340,7 +342,7 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 
 /* S41 go / no-go */
 .tag.gate-pass { color: var(--gain); background: var(--gain-tint); } .tag.gate-fail { color: var(--loss); background: var(--loss-tint); }
-.tag.gate-warn { color: var(--warn); background: var(--warn-tint); } .tag.gate-muted { color: var(--slate); background: var(--surface-2); }
+.tag.gate-warn { color: var(--warn-text); background: var(--warn-tint); } .tag.gate-muted { color: var(--slate); background: var(--surface-2); }
 .bar-track { height: 4px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 4px 0 12px; }
 .bar-track i { display: block; height: 4px; border-radius: 4px; background: var(--sea); transform-origin: left; animation: kb-growX .9s var(--ease) .3s both; }
 .gate-dot { font-size: 13px; white-space: nowrap; }
@@ -361,7 +363,7 @@ table.list tr.expand td { background: var(--paper); white-space: normal; }
 .state { display: flex; flex-direction: column; gap: 8px; font-size: 15px; line-height: 1.5; }
 .state-error b { color: var(--loss); }
 .state-detail { font-size: 13px; word-break: break-word; }
-.tag.retired { color: var(--warn); background: var(--warn-tint); }
+.tag.retired { color: var(--warn-text); background: var(--warn-tint); }
 .skip { position: absolute; left: 12px; top: -60px; z-index: 50; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: var(--paper); font-weight: 600; }
 .skip:focus { top: 12px; }
 main:focus { outline: none; }
@@ -530,7 +532,7 @@ main > * { min-width: 0; max-width: 100%; }
 .pos-head { display: flex; flex-direction: column; gap: 8px; }
 .seg { display: inline-flex; align-self: flex-start; padding: 4px; gap: 4px; border-radius: var(--r-pill); background: var(--surface); border: 1px solid var(--line); }
 .seg button { min-height: 44px; padding: 0 20px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--text-2); font-size: var(--t-sm); }
-.seg button[aria-selected=true] { background: var(--text); color: var(--bg); }
+.seg button[aria-selected=true], .seg button[aria-checked=true] { background: var(--text); color: var(--bg); }
 .rows { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); overflow: hidden; }
 .rows > li + li > .row, .rows > li + li > .day-head { border-top: 1px solid var(--line); }
 .row { display: flex; align-items: center; gap: 14px; width: 100%; min-height: var(--row); height: auto; padding: 12px 16px; border: 0; border-radius: 0;

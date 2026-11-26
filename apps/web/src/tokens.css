@@ -1,4 +1,4 @@
-/* v3 "night" tokens (design canvas v3). One dark theme; names kept so every page picks them up. */
+/* v3 "night" tokens (design canvas v3), dark and light; names kept so every page picks them up. */
 @import "tailwindcss";
 /* Tests are not shipped: keep their words from being picked up as utility classes. */
 @source not "./**/*.test.ts";
@@ -52,17 +52,18 @@
   --ai: #C9B7FD; --ai-tint: #231E30;
   --s-pot: #4F95F0; --s-spy: #9E65A1;
   --on-sea: #0A0B0D; --sea-line: #174189; --focus: #7FB4F9; --selection: #174189; --live: #4F95F0; --control: #808692;
-  --gain-line: #0A5C3B; --loss-line: #AD4B48; --warn-line: #906E34; --warn-text: #F7B746; --on-warn: #0A0B0D; --paper-edge: #F7B746; --ai-line: #50466C;
+  --gain-line: #0A5C3B; --loss-line: #AD4B48; --warn-line: #906E34; --warn-text: #F7B746; --sea-text: #4F95F0; --on-warn: #0A0B0D; --paper-edge: #F7B746; --ai-line: #50466C;
   --exp-bg: #1B1E23; --exp-line: #808692; --exp-hatch: #40454F; --exp-text: #F4F5F7;
   --s-grid: #262A31; --s-up: #10A66E; --s-down: #BC262F;
   --scrim: rgba(0, 0, 0, .6); --bar-bg: rgba(10, 11, 13, .86); --elev-sheet: 0 -12px 40px rgba(0, 0, 0, .55);
   /* the glow, on a layer 300% of the screen (app.css): 110% by 70% of the screen, as sign-in had it */
   --glow: radial-gradient(36.667% 23.333% at 50% 50%, var(--sea-tint) 0%, var(--paper) 60%); --glow-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .035 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-/* The light theme is defined and proven by Design, and not switched on: nothing sets data-theme="light" yet. */
+/* The light theme (#720): Settings' Theme (System, Dark or Light) sets data-theme on <html> (lib/theme.ts, and index.html
+   before the first paint). Without it (no script) the page is dark. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --paper: #F4F5F7; --surface: #FFFFFF; --surface-2: #E4E6EA; --rule: #CDD1D9; --rule-strong: #989FAB;
+  --paper: #F4F5F7; --surface: #FFFFFF; --surface-2: #E4E6EA; --rule: #CDD1D9; --rule-strong: #808692;
   --ink: #0A0B0D; --slate: #40454F; --stale: #5D646F;
   --sea: #2F6FDE; --sea-ink: #1A54B7; --sea-tint: #ECF4FF;
   --gain: #00764C; --gain-tint: #D8F8E5; --loss: #BC262F; --loss-tint: #FFE9E6;
@@ -70,10 +71,10 @@
   --ai: #6844AA; --ai-tint: #F0EBFF;
   --s-pot: #2F6FDE; --s-spy: #A168A4;
   --on-sea: #FFFFFF; --sea-line: #B4D4FE; --focus: #2F6FDE; --selection: #B4D4FE; --live: #2F6FDE; --control: #5D646F;
-  --gain-line: #8ECFAC; --loss-line: #D14E4D; --warn-line: #A87507; --warn-text: #835B05; --on-warn: #0A0B0D; --paper-edge: #A87507; --ai-line: #C0B7DF;
+  --gain-line: #8ECFAC; --loss-line: #D14E4D; --warn-line: #A87507; --warn-text: #835B05; --sea-text: #1A54B7; --on-warn: #0A0B0D; --paper-edge: #A87507; --ai-line: #C0B7DF;
   --exp-bg: #E4E6EA; --exp-line: #5D646F; --exp-hatch: #B2B8C1; --exp-text: #0A0B0D;
   --s-grid: #CDD1D9; --s-up: #039F68; --s-down: #A7021D;
-  --scrim: rgba(10, 11, 13, .45); --bar-bg: rgba(244, 245, 247, .88); --elev-sheet: 0 -12px 40px rgba(10, 11, 13, .18);
+  --scrim: rgba(10, 11, 13, .45); --bar-bg: rgba(244, 245, 247, .94); --elev-sheet: 0 -12px 40px rgba(10, 11, 13, .18);
   --glow: radial-gradient(36.667% 23.333% at 50% 50%, var(--blue-100) 0%, var(--paper) 60%);
 }
 
