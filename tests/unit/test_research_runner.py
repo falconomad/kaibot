@@ -134,6 +134,15 @@ def _gh_on_path(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _outside_the_quiet_window(monkeypatch):
+    """#718: heavy jobs wait out the 15:30-16:10 ET window. These tests run at any hour, so the runner's clock for
+    that rule is a Saturday noon (no session); tests/unit/test_runner_quiet_window.py tests the window itself."""
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr(rr, "wall_now", lambda: datetime(2026, 11, 28, 12, 0, tzinfo=UTC))
+
+
+@pytest.fixture(autouse=True)
 def _engine_elsewhere(monkeypatch, tmp_path_factory):
     """The engine's checkout is a folder of its own in every test (on the owner's Mac the repo these tests run in
     may BE the engine's checkout, which the runner refuses); the tests of that refusal name it themselves."""
@@ -323,7 +332,7 @@ def test_a_job_sees_a_short_fixed_environment_without_tokens(tmp_path, monkeypat
     _, _, popen = tick(tmp_path, [job()])
     env = popen.kwargs[0]["env"]
     assert env["PYTHONPATH"] == "src" and "GH_TOKEN" not in env and "ANTHROPIC_API_KEY" not in env
-    assert set(env) <= set(rr.JOB_ENV_KEYS) | {"PYTHONPATH", "PYTHONUNBUFFERED"}
+    assert set(env) <= set(rr.JOB_ENV_KEYS) | {"PYTHONPATH", "PYTHONUNBUFFERED", "KAIBOT_RATELIMIT_DIR"}
     kw = popen.kwargs[0]
     assert kw.get("shell") is not True and kw["start_new_session"] is True and kw["stdin"] == subprocess.DEVNULL
 

@@ -19,7 +19,8 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
      logged in).
    - System Settings > Energy: "Start up automatically after a power failure" on; "Prevent automatic sleeping when
      the display is off" on.
-   - Never sleep on power (24-25 Nov 2026: the Mac fell asleep at 23:45 and the engine was off for 17 hours). In
+   - Never sleep on power (24-25 Nov 2026: the Mac fell asleep at 23:45 Berlin and the engine was off for 17 hours;
+     [incidents/2026-11-24-mac-sleep.md](incidents/2026-11-24-mac-sleep.md)). In
      Terminal: `sudo pmset -c sleep 0 disksleep 0`. `./scripts/run_engine.sh --check` shows the settings and prints
      a FAILED line (and exits 1) while system sleep on AC power is not 0.
    - Docker mode only: Docker Desktop > Settings > General > "Start Docker Desktop when you sign in" on.
@@ -122,9 +123,11 @@ sends short pings (10 s timeout, in the background); it is not on the order path
 | success | every 5 minutes while the engine process is alive and not stalled |
 | fail, with the log line | a halt (daily stop, drift, kill switch, …), lease lost or refused, a refused session, an incomplete flatten, an unclean paper account, the watchdog cancelling entries or flattening, the engine exiting with an error, the engine not ticking for 10 minutes during the session, the nightly job failing, an engine gap of more than an hour (`engine gap:`), and M9's alerts: a row skipped by the replica (`replica poison`), a replica backlog of ten minutes, the engine's clock differing from the broker's (`clock skew`), a yearly calendar ending within 30 days (at most once per kind per 30 minutes) |
 | log | the nightly job finished (shown on the check's page, does not change its state) |
+| fail, `disk low: ...` | less than 10 GB free on the disk holding the repo (checked once a minute; again every 30 minutes while it lasts). No success ping is sent while it stays low, so the check stays red until there is room. `scripts/healthcheck.py disk` runs the same check once |
 
 No pings at all (Mac off, asleep, offline, service stopped) turns the check red after period + grace (about 20
 minutes). Without `HEALTHCHECKS_PING_URL` the alarms are off: one line in `healthcheck.log`, nothing else.
+The research runner has a check of its own ([research_runner.md](research_runner.md#one-time-setup-owner-on-the-mac)).
 
 ## Kill switches, strongest last
 

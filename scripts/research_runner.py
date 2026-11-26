@@ -23,6 +23,17 @@ scripts/install_runner.sh), never in the engine's. A tick refuses to run (nothin
 checkout is the engine's, or inside it, or holds it, or when data/ links into the engine's data/live or data/runner
 (the engine's checkout: KAIBOT_ENGINE_CHECKOUT, ~/Projects/kaibot, and the WorkingDirectory of the engine service's
 launchd plist, which is only read).
+
+QA-Ops audit 2 7.4 (#714): each tick rotates data/runner/*.log at 10 MB (5 kept: runner.log.1 .. .5) and pings the
+runner's own Healthchecks.io check, if one is set up (HEALTHCHECKS_RUNNER_PING_URL in the environment, or the one
+line of data/runner/healthchecks_url; never the secrets file): a success ping at the end of a good tick and every 10
+minutes while a long job runs, a /fail ping when the tick was refused, paused or could not read its queue, or when
+the disk has less than 10 GB free. StartInterval 900: the check's period is 15 minutes (docs/ops/research_runner.md).
+QA-Ops audit 2 7.8 (#718): no heavy job runs from 30 minutes before a session's close to 10 minutes after it (15:30
+to 16:10 ET, 12:30 to 13:10 on a 13:00 close; NYSE sessions from kaibot.ingest.nyse_sessions), when the engine
+sends its daily orders. A heavy job due then waits for the next tick (`deferred`); one that is running when the
+quiet window starts is paused (SIGSTOP to its process group) and resumed (SIGCONT) when it ends, and the pause does
+not count against its timeout. The launchd job itself runs as `ProcessType Background` with `LowPriorityIO`.
 """
 
 from __future__ import annotations
@@ -41,12 +52,15 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
+from healthcheck import Pinger, disk_free, disk_problem  # scripts/healthcheck.py (stdlib only, the same folder)
 
 ROOT = Path(__file__).resolve().parents[1]
 QUEUE = ROOT / "ops" / "runner" / "queue.yaml"
@@ -76,6 +90,7 @@ GIT_USER = ("Kaibot research runner", "research-runner@users.noreply.github.com"
 # The engine's checkout, which the runner never works in (QA-Ops audit, 25 Nov 2026): install_runner.sh passes it
 # as KAIBOT_ENGINE_CHECKOUT; ~/Projects/kaibot is the default; the engine service's plist is read (never written).
 ENGINE_CHECKOUT_ENV = "KAIBOT_ENGINE_CHECKOUT"
+RATELIMIT_DIR_ENV = "KAIBOT_RATELIMIT_DIR"
 DEFAULT_ENGINE_CHECKOUT = "~/Projects/kaibot"
 ENGINE_SERVICE_PLIST = "~/Library/LaunchAgents/com.kaibot.engine.plist"
 # Folders of the engine's data/ a link in the runner's data/ may never point into (the engine's state, the old runner's)
@@ -238,6 +253,10 @@ def job_env(base: dict | None = None) -> dict[str, str]:
     """What a job sees: a short fixed list from the runner's environment (never GH_TOKEN or other secrets)."""
     base = os.environ if base is None else base
     env = {k: base[k] for k in JOB_ENV_KEYS if k in base}
+    # audit 2 7.6 (#716): SEC jobs share one machine-wide request window with the engine and the nightly jobs, so
+    # they use the engine checkout's data/ratelimit, not this checkout's (a path, not a secret)
+    env[RATELIMIT_DIR_ENV] = base.get(RATELIMIT_DIR_ENV) or str(
+        Path(base.get(ENGINE_CHECKOUT_ENV) or DEFAULT_ENGINE_CHECKOUT).expanduser() / "data" / "ratelimit")
     env["PYTHONPATH"] = "src"
     env["PYTHONUNBUFFERED"] = "1"
     return env
@@ -359,6 +378,12 @@ def own_checkout_problem(root: Path, engines: list[Path]) -> str | None:
 
 # ---------------------------------------------------------------- state, locks, posting
 
+LOG_MAX_BYTES = 10 * 1024 * 1024  # rotate data/runner/*.log at 10 MB
+LOG_KEEP = 5  # runner.log.1 (newest) .. runner.log.5
+PING_ENV = "HEALTHCHECKS_RUNNER_PING_URL"
+PING_FILE = "healthchecks_url"  # in data/runner: one line, the runner check's ping URL (chmod 600)
+KEEPALIVE_S = 600  # success ping while a tick runs a long job (a heavy job may take 240 minutes)
+
 
 def now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -370,6 +395,86 @@ def log(state: Path, msg: str) -> None:
         print(line, flush=True)
     with (state / "runner.log").open("a") as f:
         f.write(line + "\n")
+
+
+def rotate_logs(state: Path, max_bytes: int = LOG_MAX_BYTES, keep: int = LOG_KEEP) -> list[str]:
+    """Rotate every data/runner/*.log over `max_bytes`: x.log -> x.log.1 -> ... -> x.log.<keep> (the oldest goes).
+    Copy, then truncate in place: launchd's stdout and stderr for this tick are open on runner.log in append mode,
+    and they keep writing to the (now empty) file instead of following a renamed one. Returns the names rotated."""
+    done = []
+    for path in sorted(state.glob("*.log")):
+        try:
+            if not path.is_file() or path.is_symlink() or path.stat().st_size < max_bytes:
+                continue
+            for i in range(keep, 1, -1):
+                older = path.with_name(f"{path.name}.{i - 1}")
+                if older.exists():
+                    os.replace(older, path.with_name(f"{path.name}.{i}"))
+            shutil.copyfile(path, path.with_name(f"{path.name}.1"))
+            with path.open("r+b") as f:
+                f.truncate(0)
+            done.append(path.name)
+        except OSError as e:  # a rotation problem must never stop the tick
+            print(f"{now()} log rotation of {path.name} failed: {type(e).__name__}", file=sys.stderr, flush=True)
+    return done
+
+
+def ping_url(state: Path, env: dict | None = None) -> str:
+    """The runner check's ping URL: the environment, else the one line of data/runner/healthchecks_url; '' if none."""
+    url = ((os.environ if env is None else env).get(PING_ENV) or "").strip()
+    if not url:
+        with contextlib.suppress(OSError, UnicodeDecodeError):
+            url = (state / PING_FILE).read_text().splitlines()[0].strip() if (state / PING_FILE).exists() else ""
+    return url.rstrip("/") if url.startswith("https://") else ""
+
+
+def tick_problem(res: dict, free: int | None) -> str | None:
+    """What a person should look at after this tick, else None. A tick that found the lock busy is no problem (a
+    tick by hand beside launchd's); everything else that kept jobs from running is."""
+    for key, what in (("_refused", "refused"), ("_paused", "paused"), ("_error", "cannot read queue or allow-list")):
+        if key in res:
+            return f"runner {what}: {redact(str(res[key]))[:300]}"
+    return disk_problem(free)
+
+
+@contextlib.contextmanager
+def keepalive(pinger, every_s: float = KEEPALIVE_S):
+    """A success ping every `every_s` while the block runs (a long job), from a daemon thread."""
+    stop = threading.Event()
+
+    def beat():
+        while not stop.wait(every_s):
+            pinger.send("success", "research runner: a job is running")
+
+    t = threading.Thread(target=beat, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(5)
+
+
+class _NoPing:
+    """No runner check set up: the alarms are off, and the tick says nothing about it (every 15 minutes)."""
+
+    def send(self, kind: str, body: str = "") -> None:
+        pass
+
+    def wait(self, timeout: float = 0) -> None:
+        pass
+
+
+def report(pinger, res: dict, free: int | None) -> str | None:
+    """The tick's ping: /fail with the reason, else success with what it did. Returns the problem, if any."""
+    why = tick_problem(res, free)
+    if why:
+        pinger.send("fail", f"kaibot {why}")
+    elif "_locked" not in res:
+        ran = ", ".join(f"{k} {v}" for k, v in sorted(res.items())) or "nothing to run"
+        pinger.send("success", f"research runner tick: {ran}"[:1000])
+    pinger.wait()
+    return why
 
 
 def load_done(state: Path) -> dict:
@@ -663,24 +768,100 @@ def paused_reason(root: Path, state: Path, run=subprocess.run) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- the quiet window around the close (#718)
+
+QUIET_BEFORE_CLOSE_MIN, QUIET_AFTER_CLOSE_MIN = 30, 10
+
+
+def wall_now() -> datetime:
+    """The time the quiet window is judged by (tests replace it)."""
+    return datetime.now(UTC)
+
+
+def _sessions():
+    """kaibot.ingest.nyse_sessions (stdlib only). The runner's .venv does not install the package: it is read from
+    this checkout's src/, as the jobs' PYTHONPATH does."""
+    src = str(ROOT / "src")
+    if src not in sys.path:
+        sys.path.append(src)
+    from kaibot.ingest import nyse_sessions
+
+    return nyse_sessions
+
+
+def quiet_window(at: datetime) -> tuple[datetime, datetime] | None:
+    """The quiet window (UTC) of `at`'s New York day when `at` is before its end; None on a day without a session
+    or once it is over."""
+    ns = _sessions()
+    day = at.astimezone(ns.ET).date()
+    if not ns.is_session(day):
+        return None
+    close = ns.close_utc(day)
+    lo = close - timedelta(minutes=QUIET_BEFORE_CLOSE_MIN)
+    hi = close + timedelta(minutes=QUIET_AFTER_CLOSE_MIN)
+    return (lo, hi) if at < hi else None
+
+
+def in_quiet(at: datetime) -> tuple[datetime, datetime] | None:
+    w = quiet_window(at)
+    return w if w and w[0] <= at else None
+
+
 # ---------------------------------------------------------------- running a job
 
 
-def run_job(job: Job, cmd: list[str], logfile: Path, popen=subprocess.Popen, env: dict | None = None) -> dict:
+def run_job(job: Job, cmd: list[str], logfile: Path, popen=subprocess.Popen, env: dict | None = None,
+            sleep=None) -> dict:
     t0 = datetime.now(UTC)
-    status, rc = "ok", None
+    status, rc, paused = "ok", None, 0.0
+    sleep = sleep or time.sleep
     with logfile.open("w") as out:
         p = popen(cmd, cwd=str(ROOT), env=job_env() if env is None else env, stdin=subprocess.DEVNULL, stdout=out,
                   stderr=subprocess.STDOUT, start_new_session=True)
+        left = job.spec.timeout_min * 60.0  # running time; a pause in the quiet window does not count
         try:
-            rc = p.wait(timeout=job.spec.timeout_min * 60)
-            status = "ok" if rc == 0 else "failed"
+            while True:
+                w = quiet_window(wall_now()) if job.spec.heavy else None
+                until_quiet = (w[0] - wall_now()).total_seconds() if w else None
+                if until_quiet is not None and until_quiet <= 0:  # the window: stop the job's group until it ends
+                    paused += _pause_group(p, w[1], out, sleep)
+                    continue
+                step = left if until_quiet is None else min(left, until_quiet)
+                try:
+                    rc = p.wait(timeout=max(step, 0.0))
+                    status = "ok" if rc == 0 else "failed"
+                    break
+                except subprocess.TimeoutExpired:
+                    left -= step
+                    if left <= 0:
+                        raise
         except subprocess.TimeoutExpired:
             status = "timeout"
             _kill_group(p)
             rc = p.returncode
-    return {"status": status, "rc": rc, "minutes": (datetime.now(UTC) - t0).total_seconds() / 60,
-            "finished": now()}
+    res = {"status": status, "rc": rc, "minutes": (datetime.now(UTC) - t0).total_seconds() / 60, "finished": now()}
+    if paused:
+        res["paused_minutes"] = round(paused / 60, 1)
+    return res
+
+
+def _pause_group(p, until: datetime, out, sleep) -> float:
+    """SIGSTOP the job's process group until `until` (the quiet window's end), then SIGCONT. Seconds paused."""
+    t0 = wall_now()
+    out.write(f"\n[research runner] {now()}: paused for the quiet window around the close, until "
+              f"{until.strftime('%H:%M')} UTC (#718)\n")
+    out.flush()
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(p.pid, signal.SIGSTOP)
+    try:
+        while (left := (until - wall_now()).total_seconds()) > 0:
+            sleep(min(left, 60.0))
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(p.pid, signal.SIGCONT)
+    out.write(f"[research runner] {now()}: resumed\n")
+    out.flush()
+    return (wall_now() - t0).total_seconds()
 
 
 def _kill_group(p) -> None:
@@ -713,6 +894,8 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
         if not held:
             log(state, "another runner holds the lock; nothing to do")
             return {"_locked": "busy"}
+        for name in rotate_logs(state):
+            log(state, f"{name} reached {LOG_MAX_BYTES // 2**20} MB: rotated ({LOG_KEEP} kept)")
         if why := paused_reason(root, state, run):  # before the pull: a dirty checkout is never pulled or run in
             log(state, f"paused: {why}; no job runs until it is clean")
             return {"_paused": why}
@@ -747,6 +930,11 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
                 did[key] = "rejected"
                 _deliver(cfg, state, key, raw.get("posts_to_issue"), rejected_comment(key, str(e)), run)
                 log(state, f"{key}: rejected: {e}")
+                continue
+            if job.spec.heavy and (w := in_quiet(wall_now())):
+                did[job.id] = "deferred"
+                log(state, f"{job.id}: deferred, heavy jobs wait for the end of the quiet window around the close "
+                           f"({w[1].strftime('%H:%M')} UTC)")
                 continue
             if job.spec.sec:
                 with try_lock(state / "sec.lock") as sec_held:
@@ -816,7 +1004,13 @@ def main(argv_: list[str] | None = None) -> int:
                 bad += 1
                 print(f"REJECT  {raw.get('id') if isinstance(raw, dict) else raw!r}: {e}")
         return 1 if bad else 0
-    res = tick(pull=not a.no_pull)
+    url = ping_url(STATE)
+    pinger = Pinger(url) if url else _NoPing()
+    with keepalive(pinger):
+        res = tick(pull=not a.no_pull)
+    if why := report(pinger, res, disk_free(str(ROOT))):
+        with contextlib.suppress(OSError):
+            log(STATE, f"alarm: {why}")
     return 3 if "_refused" in res else 1 if "_error" in res else 0
 
 

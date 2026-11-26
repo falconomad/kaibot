@@ -143,11 +143,32 @@ functions), and any engine restart then ran unreviewed `main`. Now:
 - **SEC.** A job marked `sec` also takes `data/runner/sec.lock`. It is **deferred** to the next tick, not marked
   done, while that lock is held or while another bulk SEC fetcher (`fetch_earnings_dates`, `fetch_fundamentals`,
   `fetch_spinoffs`, `fetch_listings`, `fetch_sp500_history`, `fetch_sec_fundamentals`) is running on the Mac.
+- **One SEC window for the whole Mac (audit 2 7.6, #716).** That guard sees only bulk fetchers. Every SEC
+  request now also takes a slot from one window shared by every process: the engine's 8-K feed, the nightly
+  `collect_alt`, `fetch_earnings_dates`, `fetch_listings`, `fetch_sec_fundamentals` and anything else on the
+  `sec_edgar` budget. The window is a file under a flock, `data/ratelimit/sec_edgar.slots`, with at most 8 requests
+  a second in total, spaced 125 ms apart (SEC allows 10 per IP). Each process keeps its own 5 a second as well
+  (`config/sources.yaml`, `shared_budget_per_s`; `src/kaibot/common/ratelimit.py`, `SharedWindow`). Jobs get
+  `KAIBOT_RATELIMIT_DIR=<engine checkout>/data/ratelimit`, so they share the engine checkout's file, not this
+  checkout's. If the file cannot be used, a process logs one warning and keeps its own budget only. **Not covered:**
+  an engine in Docker (its container has its own `data/ratelimit`, and a flock does not cross the Docker Desktop VM).
+  With `KAIBOT_HEADLINE_EDGAR` off, the default, the engine sends no SEC request at all.
 - **Runaway jobs.** Every script has a timeout. When it passes, the job's whole process group gets SIGTERM, then
   SIGKILL. A job is recorded as `started` before it runs, so a job that crashes the Mac is not started again on
   its own.
 - **Market hours.** Allowed (stakeholder, #600, 24 Nov 2026). Heavy jobs run under `nice -n 10`, so the engine
   keeps priority.
+- **The quiet window around the close (audit 2 7.8, #718).** The engine sends its daily orders in the 10 minutes
+  before the close, so no heavy job runs from 30 minutes before a session's close to 10 minutes after it: 15:30 to
+  16:10 ET (21:30 to 22:10 Berlin most of the year), or 12:30 to 13:10 on a 13:00 close (NYSE sessions from
+  `kaibot.ingest.nyse_sessions`; a holiday has no window).
+  - A heavy job that comes due in the window is `deferred` to a later tick.
+  - A heavy job already running when the window starts is paused with SIGSTOP to its process group and resumed with
+    SIGCONT when the window ends. Its log says so, and the pause does not count against its timeout. A network
+    connection the job held open may time out during the pause; `common.http` retries it.
+  - The launchd job runs as `ProcessType Background` with `LowPriorityIO`, so macOS throttles the runner and its
+    jobs, CPU and disk, whenever the engine wants them. After this change is pulled, run `install_runner.sh` again
+    so the new plist is loaded.
 - **The engine.** The runner never starts, stops or restarts the engine, never touches its lease or
   `scripts/service.sh`, and never runs launchctl. It works only in its own checkout (above) and refuses to run in
   the engine's. `git pull --ff-only` runs only when the runner's checkout is on `main` and clean (a dirty checkout
@@ -180,6 +201,26 @@ again, links the engine's `.venv` and data folders (above), writes the plist wit
 `--status` prints `runner checkout:` and `engine checkout:`, and a WARNING while the two are the same. The old
 `~/Projects/kaibot/data/runner` is left as it was (delete it whenever you like); a local `runner/<id>` branch in
 the engine's checkout from an old job that was not pushed stays there too.
+
+**The runner's alarm (audit 2 7.4, #714).** A second, free Healthchecks.io check, separate from the engine's: period
+15 minutes, grace 30 minutes. Paste its ping URL into the runner's state folder (never the secrets file, which the
+runner does not read):
+
+```bash
+printf '%s\n' 'https://hc-ping.com/<the runner check uuid>' > ~/Projects/kaibot-runner/data/runner/healthchecks_url
+chmod 600 ~/Projects/kaibot-runner/data/runner/healthchecks_url
+```
+
+Each tick then pings it. A good tick sends a success ping, and so does every 10 minutes of a long job. A tick sends
+a fail ping, with the reason, when it was refused (the engine's checkout), was paused (the checkout holds changes
+the runner will not commit), could not read the queue or the allow-list, or found less than 10 GB free on the
+disk. No pings at all (the runner unloaded, the Mac asleep, launchd stuck) turn the check red after period +
+grace. Without the file, the runner's alarms are off and nothing else changes. `HEALTHCHECKS_RUNNER_PING_URL`
+in the environment takes the file's place.
+
+**Logs are rotated.** At the start of each tick, every `data/runner/*.log` over 10 MB is copied to `<name>.1` and
+emptied in place; `.1` to `.4` move up one, and the old `.5` is dropped, so 5 are kept. The per-job logs in
+`data/runner/logs/` are overwritten by each run of the job.
 
 To remove the runner, run `~/Projects/kaibot-runner/scripts/install_runner.sh --uninstall`; `data/runner` is
 kept. The log is `~/Projects/kaibot-runner/data/runner/runner.log`. To run one tick by hand:

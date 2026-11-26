@@ -23,6 +23,34 @@ alembic, apscheduler, duckdb, datasketch, structlog, tenacity, feedparser, plus 
 used it), the `nlp` extra (transformers, torch) and the dev packages pytest-asyncio, respx and freezegun.
 (httpx still arrives as a dependency of anthropic.)
 
+## Dependency updates, audits and the browser policy (audit 2 7.3, #713)
+
+- **Dependabot** (`.github/dependabot.yml`): every Monday, one grouped pull request per set: Python (`uv`, the
+  root `uv.lock`), the audit tools (`.github/audit`), the web app (`npm`, runtime and dev tools apart) and the
+  GitHub Actions (still pinned by commit; Dependabot moves the sha and the tag comment). The Python ecosystem is
+  `uv`, not `pip`: `pip` would rewrite the requirements exports without `uv.lock`. A Python update's PR is red on
+  `lock_deps.sh --check` until `./scripts/lock_deps.sh` is run on its branch and the three exports are pushed. Its
+  alerts and security updates (Settings > Code security) are repository settings: the owner's.
+- **npm audit** (`ci.yml`, job `web`): `npm audit --omit=dev --audit-level=high` blocks, so nothing with a high or
+  critical advisory ships to the browser. The same audit of the dev tools runs but does not block yet: on 25 Nov 2026
+  vitest 2 pulled in tinypool (critical), vite-node, vite and esbuild with open advisories, fixed only by
+  vitest 4.1.11 or later (a major upgrade, a frontend story). Make that step blocking once it is done.
+- **Content-Security-Policy** (`apps/web/vercel.json`, every path): sent as `Content-Security-Policy-Report-Only`,
+  so a violation is a console line and nothing is blocked. It names what the browser uses: our files; the Inter
+  sheet's inline `onload` by hash; Google Fonts; the logo hosts (tickerlogos, Finnhub, FMP); the Supabase project
+  over https and wss. Alpaca is not listed: only the functions in `api/` call it. `apps/web/src/csp.test.ts` keeps
+  the policy and the code in step (a new logo host, inline handler or project fails it). To enforce: watch the
+  production console for a week, then rename the header to `Content-Security-Policy`.
+
+### Security settings only the owner can change
+
+The live Supabase advisors (second engine audit, 25 Nov 2026) raise two notes that no pull request can clear:
+
+| Advisor note | Why it stays for now | What the owner does |
+|---|---|---|
+| Leaked-password protection off (Auth) | Supabase offers it on the Pro plan and above; the project is on the free plan. Sign-up is by invite only (0045) and the owner's account is the only one that trades | Nothing on the free plan. On a paid plan: Authentication > Providers > Email > "Prevent use of leaked passwords" on |
+| `pg_net` installed in schema `public` (lint 0014) | pg_net cannot be moved with `alter extension ... set schema`: it must be dropped and created again, which drops `net._http_response` and any request in flight. The dead-man (0019) reads that table every minute 13:00-21:59 UTC on weekdays | In a planned window outside 13:00-22:00 UTC on a weekday (or at a weekend): `drop extension pg_net; create extension pg_net with schema extensions;`, then the dead-man drill of `failsafe.md` (`select kaibot.deadman_check(force => true);` twice a minute apart, engine stopped) and the advisor again |
+
 ## Types and import rules (non-blocking)
 
 CI job `hygiene` runs `mypy` (config in `pyproject.toml`, `[tool.mypy]`) and `lint-imports` (`[tool.importlinter]`).
@@ -41,7 +69,7 @@ Baseline on 12 Nov 2026 (branch of #122, main @ the PR's base):
 
 ## Migration record (#361)
 
-`tests/test_migrations_pending_hygiene.py` (repo only, no database or network) fails when `docs/ops/migrations_pending.md` and `migrations/` disagree: file numbers must be unique and run 0001, 0002, ... without gaps; every file has exactly one `- NNNN: applied ...` or `- NNNN: pending ...` entry; the "Last checked against main on <date> (<set> applied; <set> pending)" summary matches the list (`none pending` when nothing is); every pending migration has a step, steps run 1, 2, ... and name real files, and an entry's "step N" is its own row; no migration header claims a status (no `-- APPLIED` or `-- NOT APPLIED` line; a header cannot be updated when a file is applied, so the status lives only in `docs/ops/migrations_pending.md`, #368). So a new migration's PR adds its file, its list entry, its step and the summary together.
+`tests/test_migrations_pending_hygiene.py` (repo only, no database or network) fails when `docs/ops/migrations_pending.md` and `migrations/` disagree: file numbers must be unique and run 0001, 0002, ... without gaps; every file has exactly one `- NNNN: applied ...` or `- NNNN: pending ...` entry; the "Last checked against main on <date> (<set> applied; <set> pending)" summary matches the list (`none pending` when nothing is); every pending migration has a step, steps run 1, 2, ... and name real files, and an entry's "step N" is its own row; no migration header claims a status (no `-- APPLIED` or `-- NOT APPLIED` line; a header cannot be updated when a file is applied, so the status lives only in `docs/ops/migrations_pending.md`, #368). No other runbook in `docs/ops/` may call a migration file (backticked, `NNNN_name.sql`) `not applied` or `pending` while the list says applied (#686: `failsafe.md` said so of 0017 and 0019 for two weeks). CI runs the file in the suite and again as its own job `migrations-record`, so it can be required on `main` by name. So a new migration's PR adds its file, its list entry, its step and the summary together.
 
 ## Dead code
 
