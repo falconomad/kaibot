@@ -188,7 +188,8 @@ def code_sha() -> str:
         return subprocess.check_output(
             ["git", "rev-parse", "--short", "HEAD"], text=True, stderr=subprocess.DEVNULL
         ).strip()
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError) as e:  # #694: no git, not a checkout, undecodable
+        log.info("code version: git rev-parse failed (%s): reported as unknown", type(e).__name__)
         return "unknown"
 
 
@@ -1566,7 +1567,9 @@ class Engine:
         if by_sym:  # #266: never sell more than the venue holds (that would be a short); no read without sleeves
             try:
                 have = {s: float(p.get("qty") or 0) for s, p in self.broker.positions().items()}
-            except Exception:
+            except Exception as e:  # #694: the broker's read, open-ended; each sale then asks per symbol (below)
+                log.warning("flatten (%s): broker positions unreadable (%s): no venue cap read for this pass", reason,
+                            type(e).__name__)
                 have = None
         for sym, keys in by_sym.items():
             if have is not None and have.get(sym, 0.0) <= 0:  # nothing to sell (as close_position answered before)
@@ -2337,7 +2340,8 @@ class Engine:
             lv = self.level()
             return tighten(self.policies[lv], self.level_strategies(), c.get("body") or {},
                            version=int(c["version"]), universe=uni, themes=themes).custom_universe()
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 - #694: open-ended (store, owner config); the session starts without them
+            log.exception("custom tickers: the owner's list could not be read before the open (none backfilled)")
             return {}
 
 
@@ -2938,7 +2942,9 @@ class Engine:
             return
         try:
             bpos = self.broker.positions()
-        except Exception:
+        except Exception as e:  # #694: the broker's read, open-ended; the drift check holds buys while it fails
+            log.info("late corporate actions: broker positions unreadable (%s): checked again next minute",
+                     type(e).__name__)
             return
         unsettled = {p.symbol for p in self.pos.values() if p.status != "open" or p.exit_order_id}
         unsettled |= {k[1] for x in self._md_exits.values() for k, _ in x["keys"]} | self.daily.working_symbols()
