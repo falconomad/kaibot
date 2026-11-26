@@ -1119,7 +1119,8 @@ def test_av_earnings_entry_caps_the_budget_and_stays_out_of_the_quiet_window():
     flag cannot pass the free tier's shared 25 a day (the script refuses above 23 as well)."""
     cfg = rr.load_allowed()
     spec = cfg.specs["scripts/fetch_av_earnings.py"]
-    assert spec.heavy and spec.env and not spec.sec and not spec.writes and set(spec.flags) == {"--budget", "--status"}
+    assert spec.heavy and spec.env and not spec.sec and not spec.writes and set(spec.flags) == {"--budget", "--status",
+                                                                                       "--no-calendar"}
     for ok in ("0", "9", "19", "20", "23"):
         rr.check_job(job("av", "scripts/fetch_av_earnings.py", ("--budget", ok), 797), cfg)
     for bad in ("24", "25", "99", "-1", "200", "2 0"):

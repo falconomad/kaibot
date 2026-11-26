@@ -1,8 +1,10 @@
-// Home's quiet lines under the status rows, as ONE lazy chunk (pages/Live.tsx): the market notices (#378) and the
-// headline line (migration 0043). One chunk on purpose: the first load names one file here, as it did for the notices
-// alone, so adding the headlines costs the first load nothing (size-budget.json is nearly full).
+// Home's quiet lines under the status rows, as ONE lazy chunk (pages/Live.tsx): the market notices (#378), the
+// headline line (migration 0043) and the upcoming-earnings card (migration 0054). One chunk on purpose: the first load
+// names one file here, as it did for the notices alone, so adding the others costs the first load nothing
+// (size-budget.json is nearly full).
 import MarketNotices from "./Notices";
 import Headlines from "./Headlines";
+import UpcomingEarnings from "./UpcomingEarnings";
 import { ErrorBoundary } from "./ErrorBoundary";
 import type { Freshness } from "../lib/freshness";
 import type { Viewer } from "../lib/headlines";
@@ -18,6 +20,8 @@ export default function Lines({ viewer, headlines, fresh }: { viewer: Viewer; he
       {/* #738: one boundary each, so a broken notice row does not take the headlines (or Home) with it */}
       {viewer === "owner" && <ErrorBoundary name="Market notices"><MarketNotices /></ErrorBoundary>}
       {headlines && <ErrorBoundary name="Headlines"><Headlines viewer={viewer} fresh={fresh} /></ErrorBoundary>}
+      {/* #797: the held stocks' next earnings (Alpha Vantage, owner only: personal licence); display only */}
+      {viewer === "owner" && headlines && <ErrorBoundary name="Upcoming earnings"><UpcomingEarnings /></ErrorBoundary>}
     </>
   );
 }
