@@ -14,7 +14,6 @@ import pandas as pd
 import pytest
 
 from kaibot.engine.config import ROOT
-from kaibot.evaluation import gate_v3 as g3
 from kaibot.evaluation import results, tbill
 
 sys.path.insert(0, str(ROOT / "scripts"))
