@@ -54,6 +54,10 @@ Written by `gen/tokens.py`. WCAG 2 contrast ratios. Text needs 4.5:1; large text
 | Tab bar: active label | `#F4F5F7` | `#0A0B0D` | 18.05:1 | 4.5:1 |
 | Tab bar: resting label | `#A7ADB8` | `#0A0B0D` | 8.73:1 | 4.5:1 |
 | Tab bar: active mark | `#4F95F0` | `#0A0B0D` | 6.46:1 | 3:1 |
+| Link text on the page | `#4F95F0` | `#0A0B0D` | 6.46:1 | 4.5:1 |
+| Link text on a card | `#4F95F0` | `#131519` | 6.00:1 | 4.5:1 |
+| Link text on the red tint | `#4F95F0` | `#371715` | 5.32:1 | 4.5:1 |
+| Warning text on a card | `#F7B746` | `#131519` | 10.28:1 | 4.5:1 |
 
 ## Light theme
 
@@ -107,3 +111,7 @@ Written by `gen/tokens.py`. WCAG 2 contrast ratios. Text needs 4.5:1; large text
 | Tab bar: active label | `#0A0B0D` | `#F4F5F7` | 18.05:1 | 4.5:1 |
 | Tab bar: resting label | `#5D646F` | `#F4F5F7` | 5.47:1 | 4.5:1 |
 | Tab bar: active mark | `#2F6FDE` | `#F4F5F7` | 4.33:1 | 3:1 |
+| Link text on the page | `#1A54B7` | `#F4F5F7` | 6.43:1 | 4.5:1 |
+| Link text on a card | `#1A54B7` | `#FFFFFF` | 7.01:1 | 4.5:1 |
+| Link text on the red tint | `#1A54B7` | `#FFE9E6` | 6.03:1 | 4.5:1 |
+| Warning text on a card | `#835B05` | `#FFFFFF` | 6.06:1 | 4.5:1 |

@@ -27,7 +27,7 @@ Dark is the theme the app runs; light is defined and off. A gain or a loss alway
 | `--surface` | `#131519` | `#FFFFFF` | Card, sheet |
 | `--surface-2` | `#1B1E23` | `#E4E6EA` | Raised, pressed, skeleton |
 | `--rule` | `#262A31` | `#CDD1D9` | Hairline (decoration) |
-| `--rule-strong` | `#40454F` | `#989FAB` | Sheet edge, grab handle |
+| `--rule-strong` | `#40454F` | `#808692` | Sheet edge, grab handle |
 | `--ink` | `#F4F5F7` | `#0A0B0D` | Text |
 | `--slate` | `#C0C5CD` | `#40454F` | Second-level text |
 | `--stale` | `#A7ADB8` | `#5D646F` | Third-level text |

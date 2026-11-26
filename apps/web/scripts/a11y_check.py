@@ -14,6 +14,8 @@ against the design audit's mock (no production data, account or key):
   returns focus;
 - every control on those screens and in their sheets is at least 44 by 44 px.
 
+All of it runs twice (#720): with the device set to dark and to light, as Settings' Theme is System by default.
+
     cd apps/web && VITE_SUPABASE_URL=http://localhost:54321 VITE_SUPABASE_PUBLISHABLE_KEY=mock npx vite build --outDir /tmp/kb-dist-a11y --emptyOutDir
     python3 scripts/a11y_check.py --dist /tmp/kb-dist-a11y
 """
@@ -172,6 +174,16 @@ def sheet_by_keyboard(pg, opener_sel: str, what: str, fails: list[str], during=N
 
 
 def main(a) -> int:
+    fails: list[str] = []
+    for theme in a.themes.split(","):
+        print(f"=== {theme} theme")
+        fails += [f if theme == "dark" else f"[light] {f}" for f in run(a, theme)]
+    print("\n".join("FAIL " + f for f in fails) or "PASS: axe clean on every page, dark and light; focus groups, My lists and the stock summary work by keyboard; targets 44 px; no page threw or was blank")
+    return 1 if fails else 0
+
+
+def run(a, theme: str) -> list[str]:
+    """Every step in one theme (#720): the device's scheme picks it, as Settings' Theme is System by default."""
     dist = pathlib.Path(a.dist).resolve()
     now = dt.datetime.now(dt.UTC)
     session = "localStorage.setItem('sb-localhost-auth-token', JSON.stringify(" + json.dumps(mock_data.session_blob(now)) + "));"
@@ -182,7 +194,7 @@ def main(a) -> int:
         threw: list[str] = []
 
         def open_page(path: str, signed_in: bool = True):
-            ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme="dark",
+            ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme=theme,
                                       service_workers="block")  # #481: no app-shell store in this check
             if signed_in:
                 ctx.add_init_script(session)
@@ -192,6 +204,9 @@ def main(a) -> int:
             pg.goto(audit.APP + path, wait_until="load")
             pg.wait_for_selector("main > *, .center", timeout=8000)
             pg.wait_for_timeout(1500)
+            drawn = pg.evaluate("() => document.documentElement.dataset.theme")
+            if drawn != theme:
+                fails.append(f"{path}: drawn in the {drawn} theme on a {theme} device (Settings' Theme is System by default)")
             return ctx, pg
 
         # 1. Every page, as drawn, with the mock's data.
@@ -308,11 +323,11 @@ def main(a) -> int:
         browser.close()
     for e in dict.fromkeys(threw):  # thrown in a later step (focus groups, My lists, the stock summary)
         fails.append(f"a page threw: {e}")
-    print("\n".join("FAIL " + f for f in fails) or "PASS: axe clean on every page; focus groups, My lists and the stock summary work by keyboard; targets 44 px; no page threw or was blank")
-    return 1 if fails else 0
+    return fails
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dist", required=True)
+    ap.add_argument("--themes", default="dark,light", help="run every step in these themes (#720), comma-separated")
     sys.exit(main(ap.parse_args()))

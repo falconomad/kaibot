@@ -78,7 +78,7 @@ function Tab({ id, d, exp }: { id: (typeof TABS)[number][0]; d: TradeDetail; exp
         <table className="list" tabIndex={0} aria-label="Gate checks"><thead><tr><th>Check</th><th>Result</th><th className="r">Actual</th><th className="r">Limit</th></tr></thead>
           <tbody>{rows.map(([k, v]) => (
             <tr key={k}><td title={`code: ${k}`}>{checkText(k)}</td>
-              <td className={v.state === "pass" ? "" : v.state === "warn" ? "loss" : "loss"} style={{ color: v.state === "pass" ? "var(--pass)" : v.state === "warn" ? "var(--warn)" : "var(--fail)" }}>
+              <td className={v.state === "pass" ? "" : v.state === "warn" ? "loss" : "loss"} style={{ color: v.state === "pass" ? "var(--pass)" : v.state === "warn" ? "var(--warn-text)" : "var(--fail)" }}>
                 {v.state === "pass" ? "✓ pass" : v.state === "warn" ? "▲ warn" : "✕ fail"}</td>
               <td className="r num">{String(v.actual)}</td><td className="r num">{String(v.limit)}</td></tr>
           ))}</tbody>

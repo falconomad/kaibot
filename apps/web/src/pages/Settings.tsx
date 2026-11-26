@@ -10,6 +10,7 @@ import { Controls } from "./Controls";
 import { InstallApp } from "../components/InstallApp";
 import { InviteCard } from "../components/InviteCard";
 import { MotionCard } from "../components/MotionCard";
+import { ThemeCard } from "../components/ThemeCard";
 
 const STATUS: Record<string, string> = {
   scheduled: "starts at the next open", running: "running", paused: "paused (no new entries)", stopped: "stopped by you",
@@ -89,6 +90,8 @@ export function Settings() {
       </section>
 
       <InstallApp />
+
+      <ThemeCard />
 
       <MotionCard />
 

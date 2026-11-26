@@ -16,6 +16,12 @@ returns focus; and with reduced motion on, nothing animates.
 
 Text contrast (#265): axe-core's color-contrast rule runs on every page at every width; a failure fails the check.
 
+The theme (#720): every page at every width is measured twice, with the device set to dark and to light (Settings'
+Theme is System by default, so the device picks it; --themes dark limits it). Each must be drawn in that theme, set before the
+first paint and never switched after it (no flash), with the browser bar's colour on the page colour. --interact also
+checks Settings' Theme: a saved Dark or Light wins over the device, System chosen by keyboard follows the device, and
+the device switching while the page is open switches the page.
+
 The display name (#254): every page at every width fails if it shows the name wrongly in its text, its tab title or in
 what a screen reader says. Wrong is the earlier name ("kaibot"), or today's name with a capital, written so or put in
 capitals by CSS: it is always lowercase, as the first word of a sentence too (stakeholder, 16 Nov 2026). Text inside
@@ -39,9 +45,11 @@ stress mock, so Home and Positions mark the crowded book at live prices. The fre
 six-digit values and gains, each row's change today and the position sheet must fit at 375, 390 and 430 px. Live
 figures carry no freshness line (#604; stakeholder, 23 Nov 2026); a late one's line must fit on one line.
 
-Not in CI (#673): a full run (--interact --stress) takes about 4.5 minutes headless, because every page waits a fixed
-1.2-1.8 s for its motion and data to settle (65 page loads at five widths, then about 60 more for --interact and
---stress). That is over the 2 minutes a check may add to the web job. Run it before a PR that changes layout.
+Not in CI (#673): a full run (--interact --stress) took about 4.5 minutes headless in one theme, because every page
+waits a fixed 1.2-1.8 s for its motion and data to settle (65 page loads at five widths, then about 60 more for
+--interact and --stress). With both themes (#720) it is 130 page loads before --interact: about 7 minutes (--themes
+dark for the old run). That is over the 2 minutes a check may add to the web job. Run it before a PR that changes
+layout.
 """
 # ruff: noqa: E501  (the browser scripts in this file are JavaScript inside strings; a few lines run past 120)
 from __future__ import annotations
@@ -290,6 +298,60 @@ LOGO_MOTION = "document.getAnimations().filter(a => /^kb-logo-/.test(a.animation
 # The idle motion (stakeholder, 24 Nov 2026; components/Logo.tsx IDLE): once the intro has ended, the point hops and the
 # arm redraws, in turn, for as long as the page is up. Those two run on purpose; only the intro's three must not replay.
 IDLE_MOTION = {"kb-logo-hop", "kb-logo-arm"}
+
+
+# The theme (#720): every change of <html data-theme>, with whether anything could have been painted yet (a <body>, or a
+# paint entry), so a page that paints in one theme and then switches (a flash) is caught. Installed before the page's
+# own scripts. (Not timestamps: the check's fixed clock also stops performance.now().)
+THEME_WATCH = """
+window.__themes = [];
+new MutationObserver(() => window.__themes.push([!!document.body || performance.getEntriesByType('paint').length > 0, document.documentElement.dataset.theme]))
+  .observe(document, { subtree: true, attributes: true, attributeFilter: ['data-theme'] });
+"""
+THEME_JS = """() => ({ theme: document.documentElement.dataset.theme, scheme: getComputedStyle(document.documentElement).colorScheme,
+  changes: window.__themes || [],
+  bar: document.querySelector('meta[name=theme-color]')?.content, paper: getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() })"""
+
+
+def theme_ok(page, name: str, want: str, fails: list[str]) -> dict:
+    """The page is drawn in `want`, set once before the first paint and never switched after it (no flash), and the
+    browser bar's colour is the page colour."""
+    t = page.evaluate(THEME_JS)
+    late = [c[1] for c in t["changes"] if c[0]]
+    if t["theme"] != want or t["scheme"] != want or late or not t["changes"] or t["bar"] != t["paper"]:
+        fails.append(f"{name}: theme {t['theme']} (scheme {t['scheme']}), want {want}; set after the first paint: {late}; bar {t['bar']} on {t['paper']}")
+    return t
+
+
+def theme_choice(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
+    """Settings' Theme (#720) at 390 px: a saved Dark or Light wins over the device from the first paint; choosing System
+    by keyboard follows the device, and the device switching while the page is open switches the page."""
+    for device, saved in [("dark", "light"), ("light", "dark")]:
+        ctx = context(browser, now, viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, color_scheme=device)
+        ctx.add_init_script(session)
+        ctx.add_init_script(THEME_WATCH)
+        ctx.add_init_script(f"try {{ if (!sessionStorage.getItem('kb-check')) {{ localStorage.setItem('kb-theme', '{saved}'); sessionStorage.setItem('kb-check', '1'); }} }} catch (e) {{}}")
+        ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
+        pg = ctx.new_page()
+        pg.goto(audit.APP + "/settings", wait_until="load")
+        pg.wait_for_selector("#theme-h", timeout=8000)
+        pg.wait_for_timeout(800)
+        theme_ok(pg, f"settings, saved {saved} on a {device} device", saved, fails)
+        picked = pg.evaluate("() => document.querySelector('[role=radiogroup][aria-labelledby=theme-h] [aria-checked=true]')?.textContent")
+        pg.get_by_role("radio", name="System").focus()
+        pg.keyboard.press("Space")
+        pg.wait_for_timeout(300)
+        now_theme = pg.evaluate("() => document.documentElement.dataset.theme")
+        pg.emulate_media(color_scheme=saved)
+        pg.wait_for_timeout(300)
+        live = pg.evaluate("() => document.documentElement.dataset.theme")
+        stored = pg.evaluate("() => localStorage.getItem('kb-theme')")
+        pg.evaluate(AXE)
+        low = pg.evaluate(AXE_RUN)
+        print(f"theme setting: saved {saved}, device {device}: picked {picked!r}; System -> {now_theme}; device to {saved} -> {live}; stored {stored!r}; contrast {len(low)}")
+        if picked != saved.capitalize() or now_theme != device or live != saved or stored is not None or low:
+            fails.append(f"theme setting (saved {saved}, device {device}): picked {picked!r}, System -> {now_theme}, device switch -> {live}, stored {stored!r}, contrast {low[:2]}")
+        ctx.close()
 
 
 def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
@@ -832,17 +894,20 @@ def main(a) -> int:
     want = set(a.routes.split(",")) if a.routes else None
     routes = [r for r in audit.ROUTES if want is None or r[0] in want]
     sizes = [s for s in PHONES + DESKTOP if not a.widths or str(s[0]) in a.widths.split(",")]
+    themes = a.themes.split(",")
     session = signed_in(now)
     fails: list[str] = []
     rows: list[dict] = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        for w, h in sizes:
+        for theme, w, h in [(t, w, h) for t in themes for w, h in sizes]:
             for name, path, act in routes:
                 phone = w <= 430
+                # #720: the theme is System by default, so the device's scheme picks it: each page in each theme
                 ctx = context(browser, now, viewport={"width": w, "height": h}, is_mobile=phone, has_touch=phone,
-                              color_scheme="dark")
+                              color_scheme=theme)
                 ctx.add_init_script(audit.INIT)
+                ctx.add_init_script(THEME_WATCH)
                 if act != "signed-out":
                     ctx.add_init_script(session)
                 ctx.route("**/*", serve(mock_data.Mock("running", now), dist, now))
@@ -857,13 +922,16 @@ def main(a) -> int:
                 if act == "lists":
                     page.get_by_role("radio", name="My lists").click()
                     page.wait_for_timeout(700)
-                alive(page, f"{name}@{w}", threw, fails)
+                shown = name if theme == "dark" else f"{name}-light"
+                alive(page, f"{shown}@{w}", threw, fails)
                 for e in threw:  # reported above with the page's name; not again at the end
                     PAGE_ERRORS.remove(e)
-                rows.append(check(page, name, w, metrics, fails))
+                theme_ok(page, f"{shown}@{w}", theme, fails)
+                rows.append({**check(page, shown, w, metrics, fails), "theme": theme})
                 ctx.close()
         if a.interact:
             interact(browser, dist, now, session, fails)
+            theme_choice(browser, dist, now, session, fails)
             owner_notes(browser, dist, now, session, fails)
         if a.stress:
             stress(browser, dist, metrics, fails)
@@ -883,6 +951,7 @@ if __name__ == "__main__":
     ap.add_argument("--routes")
     ap.add_argument("--widths")
     ap.add_argument("--json")
+    ap.add_argument("--themes", default="dark,light", help="the themes every page is measured in (#720), comma-separated")
     ap.add_argument("--interact", action="store_true")
     ap.add_argument("--stress", action="store_true", help="also a crowded multi-day book (scripts/stress_mock.py)")
     sys.exit(main(ap.parse_args()))

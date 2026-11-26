@@ -172,7 +172,7 @@ const XIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M6 6 L18 18 M18 6 L6 18" strokeLinecap="round" /></svg>
 );
 const WarnIcon = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warn)" strokeWidth="2" aria-hidden="true" style={{ flex: "none", marginTop: 2 }}><path d="M12 4 L21 20 H3 Z" strokeLinejoin="round" /><path d="M12 10 V14 M12 17 V17.5" strokeLinecap="round" /></svg>
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warn-text)" strokeWidth="2" aria-hidden="true" style={{ flex: "none", marginTop: 2 }}><path d="M12 4 L21 20 H3 Z" strokeLinejoin="round" /><path d="M12 10 V14 M12 17 V17.5" strokeLinecap="round" /></svg>
 );
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 

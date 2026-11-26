@@ -132,7 +132,7 @@ def theme(mode: str) -> dict:
         }
     else:
         t = {
-            "paper": g[50], "surface": g[0], "surface-2": g[100], "rule": g[200], "rule-strong": g[400],
+            "paper": g[50], "surface": g[0], "surface-2": g[100], "rule": g[200], "rule-strong": g[500],   # #720: 3:1 on controls (g[400] was 2.4-2.7:1)
             "ink": g[950], "slate": g[700], "stale": g[600],
             "sea": b[500], "sea-ink": b[600], "sea-tint": b[50], "sea-line": b[200], "on-sea": g[0],
             "gain": tone("gain", 0.50, 0.80), "gain-tint": tone("gain", 0.95, 0.25), "gain-line": tone("gain", 0.80, 0.50),
@@ -142,10 +142,11 @@ def theme(mode: str) -> dict:
             "exp-bg": g[100], "exp-line": g[600], "exp-hatch": g[300], "exp-text": g[950], "control": g[600],
             "focus": b[500], "selection": b[200], "live": b[500],
             "s-pot": b[500], "s-spy": bench("light"), "s-grid": g[200], "s-up": tone("gain", 0.62, 0.9), "s-down": tone("loss", 0.46),
-            "scrim": "rgba(10, 11, 13, .45)", "bar-bg": "rgba(244, 245, 247, .88)", "elev-sheet": "0 -12px 40px rgba(10, 11, 13, .18)",
+            "scrim": "rgba(10, 11, 13, .45)", "bar-bg": "rgba(244, 245, 247, .94)", "elev-sheet": "0 -12px 40px rgba(10, 11, 13, .18)",
         }
     t["pass"], t["fail"] = t["gain"], t["loss"]
     t["warn-text"] = t["warn"] if mode == "dark" else tone("amber", 0.50, 0.75)     # amber as text on light needs a darker step
+    t["sea-text"] = t["sea"] if mode == "dark" else t["sea-ink"]     # #720: blue as text (links); --sea on light paper is 4.3:1
     return t
 
 
@@ -169,6 +170,9 @@ PAIRS = [
     ("Chart: pot line on a card", "s-pot", "surface", 3), ("Chart: benchmark line on a card", "s-spy", "surface", 3),
     ("Chart: gain mark on a card", "s-up", "surface", 3), ("Chart: loss mark on a card", "s-down", "surface", 3),
     ("Tab bar: active label", "ink", "paper", 4.5), ("Tab bar: resting label", "stale", "paper", 4.5), ("Tab bar: active mark", "sea", "paper", 3),
+    # #720: link text, and the edges of controls that use --rule-strong (switch track, round add button, list cards)
+    ("Link text on the page", "sea-text", "paper", 4.5), ("Link text on a card", "sea-text", "surface", 4.5), ("Link text on the red tint", "sea-text", "loss-tint", 4.5),
+    ("Warning text on a card", "warn-text", "surface", 4.5),
 ]
 
 
@@ -181,7 +185,7 @@ def css() -> str:
     d, l = theme("dark"), theme("light")
     order = ["paper", "surface", "surface-2", "rule", "rule-strong", "ink", "slate", "stale", "sea", "sea-ink", "sea-tint", "gain", "gain-tint", "loss", "loss-tint",
              "pass", "warn", "warn-tint", "fail", "ai", "ai-tint", "s-pot", "s-spy"]
-    new = ["on-sea", "sea-line", "focus", "selection", "live", "control", "gain-line", "loss-line", "warn-line", "warn-text", "on-warn", "paper-edge", "ai-line",
+    new = ["on-sea", "sea-line", "focus", "selection", "live", "control", "gain-line", "loss-line", "warn-line", "warn-text", "sea-text", "on-warn", "paper-edge", "ai-line",
            "exp-bg", "exp-line", "exp-hatch", "exp-text", "s-grid", "s-up", "s-down", "scrim", "bar-bg", "elev-sheet"]
 
     def block(t, names, indent="  "):

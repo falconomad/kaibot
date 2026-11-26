@@ -22,9 +22,9 @@ describe("brand system v1", () => {
       expect(Object.keys(want).length).toBeGreaterThan(40);
     }
   });
-  it("the light theme is defined but nothing switches it on", () => {
+  it("only the theme setting switches the theme (#720): lib/theme.ts, and index.html before the first paint", () => {
     const sources = import.meta.glob("./**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
-    expect(Object.entries(sources).filter(([f, s]) => !/\.test\./.test(f) && /data-theme|dataset\.theme/.test(s)).map(([f]) => f)).toEqual([]);
+    expect(Object.entries(sources).filter(([f, s]) => !/\.test\./.test(f) && /data-theme|dataset\.theme/.test(s)).map(([f]) => f)).toEqual(["./lib/theme.ts"]);
   });
   it("no colour is typed into the stylesheet: every one is a token", () => {
     expect(css.match(/#[0-9A-Fa-f]{6}\b/g) ?? []).toEqual([]);

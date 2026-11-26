@@ -46,7 +46,7 @@ function Proc({ h }: { h: Heartbeat }) {
   return (
     <tr>
       <td><div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill={ok ? "var(--sea)" : age > p.staleS ? "var(--stale)" : "var(--warn)"} /></svg>
+          <svg width="10" height="10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill={ok ? "var(--sea)" : age > p.staleS ? "var(--stale)" : "var(--warn-text)"} /></svg>
           <b>{p.name}</b><span className="sr-only">{ok ? "healthy" : "not healthy"}</span></div>
         <div className="muted" style={{ fontSize: 13 }}>{p.what}</div></td>
       <td className="num">{String(d.state ?? "—")}</td>
