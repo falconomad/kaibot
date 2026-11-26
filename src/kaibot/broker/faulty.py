@@ -34,6 +34,18 @@ venue (FaultyBroker)
     endpoint_down             a partial outage: one read endpoint (positions, activities, open orders, the account or
                               one order) answers 503 for a spell of minutes while every other call works (5.18)
 
+corporate actions (FaultyBroker.advance, before the first bar of a session; audit 2, 5.20). Drawn per (held symbol,
+session), at most one per symbol and session, applied to the account as Alpaca applies them before the open:
+    ca_split                  a forward split (2 or 3 for 1): the shares multiply, the cost per share and every bar of
+                              the symbol divide (the feed is split-adjusted), a SPLIT activity is posted
+    ca_spinoff                a spin-off: whole new shares of `<symbol>W` (one per two, or one per one, parent shares)
+                              with a tenth of the parent's cost basis, a SPIN activity, and bars of the new symbol
+    ca_merger                 a cash merger at a premium (5 or 20% over the last close): the position is removed, the
+                              cash posted (Alpaca's two MA rows), and the venue refuses every later buy of the symbol
+                              (the asset is no longer active)
+    Each is in `actions` (the sourced record a test serves the engine as Alpaca's corporate actions) and goes to
+    `on_action(action)`, for the test's own data (the daily store).
+
 market data (FaultyData.quotes_within)
     quote_stale / quote_missing / quote_zero / quote_crossed
 market data (FaultyData.bars, today's IEX minute bars only; M12 3.11, #473; never in DEFAULT_FAULTS)
@@ -79,6 +91,12 @@ STORE_FAULTS = ("write_fail", "write_timeout", "write_twice", "read_fail", "leas
 # audit 2, 5.18: the kinds of the second audit (the DST world draws them in its new weeks only, so the summer week's
 # seeds run as they did)
 AUDIT2_FAULTS = ("sale_refused", "endpoint_down", "lease_renew_fail")
+# audit 2, 5.20: corporate actions (the DST world draws them in its new weeks only, as AUDIT2_FAULTS)
+CA_FAULTS = ("ca_split", "ca_spinoff", "ca_merger")
+SPLIT_RATIOS = (2, 3)
+SPINOFF_RATIOS = (0.5, 1.0)  # new shares per parent share
+SPINOFF_BASIS = 0.1  # the part of the parent's cost basis (and price) the new shares get
+MERGER_PREMIUMS = (1.05, 1.2)
 DOWN_ENDPOINTS = ("positions", "activities", "open_orders", "account", "order")  # endpoint_down: the reads it hits
 DOWN_MINUTES = (5, 15, 40)  # endpoint_down: how long a spell lasts
 LEASE_FAIL_MINUTES = (1, 2)  # lease_renew_fail: how long a spell lasts
@@ -116,6 +134,9 @@ class FaultProfile:
     sale_refused: float = 0.0  # per market sale (client order id: each attempt)
     endpoint_down: float = 0.0  # per (endpoint, minute): a spell of DOWN_MINUTES starts
     lease_renew_fail: float = 0.0  # per minute: a spell of LEASE_FAIL_MINUTES starts
+    ca_split: float = 0.0  # per (held symbol, session)
+    ca_spinoff: float = 0.0
+    ca_merger: float = 0.0
 
     def scaled(self, k: float) -> FaultProfile:
         return replace(self, **{f.name: min(getattr(self, f.name) * k, 1.0) for f in fields(self)})
@@ -143,7 +164,8 @@ DEFAULT_FAULTS = FaultProfile(
     fill_duplicate=0.10, fill_dropped=0.12, partial_fill=0.10, hold=0.10, rate_limit=0.004, clock_skew=0.002,
     mark_bad=0.004, quote_stale=0.03, quote_missing=0.03, quote_zero=0.02, quote_crossed=0.02,
     write_fail=0.02, write_timeout=0.02, write_twice=0.02, read_fail=0.01,
-    sale_refused=0.25, endpoint_down=0.0006, lease_renew_fail=0.01)
+    sale_refused=0.25, endpoint_down=0.0006, lease_renew_fail=0.01,
+    ca_split=0.04, ca_spinoff=0.03, ca_merger=0.02)
 
 SKEW_MINUTES = 6  # a clock-skew spell
 LAG_READS = (1, 4)  # lookup_lag: reads by client order id that find nothing
@@ -228,6 +250,10 @@ class FaultyBroker(BrokerBase):
         self._refused_n: dict[tuple[str, str], int] = {}  # (symbol, side) -> forced refusals given (submit_refused)
         self._seen_at: dict[str, datetime] = {}  # activity id -> when it could first have been read
         self._skew: tuple[datetime, float] | None = None  # (until, seconds)
+        self.actions: list[dict] = []  # corporate actions applied (audit 2, 5.20), the venue's sourced record
+        self.on_action: Callable[[dict], None] = lambda action: None
+        self.merged: set[str] = set()  # symbols a cash merger removed: no longer tradable
+        self._ca_day: str | None = None  # the last session the corporate actions were drawn for
 
     def __getattr__(self, name: str):
         if name.startswith("__"):
@@ -277,6 +303,8 @@ class FaultyBroker(BrokerBase):
         try:
             self._limited("submit")
             also = (order.symbol, order.side)
+            if order.symbol in self.merged and order.side == "buy":  # (not a fault: what a merger leaves)
+                raise BrokerError(422, f'{{"code":42210000,"message":"asset {order.symbol} is not active"}}')
             refuse = self._forced("submit_refused", coid, *also) if self.armed else None
             if refuse is not None:
                 k = (order.symbol, order.side)
@@ -448,14 +476,67 @@ class FaultyBroker(BrokerBase):
     # ---------------------------------------------------------------- the venue trades a bar
     def advance(self, t) -> None:
         """One bar at the simulator; then the cancels the venue was slow to act on (asked before this bar began)
-        take effect, on what the bar left of the order."""
-        self.sim.advance(t)
+        take effect, on what the bar left of the order. Before the first bar of a session: its corporate actions."""
         bar = t if isinstance(t, datetime) else t.to_pydatetime()
         bar = bar.astimezone(UTC) if bar.tzinfo else bar.replace(tzinfo=UTC)
+        day = str(pd.Timestamp(bar).tz_convert("America/New_York").date())
+        if day != self._ca_day:
+            self._ca_day = day
+            self._corporate_actions(day, bar)
+        self.sim.advance(t)
         for oid, asked in list(self._late_cancels.items()):
             if asked <= bar + timedelta(minutes=1):
                 self.sim.cancel(oid)
                 del self._late_cancels[oid]
+
+    # ---------------------------------------------------------------- corporate actions (audit 2, 5.20)
+    def _corporate_actions(self, day: str, bar: datetime) -> None:
+        """Alpaca's corporate actions of `day`, applied before its first bar to the positions held then: at most one
+        per symbol, decided by the dice on (fault, symbol, day) and in this order: merger, spin-off, split."""
+        if not self.armed:
+            return
+        for s in sorted(self.sim.pos):
+            if float(self.sim.pos[s].get("qty") or 0) <= 0 or s in self.merged:
+                continue
+            px = self.sim.bars.last_close(s, bar)
+            if px is None:
+                continue
+            if self._hit("ca_merger", s, day):
+                price = round(px * self._param("ca_merger", MERGER_PREMIUMS, s, day), 2)
+                self.sim.cash_merger(s, price=price, day=day)
+                self.merged.add(s)
+                self._action({"kind": "cash_merger", "symbol": s, "new_symbol": "", "on": day, "ratio": price})
+            elif self._hit("ca_spinoff", s, day) and f"{s}W" not in self.sim.pos:
+                ratio = self._param("ca_spinoff", SPINOFF_RATIOS, s, day)
+                new = f"{s}W"
+                f = self.sim.bars.frames.get(s)
+                if f is not None and new not in self.sim.bars.frames:
+                    k = SPINOFF_BASIS / ratio
+                    self.sim.bars.frames[new] = f.assign(**{c: f[c] * k for c in ("o", "h", "l", "c", "vw")})
+                self.sim.spin_off(s, new, ratio=ratio, basis_share=SPINOFF_BASIS, day=day)
+                self._action({"kind": "spin_off", "symbol": s, "new_symbol": new, "on": day, "ratio": ratio})
+            elif self._hit("ca_split", s, day):
+                r = self._param("ca_split", SPLIT_RATIOS, s, day)
+                p = self.sim.pos[s]
+                before = float(p["qty"])
+                p["qty"] = _whole(before * r)
+                p["avg_entry_price"] = float(p["avg_entry_price"]) / r
+                if p.get("cost_basis") not in (None, ""):
+                    p["cost_basis"] = str(float(p["cost_basis"]))  # unchanged: the same money in more shares
+                f = self.sim.bars.frames.get(s)
+                if f is not None:  # the feed and the venue are split-adjusted from here on (every bar)
+                    self.sim.bars.frames[s] = f.assign(**{c: f[c] / r for c in ("o", "h", "l", "c", "vw")},
+                                                       v=f["v"] * r)
+                self.sim.non_trade.append({"activity_type": "SPLIT", "id": f"{day}::split{len(self.sim.non_trade) + 1}",
+                                           "date": day, "symbol": s, "qty": str(_whole(before * (r - 1)))})
+                self._action({"kind": "split", "symbol": s, "new_symbol": "", "on": day, "ratio": r})
+
+    def _action(self, a: dict) -> None:
+        a["ref"] = f"faulty-ca:{a['kind']}:{a['symbol']}:{a['on']}"
+        self.actions.append(a)
+        self._note({"cash_merger": "ca_merger", "spin_off": "ca_spinoff", "split": "ca_split"}[a["kind"]],
+                   f"{a['symbol']} {a['ratio']:g}" + (f" {a['new_symbol']}" if a["new_symbol"] else ""))
+        self.on_action(a)
 
     def heal(self) -> None:
         """Faults off, and what was pending arrives: late cancels take effect, lagging lookups answer."""
@@ -466,6 +547,10 @@ class FaultyBroker(BrokerBase):
         self._lag.clear()
         self._unlisted.clear()
         self._skew = None
+
+
+def _whole(x: float):
+    return int(round(x)) if abs(x - round(x)) < 1e-9 else x
 
 
 class FaultyData:

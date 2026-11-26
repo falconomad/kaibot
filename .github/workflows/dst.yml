@@ -6,7 +6,9 @@
 #                red by a draw another did not get) on four processes, about three minutes; then every crash point
 #                of the real engine (tests/crash/test_engine_crash_points.py, audit 2 5.19), about four minutes
 #   nightly-soak fresh seeds for 20 minutes, then the hunt for the planted bugs with random seeds; a failing seed
-#                opens an issue (or adds a comment to the open one) with the seed and the command that runs it again
+#                opens an issue (or adds a comment to the open one) with the seed and the command that runs it again.
+#                Its report's coverage section (audit 2 5.20) counts the weeks, the book stop's modes (band mode's
+#                checks and alerts), the corporate actions (split, spin-off, merger) and plays the exit-code-5 drill
 # A seed that fails is added to tests/dst/regression_seeds.txt and stays there.
 name: dst
 on:
@@ -60,7 +62,8 @@ jobs:
         env: {PYTHONPATH: src}
         run: |
           set -o pipefail
-          uv run python tests/dst/soak.py --minutes 20 --jobs 4 --hunt 40 --out soak.md 2>&1 | tee soak.log
+          uv run python tests/dst/soak.py --minutes 20 --jobs 4 --hunt 40 --drills "refused start loop" \
+            --out soak.md 2>&1 | tee soak.log
       - name: summary
         if: always()
         run: |
