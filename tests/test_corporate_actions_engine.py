@@ -7,10 +7,11 @@ the spun shares are sold at the next closing auction. Without the record, nothin
 from __future__ import annotations
 
 from test_failsafe_drills import DAY1, DAY2, MD, QTY
-from test_live_daily_engine import SEND, DailyAccount
+from test_live_daily_engine import SEND, DailyAccount, WantsB
 
 from kaibot.engine import live_daily as ld
 from kaibot.engine.corp_guard import RecentActions
+from kaibot.strategies.base import TargetList
 
 
 class Feed:
@@ -76,6 +77,67 @@ def test_a_spin_off_is_adopted_at_the_cost_basis_and_sold_at_the_next_close(tmp_
     a.ticks(a.open2, SEND + 2, 390)
     assert a.eng.kill is None  # no drift halt
     assert len([x for *_, x in a.eng.journal.entries(kinds=("spinoff",))]) == 1  # booked once
+
+
+class SellsB(WantsB):
+    """trend_momentum's settings; its decision: sell B (once held)."""
+
+    def on_event(self, ctx):
+        if "B" not in ctx.held:
+            return super().on_event(ctx)
+        return TargetList(self.name, ctx.fill_session, {}, features={"keep": [], "buy": [], "sell": {"B": "rank"}},
+                          resize=False)
+
+
+class WantsBAndZ(WantsB):
+    """Its decision: buy B and Z, a name the daily view has no column for."""
+
+    def on_event(self, ctx):
+        return TargetList(self.name, ctx.fill_session, {"B": 1.0, "Z": 1.0},
+                          features={"keep": [], "buy": ["B", "Z"], "sell": {}}, resize=False)
+
+
+def _rule(a, strategy):
+    a.rule = ld.Rule(strategy, a.rule.builder)
+    a.eng.daily = ld.for_engine(a.eng, a.load, rules=[a.rule])
+    a.eng.daily.startup()
+
+
+def test_780_a_spin_off_on_a_decision_day_sells_the_new_shares_and_sends_every_other_order(tmp_path, monkeypatch):
+    """#780: the decision of DAY1 sells B; before DAY2's open a spin-off credits BN, which the daily view the send
+    sizes with does not have. The whole send used to fail with KeyError('BN') at every pass. Now BN is not sized:
+    its 20 shares go out as a full-position sale in DAY2's window (the pre-registrations' "sold at the next closing
+    auction", trend_momentum Amendment 7.2, mom_12_1_band 6.2), and so does B's sale."""
+    a = Held(tmp_path, monkeypatch, Feed(SPIN))
+    _rule(a, SellsB())
+    a.hold()
+    (dec,) = [x for *_, x in a.eng.journal.entries(kinds=("md_decision",)) if x["fill_session"] == DAY2]
+    assert dec["target"]["sell"] == [["B", "rank"]] and dec["target"]["weights"] == []
+    a.broker.spin_off("B", "BN", ratio=0.5, basis_share=0.25, day=DAY2)
+    a.ticks(a.open2, 0, 390)
+    sells = sorted((o["symbol"], float(o["qty"]), o["status"]) for o in a.md_orders() if o["side"] == "sell")
+    # (this venue has no minute bars of BN, so its sale cannot trade here: sent once, in the window, all 20 shares)
+    assert [x[:2] for x in sells] == [("B", QTY), ("BN", 20.0)] and sells[0][2] == "filled"
+    assert all(o["client_order_id"].endswith("-20260804-sell-1") for o in a.md_orders() if o["side"] == "sell")
+    (send,) = [x for *_, x in a.eng.journal.entries(kinds=("md_send",)) if x["session"] == DAY2]
+    assert sorted((t[0], t[1], t[3]) for t in send["targets"]) == [("B", 0, "rank"), ("BN", 0, "spin_off_adopted")]
+    assert "not_sent" not in send
+    assert [x for *_, x in a.eng.journal.entries(kinds=("md_sent",)) if x["session"] == DAY2]  # the send completed
+    assert "multi_day_error" not in _kinds(a)
+
+
+def test_780_a_buy_the_daily_view_has_no_column_for_is_left_out_and_the_rest_is_bought(tmp_path, monkeypatch):
+    """#780: one unknown symbol never blocks the send: the decision wants B and Z, the view has no Z. B is bought;
+    Z is journalled as not sent (`no_daily_bar`) and said once."""
+    a = Held(tmp_path, monkeypatch, None)
+    _rule(a, WantsBAndZ())
+    a.ticks(a.open1, 0, 390)
+    a.after_close(a.open1)
+    a.ticks(a.open2, 0, 390)
+    assert [(o["symbol"], o["side"], o["status"]) for o in a.md_orders()] == [("B", "buy", "filled")]
+    (send,) = [x for *_, x in a.eng.journal.entries(kinds=("md_send",)) if x["session"] == DAY2]
+    assert send["not_sent"] == {"Z": "no_daily_bar"} and [t[0] for t in send["targets"]] == ["B"]
+    assert "multi_day_error" not in _kinds(a) and _kinds(a).count("multi_day_no_daily_bar") == 1
 
 
 def test_a_restart_after_the_adoption_books_nothing_again(tmp_path, monkeypatch):

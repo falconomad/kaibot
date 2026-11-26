@@ -115,7 +115,7 @@ import logging
 import math
 import secrets
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Protocol
@@ -179,6 +179,8 @@ LOCAL_EARLY_CLOSES: dict[date, time] = {
 }
 LOCAL_CLOSE_YEARS = range(2026, 2029)
 UNKNOWN_CLOSE = time(13, 0)  # the earliest close a regular session has
+# #780: the reason journalled (`md_send.not_sent`) for a decision's buy the evening's daily view has no column for
+NO_DAILY_BAR = "no_daily_bar"
 
 
 def local_close(day: date) -> time | None:
@@ -1461,6 +1463,8 @@ class LiveDaily:
                                               "decided": planned.get("decided"), "note": planned.get("note"),
                                               "skipped": planned.get("skipped"),
                                               **({"late_of": planned["late_of"]} if planned.get("late_of") else {}),
+                                              **({"not_sent": planned["not_sent"]} if planned.get("not_sent")
+                                                 else {}),
                                               "targets": [[s, float(held.get(s, 0.0)), q, p, w]
                                                           for s, q, p, w in planned["targets"]]})
             self._shadow_observe(r.name, session, rid, planned)  # #310: a copy, to an observer; nothing comes back
@@ -1958,6 +1962,12 @@ class LiveDaily:
             return self._planned(r, session, rid, prev, targets, None)
         live = with_session(data, session, self.account.splits(session))
         i = len(live.dates) - 1
+        # #780: a name the decision wants that the view has no column for is not bought (it cannot be sized): left
+        # out, journalled (`not_sent`, reason `no_daily_bar`), said once; the rest of the plan goes out
+        not_sent = {s: NO_DAILY_BAR for s in tl.weights if s not in live._col}
+        if not_sent:
+            tl = replace(tl, weights={s: w for s, w in tl.weights.items() if s not in not_sent})
+            self._say_no_bar(r.name, session, rid, sorted(not_sent))
         sized = {}
         for s, (q, mark) in held.items():  # held names are sized at the daily close (the research runner's mark)
             j = live._col.get(s)
@@ -1967,9 +1977,12 @@ class LiveDaily:
         unknown = [s for s in held if s not in live._col and s not in adopted]
         if unknown:  # a held name outside the daily view (it left the store): only sold, never sized
             pending = {**pending, **{s: "not_in_daily_view" for s in unknown}}
+        # #780: neither is sized; a spin-off's new ticker is never in the view (`daily.builder_sizing` would raise
+        # KeyError and fail the whole send): its shares are sold below as a full-position sale, without a daily bar
+        unsized = {*unknown, *(s for s in adopted if s not in live._col)}
         eq, cash = float(self.account.equity()), float(self.account.cash())
-        plan, targets = plan_session(r.builder, tl, r.name, {s: v for s, v in sized.items() if s not in unknown},
-                                     {s: w for s, w in pending.items() if s not in unknown}, live, i, eq, cash)
+        plan, targets = plan_session(r.builder, tl, r.name, {s: v for s, v in sized.items() if s not in unsized},
+                                     {s: w for s, w in pending.items() if s not in unsized}, live, i, eq, cash)
         targets += [Target(r.name, s, 0, "sell", {"why": "not_in_daily_view"}) for s in unknown]
         if adopted:  # #266: shares a spin-off credited are sold at this closing auction, whatever the rule decided
             targets = [t for t in targets if t.symbol not in adopted]
@@ -1979,13 +1992,29 @@ class LiveDaily:
             targets, note = self._late_cut(r, session, prev, late, targets, held, data)
         targets = self._overnight_cut(r, session, targets, held)
         targets, ca = self._ca_cut(r.name, session, prev, targets, held)
-        body = {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca}
+        body = {**self._planned(r, session, rid, prev, targets, plan, eq=eq, cash=cash), **ca,
+                **({"not_sent": not_sent} if not_sent else {})}
         if late is not None:
             body.update(decided=late["session"], late_of=late["fill_session"], late=note)
             self.event("multi_day_carry", {"strategy": r.name, "session": str(session),
                                            "late_of": late["fill_session"], "of": late["fill_session"],
                                            "carried": [], "skipped": note["skipped"], "risk_off": note["risk_off"]})
         return body
+
+    def _say_no_bar(self, rule: str, session: date, rid: int, symbols: Sequence[str]) -> None:
+        """#780: once per run and name (an earlier send entry of the run that left the name out means it was said),
+        the `multi_day_no_daily_bar` event: a decision's buy the daily view has no column for was not sent."""
+        said = {s for b in self._entries("md_send") if b.get("run_id") == rid and b.get("strategy") == rule
+                for s in (b.get("not_sent") or {})}
+        new = [s for s in symbols if s not in said]
+        if not new:
+            return
+        log.warning("#780: no daily bar for %s (%s, session %s): not bought; the rest of the send goes out", new,
+                    rule, session)
+        self.event("multi_day_no_daily_bar", {"strategy": rule, "session": str(session), "symbols": new,
+                                              "why": NO_DAILY_BAR,
+                                              "action": "the decision wanted these names, but the daily data has "
+                                                        "no prices for them: they are not bought"})
 
     def _latest(self, rule: str, session: date, rid: int) -> dict | None:
         """The latest decision of this run with a target list whose fill session is before `session`."""
