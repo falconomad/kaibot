@@ -1,0 +1,79 @@
+name: image
+# M20 9.3 (#727): the engine image is built in CI from a release tag, and its start checks the host's promotion.
+#   pull_request (the image's files)  build HEAD as kaibot-engine:test (scripts/build_image.sh --test) and prove the
+#                                     entry: refused (exit 6) without a promotion or with another commit promoted,
+#                                     let through when the promoted commit is the image's
+#   workflow_dispatch (a rel-* tag)   build that release from its tag (refused unless annotated and on main), the same
+#                                     checks, and the image id, revision and size in the run's summary
+# Nothing is pushed: no registry, no secret, no cloud account (the registry is the cloud move's, January; until then
+# the engine host builds its own image from the tag with the same script). Read-only token.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - requirements-engine.txt
+      - scripts/engine_entry.sh
+      - scripts/build_image.sh
+      - scripts/release.sh
+      - .github/workflows/image.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag to build (rel-YYYYMMDD-N)"
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with: {persist-credentials: false, fetch-depth: 0}
+      - name: build the image
+        env:
+          TAG: ${{ inputs.tag }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          git fetch -q origin main:refs/remotes/origin/main 2>/dev/null || true
+          if [ "$EVENT" = workflow_dispatch ]; then
+            case "$TAG" in rel-[0-9]*-[0-9]*) ;; *) echo "::error::not a release tag: $TAG"; exit 1 ;; esac
+            git fetch -q --tags origin
+            name="$TAG"; ./scripts/build_image.sh "$TAG" > /tmp/image.id
+          else
+            name=test; ./scripts/build_image.sh --test > /tmp/image.id
+          fi
+          echo "NAME=$name" >> "$GITHUB_ENV"
+      - name: the entry refuses an unpromoted build and starts a promoted one
+        run: |
+          set -euo pipefail
+          img="kaibot-engine:$NAME"
+          commit=$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$img")
+          d=$(mktemp -d); chmod 777 "$d"
+          run() { docker run --rm -e KAIBOT_REQUIRE_PROMOTED=1 -v "$d:/data" "$img" sh /app/scripts/engine_entry.sh --verify-only; }
+          set +e; run; rc=$?; set -e
+          [ "$rc" = 6 ] || { echo "::error::no promotion: exit $rc, want 6"; exit 1; }
+          echo "rel-19700101-1 0000000000000000000000000000000000000000" > "$d/promoted"
+          set +e; run; rc=$?; set -e
+          [ "$rc" = 6 ] || { echo "::error::another commit promoted: exit $rc, want 6"; exit 1; }
+          echo "$NAME $commit" > "$d/promoted"
+          run
+          docker run --rm "$img" python -c "import kaibot.engine.__main__, kaibot.engine.watchdog"
+      - name: summary
+        run: |
+          set -euo pipefail
+          img="kaibot-engine:$NAME"
+          {
+            echo "### kaibot-engine:$NAME"
+            echo
+            echo "- image id: \`$(cat /tmp/image.id)\`"
+            echo "- revision: \`$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$img")\`"
+            echo "- code label (heartbeats, decisions): \`$(docker image inspect --format '{{ range .Config.Env }}{{ println . }}{{ end }}' "$img" | sed -n 's/^KAIBOT_CODE_SHA=//p')\`"
+            echo "- size: $(docker image inspect --format '{{ .Size }}' "$img") bytes"
+            echo
+            echo "Nothing was pushed. On the engine host: \`./scripts/release.sh $NAME\`, \`./scripts/build_image.sh $NAME\`, restart."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
