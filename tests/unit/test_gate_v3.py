@@ -500,7 +500,8 @@ def test_the_hold_out_check_asks_for_consistency_not_significance():
     acc = sleeve(0.03)
     a = pd.Series(acc.net - mtm.exposure_matched(SPY, acc.exposure), index=IDX)
     research, hold = a[a.index <= "2024-12-31"], a[a.index > "2024-12-31"]
-    ok = g3.holdout_check(GATE, research=research, holdout=hold, first_run_at=datetime(2027, 1, 5, tzinfo=UTC))
+    ok = g3.holdout_check(GATE, research=research, holdout=hold, first_run_at=datetime(2027, 1, 5, tzinfo=UTC),
+                          design_saw_holdout=False)  # decision 18 s.9 (#705)
     assert ok["met"] is True and ok["clean"] is True and ok["label"] == "out-of-sample check"
     c = ok["checks"]["active_return"]
     assert c["floor"] < c["research"] and c["holdout"] >= c["floor"]

@@ -121,3 +121,13 @@ B2 is expected to fail on return. B6 depends on the sleeve's verdict, which this
 24 Nov 2026 stay counted, so the book `index_core_trend_momentum` has tried **12 configurations**. The trial rows
 record `params.index_cap_pct` (80), and the report is named `..._cap80_<ts>`. The 27% verdict (fail) stands. A
 pass allows only a proposal to the stakeholder, as in the core's Amendment 4.
+
+## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out
+
+As docs/prereg/index_core.md Amendment 5. This book's core is that core, and its 15% volatility target came from
+sums over 2017 to 2026, which include the hold-out:
+
+- **design_saw_holdout:** true (the core's volatility target was set from 2017-2026 sums that include the hold-out)
+
+No setting, neighbour, mark or run changes. The final check on the hold-out, if it is ever opened, is labelled a
+consistency check.

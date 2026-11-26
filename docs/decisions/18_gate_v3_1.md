@@ -27,7 +27,9 @@
   `src/kaibot/replay/config_replay.py`, `scripts/trend_momentum_gbm.py`, `scripts/trend_momentum_band.py`;
   `tests/unit/test_gate_v3_1_trial_sharpes.py`. Section 7 (#703): `src/kaibot/evaluation/results.py`,
   `src/kaibot/replay/spy_noise_band.py`; `tests/unit/test_gate_v3_1_timing_exposure.py`. Section 8 (#704):
-  `tests/unit/test_gate_v3_1_holm_inputs.py`.
+  `tests/unit/test_gate_v3_1_holm_inputs.py`. Section 9 (#705):
+  `docs/prereg/TEMPLATE.md`, `docs/prereg/index_core.md`, `docs/prereg/index_core_trend_momentum.md`;
+  `tests/unit/test_gate_v3_1_design_saw_holdout.py`.
 
 ## 1. What changes (ticket 6.1)
 
@@ -162,10 +164,27 @@ that fed Holm until now (`trend_momentum`, `mom_12_1_band`, `mom_12_1_band_nofil
 `weekly_fall_rebound`, `spy_trend_filter`, `spy_noise_band_carry`) are greyed out with their reasons, except where
 a run meets every condition.
 
+## 9. Ticket 6.5: "out-of-sample" needs a design that did not see the hold-out (#705)
+
+The final check on the hold-out (decision 16 section 7) was labelled "out-of-sample" whenever the rule's first
+run came after the freeze (21 Nov 2026). That ignores what shaped the design. `index_core`'s 15% volatility target
+came from the audit's sums over 2017 to 2026, which include the hold-out, so its first run on 24 Nov did not make
+its check clean.
+
+| What | Before | After |
+|---|---|---|
+| The pre-registration | no field | `design_saw_holdout: true` or `false`, then why (in `docs/prereg/TEMPLATE.md`; read by `prereg.load` as `Prereg.design_saw_holdout`, the last one in the file wins, so an appended amendment can declare it; any other value counts as not declared) |
+| "Out-of-sample check" | first run on or after the freeze | first run on or after the freeze **and** `design_saw_holdout: false` (`holdout_check.clean_needs`) |
+| `design_saw_holdout: true`, or not declared | — | **"consistency check"**, whatever the first-run date. Not declared counts as true, the safe reading |
+| `index_core`, `index_core_trend_momentum` | would have been "out-of-sample" (first run 24 Nov) | Amendment 5 (`index_core`) and Amendment 4 (`index_core_trend_momentum`) declare `design_saw_holdout: true`. Their check is a consistency check |
+
+The two amendments change no setting, neighbour, mark or run, only the label. They are written after results, so
+gate v3.1 prints them as hindsight (section 4). That is correct, and it makes nothing easier to pass.
+
 ## The configuration this record adopts
 
 Every gate report records the sha256 of `config/gate_v3.yaml` as `gate_sha`. A test
 (`tests/unit/test_gate_v3_1_books.py`) checks the line below against the file. Any later edit of the file must
 update this line in the same pull request, together with the section that explains the edit.
 
-config/gate_v3.yaml sha256: `dcc1b6de4150f9902299210bd79ec1feb5fca47c45e19b57866194d889bcde8a`
+config/gate_v3.yaml sha256: `1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a`

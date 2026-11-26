@@ -139,6 +139,9 @@ holdout_check:
   book_statistics: [cagr_vs_spy_points, max_drawdown]   # drawdown: at or below the 95th percentile
   contaminated_before: 2026-11-21  # a rule first run before the freeze has seen the hold-out: its check is
                                    # labelled a consistency check, never an out-of-sample test
+  clean_needs: [first_run_after_freeze, design_saw_holdout_false]   # gate v3.1 (decision 18 s.9, #705):
+                                   # "out-of-sample" also needs the pre-registration's `design_saw_holdout: false`;
+                                   # true or undeclared forces the consistency-check label
 
 # ---------------------------------------------------------------- bootstrap
 bootstrap:                         # the intervals printed beside S1, B1 and B2, and the hold-out bands
