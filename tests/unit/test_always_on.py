@@ -399,7 +399,7 @@ def repo(tmp_path):
         shutil.copy(SCRIPTS / n, r / "scripts" / n)
     (r / ".gitignore").write_text("data/\nlogs/\n")
     g = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
-    for cmd in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "one"], ["tag", "v1"]):
+    for cmd in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "one"], ["tag", "-a", "v1", "-m", "v1"]):
         sh(["git", *cmd], r, g, check=True)
     (r / "file.txt").write_text("two\n")
     for cmd in (["add", "-A"], ["commit", "-qm", "two"]):
@@ -415,7 +415,7 @@ def repo(tmp_path):
 
 
 def rev(r, ref="HEAD"):
-    return sh(["git", "rev-parse", "--short", ref], r, check=True).stdout.strip()
+    return sh(["git", "rev-parse", "--short", f"{ref}^{{commit}}"], r, check=True).stdout.strip()
 
 
 def test_release_refused_in_market_hours_unless_forced(repo):
@@ -495,6 +495,103 @@ def test_run_engine_stops_on_a_missing_release(repo):
     r, env, tmp = repo
     x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_RELEASE": "v404"})
     assert x.returncode == 1 and not (tmp / "docker.calls").exists()
+
+
+# ---------------------------------------------------------------- audit 2 5.2 (#682): explicit releases
+def _git(r, env, *args):
+    return sh(["git", *args], r, env, check=True)
+
+
+def test_a_lightweight_tag_is_not_a_release(repo):
+    r, env, _ = repo
+    _git(r, env, "tag", "light", "main")
+    x = sh(["bash", "scripts/release.sh", "light"], r, {**env, "KAIBOT_FAKE_ET": "6 1200"})
+    assert x.returncode == 1 and "lightweight tag" in x.stdout and not (r / "data/RELEASE").exists()
+    x = sh(["bash", "scripts/release.sh", "--apply"], r, {**env, "KAIBOT_RELEASE": "light"})
+    assert x.returncode == 1 and "lightweight tag" in x.stderr and rev(r) == rev(r, "main")
+
+
+def test_a_tag_off_main_is_not_a_release(repo):
+    """A tag on a commit that never reached main (a branch, a fork's push of a tag) is refused at the pin and at the
+    start, so a pin can only name merged code."""
+    r, env, _ = repo
+    _git(r, env, "checkout", "-q", "-b", "side")
+    (r / "side.txt").write_text("unreviewed\n")
+    _git(r, env, "add", "-A")
+    _git(r, env, "commit", "-qm", "side")
+    _git(r, env, "tag", "-a", "rel-20261126-9", "-m", "x")
+    _git(r, env, "checkout", "-q", "main")
+    x = sh(["bash", "scripts/release.sh", "rel-20261126-9"], r, {**env, "KAIBOT_FAKE_ET": "6 1200"})
+    assert x.returncode == 1 and "is not on main" in x.stdout and not (r / "data/RELEASE").exists()
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_RELEASE": "rel-20261126-9"})
+    assert x.returncode == 1 and "is not on main" in x.stderr and rev(r) == rev(r, "main")
+
+
+def test_latest_pins_the_newest_ci_release(repo):
+    r, env, _ = repo
+    _git(r, env, "tag", "-a", "rel-20261126-2", "-m", "x", "v1")
+    _git(r, env, "tag", "-a", "rel-20261126-10", "-m", "x", "main")
+    _git(r, env, "tag", "-a", "rel-20261125-30", "-m", "x", "v1")
+    x = sh(["bash", "scripts/release.sh", "--latest"], r, {**env, "KAIBOT_FAKE_ET": "6 1200"}, check=True)
+    assert "Newest release: rel-20261126-10" in x.stdout
+    assert (r / "data/RELEASE").read_text().strip() == "rel-20261126-10"
+
+
+def test_latest_without_a_release_changes_nothing(repo):
+    r, env, _ = repo
+    x = sh(["bash", "scripts/release.sh", "--latest"], r, {**env, "KAIBOT_FAKE_ET": "6 1200"})
+    assert x.returncode == 1 and "No rel-* tag yet" in x.stdout and not (r / "data/RELEASE").exists()
+
+
+def test_unpinned_follows_main_by_default_and_says_so_loudly(repo):
+    """Product decision (26 Nov 2026, #600): unpinned starts still follow main for now, with WARNING lines that name
+    the one-command pin; the start records the full commit it runs (data/live/running_commit)."""
+    r, env, tmp = repo
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, env, check=True)
+    assert x.stderr.count("WARNING: UNPINNED ENGINE") == 3 and "./scripts/release.sh --latest" in x.stderr
+    full = sh(["git", "rev-parse", "HEAD"], r, check=True).stdout.strip()
+    assert (r / "data/live/running_commit").read_text().strip() == full
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_RELEASE": "main"}, check=True)
+    assert "WARNING: UNPINNED ENGINE" in x.stderr and "says 'main'" in x.stderr
+
+
+@pytest.mark.parametrize("where", ["environment", "env file"])
+def test_follow_main_0_refuses_an_unpinned_start(repo, where):
+    r, env, tmp = repo
+    if where == "environment":
+        env = {**env, "KAIBOT_FOLLOW_MAIN": "0"}
+    else:
+        f = Path(env["KAIBOT_ENV_FILE"])
+        f.write_text(f.read_text() + "KAIBOT_FOLLOW_MAIN=0  # x\n")
+    for extra in ({}, {"KAIBOT_RELEASE": "main"}):
+        x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, **extra})
+        assert x.returncode == 1 and "REFUSED" in x.stderr and "./scripts/release.sh --latest" in x.stderr
+    assert not (tmp / "docker.calls").exists() and not (r / "data/live/running_release").exists()
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_RELEASE": "v1"}, check=True)
+    assert "UNPINNED" not in x.stderr and built_sha(tmp) == f"v1@{rev(r, 'v1')}"  # a pinned start is unaffected
+
+
+def test_a_follow_main_value_that_is_not_0_or_1_keeps_the_default(repo):
+    r, env, _ = repo
+    x = sh(["bash", "scripts/run_engine.sh", "--docker"], r, {**env, "KAIBOT_FOLLOW_MAIN": "off"}, check=True)
+    assert "KAIBOT_FOLLOW_MAIN='off' is not 0 or 1" in x.stderr and "WARNING: UNPINNED ENGINE" in x.stderr
+
+
+def test_the_release_workflow_tags_only_a_green_main_and_runs_no_code():
+    """The CI side of #682: workflow_dispatch only, from main's copy, checks ci and supply-chain on main's head, makes
+    an annotated tag (a tag object, then its ref) named rel-YYYYMMDD-N; contents write and nothing else that writes."""
+    doc = __import__("yaml").safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    on = doc.pop(True, doc.get("on"))
+    assert set(on) == {"workflow_dispatch"} and doc["permissions"] == {"contents": "read"}
+    job = doc["jobs"]["tag"]
+    assert job["if"] == "github.ref == 'refs/heads/main'"
+    assert job["permissions"] == {"contents": "write", "actions": "read"}
+    (step,) = job["steps"]
+    run = step["run"]
+    assert "for wf in ci.yml supply-chain.yml" in run and '"completed success "*) ;;' in run
+    assert "head_sha=$sha&branch=main&event=push" in run
+    assert run.index("completed success") < run.index("repos/$REPO/git/tags") < run.index("repos/$REPO/git/refs")
+    assert 'name="rel-$day-$(( ${n:-0} + 1 ))"' in run and "${{" not in run  # inputs only through env
 
 
 # ---------------------------------------------------------------- #613: no hand start beside the service
@@ -621,6 +718,11 @@ def wrapper(tmp_path):
         shutil.copy(SCRIPTS / n, r / "scripts")
     (r / "scripts/run_engine.sh").write_text(f"#!/bin/bash\necho ran >> {tmp_path}/ran\nexit ${{FAKE_CODE:-0}}\n")
     (r / "scripts/run_engine.sh").chmod(0o755)
+    # a git checkout (#682: the worker and the relay start only on the commit the engine's start recorded)
+    (r / ".gitignore").write_text("data/\nlogs/\n.venv/\n")
+    g = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+    for cmd in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "one"]):
+        sh(["git", *cmd], r, g, check=True)
     return r, {"HOME": str(tmp_path), "KAIBOT_LOG_DIR": str(tmp_path / "logs"), "KAIBOT_SERVICE_MODE": "python",
                "KAIBOT_ENV_FILE": str(tmp_path / "none.env"), "PATH": os.environ["PATH"]}, tmp_path
 
@@ -836,7 +938,9 @@ while :; do sleep 0.2; done
 
 
 def engine_for(tmp, seconds, code=0):
+    # as run_engine.sh: the commit this start runs goes to data/live/running_commit (#682)
     return (f"#!/bin/bash\ntrap 'echo got-int >> {tmp}/ran; exit 0' INT\necho up >> {tmp}/ran\n"
+            "mkdir -p data/live; git rev-parse HEAD > data/live/running_commit\n"
             f"for _ in $(seq {seconds * 5}); do sleep 0.2; done\nexit {code}\n")
 
 
@@ -987,6 +1091,30 @@ def fake_docker(tmp_path):
         'esac\nexit 0\n')
     (bin_ / "docker").chmod(0o755)
     return bin_
+
+
+def test_the_worker_and_the_relay_run_only_the_engines_commit(checks):
+    """#682: the engine's start recorded another commit than the checkout's HEAD (the tree moved under it): neither the
+    worker nor the relay starts on that tree; each says why once, and the engine is not affected."""
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(
+        engine_for(tmp, 3).replace("git rev-parse HEAD >", "echo 0123456789abcdef0123456789abcdef01234567 >"))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r,
+           {**env, "KAIBOT_PRICE_STREAM": "on", "KAIBOT_STREAM_START_DELAY": "0"})
+    assert x.returncode == 0 and "engine exited cleanly" in x.stdout and worker_starts(tmp) == []
+    for log in ("ticker_checks.log", "price_stream.log"):
+        text = (tmp / "logs" / log).read_text()
+        assert text.count("not at the engine's 0123456: not starting on code the engine does not run") == 1, text
+
+
+def test_the_worker_names_the_commit_it_runs(checks):
+    r, env, tmp = checks
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 2))
+    sh(["bash", "scripts/service_run.sh", "engine"], r, env, check=True)
+    short = sh(["git", "rev-parse", "--short", "HEAD"], r, check=True).stdout.strip()
+    assert "ticker-check worker started (pid" in (tmp / "logs/ticker_checks.log").read_text()
+    assert f", code {short})" in (tmp / "logs/ticker_checks.log").read_text()
+    assert (r / "data/live/running_commit").read_text().strip()
 
 
 def test_in_docker_mode_without_a_venv_the_worker_runs_in_the_engine_image(wrapper, fake_docker):
