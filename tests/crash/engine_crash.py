@@ -200,12 +200,10 @@ def engine_points(effects: list[tuple[str, str]]) -> list[int]:
 # Engine defects this harness found that are still open: issue -> the crash points they break and why. Each has a
 # strict xfail in test_engine_crash_points.py; remove both when the issue is fixed.
 KNOWN: dict[int, str] = {
-    775: "a kill between an order's journalled intent and its venue call (after `journal.om_intent`, before "
-       "`venue.submit`) in the last window of the run: after the restart the send step journals `md_sent` as "
-       "complete while that order is still unconfirmed; once it is called lost a pass later nothing sends the "
-       "decision again in the window (the next session's carry does, so a kill in D1's window ends right)",
+    # #775 (a kill between an order's journalled intent and its venue call in the last window) is fixed: the restarted
+    # process sends the order again in the same window under its own client order id (OrderManager.resend; the venue
+    # refuses a duplicate), test_a_kill_between_a_sales_intent_and_its_venue_call_still_sells_in_the_window
 }
-
 
 def known(effects: list[tuple[str, str]], k: int, phase: str) -> int | None:
     """The open issue a failing crash point is put down to, or None: #775 for a kill between an order's intent and
