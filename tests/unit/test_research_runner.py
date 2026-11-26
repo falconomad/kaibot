@@ -205,6 +205,7 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                                                                 "scripts/fetch_sec_fundamentals.py"]
     assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_av_earnings.py",  # #797
                                                                 "scripts/fetch_listings.py",
+                                                                "scripts/fetch_minute_pit.py",  # #794: paper keys
                                                                 "scripts/fetch_sec_fundamentals.py",
                                                                 "scripts/walk_forward.py"]  # #708: FRED (VIX)
     assert not cfg.specs["kaibot.agents.evalset.golden"].flags  # no --live (money), no --record
