@@ -99,6 +99,9 @@ def replay_config(rules: Rules, cfg: dict, data_dir: Path, fomc: set, equity0: f
         "net_pnl_usd": round(float(trades["pnl"].sum()), 2) if n else 0.0,
         "net_return_pct": round(float(trades["pnl"].sum()) / equity0 * 100, 3) if n else 0.0,
         "t_stat_per_trade": round(t_stat(per_trade), 3), "daily_sharpe_ann": round(sharpe(daily_ret) * np.sqrt(252), 3),
+        # #702: that Sharpe is of the ABSOLUTE return. A config-panel replay has no SPY-at-exposure benchmark, so it
+        # logs no `daily_active_sharpe_ann`; gate v3's S4 flags such rows and leaves them out of its variance
+        "daily_sharpe_series": "absolute_return",
         "max_drawdown": round(max_drawdown(np.r_[equity0, eq]), 4),
         "policy": asdict(rules.policy), "config_sha": rules.config_sha,
         "caveats": ["Prefer mode replays as All (ranking only matters when slots compete)",

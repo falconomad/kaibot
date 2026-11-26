@@ -130,6 +130,9 @@ class GateV3:
         if isinstance(cap, bool) or not isinstance(cap, int | float) or not 0 <= float(cap) <= EVIDENCE_BUDGET_MAX_PCT:
             raise ValueError(f"config/gate_v3.yaml: evidence_based.book_budget_max_pct={cap!r} must be a number in "
                              f"[0, {EVIDENCE_BUDGET_MAX_PCT:g}] (decision 16 section 14; it may only be lowered)")
+        if (cfg["sleeve"]["s4_deflated_sharpe"].get("trial_sharpes") or "active_return") != "active_return":
+            raise ValueError("config/gate_v3.yaml: s4_deflated_sharpe.trial_sharpes must be active_return (decision "
+                             "18 section 6: S4 tests the active return, so its variance comes from active Sharpes)")
         if cfg["bootstrap"]["method"] != "stationary":
             raise ValueError("config/gate_v3.yaml: only the stationary bootstrap is implemented")
         return cls(cfg, hashlib.sha256(raw).hexdigest())
@@ -605,7 +608,12 @@ def s3(gate: GateV3, rule: str, control: Any, other_family_p: Mapping[str, float
 
 
 def s4(gate: GateV3, rule: str, active: pd.Series, registry: Registry | None) -> dict:
-    """Deflated Sharpe of the active return against the family's own configurations."""
+    """Deflated Sharpe of the active return against the family's own configurations.
+
+    Gate v3.1 (#702, decision 18 s.6): V is the variance of the family's ACTIVE-return trial Sharpes
+    (`Registry.active_daily_sharpes`), the same series S4 tests. A trial that logged only an absolute-return Sharpe
+    (every row before gate v3.1) is counted in N and flagged in the numbers, never put into V. With fewer than two
+    active Sharpes V is unknown and the 1/(T-1) floor is used, as amendment 1 says."""
     lim = float(gate.cfg["sleeve"]["s4_deflated_sharpe"]["dsr_min"])
     limit = {"dsr_min": lim, "trials": "family"}
     fam = gate.family_of(rule)
@@ -614,7 +622,8 @@ def s4(gate: GateV3, rule: str, active: pd.Series, registry: Registry | None) ->
     members = set(gate.families[fam]["rules"])
     rows = [r for r in registry.rows if r.get("strategy") in members]
     n = count_configurations(rows)
-    sharpes = [s for m in members for s in registry.daily_sharpes().get(m, [])]
+    sharpes = [s for m in members for s in registry.active_daily_sharpes().get(m, [])]
+    flagged = sum(n for m, n in registry.absolute_only().items() if m in members)
     var = float(np.var(sharpes, ddof=1)) if len(sharpes) > 1 else None
     if n < 1:
         return _mark(None, {"family": fam, "configurations": 0}, limit,
@@ -631,10 +640,25 @@ def s4(gate: GateV3, rule: str, active: pd.Series, registry: Registry | None) ->
     if floor is not None:
         limit["variance_floor"] = "1/(T-1)"
     return _mark(met, {**asdict(d), "family": fam, "configurations": n, "trial_sharpes_used": len(sharpes) if var
-                       else 0, "whole_registry_configurations": registry.configurations, "sessions_judged": t,
+                       else 0, "trial_sharpe_series": "active_return",
+                       "trial_sharpes_absolute_only_flagged": flagged,
+                       "whole_registry_configurations": registry.configurations, "sessions_judged": t,
                        "variance_of_trial_sharpes": var, "variance_floor": floor,
                        "variance_floor_binds": bool(floor is not None and (var is None or var < floor))},
                  limit, "" if met else f"deflated Sharpe {d.dsr:.3f} is below {lim:g}")
+
+
+def active_sharpe_ann(gate: GateV3, rule: str, account: Account, tbill: pd.Series | None = None,
+                      kind: str | None = None) -> float | None:
+    """#702: the annualised Sharpe of `account`'s active return on the research window, as S4 tests it, for the
+    trial row (`metrics.daily_active_sharpe_ann`). None when it cannot be computed (no exposure, too short)."""
+    kind = kind or (gate.rule(rule) or {}).get("kind") or "selection"
+    try:
+        a = active_return(gate, kind, account, tbill)["active"].to_numpy(dtype=float)
+    except ValueError:
+        return None
+    sd = float(a.std(ddof=1))
+    return float(a.mean() / sd * math.sqrt(gate.stats_kw["periods"])) if sd > 0 else 0.0
 
 
 def _marks_s1_to_s4(gate: GateV3, rule: str, kind: str, acc: Account, tbill, registry, other_family_p,

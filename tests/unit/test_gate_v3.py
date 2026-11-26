@@ -95,7 +95,8 @@ def test_marks_are_those_of_decision_16():
     assert s["s3_control"]["random_runs_min"] == 500 and s["s3_control"]["across_families"] == "holm"
     assert s["s3_control"]["within_family"] == "bonferroni" and s["s3_control"]["pool"] == "candidate_pool"
     assert s["s4_deflated_sharpe"] == {"series": "active_return", "trials": "family", "dsr_min": 0.90,
-                                       "variance_floor": "one_over_t_minus_1"}  # amendment 1
+                                       "variance_floor": "one_over_t_minus_1",  # amendment 1
+                                       "trial_sharpes": "active_return"}  # decision 18 s.6 (#702)
     assert b["b1_return"]["positive_years_share_min"] == 0.6 and b["b1_return"]["years_min"] == 8
     # the absolute test is gate v2's mark 2, number for number
     assert b["b2_spy"] == g2.GateV2.load(ROOT).cfg["gate_b"]["mark_2"]

@@ -67,7 +67,8 @@ def prereg(rule=RULE, neighbours=("n1", "n2"), sections=EVIDENCE_SECTIONS) -> Pr
 
 def registry(n=6, strategy=RULE, spread=0.0) -> Registry:
     rows = tuple({"trial_id": f"t{i}", "strategy": strategy, "n_trials": 1,
-                  "metrics": {"daily_sharpe_ann": 0.5 + spread * i}} for i in range(n))
+                  "metrics": {"daily_sharpe_ann": 0.5 + spread * i,
+                              "daily_active_sharpe_ann": 0.5 + spread * i}} for i in range(n))
     return Registry(rows, ("test",), 0)
 
 

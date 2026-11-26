@@ -43,6 +43,10 @@ LEGACY_TABLE = "trial"  # migration 0001: config replays only
 PAGE = 1000  # PostgREST returns at most 1,000 rows a request on Supabase
 MAX_PAGES = 500
 SQRT_252 = math.sqrt(252)
+# #702 (gate v3.1, decision 18 s.6): the annualised Sharpe of a trial's ACTIVE return (the sleeve minus SPY at its
+# own exposure, as gate v3's S4 tests it). `daily_sharpe_ann` is the Sharpe of the ABSOLUTE return and stays for
+# gate v2 and the M4 gate; rows that logged only that are flagged and not used for S4's variance.
+ACTIVE_SHARPE = "daily_active_sharpe_ann"
 
 
 # ---------------------------------------------------------------- one row
@@ -290,6 +294,32 @@ class Registry:
                 continue
             if math.isfinite(v):
                 out.setdefault(r.get("strategy") or "?", []).append(v / SQRT_252)
+        return out
+
+    def active_daily_sharpes(self) -> dict[str, list[float]]:
+        """#702: per strategy, the daily Sharpe of the ACTIVE return of every trial that logged one
+        (`metrics.daily_active_sharpe_ann`). Gate v3's S4 takes its variance from these, never from the absolute
+        Sharpes of `daily_sharpes`."""
+        out: dict[str, list[float]] = {}
+        for r in self.rows:
+            m = r.get("metrics")
+            try:
+                v = float((m if isinstance(m, Mapping) else {}).get(ACTIVE_SHARPE))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(v):
+                out.setdefault(r.get("strategy") or "?", []).append(v / SQRT_252)
+        return out
+
+    def absolute_only(self) -> dict[str, int]:
+        """#702: per strategy, the trials that logged an absolute-return Sharpe and no active-return one (every row
+        written before gate v3.1). They are flagged in S4's numbers and left out of its variance."""
+        active = {k: len(v) for k, v in self.active_daily_sharpes().items()}
+        out: dict[str, int] = {}
+        for k, v in self.daily_sharpes().items():
+            n = len(v) - active.get(k, 0)
+            if n > 0:
+                out[k] = n
         return out
 
     def summary(self) -> dict:
