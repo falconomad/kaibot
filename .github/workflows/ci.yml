@@ -16,9 +16,9 @@ jobs:
       fail-fast: false
       matrix: {shard: ["1/2", "2/2"]}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with: {fetch-depth: 0, persist-credentials: false}  # full history: the pre-registration check reads it (#161)
-      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
         with: {version: "0.11.32", enable-cache: true}  # same uv as scripts/lock_deps.sh was run with
       - run: ./scripts/lock_deps.sh --check  # uv.lock and the requirements exports agree (one locked set, #122)
       - run: uv sync --locked
@@ -54,18 +54,18 @@ jobs:
     # own job so it can be a required check by name.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with: {persist-credentials: false}
-      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
         with: {version: "0.11.32", enable-cache: true}
       - run: uv sync --locked
       - run: uv run pytest -q -p no:xdist tests/test_migrations_pending_hygiene.py
   hygiene:  # non-blocking for now (#122): type and import-rule counts; baseline in docs/ops/hygiene.md
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with: {persist-credentials: false}
-      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39  # v3.2.4
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d  # v10.4.0
         with: {version: "0.11.32", enable-cache: true}
       - run: uv sync --locked
       - name: mypy
@@ -83,7 +83,7 @@ jobs:
   image:  # the engine image builds from the locked requirements and its entry points import (#122); runs in parallel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with: {persist-credentials: false}
       - run: |
           base=$(sed -n 's/^FROM \([^ ]*\).*/\1/p' Dockerfile); echo "pinned base: $base"
@@ -98,9 +98,9 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with: {persist-credentials: false}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version: 22
           cache: npm
