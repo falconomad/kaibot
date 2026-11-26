@@ -238,3 +238,61 @@ This changes no setting, neighbour, mark or run. Its only effect is the label of
 (decision 16 section 7). If that check is ever opened, it is labelled a consistency check, never an out-of-sample
 test. It is written after results were seen, and gate v3.1 prints it as hindsight. That is correct, and it makes
 nothing easier to pass.
+
+## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check
+
+**Why, and what is known.** The original design of this file (rows 2 and 4: a 97% index cap at Hunter) was never
+run. Amendment 3 replaced it with the stakeholder's 27% before any run, and Amendment 4 added 80% after the 27%
+result. The second engine audit lists that gap as ticket 6.10 (M17). Product decided on 26 Nov 2026, under the
+stakeholder's full permission of 25 Nov 2026 (#600), to run the 97% configuration once. This amendment is written
+**after** the 27% results (CAGR 3.38%, maximum drawdown 5.13%, fail; job `index-core-2026-11-24`) and the 80%
+results (CAGR 10.09%, maximum drawdown 15.33%, fail; job `index-core-80-2026-11-25`) were seen. The value 97 is
+the one this file froze on 22 Nov 2026 before any run, so it was not chosen from those results. The decision to
+run it now was taken after them, though, so the run is **hindsight**, and gate v3.1 prints it that way (decision
+18). It is a **consistency check** of the original design. It is not a clean test and must never be called one.
+
+- **design_saw_holdout:** true (as Amendment 5: the 15% volatility target was set from 2017-2026 sums that include the hold-out; this amendment adds that the run was decided after the 27% and 80% results)
+
+**Research only. No setting changes.** The live index cap stays 27% at every level. So do the hard ceiling
+`BOOK_HARD_CEILINGS.max_index_pct`, `config/index_core.yaml` (27 / 27 / 27, `enabled: false`) and the live
+profiles. The 97% cap exists only as a script argument, `scripts/index_core.py --index-cap 97`. That argument goes
+through `risk.index_core.builder(index_cap_pct=97)` and the research ceiling of Amendment 4, which is at most 97%:
+100% exposure less the 3% reserve. No live module sets it. Nothing here is a level limit, and those stay the
+stakeholder's (decision 15 section 6).
+
+**The configuration.** It is the judged configuration of the 22 Nov 2026 text, with the amendments since then.
+
+| Row | This amendment |
+|---|---|
+| 2, 4: the index cap at Hunter (judged) | **97%** under the 100% exposure cap (the original row 2) |
+| Balanced, Careful (reported, not judged) | min(97, the level's exposure cap less the 3% reserve): **57%** and **27%** |
+| Neighbours | the same five (`vol12`, `vol18`, `lookback63`, `daily`, `nocap`), each at Hunter, **97%** |
+
+Every other row is unchanged: the instrument, the 15% volatility target on 21 returns, the weekly decision, the cuts
+of row 8, the 10% band, near-close orders at the closing print, cost model v2 (Amendment 2), 0% cash in the judged
+run with the Treasury-bill version printed beside it, dividends, the $100,000 account and the point-in-time
+universe. The window stays the research window, **2017-05-01 to 2024-12-31** (`--end 2024-12-31`). The hold-out
+(from 2025-01-01) is **not read** by this run, and `holdout.enforce` refuses any later `--end`. Opening it needs its
+own entry in `config/holdout.yaml`, committed before it is read. Even then it is labelled a consistency check
+(Amendment 5). The pass marks (B1 to B6 of decision 16 section 5 and gate v3.1's chance test on B2, judged at
+Hunter) are unchanged, and nothing is loosened. B2's goal metric is the owner's to fix (#731). This run is judged
+on today's B2, and it does not take that decision.
+
+**Expectation, before the run.** This is scaled from the 80% run, so it is not independent of it. At w = 1 the
+core holds 97/80 of the 80% core. Expect a CAGR of about **11.5 to 12.5%**, which is about **SPY -3 to -2 points**
+(SPY total return 14.39% a year in this window, `docs/research/results/gate_v3_rescore.md`). Expect a maximum
+drawdown of about **0.5 to 0.6 times SPY's** (SPY 33.78%). B2's defensive branch (CAGR at least SPY -2 and
+drawdown at most 0.75 times SPY's) is borderline on return, and a fail is more likely than a pass. The chance
+test of decision 18 then counts N = 18 (below). B3 failed at 27% and 80% and is expected to fail again. `nocap` is expected nearest SPY's return, with about 0.95 times its
+drawdown. A fail is reported as found.
+
+**Trials.** Six new configurations count (n_trials 1 each): the judged run at 97% and its five neighbours. Cost
+multiples, the stress fill and the two other levels are reports (n_trials 0). The twelve configurations of
+24 and 25 Nov 2026 (27% and 80%) stay counted, so the book idea `index_core` has then tried **18 configurations**.
+B2's chance test uses that N. Each row records `params.index_cap_pct` (97) and the row's `max_index_pct`, and the
+report is named `index_core_aggressive_<universe>_cap97_<ts>`. Job: `index-core-97-2026-11-26`, posting to #710.
+
+**What a result allows.** The 27% and 80% verdicts (fail) stand, and this run replaces neither. A pass would
+still be a hindsight consistency check. It would let Product put the 97% value to the stakeholder as information,
+nothing more. A fail is the end of the index-cap question for this file. No further cap is tried under this file.
+A changed construction (a T-bill ETF for idle cash, two tranches, another sleeve) is a new pre-registration.

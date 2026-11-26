@@ -242,8 +242,8 @@ def test_the_book_prereg_declares_b7_in_an_appended_amendment_printed_as_hindsig
     p = prereg_mod.load("index_core_trend_momentum", ROOT)
     text = (ROOT / "docs" / "prereg" / "index_core_trend_momentum.md").read_text()
     heads = re.findall(r"^## Amendment (\d+)", text, flags=re.M)
-    assert heads == [str(i) for i in range(1, len(heads) + 1)] and heads[-1] == "5"
-    a5 = text.split("## Amendment 5", 1)[1]
+    assert heads == [str(i) for i in range(1, len(heads) + 1)] and int(heads[-1]) >= 5  # 6: #710, the 97% core
+    a5 = text.split("## Amendment 5", 1)[1].split("## Amendment 6", 1)[0]
     for phrase in ("10% budget held in SPY", "0, 5, 10, 15 and 20 sessions", "above 0 at the median",
                    "n_trials 0", "index-core-book-80-control-2026-11-26"):
         assert phrase in a5, phrase

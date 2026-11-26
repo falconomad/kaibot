@@ -102,3 +102,11 @@ jobs:
     script: scripts/index_core_book.py         # book (sleeve budget in SPY) at 5 start offsets; B7 and the spread;
     args: ["--end", "2024-12-31", "--index-cap", "80"]   # logs trial rows (6 repeats at n_trials 1, N 12 -> 18)
     posts_to_issue: 706
+  - id: index-core-97-2026-11-26          # #710 (6.10, prereg Amendment 6): the core at the original 97% cap, once, as
+    script: scripts/index_core.py         # a consistency check (hindsight; research only); 6 configurations count
+    args: ["--end", "2024-12-31", "--index-cap", "97"]   # (index_core N 12 -> 18)
+    posts_to_issue: 710
+  - id: index-core-book-97-2026-11-26     # #710 (6.10, prereg Amendment 6): the book with its core at 97% and its
+    script: scripts/index_core_book.py    # control book (cut to 97%); 6 configurations count (N 18 -> 24)
+    args: ["--end", "2024-12-31", "--index-cap", "97"]
+    posts_to_issue: 710

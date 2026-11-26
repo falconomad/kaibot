@@ -21,7 +21,12 @@ budget and the scaling the engine is about to run (ticket #547's check), and sto
 
 `--index-cap 80` (Amendment 3 of docs/prereg/index_core_trend_momentum.md, Product 25 Nov 2026; research only):
 the book with its core allowed up to 80% of the book at Hunter (Balanced 57, Careful 27), as scripts/index_core.py.
-The sleeve test is not changed by it. Only the pre-registered values are taken (27, the config; 80).
+The sleeve test is not changed by it. Only the pre-registered values are taken (27, the config; 80; 97).
+
+`--index-cap 97` (#710, M17 ticket 6.10; Amendment 6 of docs/prereg/index_core_trend_momentum.md; research only):
+the original design's 97% core, once, as a consistency check (hindsight; the design saw the hold-out). The control
+book's index cap, core cap + budget = 107%, is cut to the level's bound (Hunter's exposure cap less the 3% reserve,
+97%), the same bound the book's core and sleeve share: `ControlBook.cut_pct`. At 27% and 80% nothing is cut.
 
 3. #706 (M17 ticket 6.6; decision 18 section 10; Amendment 5 of docs/prereg/index_core_trend_momentum.md): the
    BUDGET-MATCHED CONTROL BOOK (`strategies.index_core.ControlBook`: the same core, the sleeve's 10% budget held in
@@ -88,7 +93,8 @@ def book_builder(book: OnCore, level: str, cfg, profiles, index_cap: float | Non
 
 def control_builder(control: ControlBook, cfg):
     """#706: the control book's builder at Hunter: the index mode with its index cap = the core's cap + the sleeve's
-    budget (no stock is named). Refuses a cap the level cuts (the control would then not hold the whole budget)."""
+    budget (no stock is named), already cut to the level's bound when it is above it (#710, `ControlBook.cut_pct`).
+    Refuses a cap the builder would cut further (the control would then not hold what it names)."""
     b = ic.builder(JUDGED, cfg, index_cap_pct=control.total_cap_pct)
     if abs(b.limits.max_index_pct - control.total_cap_pct) > 1e-9:
         raise SystemExit(f"control book: the index cap {control.total_cap_pct:g}% is cut to "
@@ -133,7 +139,7 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--control-runs", type=int, default=default_runs,
                     help=f"random control runs of the sleeve test (default {default_runs}, config/gate_v3.yaml)")
     ap.add_argument("--index-cap", type=float, choices=core_run.INDEX_CAPS, default=None,
-                    help="the core's index cap at Hunter, %% of the book (pre-registered: 27, the config; 80)")
+                    help="the core's index cap at Hunter, %% of the book (pre-registered: 27, the config; 80; 97)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--trials", default=None)
     holdout.add_argument(ap)
@@ -199,7 +205,8 @@ def main(argv: list[str] | None = None) -> dict:
     for level in ("balanced", "conservative"):
         one(f"book_level|{level}", base, level, book_builder(base, level, cfg, profiles, override))
     # 3. #706: the budget-matched control book and the book at every pre-registered start offset
-    ctl = ControlBook.of(base, index_cap)
+    lv = cfg.levels[JUDGED]
+    ctl = ControlBook.of(base, index_cap, cut_pct=lv.exposure_pct - cfg.cash_reserve_pct)  # #710: 107 -> 97 at 97
     offsets = g3.control_offsets(gate)
     if i0 + max(offsets) + 30 > i1:
         raise SystemExit(f"the window has {i1 - i0 + 1} sessions: too few for start offsets up to {max(offsets)}")
@@ -256,7 +263,8 @@ def main(argv: list[str] | None = None) -> dict:
            "source": source, "rows": [row for _, row in runs.values()], "control": control,
            # #706: the control book, and which rows the rescore pairs at each start offset
            "control_book": {"control": "sleeve_budget_in_spy", "core_cap_pct": index_cap, "budget_pct": BUDGET,
-                            "index_cap_pct": ctl.total_cap_pct, "start_offsets_sessions": list(offsets),
+                            "index_cap_pct": ctl.total_cap_pct, "cut_pct": ctl.cut_pct,
+                            "start_offsets_sessions": list(offsets),
                             "pairs": {str(k): list(v) for k, v in pairs.items()}},
            "gate_v3_sleeve": sleeve_rep, "gate_v3_book": book_rep, "runtime_s": round(time.time() - t0, 1)}
     out_dir = Path(a.out or data_dir / "reports")

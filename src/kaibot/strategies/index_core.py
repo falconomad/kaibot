@@ -193,13 +193,18 @@ class OnCore:
 # ---------------------------------------------------------------- #706: the budget-matched control book
 
 
-def control_weight(w: float, core_cap_pct: float, budget_pct: float) -> float:
-    """The control book's SPY weight, as a share of its index cap (core cap + budget): the core's own w of the core
-    cap, plus the whole sleeve budget in SPY. (w x C + B) / (C + B), in 0..1."""
+def control_weight(w: float, core_cap_pct: float, budget_pct: float, total_cap_pct: float | None = None) -> float:
+    """The control book's SPY weight, as a share of its index cap T (core cap + budget): the core's own w of the core
+    cap, plus the whole sleeve budget in SPY. min(1, (w x C + B) / T), in 0..1. T defaults to C + B; it is smaller
+    only when the level cuts C + B (#710: a 97% core plus a 10% budget is cut to 97%, the exposure cap less the
+    reserve, which also bounds the book's own core and sleeve together)."""
     c, b = float(core_cap_pct), float(budget_pct)
     if not c > 0 or not b > 0:
         raise ValueError("the core cap and the sleeve budget must both be above 0")
-    return (min(1.0, max(0.0, float(w))) * c + b) / (c + b)
+    t = c + b if total_cap_pct is None else float(total_cap_pct)
+    if not 0 < t <= c + b:
+        raise ValueError(f"the control's index cap {t!r} must be in (0, core cap + budget = {c + b:g}]")
+    return min(1.0, (min(1.0, max(0.0, float(w))) * c + b) / t)
 
 
 @dataclass(frozen=True)
@@ -212,6 +217,10 @@ class ControlBook:
     It names one symbol, SPY, at `control_weight(w, core_cap_pct, budget_pct)` of the builder's index cap, which
     must be `total_cap_pct` = core_cap_pct + budget_pct (the research cap of `risk.index_core.builder`), so the
     core's SPY is w x C % of equity, as in the book, and the budget's SPY is B % of equity at every decision.
+    `cut_pct` (#710, Amendment 6 of docs/prereg/index_core_trend_momentum.md): the most the level lets an index
+    fund hold (the exposure cap less the 3% reserve, 97% at Hunter). With a 97% core, C + B = 107% is cut to it, so
+    the control holds min(w x C + B, 97) % in SPY, as the book holds at most 97% in its core and sleeve together.
+    None, or a cut at or above C + B (the 27% and 80% cores): no cut, as before.
 
     Research only, like `IndexCore` and `OnCore`: not registered, never imported by the live engine."""
 
@@ -220,6 +229,7 @@ class ControlBook:
     budget_pct: float = 10.0
     core_cap_pct: float = 27.0
     name: str = "index_core_trend_momentum~control"
+    cut_pct: float | None = None  # #710: the level's own bound on the index fund (class docstring)
     mode: Mode = Mode.SHADOW
     holding: Holding = Holding.MULTI_DAY
     schedule: tuple[When, ...] = (When(Event.AFTER_CLOSE),)
@@ -232,13 +242,15 @@ class ControlBook:
     rule = "index_core_trend_momentum"
 
     @classmethod
-    def of(cls, book: OnCore, core_cap_pct: float) -> ControlBook:
-        return cls(book.sleeve, book.core, float(book.budget_pct), float(core_cap_pct), name=f"{book.name}~control")
+    def of(cls, book: OnCore, core_cap_pct: float, cut_pct: float | None = None) -> ControlBook:
+        return cls(book.sleeve, book.core, float(book.budget_pct), float(core_cap_pct), name=f"{book.name}~control",
+                   cut_pct=None if cut_pct is None else float(cut_pct))
 
     @property
     def total_cap_pct(self) -> float:
-        """The index cap the control's builder needs: the core's cap plus the sleeve's budget."""
-        return float(self.core_cap_pct) + float(self.budget_pct)
+        """The index cap the control's builder needs: the core's cap plus the sleeve's budget, cut to `cut_pct`."""
+        full = float(self.core_cap_pct) + float(self.budget_pct)
+        return full if self.cut_pct is None else min(full, float(self.cut_pct))
 
     @property
     def warmup(self) -> int:
@@ -256,7 +268,7 @@ class ControlBook:
         w, sigma = index_weight(closes, self.core.lookback, self.core.vol_target)
         if not self.core.cap:
             w = 1.0
-        x = control_weight(w, self.core_cap_pct, self.budget_pct)
+        x = control_weight(w, self.core_cap_pct, self.budget_pct, self.total_cap_pct)
         return TargetList(self.name, ctx.fill_session, {sym: x}, sizing="index",
                           reasons=(f"control: core weight {w:.3f}, budget {self.budget_pct:g}% in SPY",),
                           features={"index_weight": x, "core_weight": w, "sigma": sigma,
