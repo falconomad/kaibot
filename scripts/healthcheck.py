@@ -61,6 +61,8 @@ ALERTS = [
     ("calendar_expiring", re.compile(r"calendar expiring: ")),
     # QA-Ops (24-25 Nov 2026 incident): the engine was down or frozen (the Mac asleep) for more than an hour
     ("engine_gap", re.compile(r"engine gap: ")),
+    # audit 2, 5.13 (#693): the engine wrote an event name its registry lacks (logged once per name and process)
+    ("unregistered_event", re.compile(r"is not registered in engine/event_names\.py")),
 ]
 TICK = re.compile(r" tick \{")
 MINUTE = re.compile(r"'minute': (-?\d+)")

@@ -244,6 +244,9 @@ def test_success_pings_every_five_minutes_not_at_once():
     # QA-Ops (24-25 Nov 2026 incident): engine/gap.py's line, as the engine logs it
     ("WARNING engine gap: no engine heartbeat for 17 h 05 min (2026-11-24T22:45 to 2026-11-25T15:50; the last "
      "heartbeat before this start was not a clean stop's).", "engine_gap"),
+    # audit 2, 5.13 (#693): engine/event_names.note's line
+    ("WARNING event 'brand_new' is not registered in engine/event_names.py (written anyway; one unregistered_event)",
+     "unregistered_event"),
 ])
 def test_alarm_lines_send_fail(line, kind):
     p = Pings()
