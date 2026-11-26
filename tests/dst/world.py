@@ -57,7 +57,7 @@ import random
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest import mock
@@ -67,7 +67,7 @@ import numpy as np
 import pandas as pd
 from fakes import FakeStore
 
-from kaibot.broker.faulty import DEFAULT_FAULTS, FaultProfile, FaultyBroker, FaultyData, FaultyStore
+from kaibot.broker.faulty import AUDIT2_FAULTS, DEFAULT_FAULTS, FaultProfile, FaultyBroker, FaultyData, FaultyStore
 from kaibot.broker.protocol import BrokerError
 from kaibot.broker.sim import NY, WORKING, SimBroker
 from kaibot.engine import failsafe
@@ -100,6 +100,7 @@ D4 = "2026-08-06"  # the venue's calendar goes on: D3's evening has a next sessi
 SESSIONS = (D1, D2, D3)
 EVENINGS = (D0, D1, D2, D3)
 REGULAR_CLOSE = "16:00"
+FOCUS = {"lease_renew_fail": 6.0, "sale_refused": 2.5, "endpoint_down": 10.0}  # see Scenario.from_seed
 MAC = ZoneInfo("Europe/Berlin")  # the owner's Mac: launchd runs the nightly bar refresh on its wall clock
 
 
@@ -187,6 +188,8 @@ VENUE_CASH = 100_000.0
 HISTORY_DAYS = 6  # sessions of minute bars before D0 (the market's history load; few, see daily_from)
 SEND, CLOSE = 380, 390  # the minute bars at 15:50 and (one past the last) at 16:00
 MARKET_PURPOSES = ("buy", "sell", "resize", "carry", "target")  # the daily path's near-close orders
+# invariant 12: venue faults of a minute that leave it a chance to sell (what the invariant is about, and the marks)
+SALE_NEUTRAL = ("sale_refused", "submit_refused", "calendar_down", "mark_bad")
 log = logging.getLogger("kaibot.dst")
 SAID = {  # the journal entries the trace shows, with the fields that tell the story
     "run": ("run_id", "amount"), "om_intent": ("coid", "side", "qty", "type"), "om_state": ("coid", "state", "reason"),
@@ -341,6 +344,10 @@ class Scenario:
             for ev, nxt in ((D0, D1), (D1, D2)):
                 if rs.random() < 0.06:  # the daily store comes only after the fill session (#691: taken late, #751)
                     ready[ev] = et(nxt, week.close(nxt)) + timedelta(minutes=rs.choice((20, 90, 400)))
+            # audit 2, 5.18: a third of the new weeks' seeds lean on one of the second audit's fault kinds
+            focus = rs.choice((None, None, "lease_renew_fail", "sale_refused", "endpoint_down"))
+            if focus is not None:
+                profile = replace(profile, **{focus: min(getattr(profile, focus) * FOCUS[focus], 1.0)})
             if rs.random() < 0.35:  # the Mac sleeps through a night, maybe into the next session (24-25 Nov)
                 day = rs.choice((D0, D1, D2))
                 arm = et(day, week.close(day)) + timedelta(minutes=rs.randrange(30, 420), seconds=rs.randrange(60))
@@ -356,6 +363,8 @@ class Scenario:
             minute = r.choice((r.randrange(5, send), r.randrange(send, close)))
             flatten = session_open(day) + timedelta(minutes=minute)
         scale = r.choice((0.0, 0.5, 1.0, 1.0, 1.0, 2.0))
+        if week is SUMMER:  # audit 2 5.18's fault kinds only in the new weeks: a summer seed runs as it did
+            profile = profile.without(*AUDIT2_FAULTS)
         profile = profile.scaled(scale)
         return cls(seed, plan, ready, tuple(sorted(outages, key=lambda o: o.arm)), flatten,
                    watchdog=r.random() < 0.5, profile=profile, week=week, book_loop=book_loop, lease=lease)
@@ -1102,6 +1111,14 @@ class Checker:
         self.rid: int | None = None
         self.decided: set[str] = set()  # fill sessions with a journalled decision (a target list) of this run
         self.sends: set[str] = set()  # sessions with a journalled md_send of this run
+        # invariant 12 (audit 2, 5.18): per session, the names the ledger held at the window's first pass, the
+        # sales that reached the venue in the window (symbol, time), and the passes that were a chance to sell
+        self.held_at: dict[str, set[str]] = {}
+        self.sold: dict[str, list[tuple[str, datetime]]] = {}
+        self.chances: dict[str, list[tuple[datetime, frozenset]]] = {}
+        self.judged: set[str] = set()
+        self.fenced: list[tuple[str, datetime]] = []  # buys the lease's fence refused for a failed renewal
+        self.intent_at: list[tuple[str, str, datetime]] = []  # (symbol, side, when) of every journalled order intent
 
     def attach(self, eng: Engine) -> None:
         self.eng = eng
@@ -1127,7 +1144,11 @@ class Checker:
             elif kind == "om_intent":
                 self.intents.add(b["coid"])
                 self.state[b["coid"]] = "intent"
+                self.intent_at.append((str(b.get("symbol")), str(b.get("side")),
+                                       w.clock()))
             elif kind == "om_state":
+                if str(b.get("state")) == "rejected" and "lease not proved" in str(b.get("reason") or ""):
+                    self.fenced.append((str(b["coid"]), w.clock()))
                 was, now = self.state.get(b["coid"]), str(b.get("state"))
                 if was in TERMINAL and now != was and not (was == "rejected" and now in ("accepted", "filled",
                                                                                          "partially_filled")):
@@ -1177,6 +1198,8 @@ class Checker:
         # close; on a holiday there is no session at all
         today = f"{now:%Y-%m-%d}"
         close = w.close_of(today) if w.sim.calendar(today) is not None else None
+        if purpose in MARKET_PURPOSES and side == "sell":
+            self.sold.setdefault(today, []).append((sym, w.clock()))
         if purpose in MARKET_PURPOSES:
             if day != f"{now:%Y%m%d}" or close is None or not (close - timedelta(minutes=10) <= w.clock() < close):
                 w.bad(f"{coid} left outside its window, at {now:%Y-%m-%d %H:%M:%S} New York"
@@ -1194,6 +1217,94 @@ class Checker:
         self.ledger_side()
         if clean:
             self.window_side()
+        self.sales_side()
+
+    # --- 12 (audit 2, 5.18): due sales go out in their window, and a refused one is sent again there
+    def sales_side(self) -> None:
+        """A sale is due in a fill session's window when the session's decision (the scenario's plan: the rule decides
+        exactly that) no longer wants a name the ledger holds at the window's first pass. A pass in the window is a
+        chance to sell a name when the engine ran it, the run is running and not flattening, the host's and the
+        venue's clocks agree, the venue answered every call of that minute (but the positions read and refused
+        sales, which 12 is about), and the name has no order the engine cannot confirm yet (it waits for it, M9
+        1.11). At the window's end:
+
+            12a  a due sale with two chances or more reached the venue in the window (one failing read endpoint
+                 must not hold a due sale behind it: 5.10, #737)
+            12b  a sale the venue refused, with a chance after the refusal, reached it again in the window
+                 (5.9, #736)
+            12c  a buy the lease's fence refused because a renewal failed, with a chance after it in a minute the
+                 renewals work again, was sent again in the window (5.8, #735)"""
+        w, eng = self.w, self.eng
+        now = w.clock()
+        day = f"{now.astimezone(NY):%Y-%m-%d}"
+        if day not in w.week.sessions or eng is None or self.rid is None:
+            return
+        close = w.close_of(day)
+        start, end = close - timedelta(minutes=10), close - timedelta(minutes=3)
+        if start <= now < end:
+            if day not in self.held_at:
+                book = eng.ledger.book(self.rid)
+                self.held_at[day] = {s for s, q in (book.qty_by_symbol().items() if book else ()) if q > 1e-9}
+            if self._chance(now):
+                om = eng.daily.om if eng.daily is not None else None
+                waiting = frozenset(r.symbol for r in (om.orders.values() if om is not None else ())
+                                    if r.state in UNCONFIRMED and r.session == day)
+                self.chances.setdefault(day, []).append((now, waiting))
+            return
+        if now >= end and day in self.held_at and day not in self.judged:
+            self.judged.add(day)
+            self._judge_sales(day, start, end)
+
+    def _chance(self, now: datetime) -> bool:
+        w, eng = self.w, self.eng
+        if w.flatten_sent or eng.run is None or eng.run.get("status") != "running":
+            return False
+        if w.broker._skew is not None and w.broker.armed:
+            return False
+        minute = f"{now.astimezone(UTC):%Y%m%dT%H%M}"
+        # a minute in which the venue answered nothing but what 12 is about (the positions read down, a refused sale)
+        return all(m != minute or f in SALE_NEUTRAL or (f == "endpoint_down" and what == "positions")
+                   for m, f, what in w.broker.log)
+
+    def _judge_sales(self, day: str, start: datetime, end: datetime) -> None:
+        w = self.w
+        want = w.s.plan.get(day)
+        sold = [(s, t) for s, t in self.sold.get(day, []) if start <= t < end + timedelta(minutes=3)]
+        chances = self.chances.get(day, [])
+        if want is not None and day in self.decided:
+            for sym in sorted(self.held_at[day] - set(want)):
+                n = sum(sym not in waiting for _, waiting in chances)
+                if n >= 2 and not any(s == sym for s, _ in sold):
+                    w.bad(f"invariant 12a: the due sale of {sym} on {day} did not reach the venue in its window, with "
+                          f"{n} passes that could have sent it")
+        for m, fault, what in w.broker.log:
+            if fault not in ("sale_refused", "submit_refused"):
+                continue
+            coid = what.split(" ")[0]
+            parts = coid.split("-")
+            if len(parts) < 4 or parts[-3] != day.replace("-", "") or parts[-2] not in MARKET_PURPOSES:
+                continue
+            at = datetime.strptime(m, "%Y%m%dT%H%M").replace(tzinfo=UTC)
+            sym = parts[-4]
+            if parts[-2] == "buy" or not start <= at < end:
+                continue
+            later = [t for t, waiting in chances if t >= at + timedelta(minutes=1) and sym not in waiting]
+            again = [t for s, t in sold if s == sym and t >= at + timedelta(minutes=1)]
+            if later and not again:
+                w.bad(f"invariant 12b: the sale {coid} the venue refused at {at.astimezone(NY):%H:%M} was not sent "
+                      f"again on {day}, with {len(later)} passes of the window left")
+        renew_down = {m for m, f, _ in w.remote.log if f == "lease_renew_fail"}
+        for coid, at in self.fenced:
+            parts = coid.split("-")
+            if len(parts) < 4 or parts[-3] != day.replace("-", "") or not start <= at < end:
+                continue
+            sym = parts[-4]
+            later = [t for t, waiting in chances if t >= at + timedelta(minutes=1) and sym not in waiting
+                     and f"{t.astimezone(UTC):%Y%m%dT%H%M}" not in renew_down]
+            again = [t for s, side, t in self.intent_at if s == sym and side == "buy" and at < t < end]
+            if later and not again:
+                w.bad(f"invariant 12c: the buy {coid} the lease's fence refused at {at.astimezone(NY):%H:%M} (a failed "
+                      f"renewal) was not sent again on {day}, with {len(later)} passes of the window left")
 
     # --- 11 (audit 2, 5.16): a decided send goes out in its fill session's own window
     def window_side(self) -> None:

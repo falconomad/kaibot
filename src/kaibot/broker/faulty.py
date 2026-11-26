@@ -29,6 +29,10 @@ venue (FaultyBroker)
     submit_refused            the venue refuses the order (403), nothing is taken. Only when a hand-written scenario
                               names it (`Forced`, never drawn by the dice): `param` refusals of that symbol and side
                               (default 1), whatever the attempt (audit 2, 5.9)
+    sale_refused              the venue refuses a market SALE (403, nothing taken), drawn per client order id, so each
+                              attempt of the sale is drawn again (audit 2, 5.18; the seeded form of submit_refused)
+    endpoint_down             a partial outage: one read endpoint (positions, activities, open orders, the account or
+                              one order) answers 503 for a spell of minutes while every other call works (5.18)
 
 market data (FaultyData.quotes_within)
     quote_stale / quote_missing / quote_zero / quote_crossed
@@ -42,6 +46,8 @@ store (FaultyStore)
     write_timeout             the write was applied and the answer never came
     write_twice               the request arrives twice (the client sees one answer)
     read_fail                 a read is refused (503)
+    lease_renew_fail          every renewal of the engine's lease fails (503, nothing renewed) for a spell of one or
+                              two minutes; the lease itself is not lost (audit 2, 5.18)
 
 Determinism. A fault is never drawn from a stream in call order: every decision is a hash of (seed, fault, what it
 is about: the client order id, the order id, the activity id, the minute). So the faults of a seed do not depend on
@@ -64,12 +70,18 @@ from kaibot.broker.sim import WORKING, SimBroker
 
 VENUE_FAULTS = ("submit_timeout_accepted", "submit_timeout_lost", "lookup_lag", "listing_lag", "cancel_lost",
                 "cancel_late", "fill_duplicate", "fill_dropped", "partial_fill", "hold", "rate_limit", "clock_skew",
-                "mark_bad")
+                "mark_bad", "sale_refused", "endpoint_down")
 DATA_FAULTS = ("quote_stale", "quote_missing", "quote_zero", "quote_crossed")
 BAR_FAULTS = ("bar_zero", "bar_spike", "bar_stale")
 BAR_STALE_BLOCK_MIN = 10
 BAR_SPIKE = 1.08
-STORE_FAULTS = ("write_fail", "write_timeout", "write_twice", "read_fail")
+STORE_FAULTS = ("write_fail", "write_timeout", "write_twice", "read_fail", "lease_renew_fail")
+# audit 2, 5.18: the kinds of the second audit (the DST world draws them in its new weeks only, so the summer week's
+# seeds run as they did)
+AUDIT2_FAULTS = ("sale_refused", "endpoint_down", "lease_renew_fail")
+DOWN_ENDPOINTS = ("positions", "activities", "open_orders", "account", "order")  # endpoint_down: the reads it hits
+DOWN_MINUTES = (5, 15, 40)  # endpoint_down: how long a spell lasts
+LEASE_FAIL_MINUTES = (1, 2)  # lease_renew_fail: how long a spell lasts
 
 
 @dataclass(frozen=True)
@@ -101,9 +113,19 @@ class FaultProfile:
     bar_zero: float = 0.0  # per (symbol, bar minute)
     bar_spike: float = 0.0  # per (symbol, bar minute)
     bar_stale: float = 0.0  # per (symbol, ten-minute block)
+    sale_refused: float = 0.0  # per market sale (client order id: each attempt)
+    endpoint_down: float = 0.0  # per (endpoint, minute): a spell of DOWN_MINUTES starts
+    lease_renew_fail: float = 0.0  # per minute: a spell of LEASE_FAIL_MINUTES starts
 
     def scaled(self, k: float) -> FaultProfile:
         return replace(self, **{f.name: min(getattr(self, f.name) * k, 1.0) for f in fields(self)})
+
+    def without(self, *names: str) -> FaultProfile:
+        """This profile with `names` switched off."""
+        unknown = set(names) - {f.name for f in fields(self)}
+        if unknown:
+            raise ValueError(f"unknown faults: {sorted(unknown)}")
+        return replace(self, **dict.fromkeys(names, 0.0))
 
     def only(self, *names: str) -> FaultProfile:
         """This profile with every fault but `names` switched off."""
@@ -120,7 +142,8 @@ DEFAULT_FAULTS = FaultProfile(
     cancel_late=0.25,
     fill_duplicate=0.10, fill_dropped=0.12, partial_fill=0.10, hold=0.10, rate_limit=0.004, clock_skew=0.002,
     mark_bad=0.004, quote_stale=0.03, quote_missing=0.03, quote_zero=0.02, quote_crossed=0.02,
-    write_fail=0.02, write_timeout=0.02, write_twice=0.02, read_fail=0.01)
+    write_fail=0.02, write_timeout=0.02, write_twice=0.02, read_fail=0.01,
+    sale_refused=0.25, endpoint_down=0.0006, lease_renew_fail=0.01)
 
 SKEW_MINUTES = 6  # a clock-skew spell
 LAG_READS = (1, 4)  # lookup_lag: reads by client order id that find nothing
@@ -163,6 +186,19 @@ class Forced:
 
 def _minute(t: datetime) -> str:
     return t.astimezone(UTC).strftime("%Y%m%dT%H%M")
+
+
+def _spell(dice: Dice, p: float, fault: str, key: str, now: datetime, lengths: tuple[int, ...]) -> bool:
+    """Is `now` inside a spell of `fault` (about `key`)? A spell starts in a minute with probability `p` and lasts one
+    of `lengths` minutes (a hash of its start): the answer depends on the minute only, never on the calls made."""
+    if p <= 0.0:
+        return False
+    t = now.astimezone(UTC).replace(second=0, microsecond=0)
+    for back in range(max(lengths)):
+        start = _minute(t - timedelta(minutes=back))
+        if dice.hit(p, fault, key, start) and back < dice.pick(lengths, fault, key, start):
+            return True
+    return False
 
 
 class FaultyBroker(BrokerBase):
@@ -223,10 +259,15 @@ class FaultyBroker(BrokerBase):
         return f.param if f is not None and f.param is not None else self.dice.pick(options, fault, *key)
 
     def _limited(self, call: str) -> None:
-        """A 429 for every call of this kind in this minute."""
+        """A 429 for every call of this kind in this minute; a 503 while this endpoint is in a partial outage."""
         if self._hit("rate_limit", call, _minute(self._now())):
             self._note("rate_limit", call)
             raise BrokerError(429, '{"code":42910000,"message":"rate limit exceeded"}')
+        if call in DOWN_ENDPOINTS and self.armed and (
+                self._forced("endpoint_down", call, _minute(self._now())) is not None
+                or _spell(self.dice, self.profile.endpoint_down, "endpoint_down", call, self._now(), DOWN_MINUTES)):
+            self._note("endpoint_down", call)
+            raise BrokerError(503, '{"message":"faulty: service unavailable (this endpoint only)"}')
 
     # ---------------------------------------------------------------- orders: writes
     def submit(self, order: OrderRequest) -> dict:
@@ -243,6 +284,9 @@ class FaultyBroker(BrokerBase):
                 if n <= int(refuse.param or 1):
                     self._note("submit_refused", f"{coid} refusal {n}")
                     raise BrokerError(403, '{"code":40310000,"message":"faulty: the venue refused the order"}')
+            if order.side == "sell" and order.type == "market" and self._hit("sale_refused", coid, also=also):
+                self._note("sale_refused", coid)
+                raise BrokerError(403, '{"code":40310000,"message":"faulty: the venue refused the sale"}')
             if self.sim.order_by_client_id(coid) is None:  # the faults of an order are decided once, at its first try
                 if self._hit("submit_timeout_lost", coid, also=also):
                     self._note("submit_timeout_lost", coid)
@@ -576,6 +620,15 @@ class FaultyStore:
             self.log.append((_minute(self.now()), "read_fail", "command"))
             raise self.error("faulty: GET command -> 503 service unavailable")
         return self.inner.pending_commands()
+
+    def lease_renew(self, *a, **kw):
+        """The engine lease's renewal (engine/lease.py): fails, nothing renewed, through a lease_renew_fail spell."""
+        now = self.now()
+        if self.armed and _spell(self.dice, self.profile.lease_renew_fail, "lease_renew_fail", "", now,
+                                 LEASE_FAIL_MINUTES):
+            self.log.append((_minute(now), "lease_renew_fail", "lease_renew"))
+            raise self.error("faulty: rpc engine_lease_renew -> 503 service unavailable")
+        return self.inner.lease_renew(*a, **kw)
 
     def quick(self, timeout: float = 5.0):
         return self
