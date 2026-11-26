@@ -2,8 +2,10 @@
 """Price relay (stakeholder, 20 Nov 2026): the dashboard's prices about once a second instead of every 10 s.
 
 A small process beside the engine, never inside it. It
-- reads the paper account's open positions (GET paper-api /v2/positions) every 60 s and the market clock
-  (GET /v2/clock), with the paper keys; a base URL that is not the paper endpoint is refused at start;
+- reads which stocks the paper run holds every 60 s and the market clock (GET paper-api /v2/clock). With data.env
+  (#712): the held stocks through the helper (`kb_helper_held_symbols`, migration 0053) and the clock with the
+  market-data pair of a SEPARATE, empty Alpaca paper account, so it never holds the trading key. Before data.env:
+  GET /v2/positions with the paper keys, as before (below). A base URL that is not the paper endpoint is refused;
 - holds ONE Alpaca market-data websocket on the free IEX feed (wss://stream.data.alpaca.markets/v2/iex) and
   subscribes to trades ONLY for the stocks held: the 30 largest by market value when more are held (the free plan's
   cap; the rest stay on the dashboard's 10 s poll). Error 405 (symbol limit) halves the set until the next session;
@@ -17,17 +19,20 @@ A small process beside the engine, never inside it. It
 - writes its heartbeat to kaibot.heartbeat with process 'price_stream' once a minute.
 
 What it cannot do: it sends no order, cancels nothing, writes no ledger or trading table, and imports none of the
-engine's trading code (only kaibot.engine.config for the .env parsing and the paper URL). Its only HTTP calls are the
-two GETs above, the broadcast POST and the heartbeat upsert. Keys are read from the env file and never logged.
+engine's trading code (only kaibot.engine.config for the paper URL). Its only HTTP calls are the clock GET, the
+held-symbols call, the broadcast POST and the heartbeat. Keys are read from their files and never logged.
 
-Which Supabase key (M10 ticket 1.26, issue #451; docs/ops/helper_role.md). With the helpers' env file
-(--helper-env, $KAIBOT_HELPER_ENV_FILE or ~/Projects/kaibot-secrets/helper.env: the paper keys, the publishable
-key and the helper user's email and password) the relay reads ONLY that file, signs in as the helper and never has
-the service key: its broadcast is allowed by migration 0038's policy and its heartbeat goes through
-`kb_helper_heartbeat`, which writes the row 'price_stream' and no other. Without that file it runs as before, on
-the engine's .env with the service key, and says so once in its log.
+Which keys (M10 ticket 1.26, #451; audit 2 7.2, #712; docs/ops/secrets.md). With the data file (--data-env,
+$KAIBOT_DATA_ENV_FILE or ~/Projects/kaibot-secrets/data.env: the second paper account's data pair) the relay reads
+ONLY that file and the helpers' env file (--helper-env, $KAIBOT_HELPER_ENV_FILE or ~/Projects/kaibot-secrets/
+helper.env: the publishable key and the helper user's email and password; a trading pair still in it is skipped):
+it signs in as the helper and never has the service key or the trading key; the held stocks come from
+`kb_helper_held_symbols` (migration 0053; until it is applied nothing is streamed, said once). Without the data file
+(Product, 26 Nov 2026: nothing stops before the owner's setup) it runs as before #712, with a WARNING: the helpers'
+file with its paper keys (positions by GET /v2/positions), else the engine's .env (--env) with the service key.
 
-    python scripts/price_stream.py --env ~/Projects/kaibot-secrets/.env
+    python scripts/price_stream.py --helper-env ~/Projects/kaibot-secrets/helper.env \
+        --data-env ~/Projects/kaibot-secrets/data.env
 
 scripts/service_run.sh runs it beside the engine when KAIBOT_PRICE_STREAM=on (off by default); its failure never
 touches the engine. IEX is one exchange: its last trade can differ from the consolidated price by a few cents."""
@@ -59,7 +64,8 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from kaibot.common.helper_session import HelperSession, helper_env  # noqa: E402
+from kaibot.common.helper_session import HelperError, HelperSession, helper_env  # noqa: E402
+from kaibot.common.secret_files import data_env_path, data_env_present, data_keys  # noqa: E402
 from kaibot.engine.config import DEFAULT_SUPABASE_URL, PAPER_TRADING_URL, load_env_file  # noqa: E402
 
 log = logging.getLogger("price_stream")
@@ -336,13 +342,19 @@ class Http:
     """The relay's only HTTP calls. Alpaca: GET on two paper-api paths. Supabase: the broadcast and the heartbeat."""
 
     ALPACA_PATHS = ("/v2/positions", "/v2/clock")
+    HELPER_ALPACA_PATHS = ("/v2/clock",)  # #712: with the data pair, the clock only (its account holds nothing)
 
     def __init__(self, alpaca_key: str, alpaca_secret: str, supabase_url: str, service_key: str | None,
-                 base: str = PAPER_TRADING_URL, helper: HelperSession | None = None):
-        """`helper`: the signed-in helper (1.26); then `service_key` is None and no call here can use one."""
+                 base: str = PAPER_TRADING_URL, helper: HelperSession | None = None, data_key: bool = False):
+        """`helper`: the signed-in helper (1.26); then `service_key` is None and no call here can use one.
+        `data_key` (#712): the key pair is data.env's (a second, empty paper account): the clock is the only Alpaca
+        path, and the held stocks come from the helper (migration 0053)."""
         if (helper is None) == (not service_key):
             raise ValueError("the relay needs the helper sign-in or the service key, not both and not neither")
-        self.helper = helper
+        if data_key and helper is None:
+            raise ValueError("the data key is used only as the helper")
+        self.helper, self.data_key = helper, data_key
+        self._no_0053_said = False
         self.base = paper_only(base)
         self.alpaca_h = {"APCA-API-KEY-ID": alpaca_key, "APCA-API-SECRET-KEY": alpaca_secret,
                          "Accept": "application/json"}
@@ -353,11 +365,32 @@ class Http:
             self.sb_h["Authorization"] = f"Bearer {service_key}"
 
     def alpaca_get(self, path: str) -> Any:
-        if path not in self.ALPACA_PATHS:
+        if path not in (self.HELPER_ALPACA_PATHS if self.data_key else self.ALPACA_PATHS):
             raise ValueError(f"not a path this relay may read: {path}")
         req = urllib.request.Request(self.base + path, headers=self.alpaca_h, method="GET")
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S, context=_ssl_context()) as r:
             return json.loads(r.read(4 * 1024 * 1024))
+
+    def held_positions(self) -> list:
+        """The held stocks as rows of {symbol, market_value}. With the data key (#712): `kb_helper_held_symbols`
+        (migration 0053), never the trading account. Before data.env exists: GET /v2/positions, as before #712.
+        With the data key and 0053 not applied yet there is no way to them that does not need the trading key, which
+        this process must not have: nothing is streamed, said once (the dashboard keeps its 10 s prices)."""
+        if not self.data_key:
+            return self.alpaca_get("/v2/positions")
+        try:
+            rows = self.helper.rpc("kb_helper_held_symbols", {})
+        except HelperError as e:
+            if e.status != 404:
+                raise
+            if not self._no_0053_said:
+                log.warning("WARNING: migration 0053 is not applied (kb_helper_held_symbols missing): the relay cannot "
+                            "see the held stocks without the trading key, so it streams nothing until it is applied "
+                            "(docs/ops/secrets.md)")
+                self._no_0053_said = True
+            return []
+        return [dict(r, asset_class="us_equity") for r in rows if isinstance(r, dict)] if isinstance(rows, list) \
+            else rows
 
     def _post(self, url: str, body: Any, extra: dict[str, str] | None = None) -> int:
         req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
@@ -442,7 +475,7 @@ class Relay:
     def refresh_positions(self, t: float) -> None:
         self.next_positions = t + POSITIONS_EVERY_S
         try:
-            rows = self.http.alpaca_get("/v2/positions")
+            rows = self.http.held_positions()
             if not isinstance(rows, list):
                 raise ValueError("positions: not a list")
             self.held = rows
@@ -650,15 +683,34 @@ def _messages(text: str) -> list[dict]:
     return [m for m in v if isinstance(m, dict)]
 
 
-def build_http(env_file: str | None, helper_file: str | None = None) -> tuple[Http, str, str]:
-    """The relay's HTTP client and its paper keys. With the helpers' env file: only that file is read and the
-    relay signs in as the helper (no service key in this process). Without it: the engine's .env, as before."""
-    henv = helper_env(helper_file)
+def build_http(env_file: str | None, helper_file: str | None = None,
+               data_file: str | None = None) -> tuple[Http, str, str]:
+    """The relay's HTTP client and its Alpaca key pair.
+
+    With data.env (#712; `data_file`, $KAIBOT_DATA_ENV_FILE or ~/Projects/kaibot-secrets/data.env): ONLY the helpers'
+    env file and the data file are read, never the engine's .env and never a trading pair: no service key, no
+    trading key in this process. A bad data file, or no helpers' file, stops the relay (no fall-back).
+    Without data.env (Product, 26 Nov 2026: nothing stops before the owner's setup): as before #712, with a WARNING:
+    the helpers' file with its paper keys, else the engine's .env with the service key."""
+    if data_env_present(data_file):
+        henv = helper_env(helper_file)  # the trading pair, if still in it, is skipped
+        if henv is None:
+            raise SystemExit("data.env exists but there is no helpers' env file (helper.env): with the data key the "
+                             "relay runs only as the helper (docs/ops/secrets.md)")
+        key, secret = data_keys(data_file)
+        url = henv.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL
+        log.info("signed in as the helper with the market-data key (no service key, no trading key in this process)")
+        helper = HelperSession.from_env(henv, DEFAULT_SUPABASE_URL)
+        return Http(key, secret, url, None, PAPER_TRADING_URL, helper=helper, data_key=True), key, secret
+    log.warning("WARNING: no market-data key file (%s): the relay still uses the paper TRADING key, as before #712. "
+                "Set up data.env (docs/ops/secrets.md, 'The data key')", data_env_path(data_file))
+    henv = helper_env(helper_file, keep_trading=True)
     if henv is not None:
         base = paper_only(henv.get("ALPACA_BASE_URL"))
         key, secret = henv.get("ALPACA_API_KEY"), henv.get("ALPACA_SECRET") or henv.get("ALPACA_API_SECRET")
         if not key or not secret:
-            raise SystemExit("missing settings: ALPACA_API_KEY, ALPACA_SECRET (put them in the helpers' env file)")
+            raise SystemExit("missing settings: ALPACA_API_KEY, ALPACA_SECRET (put them in the helpers' env file, "
+                             "or set up data.env: docs/ops/secrets.md)")
         url = henv.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL
         log.info("Supabase: signed in as the helper (no service key in this process)")
         helper = HelperSession.from_env(henv, DEFAULT_SUPABASE_URL)
@@ -678,11 +730,13 @@ def build_http(env_file: str | None, helper_file: str | None = None) -> tuple[Ht
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--env", default=os.path.expanduser("~/Projects/kaibot-secrets/.env"))
+    ap.add_argument("--env", default=os.path.expanduser("~/Projects/kaibot-secrets/.env"),
+                    help="the engine's .env: read only while there is no data.env and no helper.env (as before #712)")
     ap.add_argument("--helper-env", default=None, help="the helpers' env file (docs/ops/helper_role.md)")
+    ap.add_argument("--data-env", default=None, help="the market-data key file (docs/ops/secrets.md)")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    http, key, secret = build_http(a.env, a.helper_env)
+    http, key, secret = build_http(a.env, a.helper_env, a.data_env)
     stop = {"now": False}
 
     def on_signal(*_):
@@ -690,7 +744,8 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)
-    log.info("price relay starting (paper positions, IEX trades, at most one broadcast a second on %s)", TOPIC)
+    log.info("price relay starting (held stocks via the helper, IEX trades, one broadcast a second at most on %s)",
+             TOPIC)
     Relay(http, key, secret).run(lambda: stop["now"])
     log.info("price relay stopped")
 

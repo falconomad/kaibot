@@ -142,21 +142,37 @@ def test_the_helpers_env_file_is_its_own_file_and_may_not_hold_a_service_key(tmp
         helper_env(str(f))
 
 
-def _helper_file(tmp_path, alpaca=True):
+def _helper_file(tmp_path, alpaca=False):
+    """The helpers' file; `alpaca`: with the trading pair still in it (the setup before #712)."""
     f = tmp_path / "helper.env"
     f.write_text(f"SUPABASE_URL={URL}\nSUPABASE_PUBLISHABLE_KEY={PUB}\nSUPABASE_HELPER_EMAIL=helper@example.com\n"
                  f"SUPABASE_HELPER_PASSWORD={SECRETS[0]}\n"
-                 + ("ALPACA_API_KEY=PKFAKE\nALPACA_SECRET=fakesecret\n" if alpaca else ""))
+                 + ("ALPACA_API_KEY=PKTRADING\nALPACA_SECRET=tradingsecret\n" if alpaca else ""))
     return f
 
 
-def test_the_relay_on_the_helper_path_holds_no_service_key(tmp_path, monkeypatch):
+def _data_file(tmp_path, extra=""):
+    f = tmp_path / "data.env"
+    f.write_text("ALPACA_DATA_KEY=PKDATA\nALPACA_DATA_SECRET=datasecret\n" + extra)
+    return f
+
+
+@pytest.mark.parametrize("old_setup", [False, True])
+def test_the_relay_holds_no_service_key_and_no_trading_key(tmp_path, monkeypatch, old_setup):
+    """#712: the relay reads only helper.env and data.env. Its Alpaca pair is the data pair; a trading pair still in
+    helper.env (the setup before #712) is skipped; the engine's .env is never opened."""
     ps = load("price_stream")
     monkeypatch.setenv("SUPABASE_SERVICE_KEY", "sb_secret_must_not_be_used")
     engine_env = tmp_path / ".env"
     engine_env.write_text("SUPABASE_SERVICE_KEY=sb_secret_in_the_engine_file\nALPACA_API_KEY=X\nALPACA_SECRET=Y\n")
-    http, key, secret = ps.build_http(str(engine_env), str(_helper_file(tmp_path)))
-    assert (key, secret) == ("PKFAKE", "fakesecret") and http.helper is not None
+    opened = []
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: (opened.append(self.name), real(self, *a, **k))[1])
+    http, key, secret = ps.build_http(str(engine_env), str(_helper_file(tmp_path, alpaca=old_setup)),
+                                      str(_data_file(tmp_path)))
+    assert (key, secret) == ("PKDATA", "datasecret") and http.helper is not None
+    assert ".env" not in opened
+    assert "tradingsecret" not in json.dumps(http.alpaca_h) and "PKTRADING" not in json.dumps(http.alpaca_h)
     assert "sb_secret" not in json.dumps(http.sb_h) and "Authorization" not in http.sb_h
     fake = FakeSupabase()
     http.helper._open = fake
@@ -166,24 +182,58 @@ def test_the_relay_on_the_helper_path_holds_no_service_key(tmp_path, monkeypatch
     assert paths == ["/auth/v1/token", "/realtime/v1/api/broadcast", "/rest/v1/rpc/kb_helper_heartbeat"]
     assert fake.calls[2][3] == {"p_process": "price_stream", "p_detail": {"state": "streaming"}}
     assert not any("sb_secret" in json.dumps([c[2], c[3]]) for c in fake.calls)
-    with pytest.raises(SystemExit, match="ALPACA_API_KEY"):
-        ps.build_http(str(engine_env), str(_helper_file(tmp_path, alpaca=False)))
     with pytest.raises(ValueError, match="not both"):
         ps.Http("k", "s", URL, "sb_secret_x", helper=http.helper)
 
 
-def test_the_relay_without_the_helpers_file_runs_as_before(tmp_path, monkeypatch):
+def test_with_data_env_the_relay_refuses_rather_than_fall_back(tmp_path, monkeypatch):
+    """#712: once data.env exists the trading key is never read: a data file holding the trading pair or a service
+    key, or no helpers' file, stops the relay; the engine's .env is not opened."""
+    ps = load("price_stream")
+    monkeypatch.delenv("KAIBOT_HELPER_ENV_FILE", raising=False)
+    monkeypatch.delenv("KAIBOT_DATA_ENV_FILE", raising=False)
+    engine_env = tmp_path / ".env"
+    engine_env.write_text("SUPABASE_SERVICE_KEY=sb_secret_engine\nALPACA_API_KEY=X\nALPACA_SECRET=Y\n")
+    with pytest.raises(SystemExit, match="no helpers' env file"):
+        ps.build_http(str(engine_env), str(tmp_path / "no-helper.env"), str(_data_file(tmp_path)))
+    for extra in ("ALPACA_API_KEY=X\n", "ALPACA_SECRET=Y\n", "SUPABASE_SERVICE_KEY=sb_secret_x\n"):
+        with pytest.raises(SystemExit, match="remove it"):
+            ps.build_http(str(engine_env), str(_helper_file(tmp_path)), str(_data_file(tmp_path, extra)))
+    dangling = tmp_path / "data-link.env"
+    dangling.symlink_to(tmp_path / "gone.env")  # something is there: data mode, so no fall-back to the trading key
+    with pytest.raises(SystemExit, match="not a regular file"):
+        ps.build_http(str(engine_env), str(_helper_file(tmp_path, alpaca=True)), str(dangling))
+    import os
+    assert "ALPACA_API_KEY" not in os.environ and "SUPABASE_SERVICE_KEY" not in os.environ
+
+
+def test_without_data_env_the_relay_runs_as_before_with_a_warning(tmp_path, monkeypatch, caplog):
+    """Product (26 Nov 2026): nothing stops before the owner's setup. No data.env: the helpers' file with its paper
+    keys (positions by GET /v2/positions), else the engine's .env with the service key; a WARNING either way."""
     ps = load("price_stream")
     for k in ("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "ALPACA_API_KEY", "ALPACA_SECRET",
-              "ALPACA_API_SECRET", "ALPACA_BASE_URL", "KAIBOT_HELPER_ENV_FILE"):
+              "ALPACA_API_SECRET", "ALPACA_BASE_URL", "KAIBOT_HELPER_ENV_FILE", "KAIBOT_DATA_ENV_FILE"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("SUPABASE_URL", URL)
     engine_env = tmp_path / ".env"
     engine_env.write_text("SUPABASE_SERVICE_KEY=sb_secret_engine\nALPACA_API_KEY=X\nALPACA_SECRET=Y\n")
-    http, key, _ = ps.build_http(str(engine_env), str(tmp_path / "no-helper.env"))
-    assert http.helper is None and http.sb_h["apikey"] == "sb_secret_engine" and key == "X"
+    no_data = str(tmp_path / "no-data.env")
+    http, key, secret = ps.build_http(str(engine_env), str(_helper_file(tmp_path, alpaca=True)), no_data)
+    assert (key, secret) == ("PKTRADING", "tradingsecret") and http.helper is not None and not http.data_key
+    assert "WARNING: no market-data key file" in caplog.text
+    with pytest.raises(ValueError):  # not via the helper: the paper account's own positions, as before
+        http.alpaca_get("/v2/orders")
+    http2, key2, _ = ps.build_http(str(engine_env), str(tmp_path / "no-helper.env"), no_data)
+    assert http2.helper is None and http2.sb_h["apikey"] == "sb_secret_engine" and key2 == "X"
     for k in ("SUPABASE_SERVICE_KEY", "ALPACA_API_KEY", "ALPACA_SECRET"):
         monkeypatch.delenv(k, raising=False)  # load_env_file wrote them into the environment
+
+
+def test_the_helpers_file_never_yields_the_trading_pair(tmp_path):
+    env = helper_env(str(_helper_file(tmp_path, alpaca=True)))
+    assert not {"ALPACA_API_KEY", "ALPACA_SECRET"} & set(env) and "tradingsecret" not in json.dumps(env)
+    # only the relay's path before data.env asks for it
+    assert helper_env(str(_helper_file(tmp_path, alpaca=True)), keep_trading=True)["ALPACA_SECRET"] == "tradingsecret"
 
 
 def test_the_publisher_on_the_helper_path_makes_one_call():

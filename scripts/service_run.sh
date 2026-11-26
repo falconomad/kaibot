@@ -112,6 +112,13 @@ CHECKS_NOTE=data/live/ticker_checks.note
 CHECKS_BOX=kaibot-ticker-checks
 W_PID=""; W_KIND=""; W_CMD=()
 
+# #712 (audit 2 7.2, docs/ops/secrets.md): the worker and the relay need market data only, so with data.env their
+# Alpaca key is the data pair of a second, empty paper account, never the trading pair. Without data.env (Product,
+# 26 Nov 2026: nothing stops before the owner's setup) they run as before #712 and say so with a WARNING in their logs.
+# A file is mounted into a Docker box only when it exists (a missing one would become an empty folder).
+HELPER_ENV="${KAIBOT_HELPER_ENV_FILE:-$HOME/Projects/kaibot-secrets/helper.env}"
+DATA_ENV="${KAIBOT_DATA_ENV_FILE:-$HOME/Projects/kaibot-secrets/data.env}"
+
 checks_cmd() {  # W_CMD and W_KIND for this machine; 1 when it cannot run yet (no .venv with the deps, no image)
   local py="$REPO/.venv/bin/python" cert
   if [ -x "$py" ] && PYTHONPATH="$REPO/src" "$py" -c \
@@ -119,12 +126,20 @@ checks_cmd() {  # W_CMD and W_KIND for this machine; 1 when it cannot run yet (n
     # python.org's macOS Python has no root certificates: certifi's, as run_engine.sh does
     cert="${SSL_CERT_FILE:-$("$py" -m certifi 2>/dev/null)}"
     W_KIND=venv; W_CMD=(env PYTHONUNBUFFERED=1 ${cert:+SSL_CERT_FILE="$cert"}
-                        "$py" -u scripts/run_ticker_checks.py --env "$ENV_FILE")
+                        "$py" -u scripts/run_ticker_checks.py --env "$ENV_FILE" --data-env "$DATA_ENV")
   elif [ "$MODE" = docker ] && docker image inspect kaibot-engine >/dev/null 2>&1; then
-    # no .venv on a Docker Mac: the engine's image (built by run_engine.sh), with today's worker script mounted
+    # no .venv on a Docker Mac: the engine's image (built by run_engine.sh), with today's worker script mounted.
+    # The .env is mounted for its Supabase key only: the worker skips the trading pair's lines (#712)
+    local data=()
+    [ -f "$DATA_ENV" ] && data=(-v "$DATA_ENV:/secrets/data.env:ro")
+    # anything else at that path (a dangling link, a folder): the worker must stop, not fall back; an empty
+    # /secrets/data.env folder inside the box does that (the worker refuses a data path that is not a file)
+    { [ -e "$DATA_ENV" ] || [ -L "$DATA_ENV" ]; } && [ ! -f "$DATA_ENV" ] && data=(--tmpfs /secrets/data.env)
     W_KIND=docker; W_CMD=(docker run --rm --init --name "$CHECKS_BOX" -e KAIBOT_ENV_FILE=/secrets/.env
-      -v "$ENV_FILE:/secrets/.env:ro" -v "$REPO/scripts/run_ticker_checks.py:/app/scripts/run_ticker_checks.py:ro"
-      kaibot-engine python -u scripts/run_ticker_checks.py --env /secrets/.env)
+      -v "$ENV_FILE:/secrets/.env:ro" ${data[@]+"${data[@]}"}
+      -v "$REPO/scripts/run_ticker_checks.py:/app/scripts/run_ticker_checks.py:ro"
+      -v "$REPO/src/kaibot/common/secret_files.py:/app/src/kaibot/common/secret_files.py:ro"
+      kaibot-engine python -u scripts/run_ticker_checks.py --env /secrets/.env --data-env /secrets/data.env)
   else
     return 1
   fi
@@ -219,20 +234,28 @@ stream_cmd() {  # S_CMD and S_KIND; 1 when it cannot run yet. Needs Python 3.11+
         'import sys; assert sys.version_info >= (3, 11); import kaibot.engine.config' 2>/dev/null; then
       cert="${SSL_CERT_FILE:-$("$py" -m certifi 2>/dev/null)}"
       S_KIND=python; S_CMD=(env PYTHONUNBUFFERED=1 ${cert:+SSL_CERT_FILE="$cert"}
-                            "$py" -u scripts/price_stream.py --env "$ENV_FILE")
+                            "$py" -u scripts/price_stream.py --env "$ENV_FILE" --helper-env "$HELPER_ENV"
+                            --data-env "$DATA_ENV")
       return 0
     fi
   done
   if [ "$MODE" = docker ] && docker image inspect kaibot-engine >/dev/null 2>&1; then
-    # M10 1.26 (#451): the relay's Supabase client comes from the repo like the script (an older image lacks it),
-    # and with the helpers' env file the box gets ONLY that file: the engine's .env (the service key) stays out
-    local henv="${KAIBOT_HELPER_ENV_FILE:-$HOME/Projects/kaibot-secrets/helper.env}"
+    # M10 1.26 (#451), #712: the relay's helper modules come from the repo like the script (an older image lacks
+    # them). With data.env the box gets ONLY the helpers' file and the data file: never the engine's .env (the
+    # service key and the trading key stay out). Without it, as before #712: the helpers' file, else the .env
     local secrets=(-v "$ENV_FILE:/secrets/.env:ro")
-    [ -f "$henv" ] && secrets=(-v "$henv:/secrets/helper.env:ro" -e KAIBOT_HELPER_ENV_FILE=/secrets/helper.env)
+    [ -f "$HELPER_ENV" ] && secrets=(-v "$HELPER_ENV:/secrets/helper.env:ro")
+    if [ -e "$DATA_ENV" ] || [ -L "$DATA_ENV" ]; then  # never the .env once data.env exists, whatever is missing
+      secrets=(--tmpfs /secrets/data.env)  # not a regular file: the relay refuses it, no fall-back
+      [ -f "$DATA_ENV" ] && secrets=(-v "$DATA_ENV:/secrets/data.env:ro")
+      [ -f "$HELPER_ENV" ] && secrets+=(-v "$HELPER_ENV:/secrets/helper.env:ro")
+    fi
     S_KIND=docker; S_CMD=(docker run --rm --init --name "$STREAM_BOX" "${secrets[@]}"
       -v "$REPO/scripts/price_stream.py:/app/scripts/price_stream.py:ro"
       -v "$REPO/src/kaibot/common/helper_session.py:/app/src/kaibot/common/helper_session.py:ro"
-      kaibot-engine python -u scripts/price_stream.py --env /secrets/.env)
+      -v "$REPO/src/kaibot/common/secret_files.py:/app/src/kaibot/common/secret_files.py:ro"
+      kaibot-engine python -u scripts/price_stream.py --env /secrets/.env --helper-env /secrets/helper.env
+      --data-env /secrets/data.env)
     return 0
   fi
   return 1

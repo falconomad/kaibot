@@ -130,6 +130,10 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_RUNNER_GH_TOKEN_FILE", "path", "qa-ops", "audit 2 7.1 (#711): the research runner's fine-grained GitHub "
        "token file (default ~/Projects/kaibot-secrets/runner_gh_token, mode 600)", scope="script",
        readers=("scripts/research_runner.py",)),
+    _s("KAIBOT_DATA_ENV_FILE", "path", "qa-ops", "audit 2 7.2 (#712): the market-data key file of the price relay and "
+       "the ticker-check worker (default ~/Projects/kaibot-secrets/data.env: the data pair of a second, empty Alpaca "
+       "paper account; common/secret_files.py reads it itself)", scope="script",
+       readers=("src/kaibot/common/secret_files.py",)),
     _s("KAIBOT_HOLDOUT_OPENING", "text", "backend-quant", "M11 2.6: the id of a committed hold-out opening"),
     _s("KAIBOT_ENGINE_NAME", "text", "backend-quant", "the heartbeat's process name (default 'engine')",
        default="engine", empty_ok=False),

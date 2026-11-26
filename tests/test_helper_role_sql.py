@@ -68,7 +68,13 @@ def test_the_relay_and_the_publisher_never_read_the_service_key_on_the_helper_pa
     branch, after `helper_env(...)` returned None."""
     relay = (ROOT / "scripts" / "price_stream.py").read_text()
     build = relay[relay.index("def build_http"):relay.index("def main()")]
-    helper_branch = build[:build.index("load_env_file(env_file)")]
+    # #712: the data.env branch (before the WARNING of the old path) reads no service key, no trading key, no .env
+    data_branch = build[build.index("if data_env_present(data_file):"):build.index('log.warning("WARNING: no')]
+    assert "helper_env(helper_file)" in data_branch and "data_keys(" in data_branch
+    assert not any(x in data_branch for x in ("SERVICE", "os.environ", "load_env_file", "ALPACA_API_KEY",
+                                              "keep_trading"))
+    old_path = build[build.index('log.warning("WARNING: no'):]
+    helper_branch = old_path[:old_path.index("load_env_file(env_file)")]
     assert "helper_env(" in helper_branch and "SERVICE" not in helper_branch and "os.environ" not in helper_branch
     pub = (ROOT / "scripts" / "publish_notices.py").read_text()
     main = pub[pub.index("def main("):]
@@ -236,3 +242,31 @@ def test_only_the_helper_may_send_on_kb_prices_and_only_there(seeded):
     # 0032 is unchanged: the owner still receives, the helper does not
     probe = "select count(*) from realtime.messages where topic = realtime.topic();"
     assert psql(probe, uid=OWNER, topic="kb:prices") == "1" and psql(probe, uid=HELPER, topic="kb:prices") == "0"
+
+
+# ---------------------------------------------------------------- 0053 (#712): the held stocks for the relay
+def test_0053_is_additive_and_checks_the_helper_first():
+    sql = "\n".join(ln for ln in (ROOT / "migrations" / "0053_helper_held_symbols.sql").read_text().splitlines()
+                    if not ln.lstrip().startswith("--")).lower()
+    assert not re.search(r"\b(drop|delete|truncate|insert|update)\b", sql)
+    body = sql[sql.index("begin"):]
+    assert body.index("if not kaibot.is_helper() then raise") < body.index("from kaibot.run")
+    assert "security definer set search_path = ''" in sql
+    assert "revoke all on function public.kb_helper_held_symbols() from public, anon;" in sql
+
+
+@needs_pg
+def test_the_helper_reads_the_held_stocks_and_nothing_else_of_them(seeded):
+    psql("""delete from kaibot.ledger_position where symbol in ('ZZA', 'ZZB', 'ZZC');
+      with r as (insert into kaibot.run (amount_usd, status, kind) values (10000, 'running', 'paper') returning id)
+      insert into kaibot.ledger_position (run_id, session, strategy, symbol, qty, avg_cost, mark, priced, stop_state)
+      select r.id, s.session, s.strategy, s.symbol, s.qty, 10, s.mark, true, 'resting' from r, (values
+        ('2099-01-01'::date, 'a', 'ZZC', 9::numeric, 100::numeric),
+        ('2099-01-02'::date, 'a', 'ZZA', 2, 50), ('2099-01-02'::date, 'b', 'ZZA', 1, 50),
+        ('2099-01-02'::date, 'a', 'ZZB', 5, 10), ('2099-01-02'::date, 'b', 'ZZB', 0, 10)) s(session, strategy,
+        symbol, qty, mark);""", role=None)
+    out = json.loads(psql("select public.kb_helper_held_symbols();", uid=HELPER))
+    assert out == [{"symbol": "ZZA", "market_value": 150}, {"symbol": "ZZB", "market_value": 50}]
+    for uid in (OWNER, OTHER):
+        refused("select public.kb_helper_held_symbols();", "not authorised", uid=uid)
+    refused("select public.kb_helper_held_symbols();", "permission denied", role="anon")

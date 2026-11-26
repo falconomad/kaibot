@@ -12,6 +12,9 @@ Settings, from the helpers' own env file (`helper_env`; never the engine's .env,
     SUPABASE_HELPER_EMAIL        the helper user's email
     SUPABASE_HELPER_PASSWORD     its password
 
+No Alpaca key (#712): the market-data pair is in data.env (common/secret_files.py), and the trading pair is never
+read from this file.
+
 Stdlib only. Nothing here logs or returns a key, a password or a token; errors carry the HTTP status and at most
 the first 200 characters of the answer's message.
 """
@@ -31,6 +34,9 @@ HELPER_ENV = "KAIBOT_HELPER_ENV_FILE"
 DEFAULT_HELPER_ENV = "~/Projects/kaibot-secrets/helper.env"
 NAMES = ("SUPABASE_PUBLISHABLE_KEY", "SUPABASE_HELPER_EMAIL", "SUPABASE_HELPER_PASSWORD")
 SERVICE_NAMES = ("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY")
+# #712: the real paper account's trading pair is not a helper setting. A helpers' file that still holds it (the setup
+# before #712) is read without those lines: they never reach the dict. scripts/helper_check.py says to remove them.
+TRADING_NAMES = ("ALPACA_API_KEY", "ALPACA_SECRET", "ALPACA_API_SECRET")
 REFRESH_BEFORE_S = 120.0  # a new sign-in this long before the token ends
 TIMEOUT_S = 10.0
 
@@ -43,11 +49,13 @@ class HelperError(RuntimeError):
         self.status = status
 
 
-def helper_env(path: str | None = None) -> dict[str, str] | None:
+def helper_env(path: str | None = None, keep_trading: bool = False) -> dict[str, str] | None:
     """The helper settings from the helpers' env file (`path`, else $KAIBOT_HELPER_ENV_FILE, else
     ~/Projects/kaibot-secrets/helper.env), or None when there is no such file (the helper path is not set up yet).
     The file is read into a dict, not into os.environ. A file that holds a service key is refused: the point of the
-    file is that the process reading it cannot have that key."""
+    file is that the process reading it cannot have that key.
+    #712: the trading pair (the setup before data.env) is skipped, unless `keep_trading` (only the price relay asks,
+    and only while there is no data.env: Product, 26 Nov 2026, nothing stops before the owner's setup)."""
     p = Path(os.path.expanduser(path or os.environ.get(HELPER_ENV) or DEFAULT_HELPER_ENV))
     if not p.exists():
         return None
@@ -55,6 +63,8 @@ def helper_env(path: str | None = None) -> dict[str, str] | None:
     for line in p.read_text().splitlines():
         if "=" in line and not line.lstrip().startswith("#"):
             k, v = line.split("=", 1)
+            if k.strip() in TRADING_NAMES and not keep_trading:
+                continue  # #712: not kept
             env[k.strip()] = v.split(" #")[0].strip().strip('"').strip("'")
     if any(env.get(k) for k in SERVICE_NAMES):
         raise SystemExit(f"{p} holds a Supabase service key: remove it (the helpers' file must not have it)")

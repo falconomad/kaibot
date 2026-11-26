@@ -49,6 +49,9 @@ class FakeHttp:
             return {"is_open": self.is_open, "next_close": "2099-01-01T16:00:00-05:00"}
         return self.positions
 
+    def held_positions(self):  # #712: the helper's kb_helper_held_symbols (here: the same rows, logged as a GET)
+        return self.alpaca_get("/v2/positions")
+
     def broadcast(self, payload):
         if self.fail_broadcast:
             raise OSError("down")
@@ -362,6 +365,42 @@ def test_a_live_base_url_is_refused():
         ps.Http("k", "s", "https://x.supabase.co", "sk", base="https://api.alpaca.markets")
 
 
+def test_as_the_helper_only_the_clock_can_be_read_and_the_held_stocks_come_from_the_helper():
+    """#712: with the data pair (a second, empty paper account) /v2/positions would read the wrong account and is
+    refused; the held stocks come from kb_helper_held_symbols (migration 0053)."""
+    class Helper:
+        def __init__(self):
+            self.calls = []
+
+        def rpc(self, fn, args):
+            self.calls.append((fn, args))
+            return [{"symbol": "XOM", "market_value": 3173.6}, {"symbol": "TMO", "market_value": 10.0}]
+
+    helper = Helper()
+    h = ps.Http("dk", "ds", "https://x.supabase.co", None, helper=helper, data_key=True)
+    with pytest.raises(ValueError):
+        h.alpaca_get("/v2/positions")
+    rows = h.held_positions()
+    assert helper.calls == [("kb_helper_held_symbols", {})]
+    assert ps.pick_symbols(rows) == (["TMO", "XOM"], 0)
+    with pytest.raises(ValueError, match="only as the helper"):
+        ps.Http("dk", "ds", "https://x.supabase.co", "sb_secret_x", data_key=True)
+
+
+def test_with_the_data_key_and_0053_missing_nothing_is_streamed_and_it_is_said_once(caplog):
+    """The data key cannot read the trading account's positions, and the trading key must not be read once data.env
+    exists: until migration 0053 is applied the relay holds no symbol (the dashboard keeps its 10 s prices)."""
+    from kaibot.common.helper_session import HelperError
+
+    class NoFunction:
+        def rpc(self, fn, args):
+            raise HelperError(404, "Could not find the function public.kb_helper_held_symbols")
+
+    h = ps.Http("dk", "ds", "https://x.supabase.co", None, helper=NoFunction(), data_key=True)
+    assert h.held_positions() == [] and h.held_positions() == []
+    assert caplog.text.count("migration 0053 is not applied") == 1
+
+
 def test_only_two_paper_paths_can_be_read():
     h = ps.Http("k", "s", "https://x.supabase.co", "sb_secret_x")
     with pytest.raises(ValueError):
@@ -374,9 +413,11 @@ def test_the_script_cannot_trade():
     src = (ROOT / "scripts" / "price_stream.py").read_text()
     imports = set(re.findall(r"^\s*(?:from|import) (kaibot[\w.]*)", src, re.M))
     # M10 1.26 (#451): plus the helpers' Supabase client, which itself imports nothing of kaibot
-    assert imports == {"kaibot.engine.config", "kaibot.common.helper_session"}
-    client = (ROOT / "src" / "kaibot" / "common" / "helper_session.py").read_text()
-    assert not re.findall(r"^\s*(?:from|import) (kaibot[\w.]*)", client, re.M)
+    # #712: and the key-file reader, which imports nothing of kaibot either
+    assert imports == {"kaibot.engine.config", "kaibot.common.helper_session", "kaibot.common.secret_files"}
+    for name in ("helper_session.py", "secret_files.py"):
+        client = (ROOT / "src" / "kaibot" / "common" / name).read_text()
+        assert not re.findall(r"^\s*(?:from|import) (kaibot[\w.]*)", client, re.M)
     for word in ("/v2/orders", "AlpacaPaper", "BrokerAdapter", "ledger_", "method=\"DELETE\"", "PATCH"):
         assert word not in src
     assert src.count('method="POST"') == 1 and "realtime/v1/api/broadcast" in src and "rest/v1/heartbeat" in src

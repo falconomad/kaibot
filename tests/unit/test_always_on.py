@@ -723,6 +723,11 @@ def wrapper(tmp_path):
     g = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
     for cmd in (["init", "-q", "-b", "main"], ["add", "-A"], ["commit", "-qm", "one"]):
         sh(["git", *cmd], r, g, check=True)
+    # #712: the worker and the relay start only with their key files (the default paths under HOME)
+    secrets = tmp_path / "Projects/kaibot-secrets"
+    secrets.mkdir(parents=True)
+    (secrets / "data.env").write_text("ALPACA_DATA_KEY=PKDATA\nALPACA_DATA_SECRET=d\n")
+    (secrets / "helper.env").write_text("SUPABASE_PUBLISHABLE_KEY=p\n")
     return r, {"HOME": str(tmp_path), "KAIBOT_LOG_DIR": str(tmp_path / "logs"), "KAIBOT_SERVICE_MODE": "python",
                "KAIBOT_ENV_FILE": str(tmp_path / "none.env"), "PATH": os.environ["PATH"]}, tmp_path
 
@@ -973,7 +978,8 @@ def test_the_worker_runs_beside_the_engine_and_stops_with_it(checks):
     x = sh(["bash", "scripts/service_run.sh", "engine"], r, env)
     assert x.returncode == 0 and "ticker-check worker on" in x.stdout
     (start,) = worker_starts(tmp)
-    assert start.endswith("-u scripts/run_ticker_checks.py --env " + env["KAIBOT_ENV_FILE"])
+    data = f"{tmp}/Projects/kaibot-secrets/data.env"
+    assert start.endswith(f"-u scripts/run_ticker_checks.py --env {env['KAIBOT_ENV_FILE']} --data-env {data}")
     assert gone(int(start.split()[1])) and "worker-term" in (tmp / "worker.calls").read_text()
     assert not (r / "data/live/ticker_checks.pid").exists()
     log = (tmp / "logs/ticker_checks.log").read_text()
@@ -1128,7 +1134,8 @@ def test_in_docker_mode_without_a_venv_the_worker_runs_in_the_engine_image(wrapp
     (run,) = [c for c in calls if c.startswith("run ")]
     assert run.startswith("run --rm --init --name kaibot-ticker-checks ")
     assert f"-v {env['KAIBOT_ENV_FILE']}:/secrets/.env:ro" in run and run.endswith(
-        "kaibot-engine python -u scripts/run_ticker_checks.py --env /secrets/.env")
+        "kaibot-engine python -u scripts/run_ticker_checks.py --env /secrets/.env --data-env /secrets/data.env")
+    assert f"-v {tmp}/Projects/kaibot-secrets/data.env:/secrets/data.env:ro" in run
     assert "scripts/run_ticker_checks.py:/app/scripts/run_ticker_checks.py:ro" in run
     assert "container-term" in calls and "rm -f kaibot-ticker-checks" in calls
 
@@ -1204,7 +1211,10 @@ def test_the_relay_runs_beside_the_engine_from_the_env_file_and_stops_with_it(re
     x = sh(["bash", "scripts/service_run.sh", "engine"], r, {**env, "KAIBOT_ENV_FILE": str(env_file)})
     assert x.returncode == 0 and "price relay on" in x.stdout
     (start,) = relay_starts(tmp)
-    assert start.endswith(f"-u scripts/price_stream.py --env {env_file}")
+    sec = f"{tmp}/Projects/kaibot-secrets"
+    # #712: the relay itself decides (with data.env it never opens --env; tests/unit/test_helper_session.py)
+    assert start.endswith(f"-u scripts/price_stream.py --env {env_file} --helper-env {sec}/helper.env "
+                          f"--data-env {sec}/data.env")
     assert gone(int(start.split()[1])) and "worker-term" in (tmp / "worker.calls").read_text()
     assert not (r / "data/live/price_stream.pid").exists()
     log = (tmp / "logs/price_stream.log").read_text()
@@ -1231,6 +1241,65 @@ def test_a_relay_that_dies_or_cannot_start_never_touches_the_engine(relay_env):
            {**on, "FAKE_IMPORT": "1", "PATH": f"{nopy}:{env['PATH']}"})
     assert x.returncode == 0 and (tmp / "ran").read_text().split() == ["up"]
     assert (tmp / "logs/price_stream.log").read_text().count("cannot start the price relay yet") == 1
+
+
+def test_without_the_data_key_the_worker_and_the_relay_still_start(relay_env):
+    """Product (26 Nov 2026): no data.env yet: nothing stops. Both start as before #712 (the scripts warn and use
+    their old keys; tests/unit/test_helper_session.py, test_secret_files.py)."""
+    r, env, tmp = relay_env
+    (tmp / "Projects/kaibot-secrets/data.env").unlink()
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 3))
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r,
+           {**env, "KAIBOT_TICKER_CHECKS": "1", "KAIBOT_PRICE_STREAM": "on"})
+    assert x.returncode == 0 and "engine exited cleanly" in x.stdout
+    starts = worker_starts(tmp)
+    assert [ln for ln in starts if "run_ticker_checks.py" in ln] and relay_starts(tmp)
+
+
+def _docker_relay_run(relay_env, fake_docker, data_env: bool):
+    r, env, tmp = relay_env
+    if not data_env:
+        (tmp / "Projects/kaibot-secrets/data.env").unlink()
+    (r / ".venv/bin/python").unlink()  # Docker Mac: no .venv
+    nopy = tmp / "nopy"
+    nopy.mkdir()
+    (nopy / "python3").write_text("#!/bin/bash\nexit 1\n")
+    (nopy / "python3").chmod(0o755)
+    (r / "scripts/run_engine.sh").write_text(engine_for(tmp, 4))
+    env = {**env, "KAIBOT_SERVICE_MODE": "docker", "KAIBOT_PRICE_STREAM": "on",
+           "PATH": f"{nopy}:{fake_docker}:{env['PATH']}"}
+    x = sh(["bash", "scripts/service_run.sh", "engine"], r, env)
+    assert x.returncode == 0, x.stdout
+    (run,) = [c for c in (tmp / "docker.calls").read_text().splitlines() if c.startswith("run ")]
+    return run, env, tmp
+
+
+def test_with_data_env_the_relay_container_never_gets_the_engines_env(relay_env, fake_docker):
+    run, env, tmp = _docker_relay_run(relay_env, fake_docker, data_env=True)
+    assert "kaibot-price-stream" in run and ":/secrets/.env:ro" not in run and env["KAIBOT_ENV_FILE"] not in run
+    sec = f"{tmp}/Projects/kaibot-secrets"
+    assert f"-v {sec}/data.env:/secrets/data.env:ro" in run and f"-v {sec}/helper.env:/secrets/helper.env:ro" in run
+
+
+def test_with_data_env_but_no_helper_env_the_box_still_gets_no_engine_env(relay_env, fake_docker):
+    (relay_env[2] / "Projects/kaibot-secrets/helper.env").unlink()
+    run, env, _ = _docker_relay_run(relay_env, fake_docker, data_env=True)
+    assert ":/secrets/.env:ro" not in run and env["KAIBOT_ENV_FILE"] not in run
+
+
+def test_a_dangling_data_env_link_never_brings_the_engines_env_into_the_box(relay_env, fake_docker):
+    sec = relay_env[2] / "Projects/kaibot-secrets"
+    (sec / "data.env").unlink()
+    (sec / "data.env").symlink_to(sec / "gone.env")
+    run, env, _ = _docker_relay_run(relay_env, fake_docker, data_env=True)
+    assert ":/secrets/.env:ro" not in run and env["KAIBOT_ENV_FILE"] not in run
+    assert "--tmpfs /secrets/data.env" in run  # the relay then refuses: not a regular file
+
+
+def test_without_data_env_the_relay_container_is_as_before(relay_env, fake_docker):
+    run, env, tmp = _docker_relay_run(relay_env, fake_docker, data_env=False)
+    assert "/secrets/data.env:ro" not in run  # a missing file is never mounted (it would become a folder)
+    assert f"-v {tmp}/Projects/kaibot-secrets/helper.env:/secrets/helper.env:ro" in run
 
 
 def test_a_stop_reaches_the_relay_too(relay_env):
