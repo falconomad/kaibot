@@ -82,7 +82,7 @@ multi_day:
 # retired intraday rule left the live loop, so this is OFF. With `enabled: false` the live engine is the multi-day
 # book's loop alone (engine/book_loop.py): no level runs an intraday rule whatever its list says, no shadow rule
 # runs, the room is not built and no intraday module is imported. `enabled: true` brings the path back as it was
-# (engine/intraday.py), with the levels' lists. SimBroker research does not read this switch: a research run
+# (engine/intraday_legacy.py), with the levels' lists. SimBroker research does not read this switch: a research run
 # hands its rule to its own engine (engine/runner.simulation, `python -m kaibot.engine.research`).
 intraday:
   enabled: false

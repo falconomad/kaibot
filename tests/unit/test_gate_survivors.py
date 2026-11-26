@@ -1,7 +1,7 @@
 """#546 (weekly mutation testing): tests for surviving mutants of `risk/gate.py` (risk_caps target).
 
 The gate's checks are its audit record: the engine journals every check's rule, state, actual and limit
-(engine/intraday.py) and the shadow rules keep the names of the failed ones (engine/shadow.py). So the record is
+(engine/intraday_legacy.py) and the shadow rules keep the names of the failed ones (engine/shadow.py). So the record is
 pinned here whole, for a plain buy, a refused one and a multi-day buy against a known book. The boundaries each
 rule is defined by are pinned too: a limit reached is a failure where the rule says "below" (daily loss, run
 drawdown, positions, entries) and a pass where it says "at most" (quote age, the % caps up to 1e-9); a warning

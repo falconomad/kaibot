@@ -104,9 +104,10 @@ def test_property_no_book_setting_changes_an_intraday_verdict(eq, pnl, peak, end
 @hyp.given(peak_i=st.floats(1_000, 1e6), dd=st.floats(0, 0.5), pnl=st.floats(-0.4, 2.0))
 def test_the_gate_sees_the_intraday_drawdown_whatever_the_book_did(peak_i, dd, pnl):
     """QA-Ops second key on #207: the gate's run_drawdown_pct check (Snapshot.equity = the whole run, needed for
-    sizing) gets the peak scaled by engine/core.gate_peak, so its drawdown is the intraday one `_risk_halts` ends the
-    run on: a book in profit never hides it, a book in loss (its own end) never blocks an intraday entry."""
-    from kaibot.engine.core import gate_peak
+    sizing) gets the peak scaled by engine/intraday_legacy.gate_peak, so its drawdown is the intraday one
+    `_risk_halts` ends the run on: a book in profit never hides it, a book in loss (its own end) never blocks an
+    intraday entry."""
+    from kaibot.engine.intraday_legacy import gate_peak
 
     eq_i = peak_i * (1 - dd)
     book_pnl = pnl * peak_i
@@ -116,13 +117,13 @@ def test_the_gate_sees_the_intraday_drawdown_whatever_the_book_did(peak_i, dd, p
 
 
 def test_without_multi_day_pnl_the_gate_peak_is_the_peak_bit_for_bit():
-    from kaibot.engine.core import gate_peak
+    from kaibot.engine.intraday_legacy import gate_peak
 
     assert gate_peak(10_123.45, 9_876.5, 0.0) == 10_123.45 and gate_peak(None, 9_876.5, 0.0) is None
 
 
 def test_a_non_positive_run_equity_keeps_the_gate_peak():
     """#211: no scaled peak at or below zero (cannot happen with long-only books capped at 100%; never divides)."""
-    from kaibot.engine.core import gate_peak
+    from kaibot.engine.intraday_legacy import gate_peak
 
     assert gate_peak(10_000.0, -5.0, -200.0) == 10_000.0 and gate_peak(10_000.0, 0.0, -100.0) == 10_000.0

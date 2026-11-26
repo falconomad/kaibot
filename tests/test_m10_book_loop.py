@@ -1,5 +1,5 @@
 """M10 1.19 (#444): the multi-day book has its own loop (engine/book_loop.py); the intraday path is built only when
-an intraday rule is enabled (engine/intraday.py).
+an intraday rule is enabled (engine/intraday_legacy.py).
 
 The hard requirement of the ticket: for the multi-day rules nothing changes. The sessions of the live-daily drills
 (test_live_daily_engine.DailyAccount: a decision after DAY1's close, the near-close send on DAY2, the fill, the
@@ -111,7 +111,7 @@ def runs(tmp_path_factory):
 
 
 def test_the_book_engine_is_built_without_an_intraday_rule_and_the_intraday_one_with(runs):
-    from kaibot.engine.intraday import IntradayEngine
+    from kaibot.engine.intraday_legacy import IntradayEngine
 
     assert type(runs["old"][0].eng) is IntradayEngine and runs["old"][0].eng.intraday
     for name in ("loop", "live"):
@@ -200,7 +200,7 @@ print("ok")
 """
 # The intraday path: its engine, its shadow rules, the agent room, the custom-ticker check and the intraday rules.
 # (The test harness itself imports engine/market.py for the other two accounts, so that one is checked below.)
-NEVER = ["kaibot.engine.intraday", "kaibot.engine.shadow", "kaibot.engine.roomflow", "kaibot.engine.tickercheck",
+NEVER = ["kaibot.engine.intraday_legacy", "kaibot.engine.shadow", "kaibot.engine.roomflow", "kaibot.engine.tickercheck",
          "kaibot.agents.room", "kaibot.strategies.dip", "kaibot.strategies.spy_momentum", "kaibot.strategies.orb",
          "kaibot.strategies.news_continuation", "kaibot.strategies.noise_band", "kaibot.strategies.shadow_types"]
 
