@@ -362,7 +362,10 @@ def active_return(gate: GateV3, kind: str, acc: Account, tbill: pd.Series | None
         # share of the session's minutes the rule was invested; SPY close to close at that average share. That
         # charges an intraday rule SPY's overnight drift too, so it is the stricter of the two readings
         timed = pd.Series(np.maximum(e.to_numpy(dtype=float), tw.to_numpy(dtype=float)), index=e.index)
-    mine = net if rf is None else pd.Series(net.to_numpy() + np.clip(1.0 - held, 0.0, 1.0) * rf.to_numpy(),
+    # the sleeve's idle cash earns bills; time invested during the session is not idle (#703), so an intraday rule
+    # is not credited a full day's bill rate on money it had in SPY
+    idle = 1.0 - (held if tw is None else np.maximum(held, tw.to_numpy(dtype=float)))
+    mine = net if rf is None else pd.Series(net.to_numpy() + np.clip(idle, 0.0, 1.0) * rf.to_numpy(),
                                             index=net.index)
     bench = benchmark(gate, kind, spy, timed, rf, prior=prior)
     costs = mtm.align(net, mtm.dated(acc.costs, "costs"))[1] if acc.costs is not None else None

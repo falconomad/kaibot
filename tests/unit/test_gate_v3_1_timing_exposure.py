@@ -43,6 +43,13 @@ def test_an_intraday_rule_is_compared_with_spy_at_its_time_in_the_market_not_wit
     assert old["active"].mean() * 252 > 0.005 and abs(a["active"].mean() * 252) < 0.01
 
 
+def test_time_in_spy_during_the_session_earns_no_bills():
+    acc = intraday(0.13)
+    a = g3.active_return(GATE, "timing", acc, BILLS)
+    credit = (a["with_cash"] - a["net"]).to_numpy()
+    assert credit == pytest.approx(0.87 * a["rf"].to_numpy())
+
+
 def test_the_session_exposure_is_the_larger_of_close_and_intraday():
     e = pd.Series(np.where(np.arange(len(IDX)) % 2, 1.0, 0.0), index=IDX)  # carried every other night
     acc = g3.Account(SPY * 0.5, SPY, e, intraday_exposure=pd.Series(0.4, index=IDX))

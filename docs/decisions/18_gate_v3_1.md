@@ -129,6 +129,7 @@ its benchmark held no SPY and S1 measured "beats cash" (re-score of 25 Nov 2026:
 | `sleeve.benchmark.timing` | `average_matched`: SPY at the mean close exposure | `average_matched_time_weighted`: SPY at the mean of each session's exposure, the **larger of its close exposure and its time-weighted intraday exposure** (the share of the session's minutes the rule was invested) |
 | Where the intraday exposure comes from | nowhere | `Account.intraday_exposure`. `replay/spy_noise_band.run_account` writes `exposure_intraday` to the daily file. For a daily file written before this change, `results.intraday_exposure` derives it from the trades file beside it (entry and exit minutes; an early close counted as 390 minutes, a slight understatement). Nothing is re-run |
 | A timing sleeve with no intraday series | — | unchanged: the close exposure, as before |
+| The sleeve's own idle cash in bills | `1 −` the close exposure going into the session | `1 −` the larger of that and the session's intraday exposure: money in SPY during the session earns no bill rate (so an intraday rule is not credited a full day of bills) |
 | Selection sleeves | — | unchanged: `path_matched` |
 
 The audit offered two readings: time-weighted intraday exposure, or open-to-close SPY at the mean exposure. The
