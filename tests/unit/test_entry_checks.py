@@ -61,10 +61,13 @@ def _prev(d: date) -> date:  # weekdays as sessions, 27 Nov 2026 (Thanksgiving) 
 def test_the_reason_codes_are_one_registry_and_the_switch_offers_exactly_them():
     assert set(ec.CHOICES) | {"checks_failed"} == set(ec.REASONS)
     assert switches.SWITCHES["KAIBOT_DAILY_CHECKS_BLOCK"].choices == ec.CHOICES
-    # off by default: nothing blocks; "on" is every check but price_jump (a real news move looks the same)
-    assert switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {}) == ()
-    assert set(switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {"KAIBOT_DAILY_CHECKS_BLOCK": "on"})) == \
-        set(ec.CHOICES) - {"price_jump"}
+    # "on" is every check but price_jump (a real news move looks the same); audit 2 5.15 (#695): "on" is the
+    # default (unset or empty), and "off" still switches every check off
+    on = switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {"KAIBOT_DAILY_CHECKS_BLOCK": "on"})
+    assert set(on) == set(ec.CHOICES) - {"price_jump"}
+    assert switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {}) == on
+    assert switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {"KAIBOT_DAILY_CHECKS_BLOCK": ""}) == on
+    assert switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {"KAIBOT_DAILY_CHECKS_BLOCK": "off"}) == ()
     with pytest.raises(switches.SwitchError):
         switches.value("KAIBOT_DAILY_CHECKS_BLOCK", {"KAIBOT_DAILY_CHECKS_BLOCK": "stale"})
     b = ec.Block("benchmark_bar_missing", "no daily bar for 2026-11-24", "SPY")
