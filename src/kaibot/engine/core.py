@@ -3238,14 +3238,6 @@ class Engine:
                 "engine has no ex-date source (ex_dividends)")
         return strats
 
-
-    # ================= entries =================
-
-
-
-
-
-
     # ================= order sync =================
     def _sync_orders(self) -> None:
         self.own_order_ids()  # M9 1.13: each tick, before a leg's id can be dropped (cancel, replace)
