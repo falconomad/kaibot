@@ -67,6 +67,12 @@ the Mac itself before acting, because three minutes without Supabase used to can
   in the data folder. The carry-over (#363) reads it: a buy the watchdog cancelled is sent again at the next
   session like one that never reached the venue. A buy the dead-man cancelled is not recognised yet (its record is
   in Supabase) and stays "order canceled" until the next decision.
+- **Booked, not left to the owner (audit 2 5.13, #693; #529's watchdog half).** After each position close the watchdog
+  appends the venue's order id to `watchdog_closes.jsonl` in the data folder. The engine books that sale's fill to the
+  sleeves it sold (event `watchdog_close_booked`), also when the ledger gets the shares only later: a buy whose fill
+  activity came a day late, which the watchdog had closed as shares the books did not show. The sale waits until the
+  ledger holds at least its shares (it never books a short); a close whose answer was lost, or a sale the record does
+  not name, stays a fill on an unknown order for the owner to accept, as before.
 
 ## Degraded start: Supabase down when the engine starts (M10 1.25, #450)
 
@@ -243,6 +249,11 @@ select vault.update_secret(id, new_name => 'kaibot_alpaca_paper_secret') from va
  where name = 'kaibot_alpaca_paper_secret_drill';
 select kaibot.deadman_tick();   -- 'market closed'; the check turns green
 ```
+**Unregistered events (0055, #693).** From migration 0055 the tick also sends one `/fail` ping naming every new
+`unregistered_event` row (the engine wrote an event name `src/kaibot/engine/event_names.py` lacks: a code fault, tell
+the team); the next run's success ping turns the check green again. The engine's own check (`scripts/healthcheck.py`)
+sends a `/fail` for the same log line, also before 0055 is applied.
+
 Record the time the alert reached the phone on #717. `tests/test_deadman_alerts.py` runs the same drill, and every
 ping above, on every pull request against a throwaway Postgres.
 

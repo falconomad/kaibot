@@ -36,10 +36,11 @@ def test_0039_is_0036_with_only_the_new_types_added():
     assert "grant execute on function public.kb_health() to authenticated;" in tail_new
 
 
-def test_0039_is_the_latest_definition_of_kb_health():
+def test_0039_is_the_latest_definition_of_kb_health_before_0055():
+    """0055 (#693) is the next kb_health: 0039's text with more types (tests/test_kb_health_0055_*)."""
     later = sorted(p.name for p in (ROOT / "migrations").glob("*.sql")
                    if p.name > M39.name and "function public.kb_health()" in p.read_text())
-    assert later == []
+    assert later[:1] == ["0055_kb_health_unregistered_event_alert.sql"]
 
 
 def test_0039_has_no_destructive_statement():

@@ -40,6 +40,10 @@ log = logging.getLogger("kaibot.failsafe")
 
 # M9 1.6, both in the engine's data directory (next to journal.sqlite):
 CANCELS_FILE = "watchdog_cancels.jsonl"  # the watchdog appends a line before each entry cancel; the engine reads it
+# Audit 2, 5.13 (#693, #529's watchdog half): the watchdog appends a line after each position close it made (the venue
+# order id `close_position` answered with); the engine books such a sale against shares the ledger holds (or comes to
+# hold: a buy whose activity came late), instead of leaving a fill on an unknown order for the owner to accept
+CLOSES_FILE = "watchdog_closes.jsonl"
 PID_FILE = "engine.pid"  # the engine writes {"pid", "host"} at start; the watchdog checks the process
 
 EMERGENCY_STOP_PCT = GAP_SCENARIO_PCT  # 10%: the gap the book is sized to survive (risk/gate.py)
@@ -368,6 +372,30 @@ def watchdog_cancels(path: str | Path | None) -> set[str]:
             continue
         if isinstance(b, dict):
             out.update(str(b[k]) for k in ("order_id", "client_order_id") if b.get(k))
+    return out
+
+
+def watchdog_closes(path: str | Path | None) -> dict[str, dict]:
+    """Audit 2, 5.13 (#693): the venue order ids of the position closes the watchdog made, from the local file it
+    appends to after each close (engine/watchdog.py, CLOSES_FILE): order id -> {symbol, ts}. A close whose answer
+    was lost (no order id) is not there: its fill stays a fill on an unknown order, for the owner. No file, or a
+    torn last line: what can be read."""
+    import json
+
+    out: dict[str, dict] = {}
+    if path is None:
+        return out
+    try:
+        lines = Path(path).read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            b = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(b, dict) and b.get("order_id") and b.get("symbol"):
+            out[str(b["order_id"])] = {"symbol": str(b["symbol"]), "ts": b.get("ts")}
     return out
 
 

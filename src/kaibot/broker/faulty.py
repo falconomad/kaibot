@@ -169,9 +169,9 @@ DEFAULT_FAULTS = FaultProfile(
 
 SKEW_MINUTES = 6  # a clock-skew spell
 LAG_READS = (1, 4)  # lookup_lag: reads by client order id that find nothing
-# fill_dropped: how long an activity stays invisible. The longest is past the close and the evening's decision; a
-# hand-written scenario can ask for more (`Forced`, e.g. 1500: over the next session's window)
-DROP_MINUTES = (1, 3, 8, 45, 300)
+# fill_dropped: how long an activity stays invisible. 300 is past the close and the evening's decision; 1500 is over
+# the next session's window (#529; drawn since audit 2, 5.13, #693, fixed both halves)
+DROP_MINUTES = (1, 3, 8, 45, 300, 1500)
 HOLD_BARS = (1, 2, 4, None)  # hold: bars the venue does not trade the order (None: never)
 
 

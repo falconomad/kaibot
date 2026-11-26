@@ -894,6 +894,7 @@ class LiveDaily:
         om.sync()
         self._report_unfilled(om)
         self._report_refused(om)
+        self._book_failsafe_closes(om)
         self._prune()
         self._cancel_due()  # an order that was unconfirmed when the halt came is cancelled once it is confirmed
 
@@ -999,6 +1000,56 @@ class LiveDaily:
             said.add((key, why))
             self.event("multi_day_error", {"step": "broker_payload", "error": why, "refused": om.invalid_count,
                                            "action": "not booked; buys in the symbol wait for the reconciliation"})
+
+    def _book_failsafe_closes(self, om: OrderManager) -> list[str]:
+        """Audit 2, 5.13 (#693, #529's watchdog half): a sale the watchdog made (its close record, CLOSES_FILE, names
+        the venue order) is booked against the shares it sold, instead of staying a fill on an unknown order that
+        only the owner can accept. The watchdog closes a position the books do not show as multi-day: with a buy
+        whose activity came late, shares the ledger books only after the close (#529), so the sale waits in
+        `foreign` until the ledger holds at least its shares in the stock, and is then booked to those sleeves
+        (`OrderManager.book_failsafe_sale`; the smallest sleeve names first, by rule). A sale larger than what the
+        ledger holds is never booked here (it would book a short): it waits, and after FOREIGN_MAX_AGE it is the
+        owner's, as before. One `watchdog_close_booked` warning per sale. Returns the activity ids booked."""
+        closes = self._watchdog_closes()
+        if not closes or not om.foreign:
+            return []
+        holders = getattr(self.account, "holders", None)
+        out = []
+        for aid, a in sorted(om.foreign.items()):
+            oid, sym = str(a.get("order_id")), str(a.get("symbol"))
+            if a.get(payloads.INVALID) or str(a.get("side")) != "sell" or closes.get(oid, {}).get("symbol") != sym:
+                continue
+            have = holders(sym) if holders is not None else []
+            want = float(a.get("qty") or 0)
+            if want <= 1e-9 or sum(q for _, q in have) + 1e-9 < want:
+                continue  # the shares are not (yet) in the ledger: read again at the next check
+            parts, left = [], want
+            for strategy, q in sorted(have):
+                take = min(float(q), left)
+                if take > 1e-9:
+                    parts.append((strategy, take))
+                    left -= take
+            t = datetime.fromisoformat(str(a.get("transaction_time") or self.now().isoformat()).replace("Z", "+00:00"))
+            session = str((t if t.tzinfo else t.replace(tzinfo=UTC)).astimezone(NY).date())
+            bodies = om.book_failsafe_sale(aid, parts, session=session, reason="watchdog close")
+            for b in bodies:
+                self.account.book_fill(b)
+            if bodies:
+                out.append(aid)
+                log.warning("watchdog close of %s (%g shares, order %s) booked to %s", sym, want, oid,
+                            [f"{st}:{q:g}" for st, q in parts])
+                self.event("watchdog_close_booked", {"symbol": sym, "qty": want, "px": float(a["price"]),
+                                                     "order_id": oid, "activity": aid,
+                                                     "sleeves": {st: q for st, q in parts}})
+        return out
+
+    def _watchdog_closes(self) -> dict[str, dict]:
+        """Audit 2, 5.13 (#693): the watchdog's position closes (its local record, next to the journal file). An
+        in-memory journal (tests, research) has no such file."""
+        path = str(getattr(self.journal, "path", "") or "")
+        if not path or path == ":memory:":
+            return {}
+        return failsafe.watchdog_closes(Path(path).parent / failsafe.CLOSES_FILE)
 
     def _prune(self) -> None:
         """The account's FILL activities include the intraday engine's own fills, which this manager does not know
@@ -2465,6 +2516,13 @@ class EngineAccount:
                             for p in self.e.pos.values()):
             return None
         return float(b.qty_by_symbol().get(symbol, 0.0))
+
+    def holders(self, symbol: str) -> list[tuple[str, float]]:
+        """Audit 2, 5.13 (#693): the run's sleeves in the stock, [(strategy, shares)], for a watchdog sale's booking."""
+        b = self._book()
+        if b is None:
+            return []
+        return [(st, float(s.qty)) for (st, sym), s in b.sleeves.items() if sym == symbol and s.qty > 1e-9]
 
     def book_fill(self, body: dict) -> None:
         self.e._md_realized(body)  # today's realised P&L of a sale (before the fold changes the sleeve)

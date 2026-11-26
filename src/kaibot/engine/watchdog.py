@@ -41,7 +41,9 @@ engine's next beat may not have landed yet).
 
 Before each entry cancel the watchdog appends the order's ids to a local file (CANCELS_FILE, next to the journal;
 the journal itself it never writes). The engine's carry-over reads it: a buy the watchdog cancelled is sent again
-at the next session like one that never reached the venue (engine/daily.ended_buys).
+at the next session like one that never reached the venue (engine/daily.ended_buys). After each position close it
+appends the venue's order id to CLOSES_FILE (audit 2, 5.13, #693): the engine books that sale against the shares it
+sold, also shares whose buy the ledger books only later (#529's watchdog half).
 
 Limits: it runs on the same machine as the engine, so it does not survive the laptop sleeping or losing power.
 For that, the broker-held GTC stops protect open positions, and the off-box dead-man (Supabase pg_cron; migration
@@ -108,7 +110,7 @@ SENT_COVERS_S = 180.0  # a stop this watchdog sent counts as resting for this lo
 # tick old: one tick period on top of STALE_S. A dead or hung engine is acted on at most this long after its last
 # write (a gone process: at once).
 LOCAL_ALIVE_S = 150
-CANCELS_FILE, PID_FILE = failsafe.CANCELS_FILE, failsafe.PID_FILE
+CANCELS_FILE, CLOSES_FILE, PID_FILE = failsafe.CANCELS_FILE, failsafe.CLOSES_FILE, failsafe.PID_FILE
 
 
 def _pid_alive(pid: int) -> bool:
@@ -352,6 +354,24 @@ class Watchdog:
             log.exception("cancel record not written for %s (the carry-over will not send it again)",
                           o.get("symbol"))
 
+    def _note_close(self, symbol: str, o: dict | None) -> None:
+        """Audit 2, 5.13 (#693): append the close's venue order id to the local close record (CLOSES_FILE, next to
+        the cancel record), so the engine books its fill against the shares it sold, also when the ledger has them
+        only later (a buy whose activity came late, #529). Written after the call: `close_position` carries no
+        client id, so only its answer names the order. A lost answer, or a record not written, leaves the fill on
+        an unknown order (the owner accepts it, as before). Never stops the flatten."""
+        if self.cancel_log is None or not isinstance(o, dict) or not o.get("id"):
+            return
+        try:
+            line = json.dumps({"ts": self.now().isoformat(), "by": "watchdog", "order_id": str(o["id"]),
+                               "symbol": symbol, "qty": o.get("qty")})
+            with open(self.cancel_log.parent / CLOSES_FILE, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            log.exception("close record not written for %s (its fill waits for the owner)", symbol)
+
     def _entry_orders(self, orders: list[dict]) -> list[dict]:
         return [o for o in orders if failsafe.is_entry(o)]
 
@@ -538,7 +558,7 @@ class Watchdog:
                 continue
             try:
                 if qty is None:
-                    self.broker.close_position(sym)
+                    self._note_close(sym, self.broker.close_position(sym))
                 else:  # free the intraday shares (their legs), keep the multi-day stop, sell the rest
                     coid, there = self._keyed("intraday", sym, "x", FINAL_SALE)
                     if there is None:  # #585: our sale of this generation still working is left to work
