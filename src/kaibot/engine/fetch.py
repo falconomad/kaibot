@@ -30,13 +30,16 @@ import signal
 import subprocess
 import time as _time
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 log = logging.getLogger("kaibot.engine")
 ET = ZoneInfo("America/New_York")
 FETCH_TIMEOUT_S = 45 * 60  # a full refresh at 40 requests a minute takes about 17 minutes
+# Second-key review: the coverage check reads the whole view (seconds); this close to the send window only SPY's bar is
+# looked at, so a wake at 15:45 never holds the loop before the send
+FULL_CHECK_BEFORE = timedelta(minutes=20)
 ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "fetch_daily.sh"
 LOG = ROOT / "logs" / "fetch_daily.log"
@@ -92,7 +95,7 @@ class EngineFetch:
         opens = datetime.combine(fill, self.send_from(fill), ET)
         if now >= opens:
             return None  # the window of the decision these bars are for has opened: a fetch now changes nothing
-        why = self.missing(k, now)
+        why = self.missing(k, now, full=now < opens - FULL_CHECK_BEFORE)
         return (k, why) if why else None
 
     def _maybe_start(self, asked: str) -> None:
@@ -161,13 +164,13 @@ def for_engine(eng) -> EngineFetch | None:
         return None
     load = daily.load
 
-    def missing(k: date, now: datetime) -> str | None:
+    def missing(k: date, now: datetime, full: bool = True) -> str | None:
         from kaibot.engine.live_daily import DataNotReady, StoreFailedCheck
 
         quick = getattr(load, "available", None)
         if quick is not None:
             why = quick(k, now)
-            if why:
+            if why or not full:
                 return why
         try:  # the view itself: a refresh that stopped part-way leaves SPY's bar but too few stocks
             load(k, now)

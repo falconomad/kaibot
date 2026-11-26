@@ -50,7 +50,8 @@ class World:
     def now(self):
         return self.t
 
-    def missing(self, k, now):
+    def missing(self, k, now, full=True):
+        self.full = full
         return None if (self.store / str(k)).exists() else f"the daily store has no SPY bar for {k}"
 
     def fetch(self, tmp_path, cmd=None, **kw):
@@ -195,3 +196,41 @@ def test_fetch_daily_sh_takes_the_lock_before_anything_else(tmp_path):
     assert not (tmp_path / ".venv").exists() and _time.monotonic() - t0 < 30
     text = (ROOT / "scripts" / "fetch_daily.sh").read_text()
     assert text.index("fetch_lock.py") < text.index("[ -d .venv ]")
+
+
+def test_close_to_the_window_only_the_quick_look_is_made(tmp_path):
+    """Second-key review: within 20 minutes of the window the whole view is not read (it holds the loop)."""
+    w = World(tmp_path, datetime(2026, 8, 5, 15, 40, tzinfo=ET))
+    f = w.fetch(tmp_path)
+    f.wake("waking")
+    _run(f, w)
+    assert w.full is False and w.events[0][1]["state"] == "started"
+    (tmp_path / "b").mkdir()
+    w2 = World(tmp_path / "b", datetime(2026, 8, 5, 10, 0, tzinfo=ET))
+    f2 = w2.fetch(tmp_path / "b")
+    f2.wake("start")
+    _run(f2, w2)
+    assert w2.full is True
+
+
+def test_the_real_missing_check_reads_the_whole_view_only_when_asked():
+    from kaibot.engine.live_daily import DataNotReady
+
+    calls = []
+
+    class Load:
+        def available(self, k, now):
+            calls.append("quick")
+            return None
+
+        def __call__(self, k, now):
+            calls.append("full")
+            raise DataNotReady("the daily store holds 2026-08-04 for only 10 of 300 stocks")
+
+    daily = SimpleNamespace(load=Load(), prev_session=prev, next_session=nxt, send_from=lambda d: time(15, 50))
+    eng = SimpleNamespace(daily=daily, store=SimpleNamespace(event=lambda *a: None), _rid=lambda: None,
+                          now=lambda: datetime(2026, 8, 5, 10, tzinfo=ET))
+    f = ef.for_engine(eng)
+    assert "only 10 of 300" in f.missing(TUE, eng.now()) and calls == ["quick", "full"]
+    calls.clear()
+    assert f.missing(TUE, eng.now(), full=False) is None and calls == ["quick"]
