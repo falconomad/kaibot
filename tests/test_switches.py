@@ -148,6 +148,7 @@ def test_the_known_readers_still_read_it_themselves():
         for f in s.readers:
             assert name in {n for n, _ in _reads(ROOT / f)}, (name, f)
     assert {f for s in sw.SWITCHES.values() for f in s.readers} == {"src/kaibot/common/helper_session.py",
+                                                                      "src/kaibot/common/secret_files.py",
                                                                       "scripts/healthcheck.py",
                                                                       "scripts/research_runner.py"}
 

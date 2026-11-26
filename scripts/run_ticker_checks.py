@@ -5,9 +5,14 @@ For each pending ticker: the broker's asset record (listed, tradable), completed
 20-day $ volume) and Finnhub's industry (sector ETF; SPY when unknown). Read-only calls on free tiers, inside the
 budgets of config/sources.yaml. Run it next to the engine (it is a separate process and never trades):
 
-    python scripts/run_ticker_checks.py [--env ~/Projects/kaibot-secrets/.env] [--once]
+    python scripts/run_ticker_checks.py [--env ~/Projects/kaibot-secrets/.env] [--data-env .../data.env] [--once]
 
-Without --once it polls every 5 seconds, so a check on the Strategy page answers within a few seconds."""
+Without --once it polls every 5 seconds, so a check on the Strategy page answers within a few seconds.
+
+Keys (audit 2 7.2, #712; docs/ops/secrets.md). Alpaca: ONLY the market-data pair of the second, empty paper account
+(data.env; common/secret_files.py), for the asset record and the bars. From the engine's .env it keeps only
+SUPABASE_URL, the Supabase service key (it answers kaibot.ticker_check rows; no helper function for them yet) and
+FINNHUB_API_KEY: the trading pair's lines are skipped unparsed, so this process never holds the trading key."""
 
 from __future__ import annotations
 
@@ -39,23 +44,41 @@ def finnhub_industry(key: str | None):
     return industry
 
 
+ENV_NAMES = ("SUPABASE_URL", "SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY", "FINNHUB_API_KEY")
+
+
+def load_keys(env_file: str, data_file: str | None) -> dict[str, str]:
+    """The worker's settings: the data pair from data.env and ENV_NAMES from the engine's .env, nothing else (#712).
+    SystemExit with what to do when one is missing."""
+    from kaibot.common.secret_files import data_keys, read_names
+    from kaibot.engine.config import DEFAULT_SUPABASE_URL
+
+    key, secret = data_keys(data_file)
+    env = read_names(env_file, ENV_NAMES)
+    service = env.get("SUPABASE_SERVICE_KEY") or env.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not service:
+        raise SystemExit(f"missing SUPABASE_SERVICE_KEY in {env_file}")
+    return {"alpaca_key": key, "alpaca_secret": secret, "supabase_url": env.get("SUPABASE_URL") or DEFAULT_SUPABASE_URL,
+            "service_key": service, "finnhub": env.get("FINNHUB_API_KEY", "")}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--env", default=os.path.expanduser("~/Projects/kaibot-secrets/.env"))
+    ap.add_argument("--data-env", default=None, help="the market-data key file (docs/ops/secrets.md)")
     ap.add_argument("--once", action="store_true", help="answer what is pending, then exit")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    os.environ.setdefault("KAIBOT_ENV_FILE", a.env)
     from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
-    from kaibot.engine.config import Settings
     from kaibot.engine.store import Store
 
-    st = Settings.from_env()  # paper endpoint only; a live URL is refused
-    broker, data = AlpacaPaper(st.alpaca_key, st.alpaca_secret), AlpacaData(st.alpaca_key, st.alpaca_secret)
-    store = Store(st.supabase_url, st.supabase_service_key)
+    k = load_keys(a.env, a.data_env)  # never the trading pair (#712)
+    broker, data = AlpacaPaper(k["alpaca_key"], k["alpaca_secret"]), AlpacaData(k["alpaca_key"], k["alpaca_secret"])
+    store = Store(k["supabase_url"], k["service_key"])
+    log.info("ticker checks: Alpaca with the market-data key of the second paper account (no trading key here)")
     kw = {"asset_fn": broker.asset,
           "bars_fn": lambda s, start, end: data.bars([s], start, end, feed="sip", timeframe="1Day").get(s),
-          "industry_fn": finnhub_industry(os.environ.get("FINNHUB_API_KEY"))}
+          "industry_fn": finnhub_industry(k["finnhub"] or None)}
     while True:
         try:
             for r in tickercheck.process(store, **kw):

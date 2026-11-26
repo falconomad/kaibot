@@ -3,7 +3,7 @@
 **Why.** The engine's Supabase service key can do anything in the database: insert a command, take the engine
 lease, write a fresh engine heartbeat (so the dead-man never fires), replace the owner. Until now the price relay,
 the market-notice job and some research scripts used that same key. After this setup they sign in as a separate
-"helper" user that can do four things and nothing else, and the service key stays with the engine and its watchdog.
+"helper" user that can do a few listed things and nothing else, and the service key stays with the engine and its watchdog.
 
 **What the helper can do** (migration `0038_helper_role.sql`; the last row is `0047_helper_shadow_results.sql`):
 
@@ -14,6 +14,7 @@ the market-notice job and some research scripts used that same key. After this s
 | publish and withdraw market notices | `kb_helper_publish_notices` | read or write any other table |
 | read nine columns of closed trades | `kb_helper_trades` | read open positions, orders, the ledger |
 | read the shadow rules' results (#371, migration 0047) | `kb_helper_shadow_results` | read `event` or `signal` rows themselves |
+| read which stocks the paper run holds, with their size (#712, migration 0053; the price relay) | `kb_helper_held_symbols` | read cost, stops, strategies, P&L or the ledger rows themselves |
 
 It cannot insert a command, read or take the lease, write a halt, or touch the owner row: the helper is the
 ordinary `authenticated` role, which has no right on any `kaibot` table (migration 0004), and the dashboard's
@@ -21,8 +22,9 @@ functions answer only the owner. It can never become the owner either: the "firs
 owner" function of migration 0002 answers only while there is no owner, and 0038 adds a trigger that refuses an
 owner row for a user listed as a helper. `tests/test_helper_role_sql.py` checks each of these on a scratch database.
 
-**Nothing changes until you do the setup.** Without the helpers' env file the relay and the notice job keep
-using the engine's `.env` exactly as before (they say "still on the service key" in their logs).
+**Nothing changes for the notice job until you do the setup.** Without the helpers' env file it keeps using the
+engine's `.env` (it says "still on the service key" in its log). The price relay no longer has that fallback
+(#712): without `helper.env` and `data.env` it does not start ([secrets.md](secrets.md)).
 
 ## One-time setup (stakeholder, about 10 minutes, any time)
 
@@ -43,18 +45,19 @@ file of step 3.
      on conflict (user_id) do nothing;
      select count(*) from kaibot.helper;   -- 1
      ```
-3. **Create the helpers' env file** on the Mac: `~/Projects/kaibot-secrets/helper.env`, with these six lines
+3. **Create the helpers' env file** on the Mac: `~/Projects/kaibot-secrets/helper.env`, with these three lines
    (a new file; do not add them to `.env`, and do not put the service key in this file: the scripts refuse a
    helpers' file that holds one):
    ```
-   ALPACA_API_KEY=<the same paper key as in .env>
-   ALPACA_SECRET=<the same paper secret as in .env>
    SUPABASE_PUBLISHABLE_KEY=<Supabase > Project Settings > API keys > Publishable key, sb_publishable_...>
    SUPABASE_HELPER_EMAIL=<the email of step 1>
    SUPABASE_HELPER_PASSWORD=<the password of step 1>
    ```
    Then `chmod 600 ~/Projects/kaibot-secrets/helper.env`. (The publishable key is not a secret: the dashboard's
-   web page ships it. The relay needs the paper keys to read the held stocks and the IEX stream.)
+   web page ships it.) **No Alpaca key here (audit 2 7.2, #712):** the relay's market-data key is the data pair of
+   a second paper account in `data.env` ([secrets.md](secrets.md), "The data key"). The setup before #712 put the
+   trading pair in this file: delete those two lines; they are skipped since #712 and
+   `scripts/data_key_check.py` fails until they are gone.
 4. **Check it.**
    ```
    cd ~/Projects/kaibot && git pull
