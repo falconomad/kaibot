@@ -114,3 +114,7 @@ jobs:
     script: scripts/fetch_av_earnings.py    # day's 25 free requests; the daily run is launchd (fetch_av_earnings.sh
     args: ["--budget", "20"]                # --install-daily, 02:00 local), the runner has no daily schedule
     posts_to_issue: 797
+  - id: gate-v3-1-rescore-stage6-2026-11-27   # #701 again (#708: "run the #701 re-score after these jobs land"): the
+    script: scripts/gate_v3_rescore.py        # v3.1 table with the #708 re-runs, #706's B7 and #710's 97% runs; it
+    args: []                                  # must stay after index-core-book-97-2026-11-26 (runs no rule, no trial)
+    posts_to_issue: 701

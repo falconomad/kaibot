@@ -133,6 +133,24 @@ def test_the_rescore_job_is_allowed_and_queued_after_the_80_percent_runs():
     assert ids.index("gate-v3-rescore-books-2026-11-25") > ids.index("index-core-book-80-2026-11-25")
 
 
+def test_the_v3_1_rescore_runs_again_after_the_stage_6_runs():
+    """#708 left the #701 re-score to run after its re-runs; #706's control book and #710's 97% runs come first too,
+    so the published v3.1 table counts them (the runner takes the queue in file order)."""
+    import research_runner as rr
+
+    cfg = rr.load_allowed()
+    jobs = rr.load_queue()
+    ids = [j["id"] for j in jobs]
+    rerun = "gate-v3-1-rescore-stage6-2026-11-27"
+    job = rr.check_job(jobs[ids.index(rerun)], cfg)
+    assert (job.spec.target, job.args, job.issue) == ("scripts/gate_v3_rescore.py", (), 701)
+    before = [i for i in ids if i.endswith("-exposure-2026-11-26")]
+    before += ["index-core-book-80-control-2026-11-26", "index-core-97-2026-11-26", "index-core-book-97-2026-11-26"]
+    assert len(before) == 11
+    assert all(ids.index(rerun) > ids.index(i) for i in before)
+    assert ids.index(rerun) > ids.index("gate-v3-1-rescore-2026-11-26")
+
+
 def test_qa_only_book_reports_are_split_off_and_a_sleeve_report_stays_in_the_sleeve_table():
     """QA-Ops (#456): the split is by the report, so a sleeve report (its control p-value feeds the family
     correction) is never taken for a book, and a book report never reaches the correction through its sleeve test."""
