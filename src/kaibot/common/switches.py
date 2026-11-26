@@ -101,10 +101,14 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_DATA_CHECKS_BLOCK", "checks", "backend-quant", "M12 3.11 (#473): which minute-bar data checks block "
        "entries: off, on (all but bar_gap) or a comma list", default=(),
        choices=("stale", "no_bars", "bad_price", "unmatched_move", "bar_gap")),
+    # audit 2 5.15 (#695): on by default (Product under #600; docs/ops/switches.md). Buys only, never a sale
     _s("KAIBOT_DAILY_CHECKS_BLOCK", "checks", "data", "M12 3.11 (#473): which daily-store data checks block buys "
-       "of the multi-day path: off, on (all but price_jump) or a comma list (kaibot.ingest.entry_checks)",
-       default=(), choices=("benchmark_bar_missing", "daily_bar_stale", "price_not_positive", "split_not_applied",
-                            "universe_stale", "price_jump")),
+       "of the multi-day path: off, on (all but price_jump; the default since #695) or a comma list "
+       "(kaibot.ingest.entry_checks)",
+       default=("benchmark_bar_missing", "daily_bar_stale", "price_not_positive", "split_not_applied",
+                "universe_stale"),
+       choices=("benchmark_bar_missing", "daily_bar_stale", "price_not_positive", "split_not_applied",
+                "universe_stale", "price_jump")),
     _s("KAIBOT_ENGINE_FETCH", "flag", "backend-quant", "audit 2 5.12 (#692): the engine starts "
        "scripts/fetch_daily.sh itself, at start-up or on waking, when the daily store lacks the bars its next "
        "multi-day send needs (on unless switched off)", default=True),

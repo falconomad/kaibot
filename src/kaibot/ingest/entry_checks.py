@@ -31,7 +31,8 @@ Stock checks (block buys of that stock only)
 Every block clears by itself once the data is right: a missing bar arrives, the action is added to the table, the
 log is updated, or the bar leaves the window (WINDOW, SPLIT_WINDOW sessions). Nothing here writes or fetches; the
 clock is an argument. `DailyEntryChecks` reads the store and caches by file fingerprint, so a refresh is seen at the
-next call. Off by default (KAIBOT_DAILY_CHECKS_BLOCK, kaibot.common.switches): then nothing is read or blocked.
+next call. On by default since audit 2 5.15 (#695): every check but price_jump blocks buys (KAIBOT_DAILY_CHECKS_BLOCK,
+kaibot.common.switches; docs/ops/switches.md). With KAIBOT_DAILY_CHECKS_BLOCK=off nothing is read or blocked.
 """
 
 from __future__ import annotations
