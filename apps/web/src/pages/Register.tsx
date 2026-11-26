@@ -8,7 +8,9 @@ import { TOO_MANY, isSignupRefused, takeAttempt } from "../lib/attempts";
 // checked first (kb_invite_check, migration 0045), then Supabase Auth's own email sends the link that creates the
 // account (shouldCreateUser: true, with the name and the code as user_metadata). The database refuses the account
 // anyway unless the email has an open invite and the code is that invite's (0045's trigger), so skipping this page
-// gains nothing. After the click the invite is marked used and the profile is made.
+// gains nothing. After the click the invite is marked used and the profile is made. From 0048 (#721) the check says
+// only ok or not (no reason, and the email is not compared), and only the click of the account admitted with the code
+// redeems the invite, never after it expired.
 
 export const REASON: Record<InviteReason, string> = {
   unknown: "That code isn't an invite. Check it, or ask for a new invite.",
@@ -17,6 +19,9 @@ export const REASON: Record<InviteReason, string> = {
   expired: "That invite has expired (invites last 7 days). Ask for a new one.",
   email_mismatch: "This invite is for a different email. Use the address the invite was sent to.",
 };
+/** 0048 (#721): the check answers only whether the code is open, so the page says the same for every refusal: a
+ *  stranger holding a code learns nothing more (which address it is for, or whether it was used or withdrawn). */
+export const NOT_USABLE = "That code can't be used. It may be mistyped, used, withdrawn or expired (invites last 7 days). Check it, or ask for a new invite.";
 export const NOT_OPEN = "Registration isn't open yet: the database update for invites (migration 0045) hasn't been applied. Ask the owner.";
 export const REFUSED = "This invite can't create an account any more (it may have expired or the account limit is reached). Ask for a new invite.";
 
@@ -40,7 +45,8 @@ export function Register({ search = typeof window === "undefined" ? "" : window.
     try {
       const check = await api.inviteCheck(code, email);
       if (check === null) { setErr(NOT_OPEN); setState("error"); return; }
-      if (!check.ok) { setErr(REASON[check.reason ?? "unknown"]); setState("error"); return; }
+      // before 0048 the answer carries a reason; from 0048 on it does not, and one message stands for all
+      if (!check.ok) { setErr(check.reason && check.reason in REASON ? REASON[check.reason] : NOT_USABLE); setState("error"); return; }
       const { error } = await supa.auth.signInWithOtp({ email, options: { shouldCreateUser: true,
         data: { name: name.trim().slice(0, 60), invite_code: code.trim() }, emailRedirectTo: `${window.location.origin}/?${FROM_SIGNIN}` } });
       if (error) { setErr(isSignupRefused(error) ? REFUSED : error.message); setState("error"); return; }

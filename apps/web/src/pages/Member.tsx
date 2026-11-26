@@ -8,7 +8,9 @@ import { InviteCard } from "../components/InviteCard";
 // kill switch. This page shows only their own account and the invite card. A read-only view of the owner's run is a
 // later step that needs its own owner-checked, licence-checked RPCs.
 
-export function Member({ name }: { name: string | null }) {
+// 0048 (#721, Product 25 Nov 2026): only the owner invites. kb_me's can_invite is then false for a member, and the
+// invite card is not shown (before 0048 it is true for a member, and the card shows as it did).
+export function Member({ name, canInvite }: { name: string | null; canInvite: boolean }) {
   return (
     <div className="center">
       <div style={{ display: "grid", gap: 16, width: "min(560px, 100%)" }}>
@@ -18,7 +20,7 @@ export function Member({ name }: { name: string | null }) {
             with other accounts yet. When it is, it'll appear here; you don't need to do anything.</p>
           <button onClick={() => supa.auth.signOut()}>Sign out</button>
         </section>
-        <InviteCard />
+        {canInvite && <InviteCard />}
       </div>
     </div>
   );

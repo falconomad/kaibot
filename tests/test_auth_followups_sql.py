@@ -146,8 +146,8 @@ def test_the_inviter_revokes_and_the_code_is_refused_everywhere(db):  # noqa: F8
     out = j(f"select public.kb_invite_revoke({row['id']});")
     assert out["status"] == "revoked" and out["email"] == "gone@example.com"
     # the check, the list, the seats
-    assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="") == {"ok": False,
-                                                                                       "reason": "revoked"}
+    # (0048, #721: the check answers ok alone, no reason)
+    assert j(f"select public.kb_invite_check('{inv['code']}');", role="anon", uid="") == {"ok": False}
     row = j("select public.kb_invite_list();")["invites"][0]
     assert row["status"] == "revoked" and row["code"] is None and row["can_revoke"] is False
     assert j("select public.kb_invite_list();")["taken"] == taken - 1
@@ -179,31 +179,34 @@ def test_a_revoke_between_registration_and_confirmation_makes_no_member(db):  # 
 
 @needs_pg
 def test_who_may_revoke(db):  # noqa: F811
-    """At most one open invite at a time: the other SQL tests' up to three accounts and the member fit the cap of 5."""
+    """At most one open invite at a time: the other SQL tests' up to three accounts and the member fit the cap of 5.
+    0048 (#721, Product 25 Nov 2026): only the owner invites, so only the owner lists and revokes; a member is
+    refused as any other non-owner is, and an invite a member made before 0048 is the owner's to revoke."""
     _member()
     by_owner = j("select public.kb_invite_create('by-owner@example.com');")
     ids = {i["email"]: i["id"] for i in j("select public.kb_invite_list();")["invites"]}
-    # a member sees and revokes only their own: the owner's invite is refused with the same words as an unknown id
-    assert j("select public.kb_invite_list();", uid=MEMBER)["invites"] == []
     for bad in (ids["by-owner@example.com"], 999999, "null"):
-        with pytest.raises(AssertionError, match="no open invite of yours with that id"):
+        with pytest.raises(AssertionError, match="not authorised"):
             psql(f"select public.kb_invite_revoke({bad});", uid=MEMBER)
+    with pytest.raises(AssertionError, match="not authorised"):
+        psql("select public.kb_invite_list();", uid=MEMBER)
     assert j(f"select public.kb_invite_check('{by_owner['code']}');", role="anon", uid="")["ok"] is True
-    # a used invite cannot be revoked, not even by the owner; an expired one neither
-    with pytest.raises(AssertionError, match="no open invite"):
-        psql(f"select public.kb_invite_revoke({ids['member@example.com']});", uid=OWNER)
+    # a used invite cannot be revoked, not even by the owner; an expired one neither; an unknown id neither
+    for bad in (ids["member@example.com"], 999999):
+        with pytest.raises(AssertionError, match="no open invite"):
+            psql(f"select public.kb_invite_revoke({bad});", uid=OWNER)
     psql(f"update kaibot.invite set expires_at = now() - interval '1 second' "
          f"where id = {ids['by-owner@example.com']};", role=None)
     with pytest.raises(AssertionError, match="no open invite"):
         psql(f"select public.kb_invite_revoke({ids['by-owner@example.com']});", uid=OWNER)
-    # the owner revokes a member's invite; the member revokes their own
-    j("select public.kb_invite_create('by-mia@example.com');", uid=MEMBER)
-    mine = j("select public.kb_invite_list();", uid=MEMBER)["invites"]
-    assert [(i["email"], i["can_revoke"]) for i in mine] == [("by-mia@example.com", True)]
-    assert j(f"select public.kb_invite_revoke({mine[0]['id']});")["status"] == "revoked"
-    j("select public.kb_invite_create('by-mia-2@example.com');", uid=MEMBER)
-    again = j("select public.kb_invite_list();", uid=MEMBER)["invites"][0]
-    assert j(f"select public.kb_invite_revoke({again['id']});", uid=MEMBER)["status"] == "revoked"
+    # an invite a member made before 0048 (written as 0046 let them): the owner sees it, not theirs, and revokes it
+    psql(f"insert into kaibot.invite (email, code, invited_by) "
+         f"values ('by-mia@example.com', 'ABCD-0000-0000-0001', '{MEMBER}');", role=None)
+    row = next(i for i in j("select public.kb_invite_list();")["invites"] if i["email"] == "by-mia@example.com")
+    assert row["mine"] is False and row["can_revoke"] is True
+    with pytest.raises(AssertionError, match="not authorised"):
+        psql(f"select public.kb_invite_revoke({row['id']});", uid=MEMBER)
+    assert j(f"select public.kb_invite_revoke({row['id']});")["status"] == "revoked"
     # anon and a signed-in account with no profile: refused
     with pytest.raises(AssertionError, match="permission denied"):
         psql("select public.kb_invite_revoke(1);", role="anon")

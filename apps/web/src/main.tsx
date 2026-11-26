@@ -77,7 +77,7 @@ function Gate() {
     ? <Suspense fallback={<Skeleton variant="center" />}><Register search={search} /></Suspense> : <SignIn />;
   if (owner.data === false && me.isPending) return <Skeleton variant="center" />;
   if (owner.data === false && me.data?.member) {
-    return <Suspense fallback={<Skeleton variant="center" />}><Member name={me.data.name} /></Suspense>;
+    return <Suspense fallback={<Skeleton variant="center" />}><Member name={me.data.name} canInvite={me.data.can_invite === true} /></Suspense>;
   }
   if (owner.isError || owner.data === false) return <NotOwner failed={owner.isError} retry={() => { void owner.refetch(); }} />;
   return (

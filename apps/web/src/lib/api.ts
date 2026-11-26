@@ -239,7 +239,8 @@ async function joinPrices(): Promise<void> {
 export interface Me { owner: boolean; member: boolean; helper: boolean; name: string | null; can_invite: boolean }
 export interface InviteMade { email: string; code: string; link: string; expires_at: string; reused: boolean }
 export type InviteReason = "unknown" | "revoked" | "used" | "expired" | "email_mismatch";
-export interface InviteCheck { ok: boolean; reason: InviteReason | null; expires_at?: string }
+/** 0045/0046 answer a reason; 0048 (#721) answers `ok` alone (no reason, no expiry): `reason` is then absent. */
+export interface InviteCheck { ok: boolean; reason?: InviteReason | null; expires_at?: string }
 export interface InviteRow { id: number; email: string; created_at: string; expires_at: string; used_at: string | null;
   status: "open" | "used" | "expired" | "revoked"; code: string | null; mine: boolean;
   /** 0046 (#635): the caller may revoke this open invite (theirs, or any for the owner). Absent before 0046. */
