@@ -197,9 +197,11 @@ def test_index_core_amendment_4_is_hindsight_from_its_git_history():
     head = next(h for h in p.amendments if h.startswith("## Amendment 4"))
     assert log[head] is not None and log[head].date() == date(2026, 11, 25)
     late = g3.hindsight(p, datetime(2026, 11, 24, 12, tzinfo=UTC))  # the first 27% run, #458
-    assert [a["amendment"] for a in late] == [head]
-    assert "hindsight (Amendment 4" in g3.verdict_text("fail", late)
-    assert p.summary()["amendment_log"][-1]["amendment"] == head
+    names = [a["amendment"] for a in late]
+    assert names[0] == head and all(n.startswith("## Amendment") for n in names)
+    assert not any(n.startswith(("## Amendment 1 ", "## Amendment 2 ", "## Amendment 3 ")) for n in names)
+    assert "hindsight (Amendments 4, 5 written after the first run)" in g3.verdict_text("fail", late)
+    assert p.summary()["amendment_log"][3]["amendment"] == head
 
 
 def test_without_git_a_pre_registration_has_no_amendment_times(tmp_path):

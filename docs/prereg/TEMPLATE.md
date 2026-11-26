@@ -19,6 +19,10 @@ How to use this template (decision 15, sections 5 and 7, Gate A):
 - **Date:** <<YYYY-MM-DD, the day this file is committed>>
 - **Author:** <<team>>
 - **Issue:** <<#number of the story>>
+- **design_saw_holdout:** <<true or false, then why: did ANY number that shaped this design (a setting, a target,
+  a threshold, a choice between versions) come from data on or after 2025-01-01, the hold-out? An audit's or a
+  paper's sums over 2017-2026 count as true. True, or a missing line, labels the final check on the hold-out a
+  consistency check, never an out-of-sample test (gate v3.1, decision 18 section 9)>>
 
 ## Hypothesis
 

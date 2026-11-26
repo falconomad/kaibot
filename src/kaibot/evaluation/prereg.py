@@ -94,6 +94,8 @@ class Prereg:
     amendments: tuple[str, ...] = ()  # the "## Amendment n" headings of today's file
     # #701: (heading, the first commit that carried it; None when git was not asked or no commit has it)
     amendment_log: tuple[tuple[str, datetime | None], ...] = ()
+    # #705: did anything that shaped the design read the hold-out (2025-01-01 on)? None: not declared
+    design_saw_holdout: bool | None = None
 
     @property
     def retroactive(self) -> bool:
@@ -108,7 +110,7 @@ class Prereg:
                 "neighbours": list(self.neighbours),
                 "committed_at": self.committed_at.isoformat() if self.committed_at else None,
                 "first_committed_at": self.first_committed_at.isoformat() if self.first_committed_at else None,
-                "amendments": list(self.amendments),
+                "amendments": list(self.amendments), "design_saw_holdout": self.design_saw_holdout,
                 "amendment_log": [{"amendment": h, "committed_at": t.isoformat() if t else None}
                                   for h, t in self.amendment_log],
                 "versions": [{"sha256": v, "committed_at": t.isoformat(), "amended_only": a}
@@ -282,11 +284,30 @@ def load(rule: str, root: Path | str | None = None, *, committed: bool = True) -
         raise PreregError(f"{rel} names {len(neighbours)} neighbours; at most {MAX_NEIGHBOURS} are allowed for "
                           "the plateau check (decision 15, Gate A).")
     committed_at = _check_committed(path, root) if committed else None
+    saw = _design_saw_holdout(fields, rel)
     history = _history(path, root) if committed else []
     versions = _versions(path, root, text, history) if committed else ()
     return Prereg(rule, path, hashlib.sha256(raw).hexdigest(), status, when, neighbours, sections, committed_at,
                   versions[0][1] if versions else None, versions,
-                  tuple(m.group(0).strip() for m in _AMENDMENT.finditer(text)), amendment_log(text, history))
+                  tuple(m.group(0).strip() for m in _AMENDMENT.finditer(text)), amendment_log(text, history), saw)
+
+
+DESIGN_SAW_HOLDOUT = ("design_saw_holdout", "design saw hold-out", "design saw holdout")
+
+
+def _design_saw_holdout(fields: dict[str, str], rel: Path) -> bool | None:
+    """#705 (gate v3.1, decision 18 s.9): the `design_saw_holdout` field, `true` or `false` (a reason may follow).
+    The last one in the file wins, so an appended amendment can declare it. None when the file does not say, or
+    says something other than true or false: gate v3.1 reads None as "saw it", the safe reading."""
+    value = next((fields[k] for k in DESIGN_SAW_HOLDOUT if k in fields), None)
+    if value is None:
+        return None
+    word = re.match(r"\W*(\w+)", value.lower())
+    if word and word.group(1) in ("true", "yes"):
+        return True
+    if word and word.group(1) in ("false", "no"):
+        return False
+    return None
 
 
 def require(rule: str, root: Path | str | None = None, *, committed: bool = True) -> str:

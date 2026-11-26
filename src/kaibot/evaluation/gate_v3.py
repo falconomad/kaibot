@@ -137,6 +137,10 @@ class GateV3:
                              "(decision 18 section 8; it may only be lowered)")
         if (s3c.get("holm_inputs") or "final_requires") != "final_requires":
             raise ValueError("config/gate_v3.yaml: s3_control.holm_inputs must be final_requires (decision 18 s.8)")
+        needs = cfg["holdout_check"].get("clean_needs", ["first_run_after_freeze", "design_saw_holdout_false"])
+        if sorted(needs or []) != ["design_saw_holdout_false", "first_run_after_freeze"]:
+            raise ValueError("config/gate_v3.yaml: holdout_check.clean_needs must list first_run_after_freeze and "
+                             "design_saw_holdout_false (decision 18 section 9)")
         if (cfg["sleeve"]["s4_deflated_sharpe"].get("trial_sharpes") or "active_return") != "active_return":
             raise ValueError("config/gate_v3.yaml: s4_deflated_sharpe.trial_sharpes must be active_return (decision "
                              "18 section 6: S4 tests the active return, so its variance comes from active Sharpes)")
@@ -1125,7 +1129,8 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
 
 
 def holdout_check(gate: GateV3, *, research: pd.Series, holdout: pd.Series, first_run_at: datetime | None,
-                  spy_research: pd.Series | None = None, spy_holdout: pd.Series | None = None) -> dict:
+                  spy_research: pd.Series | None = None, spy_holdout: pd.Series | None = None,
+                  design_saw_holdout: bool | None = None, prereg: Prereg | None = None) -> dict:
     """Does the hold-out look like the research window? (decision 16 section 6)
 
     Sleeve (no SPY given): `research` and `holdout` are the ACTIVE return series; the hold-out's annualised mean
@@ -1134,7 +1139,12 @@ def holdout_check(gate: GateV3, *, research: pd.Series, holdout: pd.Series, firs
     maximum drawdown must be at or below the 95th percentile of the resampled drawdowns.
 
     `clean` is False when the rule was first run before the hold-out was frozen: the hold-out had then already
-    been seen, and the result is a consistency check, never an out-of-sample test."""
+    been seen, and the result is a consistency check, never an out-of-sample test.
+
+    Gate v3.1 (#705, decision 18 s.9): `clean` also needs the pre-registration to declare
+    `design_saw_holdout: false` (taken from `prereg` when given). True, or not declared, forces the
+    consistency-check label: a design shaped by numbers that include the hold-out has seen it, whenever its
+    first run was."""
     band = float(gate.cfg["holdout_check"]["band"])
     per = gate.stats_kw["periods"]
     r, h = mtm.dated(research, "research"), mtm.dated(holdout, "hold-out")
@@ -1144,10 +1154,19 @@ def holdout_check(gate: GateV3, *, research: pd.Series, holdout: pd.Series, firs
                          "series (at least 20 sessions) must start after it")
     rows = bootstrap_paths(gate, r.size, h.size)
     frozen = pd.Timestamp(str(gate.cfg["holdout_check"]["contaminated_before"]))
-    clean = first_run_at is not None and pd.Timestamp(_utc(first_run_at).date()) >= frozen
-    out: dict = {"sessions": int(h.size), "band": band, "clean": bool(clean),
-                 "label": "out-of-sample check" if clean else
-                 "consistency check: the rule was first run before the hold-out was frozen", "checks": {}}
+    late_enough = first_run_at is not None and pd.Timestamp(_utc(first_run_at).date()) >= frozen
+    saw = prereg.design_saw_holdout if prereg is not None and design_saw_holdout is None else design_saw_holdout
+    clean = bool(late_enough and saw is False)
+    if not late_enough:
+        label = "consistency check: the rule was first run before the hold-out was frozen"
+    elif saw is True:
+        label = "consistency check: the design saw the hold-out (design_saw_holdout: true)"
+    elif saw is None:
+        label = "consistency check: the pre-registration does not declare design_saw_holdout: false"
+    else:
+        label = "out-of-sample check"
+    out: dict = {"sessions": int(h.size), "band": band, "clean": clean, "label": label,
+                 "design_saw_holdout": saw, "checks": {}}
     if spy_research is None:
         boot = r.to_numpy()[rows].mean(axis=1) * per
         got, floor = float(h.mean() * per), float(np.quantile(boot, band))

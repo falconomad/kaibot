@@ -225,3 +225,16 @@ named `index_core_aggressive_<universe>_cap80_<ts>`.
 B1 to B6, Product may propose a level value to the stakeholder. Nothing is opened, changed or re-run with other
 settings because of this run: another cap is a new amendment written before its run. The final check of decision 16
 section 7 needs its own opening committed to `config/holdout.yaml` before the hold-out is read.
+
+## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out
+
+Gate v3.1 (decision 18 section 9) asks every pre-registration whether anything that shaped its design read the
+hold-out. For this book it did. The frozen 15% volatility target came from the audit's own monthly sums over 2017
+to 2026, and that window includes the hold-out (from 2025-01-01). This amendment declares it:
+
+- **design_saw_holdout:** true (the volatility target was set from 2017-2026 sums that include the hold-out)
+
+This changes no setting, neighbour, mark or run. Its only effect is the label of the final check on the hold-out
+(decision 16 section 7). If that check is ever opened, it is labelled a consistency check, never an out-of-sample
+test. It is written after results were seen, and gate v3.1 prints it as hindsight. That is correct, and it makes
+nothing easier to pass.
