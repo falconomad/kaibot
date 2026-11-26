@@ -203,6 +203,9 @@ class Account:
     costs: pd.Series | None = None  # each session's costs at 1x, as a share of that session's starting equity
     control: Any = None  # the matched random control: a `ControlResult`, its dict, or a report's control block
     universe: str = "today"  # "point_in_time" | "today"
+    # #703 (decision 18 s.7): the time-weighted share of equity invested during each session's minutes. An intraday
+    # rule is flat at every close, so `exposure` alone makes its timing benchmark all T-bills
+    intraday_exposure: pd.Series | None = None
 
 
 # ---------------------------------------------------------------- the correction across families
@@ -316,12 +319,16 @@ def benchmark(gate: GateV3, kind: str, spy: pd.Series, exposure: pd.Series, rf: 
     selection: yesterday's close exposure times today's SPY return (`mtm.exposure_matched`): the sleeve's own
     timetable of being invested is copied, so only the choice of names is judged.
     timing: the sleeve's AVERAGE exposure times SPY, every session: for an SPY-only rule the timetable is the
-    skill, so it must not be copied.
+    skill, so it must not be copied. Gate v3.1 (`average_matched_time_weighted`, #703): `exposure` is then the
+    session's time-weighted exposure (the larger of the close exposure and the intraday one, see `active_return`),
+    so an intraday rule is compared with the same average amount of SPY, not with T-bills.
 
     `prior` (amendment 1): the exposure at the close before the first session (0 when the account starts on it),
     so a sleeve invested going into the window is compared with SPY held at that exposure on its first session."""
     how = gate.cfg["sleeve"]["benchmark"][kind]
     e = exposure.to_numpy(dtype=float)
+    if how not in ("path_matched", "average_matched", "average_matched_time_weighted"):
+        raise ValueError(f"config/gate_v3.yaml: unknown benchmark {how!r}")
     held = np.r_[float(prior), e[:-1]] if how == "path_matched" else np.full(e.size, float(e.mean()))
     out = held * spy.to_numpy(dtype=float)
     if rf is not None:
@@ -345,12 +352,22 @@ def active_return(gate: GateV3, kind: str, acc: Account, tbill: pd.Series | None
     prior = float(before_first.iloc[-1]) if len(before_first) and math.isfinite(before_first.iloc[-1]) else 0.0
     held = np.r_[prior, e.to_numpy(dtype=float)[:-1]]  # the exposure going into each session (amendment 1)
     rf = mtm.tbill_daily(tbill, net.index) if tbill is not None else None
+    tw = None
+    if acc.intraday_exposure is not None:
+        tw = mtm.align(net, mtm.dated(acc.intraday_exposure, "intraday exposure"))[1].clip(0.0, 1.0)
+    timed = e  # what the timing benchmark averages
+    if kind == "timing" and gate.cfg["sleeve"]["benchmark"]["timing"] == "average_matched_time_weighted" \
+            and tw is not None:
+        # #703: a session's exposure is the larger of the close exposure (held overnight) and the time-weighted
+        # share of the session's minutes the rule was invested; SPY close to close at that average share. That
+        # charges an intraday rule SPY's overnight drift too, so it is the stricter of the two readings
+        timed = pd.Series(np.maximum(e.to_numpy(dtype=float), tw.to_numpy(dtype=float)), index=e.index)
     mine = net if rf is None else pd.Series(net.to_numpy() + np.clip(1.0 - held, 0.0, 1.0) * rf.to_numpy(),
                                             index=net.index)
-    bench = benchmark(gate, kind, spy, e, rf, prior=prior)
+    bench = benchmark(gate, kind, spy, timed, rf, prior=prior)
     costs = mtm.align(net, mtm.dated(acc.costs, "costs"))[1] if acc.costs is not None else None
     return {"active": mine - bench, "net": net, "with_cash": mine, "benchmark": bench, "spy": spy, "exposure": e,
-            "held": held,
+            "held": held, "intraday_exposure": tw, "benchmark_exposure": timed,
             "rf": rf, "costs": costs, "dropped_before": before, "dropped_holdout": after}
 
 
@@ -728,7 +745,10 @@ def evaluate_sleeve(gate: GateV3, *, rule: str, account: Account, pit_account: A
     kw = gate.stats_kw
     stats = {"window": [a["net"].index[0].date().isoformat(), a["net"].index[-1].date().isoformat()],
              "kind": kind, "benchmark": gate.cfg["sleeve"]["benchmark"][kind],
-             "mean_exposure": float(a["exposure"].mean()),
+             "mean_exposure": float(a["benchmark_exposure"].mean()),  # #703: what the benchmark holds
+             "mean_close_exposure": float(a["exposure"].mean()),
+             "mean_intraday_exposure": None if a["intraday_exposure"] is None else
+             float(a["intraday_exposure"].mean()),
              "rule": mtm.curve(a["with_cash"], rf=a["rf"] if a["rf"] is not None else 0.0, **kw),
              "rule_cash_at_zero": mtm.curve(a["net"], **kw),
              "benchmark_curve": mtm.curve(a["benchmark"], rf=a["rf"] if a["rf"] is not None else 0.0, **kw),

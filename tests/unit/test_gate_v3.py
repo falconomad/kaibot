@@ -90,7 +90,7 @@ def test_marks_are_those_of_decision_16():
     assert str(c["window"]["research_from"]) == "2017-05-01" and str(c["window"]["research_to"]) == "2024-12-31"
     assert "2017-05-01 to 2024-12-31" in text
     s, b = c["sleeve"], c["book"]
-    assert s["benchmark"] == {"selection": "path_matched", "timing": "average_matched"}
+    assert s["benchmark"] == {"selection": "path_matched", "timing": "average_matched_time_weighted"}  # dec. 18 s.7
     assert s["s1_active_return"]["annualised_above"] == 0.0 and s["s2_costs"]["costs_multiple"] == 2.0
     assert s["s3_control"]["random_runs_min"] == 500 and s["s3_control"]["across_families"] == "holm"
     assert s["s3_control"]["within_family"] == "bonferroni" and s["s3_control"]["pool"] == "candidate_pool"
