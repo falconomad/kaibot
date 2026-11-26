@@ -47,7 +47,7 @@ figures carry no freshness line (#604; stakeholder, 23 Nov 2026); a late one's l
 
 Not in CI (#673): a full run (--interact --stress) took about 4.5 minutes headless in one theme, because every page
 waits a fixed 1.2-1.8 s for its motion and data to settle (65 page loads at five widths, then about 60 more for
---interact and --stress). With both themes (#720) it is 130 page loads before --interact: about 7 minutes (--themes
+--interact and --stress). With both themes (#720) it is 130 page loads before --interact: about 9 minutes (--themes
 dark for the old run). That is over the 2 minutes a check may add to the web job. Run it before a PR that changes
 layout.
 """
