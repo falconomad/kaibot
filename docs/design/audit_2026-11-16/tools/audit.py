@@ -23,7 +23,7 @@ VIEWPORTS = [(375, 812), (390, 844), (430, 932), (768, 1024), (1280, 800), (1440
 ROUTES = [("home", "/", None), ("trades", "/trades", None), ("tape", "/tape", None), ("trade-detail", "/trades/137", None),
           ("report", "/report", None), ("engine", "/health", None), ("gate", "/gate", None), ("settings", "/settings", None),
           ("configure", "/strategy", None), ("my-lists", "/strategy", "lists"), ("fine-tune", "/strategy/fine-tune", None),
-          ("new-run", "/start", None), ("sign-in", "/", "signed-out")]
+          ("new-run", "/start", None), ("how", "/how", None), ("sign-in", "/", "signed-out")]
 EMPTY = ["home", "trades", "tape", "report", "engine", "gate"]
 INIT = """
 window.__cls = 0; window.__shifts = 0;

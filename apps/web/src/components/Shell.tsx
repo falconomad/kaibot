@@ -21,6 +21,7 @@ import { CREDIT_URL } from "../lib/logos";
 import { type HealthEvent, JOURNAL_REASON, journalDamaged } from "../lib/journalstop";
 import { EVERY, type Freshness, freshness } from "../lib/freshness";
 import { FreshNote } from "./Fresh";
+import { DB_DOWN, DB_DOWN_WHY, dbUnreachable, hostOf, lastSeenText } from "../lib/ownernotes";
 
 /** Required attribution for the company logos (AllInvestView's free ticker-logo CDN, stakeholder 18 Nov 2026): one
  *  visible, plain link on every screen that shows logos, phones included. Never hidden, never rel nofollow, sponsored
@@ -66,7 +67,7 @@ const NAV: { to: string; label: string; icon: string }[] = [
 const MORE_ICON = "M5 12 H5.01 M12 12 H12.01 M19 12 H19.01";
 export const TABS = ["/", "/positions", "/activity", "/health", "/more"] as const;
 /** Pages reached from More: the More tab is the active one on them. */
-export const UNDER_MORE = ["/more", "/report", "/gate", "/strategy", "/settings"];
+export const UNDER_MORE = ["/more", "/report", "/gate", "/strategy", "/settings", "/how"];
 
 /** The Engine tab's dot: red while a halt or breach is in force, amber while the engine is offline in market hours
  *  (asleep at night is no dot). */
@@ -123,7 +124,9 @@ export interface EngineChip { dot: string; text: string; sub: string; live: bool
   journal?: boolean;
   /** #604: how old the heartbeat is (lib/freshness.ts), while the engine should be beating: absent when it is live, or
    *  asleep or off on purpose. */
-  fresh?: Freshness }
+  fresh?: Freshness;
+  /** N6 (#724): the machine it was last seen on, while it is offline in market hours (the owner's screens only). */
+  host?: string }
 
 /** `events`: kb_health's events when the page has them (a damaged-journal stop is only visible there). */
 export function engineChip(o: Overview | undefined, run: Run, events?: HealthEvent[]): EngineChip {
@@ -143,7 +146,9 @@ export function engineChip(o: Overview | undefined, run: Run, events?: HealthEve
       return { dot: "var(--text-3)", text: c.kind === "asleep" ? "Engine asleep" : "Engine off", sub: c.wake ? `starts ${c.wake}` : "market closed",
         live: false, asleep: true, note: c.text };
     const fresh = freshness(Date.parse(beat.ts), EVERY.heartbeat, now.getTime());
-    return { dot: "var(--stale)", text: "Engine offline", sub: fresh.text ?? "", live: false, asleep: false, note: c.text, fresh };
+    const host = hostOf(beat.detail) ?? undefined;
+    return { dot: "var(--stale)", text: "Engine offline", sub: fresh.text ?? "", live: false, asleep: false,
+      note: host ? `${c.text} · ${lastSeenText(host)}` : c.text, fresh, host };
   }
   return { dot: state === "error" ? "var(--warn)" : "var(--live)", text: STATE_TEXT[state] ?? state,
     sub: beat.detail?.host ?? "", live: true, asleep: false, note: "" };
@@ -265,9 +270,10 @@ export function Shell() {
           </select>
         )}
         {ts && tsm ? (
-          <Link to="/health" className={`chip engine-chip ts-chip ${ts.tone}`} title={`${tsm.tradingLine(ts)} · ${chip.text} · ${chip.sub}`}>
+          <Link to="/health" className={`chip engine-chip ts-chip ${ts.tone}`} title={`${tsm.tradingLine(ts)} · ${chip.text} · ${chip.sub}${chip.host ? ` · ${lastSeenText(chip.host)}` : ""}`}>
             <span className="sr-only">Trading: </span><tsm.TradingLine s={ts} />
             <FreshNote f={chip.fresh} what="Engine" inline className="hide-sm" />
+            {chip.host && <span className="num hide-sm chip-host">· {lastSeenText(chip.host)}</span>}
           </Link>
         ) : (
           <Link to="/health" className="chip engine-chip" title={chip.sub}>
@@ -275,10 +281,18 @@ export function Shell() {
             <span className={chip.live ? "live-dot" : undefined} aria-hidden="true"
               style={{ width: 8, height: 8, borderRadius: 999, display: "inline-block", background: chip.dot, flex: "none" }} />
             <b>{chip.text}</b> {chip.fresh ? <FreshNote f={chip.fresh} what="Engine" inline className="hide-sm" /> : <span className="num hide-sm">{chip.sub}</span>}
+            {chip.host && <span className="num hide-sm chip-host">· {lastSeenText(chip.host)}</span>}
           </Link>
         )}
       </header>
       {red.length > 0 && <PhoneHaltBar items={red} />}
+      {/* N9 (#724): the overview failed at the connection while older figures stay on screen: the database, not the engine */}
+      {o && overview.isError && dbUnreachable(overview.error) && (
+        <div className="riskstrip warn db-down" role="status">
+          <b>{DB_DOWN}:</b> the figures below may be behind. {DB_DOWN_WHY}
+          {" "}<button type="button" className="link-btn" onClick={() => { void overview.refetch(); }}>Try again</button>
+        </div>
+      )}
       {risk.severity !== "ok" && pathname !== "/" && pathname !== "/health" && (
         <div className={`riskstrip ${risk.severity}`} role={risk.severity === "breach" ? "alert" : "status"}>
           <b>{risk.severity === "breach" ? "Limit or safety halt in force:" : "Heads up:"}</b> {risk.items.join(" · ")}

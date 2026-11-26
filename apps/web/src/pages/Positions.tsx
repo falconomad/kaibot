@@ -13,6 +13,7 @@ import { ExperimentSheetBody, engineDetail, experimentsOf } from "../components/
 import { StatusRow } from "../components/Home";
 import { Tick } from "../components/Tick";
 import { Sheet } from "../components/Sheet";
+import { PRICE_SOURCE } from "../lib/ownernotes";
 import { useRunCtx } from "../components/Shell";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
@@ -311,6 +312,8 @@ export function BookSheet({ o, b, exp, exits, live }: { o: Pick<Extract<Open, { 
         );
       })()}
       {RULES[p.rule] && <p className="muted" style={{ fontSize: 15 }}>The rule {RULES[p.rule].what}. {live ? "Prices are live, from the paper account." : "Prices are at the last close."}</p>}
+      {/* N12 (#724): a tick is not the engine's view; the stop line reads confirmed closes */}
+      <p className="muted price-source" style={{ fontSize: 14 }}>{PRICE_SOURCE}</p>
       <StockSummary symbol={o.symbol} />
     </>
   );

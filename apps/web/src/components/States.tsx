@@ -6,6 +6,7 @@ import { EXPERIMENT_LABEL, STATUS_TAG, TEST_PHASE, RETIRED_TEXT, ruleName, ruleS
 import { Skeleton } from "./Skeleton";
 import { experimentView, type Experiment } from "../lib/experiment";
 import { ExperimentBadge } from "./Experiment";
+import { DB_DOWN, DB_DOWN_WHY, dbUnreachable } from "../lib/ownernotes";
 
 export const Loading = Skeleton;
 
@@ -13,10 +14,13 @@ const message = (e: unknown) => (e instanceof Error ? e.message : typeof e === "
 
 export function ErrorState({ what, error, retry, compact }: { what: string; error: unknown; retry?: () => void; compact?: boolean }) {
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  // N9 (ui_after_engine_v3, #724): the database out of reach is its own state, never read as a dead engine
+  const db = !offline && dbUnreachable(error);
   const body = (
-    <div className="state state-error" role="alert">
-      <b>{what} couldn't load.</b>{" "}
-      <span className="muted">{offline ? "You seem to be offline." : "The server didn't answer as expected."} Nothing in the engine changed.</span>
+    <div className="state state-error" role="alert" data-state={db ? "db-unreachable" : undefined}>
+      <b>{db ? `${DB_DOWN}.` : `${what} couldn't load.`}</b>{" "}
+      <span className="muted">{offline ? "You seem to be offline. Nothing in the engine changed." : db ? `${what} couldn't load. ${DB_DOWN_WHY}`
+        : "The server didn't answer as expected. Nothing in the engine changed."}</span>
       <span className="muted state-detail num">{message(error)}</span>
       {retry && <span><button type="button" onClick={retry}>Try again</button></span>}
     </div>

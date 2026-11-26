@@ -40,7 +40,7 @@ function pwa(): Plugin {
 export default defineConfig({
   plugins: [react(), tailwindcss(), brand(), pwa()],
   // Tests read app.css as text (`?raw`) to check the focus and reduced-motion rules; by default vitest blanks CSS.
-  test: { css: { include: /(app|v4tokens|tokens|notices|strategy)\.css/ } },
+  test: { css: { include: /(app|v4tokens|tokens|notices|strategy|since|haltchip)\.css/ } },
   build: {
     rollupOptions: {
       output: {

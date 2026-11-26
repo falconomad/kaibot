@@ -25,6 +25,12 @@ and that the favicon, the home-screen icon and the manifest load.
 The clock: the check never reads the wall clock. Every page's clock, and the mock behind it, reads OPEN (a Thursday
 at 12:40 in New York) or CLOSED (17:30 the same day), so a run gives the same answer at any hour and on any day.
 
+--interact also checks the owner's notices of #724 (ticket 8.6), each visible at 375, 390 and 430 px with the engine
+offline in market hours and the dashboard's copy behind: "last seen on <host>" (N6), the database-lag line (N7),
+"Since you last looked" with its rows (N10), the price-source line in Home's details (N12), the halt reason as a chip
+on Engine that opens a sheet with the engine's words, "How kaibo decides" from More, and with kb_overview failing at
+the connection, "Can't reach kaibo's database" (N9).
+
 --stress also puts the daily note (#311) at its worst on Home after the close: a long note, a long template fallback
 with its reason, and text with nowhere to break (a link, a ticker list), on the card and in its sheet.
 
@@ -224,7 +230,7 @@ def check(page, name: str, w: int, metrics: str, fails: list[str]) -> dict:
     return row
 
 
-REACH = ["/", "/positions", "/activity", "/health", "/more", "/report", "/gate", "/strategy", "/settings", "/start"]
+REACH = ["/", "/positions", "/activity", "/health", "/more", "/report", "/gate", "/strategy", "/settings", "/start", "/how"]
 
 # The name and the logo as the browser has them (#254): the tab title, the header, the manifest, and every icon the page
 # and the manifest point to (each must load as an image of the size it claims).
@@ -472,6 +478,124 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
             print("360x640 sign-in: page height, screen, button bottom, logo", fit)
             if fit[0] > fit[1] or fit[2] > fit[1] or fit[3] != 50:
                 fails.append(f"at 360x640 sign-in must fit with no scroll and a 50 px logo: {fit}")
+        ctx.close()
+
+
+class OwnerNotesMock(mock_data.Mock):
+    """#724: the engine last beat ten minutes ago (offline in market hours) from a named Mac, and its copy is behind."""
+
+    def heartbeat(self):
+        rows = super().heartbeat()
+        for r in rows:
+            if r["process"] == "engine":
+                r["ts"] = mock_data.iso(self.now - dt.timedelta(minutes=10))
+                r["detail"] = {**r["detail"], "replication": {"backlog_alarm": True, "pending": 412}}
+        return rows
+
+
+class DbDownMock(mock_data.Mock):
+    """#724 N9: kb_overview cannot reach the database (PostgREST's 503, PGRST002)."""
+    FAIL = {"kb_overview"}
+
+
+def serve_failing(mock, dist: pathlib.Path, now: dt.datetime):
+    inner = serve(mock, dist, now)
+    fail = getattr(mock, "FAIL", set())
+
+    def handler(route):
+        url = route.request.url
+        if url.startswith(audit.SUPA) and "/rest/v1/rpc/" in url and url.split("/rest/v1/rpc/")[1].split("?")[0] in fail:
+            return route.fulfill(status=503, content_type="application/json",
+                                 body=json.dumps({"code": "PGRST002", "message": "Could not query the database for the schema cache. Retrying.", "details": None, "hint": None}))
+        return inner(route)
+    return handler
+
+
+NOTE_TEXTS = {
+    "N6 last seen": "last seen on kai-macbook.local",
+    "N7 lag": "kaibo's record is ahead of this screen",
+    "N10 since": "Since you last looked",
+    "N12 price source": "Live prices are from one exchange (IEX)",
+}
+
+
+def owner_notes(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails: list[str]) -> None:
+    at = int((now - dt.timedelta(hours=8)).timestamp() * 1000)
+    look = f"localStorage.setItem('kb.lastLook.1', JSON.stringify({{ at: {at} }}));"
+    for w, h in PHONES:
+        ctx = context(browser, now, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+        ctx.add_init_script(session)
+        ctx.add_init_script(look)
+        ctx.route("**/*", serve(OwnerNotesMock("running", now), dist, now))
+        pg = ctx.new_page()
+        pg.goto(audit.APP + "/", wait_until="load")
+        pg.wait_for_selector("main > *")
+        pg.wait_for_timeout(1500)
+        pg.click("details.home-details summary")
+        pg.wait_for_timeout(300)
+        seen = {k: pg.evaluate("(t) => { const r = [...document.querySelectorAll('main *')].find((e) => e.children.length === 0 && e.innerText && e.innerText.includes(t)) "
+                               "|| [...document.querySelectorAll('main p, main span, main a, main b, main h2')].find((e) => e.innerText && e.innerText.includes(t)); "
+                               "if (!r) return null; const b = r.getBoundingClientRect(); return b.width > 0 && b.height > 0 && b.right <= innerWidth + 1; }", t)
+                for k, t in NOTE_TEXTS.items()}
+        rows = pg.evaluate("[...document.querySelectorAll('.since-row')].map((a) => [a.innerText.trim(), Math.round(a.getBoundingClientRect().height), a.getAttribute('href')])")
+        over = pg.evaluate("document.documentElement.scrollWidth > innerWidth + 1")
+        print(f"owner notes {w}: {seen} | since rows {rows} | overflow {over}")
+        missing = [k for k, v in seen.items() if not v]
+        if missing or over:
+            fails.append(f"#724 at {w} px: not visible on Home: {missing}, overflow={over}")
+        if not rows or any(r[1] < 44 for r in rows):
+            fails.append(f"#724 at {w} px: 'Since you last looked' rows missing or under 44 px: {rows}")
+        elif rows[0][2] and rows[0][2].startswith("/activity"):
+            pg.click(".since-row >> nth=0")
+            pg.wait_for_timeout(1200)
+            if not pg.locator("[role=dialog]").count() and "/activity" not in pg.url:
+                fails.append(f"#724 at {w} px: the first 'Since you last looked' row did not open Activity")
+        pg.goto(audit.APP + "/health", wait_until="load")
+        pg.wait_for_selector("main > *")
+        pg.wait_for_timeout(1200)
+        # the engine is offline here, so the trading line carries no halt: the chips are in "Recent halts"
+        pg.click("details.acc summary:has-text('Technical details')")
+        pg.wait_for_timeout(400)
+        chip = pg.locator(".halt-chip:visible").first
+        if not chip.count():
+            fails.append(f"#724 at {w} px: no halt chip on Engine")
+        else:
+            tap = round(chip.bounding_box()["height"])
+            chip.click()
+            pg.wait_for_selector("[role=dialog]")
+            pg.wait_for_timeout(400)
+            said = pg.evaluate("document.querySelector('[role=dialog]').innerText")
+            wide = pg.evaluate("(() => { const d = document.querySelector('[role=dialog]'); return d.scrollWidth > d.clientWidth + 1 || d.getBoundingClientRect().right > innerWidth + 1; })()")
+            print(f"halt chip {w}: tap {tap} px, sheet wide={wide}: {said[:90]!r}")
+            if tap < 44 or "In the engine's words" not in said or wide:
+                fails.append(f"#724 at {w} px: halt chip tap {tap} px, sheet {said[:60]!r}, wide={wide}")
+            pg.keyboard.press("Escape")
+        engine_seen = pg.evaluate("document.body.innerText.includes('Last seen on') && document.body.innerText.includes(\"kaibo's record is ahead of this screen\")")
+        if not engine_seen:
+            fails.append(f"#724 at {w} px: Engine does not say last seen on and the lag")
+        pg.goto(audit.APP + "/more", wait_until="load")
+        pg.wait_for_selector(".more-list")
+        pg.click(".more-list a[href='/how']")
+        pg.wait_for_selector("main h1")
+        pg.wait_for_timeout(600)
+        how = pg.evaluate("[document.querySelector('main h1').innerText, document.documentElement.scrollWidth > innerWidth + 1]")
+        print(f"how {w}: {how}")
+        if how != ["How kaibo decides", False]:
+            fails.append(f"#724 at {w} px: How kaibo decides: {how}")
+        ctx.close()
+        ctx = context(browser, now, viewport={"width": w, "height": h}, is_mobile=True, has_touch=True)
+        ctx.add_init_script(session)
+        ctx.route("**/*", serve_failing(DbDownMock("running", now), dist, now))
+        pg = ctx.new_page()
+        pg.goto(audit.APP + "/", wait_until="load")
+        try:
+            pg.wait_for_selector("[data-state=db-unreachable]", timeout=8000)
+            down = pg.evaluate("(() => { const e = document.querySelector('[data-state=db-unreachable]'); const b = e.getBoundingClientRect(); return [e.innerText.split('\\n')[0], b.right <= innerWidth + 1, document.documentElement.scrollWidth > innerWidth + 1]; })()")
+        except Exception:
+            down = None
+        print(f"db down {w}: {down}")
+        if not down or not down[0].startswith("Can't reach kaibo's database") or not down[1] or down[2]:
+            fails.append(f"#724 at {w} px: the database-unreachable state: {down}")
         ctx.close()
 
 
@@ -740,6 +864,7 @@ def main(a) -> int:
                 ctx.close()
         if a.interact:
             interact(browser, dist, now, session, fails)
+            owner_notes(browser, dist, now, session, fails)
         if a.stress:
             stress(browser, dist, metrics, fails)
         browser.close()

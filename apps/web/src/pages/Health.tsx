@@ -22,6 +22,8 @@ import { caEvent } from "../lib/corpactions";
 import { type ShadowReview, shadowLine, shadowReviews } from "../lib/engineevents";
 import { clearedAt, clearedFrom, clockSkewText, commandEventText, dataLateText, haltClearedText, refusedPayloadText } from "../lib/healthwords";
 import { FreshNote } from "../components/Fresh";
+import { HaltChip } from "../components/HaltChip";
+import { lagFreshness } from "../lib/ownernotes";
 import { reconLine, reconcileFrom } from "../lib/reconcile";
 import { ReconcileAccept } from "../components/ReconcileAccept";
 import { EVENT_LABELS } from "../lib/eventNames";
@@ -188,7 +190,11 @@ export function Health() {
         <i className={chip.live ? "ok-dot live-dot" : "ok-dot"} style={{ background: chip.journal ? "var(--fail)" : chip.live ? "var(--up)" : "var(--text-3)" }} aria-hidden="true" />
         <span><b>{chip.text}</b>{beatTs ? chip.fresh?.text && <><br /><FreshNote f={chip.fresh} what="Engine" inline /></> : <><br /><span className="muted">Has not checked in yet</span></>}</span>
       </div>
-      {ts && <p className="trading-state" role={ts.tone === "red" ? "alert" : undefined}><span className="sr-only">Trading: </span><TradingLine s={ts} /></p>}
+      {ts && <p className="trading-state" role={ts.tone === "red" ? "alert" : undefined}><span className="sr-only">Trading: </span><TradingLine s={ts} />
+        {ts.halt && <> <HaltChip h={ts.halt} label="Why it halted" link={false} /></>}</p>}
+      {/* N6 and N7 (#724): which machine to look at, and a record the dashboard has not caught up with */}
+      {!chip.live && chip.host && <p className="muted last-seen" style={{ margin: 0 }}>Last seen on <span className="num">{chip.host}</span>{beatTs ? `, ${timeBoth(beatTs)}` : ""}</p>}
+      <FreshNote f={lagFreshness(engine?.detail)} what="Figures" />
       {chip.journal && (
         <div className="status-rows">
           <StatusRow tone="breach" title="Stopped: its journal is damaged" text={<>{NAME} stopped because its journal is damaged · needs you at the Mac</>}>
@@ -270,7 +276,7 @@ export function Health() {
           <h2 id="halt-h">Recent halts</h2>
           {h.halts.length ? (
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14 }}>{h.halts.slice(0, 12).map((x, i) => (
-              <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <span title={`code: ${x.kind}`}>{haltText(x)}</span><HaltTag x={x} all={h.halts} />
+              <li key={i}><span className="num">{dateEt(x.ts)} {timeEt(x.ts)}</span> <HaltChip h={x} cleared={clearedAt(x, cleared)} resolved={haltResolved(x, beatTs, recovered)} /><HaltTag x={x} all={h.halts} />
                 {haltResolved(x, beatTs, recovered) && <> <span className="tag allow" title="The engine's heartbeat came back after this halt">resolved</span></>}
                 {clearedAt(x, cleared) && <> <span className="tag allow" title="This halt is over: the engine cleared it">cleared {timeEt(clearedAt(x, cleared)!)} ET</span></>}
                 {x.reason && <div className="muted" style={{ fontSize: 13 }}>{x.reason}</div>}</li>))}</ul>

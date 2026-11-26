@@ -12,6 +12,7 @@ export const ROUTE_LOADERS = {
   "/strategy/fine-tune": () => import("./pages/FineTune"),
   "/settings": () => import("./pages/Settings"),
   "/start": () => import("./pages/Onboarding"),
+  "/how": () => import("./pages/HowItDecides"),
 } as const;
 
 export type LazyRoute = keyof typeof ROUTE_LOADERS;

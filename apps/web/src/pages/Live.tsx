@@ -28,10 +28,14 @@ import { FreshNote } from "../components/Fresh";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { bookFreshness, holdingsFreshness, newsFreshness } from "../lib/freshness";
 import { nextAction } from "../lib/nextaction";
+import { NAME } from "../brand/brand";
+import { PRICE_SOURCE, lagFreshness } from "../lib/ownernotes";
 
 // #378: the market notices are their own chunk (the first load's budget is nearly full); nothing shows until it loads.
 // The market notices and the headline line (migration 0043): one chunk of their own, not first load
 const Lines = lazy(() => import("../components/Lines"));
+// N10 (#724): "Since you last looked" is its own chunk with its CSS; nothing shows until it loads
+const SinceLastLook = lazy(() => import("../components/SinceLastLook"));
 
 // Memoised with plain values (the formats are fixed functions): a streamed price does not draw the evidence rows again.
 const [F0, F1, F2] = [0, 1, 2].map((d) => (v: number) => v.toFixed(d));
@@ -182,6 +186,9 @@ export function Live() {
     <>
       {newer && <NewRunRow next={newer} overview={overview} onShow={pickRun ? () => pickRun(newer.id) : undefined} />}
       <HomeStatus run={run} overview={overview} risk={risk} engineLive={chip.live} engine={chip} book={book} events={healthCache.data?.events} />
+      {run.kind === "paper" && !ended && (
+        <ErrorBoundary name="Since you last looked" compact><Suspense fallback={null}><SinceLastLook run={run} /></Suspense></ErrorBoundary>
+      )}
       <StartBanner state={startState(run, overview)} />
       {run.kind === "paper" && <Suspense fallback={null}><Lines viewer="owner" headlines={!ended} fresh={newsFresh} /></Suspense>}
 
@@ -200,6 +207,8 @@ export function Live() {
             {vsSame !== null && <span className="muted desk-only" title={SAME_AMOUNT_NOTE}>{vsSameText(vsSame, spyAt)}</span>}
           </div>
           <FreshNote f={potFresh} what="Pot" />
+          {/* N7 (#724): the engine's record is ahead of what the database gave this screen */}
+          {run.kind === "paper" && !ended && <FreshNote f={lagFreshness(beat?.detail)} what="Figures" />}
           {next && <p className="muted home-next">{next}</p>}
         </section>
         {lv && meters && run.kind === "paper" && (
@@ -271,6 +280,8 @@ export function Live() {
               </div>
             </section>
           )}
+          {run.kind === "paper" && <p className="muted price-source" style={{ fontSize: 14, margin: 0 }}>{PRICE_SOURCE}</p>}
+          <p className="muted" style={{ fontSize: 14, margin: 0 }}><Link to="/how">How {NAME} decides</Link>, in plain words.</p>
           <p className="muted" style={{ fontSize: 14, margin: 0 }}>Reported P&amp;L is the worse of broker fills and the stricter cost model.
             {run.kind === "paper" && <> Pause or stop the run in <Link to="/settings">Run &amp; settings</Link>.</>}</p>
         </div>
