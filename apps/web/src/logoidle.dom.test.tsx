@@ -32,7 +32,12 @@ describe("the logo's idle motion", () => {
     await mount(<Logo animate idle />);
     expect(document.querySelector(".logo-moving")).not.toBeNull();
     expect(document.querySelector(".logo-hop, .logo-arm, .logo-box")).toBeNull();
-    await act(async () => { document.querySelector(".logo-pulse")!.dispatchEvent(new Event("animationend", { bubbles: true })); });
+    // jsdom has no AnimationEvent but its style knows WebkitAnimation, so React listens for the prefixed name in it
+    // (jsdom 31); a browser gets "animationend". Send both: React hears exactly one of them.
+    await act(async () => {
+      const pulse = document.querySelector(".logo-pulse")!;
+      for (const name of ["animationend", "webkitAnimationEnd"]) pulse.dispatchEvent(new Event(name, { bubbles: true }));
+    });
     expect(document.querySelector(".logo-moving")).toBeNull();
     const hop = document.querySelector<SVGElement>("svg.logo-hop")!;
     expect(hop).not.toBeNull();
