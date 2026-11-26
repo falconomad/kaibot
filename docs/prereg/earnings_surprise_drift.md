@@ -41,8 +41,10 @@ section 3.
 
 ## Frozen settings
 
-**Family and trials.** Seven trials, each a row in the trial registry (`data/trials.jsonl`), all in one family for the
-deflated Sharpe (N = 7, plus any later amendment) and Holm as configured in `config/gate_v3.yaml`:
+**Family and trials.** Seven trials, each a row in the trial registry (`data/trials.jsonl`), in the gate's
+`earnings_drift` family (`config/gate_v3.yaml`, with `post_earnings_week`): the deflated Sharpe's N is every
+configuration logged for that family (these 7, the neighbours when run, and `post_earnings_week`'s), and Holm runs
+as configured:
 `sue_sec_h20`, `sue_sec_h40`, `sue_sec_h60` (primary), `av_surprise_h20`, `av_surprise_h40`, `av_surprise_h60`
 (secondary), `no_buy_before_report` (risk filter).
 
@@ -120,6 +122,6 @@ prices.
 ## Pass marks
 
 The gate v3.1 marks of `config/gate_v3.yaml` as committed together with this file (decision 18), including the B7
-control book (same budget in SPY, five start offsets), the deflated Sharpe with N = 7 and Holm with
+control book (same budget in SPY, five start offsets), the deflated Sharpe with N = the `earnings_drift` family's logged configurations, and Holm with
 `holm_inputs: final_requires`. Nothing here loosens a mark. Not for live decisions unless a trial passes gate v3.1
 **and** the stakeholder approves it in writing; the AV variant can never go live without a commercial licence.

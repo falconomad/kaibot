@@ -115,7 +115,9 @@ file `docs/prereg/earnings_surprise_drift.md` (committed with this amendment).
    more than one session from any SEC filing".
 3. **Section 3's filter** (`no_buy_before_report`) estimates the next report from the SEC report sessions known at the
    decision (not AV's dates), so it also covers former members.
-4. **Trials and family.** Seven trials in one family: SUE-SEC ×3, AV ×3, the filter ×1 (deflated Sharpe N = 7).
+4. **Trials and family.** Seven trials (SUE-SEC ×3, AV ×3, the filter ×1), listed in gate v3's `earnings_drift`
+   family next to `post_earnings_week` (`config/gate_v3.yaml`): the deflated Sharpe's N is every configuration
+   logged for that family.
 5. **Licence.** The SEC variant and the filter use public-domain SEC data only: safe for a multi-user product. The AV
    variant is personal, non-commercial use only and would need a commercial licence before any multi-user exposure
    (noted on #475, M13).
