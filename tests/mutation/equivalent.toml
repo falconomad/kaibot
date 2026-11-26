@@ -210,6 +210,13 @@ reason = "`val > lim + 1e-9` -> `>=` in the position/open-risk caps: differs onl
 mutant = "kaibot.risk.gate.x_evaluate__mutmut_382"
 reason = "`val > lim + 1e-9` -> `>=` in the book caps: differs only when val is exactly lim + 1e-9 (the same argument as x_evaluate__mutmut_346)"
 
+# (26 Nov 2026 against main @ 2a05008: 723 mutants, all tried; 5 survived, the 3 above and these two. x_size_position
+# __mutmut_57, `max(buying_power, 1)`, is killed by test_no_room_is_zero_shares_also_for_a_share_price_below_a_dollar)
+
+[[equivalent]]
+mutant = "kaibot.risk.gate.x_validate_policy__mutmut_30"
+reason = "the wording of the ValueError for a profile that allows shorts: the exception type and when it is raised (any profile with allow_short while the ceiling forbids it) are what loading a profile acts on; test_validate_policy_refuses_shorts_and_loosened_ceilings pins both"
+
 # ---- engine/journal.py (#546; 25 Nov 2026 against main @ 2c7ec53: only the pure helpers _cmp, _s, _json,
 # select_rows, _schema_missing and _refusal were tried locally (242 mutants), against tests/unit/test_journal_survivors.py
 # and tests/test_journal.py. The rest of the file (2,500 mutants) waits for the weekly run)
@@ -293,3 +300,119 @@ reason = "the second element of the sort key for a row without the column: rows 
 [[equivalent]]
 mutant = "kaibot.engine.journal.x_select_rows__mutmut_124"
 reason = "the second element of the sort key for a row without the column: rows without it are already apart by the first element, and among them the second is equal either way (None == None, 0 == 0, 1 == 1)"
+
+# (26 Nov 2026 against main @ 2a05008: the weekly target run locally, 50 min, about 1,300 of 2,862 mutants tried, 423 survived.
+# tests/unit/test_journal_survivors_store.py kills the helpers', store reads', breaker's and replicator's; these cannot
+# change behaviour. bootstrap, verify_identity, observe, _settle, _poison, _send_0018 and event wait for the next run)
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__json__mutmut_8"
+reason = "the argument of the TypeError json.dumps raises for an unknown type: canon() and the journal act on the TypeError, not on its message"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__json__mutmut_9"
+reason = "the argument of the TypeError json.dumps raises for an unknown type: canon() and the journal act on the TypeError, not on its message"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__same__mutmut_21"
+reason = "`<=` -> `<` at the float tolerance: differs only when |x - y| equals 0.005 + 1e-9 x max(|x|, |y|) to the last bit, which no price or amount rounded to the cent lands on"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__same__mutmut_60"
+reason = "zip's `strict` flag: `len(a) == len(b)` is checked first, so zip never sees two lists of different lengths"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__same__mutmut_63"
+reason = "zip's `strict` flag: `len(a) == len(b)` is checked first, so zip never sees two lists of different lengths"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__same__mutmut_64"
+reason = "zip's `strict` flag: `len(a) == len(b)` is checked first, so zip never sees two lists of different lengths"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.x__clash_columns__mutmut_14"
+reason = "str.strip takes a set of characters: adding X strips an X only at the ends of a column name, and the column names Postgres reports here are lower-case"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁheartbeat__mutmut_17"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁpending_commands__mutmut_17"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁheartbeat__mutmut_18"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁpending_commands__mutmut_18"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁheartbeat__mutmut_19"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁpending_commands__mutmut_19"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁheartbeat__mutmut_20"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁpending_commands__mutmut_20"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁheartbeat__mutmut_22"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁpending_commands__mutmut_22"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁheartbeat__mutmut_23"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁpending_commands__mutmut_23"
+reason = "a log line only (its text, its arguments, or whether the line is written): no state, no return value"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁmark_applied__mutmut_4"
+reason = "datetime.now() without UTC is the local wall time, and _json's astimezone(UTC) reads a naive datetime as local time: the same instant is journalled"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁmark_applied__mutmut_6"
+reason = "the _write just after folds the same update through _apply, which adds str(match id) to `applied` (command is always kept in memory: keep() is False only for MINUTE_TABLES); test_mark_applied_writes_the_payload_only_when_given checks the set"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁmark_applied__mutmut_7"
+reason = "the _write just after folds the same update through _apply, which adds str(match id) to `applied` (command is always kept in memory: keep() is False only for MINUTE_TABLES); test_mark_applied_writes_the_payload_only_when_given checks the set"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalStoreǁ_remote__mutmut_3"
+reason = "the wording of an error message: the exception type and when it is raised are what the caller acts on (StoreError; the text still says breaker open)"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁReplicatorǁrebuild__mutmut_3"
+reason = "the wording of an error message: the exception type and when it is raised are what the caller acts on (RuntimeError before any row is sent)"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁReplicatorǁrebuild__mutmut_4"
+reason = "the wording of an error message: the exception type and when it is raised are what the caller acts on (RuntimeError before any row is sent)"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalǁreseal__mutmut_7"
+reason = "SQL keywords and identifiers in SQLite are case-insensitive (the mutant upper-cases no string literal): the same statement"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalǁmap_id__mutmut_6"
+reason = "SQL keywords and identifiers in SQLite are case-insensitive (the mutant upper-cases no string literal): the same statement"
+
+[[equivalent]]
+mutant = "kaibot.engine.journal.xǁJournalǁskip_to__mutmut_1"
+reason = "`>` -> `>=`: at seq == last_seq the update's `seq < ?` changes nothing and the insert-or-ignore adds only the row a first append would add"

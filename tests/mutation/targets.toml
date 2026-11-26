@@ -17,7 +17,8 @@ tests = ["tests/unit/test_order_manager.py", "tests/unit/test_lost_resend.py", "
 source = "src/kaibot/engine/journal.py"
 tests = ["tests/test_journal.py", "tests/test_journal_followups.py", "tests/test_journal_identity.py",
          "tests/test_journal_pre0018.py", "tests/unit/test_journal_checksum.py", "tests/unit/test_journal_durability.py",
-         "tests/unit/test_journal_kind_index.py", "tests/unit/test_journal_survivors.py", "tests/test_replica_poison.py",
+         "tests/unit/test_journal_kind_index.py", "tests/unit/test_journal_survivors.py",
+         "tests/unit/test_journal_survivors_store.py", "tests/test_replica_poison.py",
          "tests/crash/test_crash_points.py", "tests/fuzz"]
 
 [risk_caps]
