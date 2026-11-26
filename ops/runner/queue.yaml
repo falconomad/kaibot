@@ -59,3 +59,7 @@ jobs:
     script: scripts/fetch_listings.py
     args: ["--first-bars"]
     posts_to_issue: 376
+  - id: gate-v3-1-rescore-2026-11-26        # #701-#705 (decision 18, gate v3.1): the published table under v3.1;
+    script: scripts/gate_v3_rescore.py      # merge only after #744, #749, #752, #758 and #765 are on main
+    args: []
+    posts_to_issue: 701
