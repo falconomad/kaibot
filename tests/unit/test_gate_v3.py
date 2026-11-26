@@ -85,7 +85,7 @@ def declared(gate: g3.GateV3 = GATE, rule=RULE) -> g3.GateV3:
 def test_marks_are_those_of_decision_16():
     text = (ROOT / "docs" / "decisions" / "16_gate_v3.md").read_text()
     c = GATE.cfg
-    assert c["version"] == 3 and c["decision"] == "docs/decisions/16_gate_v3.md"
+    assert c["version"] == "3.1" and c["decision"] == "docs/decisions/16_gate_v3.md"  # decision 18 (#701)
     assert c["level"] == 0.10 and "one in ten" in text
     assert str(c["window"]["research_from"]) == "2017-05-01" and str(c["window"]["research_to"]) == "2024-12-31"
     assert "2017-05-01 to 2024-12-31" in text
@@ -415,6 +415,11 @@ BOOK_SPY = by_year(SPY_YEARS)
 STEADY = {y: (r - 0.02 if r > 0 else r / 2) for y, r in SPY_YEARS.items()}  # the defensive branch
 
 
+def book_registry(n=6, strategy="index_core_book") -> Registry:
+    """#701: the book's own logged configurations, which B2's chance test (gate v3.1) needs for its N."""
+    return Registry(tuple({"trial_id": f"b{i}", "strategy": strategy, "n_trials": 1} for i in range(n)), ("t",), 0)
+
+
 def book(yearly=None, **kw) -> dict:
     acc = g3.Account(by_year(yearly or STEADY), BOOK_SPY, costs=pd.Series(0.00002, index=IDX),
                      universe=kw.pop("universe", "point_in_time"))
@@ -423,6 +428,7 @@ def book(yearly=None, **kw) -> dict:
     kw.setdefault("sleeves", {})
     kw.setdefault("source", FINAL)
     kw.setdefault("first_run_at", datetime(2026, 11, 25, tzinfo=UTC))
+    kw.setdefault("registry", book_registry())
     return g3.evaluate_book(GATE, book="index_core_book", account=acc, as_of=datetime(2026, 12, 1, tzinfo=UTC),
                             **kw)
 
