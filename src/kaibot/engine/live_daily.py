@@ -1203,7 +1203,13 @@ class LiveDaily:
             return []
         self._late_tried = (session, now)
         try:
-            missed = self._lookback(session)
+            try:
+                missed = self._lookback(session)
+            except Exception as e:  # the look-back must never cost the previous session's own late decision
+                log.exception("decision look-back failed: only the previous session is looked at")
+                self.event("multi_day_error", {"step": "decision_lookback", "session": str(session),
+                                               "error": f"{type(e).__name__}: {e}"[:200]})
+                missed = {}
             mine = all(self._decision_for(r.name, session) is not None for r in self.active())
             if mine and not missed:
                 self._caught_up = session

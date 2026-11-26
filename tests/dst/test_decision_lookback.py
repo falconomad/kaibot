@@ -130,3 +130,16 @@ def test_no_record_of_this_run_before_the_gap_means_nothing_to_make_up():
     assert ld.LiveDaily._lookback(_daily([_rec("2026-08-05"), _rec("2026-08-06")]), date(2026, 8, 7)) == {}
     assert ld.LiveDaily._lookback(_daily([_rec("2026-08-03", run=6), _rec("2026-08-06")]), date(2026, 8, 7)) == {}
     assert ld.LiveDaily._lookback(_daily([]), date(2026, 8, 7)) == {}
+
+
+def test_a_failing_look_back_never_costs_the_previous_sessions_late_decision(monkeypatch):
+    """Second-key review: the look-back raising (a calendar or journal read) is one error event, and the M9 1.3 late
+    decision of the previous session is still taken as before."""
+
+    def broken(self, session):
+        raise RuntimeError("calendar unreadable")
+
+    monkeypatch.setattr(ld.LiveDaily, "_lookback", broken)
+    res = run_scenario(quiet({D1: ("B",)}))  # the run starts after D0's close: D1's decision is the late one
+    assert res.ok, res.report()
+    assert any(" fill " in t and "side=buy" in t and "-B-" in t for t in res.trace), res.report()
