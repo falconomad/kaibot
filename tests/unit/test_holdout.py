@@ -169,6 +169,8 @@ EXEMPT = {
     "bench_scan.py": "a speed benchmark of the scan; prints timings only",
     "experiments_summary.py": "reads reports that guarded runs already wrote",
     "fetch_earnings_dates.py": "data collection and its coverage report; no rule result",
+    "fetch_minute_pit.py": "data collection (#794): reads only the store's keys; refuses an --end in the hold-out "
+                           "itself and its coverage report gives no rule result",
     "fetch_spinoffs.py": "data collection; no rule result",
     "fetch_spread_calibration.py": "plans and summarises a quote sample; no rule result",
     "news_coverage.py": "counts stored headlines",
