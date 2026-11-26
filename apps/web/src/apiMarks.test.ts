@@ -39,6 +39,7 @@ const SPY = { price: 662.1, as_of: "2026-11-19T17:39:59.500Z", prev_close: 659.3
 
 type Call = { url: string; method: string; body: string | null; headers: Record<string, string>; signal: AbortSignal | null };
 type Stub = { rows?: unknown; status?: number; hang?: boolean; throws?: Error; owner?: { status: number; code: string };
+  /** kb_me's answer (default: the owner); `noMe`: kb_me is missing (a database before 0045, PostgREST 404) */ me?: unknown; noMe?: boolean; runs?: { status: number; code: string };
   spy?: unknown; spyStatus?: number; spyThrows?: Error };
 function stub(o: Stub = {}) {
   const calls: Call[] = [];
@@ -46,7 +47,12 @@ function stub(o: Stub = {}) {
     const url = String(input), method = (init?.method ?? "GET").toUpperCase();
     calls.push({ url, method, body: init?.body ? String(init.body) : null, headers: (init?.headers ?? {}) as Record<string, string>, signal: init?.signal ?? null });
     const res = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
-    if (url.includes("/rest/v1/rpc/")) return o.owner ? res({ code: o.owner.code, message: "not authorised" }, o.owner.status) : res([{ id: 7, kind: "paper" }]);
+    if (url.includes("/rest/v1/rpc/")) {
+      if (o.owner) return res({ code: o.owner.code, message: "not authorised" }, o.owner.status);
+      if (url.endsWith("/kb_me")) return o.noMe ? res({ code: "PGRST202", message: "Could not find the function public.kb_me" }, 404)
+        : res(o.me !== undefined ? o.me : { owner: true, member: false, helper: false, name: null, can_invite: true });
+      return o.runs ? res({ code: o.runs.code, message: "not authorised" }, o.runs.status) : res([{ id: 7, kind: "paper" }]);
+    }
     if (url.includes("alpaca.markets")) {
       if (o.hang) return new Promise<Response>(() => {});
       if (o.throws) throw o.throws;
@@ -58,7 +64,7 @@ function stub(o: Stub = {}) {
     }
     return res({ message: "not found" }, 404);
   }) as typeof fetch;
-  return { f, calls, set: (next: Stub) => { Object.assign(o, { rows: undefined, status: undefined, hang: undefined, throws: undefined, owner: undefined, spy: undefined, spyStatus: undefined, spyThrows: undefined }, next); } };
+  return { f, calls, set: (next: Stub) => { Object.assign(o, { rows: undefined, status: undefined, hang: undefined, throws: undefined, owner: undefined, me: undefined, noMe: undefined, runs: undefined, spy: undefined, spyStatus: undefined, spyThrows: undefined }, next); } };
 }
 const req = (init: { method?: string; auth?: string | null } = {}) => new Request("https://kaibo.example/api/marks", { method: init.method ?? "GET",
   headers: init.auth === null ? {} : { Authorization: init.auth ?? "Bearer eyJhbGciOi.user.jwt" } });
@@ -116,11 +122,11 @@ describe("GET /api/marks: who may ask", () => {
     const i = instance();
     const r = await i.get();
     expect(r.resp.status).toBe(200);
-    expect(i.calls.map((c) => c.url)).toEqual(["https://db.example.co/rest/v1/rpc/kb_runs", SPY_URL, POSITIONS_URL]);
+    expect(i.calls.map((c) => c.url)).toEqual(["https://db.example.co/rest/v1/rpc/kb_me", SPY_URL, POSITIONS_URL]);
     expect(i.calls[0].headers.Authorization).toBe("Bearer eyJhbGciOi.user.jwt");
     expect(i.calls[0].headers.apikey).toBe("sb_publishable_test"); // no service-role key exists
     expect(i.calls[0].method).toBe("POST");
-    expect(i.calls[0].body).toBe("{}"); // kb_runs takes nothing and only reads
+    expect(i.calls[0].body).toBe("{}"); // kb_me takes nothing and only reads (#723: not kb_runs, which returned every run)
     expect(i.calls[0].signal).toBeInstanceOf(AbortSignal);
     // the check (4 s at most) and the read (4 s at most) fit the function's limit
     expect(2 * TIMEOUT_MS).toBeLessThan((VERCEL as { functions: Record<string, { maxDuration: number }> }).functions["api/marks.ts"].maxDuration * 1000);
@@ -131,8 +137,30 @@ describe("GET /api/marks: who may ask", () => {
     const r = await i.get();
     expect(r.resp.status).toBe(403);
     expect(r.body).toEqual({ error: "not authorised" });
-    expect(rpcs(i.calls)).toEqual(["kb_runs"]);
+    expect(rpcs(i.calls)).toEqual(["kb_me"]);
     expect(anyAlpaca(i.calls)).toHaveLength(0);
+  });
+
+  it("#723: kb_me answers but not as the owner (a member, a helper, a stranger, a body of another shape): 403, never Alpaca", async () => {
+    for (const me of [{ owner: false, member: true, helper: false, name: "Mia", can_invite: false }, { owner: false, helper: true },
+      { owner: "true" }, { owner: 1 }, {}, null, [], [{ owner: true }], "owner"]) {
+      const i = instance({ me });
+      const r = await i.get();
+      expect(r.resp.status, JSON.stringify(me)).toBe(403);
+      expect(r.body).toEqual({ error: "not authorised" });
+      expect(rpcs(i.calls)).toEqual(["kb_me"]);
+      expect(anyAlpaca(i.calls)).toHaveLength(0);
+    }
+  });
+
+  it("#723: kb_me missing (a database before 0045): the old check, kb_runs, decides", async () => {
+    const ok = instance({ noMe: true });
+    expect((await ok.get()).resp.status).toBe(200);
+    expect(rpcs(ok.calls)).toEqual(["kb_me", "kb_runs"]);
+    const no = instance({ noMe: true, runs: { status: 403, code: "42501" } });
+    expect((await no.get()).resp.status).toBe(403);
+    expect(rpcs(no.calls)).toEqual(["kb_me", "kb_runs"]);
+    expect(anyAlpaca(no.calls)).toHaveLength(0);
   });
 
   it("an expired or made-up session gets 401; a database that cannot be read gets 502; neither reaches Alpaca", async () => {
@@ -156,7 +184,7 @@ describe("GET /api/marks: who may ask", () => {
     const r = await i.get(req({ auth: "Bearer someone.else.jwt" }));
     expect(r.resp.status).toBe(403);
     expect(r.text).not.toContain("XOM");
-    expect(rpcs(i.calls)).toEqual(["kb_runs", "kb_runs"]);
+    expect(rpcs(i.calls)).toEqual(["kb_me", "kb_me"]);
     expect(i.calls[3].headers.Authorization).toBe("Bearer someone.else.jwt");
     expect(alpaca(i.calls)).toHaveLength(1);
   });
@@ -315,7 +343,7 @@ describe("GET /api/marks: where it cannot answer", () => {
       const r = await i.get();
       expect(r.resp.status).toBe(200);
       expect(r.body).toEqual(NONE);
-      expect(rpcs(i.calls)).toEqual(["kb_runs"]); // still owner only: a stranger learns nothing about the deployment
+      expect(rpcs(i.calls)).toEqual(["kb_me"]); // still owner only: a stranger learns nothing about the deployment
       expect(anyAlpaca(i.calls)).toHaveLength(0);
     }
     const stranger = instance({ owner: { status: 403, code: "42501" } }, { ...ENV, ALPACA_API_KEY: undefined });

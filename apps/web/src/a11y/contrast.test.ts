@@ -3,7 +3,10 @@
 // drawn on. This is arithmetic on the declared colours; the colours as drawn, on every page and width, are measured in
 // Chromium by scripts/mobile_check.py and scripts/a11y_check.py (axe's color-contrast rule).
 import { describe, expect, it } from "vitest";
-import css from "../app.css?raw";
+import appCss from "../app.css?raw";
+import strategyCss from "../pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import tokens from "../tokens.css?raw";
 import v4 from "../v4tokens.css?raw";
 import badge from "../components/StockBadge.tsx?raw";

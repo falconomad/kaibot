@@ -1,7 +1,10 @@
 // v4 PR 1 (docs/design/audit_2026-11-16.md): regressions the audit found, guarded in code. The page-level checks
 // (overflow, tap targets, layout shift at 375/390/430 and 1280/1440) are in scripts/mobile_check.py.
 import { describe, expect, it, vi } from "vitest";
-import css from "./app.css?raw";
+import appCss from "./app.css?raw";
+import strategyCss from "./pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import { Shell } from "./components/Shell";
 import { ExperimentBadge } from "./components/Experiment";
 import { paperRun, render, text } from "./pages/testkit";

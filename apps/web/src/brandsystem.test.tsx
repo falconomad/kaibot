@@ -1,7 +1,10 @@
 // Brand system v1 (docs/design/brand/brand_system_v1.md, #265): the colours derive from the Rising k logo, blue is
 // kept for the logo, the one action, links, focus and the live point, and the experiment is a neutral lab note.
 import { describe, expect, it } from "vitest";
-import css from "./app.css?raw";
+import appCss from "./app.css?raw";
+import strategyCss from "./pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import tokens from "./tokens.css?raw";
 
 // Design's file lives outside apps/web; read it from disk (this project has no Node types, so the reader is typed by hand).

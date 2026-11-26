@@ -1,6 +1,7 @@
 // M5 (decision 12): what /strategy and /strategy/fine-tune share. The Editor in Strategy.tsx owns the one draft and
 // the outcome/review bar; both pages read and edit it through this context, so moving between them keeps every edit.
 // No network here: the Editor is the only place that calls the config RPCs.
+import "./strategy.css";
 import { createContext, useContext, useId, useMemo, useState } from "react";
 import type { Level } from "../lib/api";
 import {

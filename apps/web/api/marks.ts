@@ -1,9 +1,11 @@
 // GET /api/marks — what the paper account holds and each stock's price now, so the dashboard can mark the book between
 // two closes (stakeholder, 19 Nov 2026: "why the amounts on the dashboard are not updating in realtime").
 //
-// 1. Owner only. The caller's own Supabase session and the publishable key (no service-role key exists) call an
-//    owner-only RPC, kb_runs, before anything else, on every request: a stranger gets 401 or 403 and Alpaca is never
-//    asked. kb_runs only reads; its answer is not used.
+// 1. Owner only. The caller's own Supabase session and the publishable key (no service-role key exists) ask who the
+//    caller is, kb_me (migration 0045: a few index lookups, no run data), before anything else, on every request:
+//    anyone whose answer is not owner true gets 403, a session that is not valid 401, and Alpaca is never asked.
+//    (#723, audit 2 8.5: until then this was kb_runs, which reads and returns every run row only to be thrown away.)
+//    If kb_me is missing (a database before 0045: PostgREST 404) the check falls back to kb_runs, as before.
 // 2. No ALPACA_API_KEY / ALPACA_SECRET here (preview deployments, local dev), or a base URL that is not the paper one:
 //    {available: false}. Nothing is read.
 // 3. Otherwise two reads of Alpaca, GET only, side by side: the paper account's open positions (paper-api /v2/positions)
@@ -134,14 +136,25 @@ function marks(c: Cache, f: Fetch, keyId: string, secret: string, clock: () => n
 
 class RpcError extends Error { constructor(public status: number, public code: string) { super(`rpc ${status} ${code}`); } }
 
-/** An owner-only RPC with the caller's own session; throws RpcError when the database refuses or cannot be read.
+/** An RPC with the caller's own session; its answer, or RpcError when the database refuses or cannot be read.
  *  4 s at most, so the check and the read together stay inside the function's 10 s (vercel.json). */
-async function rpc(url: string, key: string, auth: string, f: Fetch, fn: string): Promise<void> {
+async function rpc(url: string, key: string, auth: string, f: Fetch, fn: string): Promise<unknown> {
   const r = await f(`${url.replace(/\/$/, "")}/rest/v1/rpc/${fn}`, { method: "POST", signal: AbortSignal.timeout(TIMEOUT_MS),
     headers: { apikey: key, Authorization: auth, "Content-Type": "application/json" }, body: "{}" });
-  if (r.ok) return;
+  if (r.ok) return r.json().catch(() => null);
   const body = obj(await r.json().catch(() => null));
   throw new RpcError(r.status, String(body?.code ?? ""));
+}
+
+/** The owner check: kb_me's `owner` must be exactly true (anything else is 403). kb_me missing (404): kb_runs, which
+ *  refuses a non-owner itself (42501); its answer is not used. */
+async function ownerCheck(url: string, key: string, auth: string, f: Fetch): Promise<void> {
+  let me: unknown;
+  try { me = await rpc(url, key, auth, f, "kb_me"); } catch (e) {
+    if (e instanceof RpcError && e.status === 404) { await rpc(url, key, auth, f, "kb_runs"); return; }
+    throw e;
+  }
+  if (obj(me)?.owner !== true) throw new RpcError(403, "42501");
 }
 
 /** A paper base URL or none; anything else (a live URL) is refused. Same rule as engine/config.py and check-ticker. */
@@ -155,7 +168,7 @@ export async function handle(req: Request, env: Env, fetchFn: Fetch = fetch, clo
   if (!url || !key) return json(NONE);
 
   // 1. owner only, before anything touches Alpaca, the cache included
-  try { await rpc(url, key, auth, fetchFn, "kb_runs"); } catch (e) {
+  try { await ownerCheck(url, key, auth, fetchFn); } catch (e) {
     if (e instanceof RpcError && e.status === 401) return json({ error: "sign in first" }, 401);
     if (e instanceof RpcError && (e.status === 403 || e.code === "42501")) return json({ error: "not authorised" }, 403);
     console.error("marks: owner check failed", e instanceof RpcError ? e.message : e instanceof Error ? e.name : "error");

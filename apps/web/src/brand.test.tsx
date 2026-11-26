@@ -28,7 +28,10 @@ import { Onboarding } from "./pages/Onboarding";
 import { PRESETS, SPEC } from "./lib/config";
 import { applyBlockers, itemFromCheck } from "./lib/tickers";
 import indexHtml from "../index.html?raw";
-import css from "./app.css?raw";
+import appCss from "./app.css?raw";
+import strategyCss from "./pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import { ExperimentSheetBody } from "./components/Experiment";
 import { riskStatus } from "./lib/derive";
 import { roomOutcome } from "./lib/roomview";
