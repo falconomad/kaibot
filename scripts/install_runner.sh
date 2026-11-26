@@ -4,7 +4,7 @@
 #                                                    com.kaibot.research-runner, every 15 min; an install that ran in
 #                                                    the engine's checkout is moved (its state is copied over)
 #   ./scripts/install_runner.sh --uninstall          stop it and remove the plist (data/runner is kept)
-#   ./scripts/install_runner.sh --status             loaded? which checkout? gh logged in? the last lines of the log
+#   ./scripts/install_runner.sh --status             loaded? which checkout? the runner's token? the last log lines
 #   ./scripts/install_runner.sh --prepare            set up the runner's checkout only (no launchd; works on Linux)
 #   ./scripts/install_runner.sh --dry-run --out DIR  write the plist to DIR only (no launchctl; works on Linux)
 # QA-Ops audit (25 Nov 2026): the runner never works in the engine's checkout. Its checkout is
@@ -155,11 +155,9 @@ case "$ACTION" in
            ".venv -> $(readlink "$used/.venv" 2>/dev/null || echo 'its own')"
       LOG="$used/data/runner/runner.log"
     fi
-    if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
-      echo "gh: logged in (results are posted as issue comments)"
-    else
-      echo "gh: missing or not logged in (results go to data/runner/out/<id>.md)"
-    fi
+    # #711: the runner pushes and posts only with its own token, never with this user's gh login
+    bash "$HERE/scripts/runner_token.sh" --check 2>&1 | sed 's/^/runner token: /' ||
+      echo "runner token: not usable: results go to data/runner/out/<id>.md (./scripts/runner_token.sh --install)"
     tail -n 20 "$LOG" 2>/dev/null || true; exit 0;;
 esac
 
@@ -190,9 +188,9 @@ plutil -lint "$PLIST" >/dev/null
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 if [ -n "$was" ] && ! within "$was" "$RUNNER"; then say "moved $LABEL from $was to $RUNNER"; fi
 say "installed $LABEL: every 15 minutes from $RUNNER (the engine's checkout $ENGINE is never pulled or run in)"
-if command -v gh >/dev/null 2>&1 && gh auth status --hostname github.com >/dev/null 2>&1; then
-  say "gh is logged in: results are posted as issue comments"
+if bash "$HERE/scripts/runner_token.sh" --check >/dev/null 2>&1; then
+  say "the runner's own GitHub token works: results are pushed and posted with it (#711)"
 else
-  say "gh missing or not logged in: results go to data/runner/out/<id>.md (brew install gh && gh auth login)"
+  say "no usable runner token: results go to data/runner/out/<id>.md (./scripts/runner_token.sh --install; #711)"
 fi
 "$RUNNER/.venv/bin/python" "$RUNNER/scripts/research_runner.py" --check --no-pull || say "queue.yaml has jobs that will be rejected (see above)"

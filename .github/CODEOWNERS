@@ -1,0 +1,10 @@
+# Audit 2 7.1 (#711) and 5.1: the paths that decide what runs on the owner's Mac without a human in the loop, and the
+# CI that guards everything else, need the owner's review. CODEOWNERS only blocks a merge once main's ruleset has
+# "Require review from Code Owners" switched on (docs/ops/research_runner.md, "Its own GitHub token", step 4).
+# The research runner: its allow-list, queue and launchd plist, and the runner itself
+/ops/runner/                    @falconomad
+/scripts/research_runner.py     @falconomad
+/scripts/runner_token.sh        @falconomad
+/scripts/install_runner.sh      @falconomad
+# CI, the release workflow, Dependabot and this file
+/.github/                       @falconomad

@@ -133,6 +133,19 @@ def _gh_on_path(monkeypatch):
     monkeypatch.setattr(rr.shutil, "which", lambda name: f"/usr/bin/{name}")
 
 
+TOKEN = "github_pat_" + "A1b2C3d4E5" * 8  # a made-up fine-grained token (#711)
+
+
+@pytest.fixture(autouse=True)
+def _runner_token(tmp_path_factory, monkeypatch):
+    """#711: gh and the push work only with the runner's own token file; every test gets a good one (mode 600)."""
+    f = tmp_path_factory.mktemp("secrets") / "runner_gh_token"
+    f.write_text(TOKEN + "\n")
+    f.chmod(0o600)
+    monkeypatch.setenv("KAIBOT_RUNNER_GH_TOKEN_FILE", str(f))
+    return f
+
+
 @pytest.fixture(autouse=True)
 def _outside_the_quiet_window(monkeypatch):
     """#718: heavy jobs wait out the 15:30-16:10 ET window. These tests run at any hour, so the runner's clock for
@@ -781,6 +794,66 @@ def test_the_push_uses_gh_credentials_and_the_runner_s_own_environment_never_rea
     push = next(c for c in run.calls if c[0] == "git" and "push" in c)
     assert "credential.helper=!/usr/bin/gh auth git-credential" in push
     assert not [a for a in push if "ghp_" in a] and "GH_TOKEN" not in popen.kwargs[0]["env"]
+
+
+def test_gh_and_the_push_use_only_the_runner_s_token_never_the_owner_s_login(tmp_path, monkeypatch):
+    """#711: every gh call and the push get GH_TOKEN = the token file's token and an empty gh config folder of the
+    runner's own (so gh cannot read the owner's hosts.yml or keychain entry); an owner's GH_TOKEN in the runner's own
+    environment is not used; every other credential helper is switched off for the push."""
+    monkeypatch.setenv("GH_TOKEN", "gho_ownerslogin0000000000")
+    monkeypatch.setenv("GH_CONFIG_DIR", str(tmp_path / "owners-gh"))
+    envs = []
+
+    class Spy(FakeRun):
+        def __call__(self, cmd, **kw):
+            if cmd[0] == "gh" or (cmd[0] == "git" and "push" in cmd):
+                envs.append((cmd[:2] if cmd[0] == "gh" else ["git", "push"], kw.get("env")))
+            return super().__call__(cmd, **kw)
+
+    run = Spy(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    kinds = {tuple(k) for k, _ in envs}
+    assert {("gh", "auth"), ("gh", "api"), ("git", "push")} <= kinds
+    for _, env in envs:
+        assert env["GH_TOKEN"] == TOKEN and env["GH_CONFIG_DIR"] == str(tmp_path / "state" / "gh")
+        assert "gho_" not in "".join(env.values()) and "PYTHONPATH" not in env
+    push = next(c for c in run.calls if c[0] == "git" and "push" in c)
+    assert "credential.https://github.com.helper=" in push and "credential.helper=" in push
+    assert not [a for a in push if TOKEN in a]  # never on a command line
+    assert (tmp_path / "state" / "gh").stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.parametrize("problem", ["missing", "mode", "classic", "gh-login", "link"])
+def test_without_a_good_runner_token_nothing_is_pushed_or_posted(tmp_path, monkeypatch, _runner_token, problem):
+    """#711: no file, a file others can read, a classic token (every repository of the account), gh's own login
+    token (the owner's full login) or a link: the runner falls back to nothing (results stay local, said why)."""
+    f = _runner_token
+    if problem == "missing":
+        f.unlink()
+    elif problem == "mode":
+        f.chmod(0o644)
+    elif problem == "classic":
+        f.write_text("ghp_" + "x" * 36)
+    elif problem == "gh-login":
+        f.write_text("gho_" + "x" * 36)
+    else:
+        real = f.with_name("real")
+        f.rename(real)
+        f.symlink_to(real)
+    monkeypatch.setenv("GH_TOKEN", "gho_ownerslogin0000000000")
+    run = FakeRun(gh_ok=True, job_changes={RESULTS + "a.md": "??"})
+    tick_in(tmp_path, [export_job()], run, files={RESULTS + "a.md": "x\n"})
+    assert run.pushes == [] and run.prs == [] and run.posted == []
+    assert not [c for c in run.calls if c[0] == "gh"]  # not even `gh auth status` with the owner's login
+    assert [c["branch"] for c in run.commits] == ["runner/results-export-2026-11-25"] and run.branch == "main"
+    text = (tmp_path / "state" / "runner.log").read_text()
+    assert "not pushed:" in text and "not posted to GitHub:" in text and "gho_" not in text and "ghp_" not in text
+
+
+def test_the_token_never_reaches_a_job_or_the_posted_text(tmp_path):
+    run = FakeRun(gh_ok=True)
+    _, run, popen = tick(tmp_path, [job()], run=run)
+    assert TOKEN not in json.dumps(popen.kwargs[0]["env"]) and all(TOKEN not in b for _, b in run.posted)
 
 
 def test_a_failed_pr_still_leaves_clean_main_and_says_so(tmp_path):
