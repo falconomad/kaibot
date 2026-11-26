@@ -196,12 +196,14 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               "scripts/near_close_1550_rerun.py",  # #454: the 15:50-price re-run
                               "scripts/fetch_listings.py",  # #376: the new-listing history and first bars
                               # #708: the re-runs of the unscored runs (research window only, strict patterns)
-                              "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py"}
+                              "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py",
+                              "scripts/fetch_av_earnings.py"}  # #797: Alpha Vantage EARNINGS, free tier, research
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert sorted(t for t, s in cfg.specs.items() if s.sec) == ["scripts/fetch_listings.py",
                                                                 "scripts/fetch_sec_fundamentals.py"]
-    assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_listings.py",
+    assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_av_earnings.py",  # #797
+                                                                "scripts/fetch_listings.py",
                                                                 "scripts/fetch_sec_fundamentals.py",
                                                                 "scripts/walk_forward.py"]  # #708: FRED (VIX)
     assert not cfg.specs["kaibot.agents.evalset.golden"].flags  # no --live (money), no --record
@@ -1110,3 +1112,18 @@ def test_spy_engine_stays_off_the_allow_list():
 
 def cfg_env(target: str) -> bool:
     return rr.load_allowed().specs[target].env
+
+
+def test_av_earnings_entry_caps_the_budget_and_stays_out_of_the_quiet_window():
+    """#797: the Alpha Vantage batch is heavy only so that the quiet window around the close defers it; its budget
+    flag cannot pass the free tier's shared 25 a day (the script refuses above 23 as well)."""
+    cfg = rr.load_allowed()
+    spec = cfg.specs["scripts/fetch_av_earnings.py"]
+    assert spec.heavy and spec.env and not spec.sec and not spec.writes and set(spec.flags) == {"--budget", "--status"}
+    for ok in ("0", "9", "19", "20", "23"):
+        rr.check_job(job("av", "scripts/fetch_av_earnings.py", ("--budget", ok), 797), cfg)
+    for bad in ("24", "25", "99", "-1", "200", "2 0"):
+        with pytest.raises(rr.JobError):
+            rr.check_job(job("av", "scripts/fetch_av_earnings.py", ("--budget", bad), 797), cfg)
+    mine = [rr.check_job(j, cfg) for j in rr.load_queue() if j["script"] == "scripts/fetch_av_earnings.py"]
+    assert mine and all(j.issue == 797 for j in mine)

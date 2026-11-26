@@ -110,3 +110,7 @@ jobs:
     script: scripts/index_core_book.py    # control book (cut to 97%); 6 configurations count (N 18 -> 24)
     args: ["--end", "2024-12-31", "--index-cap", "97"]
     posts_to_issue: 710
+  - id: av-earnings-2026-11-27              # #797 (decision 20): first Alpha Vantage EARNINGS batch, at most 20 of the
+    script: scripts/fetch_av_earnings.py    # day's 25 free requests; the daily run is launchd (fetch_av_earnings.sh
+    args: ["--budget", "20"]                # --install-daily, 02:00 local), the runner has no daily schedule
+    posts_to_issue: 797
