@@ -1,7 +1,7 @@
 // The /api/summary serverless function (api/summary.ts) with fetch stubbed: no network, no keys. Covers the cache hit,
 // the budget refusal, validation of the model's draft, preview deployments without a key, and owner-only access.
 import { describe, expect, it, vi } from "vitest";
-import { budgetFor, checkDraft, compose, gather, handle, inputEstimate, newsFrom, parseDraft, worstCase, MAX_RESERVED, MAX_TOKENS, MODEL, PRICE, type Facts } from "../api/summary";
+import { budgetFor, checkDraft, compose, gather, handle, inputEstimate, licenceOf, newsFrom, parseDraft, worstCase, SOURCE_LICENCE, MAX_RESERVED, MAX_TOKENS, MODEL, PRICE, type Facts } from "../api/summary";
 
 const NOW = new Date("2026-11-18T20:00:00Z"); // 15:00 ET
 const ENV = { VITE_SUPABASE_URL: "https://db.example.co", VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test", ANTHROPIC_API_KEY: "sk-test-not-real" };
@@ -265,5 +265,38 @@ describe("/api/summary: the reservation is an honest upper bound (#324)", () => 
     expect(st.p_actual as number).toBeGreaterThan(reserved);
     expect(warn.mock.calls.some((c) => String(c[0]).includes("above its reservation"))).toBe(true);
     warn.mockRestore();
+  });
+});
+
+describe("/api/summary: the card's licence (#722, migration 0052)", () => {
+  it("a card with news text (Benzinga, through Alpaca's API or the news desk) is owner_only, in the card and its body", async () => {
+    const f = await gather("AAPL", DB_FACTS, {}, stub().f, NOW);
+    expect(f.newsSource).toBe("the news desk");
+    const c = compose(f, null);
+    expect(c.licence).toBe("owner_only");
+    expect(c.body.licence).toBe("owner_only");
+    expect(licenceOf(f)).toBe("owner_only");
+    const alp = { ...f, newsSource: "Alpaca news" };
+    expect(licenceOf(alp)).toBe("owner_only");
+  });
+  it("the stored card asks kb_summary_settle for owner_only when the model's gists are in it", async () => {
+    const s = stub();
+    await run(s);
+    const st = s.to("kb_summary_settle")[0].body!;
+    expect((st.p_body as Record<string, unknown>).licence).toBe("owner_only");
+    expect(String(st.p_text)).toContain("Apple raised its dividend");
+  });
+  it("a card with no news item, only facts, is public; a news source that gave no item adds no text", async () => {
+    const f = await gather("AAPL", { ...DB_FACTS, news: [] }, {}, stub().f, NOW);
+    expect(f.news).toEqual([]);
+    expect(licenceOf(f)).toBe("public");
+    expect(compose(f, null).body.news).toEqual([]);
+    expect(licenceOf({ ...f, newsSource: "Somebody's wire" })).toBe("public"); // the news source gave no text
+    expect(licenceOf({ ...f, news: [{ id: "n1", headline: "x", summary: "", date: "2026-11-18", source: "benzinga" }] })).toBe("owner_only");
+  });
+  it("every source the function can name has a licence, and both news sources are owner_only", () => {
+    expect(SOURCE_LICENCE["Alpaca news"]).toBe("owner_only");
+    expect(SOURCE_LICENCE["the news desk"]).toBe("owner_only");
+    expect(Object.keys(SOURCE_LICENCE).sort()).toEqual(["Alpaca corporate actions", "Alpaca news", "Finnhub earnings calendar", "Finnhub profile", "the news desk"]);
   });
 });

@@ -12,6 +12,7 @@
 //    model to reword only the profile and the headlines, refuse a draft that adds anything (a name, a number or a
 //    link not in its facts), store the card with its real cost, return it.
 // Dates, earnings and corporate actions are written by this code, never by the model. Nothing trades on any of this.
+// Each card carries its licence (#722, 0052): owner_only when it holds news text (Benzinga, through Alpaca).
 // Keys are read from the environment only and never logged or returned.
 
 declare const process: { env: Record<string, string | undefined> };
@@ -159,6 +160,22 @@ export function sources(f: Facts): { name: string; as_of: string }[] {
   return out;
 }
 
+// #722 (M19 8.4, migration 0052): each source's licence. News is Benzinga's, through Alpaca (its news API, or
+// kaibot.news_item, which the engine's news desk fills from the same feed): Alpaca's individual data licence lets the
+// owner see it and nobody else (0043 reads it the same way). A card holds that text (a headline or the model's gist of
+// it) only when a news item reaches it; a news source that gave no item adds no text. The other sources give facts
+// only (a name, an industry, a date, a split). An unknown source is owner_only.
+export type Licence = "owner_only" | "public";
+export const SOURCE_LICENCE: Record<string, Licence> = {
+  "Alpaca news": "owner_only", "the news desk": "owner_only",
+  "Finnhub profile": "public", "Finnhub earnings calendar": "public", "Alpaca corporate actions": "public",
+};
+/** The card's licence, from its sources: owner_only when any news item reaches it or any source is not public. */
+export function licenceOf(f: Facts): Licence {
+  if (f.news.length) return "owner_only";
+  return sources(f).every((s) => s.name === f.newsSource || SOURCE_LICENCE[s.name] === "public") ? "public" : "owner_only";
+}
+
 // ------------------------------------------------------------------ the model's draft
 export const SYSTEM = `You write short plain-English notes for a stock dashboard. You are given facts as JSON.
 Use only the facts given. Never add anything you know from elsewhere: no products, people, places, numbers,
@@ -287,9 +304,10 @@ export function compose(f: Facts, d: Draft | null) {
     : "No corporate action announced.");
   let text = lines.join("\n");
   if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT - 1).trimEnd() + "…";
+  const licence = licenceOf(f);
   const body = { about, about_ai: !!d, news, news_status: f.newsStatus, earnings: e ? { date: e.date, hour: e.hour, as_of: e.asOf } : null,
-    earnings_status: f.earningsStatus, actions: f.actions, actions_status: f.actionsStatus, profile_status: f.profileStatus };
-  return { symbol: f.symbol, day: f.day, today: true, text, body, sources: sources(f), ai: !!d, model: d ? MODEL : null };
+    earnings_status: f.earningsStatus, actions: f.actions, actions_status: f.actionsStatus, profile_status: f.profileStatus, licence };
+  return { symbol: f.symbol, day: f.day, today: true, text, body, sources: sources(f), ai: !!d, model: d ? MODEL : null, licence };
 }
 
 // ------------------------------------------------------------------ the handler
