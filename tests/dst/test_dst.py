@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 from scenarios import FINDINGS, quiet
-from world import D0, D1, D2, KNOWN, Outage, Scenario, et, run_scenario, run_seed
+from world import D0, D1, D2, KNOWN, SUMMER, Outage, Scenario, et, run_scenario, run_seed
 
 from kaibot.broker.faulty import Forced
 
@@ -34,7 +34,9 @@ def test_the_invariants_hold_under_seed(seed):
 
 @pytest.mark.parametrize("seed", REGRESSION)
 def test_a_seed_that_once_failed_still_passes(seed):
-    res = run_seed(seed)
+    # in the week and on the engine it failed in (the summer week, the intraday engine: before audit 2 5.16 every
+    # seed ran there; `week_of` may now draw another week for the same seed)
+    res = run_seed(seed, week=SUMMER, book_loop=False)
     assert res.ok, res.report()
 
 
@@ -70,7 +72,7 @@ def test_the_generator_reaches_every_kind_of_scenario():
         seen["kill"] += any(o.kill for o in s.outages)
         seen["pause"] += any(not o.kill for o in s.outages)
         seen["late_view"] += any(s.ready[ev] > et(ev, "23:00") for ev in list(s.ready)[:3])
-        seen["no_decision_day"] += s.plan[D2] is None
+        seen["no_decision_day"] += s.plan[s.week.sessions[1]] is None
         seen["sell_all"] += any(p == () for p in s.plan.values())
         seen["no_faults"] += s.profile.hold == 0
         seen["missed_window"] += any(o.kill and 20 <= o.down <= 60 for o in s.outages)
