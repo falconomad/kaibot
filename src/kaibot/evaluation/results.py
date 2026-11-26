@@ -58,7 +58,7 @@ class Row:
     set: str  # the report's `set`: core, engine_core, oneshots, spy, spy_engine, spy_trend, walkforward, ...
     rule: str  # the pre-registration name (the spec before "~")
     label: str
-    role: str  # base | neighbour | cost | fill | exposure | control | variant | other
+    role: str  # base | neighbour | cost | fill | exposure | control | variant | reference | other
     neighbour: str | None
     cost: Any  # the cost multiple (1.0, 2.0, ...) or the report's own cost label ("0.5 bp", "model v1")
     daily_file: Path | None
@@ -164,9 +164,15 @@ def _safe(label: str) -> str:
     return label.replace("|", "_").replace("~", "-").replace(" ", "")
 
 
+def _source(rep: dict) -> dict:
+    return rep["source"] if isinstance(rep.get("source"), dict) else {}
+
+
 def _set_of(name: str, rep: dict) -> str:
     if rep.get("set"):
         return str(rep["set"])
+    if _source(rep).get("engine") == "simbroker":
+        return "engine_core"  # #704: the gate v3 scripts (trend_momentum_gbm, _band) say so in their `source`
     return "walkforward" if name.startswith("walkforward_") else "?"
 
 
@@ -178,7 +184,8 @@ def _meta(f: Path, rep: dict) -> dict:
     pre = rep.get("prereg")
     return {"set": s, "universe_mode": mode or "today",
             "engine": "simbroker" if s in ("engine_core", "spy_engine") else "research_harness",
-            "cost_model": rep.get("costs") if isinstance(rep.get("costs"), str) else None,
+            "cost_model": rep.get("costs") if isinstance(rep.get("costs"), str) else (
+                _source(rep).get("cost_model") or rep.get("cost_model")),  # #704: the gate v3 scripts' `source`
             "run_at": rep.get("run_at"), "code_sha": rep.get("code_sha"), "status": rep.get("status"),
             "prereg_sha256": (pre or {}).get("sha256") if isinstance(pre, dict) else rep.get("prereg_sha256"),
             "window": rep.get("oos_window") or rep.get("window") or (rep.get("summary") or {}).get("oos_window"),
@@ -187,7 +194,11 @@ def _meta(f: Path, rep: dict) -> dict:
 
 
 def _control(rep: dict, block: dict, row: dict) -> dict | None:
-    """The matched control that belongs to a row, wherever the script stored it."""
+    """The matched control that belongs to a row, wherever the script stored it. #704: a report-level control is
+    the control of the REPORT's rule; a reference run of another rule in the same report (trend_momentum inside
+    trend_momentum_gbm's report) does not get it."""
+    if str(row.get("label", "")).startswith("reference|") and not isinstance(row.get("control"), dict):
+        return None
     if isinstance(row.get("control"), dict) and row["control"]:
         full = (rep.get("control") or {}).get(row["label"]) if isinstance(rep.get("control"), dict) else None
         return {**row["control"], **({"control_result": full["control_result"]} if isinstance(full, dict)
@@ -214,6 +225,8 @@ def _control(rep: dict, block: dict, row: dict) -> dict | None:
 
 def _role(rep: dict, row: dict, version: str | None, first: bool) -> str:
     spec, kind = str(row.get("spec", "")), row.get("kind")
+    if str(row.get("label", "")).startswith("reference|"):
+        return "reference"  # #704: another rule's run kept for comparison, not that rule's own report
     if kind in NOT_ACCOUNTS:
         return "cost"
     if kind == "control" or "control_of" in rep.get("versions", {}).get(version or "", {}):

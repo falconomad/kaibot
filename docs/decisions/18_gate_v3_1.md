@@ -26,7 +26,8 @@
   `tests/unit/test_gate_v3_1_books.py`. Section 6 (#702): `src/kaibot/evaluation/trials.py`,
   `src/kaibot/replay/config_replay.py`, `scripts/trend_momentum_gbm.py`, `scripts/trend_momentum_band.py`;
   `tests/unit/test_gate_v3_1_trial_sharpes.py`. Section 7 (#703): `src/kaibot/evaluation/results.py`,
-  `src/kaibot/replay/spy_noise_band.py`; `tests/unit/test_gate_v3_1_timing_exposure.py`.
+  `src/kaibot/replay/spy_noise_band.py`; `tests/unit/test_gate_v3_1_timing_exposure.py`. Section 8 (#704):
+  `tests/unit/test_gate_v3_1_holm_inputs.py`.
 
 ## 1. What changes (ticket 6.1)
 
@@ -142,10 +143,29 @@ much SPY. Their active return falls, because SPY rose over the window. No verdic
 benchmark's exposure is never below the old one, SPY rose over the research window (14.4% a year), and every
 intraday SPY rule predates decision 16, so it cannot pass (decision 16 section 8).
 
+## 8. Ticket 6.4: what enters Holm, a control tolerance, and the mislabelled row (#704)
+
+| # | What | Before | After |
+|---|---|---|---|
+| 1 | P-values in Holm | the best-evidenced run's control p of each rule, from any run with 500 or more runs and a matched control. So `spy_intraday_momentum` "cleared" the level on the 0.5 bp-cost run's p (0.0020), which is cost-optimistic, from a 500-run control, and whose window ran into the hold-out (†) | only a p-value from a run that meets `sleeve.final_requires` (engine with SimBroker, cost model v2, data repairs, SPY total return), with the control runs its family needs (`control_runs_for`: 2,000 for several rules), a matched control (row 2) drawn from the rule's own pool or random times, and no session after 2024-12-31 (`s3_control.holm_inputs: final_requires`). Every other p-value is **shown greyed out** (in italics, with its reasons) in the sleeve table and the families table, and counts as 1 in Holm |
+| 2 | The control's match | one unfilled slot in any of 2,000 runs made the control unmatched and S3 unknown (#474: 1 of 946) | **pre-registered tolerance**: the control is matched when, over **all** its runs together, at most **0.5%** of its slots are unfilled (`floor(0.005 × slots)`, so 4 of 946), and its committed exposure stays within its own tolerance (2 points) in every run (`s3_control.unfilled_slots_max_share: 0.005`; the config may only lower it) |
+| 3 | The `trend_momentum (?, point_in_time)` row | the reference run of `trend_momentum` inside `trend_momentum_gbm`'s report was read as a base run of `trend_momentum`, given the GBM's control (p 0.1644, "the control did not fill every slot") and the kind "?" | a row labelled `reference|…` has the role `reference`: it is not a run of that rule's own and gets no report-level control. A report's `source` (engine, cost model) is read, so the GBM report is `engine_core` with its cost model, not "?" and "not stated" |
+
+**Hindsight, by this record's own rule (section 4).** Row 2 is written after #474's result was seen. It is
+labelled so here. Its effect on that run is to make S3 judged: the GBM control (p 0.164, times 7 rules in the
+family) fails Holm, so S3 turns from unknown to fail. It cannot make anything pass. Row 1 only removes p-values
+from the correction, so it can only raise the adjusted p-values of the families that keep theirs.
+
+**Effect on the published table.** `spy_intraday_momentum`'s family p is greyed out (cost not v2, 500 runs where
+2,000 are needed, hold-out sessions), so the family counts as 1 and no family clears the level. The other rows
+that fed Holm until now (`trend_momentum`, `mom_12_1_band`, `mom_12_1_band_nofilter`, `pullback_uptrend`,
+`weekly_fall_rebound`, `spy_trend_filter`, `spy_noise_band_carry`) are greyed out with their reasons, except where
+a run meets every condition.
+
 ## The configuration this record adopts
 
 Every gate report records the sha256 of `config/gate_v3.yaml` as `gate_sha`. A test
 (`tests/unit/test_gate_v3_1_books.py`) checks the line below against the file. Any later edit of the file must
 update this line in the same pull request, together with the section that explains the edit.
 
-config/gate_v3.yaml sha256: `e6a3af9174328a0314692fc88377d2de9099116440ce971d9c8a458321556400`
+config/gate_v3.yaml sha256: `dcc1b6de4150f9902299210bd79ec1feb5fca47c45e19b57866194d889bcde8a`
