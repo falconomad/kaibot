@@ -28,6 +28,11 @@ Careful 27), through `risk.index_core.builder(index_cap_pct=80)`. Only the pre-r
 (`INDEX_CAPS`); 27 is the config's cap, the 24 Nov 2026 configuration. The live cap, the hard ceiling and
 config/index_core.yaml stay at 27. The report, its name (`_cap80_`) and every trial row record the cap.
 
+`--index-cap 97` (#710, M17 ticket 6.10; Amendment 6 of the pre-registration, Product 26 Nov 2026; research only):
+the original design's 97% cap at Hunter (Balanced 57, Careful 27), run once as a consistency check. It was
+pre-registered after the 27% and 80% results were seen, so its verdict prints as hindsight and its design saw the
+hold-out (Amendment 5). Same runs, same marks; the report is named `_cap97_`.
+
 Writes <out>/index_core_<level>_<universe>[_cap<n>]_<ts>.json, the same name .md (the book test as Markdown) and a
 folder with one daily CSV per run.
 """
@@ -63,7 +68,8 @@ RULE = "index_core"
 JUDGED = "aggressive"
 COSTS = (1.0, 2.0, 3.0, 0.0)
 COST_MODEL = "v2"  # broker.sim.AuctionCostsV2 in engine/daily.run_daily (#559, #572; prereg Amendment 2)
-INDEX_CAPS = (27.0, 80.0)  # the pre-registered index caps at Hunter: the config's 27 (Amendment 3) and 80 (Amendment 4)
+# the pre-registered index caps at Hunter: the config's 27 (Amendment 3), 80 (Amendment 4) and 97 (Amendment 6, #710)
+INDEX_CAPS = (27.0, 80.0, 97.0)
 
 
 def cap_override(cap: float | None, cfg) -> float | None:
@@ -104,7 +110,7 @@ def main(argv: list[str] | None = None) -> dict:
     ap.add_argument("--fixture", action="store_true", help="the committed fixture instead of the store (CI)")
     ap.add_argument("--index-cap", type=float, choices=INDEX_CAPS, default=None,
                     help="the index fund's cap at Hunter, %% of the book (pre-registered: 27, the config; "
-                         "80, Amendment 4)")
+                         "80, Amendment 4; 97, Amendment 6)")
     ap.add_argument("--out", default=None, help="report directory (default <data>/reports)")
     ap.add_argument("--trials", default=None, help="trial registry file (default <data>/trials.jsonl; '' = none)")
     holdout.add_argument(ap)

@@ -6,8 +6,8 @@ What must hold:
   is refused unless a builder in index mode opts into the research ceiling, which loosens `max_index_pct` only
   and never past 97%;
 - nothing in the live engine sets that research ceiling;
-- the scripts take `--index-cap` only at a pre-registered value (27 or 80), record it in the report and in every
-  trial row, and the runner's allow-list accepts exactly those two values.
+- the scripts take `--index-cap` only at a pre-registered value (27, 80, or 97 since #710), record it in the report
+  and in every trial row, and the runner's allow-list accepts exactly those values (97: test_index_core_cap97.py).
 """
 
 from __future__ import annotations
@@ -112,7 +112,8 @@ def test_book_limits_refuse_a_research_cap_outside_0_to_97(cap):
 
 
 def test_the_scripts_take_only_the_pre_registered_caps():
-    assert core_script.INDEX_CAPS == (27.0, 80.0) and book_script.core_run.INDEX_CAPS == (27.0, 80.0)
+    for got in (core_script.INDEX_CAPS, book_script.core_run.INDEX_CAPS):
+        assert got == (27.0, 80.0, 97.0)  # 97: #710, Amendment 6 of both pre-registrations
     for main in (core_script.main, book_script.main):
         with pytest.raises(SystemExit):
             main(["--fixture", "--trials", "", "--index-cap", "50"])
@@ -181,11 +182,11 @@ def test_the_hold_out_guard_still_runs_at_80(tmp_path, monkeypatch, main):
 
 
 @pytest.mark.parametrize("script", ["scripts/index_core.py", "scripts/index_core_book.py"])
-def test_the_allow_list_takes_exactly_27_or_80(script):
+def test_the_allow_list_takes_exactly_27_80_or_97(script):
     spec = rr.load_allowed().specs[script]
-    for ok in ("27", "80"):
+    for ok in ("27", "80", "97"):
         assert rr.check_args(spec, ["--end", "2024-12-31", "--index-cap", ok])[-1] == ok
-    for bad in ("50", "80.0", "97", "800", "8", " 80", "80;", "080"):
+    for bad in ("50", "80.0", "97.0", "800", "8", " 80", "80;", "080", "98", "100"):
         with pytest.raises(rr.JobError):
             rr.check_args(spec, ["--index-cap", bad])
 

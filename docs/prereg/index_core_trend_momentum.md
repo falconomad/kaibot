@@ -161,3 +161,43 @@ already a fail on B2 and B6 at both caps; B7 cannot change that.
 n_trials 0. The re-run at 80% (job `index-core-book-80-control-2026-11-26`, posting to #706) repeats the six
 configurations of 25 Nov 2026, and the script logs them with n_trials 1 again, so the idea's N becomes 18, not 12.
 Counting a repeat can only raise B2's hurdle, never lower it.
+
+## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check
+
+As docs/prereg/index_core.md Amendment 6, which gives the reasons, the research-only scope and the hindsight. The
+book's original row 9 (Hunter: a 97% index cap) was never run. This amendment is written **after** the 27% result
+(book CAGR 4.15%, maximum drawdown 6.61%, fail), the 80% result (10.87%, 16.12%, fail) and the 80% re-run with its
+control book (job `index-core-book-80-control-2026-11-26`, #706: the control book 11.64% at offset 0, so the book
+trailed it at every offset) were seen. The run is therefore **hindsight**, and gate v3.1 prints it so. It is a
+**consistency check**, never a clean test:
+
+- **design_saw_holdout:** true (as Amendment 4; this amendment adds that the run was decided after the 27% and 80% results and the control book)
+
+- **Row 1 and row 9:** the core's index cap is **97% at Hunter** (judged), under the 100% exposure cap:
+  `scripts/index_core_book.py --index-cap 97`. Balanced and Careful are reported at min(97, the exposure cap less
+  the 3% reserve), which gives **57%** and **27%**.
+- **The control book (B7, Amendment 5) at 97%.** Core cap plus budget is 107%, which is above what Hunter lets an
+  index fund hold: 97%, the exposure cap less the 3% reserve. The book has the same bound, because its core and
+  its sleeve share the exposure cap and the reserve (rows 7 and 8). The control book's index cap is therefore
+  **cut to 97%** (`ControlBook.cut_pct`). It holds min(w x 97 + 10, 97) % of equity in SPY. When w = 1, the book
+  and its control are both at most 97% invested. When w x 97 + 10 is at most 97, the control is exactly as
+  Amendment 5 wrote it. At 27% and 80% the cut does not bind (37% and 90%), so those runs are unchanged. The start
+  offsets (0, 5, 10, 15, 20 sessions), Hunter, 1x costs and cost model v2 are as in Amendment 5.
+- **Unchanged:** the sleeve (`trend_momentum_sleeve`, 10% budget, k = 0.01%, 1.5% per name), the swap, the budget
+  check against `books:`, the five neighbours (each at 97%), B1 to B7, the window (2017-05-01 to 2024-12-31,
+  `--end 2024-12-31`) and the hold-out, which is **not read**. B2's goal metric is the owner's (#731). This run is
+  judged on today's B2.
+
+**Expectation, before the run.** As the core at 97%, with the sleeve moving the book by about 0.1 times its active
+return. The sleeve's verdict is a fail (24, 25 and 26 Nov 2026), and the sleeve test inside the script re-runs the
+same configurations with the same control seed. So **B6 fails, and the book's verdict is a fail by construction**,
+whatever B2 shows. B7 is expected to fail, as at 80%. The run is worth doing only as the consistency check that
+ticket 6.10 asks for: whether the original design, at its own cap, tells the same story as 27% and 80%.
+
+**Trials.** Six new configurations count (n_trials 1): the judged book at 97% and its five neighbours. The control
+book, the book at offsets 5 to 20, the cost, fill and level reports and the sleeve's re-runs log n_trials 0. The 18
+configurations already counted stay counted: 27%, 80%, and the 80% repeat of #706. The book idea
+`index_core_trend_momentum` has then tried **24 configurations**, and B2's chance test uses that N. The trial rows
+record `params.index_cap_pct` (97), and the report is named `..._cap97_<ts>`. Job: `index-core-book-97-2026-11-26`,
+posting to #710. The earlier verdicts stand. A pass would allow only a proposal to the stakeholder, as in the
+core's Amendment 6. No further cap is tried under this file.
