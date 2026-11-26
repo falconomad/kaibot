@@ -37,9 +37,10 @@ describe("v4 shell", () => {
     try { expect(tabbar(shell(paperRun(), dead))).not.toContain("tab-dot"); } finally { vi.useRealTimers(); }
     expect(tabbar(shell(paperRun(), {}))).not.toContain("tab-dot");
   });
-  it("Paper is always in the header; the level and the run picker are desktop-only there", () => {
+  it("Paper is always in the header, on its own (the level is in the run picker); the run picker is desktop-only", () => {
     const html = shell(paperRun(), {});
-    expect(html).toMatch(/<span class="pill"[^>]*>PAPER<span class="hide-sm"> · BALANCED<\/span><\/span>/);
+    expect(html).toMatch(/<span class="pill"[^>]*>PAPER<\/span>/);
+    expect(html).not.toContain(" · BALANCED");
     const two = render(<Shell />, { seeds: [{ key: ["runs"], data: [paperRun(), paperRun({ id: 9, label: "Replay" })] }] });
     expect(two).toMatch(/<select aria-label="Run" class="chip hide-sm"/);
   });

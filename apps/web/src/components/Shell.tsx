@@ -253,7 +253,7 @@ export function Shell() {
       <header className="top">
         <div className="brand-lockup">
           <Link to="/" className="brand" aria-label={`${BRAND} home`}><Logo animate idle /></Link>
-          <span className="pill" title={lv ? `Paper trading only · ${lv.name} level` : "Paper trading only"}>PAPER<span className="hide-sm">{lv ? ` · ${lv.name.toUpperCase()}` : ""}</span></span>
+          <span className="pill" title={lv ? `Paper trading only · ${lv.name} level` : "Paper trading only"}>PAPER</span>
         </div>
         <nav className="topnav" aria-label="Main">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} end={n.to === "/"} {...warm(n.to)}>{n.label}</NavLink>)}
