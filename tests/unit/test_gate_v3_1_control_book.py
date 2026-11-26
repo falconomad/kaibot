@@ -149,7 +149,7 @@ def test_the_control_builder_holds_the_core_cap_plus_the_budget():
     for cap in (27.0, 80.0):
         c = ControlBook.of(script.book_of(), cap)
         b = script.control_builder(c, cfg)
-        assert c.index_cap_pct == cap + 10.0 == b.limits.max_index_pct and b.index_symbol == "SPY"
+        assert c.total_cap_pct == cap + 10.0 == b.limits.max_index_pct and b.index_symbol == "SPY"
         assert c.budget_pct == 10.0 and c.sleeve is script.book_of().sleeve
 
 

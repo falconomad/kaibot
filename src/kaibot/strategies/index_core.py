@@ -210,8 +210,8 @@ class ControlBook:
     book minus idle cash.
 
     It names one symbol, SPY, at `control_weight(w, core_cap_pct, budget_pct)` of the builder's index cap, which
-    must be core_cap_pct + budget_pct (`risk.index_core.builder(index_cap_pct=...)`), so the core's SPY is w x C %
-    of equity, as in the book, and the budget's SPY is B % of equity at every decision.
+    must be `total_cap_pct` = core_cap_pct + budget_pct (the research cap of `risk.index_core.builder`), so the
+    core's SPY is w x C % of equity, as in the book, and the budget's SPY is B % of equity at every decision.
 
     Research only, like `IndexCore` and `OnCore`: not registered, never imported by the live engine."""
 
@@ -236,7 +236,7 @@ class ControlBook:
         return cls(book.sleeve, book.core, float(book.budget_pct), float(core_cap_pct), name=f"{book.name}~control")
 
     @property
-    def index_cap_pct(self) -> float:
+    def total_cap_pct(self) -> float:
         """The index cap the control's builder needs: the core's cap plus the sleeve's budget."""
         return float(self.core_cap_pct) + float(self.budget_pct)
 

@@ -89,9 +89,9 @@ def book_builder(book: OnCore, level: str, cfg, profiles, index_cap: float | Non
 def control_builder(control: ControlBook, cfg):
     """#706: the control book's builder at Hunter: the index mode with its index cap = the core's cap + the sleeve's
     budget (no stock is named). Refuses a cap the level cuts (the control would then not hold the whole budget)."""
-    b = ic.builder(JUDGED, cfg, index_cap_pct=control.index_cap_pct)
-    if abs(b.limits.max_index_pct - control.index_cap_pct) > 1e-9:
-        raise SystemExit(f"control book: the index cap {control.index_cap_pct:g}% is cut to "
+    b = ic.builder(JUDGED, cfg, index_cap_pct=control.total_cap_pct)
+    if abs(b.limits.max_index_pct - control.total_cap_pct) > 1e-9:
+        raise SystemExit(f"control book: the index cap {control.total_cap_pct:g}% is cut to "
                          f"{b.limits.max_index_pct:g}% at {JUDGED}, so the budget would not all be in SPY")
     return b
 
@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> dict:
            "source": source, "rows": [row for _, row in runs.values()], "control": control,
            # #706: the control book, and which rows the rescore pairs at each start offset
            "control_book": {"control": "sleeve_budget_in_spy", "core_cap_pct": index_cap, "budget_pct": BUDGET,
-                            "index_cap_pct": ctl.index_cap_pct, "start_offsets_sessions": list(offsets),
+                            "index_cap_pct": ctl.total_cap_pct, "start_offsets_sessions": list(offsets),
                             "pairs": {str(k): list(v) for k, v in pairs.items()}},
            "gate_v3_sleeve": sleeve_rep, "gate_v3_book": book_rep, "runtime_s": round(time.time() - t0, 1)}
     out_dir = Path(a.out or data_dir / "reports")
