@@ -34,6 +34,9 @@ to 16:10 ET, 12:30 to 13:10 on a 13:00 close; NYSE sessions from kaibot.ingest.n
 sends its daily orders. A heavy job due then waits for the next tick (`deferred`); one that is running when the
 quiet window starts is paused (SIGSTOP to its process group) and resumed (SIGCONT) when it ends, and the pause does
 not count against its timeout. The launchd job itself runs as `ProcessType Background` with `LowPriorityIO`.
+Audit 2 6.8 (#708): `data/trials.jsonl` (the trial registry every gate count rests on) lives only on the Mac, so
+every results commit and pull request the runner opens records its sha256, its row count (non-empty lines) and its
+size, read after the job (`trials_stamp`). The file itself is never committed or read for its rows' content.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import plistlib
@@ -654,17 +658,61 @@ def _hold(paths: list[str], why: str) -> dict:
     return {"checkout": "held", "note": note, "reason": redact(why)[:300]}
 
 
-def _pr_text(job: Job, res: dict, sha: str, paths: list[str]) -> tuple[str, str, str]:
-    """The commit message, the PR title and the PR body (all redacted; no home path, no secrets)."""
+TRIALS_FILE = Path("data") / "trials.jsonl"
+
+
+def trials_stamp(root: Path) -> dict:
+    """#708: the trial registry as the job left it: sha256 of the bytes, rows (non-empty lines) and bytes. Read in
+    chunks, never parsed. A missing file is stated, never an error (a results PR still opens)."""
+    f = root / TRIALS_FILE
+    out: dict = {"path": TRIALS_FILE.as_posix()}
+    try:
+        if not f.is_file():
+            return {**out, "present": False}
+        h, rows, size, last = hashlib.sha256(), 0, 0, b"\n"
+        with f.open("rb") as fh:
+            pending = b""
+            while chunk := fh.read(1 << 20):
+                h.update(chunk)
+                size += len(chunk)
+                lines = (pending + chunk).split(b"\n")
+                pending = lines.pop()
+                rows += sum(1 for ln in lines if ln.strip())
+                last = chunk[-1:]
+            rows += 1 if pending.strip() else 0
+        return {**out, "present": True, "sha256": h.hexdigest(), "rows": rows, "bytes": size,
+                "ends_with_newline": last == b"\n"}
+    except OSError as e:
+        return {**out, "present": None, "error": type(e).__name__}
+
+
+def trials_line(stamp: dict | None) -> str:
+    """One Markdown line for the commit message and the PR body."""
+    if not stamp:
+        return "Trial registry (data/trials.jsonl): not read."
+    if stamp.get("present") is False:
+        return "Trial registry (data/trials.jsonl): **missing** in the runner's checkout after the job."
+    if stamp.get("present") is None:
+        return f"Trial registry (data/trials.jsonl): could not be read ({stamp.get('error')})."
+    tail = "" if stamp.get("ends_with_newline") else " (the last line has no newline: a cut-off row?)"
+    return (f"Trial registry (data/trials.jsonl) after the job: sha256 `{stamp['sha256']}`, {stamp['rows']} rows, "
+            f"{stamp['bytes']} bytes{tail}.")
+
+
+def _pr_text(job: Job, res: dict, sha: str, paths: list[str],
+             trials: dict | None = None) -> tuple[str, str, str]:
+    """The commit message, the PR title and the PR body (all redacted; no home path, no secrets). #708: both carry
+    the trial registry's sha256 and row count (`trials_stamp`)."""
     folders = ", ".join(job.spec.writes)
     title = f"Research runner: results of job {job.id} ({job.spec.target})"
     cmd = " ".join([job.spec.target, *job.args])
     what = (f"The research runner on the research Mac ran `{cmd}` (job {job.id}, status {res['status']}, exit "
             f"{res.get('rc')}, main @ {sha[:12]}) and committed the {len(paths)} changed file(s) it wrote under "
             f"{folders}. The runner never pushes to main; review and merge this pull request to keep the results.")
-    message = f"{title}\n\n{what}\n"
+    reg = trials_line(trials)
+    message = f"{title}\n\n{what}\n\n{reg}\n"
     shown = paths[:60] + ([f"... and {len(paths) - 60} more"] if len(paths) > 60 else [])
-    body = f"{what}\n\nJob comment: #{job.issue}\n\nFiles:\n\n{_fenced(shown)}\n"
+    body = f"{what}\n\n{reg}\n\nJob comment: #{job.issue}\n\nFiles:\n\n{_fenced(shown)}\n"
     return redact(message), redact(title), redact(body)
 
 
@@ -697,7 +745,7 @@ def settle_checkout(job: Job, res: dict, sha: str, cfg: Config, root: Path, stat
     branch = BRANCH_PREFIX + job.id
     if _git(root, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", run=run).returncode == 0:
         return _hold(paths, f"a local branch {branch} already exists")
-    message, title, body = _pr_text(job, res, sha, paths)
+    message, title, body = _pr_text(job, res, sha, paths, trials_stamp(root))
 
     if _git(root, "checkout", "-q", "-b", branch, run=run).returncode != 0:
         return _hold(paths, f"could not create the branch {branch}")
