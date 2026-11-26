@@ -78,7 +78,10 @@ yet; a position is only held over a close when the engine was off at 15:55.
   - **Older journals stay readable.** A file written before checksums gets the column when it is first opened
     and keeps its entries as they are; `meta.checksum_from` records the first entry number that must carry a
     checksum (the cut-over). Entries below it are accepted without one and are not protected; a new file's
-    cut-over is 1.
+    cut-over is 1. Only a file whose `entry` table is exactly the older one (no `sum` column, no recorded
+    cut-over) is taken for an older journal (#770): a damaged byte in the file's schema that renames `sum` (or
+    the table) is refused at open, `the journal file is damaged: its entry table is not the journal's`, exit
+    code 4, and nothing is written to the file. What to do: as for a failed checksum.
   - **After a roll-back to a release from before checksums**, that release appends entries without a checksum.
     The next start of a newer release refuses them (`journal entry N has no checksum`). If the roll-back explains
     them, accept them once, with the engine stopped: `python -m kaibot.engine.journal --reseal` prints the range
