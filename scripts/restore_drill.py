@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     d = Drill()
     age_h = (time.time() - src.stat().st_mtime) / 3600
     d.note(f"backup: {src} ({src.stat().st_size} bytes, written {age_h:.1f} h ago)")
-    if age_h > 36:
+    if a.archive is None and age_h > 36:  # the newest one picked: it should be last night's
         d.fail(f"the newest backup is {age_h:.0f} hours old (the daily job writes one every night)")
     try:
         plain = work / "backup.tar.gz"

@@ -90,7 +90,7 @@ What it does and checks (exit 0 when every check passes, 1 when one fails):
 4. **The research stores.** `trials.jsonl` is read as the gate reads it: rows, configurations, unreadable lines.
    The fundamentals parquet row count is taken, and the files in listings, reports and alarm are counted.
 5. **The runner.** `<tmp>/kaibot-runner/data/runner/done.json` must parse, and its job ids are counted.
-6. The newest backup must be under 36 hours old.
+6. When it picks the newest backup itself (no `--archive`), that backup must be under 36 hours old.
 
 It prints one block (`restore drill <date>: PASSED`, one line per check) to paste into the drill record. Run it once
 after setting up the off-box copy, then once a month with the USB key.

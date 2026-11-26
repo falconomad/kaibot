@@ -132,7 +132,8 @@ if command -v shasum >/dev/null 2>&1; then SHA=(shasum -a 256); else SHA=(sha256
 mv "$STAGE/MANIFEST.sha256" "$B/MANIFEST.sha256"
 
 ARCHIVE="$DEST/kaibot-$STAMP.tar.gz"
-tar -czf "$ARCHIVE.part" -C "$STAGE" kaibot && mv "$ARCHIVE.part" "$ARCHIVE"
+# COPYFILE_DISABLE: macOS tar would add ._* files for extended attributes, which the manifest does not list
+COPYFILE_DISABLE=1 tar -czf "$ARCHIVE.part" -C "$STAGE" kaibot && mv "$ARCHIVE.part" "$ARCHIVE"
 find "$DEST" -maxdepth 1 -name 'kaibot-*.tar.gz' -type f -mtime +"$KEEP" -print -delete | sed 's/^/deleted old backup: /'
 echo "backup: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1), $(($(wc -l < "$B/MANIFEST.sha256"))) files);" \
      "$(find "$DEST" -maxdepth 1 -name 'kaibot-*.tar.gz' | wc -l | tr -d ' ') kept"
