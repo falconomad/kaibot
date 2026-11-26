@@ -833,10 +833,7 @@ def main() -> None:
     eng.on_progress = lambda st: beat(st)  # long steps (history load) report progress
     while not stop["now"]:
         with contextlib.suppress(Exception):
-            # a pass more than an hour after the last one: the process was frozen (the Mac asleep); on waking the
-            # engine checks the daily store (audit 2, 5.12)
-            if gaps.tick() is not None and fetch is not None:
-                fetch.wake("waking")
+            gaps.tick()  # a pass more than an hour after the last one: the process was frozen (the Mac asleep)
         try:
             if lease.lost:  # #477: the fence (or a renewal) found the tenure gone: nothing more is sent
                 raise LeaseLost("The engine lease is no longer ours (found by the order fence). Stopping.")
@@ -874,7 +871,7 @@ def main() -> None:
                 with contextlib.suppress(Exception):
                     eng.store.event("engine_error", {"error": msg}, eng._rid())
         if fetch is not None:
-            fetch.step()  # starts a wanted fetch, polls a running one; never raises, never waits
+            fetch.step()  # on waking, or asked at the start: checks the store and starts a fetch; polls a running one
         report_conflicts(eng, replicator)
         report_news(eng, news)
         report_news(eng, feed)  # headline_feed_failed / _ok, written from this thread (the event chain)

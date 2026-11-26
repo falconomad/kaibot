@@ -28,7 +28,8 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash
 @pytest.fixture
 def repo(tmp_path):
     (tmp_path / "scripts").mkdir()
-    shutil.copy(ROOT / "scripts" / "fetch_daily.sh", tmp_path / "scripts" / "fetch_daily.sh")
+    for name in ("fetch_daily.sh", "fetch_lock.py"):  # audit 2, 5.12: the script runs itself under the lock
+        shutil.copy(ROOT / "scripts" / name, tmp_path / "scripts" / name)
     bin_ = tmp_path / ".venv" / "bin"
     bin_.mkdir(parents=True)
     for name, text in (("python", STUB), ("pip", "#!/bin/sh\nexit 0\n")):

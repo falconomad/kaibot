@@ -6,7 +6,8 @@ both runs had no bars for the previous session, and the engine waited (`multi_da
 `multi_day_data_late` at the deadline) until somebody ran the script by hand: on 25 Nov 2026 the decision came at
 16:05 ET, after its send window.
 
-Now, at start-up and on waking (engine/gap.py: two loop passes more than an hour apart), the engine asks whether the
+Now, at start-up and on waking (two loop passes more than an hour apart by the wall clock, what engine/gap.py
+reports as a frozen process), the engine asks whether the
 store is complete for the session whose bars are due (`entry_checks.expected_session`, the deadline the alarm uses)
 while that session's decision can still be sent (before the fill session's send window opens, 15:50 ET or 10
 minutes before an early close). If it is not, it starts the same script, `scripts/fetch_daily.sh`, as a background
@@ -67,6 +68,7 @@ class EngineFetch:
         self._for: str | None = None  # the session the running fetch is for
         self._asked: str | None = None
         self._log = None
+        self._last_step: datetime | None = None  # the wall clock at the last pass (a jump: the Mac slept)
 
     def wake(self, why: str) -> None:
         self._asked = why
@@ -78,6 +80,12 @@ class EngineFetch:
 
     def step(self) -> None:
         try:
+            from kaibot.engine.gap import GAP_S
+
+            now = self.now()
+            if self._last_step is not None and (now - self._last_step).total_seconds() > GAP_S:
+                self.wake("waking")  # the loop was frozen for over an hour: the Mac asleep, as engine/gap.py says
+            self._last_step = now
             self._poll()
             if self._asked is not None and self.proc is None:
                 why, self._asked = self._asked, None

@@ -77,14 +77,16 @@ def _run(f, w, minutes=30):
 
 
 def test_drill_the_mac_asleep_through_both_night_fetches_has_the_store_complete_before_1550(tmp_path):
-    w = World(tmp_path, datetime(2026, 8, 5, 10, 0, tzinfo=ET))  # woke at 10:00 ET on Wednesday
+    w = World(tmp_path, datetime(2026, 8, 4, 19, 0, tzinfo=ET))
     f = w.fetch(tmp_path)
-    assert w.missing(TUE, w.now())  # both night runs were missed: no Tuesday bars
-    f.wake("waking")
+    f.step()  # the last loop pass before the Mac sleeps, Tuesday 19:00 ET
+    w.t = datetime(2026, 8, 5, 10, 0, tzinfo=ET)  # it wakes at 10:00 ET on Wednesday: both night runs missed
+    assert w.missing(TUE, w.now())  # no Tuesday bars
     _run(f, w)
     assert [b["state"] for k, b in w.events if k == "daily_fetch"] == ["started", "finished"]
     assert w.events[0][1]["session"] == str(TUE)
     assert w.missing(TUE, w.now()) is None and w.now() < datetime(2026, 8, 5, 15, 50, tzinfo=ET)
+    assert w.events[0][1]["asked"] == "waking"
     assert "started by the engine (waking)" in (tmp_path / "logs" / "fetch_daily.log").read_text()
     f.wake("waking")  # a second wake with the store complete starts nothing
     f.step()
@@ -156,7 +158,21 @@ def test_the_engine_wires_it_only_with_the_daily_path_and_the_switch(monkeypatch
     monkeypatch.setenv("KAIBOT_ENGINE_FETCH", "0")
     assert ef.for_engine(eng) is None
     src = (ROOT / "src" / "kaibot" / "engine" / "__main__.py").read_text()
-    assert 'fetch.wake("start")' in src and 'fetch.wake("waking")' in src and "fetch.step()" in src
+    assert 'fetch.wake("start")' in src and "fetch.step()" in src
+
+
+def test_a_loop_pass_more_than_an_hour_after_the_last_is_a_wake(tmp_path):
+    """Waking is seen by the fetch itself: the wall clock jumped by more than engine/gap.py's GAP_S between passes."""
+    w = World(tmp_path, datetime(2026, 8, 4, 19, 0, tzinfo=ET))  # Tuesday evening: nothing is due yet
+    f = w.fetch(tmp_path)
+    f.step()
+    w.t += timedelta(minutes=1)
+    f.step()
+    assert f.proc is None and not w.events  # an ordinary pass is no wake
+    w.t = datetime(2026, 8, 5, 10, 0, tzinfo=ET)  # the Mac slept through both night runs
+    f.step()
+    assert f.proc is not None and w.events[0][1]["asked"] == "waking"
+    f.proc.wait(timeout=10)
 
 
 # ---------------------------------------------------------------- the lock shared with the night job
