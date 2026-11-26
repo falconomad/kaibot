@@ -10,7 +10,7 @@ refactoring loses the fix.
 
 from __future__ import annotations
 
-from datetime import time, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from world import D0, D1, D2, D3, THANKSGIVING_NO_CALENDAR, Outage, Scenario, Week, et
 
@@ -38,6 +38,30 @@ def quiet_in(week: Week, plan: dict, **kw) -> Scenario:
     kw.setdefault("profile", NO_FAULTS)
     kw.setdefault("book_loop", True)
     return Scenario(0, {**dict.fromkeys(week.sessions), **plan}, week=week, **kw)
+
+
+# ---------------------------------------------------------------- the 24-25 Nov 2026 Mac sleep (audit 2, 5.17)
+# The week around the incident: the run is up on Mon 23 Nov, buys on Tue 24 Nov, the Mac sleeps that evening.
+NOV_24 = Week("nov_24", ("2026-11-23", "2026-11-24", "2026-11-25", "2026-11-27", "2026-11-30"),
+              closes=(("2026-11-27", "13:00"),), holidays=("2026-11-26",))
+HEARTBEAT_STOPS = datetime(2026, 11, 24, 22, 45, 50, tzinfo=UTC)  # 17:45 New York, after the close
+MAC_WAKES = datetime(2026, 11, 25, 15, 47, 55, tzinfo=UTC)  # the watchdog's halt: "engine heartbeat 61325 s old"
+STORE_COMPLETE = datetime(2026, 11, 25, 16, 0, tzinfo=UTC)  # both night fetches missed; the store is in at about 16:00
+
+
+def mac_sleep_24_25_nov(**kw) -> Scenario:
+    """Product's timeline of the incident (second audit, "The 24-25 Nov sleep"), replayed: heartbeat stops 22:45 UTC
+    on 24 Nov; the Mac (engine and watchdog) sleeps until 15:47:55 UTC on 25 Nov, when the watchdog acts on a heartbeat
+    61325 s old; the engine is started again at 15:48; the daily store has the view of 24 Nov only from about 16:00;
+    the late decision (sell B, the stand-in for XOM, "on trend") follows within LATE_EVERY. The live process's loop
+    (book loop, lease, gap watch), every minute run as the live loop runs it."""
+    kw.setdefault("ready", {"2026-11-23": et("2026-11-23", "16:10"), "2026-11-24": STORE_COMPLETE,
+                            "2026-11-25": et("2026-11-25", "16:10"), "2026-11-27": et("2026-11-27", "13:10")})
+    kw.setdefault("outages", (Outage(HEARTBEAT_STOPS, 0, kill=False, mac=True, until=MAC_WAKES, restart=True),))
+    kw.setdefault("watchdog", True)
+    kw.setdefault("lease", True)
+    kw.setdefault("sparse", False)
+    return quiet_in(NOV_24, {"2026-11-24": ("B",), "2026-11-25": ()}, **kw)
 
 
 # ---------------------------------------------------------------- the planted bugs
