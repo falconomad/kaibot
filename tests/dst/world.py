@@ -85,6 +85,7 @@ from kaibot.engine.journal import (
     canon,
     select_rows,
 )
+from kaibot.engine.lease import LeaseLost
 from kaibot.engine.market import LiveMarket
 from kaibot.engine.orders import TERMINAL, UNCONFIRMED, St
 from kaibot.engine.store import StoreError
@@ -235,7 +236,14 @@ def mac_time(day: str, hhmm: str) -> datetime:
 class Outage:
     """The engine goes away. `kill`: at the `effects`-th effect (a journal append, a venue write, a replica write;
     with `orders_only`, only those of the order path) counted from `arm`, before or after that effect; it is back
-    `down` minutes later. Not `kill` (a pause): the process sleeps from `arm` for `down` minutes and wakes."""
+    `down` minutes later. Not `kill` (a pause): the process sleeps from `arm` for `down` minutes and wakes; its
+    monotonic clock runs on (a process that is only stopped).
+
+    `mac` (audit 2, 5.17): the whole Mac sleeps from `arm` to `until` (or `down` minutes): the engine, the watchdog
+    (it runs on the same Mac) and the monotonic clock stop, while the wall clock, the venue, Supabase and the daily
+    store go on. The pass at `arm` is the last one (its heartbeat is the last the watchdog and the dead-man see). At
+    the wake the watchdog runs first, then the engine wakes where it was (one loop pass hours after the last) or,
+    with `restart`, is started again (a new process)."""
 
     arm: datetime
     down: int
@@ -243,6 +251,13 @@ class Outage:
     effects: int = 1
     orders_only: bool = False
     after: bool = False
+    mac: bool = False
+    until: datetime | None = None
+    restart: bool = False
+
+    @property
+    def wake(self) -> datetime:
+        return self.until if self.until is not None else self.arm + timedelta(minutes=self.down)
 
 
 @dataclass(frozen=True)
@@ -259,6 +274,9 @@ class Scenario:
     heal: str | None = None  # the session before whose open the faults stop (None: the week's D3)
     week: Week = SUMMER  # audit 2, 5.16: the calendar the run is in
     book_loop: bool = False  # the live process's engine, `Engine(intraday=False)` (engine/book_loop.py)
+    # audit 2, 5.17: the live process's loop around the engine (engine/__main__.py): the cross-machine lease and its
+    # order fence (FencedBroker), the heartbeat that renews it, `before_tick`, and the gap watch (engine/gap.py)
+    lease: bool = False
 
     @property
     def heal_day(self) -> str:
@@ -272,6 +290,7 @@ class Scenario:
         drawn with before 5.16)."""
         week = week_of(seed) if week is None else week
         book_loop = week is not SUMMER if book_loop is None else book_loop
+        lease = book_loop and week is not SUMMER  # the new weeks run the live process's loop, lease and all
         D0, D1, D2, D3 = week.evenings  # noqa: N806 (the week's days, named as the module's summer ones)
         r = random.Random(f"kaibot-dst-{seed}")
         names = list(STOCKS)
@@ -317,6 +336,17 @@ class Scenario:
             else:
                 outages.append(Outage(arm, down, effects=r.randrange(1, 25), orders_only=r.random() < 0.6,
                                       after=r.random() < 0.5))
+        if week is not SUMMER:  # audit 2, 5.17: draws only the new weeks make (the summer stream is unchanged)
+            rs = random.Random(f"kaibot-dst-sleep-{seed}")
+            for ev, nxt in ((D0, D1), (D1, D2)):
+                if rs.random() < 0.06:  # the daily store comes only after the fill session (#691: taken late, #751)
+                    ready[ev] = et(nxt, week.close(nxt)) + timedelta(minutes=rs.choice((20, 90, 400)))
+            if rs.random() < 0.35:  # the Mac sleeps through a night, maybe into the next session (24-25 Nov)
+                day = rs.choice((D0, D1, D2))
+                arm = et(day, week.close(day)) + timedelta(minutes=rs.randrange(30, 420), seconds=rs.randrange(60))
+                hours = rs.choice((2, 5, 9, 14, 17, 19))
+                outages.append(Outage(arm, hours * 60 + rs.randrange(60), kill=False, mac=True,
+                                      restart=rs.random() < 0.5 and not week.calendar_down))
         if week.calendar_down:  # KNOWN 746: the process lives through the calendar's outage (a kill is a pause)
             outages = [o if not o.kill else Outage(o.arm, max(o.down, 2), kill=False) for o in outages]
         flatten = None
@@ -328,7 +358,7 @@ class Scenario:
         scale = r.choice((0.0, 0.5, 1.0, 1.0, 1.0, 2.0))
         profile = profile.scaled(scale)
         return cls(seed, plan, ready, tuple(sorted(outages, key=lambda o: o.arm)), flatten,
-                   watchdog=r.random() < 0.5, profile=profile, week=week, book_loop=book_loop)
+                   watchdog=r.random() < 0.5, profile=profile, week=week, book_loop=book_loop, lease=lease)
 
     def wanted(self, decidable: set[str] | None = None) -> tuple:
         """What the book must hold at the end: the latest decision's names. `decidable`: the fill sessions whose
@@ -530,7 +560,8 @@ class Result:
         s = self.scenario
         lines = [f"seed {s.seed}: {len(self.violations)} violation(s)", *[f"  - {v}" for v in self.violations[:12]],
                  f"plan {s.plan}  flatten {s.flatten}  watchdog {s.watchdog}",
-                 f"outages {[(str(o.arm), o.down, 'kill' if o.kill else 'pause') for o in s.outages]}",
+                 "outages " + str([(str(o.arm), o.down, "kill" if o.kill else "mac sleep" if o.mac else "pause")
+                                   for o in s.outages]),
                  f"week {s.week.name}  engine {'book loop' if s.book_loop else 'intraday'}",
                  f"run it again: PYTHONHASHSEED=0 PYTHONPATH=src python tests/dst/run_seed.py {s.seed} --week "
                  f"{s.week.name} {'--book-loop' if s.book_loop else '--intraday'}",
@@ -561,7 +592,11 @@ class World:
         self.broker.on_fault = lambda fault, what: self.say(f"fault {fault} {what}")
         self._calendar_went: set[str] = set()
         if week.calendar_down:
-            self.broker.calendar = self._calendar  # an instance attribute: the wrapper's other calls are unchanged
+            self.broker.calendar = self._calendar
+        if scenario.lease:  # the engine reaches the venue through the lease's fence, as engine/__main__.py builds it
+            from kaibot.engine.fence import FencedBroker
+
+            self.broker = FencedBroker(self.broker)  # an instance attribute: the wrapper's other calls are unchanged
         self.data = FaultyData(self.history, scenario.seed, scenario.profile)
         self.replica = Replica(self.clock)
         self.remote = FaultyStore(self.replica, scenario.seed, scenario.profile, now=self.clock, on_write=self.fuse)
@@ -574,12 +609,19 @@ class World:
         self.rep: Replicator | None = None
         self.down_until: datetime | None = None  # the engine is dead until then
         self.asleep_until: datetime | None = None  # the engine is paused until then
-        self.outages = list(scenario.outages)
+        self.outages = [o for o in scenario.outages if not o.mac]
+        self.mac_sleeps = [o for o in scenario.outages if o.mac]
+        self.mac_asleep: Outage | None = None  # the Mac sleeps (audit 2, 5.17)
+        self._last_pass: datetime | None = None  # the world's last moment with the Mac awake
+        self.slept = 0.0  # seconds the Mac slept: the monotonic clock did not run then
+        self.lease = None  # the engine process's lease (Scenario.lease)
+        self.gaps = None  # its gap watch
+        self.beat = None  # its heartbeat, which renews the lease (engine/__main__.make_beat)
         self.healed = False
         self.trace: list[str] = []
         self.violations: list[str] = []
         self.stats = {"passes": 0, "kills": 0, "pauses": 0, "boots": 0, "boot_failures": 0, "tick_errors": 0,
-                      "watchdog_acts": 0}
+                      "watchdog_acts": 0, "mac_sleeps": 0, "lease_lost": 0}
         self.check = Checker(self)
         self.dog = Watchdog(self.sim, self.replica, now=self.clock,
                             book=book_reader(self.jpath, self.replica, now=self.clock),
@@ -653,7 +695,7 @@ class World:
         with mock.patch.object(uuid, "uuid4", lambda: jid):
             journal = FusedJournal(self.jpath, self.clock, self.fuse)
         try:
-            store = JournalStore(journal, self.remote, live=True, mono=lambda: self.clock().timestamp())
+            store = JournalStore(journal, self.remote, live=True, mono=self.mono)
             market = LiveMarket(self.data, list(STOCKS), {s: "XLK" for s in STOCKS}, "SPY", self.root / "hist",
                                 lambda: pd.Series(18.0, index=pd.date_range("2025-01-01", "2026-12-31")))
             # the live process builds `Engine(intraday=False)` (engine/book_loop.py, no intraday strategies); the
@@ -663,10 +705,13 @@ class World:
                          daily=lambda e: ld.for_engine(e, self.load, rules=[self.rule]), **extra)
             eng.market.candidates_at = lambda m: pd.DataFrame()  # no intraday candidates: the daily path only
             eng.sleep = lambda s: None
-            eng.monotonic = lambda: self.clock().timestamp()
+            eng.monotonic = self.mono
             rep = Replicator(journal, self.remote)
-            rep.clock = lambda: self.clock().timestamp()
-            eng.startup()
+            rep.clock = self.mono
+            if self.s.lease:
+                self._start_live(eng)
+            else:
+                eng.startup()
         except BaseException:
             journal.close()
             raise
@@ -674,11 +719,45 @@ class World:
         self.check.attach(eng)
         self.say("engine up")
 
+    def mono(self) -> float:
+        """The engine's monotonic clock: the wall clock less the time the Mac slept (macOS's monotonic clock does not
+        run while the machine sleeps; engine/lease.py takes the larger of the two ages for that reason)."""
+        t = self.clock().timestamp() - self.slept
+        if self.mac_asleep is not None:
+            t -= (self.clock() - self.mac_asleep.arm).total_seconds()
+        return t
+
+    def _start_live(self, eng) -> None:
+        """engine/__main__.py's start: the last heartbeat read for the gap watch, the lease taken (a lease that cannot
+        be checked: the start fails and the launcher tries again), the fence given its tenure, the engine started,
+        one `engine_gap` event if it was down more than an hour without a clean stop."""
+        from kaibot.engine import __main__ as main
+        from kaibot.engine.gap import GapWatch
+        from kaibot.engine.lease import EngineLease, machine_key
+
+        gaps = GapWatch(eng.store, eng._rid, "dst", process=eng.process, now=self.clock)
+        with contextlib.suppress(Exception):
+            gaps.before_start(self.remote)
+        lease = EngineLease(eng.store, "H-dst", "dst",
+                            mono=self.mono, wall=lambda: self.clock().timestamp(), journal=eng.journal,
+                            machine=machine_key("dst", "UUID-DST"))
+        lease.acquire()  # LeaseUnavailable / LeaseHeld: the process exits, launchd starts it again
+        eng.lease = lease
+        main.fence_orders(eng, lease)
+        eng.startup()
+        with contextlib.suppress(Exception):
+            gaps.after_start()
+        self.lease, self.gaps = lease, gaps
+        self._stop: dict = {"now": False}
+        self.beat = main.make_beat(eng, lease, "dst", self._stop)
+
     def die(self, why: str) -> None:
         if self.eng is not None:
             with contextlib.suppress(Exception):
                 self.eng.journal.close()
         self.eng = self.rep = None
+        if self.s.lease:  # (tests/drills' DrillWorld keeps its own lease across a kill)
+            self.lease = self.gaps = self.beat = None
         self.fuse.disarm()
         self.say(f"engine down: {why}")
 
@@ -724,13 +803,24 @@ class World:
         try:
             status: dict = {"state": "starting"}
             try:
-                eng.apply_commands()
+                if self.lease is not None:  # engine/__main__.main's loop: the gap watch, the lease, the commands
+                    from kaibot.engine import __main__ as main
+
+                    with contextlib.suppress(Exception):
+                        self.gaps.tick()
+                    if self.lease.lost:
+                        raise LeaseLost("The engine lease is no longer ours (found by the order fence). Stopping.")
+                    main.before_tick(eng, self.lease)
+                else:
+                    eng.apply_commands()
                 status = eng.tick()
                 eng.on_tick_ok()
             except JournalCorrupt as e:
                 self.bad(f"the journal is damaged: {e}")
                 self.die("journal corrupt")
                 return
+            except LeaseLost:
+                raise
             except Exception as e:
                 self.stats["tick_errors"] += 1
                 self.say(f"tick error {type(e).__name__}: {str(e)[:120]}")
@@ -741,10 +831,20 @@ class World:
                     eng.store.event("engine_error", {"error": status["error"]}, eng._rid())
             if status.get("state") != "error":
                 self._could_decide(now)
-            eng.store.heartbeat(eng.process, status)
+            if self.beat is not None:
+                self.beat(status)  # renews the lease, then the heartbeat row (engine/__main__.make_beat)
+                if self._stop.get("lease_lost"):
+                    raise LeaseLost("the lease belongs to another engine")
+            else:
+                eng.store.heartbeat(eng.process, status)
             self.rep.pump()
         except Kill as k:
             self._killed(str(k))
+            return
+        except LeaseLost as e:  # engine/__main__ stops (exit 3); launchd starts it again a minute later
+            self.stats["lease_lost"] += 1
+            self.down_until = self.clock() + timedelta(minutes=1)
+            self.die(f"{type(e).__name__}: {str(e)[:100]}")
             return
         # a pass that ran without an error and without an injected fault (but the week's calendar outage)
         self.check.after_pass(clean=status.get("state") != "error" and self._faults() == faults)
@@ -800,12 +900,12 @@ class World:
 
     def beat_alive(self) -> None:
         """A live, unpaused loop beats every ten seconds whether a tick is due or not."""
-        if self.eng is not None and self.asleep_until is None:
+        if self.eng is not None and self.asleep_until is None and self.mac_asleep is None:
             with contextlib.suppress(Exception):
                 self.replica.heartbeat("engine", {"state": "alive"})
 
     def watchdog(self) -> None:
-        if self.dog is None or self.healed:
+        if self.dog is None or self.healed or self.mac_asleep is not None:  # it runs on the Mac too
             return
         try:
             out = self.dog.step()
@@ -823,6 +923,9 @@ class World:
         self.data.armed = self.remote.armed = False
         self.fuse.disarm()
         self.asleep_until = None
+        if self.mac_asleep is not None:
+            self._wake(self.clock())
+        self.mac_sleeps.clear()
         if self.down_until is not None and self.down_until > self.clock():
             # an engine that was to stay down returns before the last window at the latest
             late = self.close_of(self.s.heal_day) - timedelta(minutes=40)
@@ -830,12 +933,50 @@ class World:
         self.say("the world is healed: no more faults")
 
     def at(self, t: datetime, run: bool = True) -> None:
+        """Run the world at `t`. With the live process's loop, an awake Mac runs it at least every 50 minutes, also
+        through nights and holidays: its gap watch (engine/gap.py) takes two passes more than an hour apart for a
+        frozen process."""
+        while self.s.lease and self.mac_asleep is None and self._last_pass is not None \
+                and t - self._last_pass > timedelta(minutes=55):
+            fill = max(self._last_pass + timedelta(minutes=50), self.clock() + timedelta(seconds=1))
+            if fill >= t:
+                break
+            if self.mac_sleeps and self.mac_sleeps[0].arm <= fill and not self.healed:
+                break  # the Mac goes to sleep at its own pass first
+            self._at(fill)
+        self._at(t, run)
+
+    def _at(self, t: datetime, run: bool = True) -> None:
+        if self.mac_asleep is not None and t >= self.mac_asleep.wake:
+            self._wake(self.mac_asleep.wake)
         self.clock.set(t)
         self.owner()
+        if self.mac_asleep is not None:
+            return  # nothing runs on a sleeping Mac
         if run:
+            self._last_pass = t
             self.one_pass()
         else:
             self.beat_alive()
+        if self.mac_sleeps and self.mac_sleeps[0].arm <= t and not self.healed:
+            o = self.mac_sleeps.pop(0)
+            self.mac_asleep = o
+            self.stats["mac_sleeps"] += 1
+            self.say(f"the Mac sleeps until {o.wake.astimezone(NY):%m-%d %H:%M:%S} New York"
+                     + (" (the engine is started again at the wake)" if o.restart else ""))
+
+    def _wake(self, t: datetime) -> None:
+        """The Mac wakes at `t`: the wall clock jumped, the monotonic clock did not. The watchdog's job runs first
+        (launchd runs a missed interval at the wake), then the engine wakes or is started again."""
+        o, self.mac_asleep = self.mac_asleep, None
+        if t > self.clock():
+            self.clock.set(t)
+        self.slept += (t - o.arm).total_seconds()
+        self.say("the Mac wakes")
+        self.watchdog()
+        if o.restart and self.eng is not None:
+            self.down_until = t
+            self.die("started again after the Mac woke")
 
     def session(self, day: str, rng: random.Random) -> None:
         o = session_open(day)
@@ -869,8 +1010,10 @@ class World:
             # that took the session for a regular one would go out (#733)
             back = int((regular - close).total_seconds() // 60)
             marks |= set(range(back - 11, back + 1))
-        for m in sorted(marks):
-            self.at(close + timedelta(minutes=m, seconds=7))
+        times = {close + timedelta(minutes=m, seconds=7) for m in marks}
+        times |= {o.arm for o in self.mac_sleeps if close <= o.arm < close + timedelta(hours=15)}
+        for t in sorted(times):  # the Mac goes to sleep right after a pass at its moment
+            self.at(t)
 
     def closed_day(self, day: str) -> None:
         """A weekday the market is closed (a holiday): the Mac runs the engine all the same. Before the open, at
@@ -912,7 +1055,10 @@ class World:
             self.evening(self.week.days[0])
             for day, nxt in zip(self.week.sessions, self.week.days[2:], strict=True):
                 if day == self.s.heal_day:
-                    self.clock.set(et(day, "08:00"))
+                    if self.s.lease:
+                        self.at(et(day, "08:00"), run=False)  # (the night's passes up to here)
+                    else:
+                        self.clock.set(et(day, "08:00"))
                     self.heal()
                 self.session(day, rng)
                 self.evening(day)
