@@ -1,6 +1,6 @@
-"""#551 on the loops of M10 1.19 (#444): the multi-day book's own loop (engine/book_loop.py, `Engine._tick`) and the
-intraday path (engine/intraday.IntradayEngine, which overrides `_tick`) both run under `Engine.tick`'s check, so a
-damaged journal entry read by the daily path stops the pass at that step (JournalCorrupt: the main loop writes
+"""#551 on the loops of M10 1.19 (#444): the multi-day book's own loop (engine/book_loop.py, `Engine._tick`) and
+the intraday path (engine/intraday_legacy.IntradayEngine, which overrides `_tick`) both run under `Engine.tick`'s check,
+so a damaged journal entry read by the daily path stops the pass at that step (JournalCorrupt: the main loop writes
 `engine_error`, stops and exits with code 4), whichever loop runs, and nothing after it in that pass runs."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from test_live_daily_engine import DailyAccount
 from test_m10_book_loop import LoopAccount
 
 from kaibot.engine.core import Engine
-from kaibot.engine.intraday import IntradayEngine
+from kaibot.engine.intraday_legacy import IntradayEngine
 from kaibot.engine.journal import JournalCorrupt
 
 

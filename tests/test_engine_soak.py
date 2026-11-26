@@ -26,7 +26,7 @@ from test_outage_drill import Sim, buys, drift_up, start, stop_leg
 from test_spy_momentum_engine import STRATS, no_dips, strong_morning
 
 import kaibot.engine.alpaca as alp
-from kaibot.engine import core
+from kaibot.engine import core, intraday_legacy
 from kaibot.strategies.spy_momentum import ENTRY_M
 
 NO_BUYING_POWER = '{"code":40310000,"message":"insufficient buying power"}'
@@ -274,7 +274,7 @@ def test_d4_repeated_rejects_become_a_loop_error_and_halt_entries(tmp_path):
     assert sent == ["A", "A"] and eng.kill is None and "halt" not in store.tables
     with pytest.raises(alp.AlpacaError):
         step(eng, broker, clock, open_utc, 64, 65)  # bar 64: the third in a row is a loop error again
-    assert eng.kill == "broker_rejects" and core.MAX_REJECT_STREAK == 3
+    assert eng.kill == "broker_rejects" and intraday_legacy.MAX_REJECT_STREAK == 3
     (halt,) = store.tables["halt"]
     assert halt["kind"] == "broker_rejects" and "3 entry orders in a row" in halt["reason"]
     assert "insufficient buying power" in halt["reason"]

@@ -11,7 +11,7 @@
     ledger     the minute row
 
 Nothing of the intraday path runs here or before the send: no minute scan of the intraday universe, no bracket
-entry, no stop management, no agent room, no shadow rule. That path is engine/intraday.IntradayEngine, which the
+entry, no stop management, no agent room, no shadow rule. That path is engine/intraday_legacy.IntradayEngine, which the
 live process builds only with `intraday.enabled: true`; its tick runs these same steps in this same order around
 its own.
 

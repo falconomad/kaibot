@@ -7,7 +7,7 @@ book's own small loop (engine/book_loop.py):
     clock -> sync -> send -> reconcile -> risk checks -> ledger
 
 The intraday path (bracket entries of rules that are flat by the close, their stops and exits, the agent room,
-the shadow rules, the minute scan of the intraday universe) lives in engine/intraday.py as `IntradayEngine`, a
+the shadow rules, the minute scan of the intraday universe) lives in engine/intraday_legacy.py as `IntradayEngine`, a
 subclass that adds its steps around the same ones. `Engine(..., intraday=False)` is this class: what the live
 process builds while `config/profiles.yaml` has `intraday.enabled: false`, and it never imports that module.
 Every other `Engine(...)` call (tests, replays, SimBroker research) builds `IntradayEngine`, the engine as it
@@ -111,11 +111,6 @@ RUN_AMOUNT_MIN_USD, RUN_AMOUNT_MAX_USD = 1_000.0, 100_000.0
 CONFIG_UNREADABLE = "config unreadable"
 RULES_RETRY_S = 60.0
 COMMAND_KINDS = ("new_run", "pause", "resume", "flatten_and_stop", ACCEPT_COMMAND, "set_level")
-# S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
-# candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
-# accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
-BROKER_REJECT_STATUS = (403, 422)
-MAX_REJECT_STREAK = 3
 # S80 (#120, decision 15 sections 4 and 6): the close-minus-5 flatten and the daily stop sell intraday sleeves only;
 # multi-day sleeves keep their protective stops. Run drawdown, a new run and "Flatten and stop" sell everything.
 INTRADAY_ONLY = ("time", "daily_stop")
@@ -336,31 +331,17 @@ class Day:
         return self.n_min - 15  # 15:45
 
 
-def gate_peak(peak: float | None, eq: float, book_pnl: float) -> float | None:
-    """#206 (QA-Ops second key on #207): the run peak the gate's `run_drawdown_pct` check gets. `_risk_halts`
-    measures the intraday run end on the run's equity without the multi-day book's P&L (`intraday_equity`) against
-    the intraday peak; the gate gets the run's whole equity (its sizing needs it), so the peak is scaled such that
-    the gate's drawdown is exactly the intraday one: a book in profit cannot hide an intraday drawdown and a book in
-    loss (it has its own end) does not block intraday entries. Without multi-day P&L: the peak, unchanged."""
-    if not book_pnl or peak is None:
-        return peak
-    eq_i = intraday_equity(eq, book_pnl)
-    if not (eq_i > 0 and eq > 0):  # (#211: a non-positive run equity keeps the peak as it is)
-        return peak
-    return eq * peak / eq_i
-
-
 class Engine:
-    intraday = False  # M10 1.19: True on engine/intraday.IntradayEngine only
+    intraday = False  # M10 1.19: True on engine/intraday_legacy.IntradayEngine only
     CONTAIN_DRIFT_READ = True  # audit 2 5.10: a failed positions read of the drift check holds buys, not the minute
 
     def __new__(cls, *args, intraday: bool | None = None, **kw):
         """M10 1.19 (#444): `Engine(..., intraday=False)` is the multi-day book's engine, this class: what the
         live process builds while `intraday.enabled` is off in config/profiles.yaml. Every other call builds
-        engine/intraday.IntradayEngine, imported here and only then: an engine as it always was, for tests,
+        engine/intraday_legacy.IntradayEngine, imported here and only then: an engine as it always was, for tests,
         replays and SimBroker research (a research run hands its rule to an engine whose levels list none)."""
         if cls is Engine and intraday is not False:
-            from kaibot.engine.intraday import IntradayEngine
+            from kaibot.engine.intraday_legacy import IntradayEngine
 
             cls = IntradayEngine
         return super().__new__(cls)
@@ -520,7 +501,8 @@ class Engine:
         `tests/unit/test_one_recovery.py` checks that nothing else calls them."""
         self._rebuild_md_exits()
         self._restore_cmd_waiting()
-        self._recover_intraday()
+        if self.intraday:  # M10 1.19: the intraday path's orphaned entries
+            self._recover_intraday()
         self._daily_step("startup", lambda: self.daily.startup())
 
     def _require_daily_path(self) -> None:
@@ -746,7 +728,7 @@ class Engine:
         try:
             broker_pos = self.broker.positions()
         except Exception as e:  # noqa: BLE001 - contained: buys held (below), the tick goes on
-            if not self.CONTAIN_DRIFT_READ:  # the retired intraday path (engine/intraday.py): as before
+            if not self.CONTAIN_DRIFT_READ:  # the retired intraday path (engine/intraday_legacy.py): as before
                 raise
             why = f"broker positions unreadable ({type(e).__name__}: {str(e)[:120]}): no new buys"
             if self._positions_unread is None:
@@ -2359,9 +2341,6 @@ class Engine:
                                {k: list(v["symbols"]) for k, v in (u.get("themes") or {}).items()})
         return self._uni_cache
 
-    def _cfg_version(self) -> int:
-        return self.day.rules.version if self.day and self.day.rules else 0
-
     def _pause_rule(self) -> tuple[int, int]:
         r = self.day.rules if self.day else None
         return (r.pause_losses, r.pause_minutes) if r else (PAUSE_AFTER_LOSSES, PAUSE_MINUTES)
@@ -2413,7 +2392,7 @@ class Engine:
     def tick(self) -> dict:
         """One pass (`_tick`). #551: a damaged journal entry read anywhere in it stops it with JournalCorrupt, also
         when a broad handler on the way caught the error: the main loop then writes `engine_error`, stops and exits
-        with code 4 (docs/ops/ledger.md, "Checksums"). The book's loop and the intraday path (engine/intraday.py,
+        with code 4 (docs/ops/ledger.md, "Checksums"). The book's loop and the intraday path (engine/intraday_legacy.py,
         which overrides `_tick`) both run under this check."""
         self._journal_intact()
         try:
@@ -2451,7 +2430,8 @@ class Engine:
         return self._daily_status({"state": "market_closed", "next_open": clk.get("next_open"),
                                    "account_clean": self.account_clean})
 
-    # ---- M10 1.19 (#444): where the intraday path (engine/intraday.IntradayEngine) adds its steps. Here: nothing.
+    # ---- M10 1.19 (#444): the intraday path (engine/intraday_legacy.IntradayEngine) adds its steps around the book's;
+    # #694: its hooks are defined there only, and called here only when `self.intraday`. These two run on both.
     def _roomflow(self, room, pack_fn):
         """The agent room reviews intraday candidates only: without the intraday path there is none."""
         if room is not None:
@@ -2472,24 +2452,6 @@ class Engine:
             log.error("open intraday trades in the store (%s) and no intraday rule is enabled: they are not "
                       "managed by this engine. Close them at the broker, or start with `intraday.enabled: true` "
                       "(config/profiles.yaml) until they are flat", ", ".join(left))
-
-    def _recover_intraday(self) -> None:
-        """Start-up recovery of the intraday order path (an entry accepted just before a crash): none here."""
-
-    def _sync_positions(self) -> None:
-        """The intraday positions' entries, bracket legs and exits: none here."""
-
-    def _flatten_positions(self, reason: str, failed: dict, t0: float) -> None:
-        """The intraday positions of a flatten: none here."""
-
-    def _vet_custom(self, d: Day) -> None:
-        """The owner's custom tickers are scanned by intraday rules only: none here."""
-
-    def _day_end_room(self) -> None:
-        """The agent room's end-of-day counterfactuals: none here."""
-
-    def _day_end_shadow(self) -> None:
-        """The shadow rules' end-of-day counterfactuals: none here."""
 
     def _md_send_steps(self, d: Day, sync: bool = False) -> None:
         """The daily path's steps of a minute: its order sync (`sync`: when they run first in the tick), the pre-open
@@ -2675,7 +2637,8 @@ class Engine:
                     {"state": "preparing", "note": f"loading price history {n}/{tot}"}
                 )),
             )
-        self._vet_custom(self.day)
+        if self.intraday:  # M10 1.19: the owner's custom tickers (intraday rules only)
+            self._vet_custom(self.day)
         for p in self.pos.values():  # intraday positions opened on an earlier session are closed at the first tick
             p.carried = (flatten_at_close(_holding(p.strategy)) and bool(p.entry_ts)
                          and datetime.fromisoformat(p.entry_ts).astimezone(_et()).date() < today)
@@ -3275,26 +3238,13 @@ class Engine:
                 "engine has no ex-date source (ex_dividends)")
         return strats
 
-
-    # ================= entries =================
-
-
-
-    def broker_quotes(self, symbols: list[str]) -> dict:
-        try:
-            return self.market.data.latest_quotes(symbols)
-        except Exception:
-            log.exception("quotes failed")
-            return {}
-
-
-
     # ================= order sync =================
     def _sync_orders(self) -> None:
         self.own_order_ids()  # M9 1.13: each tick, before a leg's id can be dropped (cancel, replace)
         if self._md_exits:
             self._sync_md_exits()
-        self._sync_positions()  # M10 1.19: the intraday path's entries, legs and exits (none here)
+        if self.intraday:  # M10 1.19: the intraday path's entries, legs and exits
+            self._sync_positions()
 
     def _venue_fees(self, order_id: str | None, ts, since=None) -> float:
         """#238: the fees the venue charged on this order's fills: the `fees` of its FILL activities from a minute
@@ -3371,7 +3321,8 @@ class Engine:
             sides = ("buy",) if reason in INTRADAY_ONLY else ("buy", "sell")
             self._daily_step("cancel", lambda: self.daily.cancel_working(sides, reason))
         failed: dict[str, Exception | str] = {}
-        self._flatten_positions(reason, failed, t0)  # M10 1.19: the intraday path's positions (none here)
+        if self.intraday:  # M10 1.19: the intraday path's positions
+            self._flatten_positions(reason, failed, t0)
         if reason not in INTRADAY_ONLY:  # S80: run drawdown, new run, "Flatten and stop": multi-day sleeves too
             self._flatten_md(reason, failed, t0)
         self._flatten_slow = {s for s, e in failed.items() if isinstance(e, Exception)}  # tried and failed
@@ -3472,7 +3423,8 @@ class Engine:
 
     def _finalize_day(self) -> None:
         d = self.day
-        self._day_end_room()  # M10 1.19: the agent room's counterfactuals (intraday path only)
+        if self.intraday:  # M10 1.19: the agent room's counterfactuals
+            self._day_end_room()
         left = [p for p in self.pos.values() if flatten_at_close(_holding(p.strategy))]
         if left:  # S80: intraday sleeves only; a multi-day sleeve is meant to be held over the close
             log.warning("session ended with open intraday positions %s; they will be closed at the next open",
@@ -3509,7 +3461,8 @@ class Engine:
             },
             rid,
         )
-        self._day_end_shadow()  # M10 1.19: the shadow rules' counterfactual P&L (intraday path only)
+        if self.intraday:  # M10 1.19: the shadow rules' counterfactual P&L
+            self._day_end_shadow()
         gate_report.on_day_end(self, ROOT)  # S38: random baseline + append-only gate report (exceptions contained)
         d.finalized = True
 
@@ -3734,39 +3687,10 @@ def _holding(strategy: str | None):
     return getattr(s, "holding", Holding.INTRADAY)
 
 
-def _order_refused(err: Exception) -> bool:
-    """S74: a 403 or 422 on an entry order: the venue refused it and no order exists. Told by the status the
-    adapter's error carries, so this does not depend on which adapter raised it. One 422 is not a refusal: "client
-    order id must be unique" says an order with our id IS at the venue (an earlier attempt got through and the
-    adapter could not read it back). That stays a loop error, and the next start adopts the order."""
-    body = str(getattr(err, "body", None) or err)
-    return getattr(err, "status", None) in BROKER_REJECT_STATUS and "client_order_id" not in body
-
-
-def _reject_reason(err: Exception) -> str:
-    """S74: the venue's own words for a refused order. Alpaca answers {"code": ..., "message": ...}."""
-    body = str(getattr(err, "body", None) or err)
-    try:
-        msg = json.loads(body).get("message")
-    except (ValueError, AttributeError):
-        msg = None
-    return str(msg or body)[:160]
-
-
 def _et():
     from zoneinfo import ZoneInfo
 
     return ZoneInfo("America/New_York")
-
-
-def _age_s(t: str | None, now: datetime) -> float:
-    if not t:
-        return 1e9
-    try:
-        ts = datetime.fromisoformat(t.replace("Z", "+00:00"))
-        return max(0.0, (now - ts).total_seconds())
-    except ValueError:
-        return 1e9
 
 
 def _parse_ts(v) -> datetime:

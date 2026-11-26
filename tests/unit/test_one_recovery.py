@@ -21,7 +21,7 @@ PARTS = {
     "_rebuild_md_exits": {("engine/core.py", "recover")},
     "_restore_cmd_waiting": {("engine/core.py", "recover")},
     "_recover_intraday": {("engine/core.py", "recover")},
-    "_adopt_orphans": {("engine/intraday.py", "_recover_intraday")},
+    "_adopt_orphans": {("engine/intraday_legacy.py", "_recover_intraday")},
     "recover": {("engine/core.py", "startup"), ("engine/protect.py", "startup")},  # the engine's; the manager's
 }
 
@@ -62,7 +62,8 @@ def test_the_daily_paths_start_up_runs_only_from_recover():
 def test_recover_runs_its_parts_in_order_and_startup_runs_it_once(monkeypatch):
     calls = []
     for name in ("_rebuild_md_exits", "_restore_cmd_waiting", "_recover_intraday"):
-        monkeypatch.setattr(Engine, name, lambda self, n=name: calls.append(n))
+        # (#694: the book's engine has no `_recover_intraday`; only engine/intraday_legacy.IntradayEngine defines it)
+        monkeypatch.setattr(Engine, name, lambda self, n=name: calls.append(n), raising=False)
     monkeypatch.setattr(Engine, "_daily_step", lambda self, step, call: calls.append(f"daily:{step}"))
 
     class Bare:
@@ -71,8 +72,13 @@ def test_recover_runs_its_parts_in_order_and_startup_runs_it_once(monkeypatch):
     eng = Bare()
     for name in ("_rebuild_md_exits", "_restore_cmd_waiting", "_recover_intraday", "_daily_step", "recover"):
         setattr(eng, name, getattr(Engine, name).__get__(eng))
+    eng.intraday = True  # the intraday engine: its orphaned entries are recovered third
     eng.recover()
     assert calls == ["_rebuild_md_exits", "_restore_cmd_waiting", "_recover_intraday", "daily:startup"]
+    calls.clear()
+    eng.intraday = False  # the book's engine (the live process): the intraday part is not called
+    eng.recover()
+    assert calls == ["_rebuild_md_exits", "_restore_cmd_waiting", "daily:startup"]
 
     # in `startup`: after the ledger and the daily-path check, before the account guard and the reconciliation
     order = []

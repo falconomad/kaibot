@@ -352,12 +352,12 @@ def test_a_refused_activity_adds_no_fee():
 
 @pytest.mark.parametrize("case", ["entry", "exit", "leg"])
 def test_the_intraday_sync_never_books_a_fill_price_that_is_not_one(case):
-    """QA-Ops on #545, moved by M10 1.19 (#444) to engine/intraday.IntradayEngine._sync_positions: an entry, an exit
-    or a bracket leg whose filled_avg_price is not a finite number above zero is not booked (read again at the next
-    sync) and raises the refusal; the same position with a good price is booked."""
+    """QA-Ops on #545, moved by M10 1.19 (#444) to engine/intraday_legacy.IntradayEngine._sync_positions: an entry,
+    an exit or a bracket leg whose filled_avg_price is not a finite number above zero is not booked (read again at the
+    next sync) and raises the refusal; the same position with a good price is booked."""
     from types import SimpleNamespace
 
-    from kaibot.engine.intraday import IntradayEngine
+    from kaibot.engine.intraday_legacy import IntradayEngine
 
     def run(px):
         booked, refused = [], []

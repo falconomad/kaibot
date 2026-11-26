@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 
 import numpy as np
 
@@ -47,30 +48,75 @@ from kaibot.engine.core import (
     FLATTEN_BUDGET_S,
     FLATTEN_TRIES,
     INTRADAY_ONLY,
-    MAX_REJECT_STREAK,
     Day,
     Engine,
     Pos,
     Positions,
-    _age_s,
     _et,
     _holding,
     _iso,
-    _order_refused,
     _refused,
-    _reject_reason,
-    gate_peak,
     log,
 )
 from kaibot.engine.execution import flatten_at_close
 from kaibot.engine.roomflow import RoomFlow
 from kaibot.engine.userconfig import Rules
 from kaibot.replay.sim import half_spread, sell_px
-from kaibot.risk.gate import Proposal, Side, Snapshot, evaluate
+from kaibot.risk.gate import Proposal, Side, Snapshot, evaluate, intraday_equity
 from kaibot.strategies import registry
 from kaibot.strategies.base import CloseOut, Context, Event, MoveStop, Strategy, due
 
 __all__ = ["IntradayEngine"]
+
+# #694: moved from engine/core.py unchanged: what only the intraday path uses.
+# S74 (#114). A 403 or 422 on an entry order means the venue refused it: there is no order. One refusal is about one
+# candidate (the stop is no longer below the market, the symbol cannot be traded right now). Three in a row with no
+# accepted order in between, the same "repeated" as MAX_ERROR_STREAK, is about the account or the order format.
+BROKER_REJECT_STATUS = (403, 422)
+MAX_REJECT_STREAK = 3
+
+
+def gate_peak(peak: float | None, eq: float, book_pnl: float) -> float | None:
+    """#206 (QA-Ops second key on #207): the run peak the gate's `run_drawdown_pct` check gets. `_risk_halts`
+    measures the intraday run end on the run's equity without the multi-day book's P&L (`intraday_equity`) against
+    the intraday peak; the gate gets the run's whole equity (its sizing needs it), so the peak is scaled such that
+    the gate's drawdown is exactly the intraday one: a book in profit cannot hide an intraday drawdown and a book in
+    loss (it has its own end) does not block intraday entries. Without multi-day P&L: the peak, unchanged."""
+    if not book_pnl or peak is None:
+        return peak
+    eq_i = intraday_equity(eq, book_pnl)
+    if not (eq_i > 0 and eq > 0):  # (#211: a non-positive run equity keeps the peak as it is)
+        return peak
+    return eq * peak / eq_i
+
+
+def _order_refused(err: Exception) -> bool:
+    """S74: a 403 or 422 on an entry order: the venue refused it and no order exists. Told by the status the
+    adapter's error carries, so this does not depend on which adapter raised it. One 422 is not a refusal: "client
+    order id must be unique" says an order with our id IS at the venue (an earlier attempt got through and the
+    adapter could not read it back). That stays a loop error, and the next start adopts the order."""
+    body = str(getattr(err, "body", None) or err)
+    return getattr(err, "status", None) in BROKER_REJECT_STATUS and "client_order_id" not in body
+
+
+def _reject_reason(err: Exception) -> str:
+    """S74: the venue's own words for a refused order. Alpaca answers {"code": ..., "message": ...}."""
+    body = str(getattr(err, "body", None) or err)
+    try:
+        msg = json.loads(body).get("message")
+    except (ValueError, AttributeError):
+        msg = None
+    return str(msg or body)[:160]
+
+
+def _age_s(t: str | None, now: datetime) -> float:
+    if not t:
+        return 1e9
+    try:
+        ts = datetime.fromisoformat(t.replace("Z", "+00:00"))
+        return max(0.0, (now - ts).total_seconds())
+    except ValueError:
+        return 1e9
 
 
 class IntradayEngine(Engine):
@@ -80,6 +126,16 @@ class IntradayEngine(Engine):
     CONTAIN_DRIFT_READ = False
 
     # ================= what the book's engine leaves to this path =================
+    def _cfg_version(self) -> int:
+        return self.day.rules.version if self.day and self.day.rules else 0
+
+    def broker_quotes(self, symbols: list[str]) -> dict:
+        try:
+            return self.market.data.latest_quotes(symbols)
+        except Exception:
+            log.exception("quotes failed")
+            return {}
+
     def _roomflow(self, room, pack_fn):
         # S34: the agent room (None = rules-only). It can only veto or halve a candidate the rules approved.
         return RoomFlow(self, room, pack_fn) if room is not None else None
