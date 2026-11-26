@@ -21,6 +21,13 @@ PY="$(command -v python3.13 || command -v python3.12 || command -v python3 || tr
 if [ -z "$PY" ] || ! "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
   echo "Needs Python 3.12+:  brew install python@3.13"; exit 1
 fi
+# Audit 2, 5.12 (#692): one download at a time. The night job and the engine (engine/fetch.py, when the Mac slept
+# through the night job) both run this script; it re-runs itself under a lock on data/fetch_daily.lock, and a second
+# run while one holds it says so and exits 0 (scripts/fetch_lock.py). --status and --check only read: no lock.
+if [ -z "${1:-}" ] && [ -z "${KAIBOT_FETCH_LOCKED:-}" ]; then
+  mkdir -p data
+  KAIBOT_FETCH_LOCKED=1 exec "$PY" scripts/fetch_lock.py data/fetch_daily.lock -- /bin/bash "$PWD/scripts/fetch_daily.sh"
+fi
 [ -d .venv ] || "$PY" -m venv .venv
 .venv/bin/pip install -q --disable-pip-version-check --require-hashes -r requirements-engine.txt  # locked (uv.lock export, #122)
 export SSL_CERT_FILE="${SSL_CERT_FILE:-$(.venv/bin/python -m certifi)}"  # macOS python.org builds lack root certs

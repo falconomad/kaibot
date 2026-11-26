@@ -135,6 +135,8 @@ PENDING: tuple[Event, ...] = (
     Event("engine_degraded_start", "critical",
           "The engine started while its database was unreachable: selling only, no buys"),
     Event("engine_lease_confirmed", "info", "The engine reached its database again and holds the lease"),
+    # Audit 2, 5.12 (#692): the daily-bars fetch the engine started itself (the Mac slept through the night job) failed
+    Event("daily_fetch_failed", "warn", "The engine's own fetch of the daily prices failed (see logs/fetch_daily.log)"),
     # M12 3.11 (#473): the daily prices missed their deadline; a daily-data check blocks buys, and lets go again
     Event("multi_day_data_late", "warn", "Daily prices not in by their deadline: no multi-day decision until they are"),
     Event("data_entry_block", "warn", "New buys blocked by a daily-data check (sales and stops go on)"),
@@ -154,6 +156,7 @@ ROUTINE: tuple[Event, ...] = (
     Event("cash_merger_booked", "info", why="a cash merger booked (S78)"),
     Event("config_applied", "info", why="the owner's config read for a session"),
     Event("custom_tickers", "info", why="the session's custom-ticker check"),
+    Event("daily_fetch", "info", why="audit 2 5.12: the engine started, or finished, its own daily-bars fetch"),
     Event("dividend_booked", "info", why="a dividend booked"),
     Event("filing_flag_shadow", "info", why="#375: the 8-K flags' shadow log (research)"),
     Event("headline_feed_failed", "warn",
