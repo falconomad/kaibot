@@ -264,6 +264,9 @@ families:
     idea: stocks drift for days after an earnings surprise
     rules:
       post_earnings_week: {kind: selection, v3_declared: false, existing_control: universe}
+      # docs/prereg/earnings_surprise_drift.md (#797, decision 20 Amendment 1): SUE-SEC (primary), AV surprise
+      # (secondary), the pre-report filter; 7 trials, not run yet
+      earnings_surprise_drift: {kind: selection, v3_declared: true, existing_control: universe}
   short_term_reversal:
     idea: a sharp short-term fall in a large stock rebounds
     rules:

@@ -155,6 +155,26 @@ Never delete the row or shorten `expires_at` while `renewed_at` is moving. The r
 its next heartbeat and stop (`lease lost`), but in the seconds before that both engines could act on the account.
 Do not copy `data/live/engine_holder_id` to another machine: two machines with the same id would both be let in.
 
+### Two hosts side by side (the cloud move, M20 9.6, #730)
+
+During the cut-over the Mac and the VM may both run an engine on the one paper account. Only the host the lease row
+names can send: every order is preceded by a renewal with its tenure's epoch (above), so the other host's orders stop
+at its own fence. The deterministic simulation plays it (`tests/dst/test_dst_two_hosts.py`, every pull request), with
+two real engine processes on one simulated venue and Supabase, each with its own data folder, holder id, machine and
+fence, and every venue write attributed to its host:
+
+| Scenario | What must follow (checked) |
+|---|---|
+| The VM is started while the Mac runs; the Mac freezes at 15:45 ET with a sale due in the 15:50 window; the journal is copied to the VM | every VM start before that is refused (`LeaseHeld`, exit 3) and sends nothing; the VM takes the lease once it expired and sends the window's orders; the woken Mac's sale is refused at its fence (nothing reaches the venue), it stops (`lease lost`, exit 3), every later start is refused (exit 3); every venue write is made by the host the lease named at that moment |
+| The runbook's clean cut-over: Mac stopped cleanly after the close, journal copied, VM started; the Mac's launcher comes back the next morning | the VM takes the free lease at once; every Mac start is refused (exit 3) and sends nothing |
+| The roll-back: the VM stopped cleanly; the Mac's launcher is still loaded with its old journal | the lease is free, but every Mac start finds its journal stale (`IdentityError`, exit 4), gives the lease back and sends nothing, until the VM's journal is copied back; then the Mac trades the next session |
+
+Two planted bugs prove the scenario's reach: without the loop's renewal before the tick the fence alone stops the
+woken Mac; with the fence taken away too, the Mac's sale reaches the venue on the VM's lease and the one-sender check
+fails. No migration is needed: 0041 (machine) and 0042 (epoch) already do this. What the lease cannot do is tell a
+stale journal from a current one; the journal's identity check does (exit 4, [ledger.md](ledger.md)), so the journal
+moves with the engine, and `data/live/engine_holder_id` never does.
+
 ### What the lease does not do
 - It does not replace `engine_guard.sh`: two engines on the same machine share one holder id.
 - It does not cover the watchdog or `--check`: neither trades, neither takes the lease.

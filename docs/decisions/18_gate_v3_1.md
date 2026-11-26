@@ -212,10 +212,19 @@ is re-run with the control (job `index-core-book-80-control-2026-11-26`, posting
 B7 to that book's pre-registration (`docs/prereg/index_core_trend_momentum.md` Amendment 5) is written after its
 results were seen, so gate v3.1 prints it as hindsight (section 4). That is correct.
 
+## 11. A new rule in a family: `earnings_surprise_drift` (#797, 26 Nov 2026)
+
+`config/gate_v3.yaml` lists `earnings_surprise_drift` (decision 20 and its Amendment 1;
+`docs/prereg/earnings_surprise_drift.md`) under the existing `earnings_drift` family, next to `post_earnings_week`,
+with `v3_declared: true` (pre-registered after decision 16) and `existing_control: universe`. Every pre-registration
+must sit in exactly one family (`tests/unit/test_gate_v3.py`). **No mark, level, window or other family changes.**
+Its effect: the family's deflated Sharpe counts the new rule's configurations (7 trials, plus neighbours when run)
+together with `post_earnings_week`'s, so the bar for the family can only rise. Nothing has run yet.
+
 ## The configuration this record adopts
 
 Every gate report records the sha256 of `config/gate_v3.yaml` as `gate_sha`. A test
 (`tests/unit/test_gate_v3_1_books.py`) checks the line below against the file. Any later edit of the file must
 update this line in the same pull request, together with the section that explains the edit.
 
-config/gate_v3.yaml sha256: `af08d53f39f3727ca6ae5593802d904d2288b4faf127619511ed4c422d81c5f9`
+config/gate_v3.yaml sha256: `8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec`

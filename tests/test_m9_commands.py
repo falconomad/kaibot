@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 from test_failsafe_drills import Account
 
-from kaibot.engine import core
+from kaibot.engine import commands, core
 
 
 def _cmd(a, kind, payload, key):
@@ -128,7 +128,7 @@ def test_a_command_the_check_cannot_read_is_rejected_and_the_tick_goes_on(tmp_pa
     def boom(amount, level, policies):
         raise RuntimeError("check broke")
 
-    monkeypatch.setattr(core, "run_refusal", boom)
+    monkeypatch.setattr(commands, "run_refusal", boom)  # #694: the check is read where the command loop is
     _cmd(a, "new_run", {"amount_usd": 5000, "level": "balanced"}, "odd")
     a.eng.apply_commands()  # does not raise
     assert a.eng.run["id"] == a.rid and len(a.store.tables["run"]) == 1
