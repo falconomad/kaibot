@@ -200,7 +200,8 @@ def test_index_core_amendment_4_is_hindsight_from_its_git_history():
     names = [a["amendment"] for a in late]
     assert names[0] == head and all(n.startswith("## Amendment") for n in names)
     assert not any(n.startswith(("## Amendment 1 ", "## Amendment 2 ", "## Amendment 3 ")) for n in names)
-    assert "hindsight (Amendments 4, 5 written after the first run)" in g3.verdict_text("fail", late)
+    # 5: #705 (design_saw_holdout); 6: #710 (the 97% core, a consistency check decided after the 27% and 80% runs)
+    assert "hindsight (Amendments 4, 5, 6 written after the first run)" in g3.verdict_text("fail", late)
     assert p.summary()["amendment_log"][3]["amendment"] == head
 
 
