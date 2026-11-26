@@ -11,8 +11,8 @@ follows a split in its daily store, and its oracle knows that a merged name cann
 seeds (`BAND_SHARE`) run the book's stop in band mode with the world's own band table (`World.band_config`). The
 nightly soak counts all of it in its coverage section (soak.Coverage), and plays the exit-code-5 drill.
 
-The spin-off found #780 (KNOWN): the adopted shares are outside the daily view the session's send sizes with, and the
-whole send of that session fails.
+The spin-off found #780 (fixed): the adopted shares were outside the daily view the session's send sizes with, and
+the whole send of that session failed. They are now sold in that session's window, unsized, with every other order.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import pytest
 import world
 from scenarios import quiet_in
 from soak import Coverage
-from world import BAND_SHARE, D1, D2, KNOWN, SPINOFF_ISSUE, SUMMER, THANKSGIVING, Scenario, Venue, et, minute_frames
+from world import BAND_SHARE, D1, D2, KNOWN, SUMMER, THANKSGIVING, Scenario, Venue, et, minute_frames
 from world import run_scenario as run
 
 from kaibot.broker.faulty import CA_FAULTS, DEFAULT_FAULTS, NO_FAULTS, FaultyBroker, Forced
@@ -133,23 +133,18 @@ def test_a_corporate_action_before_a_session_keeps_every_invariant(fault, param)
     assert res.stats["corporate_actions"] == [want]
 
 
-def test_a_spin_off_is_adopted_and_sold_with_the_known_issue_left_out():
-    """KNOWN #780 as the generator leaves it out: the new symbol joins the daily store and the spin-off's own session
-    is not judged by invariants 11 and 12. The new shares are sold, and the book ends where the decision wanted it."""
-    assert SPINOFF_ISSUE in KNOWN
+def test_a_spin_off_day_sells_the_new_shares_and_sends_the_rest_in_its_window():
+    """#780 (was KNOWN): the daily store never has BW. In D2's window the send sells all of BW unsized (invariant 12a:
+    a due sale of the window) and buys C (invariant 11: the decided send goes out in its own window); the book ends
+    where the decision wanted it."""
+    assert 780 not in KNOWN
     s = quiet_in(SUMMER, {D1: ("B",), D2: ("B", "C")}, forced=(Forced("ca_spinoff", f"B|{D2}", 1.0),))
     res = run(s)
     assert res.ok, res.report()
     assert res.stats["corporate_actions"] == ["spin_off"]
-
-
-@pytest.mark.xfail(strict=True, reason=f"engine bug #{SPINOFF_ISSUE}: the spin-off's adopted shares are outside the "
-                                       "daily view and the session's whole send fails with KeyError")
-def test_known_a_spin_off_day_still_sends_its_window(monkeypatch):
-    monkeypatch.delitem(world.KNOWN, SPINOFF_ISSUE)  # the generator's way round it, off
-    s = quiet_in(SUMMER, {D1: ("B",), D2: ("B", "C")}, forced=(Forced("ca_spinoff", f"B|{D2}", 1.0),))
-    res = run(s)
-    assert res.ok, res.report()
+    sold = [t for t in res.trace if "om_intent" in t and "-BW-" in t and "side=sell" in t]
+    assert len(sold) == 1 and f"-{D2.replace('-', '')}-sell-1" in sold[0], sold
+    assert any("om_intent" in t and "-C-" in t and "side=buy" in t and D2.replace("-", "") in t for t in res.trace)
 
 
 # ---------------------------------------------------------------- the book stop in band mode
@@ -206,7 +201,7 @@ CA_SEEDS = {40: "spin_off", 79: "cash_merger", 88: "split", 130: "spin_off"}
 
 @pytest.mark.parametrize("seed", sorted(CA_SEEDS))
 def test_a_seed_that_draws_a_corporate_action_keeps_every_invariant(seed):
-    """Seed 40 (thanksgiving_no_calendar, book stop in band mode) found #780; with KNOWN's way round it, it passes."""
+    """Seed 40 (thanksgiving_no_calendar, book stop in band mode) found #780; it passes with the fix."""
     from world import run_seed
 
     res = run_seed(seed)

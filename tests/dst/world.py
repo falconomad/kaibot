@@ -215,7 +215,6 @@ SAID = {  # the journal entries the trace shows, with the fields that tell the s
 }
 
 
-SPINOFF_ISSUE = 780  # audit 2 5.20's finding (see KNOWN)
 # Engine defects the simulation found that are still open: issue -> what the generator leaves out so that every
 # seed does not trip over the same one. Each has a strict xfail (test_dst.py, or its kind's file); remove both then.
 KNOWN: dict[int, str] = {
@@ -226,11 +225,8 @@ KNOWN: dict[int, str] = {
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
          "a watchdog flatten of the shares while their buy is still unbooked leaves a difference only the owner "
          "can accept (the venue's sale is a foreign fill, then the late booking puts the shares in the ledger)",
-    SPINOFF_ISSUE: "invariants 11 and 12 are not judged in the session of a spin-off, and the daily store gets the "
-                   "new symbol's bars from that evening on: the adopted shares are outside the daily view the send "
-                   "sizes with (`daily.builder_sizing` raises KeyError), so the whole send of that session fails "
-                   "(the new shares' sale, every other sale, every buy) and goes out late at the next session; with a "
-                   "store that never has the new symbol it fails at every session",
+    # #780 is fixed: a spin-off's new ticker, which the daily store never has, is sold in the session's own window
+    # as a full-position sale, unsized, and the rest of the send goes out (test_dst_corporate_actions.py)
 }
 
 
@@ -452,7 +448,7 @@ def minute_frames(seed: int, week: Week = SUMMER) -> dict[str, pd.DataFrame]:
     return out
 
 
-def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER, extra: tuple = ()) -> DailyData:
+def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER) -> DailyData:
     """300 sessions of daily bars up to D4: the last ones are the minute bars' own days, the earlier ones a steady
     rise to them: enough history for the rule's averages, and steep enough against the few gentle days of minute bars
     that every stock stays above its 100-day average and SPY above its 200-day average. The carry-over and the late
@@ -461,7 +457,7 @@ def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER, extra: tupl
     n = 300
     dates = np.busday_offset(np.datetime64(week.days[4]), -np.arange(n)[::-1], roll="backward",
                              holidays=list(week.holidays)).astype("datetime64[D]")
-    symbols = [*STOCKS, "SPY", *extra]  # `extra`: names outside the universe the store also has (a spin-off's)
+    symbols = [*STOCKS, "SPY"]
     c = np.zeros((n, len(symbols)))
     o = np.zeros_like(c)
     tail = HISTORY_DAYS + 5
@@ -622,8 +618,6 @@ class World:
                                    forced=scenario.forced)
         self.broker.on_fault = lambda fault, what: self.say(f"fault {fault} {what}")
         self.broker.on_action = self._on_action  # audit 2, 5.20: a corporate action the venue applied
-        self.spun: list[str] = []  # spun-off symbols the daily store has (KNOWN)
-        self.spun_days: set[str] = set()  # sessions of a spin-off (KNOWN)
         self._calendar_went: set[str] = set()
         if week.calendar_down:
             self.broker.calendar = self._calendar
@@ -757,14 +751,14 @@ class World:
     # ------------------------------------------------------------ corporate actions (audit 2, 5.20)
     def _on_action(self, a: dict) -> None:
         """The venue applied a corporate action before the open: the daily store follows (split-adjusted from the
-        venue's own bars), and the oracle's targets are in the new shares."""
+        venue's own bars), and the oracle's targets are in the new shares. The store never gets a spin-off's new
+        symbol (a new ticker outside the universe, as at Alpaca): #780's rule is that its shares are a due sale of
+        that session's window (the window's holdings include them and no decision wants them: invariant 12a), and
+        the session's other orders go out in it too (invariant 11)."""
         if a["kind"] == "split":
             self.check.split(a["symbol"], float(a["ratio"]))
-        if a["kind"] == "spin_off" and SPINOFF_ISSUE in KNOWN:  # (KNOWN: the store gets the new symbol's bars, and
-            self.spun.append(a["new_symbol"])  # the send of the spin-off's own session is not judged)
-            self.spun_days.add(a["on"])
         if a["kind"] in ("split", "spin_off"):
-            self.daily_all = daily_from(self.history.frames, self.week, tuple(self.spun))
+            self.daily_all = daily_from(self.history.frames, self.week)
 
     def recent_actions(self, today: date, symbols) -> list:
         """Alpaca's corporate-actions record as the engine reads it (engine/corp_guard.RecentActions): what the
@@ -1349,8 +1343,7 @@ class Checker:
             return
         if now >= end and day in self.held_at and day not in self.judged:
             self.judged.add(day)
-            if day not in w.spun_days:  # KNOWN (SPINOFF_ISSUE): the spin-off's own session sends nothing
-                self._judge_sales(day, start, end)
+            self._judge_sales(day, start, end)
 
     def _chance(self, now: datetime) -> bool:
         w, eng = self.w, self.eng
@@ -1416,8 +1409,6 @@ class Checker:
         now = w.clock()
         day = f"{now.astimezone(NY):%Y-%m-%d}"
         if day not in w.week.sessions or day not in self.decided or day in self.sends or w.flatten_sent:
-            return
-        if day in w.spun_days:  # KNOWN (SPINOFF_ISSUE): the spin-off's own session sends nothing
             return
         close = w.close_of(day)
         if not (close - timedelta(minutes=10) <= now < close - timedelta(minutes=3)):

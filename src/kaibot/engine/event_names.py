@@ -157,6 +157,8 @@ PENDING: tuple[Event, ...] = (
     # Audit 2, 5.11: a multi-day decision day whose daily prices never came in time (or that a newer one replaced)
     Event("multi_day_decision_lost", "warn",
           "A multi-day decision was never taken: its daily prices did not come in time"),
+    # #780: a decision's buy the daily data has no prices for (no column in the view): not bought; once per name
+    Event("multi_day_no_daily_bar", "warn", "A planned buy has no daily prices: it was not bought"),
     # #746: the broker's calendar unreadable: the session's days and hours from the engine's local NYSE calendar
     Event("calendar_local", "warn",
           "Broker calendar unreadable: the session's days and hours come from the engine's local NYSE calendar"),
