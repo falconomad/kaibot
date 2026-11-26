@@ -188,6 +188,35 @@ def local_close(day: date) -> time | None:
     return LOCAL_EARLY_CLOSES.get(day, REGULAR_CLOSE)
 
 
+# #746: the local session calendar beside LOCAL_EARLY_CLOSES, for the two other reads of the broker's calendar that
+# stopped a session's send while it was down: the sessions around the day (`sessions_from_calendar`: the plan's
+# previous session) and the day's start (`Engine._start_day`: its open and length). The days are NYSE's rules
+# (kaibot.ingest.nyse_sessions, offline), only for LOCAL_CLOSE_YEARS, the years whose closes the local table holds:
+# outside them there is no local calendar and a failed read raises as before (nothing is sent). It is used only when
+# the broker's read raises; an answer of the broker (also "closed") always wins, and a local answer is never cached.
+LOCAL_OPEN = time(9, 30)
+
+
+def local_session(day: date) -> bool | None:
+    """Whether `day` is a regular NYSE session by the local calendar, or None outside LOCAL_CLOSE_YEARS."""
+    if day.year not in LOCAL_CLOSE_YEARS:
+        return None
+    from kaibot.ingest import nyse_sessions
+
+    return nyse_sessions.is_session(day)
+
+
+def local_hours(day: date) -> tuple[datetime, int] | None:
+    """(the open as a UTC datetime, the regular session's minutes) of `day` by the local calendar, as
+    engine/clock.session_minutes gives them from a broker's row; None when the local calendar has no session that
+    day (closed, or outside LOCAL_CLOSE_YEARS)."""
+    close = local_close(day)
+    if not local_session(day) or close is None:
+        return None
+    o, c = datetime.combine(day, LOCAL_OPEN, NY), datetime.combine(day, close, NY)
+    return o.astimezone(UTC), int((c - o).total_seconds() // 60)
+
+
 DAILY_KINDS = ("md_decision", "md_send", "md_sent", "md_cancel", "md_review", "md_unfilled")
 PREOPEN_FROM, PREOPEN_UNTIL = time(8, 30), time(9, 31)  # #131: the pre-open review runs before the session
 REVIEW_WAIT_UNTIL_S = 300.0  # the send stops waiting for a running review 5 minutes before the window ends
@@ -2448,16 +2477,33 @@ class EngineAccount:
         return out
 
 
-def sessions_from_calendar(calendar: Callable[[str], dict | None]) -> tuple[Callable[[date], date],
-                                                                           Callable[[date], date]]:
-    """next_session / prev_session from the broker's calendar (Alpaca: GET /v2/calendar), cached."""
+def sessions_from_calendar(calendar: Callable[[str], dict | None],
+                           on_local: Callable[[date, str], None] | None = None) -> tuple[Callable[[date], date],
+                                                                                         Callable[[date], date]]:
+    """next_session / prev_session from the broker's calendar (Alpaca: GET /v2/calendar), cached.
+    #746: a day whose read raises is answered by the local calendar (`local_session`), not cached (the broker is read
+    again at the next call), and `on_local(day, error)` is told (the engine journals it once per session); a day
+    outside the local calendar's years raises as before."""
     cache: dict[str, bool] = {}
 
     def trades(d: date) -> bool:
         k = str(d)
-        if k not in cache:
-            cache[k] = calendar(k) is not None
-        return cache[k]
+        if k in cache:
+            return cache[k]
+        try:
+            ans = calendar(k) is not None
+        except Exception as e:
+            local = local_session(d)
+            if local is None:
+                raise
+            if on_local is not None:
+                try:  # the note must never be what stops the send
+                    on_local(d, f"{type(e).__name__}: {e}"[:160])
+                except Exception:
+                    log.exception("calendar fallback note not written")
+            return local
+        cache[k] = ans
+        return ans
 
     def step(d: date, sign: int) -> date:
         for n in range(1, 11):
@@ -2475,7 +2521,7 @@ def for_engine(engine, load: Callable[[date, datetime], DailyData],
     """The engine's daily path: its broker, its journal, its clock, its ledger and reconciliation. `rules` default:
     the multi-day rules the session runs (`Engine.live_strategies`, which loads them only with KAIBOT_MULTIDAY=on)
     at the run's level and its policy."""
-    nxt, prev = sessions_from_calendar(engine.broker.calendar)
+    nxt, prev = sessions_from_calendar(engine.broker.calendar, on_local=getattr(engine, "calendar_local", None))
     cache: dict = {}
 
     def current() -> list[Rule]:

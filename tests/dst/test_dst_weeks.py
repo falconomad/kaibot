@@ -20,7 +20,6 @@ import shutil
 import pytest
 from scenarios import FINDINGS, calendar_fallback_regular_close, quiet_in
 from world import (
-    KNOWN,
     MARCH_GAP,
     NY,
     OCTOBER_GAP,
@@ -173,15 +172,17 @@ def test_733s_bug_reproduces_from_a_seed_without_the_fix(seed, monkeypatch):
                for v in bad.violations), bad.report()
 
 
-@pytest.mark.xfail(strict=True, reason="engine bug #746: with the calendar down, a restarted process cannot find the "
-                                       "previous session and sends nothing in the early close's window")
 def test_a_restart_before_the_calendar_goes_down_still_sends_in_the_window():
-    """#746: the engine is killed on the evening of 25 Nov and starts again on the holiday; the calendar goes down at
-    09:31 on 27 Nov, right after the session's start. The decision of 25 Nov (sell B, buy C) is due at 12:50."""
-    assert 746 in KNOWN
+    """#746 (fixed): the engine is killed on the evening of 25 Nov and starts again on the holiday; the calendar goes
+    down at 09:31 on 27 Nov, right after the session's start. The decision of 25 Nov (sell B, buy C) is due at 12:50:
+    the previous session comes from the local NYSE calendar, and the orders go out in the 12:50-12:57 window."""
     res = run_scenario(quiet_in(THANKSGIVING_NO_CALENDAR, {"2026-11-25": ("B",), "2026-11-27": ("C",)},
                                 outages=(Outage(et("2026-11-25", "20:00"), 600),)))
     assert res.ok, res.report()
+    assert res.stats["kills"] >= 1 and any("calendar goes down" in t for t in res.trace)
+    sent = _sends(res, "2026-11-27")
+    assert {("-B-" in t, "-C-" in t) for t in sent} == {(True, False), (False, True)}, sent  # B sold, C bought
+    assert all("12:50" <= t[6:11] < "12:57" for t in sent), sent
 
 
 def test_a_send_outside_the_early_close_window_is_a_violation():
