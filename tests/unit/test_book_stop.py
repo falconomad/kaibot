@@ -45,11 +45,12 @@ def test_the_repository_keeps_todays_stop():
 
 def test_only_the_engines_book_check_reads_the_band():
     """#461 (decision 17 section 7 step 3): the engine's book check is the one live user of the module. Every file
-    under src/ is checked (a dynamic import or a registry would name the module)."""
+    under src/ is checked (a dynamic import or a registry would name the module). Since #694 the book check's
+    verdicts are in engine/book_risk.py, a mixin of `core.Engine`; the switch file is still read in core.py."""
     own = ROOT / "src" / "kaibot" / "risk" / "book_stop.py"
     users = [p.relative_to(ROOT) for p in (ROOT / "src").rglob("*") if p.is_file() and p != own
              and p.suffix in (".py", ".yaml", ".yml", ".json", ".toml", ".cfg") and "book_stop" in p.read_text()]
-    assert [str(p) for p in users] == ["src/kaibot/engine/core.py"]
+    assert sorted(str(p) for p in users) == ["src/kaibot/engine/book_risk.py", "src/kaibot/engine/core.py"]
 
 
 def test_a_missing_or_bad_config_fails_closed_to_the_fixed_stop(tmp_path: Path):

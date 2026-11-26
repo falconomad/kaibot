@@ -54,6 +54,13 @@ mypy_path = "src"
 packages = ["kaibot"]
 ignore_missing_imports = true
 
+# #694: Engine's mixins (engine/book_risk.py and the modules after it) use the engine's attributes, which only
+# core.Engine.__init__ sets, so mypy cannot see them on the mixin's `self`
+[[tool.mypy.overrides]]
+module = ["kaibot.engine.book_risk", "kaibot.engine.flatten", "kaibot.engine.commands", "kaibot.engine.bookkeeping",
+          "kaibot.engine.corporate"]
+disable_error_code = ["attr-defined", "has-type"]
+
 [tool.importlinter]  # non-blocking in CI for now (#122): live code and research code must not import each other
 root_package = "kaibot"
 
