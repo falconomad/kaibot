@@ -1,0 +1,7 @@
+/* #724: the halt chip. The pill keeps the .tag look; the button around it is 44 px tall to tap, with no box of its
+   own, and its words wrap on a narrow phone instead of running past the edge. */
+.halt-chip { display: inline-flex; align-items: center; min-height: 44px; max-width: 100%; padding: 0; margin: 0; border: 0;
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; vertical-align: middle; }
+.halt-chip .tag { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; text-decoration: underline dotted; text-underline-offset: 3px; }
+.halt-chip:hover .tag { filter: brightness(1.08); }
+.halt-why { overflow-wrap: anywhere; }

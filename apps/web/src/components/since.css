@@ -1,0 +1,18 @@
+/* N10 "Since you last looked" (#724). Loaded with its chunk only, not in the first load. The market notices' look
+   (notices.css): card surface, hairline edge, 48 px rows that wrap on a narrow phone; a small dot says the tone and
+   the words say it too. */
+.since-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.since-h { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; color: var(--slate); }
+.since-when { font-weight: 500; }
+.since-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.since-row { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 48px; padding: 8px 12px 8px 14px;
+  border-radius: var(--r-row); border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  font-size: var(--t-sm); font-weight: 500; text-decoration: none; }
+.since-row:hover { background: var(--surface-2); }
+.since-row svg { flex: none; color: var(--stale); }
+.since-text { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.since-dot { flex: none; width: 8px; height: 8px; border-radius: 999px; background: var(--text-3); }
+.since-row.warn .since-dot { background: var(--warn); }
+.since-row.red .since-dot { background: var(--fail); }
+.since-more { margin: 0; font-size: 13px; color: var(--slate); }
+.since-more a { display: inline-flex; align-items: center; min-height: 44px; }

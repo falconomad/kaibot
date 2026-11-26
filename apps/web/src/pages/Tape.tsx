@@ -3,8 +3,8 @@
 // the full "why", prices, the counterfactual, the agent room's transcript and the trade. Test-only (shadow) rows are
 // off by default; the "Test only" chip turns them on (Product, 16 Nov 2026). Today's halts are listed as alerts.
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useRunCtx } from "../components/Shell";
 import { poll } from "../lib/poll";
 import { api, type Halt, type TapeItem } from "../lib/api";
@@ -16,6 +16,7 @@ import { type Experiment, experimentView, findExperiment, haltTone } from "../li
 import { dateEt, day, money, px, signedMoney, timeEt } from "../lib/fmt";
 import { ExperimentSheetBody, experimentsOf } from "../components/Experiment";
 import { StatusRow } from "../components/Home";
+import { HaltSheetBody } from "../components/HaltChip";
 import { Sheet } from "../components/Sheet";
 import { Skeleton } from "../components/Skeleton";
 import { Empty, ErrorState } from "../components/States";
@@ -78,7 +79,10 @@ const ICON: Record<string, string> = {
 
 export function Tape() {
   const { run, overview } = useRunCtx();
-  const [filter, setFilter] = useState<Filter>("all");
+  // N10 (#724): "Since you last looked" opens a row here: ?show=<filter> picks the chip, ?at=<ts> opens that row once
+  const [params] = useSearchParams();
+  const [filter, setFilter] = useState<Filter>(() => FILTERS.find(([k]) => k === params.get("show"))?.[0] ?? "all");
+  const [at, setAt] = useState(() => params.get("at"));
   const [testOnly, setTestOnly] = useState(false);
   const [open, setOpen] = useState<Row | null>(null);
   const q = useInfiniteQuery({
@@ -116,6 +120,13 @@ export function Tape() {
     .map((it) => ({ kind: "item", it, ts: it.ts }));
   const rows = [...(filter === "all" || filter === "alerts" ? halts : []), ...caRows, ...unfRows, ...items]
     .sort((a, b) => b.ts.localeCompare(a.ts));
+  const loading = q.isPending || (paper && health.isPending);
+  useEffect(() => {
+    if (!at || loading) return;
+    const r = rows.find((x) => x.ts === at || Date.parse(x.ts) === Date.parse(at));
+    if (r) setOpen(r);
+    setAt(null);
+  }, [at, loading]); // eslint-disable-line react-hooks/exhaustive-deps
   const expShown = exps.find((e) => e.experiment && rows.some((r) => r.kind === "item" && findExperiment(r.it.strategy, [e]))) ?? null;
   const shadowN = all.filter((it) => it.kind === "signal" && it.mode === "shadow").length;
   let lastDay = "";
@@ -170,7 +181,7 @@ export function Tape() {
       )}
       {q.hasNextPage && <p><button disabled={q.isFetchingNextPage} onClick={() => q.fetchNextPage()}>{q.isFetchingNextPage ? "Loading…" : "Older"}</button></p>}
       <Sheet open={open !== null} onClose={() => setOpen(null)} title={open ? (open.kind === "halt" ? "Halt" : open.kind === "ca" ? caView(open.c).head : open.kind === "unf" ? unfilledText(open.u) : rowView(open.it).head) : ""}>
-        {open && (open.kind === "halt" ? <HaltSheet h={open.h} /> : open.kind === "ca" ? <CaSheet c={open.c} /> : open.kind === "unf" ? <UnfilledSheet u={open.u} />
+        {open && (open.kind === "halt" ? <HaltSheetBody h={open.h} /> : open.kind === "ca" ? <CaSheet c={open.c} /> : open.kind === "unf" ? <UnfilledSheet u={open.u} />
           : <ItemSheet it={open.it} exp={findExperiment(open.it.strategy, exps)} />)}
       </Sheet>
     </>
@@ -201,15 +212,6 @@ function CaSheet({ c }: { c: CaEvent }) {
   return <p>{c.detail}</p>;
 }
 
-function HaltSheet({ h }: { h: Halt }) {
-  return (
-    <>
-      <p>{haltText(h)}</p>
-      {h.reason && <p className="muted" style={{ fontSize: 15 }}>{h.reason}</p>}
-      <p className="muted" style={{ fontSize: 15 }}>{dateEt(h.ts)} {timeEt(h.ts)} ET · <Link to="/health">Engine health</Link></p>
-    </>
-  );
-}
 
 function ItemSheet({ it, exp }: { it: TapeItem; exp: Experiment | null }) {
   const label = exp ? <p style={{ margin: "0 0 12px" }}><span className="tag info exp-pill">{experimentView(exp).text}</span></p> : null;

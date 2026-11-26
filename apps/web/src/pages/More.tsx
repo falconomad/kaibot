@@ -5,12 +5,14 @@ import { Meter, useRunCtx } from "../components/Shell";
 import { supa } from "../lib/api";
 import { LEVELS } from "../lib/model";
 import { pct } from "../lib/fmt";
+import { NAME } from "../brand/brand";
 
 const ITEMS: { to: string; label: string; line: string }[] = [
   { to: "/report", label: "Report", line: "One day in detail, and what worked" },
   { to: "/gate", label: "Go / no-go", line: "The ten-year test and the bar for real money" },
   { to: "/strategy", label: "Strategy", line: "Starting point, focus and settings" },
   { to: "/settings", label: "Run & settings", line: "This run, its level, pause or stop" },
+  { to: "/how", label: `How ${NAME} decides`, line: "The whole picture, in plain words" },
   { to: "/start", label: "New run", line: "Start again with a new amount or level" },
 ];
 

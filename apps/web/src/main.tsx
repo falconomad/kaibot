@@ -30,6 +30,7 @@ const StrategyHome = lazy(() => load["/strategy"]().then((m) => ({ default: m.St
 const FineTune = lazy(() => load["/strategy/fine-tune"]().then((m) => ({ default: m.FineTune })));
 const More = lazy(() => load["/more"]().then((m) => ({ default: m.More })));
 const Positions = lazy(() => load["/positions"]().then((m) => ({ default: m.Positions })));
+const HowItDecides = lazy(() => load["/how"]().then((m) => ({ default: m.HowItDecides })));
 // Invites (migration 0045): the registration page and an invited user's page, neither in the first load.
 const Register = lazy(() => import("./pages/Register").then((m) => ({ default: m.Register })));
 const Member = lazy(() => import("./pages/Member").then((m) => ({ default: m.Member })));
@@ -102,6 +103,7 @@ function Gate() {
           <Route path="fine-tune" element={<FineTune />} />
         </Route>
         <Route path="settings" element={page("Settings", <Settings />)} />
+        <Route path="how" element={page("How it decides", <HowItDecides />)} />
       </Route>
       <Route path="start" element={<PageBoundary key="Start" name="Start"><Onboarding /></PageBoundary>} />
       <Route path="*" element={<Navigate to="/" replace />} />

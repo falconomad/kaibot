@@ -51,6 +51,8 @@ export interface TradingState {
   needsYou: boolean;
   /** rule 1: the stop that needs the owner at the Mac */
   journal?: boolean;
+  /** rule 5: the halt in force, so a page can open its reason with a tap (components/HaltChip, #724) */
+  halt?: Halt;
 }
 
 export const LABEL: Record<TradingKind, string> = {
@@ -94,7 +96,7 @@ export function tradingState(run: Run, o: Pick<Overview, "heartbeat" | "pending_
   // A `three_stops` halt is what paused the run: on a paused run rule 9 says it ("paused after three daily stops").
   const cleared = (h: Halt) => (events ?? []).some((e) => e.type === "halt_cleared" && obj(e.payload)?.kind === h.kind && t(e.ts) > t(h.ts));
   const open = halts.filter((h) => !cleared(h) && !(h.kind === "watchdog" && t(beat.ts) > t(h.ts)) && !(paused && h.kind === "three_stops"));
-  if (open.length) return make("selling_only", `halt: ${haltText(open[0]).slice(0, 80)}`, "red", true);
+  if (open.length) return { ...make("selling_only", `halt: ${haltText(open[0]).slice(0, 80)}`, "red", true), halt: open[0] };
   if (d.halted === true && !(paused && halts.some((h) => h.kind === "three_stops")))
     return make("selling_only", "halt: daily stop reached", "red", true);
   if (d.account_clean === false) return make("selling_only", `account holds positions or orders ${NAME} didn't place`, "red", true);
