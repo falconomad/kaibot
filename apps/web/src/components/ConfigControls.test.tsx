@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PillSwitch, RadioGroup, Slider, Stepper, Switch, radioKeyTarget } from "./ConfigControls";
 import { Skeleton } from "./Skeleton";
-import css from "../app.css?raw";
+import appCss from "../app.css?raw";
+import strategyCss from "../pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import strategySrc from "../pages/Strategy.tsx?raw";
 import fineTuneSrc from "../pages/FineTune.tsx?raw";
 

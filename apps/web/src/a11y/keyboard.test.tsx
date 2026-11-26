@@ -7,7 +7,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { Route } from "react-router-dom";
-import css from "../app.css?raw";
+import appCss from "../app.css?raw";
+import strategyCss from "../pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import { StockSummary } from "../components/StockSummary";
 import { Sheet } from "../components/Sheet";
 import { MyListsCard, type ListEditor } from "../pages/MyLists";
@@ -213,7 +216,8 @@ describe("the focus ring", () => {
     const off = [...css.matchAll(/([^{}]+)\{[^}]*outline:\s*(?:none|0)\b[^}]*\}/g)].map((m) => m[1].replace(/\/\*[\s\S]*?\*\//g, "").trim());
     // Not controls: a heading and the page area that take focus after a navigation, the sheet's panel (focus moves to
     // it so the next Tab is inside), and the search box, whose ring is drawn on its wrapper (.kb-search:focus-within).
-    expect(off).toEqual(['h1[tabindex="-1"]:focus', ".kb-search input", "main:focus", ".sheet"]);
+    // (sorted: since #723 the Strategy rules, .kb-search among them, come after app.css's)
+    expect(off.sort()).toEqual([".kb-search input", ".sheet", 'h1[tabindex="-1"]:focus', "main:focus"]);
     expect(css).toMatch(/\.kb-search:focus-within \{[^}]*(?:outline|border-color|box-shadow)/);
   });
   it("cards in a sideways scroller (theme cards, saved lists on a phone) draw the ring inside, where it is not cut off", () => {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import src from "./pages/Strategy.tsx?raw";
-import css from "./app.css?raw";
+import appCss from "./app.css?raw";
+import strategyCss from "./pages/strategy.css?raw";
+// #723: the Strategy pages' rules come with their chunk (pages/strategy.css); together they are what those pages get
+const css = `${appCss}\n${strategyCss}`;
 import tokens from "./v4tokens.css?raw";
 
 describe("focus groups open to show their stocks (17 Nov 2026)", () => {
