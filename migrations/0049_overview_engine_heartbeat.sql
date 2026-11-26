@@ -5,7 +5,7 @@
 -- Why. kb_overview (0007) returned every row of kaibot.heartbeat: the engine's, and the watchdog's, the engine check's,
 -- the research runner's and any other process that reports. The dashboard polls kb_overview every few seconds and
 -- reads only the engine's row from it (`heartbeat.find((h) => h.process === "engine")` in lib/derive, poll,
--- startstate, tradingstate, Shell, Home and the pages); the Engine page reads every process from kb_health, not
+-- startstate, tradingstate, Shell, Home and the pages); the Engine page reads every process from its own health RPC, not
 -- from here. So each poll carried the other rows' detail for nothing.
 --
 -- What changes. One line of public.kb_overview: `where h.process = 'engine'`. `heartbeat` stays a list (of zero
@@ -35,7 +35,7 @@ begin
         'session', d.session, 'pnl', d.pnl_reported, 'pnl_venue', d.pnl_venue, 'pnl_shadow', d.pnl_shadow,
         'spy_ret', d.spy_ret, 'cash_ret', d.cash_ret, 'trades', d.trades) order by d.session)
       from kaibot.daily_result d where d.run_id = p_run), '[]'::jsonb),
-    -- 0049 (#723): the engine's row only; the dashboard reads no other process here (kb_health has them all)
+    -- 0049 (#723): the engine's row only; the dashboard reads no other process here (the Engine page has its own health RPC)
     'heartbeat', coalesce((select jsonb_agg(to_jsonb(h)) from kaibot.heartbeat h where h.process = 'engine'), '[]'::jsonb),
     'pending_commands', coalesce((select jsonb_agg(jsonb_build_object('kind', c.kind, 'ts', c.ts, 'payload', c.payload))
       from kaibot.command c where c.applied_at is null), '[]'::jsonb),
