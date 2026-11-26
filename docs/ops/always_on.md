@@ -19,7 +19,8 @@ engine by itself, restart it after a crash, raise an alarm when something is wro
      logged in).
    - System Settings > Energy: "Start up automatically after a power failure" on; "Prevent automatic sleeping when
      the display is off" on.
-   - Never sleep on power (24-25 Nov 2026: the Mac fell asleep at 23:45 and the engine was off for 17 hours). In
+   - Never sleep on power (24-25 Nov 2026: the Mac fell asleep at 23:45 Berlin and the engine was off for 17 hours;
+     [incidents/2026-11-24-mac-sleep.md](incidents/2026-11-24-mac-sleep.md)). In
      Terminal: `sudo pmset -c sleep 0 disksleep 0`. `./scripts/run_engine.sh --check` shows the settings and prints
      a FAILED line (and exits 1) while system sleep on AC power is not 0.
    - Docker mode only: Docker Desktop > Settings > General > "Start Docker Desktop when you sign in" on.
