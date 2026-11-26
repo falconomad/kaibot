@@ -41,7 +41,10 @@ gate_a:
 sleeve:
   benchmark:
     selection: path_matched        # a stock-picking rule: SPY at the sleeve's own exposure, session by session
-    timing: average_matched        # an SPY-only rule: SPY at the sleeve's average exposure, held all the time
+    timing: average_matched_time_weighted   # an SPY-only rule: SPY at the sleeve's average exposure, held all the
+                                   # time; gate v3.1 (decision 18 s.7, #703): a session's exposure is the larger
+                                   # of its close exposure and its time-weighted intraday exposure, so an intraday
+                                   # rule (flat at every close) faces SPY, not T-bills
   s1_active_return:                # annualised mean active return, net of costs, above zero
     annualised_above: 0.0
   s2_costs:                        # S1 still holds when every cost is doubled; 3x and the break-even are reported

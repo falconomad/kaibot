@@ -25,7 +25,8 @@
   `scripts/gate_v3_rescore.py`, `scripts/index_core.py`, `scripts/index_core_book.py`;
   `tests/unit/test_gate_v3_1_books.py`. Section 6 (#702): `src/kaibot/evaluation/trials.py`,
   `src/kaibot/replay/config_replay.py`, `scripts/trend_momentum_gbm.py`, `scripts/trend_momentum_band.py`;
-  `tests/unit/test_gate_v3_1_trial_sharpes.py`.
+  `tests/unit/test_gate_v3_1_trial_sharpes.py`. Section 7 (#703): `src/kaibot/evaluation/results.py`,
+  `src/kaibot/replay/spy_noise_band.py`; `tests/unit/test_gate_v3_1_timing_exposure.py`.
 
 ## 1. What changes (ticket 6.1)
 
@@ -116,10 +117,35 @@ decision 16, and so cannot pass (decision 16 section 8), or fails S1: `trend_mom
 (#474). `trend_momentum_sleeve` takes the evidence-based tier, where S4 is printed and not judged. A rule run
 from now on logs active Sharpes, and its V is their spread.
 
+## 7. Ticket 6.3: the timing benchmark sees an intraday rule's exposure (#703)
+
+Decision 16 benchmarks a timing sleeve with "SPY at the sleeve's average exposure". The exposure it read was the
+share of equity invested **at each close**. An intraday rule such as `spy_noise_band` is flat at every close, so
+its benchmark held no SPY and S1 measured "beats cash" (re-score of 25 Nov 2026: "Exposure 0%"; #454: "mean position
+13.16% of equity" intraday).
+
+| What | Before | After |
+|---|---|---|
+| `sleeve.benchmark.timing` | `average_matched`: SPY at the mean close exposure | `average_matched_time_weighted`: SPY at the mean of each session's exposure, the **larger of its close exposure and its time-weighted intraday exposure** (the share of the session's minutes the rule was invested) |
+| Where the intraday exposure comes from | nowhere | `Account.intraday_exposure`. `replay/spy_noise_band.run_account` writes `exposure_intraday` to the daily file. For a daily file written before this change, `results.intraday_exposure` derives it from the trades file beside it (entry and exit minutes; an early close counted as 390 minutes, a slight understatement). Nothing is re-run |
+| A timing sleeve with no intraday series | — | unchanged: the close exposure, as before |
+| The sleeve's own idle cash in bills | `1 −` the close exposure going into the session | `1 −` the larger of that and the session's intraday exposure: money in SPY during the session earns no bill rate (so an intraday rule is not credited a full day of bills) |
+| Selection sleeves | — | unchanged: `path_matched` |
+
+The audit offered two readings: time-weighted intraday exposure, or open-to-close SPY at the mean exposure. The
+re-score reads only reports, and those hold SPY close-to-close, not its open. So the first reading is used, with
+SPY close-to-close. This charges an intraday rule SPY's overnight drift as well, which makes the benchmark the
+stricter of the two. An open-to-close benchmark needs SPY's daily opens in the reports, and is a later change.
+
+**Effect.** `spy_noise_band` and `spy_noise_band_carry` now show their intraday exposure and are compared with that
+much SPY. Their active return falls, because SPY rose over the window. No verdict can pass because of this. The
+benchmark's exposure is never below the old one, SPY rose over the research window (14.4% a year), and every
+intraday SPY rule predates decision 16, so it cannot pass (decision 16 section 8).
+
 ## The configuration this record adopts
 
 Every gate report records the sha256 of `config/gate_v3.yaml` as `gate_sha`. A test
 (`tests/unit/test_gate_v3_1_books.py`) checks the line below against the file. Any later edit of the file must
 update this line in the same pull request, together with the section that explains the edit.
 
-config/gate_v3.yaml sha256: `607e089d972bbfada977fa2f7c5b49534659421eeb758a92f81eb446597b6203`
+config/gate_v3.yaml sha256: `e6a3af9174328a0314692fc88377d2de9099116440ce971d9c8a458321556400`

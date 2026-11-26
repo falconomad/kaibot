@@ -246,8 +246,15 @@ def run_account(spy: SymbolDays, trips: Sequence[Trip], i0: int, i1: int, cost: 
                 carried, cash = (t, q, spent), 0.0
         mark = cash + (carried[1] * float(spy.c[i, cm[i]]) if carried is not None else 0.0)
         book.equity = mark
+        # #703: the share of the session's minutes the account was invested (all in when long, 1x), so gate v3's
+        # timing benchmark sees an intraday rule's exposure; a carry counts to the close, its exit is at the open
+        # (an exit at the open of minute m holds minutes entry..m-1; one at the close holds the last bar too)
+        session = int(cm[i]) + 1
+        minutes = sum(max(0, (t.exit_m + (t.reason == "close") if t.i_exit == i else session) - t.entry_m)
+                      for t in by_day.get(i, ()))
         book.daily.append({"date": spy.dates[i], "start": start, "end": mark, "pnl": mark - start,
-                           "invested": invested, "carry_in": carry_in, "carry_out": carried is not None})
+                           "invested": invested, "carry_in": carry_in, "carry_out": carried is not None,
+                           "exposure_intraday": min(1.0, minutes / session)})
     if carried is not None:  # still open at the end of the window: not a finished round trip
         book.trades.pop()
     return book

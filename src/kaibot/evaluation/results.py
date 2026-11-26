@@ -254,11 +254,14 @@ def rows(f: Path, rep: dict) -> list[Row]:
         cands.append(folder / f.stem / f"daily_{_safe(r['label'])}.csv")
         cands.append(folder / f.stem / f"daily_{r['label']}.csv")  # the intraday one-shots keep the "~"
         daily_file = next((c for c in cands if c.is_file()), None)
+        trel = (r.get("files") or {}).get("trades") if isinstance(r.get("files"), dict) else None
+        trades_file = folder / trel if trel and (folder / trel).is_file() else None
         out.append(Row(f.name, meta["set"], rule, r["label"], role, spec.split("~")[1] if "~" in spec else None,
                        r.get("cost", r.get("mult")), daily_file, _control(rep, block, r),
                        {k: r[k] for k in STAT_KEYS if k in r}, {**meta, "version": version, "fill": r.get("fill"),
                                                                 "exposure_cap_pct": r.get("exposure_pct"),
-                                                                "cost_model_row": r.get("costs")}))
+                                                                "cost_model_row": r.get("costs"),
+                                                                "trades_file": trades_file}))
     for name in {r.rule for r in out} - seen_base:
         # a report without a base row (the SPY sets: one account per cost scenario): each scenario at the rule's
         # own settings is a base row of its own kind of run
@@ -297,7 +300,35 @@ def daily(row: Row) -> pd.DataFrame | None:
         out["exposure"] = d["carry_out"].astype(str).str.lower().isin(("true", "1", "1.0")).astype(float)
     if {"cost", "start"} <= set(d.columns):
         out["cost"] = (d["cost"] / d["start"]).astype(float)
+    if "exposure_intraday" in d.columns:
+        out["exposure_intraday"] = d["exposure_intraday"].astype(float)
+    elif row.meta.get("trades_file") is not None:
+        tw = intraday_exposure(Path(row.meta["trades_file"]), out.index)
+        if tw is not None:
+            out["exposure_intraday"] = tw
     return out[np.isfinite(out["ret"])]
+
+
+SESSION_MINUTES = 390  # 09:30-16:00 ET; an early close is counted as a full session (a slight understatement)
+
+
+def intraday_exposure(trades_file: Path, sessions: pd.Index) -> pd.Series | None:
+    """#703: each session's time-weighted share of its minutes invested, from an intraday SPY account's trades file
+    (`date`, `entry_m`, `exit_date`, `exit_m`, `reason`; the SPY noise-band script, all in when long). A daily file
+    written before #703 has no `exposure_intraday` column; the trades file it sits beside has what is needed, so
+    nothing is re-run. A trade that exits at the close holds the last minute too; a carry counts to the close (its
+    exit is the next open). None when the file lacks the columns."""
+    t = pd.read_csv(trades_file)
+    if t.empty:
+        return pd.Series(0.0, index=sessions)
+    if not {"date", "entry_m", "exit_date", "exit_m"} <= set(t.columns):
+        return None
+    same = t["exit_date"].astype(str) == t["date"].astype(str)
+    close = t["reason"].astype(str).eq("close") if "reason" in t.columns else pd.Series(False, index=t.index)
+    end = np.where(same, t["exit_m"].astype(float) + close.astype(float), SESSION_MINUTES)
+    held = np.clip(np.minimum(end, SESSION_MINUTES) - t["entry_m"].to_numpy(dtype=float), 0.0, None)
+    per = pd.Series(held, index=pd.to_datetime(t["date"])).groupby(level=0).sum() / SESSION_MINUTES
+    return per.reindex(sessions).fillna(0.0).clip(0.0, 1.0).astype(float)
 
 
 def _spy_file(path: Path) -> tuple[pd.Series, str] | None:

@@ -72,7 +72,8 @@ def account(row: results.Row, spy) -> g3.Account | None:
     if d is None or spy is None:
         return None
     return g3.Account(d["ret"], spy[0], d.get("exposure"), d.get("cost"), row.control,
-                      row.meta.get("universe_mode") or "today")
+                      row.meta.get("universe_mode") or "today",
+                      intraday_exposure=d.get("exposure_intraday"))  # #703: an intraday rule's time in SPY
 
 
 def source_of(row: results.Row, spy_kind: str | None) -> dict:
