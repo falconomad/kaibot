@@ -48,6 +48,23 @@ The key is read (that name only) from `data.env`, else from the `--env` file, el
 the `apikey` query value, which the HTTP layer redacts in every log line. `./scripts/fetch_av_earnings.sh --status`
 shows progress (cached n/500, requests used today) without sending anything.
 
+## Upcoming earnings on Home (display only, migration 0054)
+
+Before the backfill, once a UTC day, the script spends **one** request of the same daily budget on
+`function=EARNINGS_CALENDAR&horizon=3month` (one CSV of every US symbol's next reports), so the backfill gets the
+other 19 (it always keeps that one request free while the calendar has not run that day, also with
+`--no-calendar`). It keeps the engine universe's rows, caches the CSV as `data/earnings/alphavantage/calendar/<day>.csv`
+(a month kept), and writes them with the `.env`'s `SUPABASE_SERVICE_KEY` (that name and `SUPABASE_URL` only, never
+printed) through `kaibot.earnings_calendar_refresh`: upsert by (symbol, fiscal quarter), then delete past report dates.
+Home's "Upcoming earnings" card (`kb_upcoming_earnings`, owner only) shows the held stocks' reports in the next 30
+days, with "Data: Alpha Vantage" and a "last updated" note when the data is more than two days old.
+
+- No service key, or 0054 not applied yet: a `WARNING`, the CSV stays on disk, and the next run writes it without a
+  new request. The card shows nothing before 0054.
+- Rate limit or key error on the calendar: same rules as the backfill (nothing stored, the day stops).
+- **Display only.** The engine never reads the calendar. The pre-earnings filter of decision 20 (section 3) must pass
+  gate v3.1 and get the stakeholder's approval before any decision uses report dates.
+
 ## Reading it
 
 `kaibot.data.av_earnings.AVEarnings(...).known_as_of(symbol, date)`: only reports usable at that date's open, by

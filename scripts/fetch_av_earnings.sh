@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Alpha Vantage EARNINGS backfill, free tier only, research only (decision 20, issue #797; docs/ops/alphavantage.md).
-#   ./scripts/fetch_av_earnings.sh                  one daily batch: at most 20 requests, 13 s apart (~5 minutes)
+#   ./scripts/fetch_av_earnings.sh                  one daily batch: the upcoming-earnings calendar (1 request, display
+#                                                   only), then at most 19 EARNINGS requests, 13 s apart (~5 minutes)
 #   ./scripts/fetch_av_earnings.sh --status         progress and today's request count (offline)
 #   ./scripts/fetch_av_earnings.sh --check-key      is ALPHAVANTAGE_API_KEY configured? (never shows it)
 #   ./scripts/fetch_av_earnings.sh --install-daily  run the batch every night at 02:00 local time (launchd)

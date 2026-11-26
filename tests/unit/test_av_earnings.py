@@ -247,7 +247,7 @@ def test_script_never_prints_the_key_and_refuses_a_big_budget(tmp_path, monkeypa
     monkeypatch.setattr(mod, "universe", lambda: ["AAA", "BBB"])
     monkeypatch.setattr(mod.av, "http_getter", lambda key: FakeAV())
     monkeypatch.setattr(mod.av.time, "sleep", lambda s: None)
-    assert mod.main(["--data", str(tmp_path / "c"), "--budget", "2"]) == 0
+    assert mod.main(["--data", str(tmp_path / "c"), "--budget", "3", "--no-calendar"]) == 0  # 1 stays reserved
     assert mod.main(["--data", str(tmp_path / "c"), "--check-key"]) == 0
     assert mod.main(["--data", str(tmp_path / "c"), "--status"]) == 0
     out = capsys.readouterr().out

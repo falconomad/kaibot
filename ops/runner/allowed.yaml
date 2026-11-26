@@ -171,11 +171,14 @@ scripts:
   # stops on AV's rate-limit answer. Its key is ALPHAVANTAGE_API_KEY in data.env, which the script reads itself (only
   # that name); `env` passes the .env path as a fall-back. No key: a WARNING and exit 0. Writes data/earnings/
   # alphavantage/ only (ignored), so no `writes`. heavy: true only so that it never runs in the quiet window around
-  # the close (it is light: ~5 minutes of waiting). --status sends nothing.
+  # the close (it is light: ~5 minutes of waiting). --status sends nothing. First, once a UTC day, it fetches the
+  # upcoming-earnings calendar (1 request of the same budget; the backfill gets the rest) and writes it, display
+  # only, with the .env's service key to kaibot.earnings_calendar (migration 0054); --no-calendar skips that.
   scripts/fetch_av_earnings.py:
     env: true
     heavy: true
     timeout_min: 15
     flags:
       --budget: '[0-9]|1[0-9]|2[0-3]'
+      --no-calendar: null
       --status: null
