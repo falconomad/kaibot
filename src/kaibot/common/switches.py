@@ -149,6 +149,11 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
         ("KAIBOT_LAUNCH_AGENTS_DIR", "qa-ops", "where uninstall_service.sh looks for the launch agents"),
         ("KAIBOT_BACKUP_DIR", "qa-ops", "backup_local.sh's target"),
         ("KAIBOT_BACKUP_KEEP_DAYS", "qa-ops", "backup_local.sh's retention"),
+        ("KAIBOT_BACKUP_OFFBOX_DIR", "qa-ops", "audit 2 7.5 (#715): backup_local.sh's encrypted off-box folder "
+         "(iCloud Drive, an external disk; unset: no off-box copy)"),
+        ("KAIBOT_BACKUP_OFFBOX_KEEP_DAYS", "qa-ops", "#715: the off-box copies' retention (default 14 days)"),
+        ("KAIBOT_BACKUP_AGE_RECIPIENTS", "qa-ops", "#715: the age public key file the off-box copy is encrypted to"),
+        ("KAIBOT_BACKUP_PASSFILE", "qa-ops", "#715: the openssl passphrase file, when there is no age key"),
         ("KAIBOT_PRICE_STREAM", "frontend", "the price relay (scripts/price_stream.py) in the service"),
         ("KAIBOT_STREAM_START_DELAY", "frontend", "the price relay's start delay in the service"),
         ("KAIBOT_NOTICES", "data", "the market-notice job (scripts/publish_notices.py) in the service"),

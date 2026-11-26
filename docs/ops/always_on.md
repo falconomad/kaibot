@@ -149,15 +149,20 @@ dead-man cover a dead engine during the session (`docs/ops/failsafe.md`).
 | `kaibot engine_gap: engine gap: no engine heartbeat for …` | The engine was off or frozen for that long (usually the Mac asleep). `./scripts/run_engine.sh --check` (any FAILED mac_sleep line: `sudo pmset -c sleep 0 disksleep 0`); check the dashboard for a late or missed multi-day decision and `logs/fetch_daily.log` for the nightly refresh (run `./scripts/fetch_daily.sh` by hand if it is missing: resumable, it skips what it has). |
 | "waiting for Docker Desktop" in the log | Open Docker Desktop; the service starts within a minute after it is up. |
 | A bad release | `./scripts/release.sh <previous tag> --force` then `./scripts/service.sh restart`. The previous tags are in `./scripts/release.sh --show`. |
-| Restore local files | Backups are in `~/Projects/kaibot-backups/kaibot-<date>.tar.gz` (30 days). `tar -xzf <file>` into a temporary folder and copy back what you need (with the engine stopped). The price-history cache is not backed up: it downloads again. |
+| Restore local files | Backups are in `~/Projects/kaibot-backups/kaibot-<date>-<time>.tar.gz` (30 days), and encrypted off the Mac once set up. `./scripts/restore_drill.sh --keep --into ~/kaibot-restore` rebuilds and checks them in that folder; copy back what you need with the engine stopped ([backup_restore.md](backup_restore.md)). The price-history cache is not backed up: it downloads again. |
 
 ## Backups
 
 `scripts/backup_local.sh` (nightly from the daily agent, safe to run by hand) packs `data/live` (holder id, trial
 log, running release, and any `*.sqlite` journal copied consistently with `sqlite3`), the release pin and history,
-and the logs into `~/Projects/kaibot-backups/kaibot-<date>-<time>.tar.gz`, then deletes archives older than 30 days
-(`KAIBOT_BACKUP_DIR`, `KAIBOT_BACKUP_KEEP_DAYS`). The secrets file is never included. Results and trades live in
-Supabase as well; this backup covers what exists only on the Mac.
+the research stores (`data/fundamentals` without its download cache, `data/listings`, `data/reports`, `data/alarm`,
+`data/trials.jsonl`), the runner's `done.json` and the logs into
+`~/Projects/kaibot-backups/kaibot-<date>-<time>.tar.gz` with a `MANIFEST.sha256`, then deletes archives older than
+30 days (`KAIBOT_BACKUP_DIR`, `KAIBOT_BACKUP_KEEP_DAYS`). Once set up (`./scripts/backup_local.sh --setup`), an
+age- or openssl-encrypted copy also goes to iCloud Drive or an external disk (`KAIBOT_BACKUP_OFFBOX_DIR`); a copy that
+cannot be written fails the daily job. The secrets file is never included: it needs its own second copy off the Mac.
+`./scripts/restore_drill.sh` restores into a temporary folder and checks it. All of it:
+[backup_restore.md](backup_restore.md).
 
 ## A second paper account as staging
 

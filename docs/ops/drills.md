@@ -26,8 +26,9 @@ real watchdog and the real SQL dead-man, and checks the outcome these documents 
 | journal damaged at start | one entry of a finished session's journal is changed on disk | the start exits with code 4 naming the entry, every later start the same; the watchdog reads the book from Supabase's ledger rows |
 | journal damaged while running | the session's decision entry is changed on disk at 11:00 while the engine runs | the engine stops and an `engine_error` event reaches Supabase (fixed by #551: the daily path caught the error and the engine kept running) |
 
-Not drilled here, and why: a full disk, a restore from backup, a release roll-back and a key rotation need the
-real machine and the real accounts (the stakeholder's, see below); a clock jump is covered by the deterministic
+Not drilled here, and why: a full disk, a release roll-back and a key rotation need the real machine and the real
+accounts (the stakeholder's, see below); a restore from backup has its own drill, `scripts/restore_drill.sh`
+([backup_restore.md](backup_restore.md); on a synthetic Mac in every pull request, on the real backups by the owner); a clock jump is covered by the deterministic
 simulation's `clock_skew` fault on every pull request (`tests/dst/`).
 
 ## Design note: the same drills on a second Alpaca paper account (later; nothing of this is built)
