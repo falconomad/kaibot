@@ -148,6 +148,9 @@ PENDING: tuple[Event, ...] = (
     # Audit 2, 5.9: the venue refused a multi-day sale at every try of the send window (sent again next session)
     Event("multi_day_sale_refused", "critical",
           "The broker refused a sale all through the send window: it is tried again next session"),
+    # Audit 2, 5.11: a multi-day decision day whose daily prices never came in time (or that a newer one replaced)
+    Event("multi_day_decision_lost", "warn",
+          "A multi-day decision was never taken: its daily prices did not come in time"),
 )
 
 ROUTINE: tuple[Event, ...] = (

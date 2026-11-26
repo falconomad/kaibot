@@ -200,6 +200,9 @@ AUCTION, POLL_EVERY = time(15, 59), timedelta(minutes=15)  # see LiveDaily.sync
 # M9 1.3: a session that opened without its decision record (the engine was off after the last close) takes it
 # during the session; before the send window a failed try (the daily store not refreshed) is repeated this often
 LATE_EVERY = timedelta(minutes=5)
+# Audit 2, 5.11: how many sessions back `catch_up` looks for a decision day without a decision record (its daily
+# prices came only after its fill session); older, or replaced by a newer decision day, it is journalled as lost
+DECISION_LOOKBACK = 5
 # The protective stop each rule's pre-registration declares, in ATR(20) below the entry (None: the rule has none).
 PREREG_STOP_ATR: dict[str, float | None] = {"trend_momentum": None, "mom_12_1_band": None,
                                             "mom_12_1_band_nofilter": None}
@@ -1006,10 +1009,11 @@ class LiveDaily:
 
         return _ReconView({aid: a for aid, a in om.foreign.items() if judged(a)}, om.orders)
 
-    def after_close(self, closed: date, late: bool = False) -> list[str]:
+    def after_close(self, closed: date, late: bool = False, only: set[str] | None = None) -> list[str]:
         """After the close of session `closed`: each rule that has not decided for it decides once the daily view of
         that evening is available, and the target list is journalled (`md_decision`). Returns the rules decided now.
-        `late` (M9 1.3, `catch_up`): the same step taken during the next session; the record says so."""
+        `late` (M9 1.3, `catch_up`): the same step taken during the next session; the record says so. `only`
+        (audit 2, 5.11): these rules alone (a decision day further back that they missed)."""
         mark = {"late": True} if late else {}
         rid = self.account.run_id()
         if rid is None or self.account.book_ended():
@@ -1018,7 +1022,7 @@ class LiveDaily:
             self._late.pop(k)
         done = []
         for r in self.active():
-            if self.decision(r.name, closed) is not None:
+            if (only is not None and r.name not in only) or self.decision(r.name, closed) is not None:
                 continue
             now = self.now()
             fill = self.next_session(closed)
@@ -1183,7 +1187,14 @@ class LiveDaily:
         that was not the rule's decision day gets its "not a decision day" record, as on time. Tried at every call
         with `force` (the send window), else at most every LATE_EVERY; nothing once every rule has its record.
         Never raises: a failure is an event (`multi_day_error`, step `late_decision`) and the session goes on
-        without the decision, as before. Returns the rules decided now."""
+        without the decision, as before. Returns the rules decided now.
+
+        Audit 2, 5.11: a decision day further back can have no record either, when its daily prices came only after
+        its fill session had ended (the next evening then journalled "not a decision day" for a weekly rule, so the
+        look one session back found a record and the rebalance was gone). `_lookback` finds, per rule, the latest
+        decision day without a record within DECISION_LOOKBACK sessions; it is taken here by the same step, marked
+        `late`, and its plan is then due (M9 1.4: sent late at this session's prices). One that a newer decision day
+        replaced, or that is beyond the bound, is journalled once as lost (`md_decision_lost`)."""
         if self._caught_up == session and not force:  # `force` reads the records again (a rule re-enabled today)
             return []
         now = self.now()
@@ -1192,10 +1203,14 @@ class LiveDaily:
             return []
         self._late_tried = (session, now)
         try:
-            if all(self._decision_for(r.name, session) is not None for r in self.active()):
+            missed = self._lookback(session)
+            mine = all(self._decision_for(r.name, session) is not None for r in self.active())
+            if mine and not missed:
                 self._caught_up = session
                 return []
-            done = self.after_close(self.prev_session(session), late=True)
+            done = [] if mine else self.after_close(self.prev_session(session), late=True)
+            for day in sorted(missed):  # oldest first: journal order is the decisions' order (engine/standing.py)
+                done += self.after_close(day, late=True, only=missed[day])
         except Exception as e:
             log.exception("late decision failed: the session goes on without it")
             self.event("multi_day_error", {"step": "late_decision", "session": str(session),
@@ -1204,6 +1219,60 @@ class LiveDaily:
         if done:
             log.warning("late decision for %s taken during the session: %s", session, ", ".join(done))
         return done
+
+    def _lookback(self, session: date) -> dict[date, set[str]]:
+        """Audit 2, 5.11: the decision days before the previous session (that one is `catch_up`'s own step) that
+        have no decision record: the latest per rule within DECISION_LOOKBACK sessions, as close -> the rules to
+        decide for it. Only after a close where the rule was deciding in this run (a decision record of this run
+        within the look-back, older than the gap): a new run, a new journal or a rule switched on since has nothing
+        to make up. A missed decision day that a newer decision day replaced, or that is now beyond the bound, will
+        never be taken: journalled once (`md_decision_lost`), with an event. In normal operation every decision day
+        has its record and this returns nothing and writes nothing."""
+        rid = self.account.run_id()
+        if rid is None or self.account.book_ended():
+            return {}
+        closes, c = [], session
+        for _ in range(DECISION_LOOKBACK + 2):  # the bound, and one close more: the anchor of the oldest
+            c = self.prev_session(c)
+            closes.append(c)
+        out: dict[date, set[str]] = {}
+        for r in self.active():
+            day = getattr(r.strategy, "decision_day", None)
+            recs = {c: self.decision(r.name, c) for c in closes}
+            ran = [c for c in closes if recs[c] is not None and recs[c].get("run_id") == rid]
+            if not ran:
+                continue
+            since = min(ran)  # the rule was deciding in this run at that close
+            newer = False  # a newer decision day exists (with its record, or the previous session's own step)
+            for i, c in enumerate(closes):
+                if c <= since:
+                    break
+                if day is not None and not day(c, self.next_session(c)):
+                    continue
+                if i == 0 or recs[c] is not None:  # i == 0: the previous session, decided by catch_up itself
+                    newer = True
+                    continue
+                if not newer and i < DECISION_LOOKBACK:
+                    out.setdefault(c, set()).add(r.name)
+                else:
+                    self._decision_lost(r.name, rid, c, "a newer decision day replaced it" if newer
+                                        else f"no daily prices within {DECISION_LOOKBACK} sessions")
+                newer = True
+        return out
+
+    def _decision_lost(self, rule: str, rid: int, closed: date, why: str) -> None:
+        """Audit 2, 5.11: journal once that the decision after the close of `closed` will never be taken."""
+        find = getattr(self.journal, "find", None)
+        seen = find("md_decision_lost", strategy=rule, session=str(closed)) if find is not None else [
+            b for b in self._entries("md_decision_lost")
+            if b.get("strategy") == rule and b.get("session") == str(closed)]
+        if seen:
+            return
+        body = {"run_id": rid, "strategy": rule, "session": str(closed),
+                "fill_session": str(self.next_session(closed)), "why": why, "noted_at": self.now().isoformat()}
+        self.journal.append("md_decision_lost", body)
+        log.error("%s: the decision after the close of %s was never taken and is lost (%s)", rule, closed, why)
+        self.event("multi_day_decision_lost", body)
 
     def _filing_observe(self, rule: str, session: date, now: datetime, symbols: list[str]) -> None:
         """#375: the 8-K do-not-buy flags of the decision's names, logged once per decision. Never raises."""
