@@ -44,7 +44,8 @@ WEEK_SEEDS = {w.name: next(s for s in range(1, 200) if week_of(s) is w) for w in
 # audit 2 5.3 / #733 from a seed: seeds that draw the unreadable-calendar week and send on 27 Nov. Before #733 (at
 # eb3c7bd, and here with `calendar_fallback_regular_close` planted) each breaks invariant 11: the 27 Nov decision is
 # not sent in the 12:50-12:57 window, the engine waits for 15:50, the venue has closed, it goes out late on 30 Nov
-SEEDS_733 = (25, 35, 40, 60)
+# (audit 2 5.20: seed 40 now meets a spin-off on 27 Nov, KNOWN #780, whose session sends nothing; 75 in its place)
+SEEDS_733 = (25, 35, 60, 75)
 
 
 def _sends(res, day: str) -> list[str]:

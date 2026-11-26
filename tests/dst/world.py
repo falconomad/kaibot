@@ -67,7 +67,15 @@ import numpy as np
 import pandas as pd
 from fakes import FakeStore
 
-from kaibot.broker.faulty import AUDIT2_FAULTS, DEFAULT_FAULTS, FaultProfile, FaultyBroker, FaultyData, FaultyStore
+from kaibot.broker.faulty import (
+    AUDIT2_FAULTS,
+    CA_FAULTS,
+    DEFAULT_FAULTS,
+    FaultProfile,
+    FaultyBroker,
+    FaultyData,
+    FaultyStore,
+)
 from kaibot.broker.protocol import BrokerError
 from kaibot.broker.sim import NY, WORKING, SimBroker
 from kaibot.engine import failsafe
@@ -101,6 +109,12 @@ SESSIONS = (D1, D2, D3)
 EVENINGS = (D0, D1, D2, D3)
 REGULAR_CLOSE = "16:00"
 FOCUS = {"lease_renew_fail": 6.0, "sale_refused": 2.5, "endpoint_down": 10.0}  # see Scenario.from_seed
+BAND_SHARE = 0.35  # audit 2, 5.20: the share of the new weeks' seeds whose book stop is in band mode
+# the band table of a band-mode run (trend_momentum at balanced): a 95% line of 0.01%, so the alert (a record, nothing
+# sold) is met about once a session, and a 99% line far beyond the simulation's gentle walks, so the band is read and
+# judged at every check and never ends the book (the book's end is its own tests' business: test_m11_book_band)
+BAND_TABLE = {"rule": "trend_momentum", "level": "balanced", "horizons": [5, 20, 252], "q95": [0.0001, 0.0001, 0.0001],
+              "q99": [0.08, 0.12, 0.2], "source": {"window": ["2017-05-01", "2024-12-31"], "dst": True}}
 MAC = ZoneInfo("Europe/Berlin")  # the owner's Mac: launchd runs the nightly bar refresh on its wall clock
 
 
@@ -201,8 +215,9 @@ SAID = {  # the journal entries the trace shows, with the fields that tell the s
 }
 
 
+SPINOFF_ISSUE = 780  # audit 2 5.20's finding (see KNOWN)
 # Engine defects the simulation found that are still open: issue -> what the generator leaves out so that every
-# seed does not trip over the same one. Each has a strict xfail in test_dst.py; remove both when the issue is fixed.
+# seed does not trip over the same one. Each has a strict xfail (test_dst.py, or its kind's file); remove both then.
 KNOWN: dict[int, str] = {
     # Audit 2, 5.13 fixed #529's first half: the decision in force now sells a buy booked after it
     # (LiveDaily._booked_late; test_a_buy_booked_a_day_late_is_sold_by_the_decision_taken_meanwhile passes). The
@@ -211,6 +226,11 @@ KNOWN: dict[int, str] = {
     529: "no fill activity is delayed past the next session's window (faulty.DROP_MINUTES ends at 300 minutes): "
          "a watchdog flatten of the shares while their buy is still unbooked leaves a difference only the owner "
          "can accept (the venue's sale is a foreign fill, then the late booking puts the shares in the ledger)",
+    SPINOFF_ISSUE: "invariants 11 and 12 are not judged in the session of a spin-off, and the daily store gets the "
+                   "new symbol's bars from that evening on: the adopted shares are outside the daily view the send "
+                   "sizes with (`daily.builder_sizing` raises KeyError), so the whole send of that session fails "
+                   "(the new shares' sale, every other sale, every buy) and goes out late at the next session; with a "
+                   "store that never has the new symbol it fails at every session",
 }
 
 
@@ -277,6 +297,9 @@ class Scenario:
     # audit 2, 5.17: the live process's loop around the engine (engine/__main__.py): the cross-machine lease and its
     # order fence (FencedBroker), the heartbeat that renews it, `before_tick`, and the gap watch (engine/gap.py)
     lease: bool = False
+    # audit 2, 5.20: the multi-day book's stop, config/book_stop.yaml's `mode` ("fixed", the repository's; "band": the
+    # world's own band table for the book, `World.band_config`)
+    book_stop: str = "fixed"
 
     @property
     def heal_day(self) -> str:
@@ -358,11 +381,15 @@ class Scenario:
             minute = r.choice((r.randrange(5, send), r.randrange(send, close)))
             flatten = session_open(day) + timedelta(minutes=minute)
         scale = r.choice((0.0, 0.5, 1.0, 1.0, 1.0, 2.0))
-        if week is SUMMER:  # audit 2 5.18's fault kinds only in the new weeks: a summer seed runs as it did
-            profile = profile.without(*AUDIT2_FAULTS)
+        book_stop = "fixed"
+        if week is SUMMER:  # audit 2 5.18's and 5.20's fault kinds only in the new weeks: a summer seed runs as it did
+            profile = profile.without(*AUDIT2_FAULTS, *CA_FAULTS)
+        elif random.Random(f"kaibot-dst-band-{seed}").random() < BAND_SHARE:
+            book_stop = "band"  # audit 2, 5.20: the book's stop in band mode (its own stream: nothing else moves)
         profile = profile.scaled(scale)
         return cls(seed, plan, ready, tuple(sorted(outages, key=lambda o: o.arm)), flatten,
-                   watchdog=r.random() < 0.5, profile=profile, week=week, book_loop=book_loop, lease=lease)
+                   watchdog=r.random() < 0.5, profile=profile, week=week, book_loop=book_loop, lease=lease,
+                   book_stop=book_stop)
 
     def wanted(self, decidable: set[str] | None = None) -> tuple:
         """What the book must hold at the end: the latest decision's names. `decidable`: the fill sessions whose
@@ -425,7 +452,7 @@ def minute_frames(seed: int, week: Week = SUMMER) -> dict[str, pd.DataFrame]:
     return out
 
 
-def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER) -> DailyData:
+def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER, extra: tuple = ()) -> DailyData:
     """300 sessions of daily bars up to D4: the last ones are the minute bars' own days, the earlier ones a steady
     rise to them: enough history for the rule's averages, and steep enough against the few gentle days of minute bars
     that every stock stays above its 100-day average and SPY above its 200-day average. The carry-over and the late
@@ -434,7 +461,7 @@ def daily_from(frames: dict[str, pd.DataFrame], week: Week = SUMMER) -> DailyDat
     n = 300
     dates = np.busday_offset(np.datetime64(week.days[4]), -np.arange(n)[::-1], roll="backward",
                              holidays=list(week.holidays)).astype("datetime64[D]")
-    symbols = [*STOCKS, "SPY"]
+    symbols = [*STOCKS, "SPY", *extra]  # `extra`: names outside the universe the store also has (a spin-off's)
     c = np.zeros((n, len(symbols)))
     o = np.zeros_like(c)
     tail = HISTORY_DAYS + 5
@@ -566,7 +593,7 @@ class Result:
                  f"plan {s.plan}  flatten {s.flatten}  watchdog {s.watchdog}",
                  "outages " + str([(str(o.arm), o.down, "kill" if o.kill else "mac sleep" if o.mac else "pause")
                                    for o in s.outages]),
-                 f"week {s.week.name}  engine {'book loop' if s.book_loop else 'intraday'}",
+                 f"week {s.week.name}  engine {'book loop' if s.book_loop else 'intraday'}  book stop {s.book_stop}",
                  f"run it again: PYTHONHASHSEED=0 PYTHONPATH=src python tests/dst/run_seed.py {s.seed} --week "
                  f"{s.week.name} {'--book-loop' if s.book_loop else '--intraday'}",
                  f"the last {tail} lines of the trace:", *[f"  {t}" for t in self.trace[-tail:]]]
@@ -594,6 +621,9 @@ class World:
         self.broker = FaultyBroker(self.sim, scenario.seed, scenario.profile, on_write=self._venue_write,
                                    forced=scenario.forced)
         self.broker.on_fault = lambda fault, what: self.say(f"fault {fault} {what}")
+        self.broker.on_action = self._on_action  # audit 2, 5.20: a corporate action the venue applied
+        self.spun: list[str] = []  # spun-off symbols the daily store has (KNOWN)
+        self.spun_days: set[str] = set()  # sessions of a spin-off (KNOWN)
         self._calendar_went: set[str] = set()
         if week.calendar_down:
             self.broker.calendar = self._calendar
@@ -706,7 +736,8 @@ class World:
             # world's default stays the engine it was written for, which drives the same daily path
             extra = {"intraday": False, "strategies": {lv: [] for lv in load_profiles()}} if self.s.book_loop else {}
             eng = Engine(self.broker, market, store, load_profiles(), set(), now=self.clock,
-                         daily=lambda e: ld.for_engine(e, self.load, rules=[self.rule]), **extra)
+                         daily=lambda e: ld.for_engine(e, self.load, rules=[self.rule]),
+                         recent_actions=self.recent_actions, **extra)
             eng.market.candidates_at = lambda m: pd.DataFrame()  # no intraday candidates: the daily path only
             eng.sleep = lambda s: None
             eng.monotonic = self.mono
@@ -722,6 +753,44 @@ class World:
         self.eng, self.rep = eng, rep
         self.check.attach(eng)
         self.say("engine up")
+
+    # ------------------------------------------------------------ corporate actions (audit 2, 5.20)
+    def _on_action(self, a: dict) -> None:
+        """The venue applied a corporate action before the open: the daily store follows (split-adjusted from the
+        venue's own bars), and the oracle's targets are in the new shares."""
+        if a["kind"] == "split":
+            self.check.split(a["symbol"], float(a["ratio"]))
+        if a["kind"] == "spin_off" and SPINOFF_ISSUE in KNOWN:  # (KNOWN: the store gets the new symbol's bars, and
+            self.spun.append(a["new_symbol"])  # the send of the spin-off's own session is not judged)
+            self.spun_days.add(a["on"])
+        if a["kind"] in ("split", "spin_off"):
+            self.daily_all = daily_from(self.history.frames, self.week, tuple(self.spun))
+
+    def recent_actions(self, today: date, symbols) -> list:
+        """Alpaca's corporate-actions record as the engine reads it (engine/corp_guard.RecentActions): what the
+        venue applied in the ten days to `today`, for these symbols."""
+        from kaibot.engine.corp_guard import Link
+
+        start = str(today - timedelta(days=10))
+        want = {str(x).upper() for x in symbols}
+        return [Link(a["kind"], a["symbol"], a["new_symbol"], a["on"], a["ratio"], a["ref"])
+                for a in self.broker.actions if a["kind"] != "split" and a["symbol"] in want
+                and start <= a["on"] <= str(today)]
+
+    def band_config(self) -> Path:
+        """config/book_stop.yaml with `mode: band` and BAND_TABLE as the book's table, written under the root."""
+        import yaml
+
+        from kaibot.risk import book_stop as bstop
+
+        table = self.root / "band_trend_momentum_balanced.json"
+        table.write_text(json.dumps(BAND_TABLE))
+        cfg = yaml.safe_load(bstop.DEFAULT_PATH.read_text())
+        cfg["mode"] = "band"
+        cfg["tables"] = {"trend_momentum": {"balanced": str(table)}}
+        path = self.root / "book_stop.yaml"
+        path.write_text(yaml.safe_dump(cfg))
+        return path
 
     def mono(self) -> float:
         """The engine's monotonic clock: the wall clock less the time the Mac slept (macOS's monotonic clock does not
@@ -1055,7 +1124,13 @@ class World:
         os.environ["KAIBOT_MULTIDAY"] = "on"
         rng = random.Random(f"kaibot-dst-ticks-{self.s.seed}")
         unseam = self._state_seam()
+        band = contextlib.nullcontext()
+        if self.s.book_stop == "band":
+            from kaibot.engine import core
+
+            band = mock.patch.object(core, "BOOK_STOP_PATH", self.band_config())  # where the engine reads its config
         try:
+            band.__enter__()
             self.evening(self.week.days[0])
             for day, nxt in zip(self.week.sessions, self.week.days[2:], strict=True):
                 if day == self.s.heal_day:
@@ -1073,6 +1148,7 @@ class World:
                 self.at(et(self.week.days[3], "21:10", 7) + timedelta(minutes=m))
             self.check.at_quiescence()
         finally:
+            band.__exit__(None, None, None)
             unseam()
             if self.eng is not None:
                 with contextlib.suppress(Exception):
@@ -1082,6 +1158,12 @@ class World:
         faults = [*self.broker.log, *self.data.log, *self.remote.log]
         self.stats["faults"] = len(faults)
         self.stats["fault_kinds"] = sorted({f[1] for f in faults})
+        # audit 2, 5.20: what the nightly coverage counts besides the faults
+        self.stats["week"] = self.week.name
+        self.stats["book_stop"] = self.s.book_stop
+        self.stats["band_checks"] = self.check.band_checks
+        self.stats["band_alerts"] = self.check.kinds.get("md_book_band_alert", 0)
+        self.stats["corporate_actions"] = sorted({a["kind"] for a in self.broker.actions})
         return Result(self.s, self.violations, self.trace, self.stats)
 
 
@@ -1114,6 +1196,8 @@ class Checker:
         self.judged: set[str] = set()
         self.fenced: list[tuple[str, datetime]] = []  # buys the lease's fence refused for a failed renewal
         self.intent_at: list[tuple[str, str, datetime]] = []  # (symbol, side, when) of every journalled order intent
+        self.kinds: dict[str, int] = {}  # journal entries by kind (the run's coverage, audit 2 5.20)
+        self.band_checks = 0  # passes whose book check judged the book by its band (audit 2 5.20)
 
     def attach(self, eng: Engine) -> None:
         self.eng = eng
@@ -1126,6 +1210,7 @@ class Checker:
             if seq != self.seq + 1:
                 w.bad(f"journal sequence numbers have a gap: {self.seq} is followed by {seq}")
             self.seq = seq
+            self.kinds[kind] = self.kinds.get(kind, 0) + 1
             if kind in SAID and not (kind == "om_state" and self.state.get(b["coid"]) == str(b.get("state"))):
                 w.say(f"journal {seq} {kind} " + " ".join(f"{k}={b[k]}" for k in SAID[kind] if b.get(k) is not None))
             if kind == "run":
@@ -1149,6 +1234,14 @@ class Checker:
                                                                                          "partially_filled")):
                     w.bad(f"{b['coid']} left its final state {was} for {now}")
                 self.state[b["coid"]] = now
+            elif kind == "split":  # audit 2, 5.20: the venue's split, booked (the shares multiply, no cash)
+                sym = b["symbol"]
+                self.fills_qty[sym] = self.fills_qty.get(sym, 0.0) * float(b["ratio"])
+            elif kind == "spinoff":  # the spun-off shares, adopted (no cash: the cost basis moves)
+                self.fills_qty[b["new_symbol"]] = self.fills_qty.get(b["new_symbol"], 0.0) + float(b["qty"])
+            elif kind == "fill" and b.get("reason") == "cash_merger":  # the venue's cash for the merged shares
+                self.fills_cash += float(b["qty"]) * float(b["px"]) - float(b.get("fees") or 0.0)
+                self.fills_qty[b["symbol"]] = self.fills_qty.get(b["symbol"], 0.0) - float(b["qty"])
             elif kind == "fill":
                 aid = str(b.get("activity"))
                 if aid.startswith("owner:"):  # #529: the owner booked the order's fill from its view: it stands for
@@ -1173,6 +1266,11 @@ class Checker:
                     self.sends.add(str(b.get("session")))
                 for sym, shares, *_ in b.get("targets") or []:
                     self.targets[sym] = max(self.targets.get(sym, 0), int(shares))
+
+    def split(self, symbol: str, ratio: float) -> None:
+        """Audit 2, 5.20: the venue split `symbol`: the targets journalled so far are in the old shares."""
+        if symbol in self.targets:
+            self.targets[symbol] = int(round(self.targets[symbol] * ratio))
 
     # --- 8 (intent before send), 9 (the window)
     def on_venue_write(self, what: str) -> None:
@@ -1208,6 +1306,9 @@ class Checker:
     # --- after every pass
     def after_pass(self, clean: bool = False) -> None:
         self.journal_tail()
+        line = (self.eng.book_line or {}) if self.eng is not None else {}
+        if (line.get("stop") or {}).get("mode") == "band":  # audit 2, 5.20: the book was judged by its band
+            self.band_checks += 1
         self.venue_side()
         self.ledger_side()
         if clean:
@@ -1248,7 +1349,8 @@ class Checker:
             return
         if now >= end and day in self.held_at and day not in self.judged:
             self.judged.add(day)
-            self._judge_sales(day, start, end)
+            if day not in w.spun_days:  # KNOWN (SPINOFF_ISSUE): the spin-off's own session sends nothing
+                self._judge_sales(day, start, end)
 
     def _chance(self, now: datetime) -> bool:
         w, eng = self.w, self.eng
@@ -1314,6 +1416,8 @@ class Checker:
         now = w.clock()
         day = f"{now.astimezone(NY):%Y-%m-%d}"
         if day not in w.week.sessions or day not in self.decided or day in self.sends or w.flatten_sent:
+            return
+        if day in w.spun_days:  # KNOWN (SPINOFF_ISSUE): the spin-off's own session sends nothing
             return
         close = w.close_of(day)
         if not (close - timedelta(minutes=10) <= now < close - timedelta(minutes=3)):
@@ -1438,7 +1542,8 @@ class Checker:
                 if a != b:
                     w.bad(f"at quiescence the replica's table {table} differs from the journal's")
         held = tuple(sorted(mine))
-        wanted = w.s.wanted(w.decidable)
+        # audit 2, 5.20: a cash merger took a name off the market: no decision can hold it any more
+        wanted = tuple(s for s in w.s.wanted(w.decidable) if s not in w.broker.merged)
         if held != tuple(sorted(wanted)):
             w.bad(f"at the end the book holds {held}; the latest decision wanted {tuple(sorted(wanted))}"
                   + (" (the owner flattened)" if w.s.flatten is not None else ""))

@@ -29,7 +29,8 @@ def test_the_drill_quotes_its_documents(name):
 
 def test_the_ticket_s_drills_are_all_there():
     want = {"watchdog takeover", "dead-man stop placement", "lease lost", "supabase down at start",
-            "supabase down at a restart", "journal damaged at start", "journal damaged while running"}
+            "supabase down at a restart", "journal damaged at start", "journal damaged while running",
+            "refused start loop"}  # audit 2, 5.20 (#700): the exit-code-5 loop
     assert want <= set(drills.DRILLS)
 
 

@@ -19,6 +19,10 @@ test_drills.py fails when a sentence is no longer in its document, so a changed 
                                heartbeat is attempted; once the lease is confirmed and the owner config read, entries
                                are allowed again and the buy goes out once in D2's window (#536)
     journal damaged            at start: exit code 4 before anything else; while running: the engine stops (exit code 4)
+    refused start loop         audit 2, 5.20: the engine restarts with KAIBOT_MULTIDAY off while its run holds a
+                               multi-day sleeve: every start exits with code 5 before any order call and gives the lease
+                               back, the launcher tries again after the service's back-off (scripts/service_run.sh), the
+                               watchdog keeps the sleeve's stop; with the switch on again, the next start trades
 
 A drill returns its checks (what was expected, what happened, pass or fail); scripts/run_drills.py writes the record.
 Nothing here edits or patches the engine: the drills own only the world around it.
@@ -49,7 +53,7 @@ import pandas as pd  # noqa: E402
 from world import D0, D1, D2, D3, EVENINGS, STOCKS, Kill, Outage, Scenario, World, et  # noqa: E402
 
 from kaibot.broker.faulty import NO_FAULTS, FaultProfile, Forced  # noqa: E402
-from kaibot.broker.sim import NY  # noqa: E402
+from kaibot.broker.sim import NY, WORKING  # noqa: E402
 from kaibot.engine import __main__ as engine_main  # noqa: E402
 from kaibot.engine import failsafe  # noqa: E402
 from kaibot.engine import live_daily as ld  # noqa: E402
@@ -123,6 +127,9 @@ class DrillWorld(World):
         self.log = _Capture()
         self.log.attach()
         self.confirmed_at: datetime | None = None  # a reducing-only engine's lease confirmed (before_tick)
+        self.multiday = True  # KAIBOT_MULTIDAY in the engine's .env (the refused-start drill turns it off)
+        self.backoff: dict[object, timedelta] = {}  # exit code -> the launcher's wait before the next start
+        self.lease_after: list[tuple[datetime, dict | None]] = []  # the lease row right after each refused start
         self.beat_calls: list[tuple[datetime, str]] = []  # every heartbeat write the engine attempts, even failed
         sent = self.remote.heartbeat
 
@@ -155,7 +162,7 @@ class DrillWorld(World):
         import hashlib
         import uuid
 
-        from kaibot.engine.__main__ import make_beat, start_with_lease
+        from kaibot.engine.__main__ import make_beat, start_or_refuse
 
         jid = uuid.UUID(int=int.from_bytes(hashlib.blake2b(f"kaibot-dst-{self.s.seed}".encode(),
                                                            digest_size=16).digest(), "big"))
@@ -167,8 +174,9 @@ class DrillWorld(World):
             store = JournalStore(journal, self.remote, live=True, mono=lambda: self.clock().timestamp())
             market = LiveMarket(self.data, list(STOCKS), {s: "XLK" for s in STOCKS}, "SPY", self.root / "hist",
                                 lambda: pd.Series(18.0, index=pd.date_range("2025-01-01", "2026-12-31")))
-            eng = Engine(self.broker, market, store, load_profiles(), set(), now=self.clock,
-                         daily=lambda e: ld.for_engine(e, self.load, rules=[self.rule]))
+            os.environ["KAIBOT_MULTIDAY"] = "on" if self.multiday else "off"  # the process's own environment
+            daily = (lambda e: ld.for_engine(e, self.load, rules=[self.rule])) if self.multiday else None
+            eng = Engine(self.broker, market, store, load_profiles(), set(), now=self.clock, daily=daily)
             eng.market.candidates_at = lambda m: pd.DataFrame()
             eng.sleep = lambda s: None
             eng.monotonic = lambda: self.clock().timestamp()
@@ -177,9 +185,12 @@ class DrillWorld(World):
             kw = {"journal": eng.journal} if "journal" in inspect.signature(EngineLease).parameters else {}
             lease = EngineLease(eng.store, FIXED_HOLDER, "drill-mac", mono=ts, wall=ts, **kw)
             try:
-                mode = start_with_lease(eng, lease)
+                mode = start_or_refuse(eng, lease)  # engine/__main__.main: start_with_lease, and exit code 5
             except SystemExit as e:
                 self.refused.append((self.clock(), e.code, self.log.last_error()))
+                self.lease_after.append((self.clock(), self.replica.lease_row()))
+                if e.code in self.backoff:  # the service waits before it exits; launchd starts it again
+                    self.down_until = self.clock() + self.backoff[e.code]
                 raise StartRefused(e.code) from None
             rep = Replicator(journal, self.remote)
             rep.clock = ts
@@ -745,6 +756,79 @@ def journal_damaged_while_running(tmp: Path) -> list[Check]:
     return out
 
 
+# ---------------------------------------------------------------- 6. refused start loop (audit 2, 5.20)
+# scripts/service_run.sh's `refused_backoff` (KAIBOT_REFUSED_BACKOFF_S, 300 s) and launchd's next start about a minute
+# after the service exits (tests/unit/test_always_on.py plays the shell itself)
+REFUSED_BACKOFF = timedelta(seconds=300 + 60)
+
+
+def refused_start_loop(tmp: Path) -> list[Check]:
+    """B is bought in D1's window. On D1's evening the engine is restarted with KAIBOT_MULTIDAY off (the .env lost the
+    switch): its run holds a multi-day sleeve and the engine has no daily path, so every start is refused with exit
+    code 5, and the launcher tries again every 6 minutes. The watchdog sees the heartbeat go stale and places the
+    sleeve's protective stop. At 10:00 on D2 the owner turns the switch on again: the next start comes up, adopts the
+    stop and D2's decision (B and C) goes out in its 15:50-15:57 window."""
+    from kaibot.engine.__main__ import EXIT_DAILY_PATH
+
+    out: list[Check] = []
+    s = Scenario(37, {D1: ("B",), D2: ("B", "C"), D3: None}, ON_TIME, profile=NO_FAULTS, watchdog=True, heal=D3)
+    w = DrillWorld(s, tmp, lease=True)
+    w.backoff = {EXIT_DAILY_PATH: REFUSED_BACKOFF}
+    off, fixed = et(D1, "18:00"), et(D2, "10:00")
+
+    def switch_off(world):
+        world.multiday = False
+        world.die("restarted with KAIBOT_MULTIDAY off (the .env lost the switch)")
+        world.down_until = None
+
+    seen: dict = {}
+
+    def switch_on(world):
+        seen["stops"] = [(o["client_order_id"], o["status"]) for o in world.sim.orders.values()
+                         if o.get("symbol") == "B" and o.get("type") == "stop"]  # what the broker holds at the fix
+        world.multiday = True
+        world.say("the owner sets KAIBOT_MULTIDAY=on again")
+
+    w.hooks += [(off, switch_off), (fixed, switch_on)]
+    res = play(w)
+    refused = [r for r in w.refused if off <= r[0] < fixed]
+    check(out, "every start while the switch was off was refused with exit code 5", len(refused) >= 3 and all(
+        r[1] == EXIT_DAILY_PATH for r in refused), f"{len(refused)} refusals, codes {sorted({r[1] for r in refused})}")
+    msg = refused[0][2] if refused else ""
+    check(out, "the log line names the switch (KAIBOT_MULTIDAY) and the run's sleeves",
+          "KAIBOT_MULTIDAY" in msg and "multi-day sleeves" in msg, msg[:200])
+    gaps = [(b[0] - a[0]).total_seconds() for a, b in zip(refused, refused[1:], strict=False)]
+    check(out, "the launcher waits the service's back-off between tries (one try about every 6 minutes)",
+          gaps and min(gaps) >= REFUSED_BACKOFF.total_seconds(), f"{len(gaps)} gaps, shortest {min(gaps or [0]):.0f} s")
+    held = [(_ny(t), row) for t, row in w.lease_after if off <= t < fixed and row is not None]
+    check(out, "each refused start gave the lease back", not held and w.lease_after, held[:2] or "released every time")
+    mine = [(t, x) for t, x in w.writes if off <= t < fixed and " kb" in f" {x.split()[-1]}"
+            and not x.split()[-1].startswith(("kbwd-", "kbdm-"))]
+    check(out, "no refused start sent anything to the venue (no order call)", not mine, [x for _, x in mine[:3]] or
+          "nothing")
+    orders = [b for k in ("om_intent", "om_state", "fill", "md_send", "md_sent", "md_decision")
+              for b in _journal_kinds(w, k, off + timedelta(minutes=1), fixed)]
+    check(out, "and journalled no order, fill or decision", not orders, orders[:2] or "nothing")
+    beats = [t for t, pr in w.beat_calls if pr == "engine" and off <= t < fixed]
+    check(out, "no heartbeat while refused (the watchdog sees the engine as down)", not beats, len(beats))
+    stops = [o for o in w.sim.orders.values() if o.get("symbol") == "B" and o.get("type") == "stop"
+             and str(o.get("client_order_id") or "").startswith(("kbwd-", "kbdm-"))
+             and off <= _submitted(o) < fixed]
+    check(out, "the watchdog placed the sleeve's protective stop at the broker while the engine was refused",
+          stops, [(o["client_order_id"], o["status"]) for o in stops] or "no stop")
+    at_fix = seen.get("stops") or []
+    check(out, "the broker-held stop stays through the refused starts (still working when the switch is fixed)",
+          at_fix and all(st in WORKING for _, st in at_fix), at_fix or "no stop at the fix")
+    up = next((ln for ln in w.trace if "engine up" in ln and ln[:11] >= f"{fixed.astimezone(NY):%m-%d %H:%M}"), None)
+    check(out, "once the switch is on the next start comes up", up and up[:5] == "08-04", up)
+    buy = _orders(w, "buy", "C", D2)
+    check(out, "and D2's decision goes out in its window", buy and all(
+        et(D2, "15:50") <= _submitted(o) < et(D2, "15:57") for o in buy),
+        [(o["client_order_id"], o["status"], _ny(_submitted(o))) for o in buy] or "no buy of C")
+    check(out, "the simulation's invariants hold and the book ends holding B and C", res.ok, res.violations or "ok")
+    return out
+
+
 DRILLS: dict[str, tuple] = {
     # name: (function, the documents' sentences it holds the engine to, an open engine issue it fails on)
     "watchdog takeover": (watchdog_takeover, [
@@ -788,6 +872,13 @@ DRILLS: dict[str, tuple] = {
     ], None),
     "journal damaged while running": (journal_damaged_while_running, [
         ("docs/ops/ledger.md", "While running: the engine writes an `engine_error` event with the line, stops"),
+    ], None),
+    "refused start loop": (refused_start_loop, [
+        ("docs/ops/run_engine.md", "Without the daily path nothing could sell, sync or book those sleeves, so the "
+                                   "engine does not start. The lease is given back."),
+        ("docs/ops/run_engine.md", "Waits 5 minutes before it exits (`KAIBOT_REFUSED_BACKOFF_S`, 300 s)"),
+        ("docs/ops/always_on.md", "The service waits 5 minutes between tries; the next one starts by itself once it "
+                                  "is fixed."),
     ], None),
 }
 
