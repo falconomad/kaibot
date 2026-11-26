@@ -15,7 +15,11 @@ export const LEVELS: Record<Level, { name: string; risk: number; stop: number; p
 export const BAR = { trades: 900, months: 3, t: 3, randomPct: 95 };
 
 export interface Curve { session: string; pot: number; spy: number; /** today's live value, not a close */ live?: boolean;
-  /** the live point's SPY is the last close, not SPY now (lib/marks.homeLine): the legend says so */ spyClose?: boolean }
+  /** the live point's SPY is the last close, not SPY now (lib/marks.homeLine): the legend says so */ spyClose?: boolean;
+  /** #719: SPY held at the pot's own invested share (lib/book.mtmCurve), from the same start. Absent when the series
+   *  carries no exposure (a replay, or kb_equity_series without invested/gross). */ spyMatched?: number;
+  /** #719: the share of the pot invested at this close (0..1), what the next session's matched SPY move is scaled by */
+  exposure?: number }
 
 export function curve(start: number, daily: Daily[]): Curve[] {
   let pot = start, spy = start;

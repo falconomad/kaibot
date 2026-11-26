@@ -23,7 +23,7 @@ import { engineDetail } from "../components/Experiment";
 import { dailyNote, showNote } from "../lib/engineevents";
 import { multiDayFrom } from "../lib/experiment";
 import { useMarks } from "../components/Marks";
-import { homeLine, potLive, vsSpyText } from "../lib/marks";
+import { SAME_AMOUNT_NOTE, homeLine, potLive, vsSameText, vsSpyText } from "../lib/marks";
 import { FreshNote } from "../components/Fresh";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { bookFreshness, holdingsFreshness, newsFreshness } from "../lib/freshness";
@@ -149,6 +149,11 @@ export function Live() {
   // the pot's gain (marked) against SPY's from the same start, both read from the line's last point
   const vsSpy = (live ? pot - run.amount_usd : s.netUsd) - (end ? end.spy - run.amount_usd : 0);
   const spyPct = end ? ((end.spy - run.amount_usd) / run.amount_usd) * 100 : s.spyPct;
+  // #719 (audit 2 8.1): the same gap against SPY held at the pot's own invested share each day, read from the same
+  // point; only when the line carries it (the marked series with its exposure). The line above stays as it is.
+  const same = end?.spyMatched;
+  const vsSame = same !== undefined ? (live ? pot - run.amount_usd : s.netUsd) - (same - run.amount_usd) : null;
+  const samePct = same !== undefined ? ((same - run.amount_usd) / run.amount_usd) * 100 : null;
   // Stakeholder, 16 Nov 2026: while a newer run is scheduled, an ended run's pot must not read as the current one.
   const ended = run.kind === "paper" && !["scheduled", "running", "paused"].includes(run.status);
   const newer = ended ? (runs ?? []).filter((r) => r.kind === "paper" && r.id !== run.id && r.created_at >= run.created_at
@@ -192,6 +197,7 @@ export function Live() {
             <Tick value={allTime} from={src} className={tone(allTime)}>{signedMoney(allTime)} all time</Tick>
             {live && <Tick value={live.dayPnl} from={src} className={tone(live.dayPnl)}>{signedMoney(live.dayPnl)} {live.dayLabel}</Tick>}
             <span className="muted desk-only">{vsSpyText(vsSpy, spyAt)}</span>
+            {vsSame !== null && <span className="muted desk-only" title={SAME_AMOUNT_NOTE}>{vsSameText(vsSame, spyAt)}</span>}
           </div>
           <FreshNote f={potFresh} what="Pot" />
           {next && <p className="muted home-next">{next}</p>}
@@ -231,7 +237,12 @@ export function Live() {
           <div className="kv">
             <span>S&amp;P 500 (SPY), same start{spyAt === "close" ? " (last close)" : ""}</span><span /><span className="v num">{spyPct >= 0 ? "+" : ""}{pct(spyPct)}</span>
             <span>{vsSpyText(vsSpy, spyAt, false)}</span><span /><span className="v num">{money(Math.abs(vsSpy))}</span>
+            {vsSame !== null && samePct !== null && <>
+              <span title={SAME_AMOUNT_NOTE}>The same amount in SPY (at the pot&apos;s invested share){spyAt === "close" ? " (last close)" : ""}</span><span /><span className="v num">{samePct >= 0 ? "+" : ""}{pct(samePct)}</span>
+              <span>{vsSameText(vsSame, spyAt, false)}</span><span /><span className="v num">{money(Math.abs(vsSame))}</span>
+            </>}
           </div>
+          {vsSame !== null && <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>The same amount in SPY: {SAME_AMOUNT_NOTE.split(": ")[0]}.</p>}
           {lv && meters && run.kind === "paper" && (
             <div className="phone-only meters meters-home" aria-label="Limits">
               <Meter label="Day vs stop" value={`${pct(meters.dayPct)} / −${lv.stop.toFixed(2)}%`} frac={meters.dayPct < 0 ? -meters.dayPct / lv.stop : 0} />

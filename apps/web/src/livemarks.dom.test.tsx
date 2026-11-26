@@ -48,9 +48,9 @@ const seeds = [{ key: ["trades-all", 7], data: { total: 0, rows: [] } }, { key: 
 /** What /api/marks answers: XOM at `price`, read `age` milliseconds ago. */
 const xom = (price: number, age = 2_000) => async (): Promise<Marks> => ({ at: Date.now() - age, by: { XOM: { qty: 20, price, prevClose: 160.58 } } });
 const OPEN = "2026-11-19T17:40:00Z"; // Thursday 12:40 in New York
-const start = async (now: string, o = overview()) => {
+const start = async (now: string, o = overview(), with_ = seeds) => {
   vi.useFakeTimers({ now: new Date(now), toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
-  await mount(<Live />, { ctx: ctxFor(run, { overview: o }), seeds });
+  await mount(<Live />, { ctx: ctxFor(run, { overview: o }), seeds: with_ });
   await pass(50);
 };
 /** Let `ms` of the page's time pass: timers, polls and their answers. */
@@ -186,6 +186,70 @@ describe("the S&P 500 side moves with SPY now (stakeholder, 24 Nov 2026)", () =>
       expect(page()).toContain(`${vs >= 0 ? "Ahead of" : "Behind"} the S&P 500 at last close by ${usd(vs)}`);
       await unmount();
     }
+  });
+});
+
+describe("#719: the same amount in SPY beside the fully invested S&P 500", () => {
+  // the series as kb_equity_series sends it, with the ledger's gross (invested / the venue's equity) at each close:
+  // 2% invested at Tuesday's close, 3.4% at Wednesday's (the book's 3,212.40 of 94,997.26)
+  const GROSS = [0.02, 3212.4 / 94997.26];
+  const matchedSeries = parseSeries([{ session: "2026-11-17", close_equity: 95000, marked: true, gross: GROSS[0] },
+    { session: SESSION, close_equity: 94997.26, marked: true, gross: GROSS[1] }]);
+  const withSeries = seeds.map((x) => (x.key[0] === "equity_series" ? { ...x, data: matchedSeries } : x));
+  const withSpy = (price: number, age = 2_000) => async (): Promise<Marks> => ({ ...(await xom(158.68)()),
+    spy: { price, at: Date.now() - age, prevClose: 659.3, prevSession: SESSION } });
+  /** The hero's two lines, as the page shows them side by side. */
+  const both = () => [...document.querySelectorAll(".home-change > span.muted")].map((e) => e.textContent);
+  /** The Details rows from "S&P 500 (SPY)" on, label and figure. */
+  const details = () => [...document.querySelectorAll(".home-details-body > .kv")][0].textContent!.replace(/\s+/g, " ").trim();
+  // SPY over the two sessions: fully invested, and at the invested share of the close before (Tuesday: 0, the start)
+  const SAME_CLOSE = 95000 * (1 + GROSS[0] * -0.009749);
+
+  it("live (SPY now): both lines move with SPY, the matched one by the last close's invested share", async () => {
+    asked.marks.mockImplementation(withSpy(662.1));
+    await start(OPEN, overview(), withSeries);
+    const k = 662.1 / 659.3, pot = 94958.46, same = SAME_CLOSE * (1 + GROSS[1] * (k - 1));
+    expect(both()).toMatchInlineSnapshot(`
+      [
+        "Ahead of the S&P 500 by $1,646.55",
+        "Behind the same amount in SPY by $36.66",
+      ]
+    `);
+    expect(both()[1]).toBe(`Behind the same amount in SPY by $${Math.abs(pot - same).toFixed(2)}`);
+    expect(details()).toMatchInlineSnapshot(`"S&P 500 (SPY), same start−1.78%Ahead of the S&P 500$1,646.55The same amount in SPY (at the pot's invested share)−0.01%Behind the same amount in SPY$36.66"`);
+    expect(document.querySelector(".home-details-body")!.textContent).toContain("The same amount in SPY: SPY held at the pot's own invested share each day, the rest in cash.");
+  });
+
+  it("no fresh SPY price: both lines hold the last close and both say so", async () => {
+    asked.marks.mockImplementation(xom(158.68));
+    await start(OPEN, overview(), withSeries);
+    expect(both()).toMatchInlineSnapshot(`
+      [
+        "Ahead of the S&P 500 at last close by $2,041.16",
+        "Behind the same amount in SPY at last close by $23.02",
+      ]
+    `);
+    expect(both()[1]).toBe(`Behind the same amount in SPY at last close by $${Math.abs(94958.46 - SAME_CLOSE).toFixed(2)}`);
+  });
+
+  it("the market closed: closes on both sides, no note", async () => {
+    asked.marks.mockImplementation(xom(158.68));
+    await start("2026-11-19T12:00:00Z", overview({ ledger: null, heartbeat: [] }), withSeries);
+    expect(both()).toMatchInlineSnapshot(`
+      [
+        "Ahead of the S&P 500 by $2,079.96",
+        "Ahead of the same amount in SPY by $15.78",
+      ]
+    `);
+    expect(both()[1]).toBe(`Ahead of the same amount in SPY by $${(94997.26 - SAME_CLOSE).toFixed(2)}`);
+  });
+
+  it("a series without exposure (before the ledger sent it): only the fully invested line, as before", async () => {
+    asked.marks.mockImplementation(withSpy(662.1));
+    await start(OPEN);
+    expect(both()).toHaveLength(1);
+    expect(both()[0]).toMatch(/^Ahead of the S&P 500 by \$/);
+    expect(page()).not.toContain("same amount");
   });
 });
 

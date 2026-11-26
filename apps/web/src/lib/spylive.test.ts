@@ -6,7 +6,7 @@
 // Pure maths: no network, no clock but the one passed in.
 import { describe, expect, it } from "vitest";
 import type { Curve } from "./model";
-import { STALE_MS, type Fresh, type SpyMark, homeLine, parseMarks, parseSpy, spyFactor, vsSpyText } from "./marks";
+import { STALE_MS, type Fresh, type SpyMark, homeLine, parseMarks, parseSpy, spyFactor, vsSameText, vsSpyText } from "./marks";
 import { applyStream } from "./stream";
 
 // Thursday 19 Nov 2026, 12:40 in New York. The line's last close is Wednesday's.
@@ -159,5 +159,64 @@ describe("vsSpyText", () => {
     expect(vsSpyText(0, "live")).toBe("Ahead of the S&P 500 by $0.00");
     expect(vsSpyText(-10, "close")).toBe("Behind the S&P 500 at last close by $10.00");
     expect(vsSpyText(10, "close", false)).toBe("Ahead of the S&P 500 at last close");
+  });
+});
+
+describe("#719: the same amount in SPY (SPY at the pot's own invested share)", () => {
+  // the closes with the matched line, as mtmCurve gives them: 16% invested at Wednesday's close
+  const M: Curve[] = [{ session: "2026-11-17", pot: 95_000, spy: 93_832.07, spyMatched: 95_000, exposure: 0.1 },
+    { session: CLOSE, pot: 94_997.26, spy: 92_917.28, spyMatched: 94_907.33, exposure: 0.16 }];
+  const lines = (c: Curve[], p: { pot: number; fresh: Fresh | null } | null, spy: SpyMark | null | undefined, now = NOW) => {
+    const { end, spyAt } = homeLine(c, p, spy, TODAY, START, now);
+    const hero = end?.pot ?? p?.pot ?? START;
+    return [vsSpyText((hero - START) - (end!.spy - START), spyAt), vsSameText((hero - START) - (end!.spyMatched! - START), spyAt)];
+  };
+
+  it("live with SPY now: the matched point moves by the last close's invested share of SPY's move", () => {
+    const { end } = homeLine(M, live(), SPY, TODAY, START, NOW);
+    expect(end!.spyMatched).toBeCloseTo(94_907.33 * (1 + 0.16 * (K - 1)), 9);
+    expect(lines(M, live(), SPY)).toMatchInlineSnapshot(`
+      [
+        "Ahead of the S&P 500 by $1,646.57",
+        "Behind the same amount in SPY by $13.36",
+      ]
+    `);
+  });
+  it("live without a fresh SPY: both lines hold the last close and both say so", () => {
+    const { end } = homeLine(M, live(), null, TODAY, START, NOW);
+    expect(end!.spyMatched).toBe(94_907.33);
+    expect(lines(M, live(), null)).toMatchInlineSnapshot(`
+      [
+        "Ahead of the S&P 500 at last close by $2,041.18",
+        "Ahead of the same amount in SPY at last close by $51.13",
+      ]
+    `);
+  });
+  it("the market closed: the closes' own gaps, no note", () => {
+    expect(lines(M, { pot: 94_997.26, fresh: { kind: "close", session: CLOSE } }, null)).toMatchInlineSnapshot(`
+      [
+        "Ahead of the S&P 500 by $2,079.98",
+        "Ahead of the same amount in SPY by $89.93",
+      ]
+    `);
+  });
+  it("today's point already on the line: replaced, and measured from the close before it", () => {
+    const c = [...M, { session: TODAY, pot: 94_900, spy: 92_000, spyMatched: 94_800, exposure: 0.2 }];
+    expect(homeLine(c, live(), SPY, TODAY, START, NOW).end!.spyMatched).toBeCloseTo(94_907.33 * (1 + 0.16 * (K - 1)), 9);
+    expect(homeLine(c, live(), null, TODAY, START, NOW).end!.spyMatched).toBe(94_800);
+  });
+  it("closes without it (a replay's curve, an older series): no matched point, and the S&P 500 side as before", () => {
+    expect(homeLine(CLOSES, live(), SPY, TODAY, START, NOW).end).not.toHaveProperty("spyMatched");
+    expect(homeLine([], live(95_010), SPY, TODAY, START, NOW).end).not.toHaveProperty("spyMatched");
+  });
+  it("vsSameText says ahead or behind, and 'at last close' under the same rule as vsSpyText", () => {
+    expect([vsSameText(12.5, "live"), vsSameText(-12.5, "none"), vsSameText(-1, "close"), vsSameText(3, "close", false)]).toMatchInlineSnapshot(`
+      [
+        "Ahead of the same amount in SPY by $12.50",
+        "Behind the same amount in SPY by $12.50",
+        "Behind the same amount in SPY at last close by $1.00",
+        "Ahead of the same amount in SPY at last close",
+      ]
+    `);
   });
 });
