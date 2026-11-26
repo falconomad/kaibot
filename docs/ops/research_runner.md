@@ -158,6 +158,17 @@ functions), and any engine restart then ran unreviewed `main`. Now:
   its own.
 - **Market hours.** Allowed (stakeholder, #600, 24 Nov 2026). Heavy jobs run under `nice -n 10`, so the engine
   keeps priority.
+- **The quiet window around the close (audit 2 7.8, #718).** The engine sends its daily orders in the 10 minutes
+  before the close, so no heavy job runs from 30 minutes before a session's close to 10 minutes after it: 15:30 to
+  16:10 ET (21:30 to 22:10 Berlin most of the year), or 12:30 to 13:10 on a 13:00 close (NYSE sessions from
+  `kaibot.ingest.nyse_sessions`; a holiday has no window).
+  - A heavy job that comes due in the window is `deferred` to a later tick.
+  - A heavy job already running when the window starts is paused with SIGSTOP to its process group and resumed with
+    SIGCONT when the window ends. Its log says so, and the pause does not count against its timeout. A network
+    connection the job held open may time out during the pause; `common.http` retries it.
+  - The launchd job runs as `ProcessType Background` with `LowPriorityIO`, so macOS throttles the runner and its
+    jobs, CPU and disk, whenever the engine wants them. After this change is pulled, run `install_runner.sh` again
+    so the new plist is loaded.
 - **The engine.** The runner never starts, stops or restarts the engine, never touches its lease or
   `scripts/service.sh`, and never runs launchctl. It works only in its own checkout (above) and refuses to run in
   the engine's. `git pull --ff-only` runs only when the runner's checkout is on `main` and clean (a dirty checkout

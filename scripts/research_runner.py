@@ -29,6 +29,11 @@ runner's own Healthchecks.io check, if one is set up (HEALTHCHECKS_RUNNER_PING_U
 line of data/runner/healthchecks_url; never the secrets file): a success ping at the end of a good tick and every 10
 minutes while a long job runs, a /fail ping when the tick was refused, paused or could not read its queue, or when
 the disk has less than 10 GB free. StartInterval 900: the check's period is 15 minutes (docs/ops/research_runner.md).
+QA-Ops audit 2 7.8 (#718): no heavy job runs from 30 minutes before a session's close to 10 minutes after it (15:30
+to 16:10 ET, 12:30 to 13:10 on a 13:00 close; NYSE sessions from kaibot.ingest.nyse_sessions), when the engine
+sends its daily orders. A heavy job due then waits for the next tick (`deferred`); one that is running when the
+quiet window starts is paused (SIGSTOP to its process group) and resumed (SIGCONT) when it ends, and the pause does
+not count against its timeout. The launchd job itself runs as `ProcessType Background` with `LowPriorityIO`.
 """
 
 from __future__ import annotations
@@ -48,9 +53,10 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -762,24 +768,100 @@ def paused_reason(root: Path, state: Path, run=subprocess.run) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- the quiet window around the close (#718)
+
+QUIET_BEFORE_CLOSE_MIN, QUIET_AFTER_CLOSE_MIN = 30, 10
+
+
+def wall_now() -> datetime:
+    """The time the quiet window is judged by (tests replace it)."""
+    return datetime.now(UTC)
+
+
+def _sessions():
+    """kaibot.ingest.nyse_sessions (stdlib only). The runner's .venv does not install the package: it is read from
+    this checkout's src/, as the jobs' PYTHONPATH does."""
+    src = str(ROOT / "src")
+    if src not in sys.path:
+        sys.path.append(src)
+    from kaibot.ingest import nyse_sessions
+
+    return nyse_sessions
+
+
+def quiet_window(at: datetime) -> tuple[datetime, datetime] | None:
+    """The quiet window (UTC) of `at`'s New York day when `at` is before its end; None on a day without a session
+    or once it is over."""
+    ns = _sessions()
+    day = at.astimezone(ns.ET).date()
+    if not ns.is_session(day):
+        return None
+    close = ns.close_utc(day)
+    lo = close - timedelta(minutes=QUIET_BEFORE_CLOSE_MIN)
+    hi = close + timedelta(minutes=QUIET_AFTER_CLOSE_MIN)
+    return (lo, hi) if at < hi else None
+
+
+def in_quiet(at: datetime) -> tuple[datetime, datetime] | None:
+    w = quiet_window(at)
+    return w if w and w[0] <= at else None
+
+
 # ---------------------------------------------------------------- running a job
 
 
-def run_job(job: Job, cmd: list[str], logfile: Path, popen=subprocess.Popen, env: dict | None = None) -> dict:
+def run_job(job: Job, cmd: list[str], logfile: Path, popen=subprocess.Popen, env: dict | None = None,
+            sleep=None) -> dict:
     t0 = datetime.now(UTC)
-    status, rc = "ok", None
+    status, rc, paused = "ok", None, 0.0
+    sleep = sleep or time.sleep
     with logfile.open("w") as out:
         p = popen(cmd, cwd=str(ROOT), env=job_env() if env is None else env, stdin=subprocess.DEVNULL, stdout=out,
                   stderr=subprocess.STDOUT, start_new_session=True)
+        left = job.spec.timeout_min * 60.0  # running time; a pause in the quiet window does not count
         try:
-            rc = p.wait(timeout=job.spec.timeout_min * 60)
-            status = "ok" if rc == 0 else "failed"
+            while True:
+                w = quiet_window(wall_now()) if job.spec.heavy else None
+                until_quiet = (w[0] - wall_now()).total_seconds() if w else None
+                if until_quiet is not None and until_quiet <= 0:  # the window: stop the job's group until it ends
+                    paused += _pause_group(p, w[1], out, sleep)
+                    continue
+                step = left if until_quiet is None else min(left, until_quiet)
+                try:
+                    rc = p.wait(timeout=max(step, 0.0))
+                    status = "ok" if rc == 0 else "failed"
+                    break
+                except subprocess.TimeoutExpired:
+                    left -= step
+                    if left <= 0:
+                        raise
         except subprocess.TimeoutExpired:
             status = "timeout"
             _kill_group(p)
             rc = p.returncode
-    return {"status": status, "rc": rc, "minutes": (datetime.now(UTC) - t0).total_seconds() / 60,
-            "finished": now()}
+    res = {"status": status, "rc": rc, "minutes": (datetime.now(UTC) - t0).total_seconds() / 60, "finished": now()}
+    if paused:
+        res["paused_minutes"] = round(paused / 60, 1)
+    return res
+
+
+def _pause_group(p, until: datetime, out, sleep) -> float:
+    """SIGSTOP the job's process group until `until` (the quiet window's end), then SIGCONT. Seconds paused."""
+    t0 = wall_now()
+    out.write(f"\n[research runner] {now()}: paused for the quiet window around the close, until "
+              f"{until.strftime('%H:%M')} UTC (#718)\n")
+    out.flush()
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.killpg(p.pid, signal.SIGSTOP)
+    try:
+        while (left := (until - wall_now()).total_seconds()) > 0:
+            sleep(min(left, 60.0))
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.killpg(p.pid, signal.SIGCONT)
+    out.write(f"[research runner] {now()}: resumed\n")
+    out.flush()
+    return (wall_now() - t0).total_seconds()
 
 
 def _kill_group(p) -> None:
@@ -848,6 +930,11 @@ def tick(*, root: Path = ROOT, state: Path = STATE, queue: Path = QUEUE, allowed
                 did[key] = "rejected"
                 _deliver(cfg, state, key, raw.get("posts_to_issue"), rejected_comment(key, str(e)), run)
                 log(state, f"{key}: rejected: {e}")
+                continue
+            if job.spec.heavy and (w := in_quiet(wall_now())):
+                did[job.id] = "deferred"
+                log(state, f"{job.id}: deferred, heavy jobs wait for the end of the quiet window around the close "
+                           f"({w[1].strftime('%H:%M')} UTC)")
                 continue
             if job.spec.sec:
                 with try_lock(state / "sec.lock") as sec_held:
