@@ -143,6 +143,16 @@ functions), and any engine restart then ran unreviewed `main`. Now:
 - **SEC.** A job marked `sec` also takes `data/runner/sec.lock`. It is **deferred** to the next tick, not marked
   done, while that lock is held or while another bulk SEC fetcher (`fetch_earnings_dates`, `fetch_fundamentals`,
   `fetch_spinoffs`, `fetch_listings`, `fetch_sp500_history`, `fetch_sec_fundamentals`) is running on the Mac.
+- **One SEC window for the whole Mac (audit 2 7.6, #716).** That guard sees only bulk fetchers. Every SEC
+  request now also takes a slot from one window shared by every process: the engine's 8-K feed, the nightly
+  `collect_alt`, `fetch_earnings_dates`, `fetch_listings`, `fetch_sec_fundamentals` and anything else on the
+  `sec_edgar` budget. The window is a file under a flock, `data/ratelimit/sec_edgar.slots`, with at most 8 requests
+  a second in total, spaced 125 ms apart (SEC allows 10 per IP). Each process keeps its own 5 a second as well
+  (`config/sources.yaml`, `shared_budget_per_s`; `src/kaibot/common/ratelimit.py`, `SharedWindow`). Jobs get
+  `KAIBOT_RATELIMIT_DIR=<engine checkout>/data/ratelimit`, so they share the engine checkout's file, not this
+  checkout's. If the file cannot be used, a process logs one warning and keeps its own budget only. **Not covered:**
+  an engine in Docker (its container has its own `data/ratelimit`, and a flock does not cross the Docker Desktop VM).
+  With `KAIBOT_HEADLINE_EDGAR` off, the default, the engine sends no SEC request at all.
 - **Runaway jobs.** Every script has a timeout. When it passes, the job's whole process group gets SIGTERM, then
   SIGKILL. A job is recorded as `started` before it runs, so a job that crashes the Mac is not started again on
   its own.

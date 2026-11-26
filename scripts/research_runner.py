@@ -76,6 +76,7 @@ GIT_USER = ("Kaibot research runner", "research-runner@users.noreply.github.com"
 # The engine's checkout, which the runner never works in (QA-Ops audit, 25 Nov 2026): install_runner.sh passes it
 # as KAIBOT_ENGINE_CHECKOUT; ~/Projects/kaibot is the default; the engine service's plist is read (never written).
 ENGINE_CHECKOUT_ENV = "KAIBOT_ENGINE_CHECKOUT"
+RATELIMIT_DIR_ENV = "KAIBOT_RATELIMIT_DIR"
 DEFAULT_ENGINE_CHECKOUT = "~/Projects/kaibot"
 ENGINE_SERVICE_PLIST = "~/Library/LaunchAgents/com.kaibot.engine.plist"
 # Folders of the engine's data/ a link in the runner's data/ may never point into (the engine's state, the old runner's)
@@ -238,6 +239,10 @@ def job_env(base: dict | None = None) -> dict[str, str]:
     """What a job sees: a short fixed list from the runner's environment (never GH_TOKEN or other secrets)."""
     base = os.environ if base is None else base
     env = {k: base[k] for k in JOB_ENV_KEYS if k in base}
+    # audit 2 7.6 (#716): SEC jobs share one machine-wide request window with the engine and the nightly jobs, so
+    # they use the engine checkout's data/ratelimit, not this checkout's (a path, not a secret)
+    env[RATELIMIT_DIR_ENV] = base.get(RATELIMIT_DIR_ENV) or str(
+        Path(base.get(ENGINE_CHECKOUT_ENV) or DEFAULT_ENGINE_CHECKOUT).expanduser() / "data" / "ratelimit")
     env["PYTHONPATH"] = "src"
     env["PYTHONUNBUFFERED"] = "1"
     return env

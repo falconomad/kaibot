@@ -116,6 +116,9 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
     _s("KAIBOT_DAILY_DATA", "path", "data", "the daily store's root (default data)"),
     _s("KAIBOT_TRIALS_FILE", "path", "backend-quant", "the trial registry file"),
     _s("KAIBOT_SOURCES_FILE", "path", "data", "config/sources.yaml elsewhere (tests)"),
+    _s("KAIBOT_RATELIMIT_DIR", "path", "qa-ops", "audit 2 7.6 (#716): the folder of the machine-wide rate-limit "
+       "windows (default data/ratelimit; the research runner sets it for its jobs to the engine checkout's)",
+       readers=("scripts/research_runner.py",)),
     _s("KAIBOT_HELPER_ENV_FILE", "path", "qa-ops", "#451: the helpers' env file (read by common/helper_session.py "
        "itself: the helpers' path imports nothing of the package)", readers=("src/kaibot/common/helper_session.py",)),
     _s("KAIBOT_ENGINE_CHECKOUT", "path", "qa-ops", "QA-Ops audit (25 Nov 2026): the engine's checkout, which the "
@@ -274,6 +277,7 @@ class Switches:
     daily_data: Path | None
     trials_file: Path | None
     sources_file: Path | None
+    ratelimit_dir: Path | None
     helper_env_file: Path | None
     holdout_opening: str | None
     engine_name: str
