@@ -100,6 +100,7 @@ SAID = {  # the journal entries the trace shows, with the fields that tell the s
     "run": ("run_id", "amount"), "om_intent": ("coid", "side", "qty", "type"), "om_state": ("coid", "state", "reason"),
     "fill": ("coid", "activity", "side", "qty", "px"), "md_decision": ("session", "fill_session", "late", "note"),
     "md_send": ("session", "late_of", "targets"), "md_sent": ("session", "sent", "skipped"),
+    "md_decision_lost": ("session", "fill_session", "why"),
     "md_cancel": ("day", "sides", "reason"), "md_withheld": ("session", "symbol", "why"),
     "md_book_end": ("drawdown_pct",), "reconcile": ("when", "ok"),
 }
