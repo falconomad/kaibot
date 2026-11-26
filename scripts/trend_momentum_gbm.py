@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> dict:
     rep = g3.evaluate_sleeve(gate, rule=RULE, account=account("rule|1x", control=control),
                              neighbours={k.split("|")[1]: account(k) for k in runs if k.startswith("neighbour|")},
                              prereg=pre, source=source, registry=reg, first_run_at=run_at,
-                             tbill=tbill_mod.find(data_dir), as_of=run_at)
+                             tbill=(bills := tbill_mod.find(data_dir)), as_of=run_at)
     diff = series(rule_run)["net"] - series(runs["reference|trend_momentum"][0])["net"]
     vs_rule = {"annualised": float(diff.mean() * 252), "met": bool(diff.mean() > 0)}
     sharpe = float(runs["rule|1x"][1]["sharpe"])
@@ -230,6 +230,9 @@ def main(argv: list[str] | None = None) -> dict:
                 "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"]},
                 "window": out["window"],
                 "metrics": {"cagr_pct": row["cagr_pct"], "daily_sharpe_ann": row["sharpe"],
+                            # #702: the active-return Sharpe S4 takes its variance from
+                            trials_mod.ACTIVE_SHARPE: g3.active_sharpe_ann(
+                                gate, "trend_momentum" if ref else RULE, account(label), bills),
                             "max_drawdown_pct": row["max_drawdown_pct"]}}, default=str)))
     print(f"verdict: {verdict}; vs trend_momentum {vs_rule['annualised']:.2%} a year; report {out_dir / tag}.json")
     out["file"] = str(out_dir / f"{tag}.json")

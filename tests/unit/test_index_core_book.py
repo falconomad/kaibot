@@ -145,6 +145,13 @@ def test_the_script_on_the_fixture_counts_six_configurations(tmp_path):
         "trend_momentum_sleeve": out["gate_v3_sleeve"]["verdict"]}
     assert out["budgets"]["engine"] == {"trend_momentum_sleeve": 10.0}
     assert "20 runs, 2000 needed" in out["gate_v3_sleeve"]["marks"]["s3"]["why"]
+    # #702: sleeve rows log the active-return Sharpe S4 reads; book rows (in no family) log none
+    active = {r["label"]: r["metrics"].get("daily_active_sharpe_ann") for r in rows}
+    sleeve = [k for k, r in zip(active, rows, strict=True) if r["strategy"] == "trend_momentum_sleeve"]
+    assert sleeve and all(isinstance(active[k], float) for k in sleeve)
+    assert all(active[r["label"]] is None for r in rows if r["strategy"] != "trend_momentum_sleeve")
+    # #701: the run's own six configurations are B2's N before its rows were appended
+    assert out["gate_v3_book"]["book_configurations"]["configurations"] == 6
 
 
 def test_the_mac_command_defaults_to_2000_control_runs_and_a_ten_percent_budget():

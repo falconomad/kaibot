@@ -245,6 +245,10 @@ def main(argv: list[str] | None = None) -> dict:
                            "max_index_pct": row["max_index_pct"]},
                 "window": out["window"],
                 "metrics": {"cagr_pct": row["cagr_pct"], "daily_sharpe_ann": row["sharpe"],
+                            # #702: a sleeve row logs the active-return Sharpe S4 takes its variance from (a book
+                            # is in no family, so its rows have none)
+                            trials_mod.ACTIVE_SHARPE: g3.active_sharpe_ann(gate, SLEEVE, account(label), bills)
+                            if name == SLEEVE else None,
                             "max_drawdown_pct": row["max_drawdown_pct"], "net_return_pct": row["return_pct"]}})
     print(f"sleeve: {sleeve_rep['verdict']}; book: {book_rep['verdict']}; report {out_dir / tag}.json", flush=True)
     out["file"] = str(out_dir / f"{tag}.json")

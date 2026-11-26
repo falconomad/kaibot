@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> dict:
     rep = g3.evaluate_sleeve(gate, rule=RULE, account=account("rule|1x", control=control),
                              neighbours={k.split("|")[1]: account(k) for k in runs if k.startswith("neighbour|")},
                              prereg=pre, source=source, registry=reg, first_run_at=run_at,
-                             tbill=tbill_mod.find(data_dir), as_of=run_at)
+                             tbill=(bills := tbill_mod.find(data_dir)), as_of=run_at)
     mine, ref = runs["rule|1x"][1]["turnover"], runs["reference|trend_momentum"][1]["turnover"]
     turn = {"rule": mine, "trend_momentum": ref, "ratio": mine / ref if ref > 0 else float("nan"),
             "max_ratio": TURNOVER_MAX, "met": bool(ref > 0 and mine <= TURNOVER_MAX * ref)}
@@ -178,6 +178,10 @@ def main(argv: list[str] | None = None) -> dict:
                                                         "cost_multiple": row["cost"]},
                 "window": out["window"],
                 "metrics": {"cagr_pct": row["cagr_pct"], "daily_sharpe_ann": row["sharpe"],
+                            # #702: the active-return Sharpe S4 takes its variance from
+                            trials_mod.ACTIVE_SHARPE: g3.active_sharpe_ann(
+                                gate, "trend_momentum" if label.startswith("reference") else RULE, account(label),
+                                bills),
                             "max_drawdown_pct": row["max_drawdown_pct"], "turnover": row["turnover"]}})
     print(f"sleeve: {rep['verdict']}; turnover {turn['ratio']:.2f} of trend_momentum's; report {out_dir / tag}.json")
     out["file"] = str(out_dir / f"{tag}.json")

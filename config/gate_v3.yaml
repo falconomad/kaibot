@@ -60,6 +60,8 @@ sleeve:
     trials: family                 # configurations logged for the family's rules, not the whole registry
     dsr_min: 0.90                  # = 1 - level
     variance_floor: one_over_t_minus_1   # amendment 1: V = max(variance of the family's trial Sharpes, 1/(T-1))
+    trial_sharpes: active_return   # gate v3.1 (decision 18 s.6, #702): V from the trials' ACTIVE-return Sharpes;
+                                   # rows with only an absolute-return Sharpe are flagged, not used
   s5_universe: point_in_time       # S1 to S4 hold on the point-in-time universe
   s6_neighbours:                   # every pre-declared neighbour has a positive active return
     each: active_return_positive
