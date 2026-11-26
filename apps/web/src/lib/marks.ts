@@ -18,7 +18,7 @@
 // stays at the last close, as before, and the page says so: "at last close" (vsSpyText, PotChart's legend).
 //
 // The same amount in SPY (#719, audit 2 8.1): the line above compares the pot with SPY fully invested, while the pot
-// holds a share of itself in stocks (27% caps and cash). Beside it, Home shows SPY held at the pot's own invested share
+// holds only a capped share of itself in stocks, the rest in cash. Beside it, Home shows SPY held at the pot's own invested share
 // each day (lib/book.mtmCurve, gate v3's exposure-matched SPY): "Ahead of / Behind the same amount in SPY by $X"
 // (vsSameText). Its live point follows the same rule as the S&P 500 side: SPY now only when spyFactor allows it,
 // scaled by the last close's invested share; else the last close, and the words say "at last close".
