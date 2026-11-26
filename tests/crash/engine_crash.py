@@ -59,10 +59,13 @@ RESTART = et(D1, "15:51", 3)  # stopped and started after the window's first fil
 SCENARIO = Scenario(SEED, PLAN, READY, profile=NO_FAULTS, book_loop=True, sparse=True)
 SKIPPED = ("store.heartbeat",)  # not a crash point (see the module's docstring)
 
-def _files() -> tuple[str, str]:
+def _files() -> tuple[set[str], str]:
+    """The files of `core.Engine` (engine/core.py and, since #694, the mixin modules its methods were moved to) and
+    of engine/book_loop.py."""
     from kaibot.engine import book_loop, core
 
-    return str(Path(core.__file__).resolve()), str(Path(book_loop.__file__).resolve())
+    engine = {str(Path(sys.modules[c.__module__].__file__).resolve()) for c in core.Engine.__mro__ if c is not object}
+    return engine, str(Path(book_loop.__file__).resolve())
 
 
 def region() -> str:
@@ -72,7 +75,7 @@ def region() -> str:
     f = sys._getframe(2)
     while f is not None:
         path = f.f_code.co_filename
-        if path == core:
+        if path in core:
             seen.add("recover" if f.f_code.co_name == "recover" else "core.Engine")
         elif path == loop and f.f_code.co_name == "tick":
             seen.add("book_loop")
