@@ -12,7 +12,8 @@ Without --once it polls every 5 seconds, so a check on the Strategy page answers
 Keys (audit 2 7.2, #712; docs/ops/secrets.md). Alpaca: ONLY the market-data pair of the second, empty paper account
 (data.env; common/secret_files.py), for the asset record and the bars. From the engine's .env it keeps only
 SUPABASE_URL, the Supabase service key (it answers kaibot.ticker_check rows; no helper function for them yet) and
-FINNHUB_API_KEY: the trading pair's lines are skipped unparsed, so this process never holds the trading key."""
+FINNHUB_API_KEY: the trading pair's values are never sliced out of their lines or kept, so this process never
+holds the trading key."""
 
 from __future__ import annotations
 

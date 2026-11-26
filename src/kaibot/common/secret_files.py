@@ -12,9 +12,11 @@ That pair can place orders only on the empty second account: it cannot see, buy 
 account. The trading pair (ALPACA_API_KEY / ALPACA_SECRET) stays in the engine's .env for the engine and its
 watchdog only. A data file that holds the trading pair or a Supabase service key is refused.
 
-`read_names` reads an env file line by line and keeps ONLY the names asked for: a name not asked for (the trading
-pair in the engine's .env, read by the ticker worker for its Supabase key) is never put in a dict, in os.environ or
-in a client. Stdlib only (the helpers' path imports nothing else of the package). Nothing here logs a value.
+`read_names` reads an env file line by line and keeps ONLY the names asked for: the value of a name not asked for
+(the trading pair in the engine's .env, which the ticker worker reads for its Supabase key) is never sliced out of
+its line, and never put in a dict, in os.environ or in a client. (The file's text passes through memory once while
+it is read: the split protects against a helper using or leaking the key, not against reading the Mac's files.)
+Stdlib only (the helpers' path imports nothing else of the package). Nothing here logs a value.
 """
 
 from __future__ import annotations
@@ -31,14 +33,19 @@ TRADING_NAMES = ("ALPACA_API_KEY", "ALPACA_SECRET", "ALPACA_API_SECRET")
 SERVICE_NAMES = ("SUPABASE_SERVICE_KEY", "SUPABASE_SERVICE_ROLE_KEY")
 
 
-def _lines(p: Path):
+def _keys(p: Path):
+    """(name, the line) for each KEY=VALUE line; the value is not sliced out here."""
     for line in p.read_text().splitlines():
         s = line.strip()
         if "=" not in s or s.startswith("#"):
             continue
-        k, v = s.split("=", 1)
-        k = k.strip().removeprefix("export ").strip()
-        yield k, v
+        yield s[:s.index("=")].strip().removeprefix("export ").strip(), s
+
+
+def _lines(p: Path, want: set[str] | None = None):
+    for k, s in _keys(p):
+        if want is None or k in want:
+            yield k, s[s.index("=") + 1:]
 
 
 def _value(v: str) -> str:
@@ -46,19 +53,20 @@ def _value(v: str) -> str:
 
 
 def read_names(path: str | Path, names: Iterable[str]) -> dict[str, str]:
-    """The listed names of an env file (KEY=VALUE, " #" starts a comment, quotes off), nothing else. A value of a
-    name not listed is skipped before it is parsed. A missing file: {}."""
+    """The listed names of an env file (KEY=VALUE, " #" starts a comment, quotes off), nothing else: the value of a
+    name not listed is never sliced out of its line. A missing file: {}."""
     want = set(names)
     p = Path(os.path.expanduser(str(path)))
     if not p.exists():
         return {}
-    return {k: _value(v) for k, v in _lines(p) if k in want and _value(v)}
+    return {k: _value(v) for k, v in _lines(p, want) if _value(v)}
 
 
 def names_in(path: str | Path) -> set[str]:
     """The names an env file sets (no values): for the checks that a file does not hold what it must not."""
     p = Path(os.path.expanduser(str(path)))
-    return {k for k, v in _lines(p) if _value(v)} if p.exists() else set()
+    return {k for k, line in _keys(p) if line[line.index("=") + 1:].split(" #")[0].strip().strip('"').strip("'")} \
+        if p.exists() else set()
 
 
 def data_env_path(path: str | None = None) -> Path:
