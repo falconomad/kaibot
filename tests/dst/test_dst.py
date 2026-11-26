@@ -193,12 +193,40 @@ def test_a_late_decision_journalled_then_killed_is_still_expected():
     assert any("late_of=" + D1 in t for t in res.trace), res.report()
 
 
-@pytest.mark.xfail(strict=True, reason="engine bug #529 (seed 190's case): a fill activity a day late; the sale the "
-                                       "decision taken meanwhile wants is never sent")
 def test_a_buy_booked_a_day_late_is_sold_by_the_decision_taken_meanwhile():
-    """QA-Ops on #537: the finding added to #529 had no strict xfail. B is bought at D1's close and its activity is
-    hidden for 1500 minutes (past D2's window, where the world is healed only from D3); D2's decision wants nothing.
-    The engine plans D2 from the ledger, which has no B, so nothing sells it, and D3 is no decision day."""
-    assert 529 in KNOWN
+    """QA-Ops on #537, fixed by audit 2, 5.13 (#529, seed 190's case). B is bought at D1's close and its activity is
+    hidden for 1500 minutes (past D2's window); D2's decision wants nothing. D2 is planned from the ledger, which
+    has no B yet, and D3 is no decision day: the decision in force (D2's) now sells the late-booked B on D3."""
     res = run_scenario(quiet({D1: ("B",), D2: ()}, forced=(Forced("fill_dropped", "|B|buy", 1500),)))
+    assert res.ok, res.report()
+    sells = [t for t in res.trace if " om_intent " in t and "side=sell" in t and "-B-" in t]
+    assert len(sells) == 1 and "20260805" in sells[0], res.report()
+
+
+def test_without_the_sale_of_a_late_booked_buy_the_book_keeps_it(monkeypatch):
+    """The teeth of 5.13: the same scenario with `_booked_late` taken away ends holding B (the #529 defect)."""
+    from kaibot.engine import live_daily as ld
+
+    monkeypatch.setattr(ld.LiveDaily, "_booked_late", lambda self, rule, session, rid, held: {})
+    res = run_scenario(quiet({D1: ("B",), D2: ()}, forced=(Forced("fill_dropped", "|B|buy", 1500),)))
+    assert any("the book holds ('B',)" in v for v in res.violations), res.report()
+
+
+def test_a_buy_booked_late_that_the_decision_wants_is_kept():
+    """The other side: D2's decision wants B too (it is in its target list), so the late booking is not sold."""
+    res = run_scenario(quiet({D1: ("B",), D2: ("B",)}, forced=(Forced("fill_dropped", "|B|buy", 1500),)))
+    assert res.ok, res.report()
+    assert not any(" om_intent " in t and "side=sell" in t for t in res.trace), res.report()
+
+
+@pytest.mark.xfail(strict=True, reason="engine bug #529, second half (seed 172 with the fault drawn): a watchdog "
+                                       "flatten of shares whose buy is still unbooked leaves a ledger-venue difference")
+def test_a_watchdog_flatten_of_unbooked_shares_is_booked_against_the_late_buy():
+    """Audit 2, 5.13: what is left of #529. B's buy fills at D1's close and its activity is hidden for 1500 minutes;
+    the engine pauses over D2's close, and the watchdog closes the venue's B, which the ledger does not have yet.
+    On D3 the buy is booked: the ledger holds B, the venue does not (its sale is a foreign fill)."""
+    assert 529 in KNOWN
+    res = run_scenario(quiet({D1: ("B",), D2: ("C",)}, watchdog=True,
+                             outages=(Outage(et(D2, "15:58"), 2, kill=False),),
+                             forced=(Forced("fill_dropped", "|B|buy", 1500),)))
     assert res.ok, res.report()

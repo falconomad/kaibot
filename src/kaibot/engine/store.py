@@ -135,7 +135,7 @@ class Store:
 
     def event(self, kind: str, detail: dict, run_id: int | None = None) -> None:
         """Append to the hash-chained event log (append-only in Postgres)."""
-        event_names.note(kind)  # M10 1.22 (#447): one registry of names; never stops a write here
+        first = event_names.note(kind)  # M10 1.22 (#447): one registry of names; never stops a write here
         if not self._chain_loaded:
             last = self.select("event", {"select": "hash", "order": "id.desc", "limit": "1"})
             self._prev_hash = last[0]["hash"] if last else None
@@ -151,6 +151,11 @@ class Store:
             returning=False,
         )
         self._prev_hash = h
+        if first:  # audit 2, 5.13 (#693): an unregistered name, the first time: one visible warning after it
+            try:
+                self.event("unregistered_event", event_names.unregistered(kind), run_id)
+            except Exception:  # the event itself is written: the warning about it must never fail its caller
+                event_names.log.exception("unregistered_event for %r not written", kind)
 
     def pending_commands(self) -> list[dict]:
         return self.select("command", {"applied_at": "is.null", "order": "id.asc"})

@@ -1761,6 +1761,37 @@ class LiveDaily:
             return {}
         return {s: str(w) for s, q, _, w in last["targets"] if int(q) == 0 and s in held}
 
+    def _booked_late(self, rule: str, session: date, rid: int,
+                     held: Mapping[str, tuple[float, float | None]]) -> dict[str, str]:
+        """Audit 2, 5.13 (#529): shares held now that the decision in force never saw and does not want: a buy of
+        its own session or earlier (a `fill` of this run and rule whose order's session is on or before the
+        decision's evening) that the ledger booked only after the decision was taken (the fill's account activity
+        came a day late), of a name neither held at the decision nor in its target list or its plan. The decision's
+        own send could not sell them (the ledger did not have them then) and the sessions after it send no new
+        list, so they are sold here, as the decision would have sold them had it seen them. Names a corporate
+        action credited (spin-offs, symbol changes) have no such fill and are never in this list. In normal
+        operation every fill is booked before the evening's decision, and this is empty."""
+        st = self.standing(rule, session, rid)
+        if st is None or not held:
+            return {}
+        d = st.decision
+        keep = {str(s) for s, _ in (d.get("target") or {}).get("weights") or []} | set(d.get("held") or {})
+        keep |= {s for s, _, _ in st.plan()}
+        find = getattr(self.journal, "find", None)
+        fills = find("fill", run_id=rid, strategy=rule, side="buy") if find is not None else [
+            b for b in self._entries("fill") if b.get("run_id") == rid and b.get("strategy") == rule
+            and b.get("side") == "buy"]
+        out = {}
+        for b in fills:
+            sym = str(b.get("symbol"))
+            if sym in held and sym not in keep and str(b.get("session") or "9999") <= str(d["session"]) \
+                    and float(held[sym][0]) > 1e-9:
+                out[sym] = "booked after the decision"
+        if out:
+            log.warning("#529: %s holds %s, bought on or before %s and booked only after that evening's decision, "
+                        "which does not want them: sold on %s", rule, sorted(out), d["session"], session)
+        return out
+
     def _pending_cuts(self, rule: str, session: date, held: Mapping[str, tuple[float, float | None]],
                       skip: set[str]) -> list[Target]:
         """Audit 2, 5.9: reductions sent on an earlier session that did not fill, in whole or in part (a `resize`
@@ -1803,6 +1834,8 @@ class LiveDaily:
             tl = target_from_json(late["target"])
         if dec is None:
             self._no_decision(r.name, session, prev)
+        if tl is None:  # audit 2, 5.13 (#529): a buy booked after the decision in force, which does not want it
+            pending = {**self._booked_late(r.name, session, rid, held), **pending}
         cuts = self._pending_cuts(r.name, session, held, set(pending)) if tl is None else []
         if dec is None and not pending and not cuts:
             return {"run_id": rid, "strategy": r.name, "session": str(session), "decided": None, "targets": [],

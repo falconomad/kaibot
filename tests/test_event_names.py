@@ -100,6 +100,29 @@ def test_at_run_time_an_unregistered_name_is_written_and_logged_once(monkeypatch
         store.event("brand_new_event", {"a": 2})
     assert caplog.text.count("not registered") == 1
     assert store.journal.last_seq() >= before + 2  # both written
+    # audit 2, 5.13 (#693): and one visible warning event naming it, after the first (not after the second)
+    rows = [(r["type"], r["payload"]) for r in store.tables["event"]]
+    assert [t for t, _ in rows] == ["brand_new_event", "unregistered_event", "brand_new_event"]
+    assert rows[1][1]["name"] == "brand_new_event" and en.severity("unregistered_event") == "warn"
+
+
+def test_at_run_time_the_plain_store_writes_one_warning_event_per_unregistered_name(monkeypatch):
+    """Audit 2, 5.13 (#693), on the store the watchdog and the scripts use (engine/store.Store)."""
+    from kaibot.engine.store import Store
+
+    monkeypatch.setattr(en, "STRICT", False)
+    monkeypatch.setattr(en, "_said", set())
+    rows = []
+    s = Store("http://localhost", "k")
+    s._chain_loaded = True
+    monkeypatch.setattr(s, "insert", lambda table, row, returning=True: rows.append(row))
+    for kind in ("brand_new_event", "brand_new_event", "other_new_event", "halt", "other_new_event"):
+        s.event(kind, {})
+    assert [r["type"] for r in rows] == ["brand_new_event", "unregistered_event", "brand_new_event",
+                                         "other_new_event", "unregistered_event", "halt", "other_new_event"]
+    assert [r["payload"]["name"] for r in rows if r["type"] == "unregistered_event"] == [
+        "brand_new_event", "other_new_event"]
+    assert rows[1]["prev_hash"] == rows[0]["hash"]  # the warning is a link of the same chain
 
 
 def test_the_registered_store_paths_call_note():
@@ -134,3 +157,23 @@ def test_the_dashboard_gets_every_severity():
     ts = TS.read_text()
     for e in (*en.HEALTH, *en.PENDING, *en.ROUTINE):
         assert f'  {e.name}: "{e.severity}",' in ts, e.name
+
+
+def test_a_failing_warning_write_never_fails_the_event_that_was_written(monkeypatch):
+    """Second-key review: the unregistered_event write raising (Supabase down) is logged; the caller goes on."""
+    from kaibot.engine.store import Store
+
+    monkeypatch.setattr(en, "STRICT", False)
+    monkeypatch.setattr(en, "_said", set())
+    rows = []
+    s = Store("http://localhost", "k")
+    s._chain_loaded = True
+
+    def insert(table, row, returning=True):
+        if row["type"] == "unregistered_event":
+            raise RuntimeError("supabase down")
+        rows.append(row)
+
+    monkeypatch.setattr(s, "insert", insert)
+    s.event("brand_new_event", {})
+    assert [r["type"] for r in rows] == ["brand_new_event"]

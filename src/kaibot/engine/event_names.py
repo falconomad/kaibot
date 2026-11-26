@@ -22,7 +22,9 @@ or the books disagree: the owner should look). It is declared here once and gene
 (`EVENT_SEVERITY`) with the names and the text. No page reads it yet, so the dashboard shows exactly what it showed.
 
 At run time `note` never stops the engine: an unregistered name is written as before and logged once (the event
-is the record; losing it would be worse). Only the tests make it an error (`STRICT`).
+is the record; losing it would be worse). Audit 2, 5.13 (#693): the first time a name is seen, the store also writes
+one visible `unregistered_event` warning (a health event) naming it, so a name the registry lacks shows on the
+dashboard instead of only in a log line. Only the tests make it an error (`STRICT`).
 """
 
 from __future__ import annotations
@@ -127,6 +129,8 @@ HEALTH: tuple[Event, ...] = (
 )
 
 PENDING: tuple[Event, ...] = (
+    # Audit 2, 5.13 (#693): an event name the registry lacks was written (once per name and process): a code fault
+    Event("unregistered_event", "warn", "The engine wrote an event its registry does not know (tell the team)"),
     # M10 1.24 (#449): a journal snapshot that was not written (memory and a full fold differ) or not used at a start
     Event("journal_snapshot_mismatch", "warn",
           "The engine's start-up snapshot differed from its full record (not used)"),
@@ -191,15 +195,23 @@ class UnregisteredEvent(ValueError):
     pass
 
 
-def note(name: str) -> None:
-    """Called by every store's `event` before it writes. Unregistered: logged once (STRICT: raised)."""
+def note(name: str) -> bool:
+    """Called by every store's `event` before it writes. Unregistered: logged once (STRICT: raised). True the first
+    time an unregistered name is seen in this process: the store then writes one `unregistered_event` after it."""
     if name in NAMES:
-        return
+        return False
     if STRICT:
         raise UnregisteredEvent(f"event {name!r} is not in kaibot.engine.event_names: add it (HEALTH or ROUTINE)")
-    if name not in _said:
-        _said.add(name)
-        log.warning("event %r is not registered in engine/event_names.py (written anyway)", name)
+    if name in _said:
+        return False
+    _said.add(name)
+    log.warning("event %r is not registered in engine/event_names.py (written anyway; one unregistered_event)", name)
+    return True
+
+
+def unregistered(name: str) -> dict:
+    """The `unregistered_event` warning's payload for an unregistered name."""
+    return {"name": str(name)[:120], "action": "add it to src/kaibot/engine/event_names.py (HEALTH or ROUTINE)"}
 
 
 def _check_registry() -> None:

@@ -1,6 +1,7 @@
 """#529 end to end on the deterministic simulation: B is bought at D1's close and its FILL activity never arrives.
-Without the owner, the book never holds B and D2's decision ("hold nothing") cannot sell it (the strict xfail
-test_a_buy_booked_a_day_late_is_sold_by_the_decision_taken_meanwhile in test_dst.py, KNOWN[529]). Here an owner
+Without the owner, the book does not hold B on D2 and D2's decision ("hold nothing") cannot sell it there (since
+audit 2, 5.13, the decision in force sells it once it is booked: test_a_buy_booked_a_day_late_is_sold_by_the_decision
+_taken_meanwhile in test_dst.py). Here an owner
 reads the Engine page on D2 morning (the heartbeat's reconcile block: exactly what the screen shows) and sends
 `accept_reconcile` with "book it" for the unbooked fill. The engine books it from the venue's view of the order,
 D2's send sells it, and every invariant holds at quiescence (ledger and venue agree, no execution left unbooked,
@@ -66,8 +67,11 @@ def test_the_owner_books_a_fill_whose_activity_never_came_and_the_decision_sells
 def test_a_screen_that_no_longer_matches_books_nothing(monkeypatch):
     res = _run(monkeypatch, tamper=staticmethod(lambda x: {**x, "venue": x["venue"] + 1}))
     assert any("owner: book" in t for t in res.trace)
-    assert not any("activity=owner:" in t for t in res.trace)
-    assert not res.ok  # still the unresolved #529 state: nothing was guessed
+    assert not any("activity=owner:" in t for t in res.trace)  # nothing was guessed from the stale screen
+    # audit 2, 5.13: the activity comes once the world heals (D3); the decision in force does not want B and sells
+    # the late booking there, so the run ends clean without the owner (it used to end holding B: #529)
+    assert res.ok, res.report()
+    assert any(" om_intent " in t and "side=sell" in t and "-B-" in t for t in res.trace), res.report()
 
 
 @pytest.mark.parametrize("action", ["accept"])

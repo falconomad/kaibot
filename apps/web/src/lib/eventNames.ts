@@ -200,6 +200,7 @@ export const EVENT_SEVERITY: Record<string, EventSeverity> = {
   multi_day_book_unchecked: "warn",
   multi_day_book_unconfirmed: "warn",
   multi_day_unbooked_aged: "warn",
+  unregistered_event: "warn",
   journal_snapshot_mismatch: "warn",
   journal_snapshot_unused: "info",
   engine_degraded_start: "critical",
