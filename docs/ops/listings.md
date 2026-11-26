@@ -59,6 +59,9 @@ The times and request counts on this page are estimates; each run prints its own
 - If one input fails (for example Nasdaq Trader), the others are still stored, the failed one is named in the log
   and the command ends with exit code 1. **Please send that line to the Data team**: the three sources could not
   be reached from the machine this was built on (see "Not verified" below).
+- `fetch_listings.py` stops after 3 quarters in a row that fail the same way (it does not ask the other 41), and
+  an answer that is not an index is named: `SEC answered HTTP <status>, <content-type>, <bytes>, starts '<first
+  80 characters>'` (e-mail addresses and long tokens redacted).
 
 ## What it collects
 
@@ -188,8 +191,10 @@ Not one of the three sources could be reached from the machine this was built on
 `www.sec.gov` refuses a client that declares no contact, and Alpaca needs the keys. **Every test fixture is
 hand-built** (`tests/fixtures/listings/README.md`). The first run on the Mac is the first real check of:
 
-- the layout of EDGAR's daily and quarterly `master.idx` (written from memory), and what EDGAR answers for a
-  weekday without an index (404 is assumed; a 403 on every index is reported as a User-Agent problem);
+- the layout of EDGAR's daily and quarterly `master.idx` (written from memory; the first Mac run, 25 Nov 2026,
+  showed that the quarterly column line ends in `Filename`, not `File Name` as the daily one: fixed in #376),
+  and what EDGAR answers for a weekday without an index (404 is assumed; a 403 on every index is reported as a
+  User-Agent problem);
 - whether a company's submissions file already carries the ticker before the first trading day;
 - the wording of a prospectus cover. An unreadable cover leaves the price empty;
 - the URLs of the symbol directory files and the layout of the news feed (generic RSS is assumed), and the wording

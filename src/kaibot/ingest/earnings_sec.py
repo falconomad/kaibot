@@ -210,22 +210,30 @@ def company_from_submissions(cik: str, doc: object, older: Mapping[str, object],
 # ---------------------------------------------------------------- fetching (resumable, budgeted)
 
 
-def sec_getter(user_agent: str) -> Callable[[str], bytes]:
-    """GET under the shared `sec_edgar` budget with the declared User-Agent; gzip transfer when offered."""
+def sec_response_getter(user_agent: str) -> Callable[[str], object]:
+    """GET under the shared `sec_edgar` budget with the declared User-Agent; gzip transfer when offered. Returns
+    the `http.Response` (status and headers kept, so a caller can say what SEC answered), its body decompressed."""
+    import dataclasses
+
     from kaibot.common import http
 
     if "@" not in user_agent:
         raise SystemExit("SEC_USER_AGENT must be 'Name email@domain' (SEC fair-access rule)")
     headers = {"User-Agent": user_agent, "Accept-Encoding": "gzip"}
 
-    def get(url: str) -> bytes:
+    def get(url: str) -> http.Response:
         r = http.get(url, source=BUDGET, headers=headers, timeout=60, max_bytes=256 * 1024 * 1024)
-        body = r.body
-        if r.headers.get("content-encoding", "").lower() == "gzip" or body[:2] == b"\x1f\x8b":
-            body = gzip.decompress(body)
-        return body
+        if r.headers.get("content-encoding", "").lower() == "gzip" or r.body[:2] == b"\x1f\x8b":
+            r = dataclasses.replace(r, body=gzip.decompress(r.body))
+        return r
 
     return get
+
+
+def sec_getter(user_agent: str) -> Callable[[str], bytes]:
+    """`sec_response_getter`, the body only."""
+    get = sec_response_getter(user_agent)
+    return lambda url: get(url).body
 
 
 class Cache:
