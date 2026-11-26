@@ -2586,8 +2586,7 @@ class Engine:
             return
         nxt = datetime.fromisoformat(clk["next_open"])
         if timedelta(0) < nxt - now <= timedelta(minutes=45) and self.market.day != nxt.date():
-            cal = self.broker.calendar(str(nxt.date()))
-            open_utc, _ = session_minutes(cal, nxt.date())
+            open_utc, _ = self._session_hours(nxt.date(), "prepare")
             self.market.set_custom(self._custom_before_open(open_utc))  # S68: backfill custom tickers before the open
             self.market.prepare_day(
                 nxt.date(),
@@ -2597,10 +2596,48 @@ class Engine:
                 )),
             )
 
+    def calendar_local(self, day: date, why: str, step: str = "sessions") -> None:
+        """#746: a read of the broker's calendar failed and the local NYSE calendar answered for `day`
+        (live_daily.local_session / local_hours). One `calendar_local` event per session (the ET date of now) and
+        process, whichever read it was; the log says it at every new day asked. Never raises."""
+        today = self.now().astimezone(_et()).date()
+        said = getattr(self, "_calendar_local_said", None)
+        if said is None:
+            said = self._calendar_local_said = set()
+        if (today, day) not in said:
+            said.add((today, day))
+            log.warning("broker calendar unreadable for %s (%s): the local NYSE calendar answers (%s)", day, why, step)
+        if today in said:
+            return
+        said.add(today)
+        try:
+            self.store.event("calendar_local", {"day": str(today), "asked": str(day), "step": step, "error": why,
+                                                "action": "the session's days and hours come from the engine's "
+                                                          "local NYSE calendar until the broker's reads again"},
+                             self._rid())
+        except Exception:
+            log.exception("calendar_local event not written")
+
+    def _session_hours(self, day: date, step: str) -> tuple[datetime, int]:
+        """(open UTC, regular minutes) of `day` from the broker's calendar; #746: when that read raises, from the
+        local NYSE calendar (journalled once, `calendar_local`). A day the local calendar has no session for, or
+        outside its years, raises the broker's error as before. A broker answer (a row, or none) is never
+        overruled."""
+        try:
+            cal = self.broker.calendar(str(day))
+        except Exception as e:
+            from kaibot.engine.live_daily import local_hours
+
+            hours = local_hours(day)
+            if hours is None:
+                raise
+            self.calendar_local(day, f"{type(e).__name__}: {e}"[:160], step)
+            return hours
+        return session_minutes(cal, day)
+
     def _start_day(self, now: datetime) -> None:
         today = now.astimezone(_et()).date()
-        cal = self.broker.calendar(str(today))
-        open_utc, n_min = session_minutes(cal, today)
+        open_utc, n_min = self._session_hours(today, "session_start")
         if self.run["status"] == "scheduled":
             self._set_run_status("running")
             self.store.update("run", {"id": self.run["id"]}, {"started_on": str(today)})
