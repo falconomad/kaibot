@@ -77,8 +77,11 @@ export type TapeItem =
       target: number | null; reasons: string[]; veto: string | null; approved: boolean | null; qty: number | null; binding: string | null;
       trade_id: number | null; counterfactual: Counterfactual | null;
       room?: { status: RoomStatus; verdict: RoomVerdict | null; cause: string | null; confidence: string | null; counterfactual: Counterfactual | null } | null }
-  | { kind: "fill"; ts: string; side: "buy" | "sell"; qty: number; venue_px: number; shadow_px: number; fees: number; tag: string | null;
-      symbol: string; strategy: string; trade_id: number | null; exit_reason: string | null; pnl_usd: number | null };
+  // 0050: `source: "multi_day"` is a fill of the multi-day rule (a `multi_day_fill` engine event): no shadow price,
+  // fees, trade or result unless the engine sends them; exit_reason is a multi-day sell code (lib/multiday reasonText)
+  | { kind: "fill"; ts: string; side: "buy" | "sell"; qty: number; venue_px: number; shadow_px: number | null; fees: number | null; tag: string | null;
+      symbol: string; strategy: string; trade_id: number | null; exit_reason: string | null; pnl_usd: number | null;
+      source?: "multi_day"; coid?: string | null };
 export interface Health {
   now: string; heartbeat: Heartbeat[]; halts: Halt[];
   events: { type: string; ts: string; run_id: number | null; payload: Record<string, unknown> }[];
