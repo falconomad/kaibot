@@ -29,6 +29,7 @@ import yaml
 
 from kaibot.agents.gateway import from_env as gateway_from_env
 from kaibot.common import http
+from kaibot.engine import fetch as engine_fetch
 from kaibot.engine.alpaca import AlpacaData, AlpacaPaper
 from kaibot.engine.book_market import BookMarket
 from kaibot.engine.config import ROOT, Settings
@@ -792,6 +793,11 @@ def main() -> None:
     mode = start_or_refuse(eng, lease, adopt_journal=a.adopt_journal)
     with contextlib.suppress(Exception):
         gaps.after_start()  # one engine_gap event if the engine was down more than an hour without a clean stop
+    fetch = None  # audit 2, 5.12 (#692): the daily-bars fetch the engine starts itself (engine/fetch.py)
+    with contextlib.suppress(Exception):
+        fetch = engine_fetch.for_engine(eng)
+    if fetch is not None:
+        fetch.wake("start")
     write_pid_file(settings.data_dir, host)
     replicator = Replicator(eng.journal, eng.store.remote)  # S77: Supabase catches up in the background
     news = getattr(eng, "news_poller", None)
@@ -864,6 +870,8 @@ def main() -> None:
                 last_error = msg
                 with contextlib.suppress(Exception):
                     eng.store.event("engine_error", {"error": msg}, eng._rid())
+        if fetch is not None:
+            fetch.step()  # on waking, or asked at the start: checks the store and starts a fetch; polls a running one
         report_conflicts(eng, replicator)
         report_news(eng, news)
         report_news(eng, feed)  # headline_feed_failed / _ok, written from this thread (the event chain)

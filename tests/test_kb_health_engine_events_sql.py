@@ -51,6 +51,8 @@ DYNAMIC_SITES = {
     # live_daily's `event=` callback and the watchdog's `_event`: pass-throughs of names written at their callers
     ("src/kaibot/engine/live_daily.py", "kind"),
     ("src/kaibot/engine/watchdog.py", "kind"),
+    # engine/fetch.py (audit 2, 5.12): its `event=` callback, a pass-through of daily_fetch / daily_fetch_failed
+    ("src/kaibot/engine/fetch.py", "kind"),
     # engine/core.py: f"command_{kind}" for every command the engine applies, f"{a.kind}_booked" for corporate actions
     ("src/kaibot/engine/core.py", 'f"command_{kind}"'),
     ("src/kaibot/engine/core.py", 'f"{a.kind}_booked"'),

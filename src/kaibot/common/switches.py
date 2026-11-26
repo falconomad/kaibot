@@ -105,6 +105,9 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
        "of the multi-day path: off, on (all but price_jump) or a comma list (kaibot.ingest.entry_checks)",
        default=(), choices=("benchmark_bar_missing", "daily_bar_stale", "price_not_positive", "split_not_applied",
                             "universe_stale", "price_jump")),
+    _s("KAIBOT_ENGINE_FETCH", "flag", "backend-quant", "audit 2 5.12 (#692): the engine starts "
+       "scripts/fetch_daily.sh itself, at start-up or on waking, when the daily store lacks the bars its next "
+       "multi-day send needs (on unless switched off)", default=True),
     _s("KAIBOT_REENABLE", "text", "backend-quant", "the owner's word to switch a retired multi-day rule back on "
        "(read once at start)"),
     _s("KAIBOT_TESTWRITER", "flag", "qa-ops", "M12 3.8 (#470): the test-writing agent (spends API credit)",
@@ -154,6 +157,7 @@ SWITCHES: dict[str, Switch] = {s.name: s for s in (
         ("KAIBOT_DAILY_FETCH", "data", "the evening daily-bars fetch in the service"),
         ("KAIBOT_HISTORY_START", "data", "fetch_history.sh's first day"),
         ("KAIBOT_FORMER_MEMBERS", "data", "fetch_daily.sh: also fetch former index members"),
+        ("KAIBOT_FETCH_LOCKED", "backend-quant", "fetch_daily.sh: set while it runs under its lock (audit 2 5.12)"),
         ("KAIBOT_EXP_START", "quant", "run_experiments.sh's first day"),
         ("KAIBOT_EXP_END", "quant", "run_experiments.sh's last day"),
         ("KAIBOT_EXP_UNIVERSE", "quant", "run_experiments.sh's universe"),
@@ -270,6 +274,7 @@ class Switches:
     data_checks: bool
     data_checks_block: tuple[str, ...]
     daily_checks_block: tuple[str, ...]
+    engine_fetch: bool
     reenable: str | None
     test_writer: bool
     env_file: Path | None
