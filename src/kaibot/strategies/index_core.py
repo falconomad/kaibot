@@ -188,3 +188,89 @@ class OnCore:
 
     def close_out(self, ctx, pos):
         return None
+
+
+# ---------------------------------------------------------------- #706: the budget-matched control book
+
+
+def control_weight(w: float, core_cap_pct: float, budget_pct: float) -> float:
+    """The control book's SPY weight, as a share of its index cap (core cap + budget): the core's own w of the core
+    cap, plus the whole sleeve budget in SPY. (w x C + B) / (C + B), in 0..1."""
+    c, b = float(core_cap_pct), float(budget_pct)
+    if not c > 0 or not b > 0:
+        raise ValueError("the core cap and the sleeve budget must both be above 0")
+    return (min(1.0, max(0.0, float(w))) * c + b) / (c + b)
+
+
+@dataclass(frozen=True)
+class ControlBook:
+    """#706 (M17 ticket 6.6; decision 18 section 10): the BUDGET-MATCHED CONTROL BOOK of an `OnCore` book. The same
+    core with the same volatility cap, decided on the same days as the book (the sleeve's decision days), but the
+    sleeve's budget is held in SPY instead of stocks. A sleeve's value is the book minus this control book, not the
+    book minus idle cash.
+
+    It names one symbol, SPY, at `control_weight(w, core_cap_pct, budget_pct)` of the builder's index cap, which
+    must be `total_cap_pct` = core_cap_pct + budget_pct (the research cap of `risk.index_core.builder`), so the
+    core's SPY is w x C % of equity, as in the book, and the budget's SPY is B % of equity at every decision.
+
+    Research only, like `IndexCore` and `OnCore`: not registered, never imported by the live engine."""
+
+    sleeve: Any
+    core: IndexCore = IndexCore()
+    budget_pct: float = 10.0
+    core_cap_pct: float = 27.0
+    name: str = "index_core_trend_momentum~control"
+    mode: Mode = Mode.SHADOW
+    holding: Holding = Holding.MULTI_DAY
+    schedule: tuple[When, ...] = (When(Event.AFTER_CLOSE),)
+    owner_filters: bool = False
+    room: bool = False
+    market_filter: bool = False
+    max_names: int = 1
+    atr_risk: float = 0.001  # not used (only the index is named); kept for the runner's checks
+
+    rule = "index_core_trend_momentum"
+
+    @classmethod
+    def of(cls, book: OnCore, core_cap_pct: float) -> ControlBook:
+        return cls(book.sleeve, book.core, float(book.budget_pct), float(core_cap_pct), name=f"{book.name}~control")
+
+    @property
+    def total_cap_pct(self) -> float:
+        """The index cap the control's builder needs: the core's cap plus the sleeve's budget."""
+        return float(self.core_cap_pct) + float(self.budget_pct)
+
+    @property
+    def warmup(self) -> int:
+        return max(int(getattr(self.sleeve, "warmup", 0)), self.core.warmup)
+
+    def with_params(self, **kw) -> ControlBook:
+        return dataclasses.replace(self, **kw)
+
+    def on_event(self, ctx: DailyContext) -> TargetList | None:
+        if ctx.event is not Event.AFTER_CLOSE or not self.sleeve.decision_day(ctx.session, ctx.fill_session):
+            return None
+        v = ctx.view
+        sym = v.symbols[v.spy]
+        closes = v.close(self.core.lookback + 1)[:, v.spy]
+        w, sigma = index_weight(closes, self.core.lookback, self.core.vol_target)
+        if not self.core.cap:
+            w = 1.0
+        x = control_weight(w, self.core_cap_pct, self.budget_pct)
+        return TargetList(self.name, ctx.fill_session, {sym: x}, sizing="index",
+                          reasons=(f"control: core weight {w:.3f}, budget {self.budget_pct:g}% in SPY",),
+                          features={"index_weight": x, "core_weight": w, "sigma": sigma,
+                                    "budget_pct": self.budget_pct, "core_cap_pct": self.core_cap_pct})
+
+    def signals(self, v):
+        n = len(v.symbols)
+        return np.full(n, np.nan), np.zeros(n, dtype=bool), lambda j: None
+
+    def on_fill(self, fill: float, risk_ps: float) -> tuple[float, float | None]:
+        return fill - risk_ps, None
+
+    def manage(self, ctx, pos):
+        return None
+
+    def close_out(self, ctx, pos):
+        return None

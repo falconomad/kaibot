@@ -81,7 +81,8 @@ sleeve:
 
 # ---------------------------------------------------------------- Gate B, part 2: the book test
 # A book is the whole account that would trade: an index core, its overlays and the sleeves at fixed weights, run
-# through the engine as ONE account. The absolute test of gate v2 is kept for it. ALL six marks must hold.
+# through the engine as ONE account. The absolute test of gate v2 is kept for it. ALL marks must hold (six in
+# gate v3; B7, the control book, since gate v3.1, decision 18 s.10).
 book:
   b1_return:                       # gate v2 mark 1 on the research window
     net_return_positive: true
@@ -108,7 +109,13 @@ book:
     neighbours_pass: b1
   b6_sleeves:                      # every return sleeve inside the book has passed the sleeve test
     every_return_sleeve: pass
-  cash: zero                       # judged with idle cash at 0%, which is what the paper account shows; the
+  b7_control_book:                 # gate v3.1 (decision 18 s.10, #706): a book with a return sleeve beats its
+    control: sleeve_budget_in_spy  #   budget-matched control book (the same core, the sleeves' budget in SPY,
+    statistic: cagr_points_over_control   # not idle cash), at the MEDIAN of these start offsets (sessions after
+    start_offsets_sessions: [0, 5, 10, 15, 20]   # the window's first; 0 is the judged run); the spread is printed
+    offsets_min: 5                 #   fewer offsets than this: unknown; a book with no return sleeve: holds
+    median_above: 0.0
+  cash: zero                      # judged with idle cash at 0%, which is what the paper account shows; the
                                    # Treasury-bill version is reported beside it (ticket 2.4)
   final_requires:
     engine: simbroker

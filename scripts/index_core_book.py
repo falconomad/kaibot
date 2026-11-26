@@ -23,8 +23,17 @@ budget and the scaling the engine is about to run (ticket #547's check), and sto
 the book with its core allowed up to 80% of the book at Hunter (Balanced 57, Careful 27), as scripts/index_core.py.
 The sleeve test is not changed by it. Only the pre-registered values are taken (27, the config; 80).
 
+3. #706 (M17 ticket 6.6; decision 18 section 10; Amendment 5 of docs/prereg/index_core_trend_momentum.md): the
+   BUDGET-MATCHED CONTROL BOOK (`strategies.index_core.ControlBook`: the same core, the sleeve's 10% budget held in
+   SPY instead of stocks, decided on the book's days) and the book itself, each started at every pre-registered
+   start offset (`book.b7_control_book.start_offsets_sessions` of config/gate_v3.yaml: 0, 5, 10, 15 and 20 sessions
+   after the window's first; offset 0 of the book is `book|1x`). Hunter, 1x costs. Judged by B7 (the book's CAGR
+   over the control's, above 0 at the median offset); the spread over the offsets is in the report.
+
 Trials: n_trials 1 for the judged book and each of its five neighbours (six configurations); 0 for every other row
-(the sleeve's runs re-run configurations `trend_momentum` already counted; cost, fill and level reports).
+(the sleeve's runs re-run configurations `trend_momentum` already counted; cost, fill and level reports; the control
+book, which is the benchmark of the judged book, and the book at the other start offsets, which are path reports of
+the judged configuration).
 """
 
 from __future__ import annotations
@@ -56,7 +65,7 @@ from kaibot.evaluation import trials as trials_mod  # noqa: E402
 from kaibot.risk import index_core as ic  # noqa: E402
 from kaibot.risk.profiles import load_profiles  # noqa: E402
 from kaibot.strategies import momentum as mom  # noqa: E402
-from kaibot.strategies.index_core import IndexCore, OnCore  # noqa: E402
+from kaibot.strategies.index_core import ControlBook, IndexCore, OnCore  # noqa: E402
 
 BOOK = "index_core_trend_momentum"
 SLEEVE = "trend_momentum_sleeve"
@@ -75,6 +84,16 @@ def book_of(budget: float = BUDGET, core: IndexCore | None = None, name: str = B
 def book_builder(book: OnCore, level: str, cfg, profiles, index_cap: float | None = None):
     name_pct = float(profiles[SLEEVE_LEVEL].max_position_pct) * book.budget_pct / 100
     return ic.sleeve_builder(level, book.budget_pct, book.atr_risk, name_pct, cfg, index_cap_pct=index_cap)
+
+
+def control_builder(control: ControlBook, cfg):
+    """#706: the control book's builder at Hunter: the index mode with its index cap = the core's cap + the sleeve's
+    budget (no stock is named). Refuses a cap the level cuts (the control would then not hold the whole budget)."""
+    b = ic.builder(JUDGED, cfg, index_cap_pct=control.total_cap_pct)
+    if abs(b.limits.max_index_pct - control.total_cap_pct) > 1e-9:
+        raise SystemExit(f"control book: the index cap {control.total_cap_pct:g}% is cut to "
+                         f"{b.limits.max_index_pct:g}% at {JUDGED}, so the budget would not all be in SPY")
+    return b
 
 
 def check_budgets(gate: g3.GateV3, book: OnCore, builder) -> dict:
@@ -142,13 +161,13 @@ def main(argv: list[str] | None = None) -> dict:
     i0, i1 = sessions_window(data, w0, min(pd.Timestamp(a.end), hi).date())
     runs: dict[str, tuple] = {}
 
-    def one(label, strat, level, builder=None, *, fill="base", cost=1.0, n_trials=0, part="book"):
+    def one(label, strat, level, builder=None, *, fill="base", cost=1.0, n_trials=0, part="book", offset=0):
         t = time.time()
-        r = run_daily(strat, data, profiles[level], i0, i1, fill=fill, cost=cost, builder=builder,
+        r = run_daily(strat, data, profiles[level], i0 + offset, i1, fill=fill, cost=cost, builder=builder,
                       cost_model=core_run.COST_MODEL)  # v2 (#572; both preregs' amendments)
         st = dr.run_stats(r)
         runs[label] = (r, {"label": label, "part": part, "spec": strat.name, "level": level, "fill": fill,
-                           "cost": cost, "n_trials": n_trials,
+                           "cost": cost, "n_trials": n_trials, "start_offset_sessions": offset,
                            "max_index_pct": builder.limits.max_index_pct if builder is not None else None,
                            **st, **core_run.index_stats(r),
                            "runtime_s": round(time.time() - t, 1)})
@@ -179,6 +198,18 @@ def main(argv: list[str] | None = None) -> dict:
         one(f"book_neighbour|{k}", b, JUDGED, book_builder(b, JUDGED, cfg, profiles, override), n_trials=1)
     for level in ("balanced", "conservative"):
         one(f"book_level|{level}", base, level, book_builder(base, level, cfg, profiles, override))
+    # 3. #706: the budget-matched control book and the book at every pre-registered start offset
+    ctl = ControlBook.of(base, index_cap)
+    offsets = g3.control_offsets(gate)
+    if i0 + max(offsets) + 30 > i1:
+        raise SystemExit(f"the window has {i1 - i0 + 1} sessions: too few for start offsets up to {max(offsets)}")
+    pairs: dict[int, tuple[str, str]] = {}
+    for k in offsets:
+        if k:
+            one(f"book_offset|{k}", base, JUDGED, book_builder(base, JUDGED, cfg, profiles, override), part="offset",
+                offset=k)
+        one(f"control|{k}", ctl, JUDGED, control_builder(ctl, cfg), part="control", offset=k)
+        pairs[k] = ("book|1x" if k == 0 else f"book_offset|{k}", f"control|{k}")
 
     spy_tr = data.spy_tr[i0:i1 + 1] if data.spy_tr is not None else None
     have_tr = spy_tr is not None and np.isfinite(np.asarray(spy_tr, dtype=float)).all()
@@ -207,6 +238,8 @@ def main(argv: list[str] | None = None) -> dict:
         neighbours={k.split("|")[1]: core_run.series(r, data)["net"] for k, (r, _) in runs.items()
                     if k.startswith("book_neighbour|")},
         sleeves={SLEEVE: sleeve_rep["verdict"]}, prereg=pre_book, source=source, registry=reg, first_run_at=run_at,
+        control_books={k: (core_run.series(runs[b][0], data)["net"], core_run.series(runs[c][0], data)["net"])
+                       for k, (b, c) in pairs.items()},  # #706: B7
         tbill=bills, as_of=run_at, ran_budgets=check["engine"],  # #547: the budgets the engine ran
         # #701: this run's own configurations count in B2's N, before its rows are appended below
         unlogged_configurations=sum(row["n_trials"] for _, row in runs.values() if row["part"] != "sleeve")
@@ -221,6 +254,10 @@ def main(argv: list[str] | None = None) -> dict:
            "holdout": holdout.stamp(None), "budgets": check, "universe": universe, "data": info,
            "window": [str(data.dates[i0]), str(data.dates[i1])], "control_runs": a.control_runs,
            "source": source, "rows": [row for _, row in runs.values()], "control": control,
+           # #706: the control book, and which rows the rescore pairs at each start offset
+           "control_book": {"control": "sleeve_budget_in_spy", "core_cap_pct": index_cap, "budget_pct": BUDGET,
+                            "index_cap_pct": ctl.total_cap_pct, "start_offsets_sessions": list(offsets),
+                            "pairs": {str(k): list(v) for k, v in pairs.items()}},
            "gate_v3_sleeve": sleeve_rep, "gate_v3_book": book_rep, "runtime_s": round(time.time() - t0, 1)}
     out_dir = Path(a.out or data_dir / "reports")
     (out_dir / tag).mkdir(parents=True, exist_ok=True)
@@ -240,7 +277,8 @@ def main(argv: list[str] | None = None) -> dict:
                 "universe_mode": universe, "code_sha": code_sha,
                 "prereg_sha256": out["prereg_sha256"][name], "gate_sha": gate.sha, "n_trials": row["n_trials"],
                 "params": {"spec": row["spec"], "fill": row["fill"], "cost_multiple": row["cost"],
-                           "budget_pct": BUDGET if name == BOOK else None,
+                           "budget_pct": BUDGET if name == BOOK else None, "part": row["part"],
+                           "start_offset_sessions": row["start_offset_sessions"],
                            "index_cap_pct": index_cap if name == BOOK else None,
                            "max_index_pct": row["max_index_pct"]},
                 "window": out["window"],

@@ -436,7 +436,7 @@ def book(yearly=None, **kw) -> dict:
 
 def test_the_book_test_is_gate_v2s_absolute_test_on_the_research_window():
     rep = book()
-    assert met(rep) == {k: True for k in ("b1", "b2", "b3", "b4", "b5", "b6")}
+    assert met(rep) == {k: True for k in ("b1", "b2", "b3", "b4", "b5", "b6", "b7")}  # b7: no sleeve (#706)
     n = rep["marks"]["b1"]["numbers"]
     assert n["years"] == 8 and n["positive_years"] == 6 and rep["marks"]["b1"]["limit"]["positive_years_min"] == 5
     b2 = rep["marks"]["b2"]["numbers"]

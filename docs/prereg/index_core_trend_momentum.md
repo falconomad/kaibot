@@ -131,3 +131,33 @@ sums over 2017 to 2026, which include the hold-out:
 
 No setting, neighbour, mark or run changes. The final check on the hold-out, if it is ever opened, is labelled a
 consistency check.
+
+## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book
+
+Gate v3.1 adds mark B7 (docs/decisions/18_gate_v3_1.md section 10, M17 ticket 6.6), and this book's verdict depends
+on it, so it is pre-registered here before the run that first computes it. This amendment is written after the 24
+and 25 Nov 2026 results were seen (27%: book CAGR 4.15%; 80%: 10.87% against the core's 10.09%; the sleeve's
+selection effect against exposure-matched SPY −1.14% a year). Gate v3.1 prints it as hindsight.
+
+- **The control book:** `strategies.index_core.ControlBook`, the same core (15% volatility target, 21 sessions,
+  weekly) decided on the book's own days, with the sleeve's whole **10% budget held in SPY** instead of stocks. Its
+  index cap is the core's cap plus the budget (**90% at Hunter** when the core is at 80%, 37% at 27%), so it holds
+  w × C + 10 % of equity in SPY. Hunter, 1x costs, cost model v2, the same fill model and window.
+- **Start offsets:** the book and the control book are each run from **0, 5, 10, 15 and 20 sessions** after the
+  window's first session (`book.b7_control_book.start_offsets_sessions` of `config/gate_v3.yaml`), to the same end.
+  Offset 0 of the book is the judged run, `book|1x`.
+- **B7:** the book's CAGR minus the control book's, in points, is **above 0 at the median of the five offsets**.
+  Fewer than five offsets: unknown. The spread (median, min, max, range, standard deviation) of the CAGR, Sharpe and
+  drawdown differences is reported, not judged. The sleeve's contribution is stated as book minus control book.
+- **Unchanged:** the sleeve, its budget, the neighbours, B1 to B6, the window (2017-05-01 to 2024-12-31) and the
+  hold-out, which is not read. `design_saw_holdout` stays true (Amendment 4).
+
+**Expectation, before the run.** The audit's reading: "The sleeve adds exposure, not skill. The same budget held in
+SPY would probably have done as well." A −1.14% a year selection effect on a 10% budget is about −0.1 points a year
+on the book, inside one-path noise, so B7 is expected near 0 and more likely to fail than to hold. The verdict is
+already a fail on B2 and B6 at both caps; B7 cannot change that.
+
+**Trials.** The control book (a benchmark) and the book at offsets 5 to 20 (paths of a counted configuration) log
+n_trials 0. The re-run at 80% (job `index-core-book-80-control-2026-11-26`, posting to #706) repeats the six
+configurations of 25 Nov 2026, and the script logs them with n_trials 1 again, so the idea's N becomes 18, not 12.
+Counting a repeat can only raise B2's hurdle, never lower it.

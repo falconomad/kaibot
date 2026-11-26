@@ -32,6 +32,12 @@ the book's daily Sharpe over SPY's, with N = the idea's configurations. B2 holds
 chance test holds, so no verdict can turn from fail to pass. Any amendment of the pre-registration committed after
 the first logged run is "hindsight", and the verdict says so (`hindsight`, `verdict_text`).
 
+Gate v3.1, B7 (decision 18 section 10, M17 ticket 6.6, #706): a book with a return sleeve is also judged against its
+BUDGET-MATCHED CONTROL BOOK, the same core with the sleeves' budget held in SPY instead of idle cash
+(`strategies.index_core.ControlBook`), on at least five pre-registered start offsets. B7 holds when the book's CAGR
+over the control book's is above 0 at the median offset; the spread over the offsets is printed. A book with no
+return sleeve has nothing to compare and holds B7. B7 only adds a condition, so no verdict turns from fail to pass.
+
 Every series is cut to the research window first. Sessions in the hold-out are dropped before any number is
 computed and are counted in the report (`sessions_in_holdout_dropped`).
 """
@@ -65,7 +71,7 @@ REQUIRED = {
     "sleeve": ("benchmark", "s1_active_return", "s2_costs", "s3_control", "s4_deflated_sharpe", "s5_universe",
                "s6_neighbours", "final_requires"),
     "book": ("b1_return", "b2_spy", "b2_chance", "b3_costs", "b4_universe", "b5_neighbours", "b6_sleeves",
-             "final_requires"),
+             "b7_control_book", "final_requires"),
     "holdout_check": ("band", "contaminated_before"),
     "bootstrap": ("method", "mean_block_sessions", "runs", "seed", "interval"),
     "statistics": ("periods_per_year", "sharpe_haircut", "sharpe_warning_above"),
@@ -144,6 +150,19 @@ class GateV3:
         if (cfg["sleeve"]["s4_deflated_sharpe"].get("trial_sharpes") or "active_return") != "active_return":
             raise ValueError("config/gate_v3.yaml: s4_deflated_sharpe.trial_sharpes must be active_return (decision "
                              "18 section 6: S4 tests the active return, so its variance comes from active Sharpes)")
+        b7 = cfg["book"]["b7_control_book"] or {}
+        offs = b7.get("start_offsets_sessions")
+        if not isinstance(offs, list) or not all(isinstance(o, int) and not isinstance(o, bool) and o >= 0
+                                                 for o in offs) or len(set(offs)) != len(offs) or 0 not in offs:
+            raise ValueError("config/gate_v3.yaml: book.b7_control_book.start_offsets_sessions must be distinct "
+                             "whole numbers >= 0 that include 0 (the judged run)")
+        least = b7.get("offsets_min")
+        if isinstance(least, bool) or not isinstance(least, int) or least < 5 or len(offs) < least:
+            raise ValueError("config/gate_v3.yaml: book.b7_control_book.offsets_min must be at least 5 and at most "
+                             "the number of offsets (decision 18 section 10)")
+        if b7.get("control") != "sleeve_budget_in_spy" or b7.get("statistic") != "cagr_points_over_control":
+            raise ValueError("config/gate_v3.yaml: book.b7_control_book judges cagr_points_over_control against "
+                             "sleeve_budget_in_spy (decision 18 section 10)")
         if cfg["bootstrap"]["method"] != "stationary":
             raise ValueError("config/gate_v3.yaml: only the stationary bootstrap is implemented")
         return cls(cfg, hashlib.sha256(raw).hexdigest())
@@ -997,14 +1016,86 @@ def _book_1_to_3(gate: GateV3, acc: Account, configurations: int | None = None) 
     return marks
 
 
+def control_offsets(gate: GateV3) -> tuple[int, ...]:
+    """#706: the pre-registered start offsets of the control-book comparison (sessions after the window's first)."""
+    return tuple(int(o) for o in gate.cfg["book"]["b7_control_book"]["start_offsets_sessions"])
+
+
+def control_pair(gate: GateV3, book_net: pd.Series, control_net: pd.Series) -> dict:
+    """One offset of the control-book comparison: both accounts cut to the research window and to their common
+    sessions; the book's CAGR, Sharpe and maximum drawdown over the control book's."""
+    per = gate.stats_kw["periods"]
+    a = gate.cut(mtm.dated(book_net, "book returns"), "book returns")[0]
+    c = gate.cut(mtm.dated(control_net, "control book returns"), "control book returns")[0]
+    a, c = mtm.align(a, c)
+    if a.size < 30:
+        raise ValueError(f"{a.size} common sessions of the book and its control book on the research window")
+    sa, sc = float(_sharpe_rows(a.to_numpy(dtype=float))), float(_sharpe_rows(c.to_numpy(dtype=float)))
+    out = {"first_session": a.index[0].date().isoformat(), "sessions": int(a.size),
+           "book_cagr": mtm.cagr(a, per), "control_cagr": mtm.cagr(c, per),
+           "book_max_drawdown": mtm.max_drawdown(a), "control_max_drawdown": mtm.max_drawdown(c),
+           "book_sharpe": sa * math.sqrt(per), "control_sharpe": sc * math.sqrt(per)}
+    out.update(cagr_points_over_control=(out["book_cagr"] - out["control_cagr"]) * 100.0,
+               sharpe_over_control=out["book_sharpe"] - out["control_sharpe"],
+               max_drawdown_points_over_control=(out["book_max_drawdown"] - out["control_max_drawdown"]) * 100.0)
+    return out
+
+
+def _spread(values: Sequence[float]) -> dict:
+    x = np.asarray(values, dtype=float)
+    return {"median": float(np.median(x)), "min": float(x.min()), "max": float(x.max()),
+            "range": float(x.max() - x.min()), "sd": float(x.std(ddof=1)) if x.size > 1 else 0.0, "n": int(x.size)}
+
+
+def b7(gate: GateV3, return_sleeves: Sequence[str],
+       control_books: Mapping[int, tuple[pd.Series, pd.Series]] | None) -> dict:
+    """#706 (decision 18 section 10): the book against its budget-matched control book (the same core, the sleeves'
+    budget in SPY), at each pre-registered start offset. Holds when the book's CAGR over the control's (points) is
+    above `median_above` at the median offset. The spread over the offsets (median, min, max, range, sd) of the
+    CAGR, Sharpe and drawdown differences is printed, not judged. A book with no return sleeve holds (nothing to
+    compare). Fewer than `offsets_min` of the pre-registered offsets supplied: unknown."""
+    m = gate.cfg["book"]["b7_control_book"]
+    want, least, above = control_offsets(gate), int(m["offsets_min"]), float(m.get("median_above", 0.0))
+    limit = {"control": m["control"], "statistic": m["statistic"], "start_offsets_sessions": list(want),
+             "offsets_min": least, "median_above": above}
+    if not return_sleeves:
+        return _mark(True, {"return_sleeves": []}, limit, "")
+    if not control_books:
+        return _mark(None, {"return_sleeves": list(return_sleeves)}, limit,
+                     "no control book was run (the sleeves' budget held in SPY), so the sleeves' value over SPY is "
+                     "not known")
+    extra = sorted(set(control_books) - set(want))
+    pairs, bad = {}, []
+    for k in want:
+        if k in control_books:
+            try:
+                pairs[int(k)] = control_pair(gate, *control_books[k])
+            except ValueError as e:
+                bad.append(f"offset {k}: {e}")
+    nums: dict[str, Any] = {"return_sleeves": list(return_sleeves), "offsets": pairs,
+                            "offsets_not_pre_registered": extra}
+    if bad:
+        return _mark(None, nums, limit, "; ".join(bad))
+    if len(pairs) < least:
+        return _mark(None, nums, limit, f"{len(pairs)} of the pre-registered start offsets were run, {least} needed")
+    for key in ("cagr_points_over_control", "sharpe_over_control", "max_drawdown_points_over_control"):
+        nums[key] = _spread([p[key] for p in pairs.values()])
+    med = nums["cagr_points_over_control"]["median"]
+    met = bool(med > above)
+    return _mark(met, nums, limit, "" if met else
+                 f"the book's CAGR over its control book's is {med:.2f} points at the median of {len(pairs)} start "
+                 f"offsets (the same budget held in SPY did as well)")
+
+
 def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Account | None = None,
                   neighbours: Mapping[str, pd.Series] | None = None, sleeves: Mapping[str, str] | None = None,
                   prereg: Prereg | None = None, source: Mapping[str, Any] | None = None,
                   registry: Registry | None = None, first_run_at: datetime | None = None,
                   tbill: pd.Series | None = None, as_of: datetime | None = None,
                   budgets: Mapping[str, float] | None = None,
-                  ran_budgets: Mapping[str, float] | None = None, unlogged_configurations: int = 0) -> dict:
-    """The book test: marks B1 to B6 for the whole account that would trade.
+                  ran_budgets: Mapping[str, float] | None = None, unlogged_configurations: int = 0,
+                  control_books: Mapping[int, tuple[pd.Series, pd.Series]] | None = None) -> dict:
+    """The book test: marks B1 to B7 for the whole account that would trade.
 
     account: the combined book's run through the engine (one account: shared cash, one per-name cap), not a
     weighted sum of sleeve results. neighbours: daily net returns of each pre-declared neighbour of the book.
@@ -1015,7 +1106,11 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
     sleeves together take at most `evidence_based.book_budget_max_pct` of the book.
 
     Gate v3.1 (#701): B2 and B3 need the chance test with N = the configurations of the book's idea in `registry`,
-    plus `unlogged_configurations` (a run judged before its own rows are appended). No registry: B2 is unknown."""
+    plus `unlogged_configurations` (a run judged before its own rows are appended). No registry: B2 is unknown.
+
+    Gate v3.1, B7 (#706): `control_books` maps each start offset (sessions) to (the book's daily net returns, its
+    control book's), both started that many sessions after the window's first. The return sleeves are the book's
+    pre-registered ones under `books:` (else the `sleeves` given)."""
     net, spy, costs, before, after = _cut_book(gate, account)
     n_book = book_configurations(gate, book, registry, unlogged_configurations)
     marks = _book_1_to_3(gate, account, n_book["configurations"])
@@ -1087,6 +1182,9 @@ def evaluate_book(gate: GateV3, *, book: str, account: Account, pit_account: Acc
         marks["b6"] = _mark(state, {"sleeves": dict(sleeves), "evidence_based_budget_pct": total,
                                     "labels": {k: label for k in eb}, "missing_verdicts": missing},
                             limit6, "; ".join(why))
+    listed7 = gate.book(book)
+    own = (listed7.get("sleeves") or {}) if listed7 is not None else (sleeves or budgets or {})
+    marks["b7"] = b7(gate, sorted(own), control_books)
     checks, reasons = _gate_a(gate, book, prereg, registry, first_run_at, source,
                               gate.cfg["book"]["final_requires"], role="book")
     # #547: the budgets the engine actually ran must be the pre-registered ones; a book run at other weights is
@@ -1195,7 +1293,8 @@ SLEEVE_LABELS = {"s1": "S1. Return above the same amount of SPY", "s2": "S2. The
 BOOK_LABELS = {"b1": "B1. Net return positive overall and in enough calendar years",
                "b2": "B2. CAGR and drawdown against SPY", "b3": "B3. B1 and B2 at doubled costs",
                "b4": "B4. Holds on the point-in-time universe", "b5": "B5. Every neighbour passes B1",
-               "b6": "B6. Every return sleeve in the book has passed the sleeve test"}
+               "b6": "B6. Every return sleeve in the book has passed the sleeve test",
+               "b7": "B7. The book beats its control book (the sleeves' budget in SPY) at the median start offset"}
 
 
 def _head(rep: dict, title: str, labels: Mapping[str, str]) -> list[str]:
@@ -1259,6 +1358,29 @@ def render_sleeve(rep: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+def render_control_book(mark: Mapping) -> list[str]:
+    """#706: B7's table, one row per start offset, and the spread."""
+    n = mark.get("numbers") or {}
+    if not n.get("offsets"):
+        return []
+    out = ["", "Control book (gate v3.1, B7): the same core with the sleeves' budget held in SPY "
+               f"({', '.join(n.get('return_sleeves') or [])}). Book minus control book, by start offset:", "",
+           "| Start offset (sessions) | First session | Book CAGR | Control CAGR | CAGR over control (points) | "
+           "Sharpe over control | Drawdown over control (points) |", "|---|---|---|---|---|---|---|"]
+    for k, p in n["offsets"].items():
+        out.append(f"| {k} | {p['first_session']} | {_pct(p['book_cagr'])} | {_pct(p['control_cagr'])} | "
+                   f"{p['cagr_points_over_control']:.2f} | {p['sharpe_over_control']:.2f} | "
+                   f"{p['max_drawdown_points_over_control']:.2f} |")
+    sp = n.get("cagr_points_over_control")
+    if sp:
+        sh, dd = n["sharpe_over_control"], n["max_drawdown_points_over_control"]
+        out += ["", f"- Spread over {sp['n']} offsets, CAGR over control: median {sp['median']:.2f}, min "
+                    f"{sp['min']:.2f}, max {sp['max']:.2f}, range {sp['range']:.2f}, sd {sp['sd']:.2f} points. "
+                    f"Sharpe over control: median {sh['median']:.2f} ({sh['min']:.2f} to {sh['max']:.2f}). "
+                    f"Drawdown over control: median {dd['median']:.2f} points ({dd['min']:.2f} to {dd['max']:.2f})."]
+    return out
+
+
 def render_book(rep: dict) -> str:
     """The book test as Markdown."""
     m = rep["marks"]
@@ -1282,5 +1404,6 @@ def render_book(rep: dict) -> str:
                    + (f", deflated {ch['dsr']:.3f} (hurdle {ch['hurdle']:.2f})" if ch.get("dsr") is not None else "")
                    + f"; N = {nb.get('configurations') if nb.get('configurations') is not None else 'unknown'} "
                      f"configurations of the idea `{nb.get('idea')}` ({', '.join(nb.get('books') or [])}).")
+    out += render_control_book(m.get("b7") or {})
     out += ["", f"gate_v3.yaml sha256 `{rep['gate_sha']}`. Generated {rep['generated_at']}."]
     return "\n".join(out) + "\n"

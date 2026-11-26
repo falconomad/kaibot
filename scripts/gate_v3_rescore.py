@@ -34,6 +34,10 @@ family correction. Its sleeve test is the book script's own, shown with the book
 Gate v3.1 (decision 18, #701): each book row lists N, the configurations of its book idea in the registry, which
 B2's chance test deflates by; and a verdict is printed with "hindsight" when an amendment of the pre-registration
 was committed after the first logged run.
+
+Gate v3.1, B7 (decision 18 section 10, #706): a book with a return sleeve is re-scored against its budget-matched
+control book from the report's own daily files (`control_book.pairs`: the book and its control at each start
+offset). A book report written before #706 has no control book, so its B7 is unknown.
 """
 
 from __future__ import annotations
@@ -135,6 +139,23 @@ def book_key(rep: dict) -> tuple[str, str, str]:
     return (book_name(rep), f"{float(cap):g}%", str(rep.get("universe") or "?"))
 
 
+def control_books(rep: dict, rows: dict) -> dict | None:
+    """#706: {start offset: (the book's daily net returns, its control book's)} from the report's `control_book`
+    pairs and their daily files; None when the report has no control book (written before #706)."""
+    cb = rep.get("control_book") if isinstance(rep.get("control_book"), dict) else None
+    pairs = (cb or {}).get("pairs") if isinstance((cb or {}).get("pairs"), dict) else None
+    if not pairs:
+        return None
+    out = {}
+    for k, labels in pairs.items():
+        if not (isinstance(labels, list) and len(labels) == 2 and all(lb in rows for lb in labels)):
+            continue
+        b, c = (results.daily(rows[lb]) for lb in labels)
+        if b is not None and c is not None and str(k).isdigit():
+            out[int(k)] = (b["ret"], c["ret"])
+    return out
+
+
 def rescore_books(gate: g3.GateV3, found, pool, registry, bills, root: Path, as_of) -> tuple[list, list]:
     """(one re-scored row per book, index cap and universe: the newest report of each; the book reports that
     could not be scored). Reads only the reports' daily files; nothing is re-run."""
@@ -176,12 +197,13 @@ def rescore_books(gate: g3.GateV3, found, pool, registry, bills, root: Path, as_
         except prereg.PreregError:
             reg = None
         src = rep.get("source") if isinstance(rep.get("source"), dict) else {}
+        controls = control_books(rep, rows)
         try:
             rep3 = g3.evaluate_book(gate, book=name, account=acc, neighbours=nb, sleeves=sleeves, prereg=reg,
                                     source={**src, "report": f.name, "run_at": rep.get("run_at"),
                                             "code_sha": rep.get("code_sha")},
                                     registry=registry, first_run_at=first_run(registry, name), tbill=bills,
-                                    as_of=as_of, ran_budgets=ran)
+                                    as_of=as_of, ran_budgets=ran, control_books=controls)
         except ValueError as e:
             skipped.append({"rule": name, "run": f"book, index cap {key[1]}, {key[2]}", "report": f.name,
                             "why": str(e), "summary": {}})
@@ -309,6 +331,13 @@ def _hcell(r: dict, n3: dict) -> str:
     return _num(n3["holm_adjusted"], "{:.4f}") if (r.get("holm_input") or {}).get("enters_holm") else "_greyed_"
 
 
+def _control_cell(mark: dict | None) -> str:
+    sp = ((mark or {}).get("numbers") or {}).get("cagr_points_over_control")
+    if not sp:
+        return "n/a" if (mark or {}).get("met") is True else "-"
+    return f"{sp['median']:.2f} pts ({sp['min']:.2f} to {sp['max']:.2f}, {sp['n']} offsets)"
+
+
 def render(res: dict) -> str:
     out = ["# Gate v3 re-score of the existing rule reports", "",
            f"Generated {res['generated_at']} by `scripts/gate_v3_rescore.py` from {res['reports_read']} reports. No "
@@ -376,8 +405,9 @@ def render(res: dict) -> str:
                 "is the one its script ran (`gate_v3_sleeve`); its rows are not "
                 "in the sleeve table or in the family correction above.", "",
                 "| Book | Index cap at Hunter | Universe | CAGR | SPY CAGR | Max drawdown | SPY max drawdown | "
-                "N (book idea) | B2 chance (deflated) | B1 | B2 | B3 | B4 | B5 | B6 | Sleeve test | Gate v3 | At run |",
-                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+                "N (book idea) | B2 chance (deflated) | B1 | B2 | B3 | B4 | B5 | B6 | B7 | "
+                "Book over control (median, range) | Sleeve test | Gate v3 | At run |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
         for b in res["books"]:
             g, m = b["gate_v3"], b["gate_v3"]["marks"]
             n = m["b2"]["numbers"]
@@ -394,7 +424,8 @@ def render(res: dict) -> str:
             out.append(f"| {b['book']} | {b['index_cap']} | {b['universe']} | {_num(n.get('cagr'))} | "
                        f"{_num(n.get('spy_cagr'))} | {_num(n.get('max_drawdown'))} | "
                        f"{_num(n.get('spy_max_drawdown'))} | {ncell} | {_num(ch.get('dsr'), '{:.3f}')} | "
-                       + " | ".join(_cell(m[k]) for k in ("b1", "b2", "b3", "b4", "b5", "b6"))
+                       + " | ".join(_cell(m[k]) if k in m else "?" for k in ("b1", "b2", "b3", "b4", "b5", "b6", "b7"))
+                       + f" | {_control_cell(m.get('b7'))}"
                        + f" | {'none' if st is None else st['rule'] + ': ' + str(st['verdict'])} | "
                        f"{g.get('verdict_text') or g['verdict']} | {at} |")
         out += ["", "Why a book mark is unknown or failed:", ""]

@@ -98,3 +98,7 @@ jobs:
     script: scripts/spy_cost_rerun.py
     args: ["--end", "2024-12-31"]
     posts_to_issue: 708
+  - id: index-core-book-80-control-2026-11-26   # #706 (6.6, prereg Amendment 5): the book at 80% with its control
+    script: scripts/index_core_book.py         # book (sleeve budget in SPY) at 5 start offsets; B7 and the spread;
+    args: ["--end", "2024-12-31", "--index-cap", "80"]   # logs trial rows (6 repeats at n_trials 1, N 12 -> 18)
+    posts_to_issue: 706
