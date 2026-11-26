@@ -362,10 +362,11 @@ class OrderManager:
         return [r for r in list(self.live.values()) if r.open and (symbol is None or r.symbol == symbol)
                 and (strategy is None or r.strategy == strategy) and (ps is None or r.purpose in ps)]
 
-    def blocked(self, symbol: str) -> str | None:
-        """Why no new order may go out in `symbol` (None: it may): an order the venue has not confirmed yet."""
+    def blocked(self, symbol: str, but: str | None = None) -> str | None:
+        """Why no new order may go out in `symbol` (None: it may): an order the venue has not confirmed yet (other
+        than `but`, the one about to be sent again: `resend`)."""
         for r in self.live.values():
-            if r.symbol == symbol and r.state in UNCONFIRMED:
+            if r.symbol == symbol and r.state in UNCONFIRMED and r.coid != but:
                 return f"order {r.coid} is {r.state}: look it up by its client order id first"
         return None
 
@@ -406,6 +407,43 @@ class OrderManager:
         r = self.orders[coid]
         try:
             o = order_path.submit(self.broker, req, gate=self.gate)
+        except BrokerError as e:
+            if e.status in REFUSED and "client_order_id" not in (e.body or ""):
+                self._state(r, St.REJECTED, reason=f"{e.status}: {_reason(e)}")
+            else:  # no answer, 5xx, or "client order id must be unique" without the order read back
+                self._state(r, St.UNKNOWN, reason=f"{e.status}: {_reason(e)}")
+            return r
+        except Exception as e:  # anything else: the order may be at the venue
+            self._state(r, St.UNKNOWN, reason=f"{type(e).__name__}: {str(e)[:160]}")
+            return r
+        self._adopt(r, o)
+        return r
+
+    def orphan(self, r: OrderRecord, session: str) -> bool:
+        """#775: `r` is an intent of `session` that a process which has died journalled and never got an answer for
+        (still `intent`: in a living process `submit` always journals the venue's answer, or `unknown`, before it
+        returns). The kill may have come before the venue call or after it."""
+        return r.state is St.INTENT and r.session == session and r.purpose != "stop"
+
+    @staticmethod
+    def resendable(r: OrderRecord) -> bool:
+        """#775: an orphan that a lookup BY CLIENT ORDER ID has looked for and not found (`last_miss`): `resend` may
+        send it. One whose lookup has not answered yet (the venue unreadable) is only waited on."""
+        return r.state is St.INTENT and bool(r.last_miss)
+
+    def resend(self, coid: str) -> OrderRecord:
+        """#775: send an orphaned intent (`orphan`) again, exactly as journalled and under its OWN client order id,
+        never a new one. If the dead process's call did reach the venue, the venue refuses a second order under
+        the same id (Alpaca: client order ids are unique per account; broker/alpaca.py then reads back the order
+        that is there, broker/sim.py the same) and the record adopts that order: there can never be two. A refusal
+        or no answer is handled as in `submit`. Journalled (`om_state` intent, reason `resent`) before the call; a
+        record that is not `resendable` is returned unchanged and nothing is sent."""
+        r = self.orders[coid]
+        if not self.resendable(r):
+            return r
+        self._state(r, St.INTENT, reason="resent: the intent of a process that died, never answered")
+        try:
+            o = order_path.submit(self.broker, r.request(), gate=self.gate)
         except BrokerError as e:
             if e.status in REFUSED and "client_order_id" not in (e.body or ""):
                 self._state(r, St.REJECTED, reason=f"{e.status}: {_reason(e)}")

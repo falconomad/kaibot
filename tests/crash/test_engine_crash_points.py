@@ -15,7 +15,7 @@ import os
 from collections import Counter
 
 import pytest
-from engine_crash import KNOWN, REGIONS, engine_points, known, run
+from engine_crash import REGIONS, engine_points, known, run
 
 PHASES = ("before", "after")
 SLICES = 8  # each phase's points in this many tests, so that xdist spreads them
@@ -91,17 +91,26 @@ def test_a_kill_at_every_crash_point_of_the_engine_recovers(baseline, phase, par
     assert not broken, broken
 
 
-def _the_last_windows_lost_sale(effects) -> int:
-    return next(k for k, (what, _) in enumerate(effects, start=1)
-                if what.startswith("venue.submit B sell") and "-20260804-sell-" in what)
-
-
-@pytest.mark.xfail(strict=True, reason=f"#{next(iter(KNOWN))}: open engine issue")
-def test_known_a_kill_between_a_sales_intent_and_its_venue_call_still_sells_in_the_window(baseline):
-    """The minimal case of KNOWN: D2's sale of B, killed just before its venue call. The restart calls the order
-    lost a pass later and nothing sells B in the five passes left of the window."""
-    o = run(_the_last_windows_lost_sale(baseline["effects"]), "before")
+@pytest.mark.parametrize("phase", ["before", "after"])
+@pytest.mark.parametrize("side", ["B sell", "D buy"])
+def test_a_kill_between_an_orders_intent_and_its_venue_call_still_sends_it_in_the_window(baseline, side, phase):
+    """#775 (was KNOWN): D2's sale of B and buy of D, killed after the intent and before the venue call (`before`
+    the submit, or `after` the om_intent just before it). The restarted process looks the order up by its client id,
+    finds nothing, and sends it again in the same window under the SAME client id: one order at the venue, the
+    decision's first attempt, filled in D2's window; the run ends where the uninterrupted one does."""
+    effects = baseline["effects"]
+    k = next(i for i, (what, _) in enumerate(effects, start=1)
+             if what.startswith(f"venue.submit {side}") and "-20260804-" in what)
+    coid = effects[k - 1][0].split()[-1]
+    assert coid.endswith("-1")
+    o = run(k if phase == "before" else k - 1, phase)
+    if phase == "after":
+        assert effects[k - 2][0].startswith("journal.om_intent")
     assert o.violations == [] and sorted(o.end) == sorted(baseline["end"]), o.violations
+    sent = [t for t in o.trace if " om_state " in t and coid in t]
+    assert any("state=filled" in t for t in sent), sent
+    assert not any(f"{coid[:-2]}-2" in t for t in o.trace)  # no second attempt: the venue had one order of it
+    assert not any("lost: never reached the venue" in t for t in o.trace)
 
 
 def test_the_kill_cannot_be_caught_by_the_engine():

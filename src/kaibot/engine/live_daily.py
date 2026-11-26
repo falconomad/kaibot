@@ -1496,7 +1496,8 @@ class LiveDaily:
             res = reconcile_targets(om, self.policy_for(session), targets, held_now, now=self.now(),
                                     session=str(session), run=rid, reconciler=self.gate,
                                     stops=_KnownStops(self.stops) if self.gate.open_unread else self.stops,
-                                    sells_first=False, presend=self._gate_check(r, session, targets))
+                                    sells_first=False, presend=self._gate_check(r, session, targets),
+                                    resend=True)  # #775: a dead process's unanswered intent: sent again, or waited on
             withheld = self._note_withheld(r.name, session, rid, res.withheld)
             sent = [{"coid": x.coid, "symbol": x.symbol, "side": x.side, "qty": x.qty, "state": str(x.state),
                      "reason": x.reason} for x in res.sent]

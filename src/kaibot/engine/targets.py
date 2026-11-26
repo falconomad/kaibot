@@ -73,15 +73,25 @@ def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequen
                       held: Mapping[Key, float], *, now: datetime, session: str, run="0", reconciler=None,
                       stops=None, quotes: Mapping[str, tuple[float, float]] | None = None,
                       sells_first: bool = True,
-                      presend: Callable[[Target, str, float], str | None] | None = None) -> LoopResult:
+                      presend: Callable[[Target, str, float], str | None] | None = None,
+                      resend: bool = False) -> LoopResult:
     """`held`: broker-confirmed shares per sleeve (the ledger after the manager booked the venue's fills).
     `quotes`: symbol -> (bid, ask) for marketable limits. `sells_first`: sales before purchases (they fund them);
     False keeps the caller's order (the research path matches the harness's order of the auction).
-    `presend`: the pre-send gate (execution.PreSendGate through the caller's quotes); None: no gate."""
+    `presend`: the pre-send gate (execution.PreSendGate through the caller's quotes); None: no gate.
+    `resend` (#775, the live daily path): an orphaned intent of this session (`OrderManager.orphan`: a process
+    journalled it and died before the venue's answer) does not count as working. When it is the sleeve's only
+    order and every check a new order would meet passes now, for the same side and shares and the same request,
+    it is sent again under its own client order id (`OrderManager.resend`: the venue refuses a duplicate);
+    otherwise it is skipped as an unconfirmed order, so the caller keeps its send open until the order is
+    resolved (found, or called lost and a new attempt made). An orphan its lookup has not answered for yet is only
+    waited on. Off (research), nothing changes."""
     res = LoopResult()
     todo = []
     for t in targets:
         diff = int(t.shares) - float(held.get(t.key, 0.0)) - working_shares(om, t.key)
+        if resend:  # #775: as if an orphan's order had not gone out (it may not have)
+            diff += sum((r.left if r.side == "buy" else -r.left) for r in _orphans(om, t, session))
         if abs(diff) < 1e-9:
             continue
         todo.append((t, diff))
@@ -104,6 +114,19 @@ def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequen
             res.aged.append((t.key, f"a fill of an earlier day is still not booked: the sale of {abs(diff):g} "
                                     f"shares goes out without it ({gone:g} shares of unbooked sales left out)"))
         working = [r for r in om.working(symbol=t.symbol, strategy=t.strategy) if r.purpose != "stop"]
+        orphans = _orphans(om, t, session) if resend else []
+        if orphans and working == orphans and len(orphans) == 1:  # #775: the dead process's order, alone
+            why = _resend(om, policy, t, diff, orphans[0], held, now=now, reconciler=reconciler, stops=stops,
+                          presend=presend, quotes=quotes)
+            if why is None:
+                res.sent.append(om.resend(orphans[0].coid))
+            elif why[0] == "withheld":
+                res.withheld.append((t.key, why[1], why[2]))
+            elif why[0] == "deferred":
+                res.deferred.append(t.key)
+            else:
+                res.skipped.append((t.key, why[1]))
+            continue
         if any(r.state in UNCONFIRMED for r in working):  # never cancel or add to an order nobody has confirmed
             res.skipped.append((t.key, om.blocked(t.symbol) or "unconfirmed order"))
             continue
@@ -134,3 +157,42 @@ def reconcile_targets(om: OrderManager, policy: ExecutionPolicy, targets: Sequen
             continue
         res.sent.append(om.submit(req, strategy=t.strategy, purpose=t.purpose, session=session, meta=t.meta))
     return res
+
+
+def _orphans(om: OrderManager, t: Target, session: str) -> list[OrderRecord]:
+    """#775: the sleeve's orphaned intents of this session (`OrderManager.orphan`)."""
+    return [r for r in om.working(symbol=t.symbol, strategy=t.strategy) if om.orphan(r, session)]
+
+
+def _resend(om: OrderManager, policy: ExecutionPolicy, t: Target, diff: float, r: OrderRecord,
+            held: Mapping[Key, float], *, now: datetime, reconciler, stops, presend,
+            quotes) -> tuple[str, ...] | None:
+    """#775: None when the orphan `r` may be sent again now under its own client id: its lookup by client id found
+    nothing (`OrderManager.resendable`), the target still wants
+    exactly its side and shares, nothing else blocks the symbol, the reconciliation and the pre-send gate let a new
+    order of it through, a sale's protective stop frees the shares, and the execution policy would build the same
+    request now. Otherwise why not (("skipped", why), ("withheld", side, why) or ("deferred",)): never sent then,
+    it waits for its lookup (found, or lost and a new attempt)."""
+    side = "buy" if diff > 0 else "sell"
+    if not om.resendable(r):
+        return ("skipped", f"order {r.coid} is unconfirmed (a restart): waiting for its lookup by client order id")
+    if r.side != side or abs(abs(diff) - float(r.qty)) > 1e-9:
+        return ("skipped", f"order {r.coid} is unconfirmed (a restart) and the target moved: waiting for its lookup")
+    why = om.blocked(t.symbol, but=r.coid) or (reconciler.allows(t.symbol, side, t.purpose, abs(diff))
+                                                if reconciler else None)
+    if why:
+        return ("skipped", why)
+    why = presend(t, side, abs(diff)) if presend is not None else None
+    if why:
+        return ("withheld", side, why)
+    bid, ask = (quotes or {}).get(t.symbol, (None, None))
+    try:
+        req = policy.request(t.symbol, side, abs(diff), now, r.coid, bid=bid, ask=ask)
+    except ExecutionRefused as e:
+        return ("skipped", str(e))
+    if req != r.request():
+        return ("skipped", f"order {r.coid} is unconfirmed (a restart) and its terms are not today's: waiting for "
+                           "its lookup")
+    if side == "sell" and stops is not None and not stops.release(t.key, float(held.get(t.key, 0.0)) + diff):
+        return ("deferred",)
+    return None
