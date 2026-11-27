@@ -200,8 +200,7 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py",
                               "scripts/fetch_av_earnings.py",  # #797: Alpha Vantage EARNINGS, free tier, research
                               "scripts/fetch_daily.py",  # #812: one point-in-time daily store key (--key)
-                              "scripts/fetch_minute_pit.py",  # #794: the 15:50 minutes of the pit universe
-                              "scripts/momentum_core.py"}  # #812: the core pit re-runs (three rules, strict)
+                              "scripts/fetch_minute_pit.py"}  # #794: the 15:50 minutes of the pit universe
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert sorted(t for t, s in cfg.specs.items() if s.sec) == ["scripts/fetch_listings.py",
