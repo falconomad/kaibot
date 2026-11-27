@@ -198,12 +198,14 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               # #708: the re-runs of the unscored runs (research window only, strict patterns)
                               "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py",
                               "scripts/fetch_av_earnings.py",  # #797: Alpha Vantage EARNINGS, free tier, research
-                              "scripts/fetch_minute_pit.py"}  # #794: the 15:50 minutes of the pit universe
+                              "scripts/fetch_minute_pit.py",  # #794: the 15:50 minutes of the pit universe
+                              "scripts/fetch_daily.py"}  # #812: one point-in-time daily store key (--key)
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert sorted(t for t, s in cfg.specs.items() if s.sec) == ["scripts/fetch_listings.py",
                                                                 "scripts/fetch_sec_fundamentals.py"]
     assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_av_earnings.py",  # #797
+                                                                "scripts/fetch_daily.py",  # #812: paper keys
                                                                 "scripts/fetch_listings.py",
                                                                 "scripts/fetch_minute_pit.py",  # #794: paper keys
                                                                 "scripts/fetch_sec_fundamentals.py",
@@ -211,6 +213,19 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
     assert not cfg.specs["kaibot.agents.evalset.golden"].flags  # no --live (money), no --record
     for s in cfg.specs.values():
         assert not set(s.flags) & rr.FORBIDDEN_FLAGS and 0 < s.timeout_min <= 240
+
+
+def test_fetch_daily_is_allowed_one_pit_key_at_a_time_only():
+    """#812: the runner may fetch named SYMBOL@ASOF keys (the script also refuses a key the pit universe does not
+    name), never the whole universe, a symbols file, another store or a refresh, and not faster than 40 a minute."""
+    spec = rr.load_allowed().specs["scripts/fetch_daily.py"]
+    assert set(spec.flags) == {"--key", "--retry-holes", "--per-min", "--status"} and spec.heavy and not spec.writes
+    assert rr.check_args(spec, ["--key", "PSKY@2026-11-05", "--retry-holes", "--per-min", "40"])
+    for bad in (["--key", "PSKY"], ["--key", "psky@2026-11-05"], ["--key", "../x@2026-11-05"],
+                ["--key", "PSKY@2026-13-05"], ["--per-min", "41"], ["--per-min", "120"], ["--symbols", "AAPL"],
+                ["--symbols-file", "x.csv"], ["--refresh"], ["--no-universe"], ["--start", "2016-01-01"]):
+        with pytest.raises(rr.JobError):
+            rr.check_args(spec, bad)
 
 
 def test_the_committed_queue_is_valid():
