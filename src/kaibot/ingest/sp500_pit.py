@@ -29,6 +29,7 @@ Names used here:
 from __future__ import annotations
 
 import bisect
+import contextlib
 import csv
 import io
 from collections.abc import Iterable, Mapping, Sequence
@@ -57,6 +58,11 @@ FILE_HEADER = ["symbol", "asof_date"]  # the --symbols-file contract with S84 (#
 # liquid class). Dropping them keeps one column, one position and one vote per company.
 SECONDARY_CLASSES = {"GOOG": "GOOGL", "FOX": "FOXA", "NWS": "NWSA", "UA": "UAA", "DISCK": "DISCA"}
 ASOF_LAG_DAYS = 7  # the as-of date sits this far before the last membership day (inside the spell, before delisting)
+# The day the daily store's SYMBOL@ASOF keys were written (data/universe/former_members.csv, #124's fetch on the Mac).
+# A current member has no last membership day, so its as-of date is pinned to this day, not to today: the key it gets
+# is the key the store holds on every later run date (#812: built from today, 225 current members outside the 288
+# silently left the point-in-time view after 12 Nov 2026). Moving it renames every such key: refetch after it.
+STORE_DAY = date(2026, 11, 12)
 DEFAULT_TERMINAL_RETURN = -0.30  # hole policy: a held company whose bars stop, without a known outcome
 
 
@@ -201,6 +207,10 @@ def read_universe(path: Path = UNIVERSE) -> list[str]:
     return [str(s) for syms in cfg["sectors"].values() for s in syms]
 
 
+class KeyMismatchError(ValueError):
+    """A member's bar-store key is not among the columns although the store holds the company (#812)."""
+
+
 @dataclass(frozen=True)
 class Spell:
     """One continuous membership of a company: member on start <= d < end (end None: still a member)."""
@@ -231,6 +241,7 @@ class Membership:
     aliases: dict[str, list[Alias]] = field(default_factory=dict)
     universe: Sequence[str] = ()  # today's research universe (288): their keys are plain tickers
     today: date | None = None
+    store_day: date = STORE_DAY  # the as-of anchor of current members' store keys (see STORE_DAY)
 
     def __post_init__(self) -> None:
         self.today = self.today or date.today()
@@ -246,9 +257,9 @@ class Membership:
 
     @classmethod
     def load(cls, changes: Path = CHANGES, ticker_map: Path = TICKER_MAP, universe: Path | None = UNIVERSE,
-             today: date | None = None) -> Membership:
+             today: date | None = None, store_day: date = STORE_DAY) -> Membership:
         uni = read_universe(universe) if universe is not None and Path(universe).is_file() else []
-        return cls(read_changes(changes), read_ticker_map(ticker_map), uni, today)
+        return cls(read_changes(changes), read_ticker_map(ticker_map), uni, today, store_day)
 
     # ------------------------------------------------------------ point-in-time lists
 
@@ -312,9 +323,12 @@ class Membership:
 
     def request(self, company: str) -> tuple[str, date]:
         """(symbol, as-of date) to download a company's bars: its last ticker in the index, as of a date inside its
-        last spell (ASOF_LAG_DAYS before the last membership day, so before any delisting)."""
+        last spell (ASOF_LAG_DAYS before the last membership day, so before any delisting).
+
+        A current member has no last membership day: its as-of date counts from `store_day` (or today, if earlier),
+        never from a later today, so the key does not depend on the run date (#812)."""
         sp = self.spells[company][-1]
-        last = sp.last_day or self.today
+        last = sp.last_day or min(self.today, self.store_day)
         asof = max(sp.start, START, last - timedelta(days=ASOF_LAG_DAYS))
         return sp.tickers[-1], min(asof, self.today)
 
@@ -344,14 +358,41 @@ class Membership:
         departed 288 names as a second chance), as (symbol, asof_date), sorted."""
         return sorted(self.request(c) for c in self.spells if self.needs_request(c))
 
-    def key_map(self, columns: Iterable[str]) -> dict[str, int]:
-        """company -> column index in `columns` (DailyBars.symbols), first preferred key that is present."""
+    def key_map(self, columns: Iterable[str], strict: bool = False) -> dict[str, int]:
+        """company -> column index in `columns` (DailyBars.symbols), first preferred key that is present.
+
+        Raises KeyMismatchError instead of dropping a company silently (#812) when `columns` hold a SYMBOL@ASOF key of
+        the company (its symbol, an as-of date inside one of its spells) but none of the keys `keys()` names: the
+        store and this module disagree on the key. With `strict` (columns that are a whole store), every current
+        member must also have a key."""
+        columns = list(columns)
         col = {s: j for j, s in enumerate(columns)}
+        stored: dict[str, list[tuple[date, str]]] = {}
+        for s in columns:
+            sym, at, asof = s.partition("@")
+            if at:
+                with contextlib.suppress(ValueError):
+                    stored.setdefault(sym, []).append((date.fromisoformat(asof), s))
         out: dict[str, int] = {}
-        for c in self.spells:
-            j = next((col[k] for k in self.keys(c) if k in col), None)
+        bad: list[str] = []
+        for c, sps in self.spells.items():
+            keys = self.keys(c)
+            j = next((col[k] for k in keys if k in col), None)
             if j is not None:
                 out[c] = j
+                continue
+            syms = {t for sp in sps for t in sp.tickers}
+            other = sorted(k for t in syms for d, k in stored.get(t, ()) if any(sp.covers(d) for sp in sps))
+            if other:
+                bad.append(f"{c}: expects {' or '.join(keys)}, the columns hold {', '.join(other)}")
+            elif strict and sps[-1].end is None:
+                bad.append(f"{c}: a current member, expects {' or '.join(keys)}, no such column")
+        if bad:
+            raise KeyMismatchError(
+                f"{len(bad)} S&P 500 members have no matching store key (#812; rebuild "
+                "data/universe/former_members.csv with scripts/fetch_sp500_history.py and run "
+                "./scripts/fetch_daily.sh, or check STORE_DAY): "
+                + "; ".join(bad[:10]) + (" ..." if len(bad) > 10 else ""))
         return out
 
     def mask(self, dates: Sequence, columns: Sequence[str]) -> np.ndarray:

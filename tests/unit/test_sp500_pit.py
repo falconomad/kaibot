@@ -187,3 +187,75 @@ def test_crosscheck_against_an_nport_file(tmp_path, real):
     dd, got = pit.read_nport(x)
     only_list, only_fund = pit.crosscheck(real, dd, got)
     assert dd == d and only_list == [sorted(real.members_on(d))[0]] and only_fund == ["Not A Member Inc"]
+
+
+# ---------------------------------------------------------------- #812: store keys do not drift with the run date
+
+
+class _Frozen(date):
+    day: date = TODAY
+
+    @classmethod
+    def today(cls):
+        return cls.day
+
+
+def _frozen_load(monkeypatch, day: date) -> pit.Membership:
+    """Membership.load() as a run on `day` does it: no `today` given, the module's date.today() frozen."""
+    monkeypatch.setattr(_Frozen, "day", day)
+    monkeypatch.setattr(pit, "date", _Frozen)
+    return pit.Membership.load()
+
+
+def _store_keys() -> list[str]:
+    """The daily store's keys as fetched on STORE_DAY: the 288, the 11 sector ETFs, SPY, former_members.csv."""
+    import yaml
+
+    m = pit.Membership.load(today=pit.STORE_DAY)
+    cfg = yaml.safe_load(pit.UNIVERSE.read_text())
+    plain = [*m.universe, *cfg["sectors"], cfg["market"]]
+    return sorted({*plain, *(f"{s}@{d.isoformat()}" for s, d in m.former_members())})
+
+
+@pytest.mark.parametrize("run_day", [D(2026, 11, 25), D(2027, 3, 1)])
+def test_pit_universe_size_is_the_same_on_any_run_date(monkeypatch, run_day):
+    import yaml
+
+    have = _store_keys()
+    cfg = yaml.safe_load(pit.UNIVERSE.read_text())
+    stocks, etfs, spy = pit.read_universe(), list(cfg["sectors"]), cfg["market"]
+    m = _frozen_load(monkeypatch, run_day)
+    assert m.today == run_day and pit.date.today() == run_day
+    # daily_report.load_store(mode="pit")'s selection
+    cand = [*stocks, *sorted(set(have) - set(stocks) - set(etfs) - {spy})]
+    km = m.key_map(cand, strict=True)
+    names = {cand[j] for j in km.values()}
+    assert len(km) == len(m.spells) == 714  # every company since 2016 (was 489 after 12 Nov: #812)
+    assert len(names) + len(etfs) + 1 == 726
+    assert m.former_members() == pit.Membership.load(today=pit.STORE_DAY).former_members()
+    assert m.keys("BALL")[-1] == "BALL@2026-11-05"  # a current member outside the 288
+
+
+def test_current_members_asof_is_pinned_to_the_store_day_not_today():
+    a, b = (_m(BASE, ALIASES, universe=["META"], today=t) for t in (D(2026, 11, 12), D(2027, 5, 3)))
+    assert a.keys("META") == b.keys("META") == ["META", "META@2026-11-05"]
+    assert a.request("DWDP") == b.request("DWDP") == ("DWDP", D(2026, 11, 5))
+    # a run date before the store day (toy logs, old tests) keeps today - 7 days
+    assert _m(BASE, ALIASES, today=D(2024, 2, 1)).request("DWDP") == ("DWDP", D(2024, 1, 25))
+    assert _m(BASE, ALIASES, today=D(2027, 1, 1)).request("OLD") == ("OLD", D(2019, 3, 25))  # former: fixed
+
+
+def test_key_map_fails_loudly_when_the_store_holds_a_member_under_another_key():
+    m = _m(BASE, ALIASES, universe=["META", "DOW", "GOOGL", "XYZ"])
+    cols = ["META", "DOW", "GOOGL", "XYZ", "DOW@2017-08-24", "OLD@2019-03-25", "CPRI@2020-05-04"]
+    ok = m.key_map([*cols, "DWDP@2026-11-05"], strict=True)
+    assert len(ok) == len(m.spells)
+    with pytest.raises(pit.KeyMismatchError, match=r"DWDP: expects DWDP@2026-11-05, the columns hold DWDP@2026-11-18"):
+        m.key_map([*cols, "DWDP@2026-11-18"])  # the #812 drift: never a silent drop
+    with pytest.raises(pit.KeyMismatchError, match="DWDP: a current member"):
+        m.key_map(cols, strict=True)
+    assert "DWDP" not in m.key_map(cols)  # not strict: a partial column list may leave members out
+    # a former member with no bars at all is the hole policy's no_bars, not an error
+    assert "OLD" not in m.key_map([*cols[:5], "CPRI@2020-05-04", "DWDP@2026-11-05"], strict=True)
+    # another company's key of the same ticker (outside this company's spells) is no mismatch
+    assert m.key_map(["DOW@2017-08-24"]) == {"DOW#2017": 0}

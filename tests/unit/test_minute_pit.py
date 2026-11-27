@@ -153,8 +153,8 @@ def test_every_key_of_the_pit_view_is_a_target_as_the_store_keys_it():
     tg = {t.key: t for t in mp.targets(store_keys(), membership(), CFG, START, END)}
     assert set(tg) == set(store_keys())
     assert tg["AAA"].seen_by_runs and tg["OLD@2018-02-21"].seen_by_runs
-    # today (26 Nov) `keys` names C01@2026-11-19, the store holds C01@2026-11-05: still a target, flagged as unseen
-    assert not tg[f"C01@{STORE_ASOF}"].seen_by_runs and tg[f"C01@{STORE_ASOF}"].asof == date(2026, 11, 5)
+    # #812: on 26 Nov `keys` still names the store's C01@2026-11-05 (as-of pinned to STORE_DAY): seen by runs
+    assert tg[f"C01@{STORE_ASOF}"].seen_by_runs and tg[f"C01@{STORE_ASOF}"].asof == date(2026, 11, 5)
     built = {t.key: t for t in mp.targets(store_keys(), membership(date(2026, 11, 12)), CFG, START, END)}
     assert built[f"C01@{STORE_ASOF}"].seen_by_runs  # the day the store was built, key_map found it
     assert tg["XLK"].company is None and tg["SPY"].need == mp.full_sessions(START, END)
@@ -257,7 +257,7 @@ def test_coverage_counts_per_year_and_flags_keys_without_minutes(world, http):
     assert y["members_with_1550"] == y["members"] - 1  # OLD: Alpaca does not know it
     assert [f["key"] for f in cov["flagged_no_minutes"]] == ["OLD@2018-02-21"]
     assert cov["flagged_no_minutes"][0]["unknown_symbol_months"] == 2  # its member months
-    assert cov["keys"] == len(tg) and cov["keys_seen_by_runs"] == 4  # AAA, OLD, XLK, SPY
+    assert cov["keys"] == len(tg) and cov["keys_seen_by_runs"] == len(tg)  # #812: every key, not 4
     text = mp.render(cov)
     assert "| 2018 |" in text and "OLD@2018-02-21 (Alpaca: unknown)" in text
     assert json.loads((data / "bars_1550" / "coverage_cache.json").read_text())
