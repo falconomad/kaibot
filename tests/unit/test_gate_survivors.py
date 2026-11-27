@@ -250,6 +250,9 @@ def test_no_room_is_zero_shares_also_for_a_share_price_below_a_dollar():
                                   BookLimits())
     assert cands["sector_headroom"] == 0
     assert G.evaluate(cheap, replace(SNAP, symbol_exposure=10_000), POL).qty == 0
+    for bp in (0.0, -5.0, 0.4):  # no buying power (or under one share's price): not floor(1 / 0.5) = 2 shares
+        qty, binding, cands = G.size_position(cheap, replace(SNAP, buying_power=bp), POL)
+        assert (qty, binding, cands["buying_power"]) == (0, "buying_power", 0)
 
 
 # ---------------------------------------------------------------- helpers
