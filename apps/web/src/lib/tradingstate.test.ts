@@ -1,7 +1,7 @@
 // N1 / N2 (docs/design/ui_after_engine_v3.md): every state of the trading-state line, and "reason not reported".
 import { describe, expect, it } from "vitest";
 import type { Heartbeat, Overview, Run } from "./api";
-import { JOURNAL_REASON, UNKNOWN, journalDamaged, tradingLine, tradingState, type HealthEvent } from "./tradingstate";
+import { JOURNAL_REASON, LABEL_TINY, MARKET_SHORT, MARKET_TINY, UNKNOWN, journalDamaged, marketSession, shortLine, tradingLine, tradingState, type HealthEvent } from "./tradingstate";
 
 const run = (over: Partial<Run> = {}): Run => ({ id: 1, created_at: "2026-11-02T14:00:00Z", amount_usd: 10_000, status: "running",
   end_reason: null, peak_equity: null, kind: "paper", label: "Paper 1", level: "balanced", started_on: "2026-11-02", ended_on: null, ...over });
@@ -169,5 +169,40 @@ describe("Not running", () => {
     expect(x.kind).toBe("not_running");
     expect(x.reason).toMatch(/^asleep · starts /);
     expect([x.tone, x.needsYou]).toEqual(["calm", false]);
+  });
+});
+
+describe("the market's session, for the phones' compact line (27 Nov 2026)", () => {
+  // New York times; November is EST (UTC-5)
+  const ny = (d: string, hm: string) => Date.parse(`${d}T${hm}:00-05:00`);
+  it.each([
+    ["2026-11-23", "03:59", "closed"], ["2026-11-23", "04:00", "pre_market"], ["2026-11-23", "09:29", "pre_market"],
+    ["2026-11-23", "09:30", "open"], ["2026-11-23", "15:59", "open"], ["2026-11-23", "16:00", "after_hours"],
+    ["2026-11-23", "19:59", "after_hours"], ["2026-11-23", "20:00", "closed"],
+    // Thanksgiving, then the 13:00 early close the day after
+    ["2026-11-26", "11:00", "holiday"], ["2026-11-27", "08:00", "pre_market"], ["2026-11-27", "12:59", "early_close"],
+    ["2026-11-27", "13:00", "after_hours"], ["2026-11-27", "17:00", "closed"],
+    ["2026-11-28", "11:00", "closed"], ["2026-11-29", "11:00", "closed"], // the weekend
+  ])("%s %s ET is %s", (d, hm, want) => {
+    expect(marketSession(ny(d, hm))).toBe(want);
+  });
+  it("a heartbeat that says closed, with its next open ahead, wins over the table in session hours", () => {
+    const now = ny("2026-11-23", "11:00");
+    expect(marketSession(now, { detail: { state: "market_closed", next_open: new Date(now + 86_400_000).toISOString() } })).toBe("closed");
+    expect(marketSession(now, { detail: { state: "market_closed", next_open: new Date(now - 60_000).toISOString() } })).toBe("open");
+  });
+  it("every session has a short label, and the compact line is the state and the session", () => {
+    expect(MARKET_SHORT).toEqual({ pre_market: "Pre-market", open: "Open", early_close: "Early close", after_hours: "After hours",
+      closed: "Closed", holiday: "Holiday" });
+    const late = Date.parse("2026-11-24T02:30:00Z"); // Mon 21:30 ET
+    const h = s(run(), ov(beat({ state: "market_closed" }, late)), undefined, late);
+    expect(tradingLine(h)).toBe("Holding — market closed");
+    expect(shortLine(h, marketSession(late))).toBe("Holding · Closed");
+    const sell = s(run({ status: "paused" }), ov(beat({ state: "managing" })));
+    expect(shortLine(sell, "after_hours")).toBe("Selling only · After hours");
+    expect(shortLine(sell, "after_hours", "tiny")).toBe("Sell only · After hours");
+    expect(shortLine(sell, "after_hours", "tinier")).toBe("Sell only · After");
+    expect(MARKET_TINY).toEqual({ pre_market: "Pre", open: "Open", early_close: "Early", after_hours: "After", closed: "Closed", holiday: "Holiday" });
+    expect(LABEL_TINY).toEqual({ buying: "Buying", holding: "Holding", selling_only: "Sell only", stopped: "Stopped", not_running: "Off" });
   });
 });

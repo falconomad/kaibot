@@ -270,8 +270,9 @@ export function Shell() {
           </select>
         )}
         {ts && tsm ? (
-          <Link to="/health" className={`chip engine-chip ts-chip ${ts.tone}`} title={`${tsm.tradingLine(ts)} · ${chip.text} · ${chip.sub}${chip.host ? ` · ${lastSeenText(chip.host)}` : ""}`}>
-            <span className="sr-only">Trading: </span><tsm.TradingLine s={ts} />
+          <Link to="/health" className={`chip engine-chip ts-chip ${ts.tone}`} title={`${tsm.tradingLine(ts)} · ${chip.text} · ${chip.sub}${chip.host ? ` · ${lastSeenText(chip.host)}` : ""}`}
+            aria-label={`Trading: ${tsm.tradingLine(ts)}${ts.needsYou ? " (needs you)" : ""}`}>
+            <span className="sr-only">Trading: </span><tsm.TradingLine s={ts} market={tsm.marketSession(Date.now(), o?.heartbeat.find((h) => h.process === "engine"))} />
             <FreshNote f={chip.fresh} what="Engine" inline className="hide-sm" />
             {chip.host && <span className="num hide-sm chip-host">· {lastSeenText(chip.host)}</span>}
           </Link>

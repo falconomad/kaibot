@@ -31,6 +31,7 @@
 //     reported
 import type { Halt, Overview, Run } from "./api";
 import { engineClock } from "./engineclock";
+import { CLOSE_MIN, HOLIDAYS, OPEN_MIN, closeMin } from "./nyse";
 import { haltText } from "./derive";
 import { NAME } from "../brand/brand";
 import { type HealthEvent, JOURNAL_REASON, journalDamaged } from "./journalstop";
@@ -135,3 +136,47 @@ function marketFilterOff(md: unknown): boolean {
 
 /** "Selling only — paused by you" */
 export const tradingLine = (s: TradingState) => `${s.label} — ${s.reason}`;
+
+/** The market's session, for the phone top bar's compact line (stakeholder, 27 Nov 2026: "Holding · Closed", never
+ *  "Holding — market clo…"). NYSE hours in New York: pre-market 04:00-09:30, open 09:30-16:00, after hours to 20:00;
+ *  on an early close (lib/nyse.ts) the session ends at 13:00 and after hours at 17:00. A full-day holiday is "Holiday",
+ *  a weekend or the night "Closed". A heartbeat that says the market is closed with its next open still ahead wins over
+ *  the table (a closure the table does not know). */
+export type MarketSession = "pre_market" | "open" | "early_close" | "after_hours" | "closed" | "holiday";
+export const MARKET_SHORT: Record<MarketSession, string> = {
+  pre_market: "Pre-market", open: "Open", early_close: "Early close", after_hours: "After hours", closed: "Closed", holiday: "Holiday",
+};
+/** The smallest phones (380 px and under, app.css): the session in one short word. */
+export const MARKET_TINY: Record<MarketSession, string> = {
+  pre_market: "Pre", open: "Open", early_close: "Early", after_hours: "After", closed: "Closed", holiday: "Holiday",
+};
+/** Phones 420 px and under (app.css): the state in at most two short words, so the line fits beside the logo. */
+export const LABEL_TINY: Record<TradingKind, string> = {
+  buying: "Buying", holding: "Holding", selling_only: "Sell only", stopped: "Stopped", not_running: "Off",
+};
+const PRE_MIN = 4 * 60;
+const AFTER_MIN = 4 * 60; // after hours run four hours past the close (20:00, or 17:00 on an early close)
+
+export function marketSession(now: number, beat?: { detail?: Record<string, unknown> | null } | null): MarketSession {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short", year: "numeric",
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(now)).map((x) => [x.type, x.value]));
+  const date = `${p.year}-${p.month}-${p.day}`;
+  const min = Number(p.hour) * 60 + Number(p.minute);
+  if (p.weekday === "Sat" || p.weekday === "Sun") return "closed";
+  if (HOLIDAYS.has(date)) return "holiday";
+  const close = closeMin(date);
+  const next = typeof beat?.detail?.next_open === "string" ? Date.parse(beat.detail.next_open) : NaN;
+  const toldClosed = beat?.detail?.state === "market_closed" && Number.isFinite(next) && next > now;
+  if (min >= OPEN_MIN && min < close) return toldClosed ? "closed" : close < CLOSE_MIN ? "early_close" : "open";
+  if (min >= PRE_MIN && min < OPEN_MIN) return "pre_market";
+  if (min >= close && min < close + AFTER_MIN) return "after_hours";
+  return "closed";
+}
+
+/** The compact line for phones: the state and the market's session ("Holding · Closed"); `tiny` for 420 px and under
+ *  (the state's short word, "Sell only · After hours") and `tinier` for 380 px and under ("Sell only · After"). The full
+ *  line stays the chip's accessible name and title. */
+export function shortLine(s: TradingState, m: MarketSession, size: "phone" | "tiny" | "tinier" = "phone"): string {
+  const label = size === "phone" ? s.label : LABEL_TINY[s.kind];
+  return `${label} · ${(size === "tinier" ? MARKET_TINY : MARKET_SHORT)[m]}`;
+}
