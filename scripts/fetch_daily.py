@@ -7,6 +7,10 @@
                                               ticker is requested as of that date, so a retired or reused ticker
                                               returns the company that had it then; stored as SYMBOL@DATE
     python scripts/fetch_daily.py --symbols NBIS,CRWV    SPY plus exactly these instead of the universe
+    python scripts/fetch_daily.py --key PSKY@2026-11-05 --retry-holes
+                                              exactly this point-in-time store key (#812), and nothing else: it
+                                              must be a key sp500_pit.Membership names (as-of pinned to STORE_DAY),
+                                              run under data/fetch_daily.lock (the research runner's job)
     python scripts/fetch_daily.py --status    what is stored
     python scripts/fetch_daily.py --check     offline checks: minute history against daily bars on a sample, and
                                               the corporate-actions table against Alpaca's adjusted bars, and
@@ -25,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from contextlib import contextmanager
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -41,6 +46,7 @@ from kaibot.ingest import daily_bars as db  # noqa: E402
 from kaibot.ingest.alpaca_history import ET, Alpaca  # noqa: E402
 from kaibot.ingest.certs import CERT_HINT, ensure_ca_bundle  # noqa: E402
 
+LOCK = "fetch_daily.lock"  # the lock scripts/fetch_daily.sh runs under (scripts/fetch_lock.py, #692)
 REFUSED_IN_A_ROW = 3  # this many refusals before anything was stored means the request is wrong, not the ticker
 
 
@@ -53,6 +59,22 @@ def build_requests(a: argparse.Namespace, today: date) -> list[db.Request]:
     if start >= today:
         raise SystemExit(f"--start {a.start} is not in the past")
     reqs: dict[str, db.Request] = {}
+    if getattr(a, "key", None):
+        if a.symbols or a.symbols_file or a.no_universe:
+            raise SystemExit("--key downloads exactly those keys: not with --symbols, --symbols-file or --no-universe")
+        known = pit_keys()
+        for k in a.key:
+            try:
+                r = db.parse_key(k.strip())
+            except ValueError:
+                raise SystemExit(f"--key: expected SYMBOL@YYYY-MM-DD, got {k!r}") from None
+            if r.asof is None or r.key != k.strip().upper() or not (start <= r.asof <= today):
+                raise SystemExit(f"--key: expected SYMBOL@YYYY-MM-DD with a date between {start} and today, got {k!r}")
+            if r.key not in known:
+                raise SystemExit(f"--key {r.key}: not a key of the point-in-time universe (sp500_pit.Membership); "
+                                 "only those keys are fetched one by one")
+            reqs.setdefault(r.key, r)
+        return list(reqs.values())
     if not a.no_universe:
         cfg = yaml.safe_load(Path(a.universe).read_text())
         for s in select_symbols(cfg, a.symbols):
@@ -70,6 +92,38 @@ def build_requests(a: argparse.Namespace, today: date) -> list[db.Request]:
     if not reqs:
         raise SystemExit("nothing to download (--no-universe without --symbols-file)")
     return list(reqs.values())
+
+
+def pit_keys() -> set[str]:
+    """Every SYMBOL@ASOF store key the point-in-time universe names (as-of dates pinned to sp500_pit.STORE_DAY)."""
+    from kaibot.ingest.sp500_pit import Membership
+
+    m = Membership.load()
+    return {k for c in m.spells for k in m.keys(c) if "@" in k}
+
+
+@contextmanager
+def fetch_lock(root: Path):
+    """The lock scripts/fetch_daily.sh runs under, for a run that does not come through it (--key, the research
+    runner): <data>/fetch_daily.lock next to the store as resolved through links, so the runner's linked data/daily
+    locks the engine's own file. Yields False, without waiting, when another fetch holds it."""
+    import fcntl
+    import os
+
+    path = Path(root).resolve().parent / LOCK
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, str(os.getpid()).encode(), 0)
+        yield True
+    finally:
+        os.close(fd)
 
 
 def print_status(root: Path, reqs: list[db.Request] | None = None) -> None:
@@ -102,6 +156,8 @@ def main(argv: list[str] | None = None, api=None, now: datetime | None = None) -
     ap.add_argument("--symbols-file", action="append", help="CSV with the header symbol,asof_date: each ticker is "
                                                              "requested as of that date (may be given more than once)")
     ap.add_argument("--no-universe", action="store_true", help="download only the --symbols-file lines")
+    ap.add_argument("--key", action="append", help="exactly this point-in-time store key SYMBOL@YYYY-MM-DD and "
+                                                    "nothing else (may be given more than once; #812)")
     ap.add_argument("--per-min", type=int, default=60, help="request budget for this run")
     ap.add_argument("--no-reference", action="store_true", help="skip Alpaca's adjusted series (no adjustment check)")
     ap.add_argument("--no-actions", action="store_true", help="skip the corporate actions")
@@ -144,6 +200,24 @@ def main(argv: list[str] | None = None, api=None, now: datetime | None = None) -
         ensure_ca_bundle()
         api = Alpaca(key, secret, per_min=a.per_min)
 
+    if not a.key:
+        return download(a, api, reqs, root, now)
+    with fetch_lock(root) as got:
+        if not got:
+            print(f"Another daily fetch is running (lock {Path(root).resolve().parent / LOCK}): nothing was asked. "
+                  "Queue the job again under a new id once it has finished.", flush=True)
+            return 1
+        for r in reqs:
+            marker = db.bars_path(root, r.key).with_suffix(".empty")
+            if marker.exists():
+                print(f"{r.key}: the store has a hole marker ({db.read_hole(marker).get('reason', '?')})"
+                      + ("; asked again (--retry-holes)" if a.retry_holes else "; kept (pass --retry-holes to ask "
+                                                                                 "again)"), flush=True)
+        return download(a, api, reqs, root, now)
+
+
+def download(a: argparse.Namespace, api, reqs: list[db.Request], root: Path, now: datetime) -> int:
+    """The download itself: every request, holes.csv, the corporate actions, the status."""
     start = date.fromisoformat(a.start)
     through = db.complete_through(now)
     n_asof = sum(r.asof is not None for r in reqs)

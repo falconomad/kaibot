@@ -145,3 +145,11 @@ jobs:
     script: scripts/fetch_minute_pit.py
     args: ["--report"]
     posts_to_issue: 794
+  # #812 (after #817): PSKY (Paramount Skydance) is the one current member the Mac's store lacks (owner's check: 725 of
+  # 726 keys). Its key PSKY@2026-11-05, as of that date: Alpaca's PSKY series begins with its own listing on
+  # 7 Aug 2025 (a merger into a new company, not a rename; Paramount Global stays PARA@2025-07-31), so no bar before
+  # PSKY existed. --retry-holes: the 12 Nov fetch may have left a hole marker. Idempotent; no trial, no rule.
+  - id: daily-key-psky-2026-11-27
+    script: scripts/fetch_daily.py
+    args: ["--key", "PSKY@2026-11-05", "--retry-holes", "--per-min", "40"]
+    posts_to_issue: 812
