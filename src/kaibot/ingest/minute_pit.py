@@ -100,8 +100,8 @@ def targets(store_keys: Iterable[str], membership, cfg: dict, start: date, end: 
     """The point-in-time view's keys (`daily_report.load_store`, mode "pit") with the sessions each needs.
 
     A company's key is the first of `membership.keys(company)` the store holds, as `key_map` picks it. A current
-    member without that key (its SYMBOL@ASOF names the day the store was built, `keys` names today minus 7 days) is
-    matched to the store's newest key of its symbol; such keys have `seen_by_runs` False (issue #812)."""
+    member without that key (a store built on another day than `sp500_pit.STORE_DAY`) is matched to the store's
+    newest key of its symbol; such keys have `seen_by_runs` False (pit runs stop with KeyMismatchError, #812)."""
     have = set(store_keys)
     plain = [*cfg["sectors"], cfg["market"]]
     days = full_sessions(start, end)
