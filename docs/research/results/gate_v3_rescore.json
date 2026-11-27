@@ -1,6 +1,6 @@
 {
- "generated_at": "2026-11-25T18:23:33+00:00",
- "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+ "generated_at": "2026-11-27T10:40:28+00:00",
+ "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
  "window": [
   "2017-05-01",
   "2024-12-31"
@@ -178,7 +178,8 @@
   },
   "earnings_drift": {
    "rules": [
-    "post_earnings_week"
+    "post_earnings_week",
+    "earnings_surprise_drift"
    ],
    "p": null,
    "greyed": {
@@ -188,6 +189,7 @@
       "engine is 'research_harness', Holm needs 'simbroker'",
       "cost_model is 'not stated', Holm needs 'v2'",
       "benchmark is 'spy_not_stated', Holm needs 'spy_total_return'",
+      "500 control runs, 2000 needed",
       "the control drew from universe, not the rule's own candidate pool",
       "its window ran 464 sessions into the hold-out"
      ],
@@ -424,6 +426,7 @@
     "engine is 'research_harness', Holm needs 'simbroker'",
     "cost_model is 'not stated', Holm needs 'v2'",
     "benchmark is 'spy_not_stated', Holm needs 'spy_total_return'",
+    "500 control runs, 2000 needed",
     "the control drew from universe, not the rule's own candidate pool",
     "its window ran 464 sessions into the hold-out"
    ],
@@ -479,25 +482,25 @@
  },
  "tbill": true,
  "registry": {
-  "configurations": 10890,
-  "rows": 526,
+  "configurations": 15064,
+  "rows": 615,
   "unreadable_lines": 0,
   "by_strategy": {
    "ath_breakout": 9,
-   "dip_reversal": 8286,
+   "dip_reversal": 12431,
    "filing_flags_study": 12,
-   "index_core": 12,
-   "index_core_trend_momentum": 12,
+   "index_core": 18,
+   "index_core_trend_momentum": 24,
    "market_alarm_study": 8,
    "mom_12_1_band": 38,
-   "news_continuation": 6,
+   "news_continuation": 12,
    "news_gap_week": 6,
-   "orb_stocks_in_play": 4,
+   "orb_stocks_in_play": 8,
    "overnight_spy": 346,
    "post_earnings_week": 7,
    "pullback_uptrend": 8,
    "rel_strength": 691,
-   "spy_noise_band": 13,
+   "spy_noise_band": 14,
    "spy_noise_band_carry": 2,
    "spy_trend_filter": 6,
    "trend_highs": 1036,
@@ -508,10 +511,10 @@
    "winners_run": 346
   },
   "sources": [
-   "file data/trials.jsonl: 526 rows"
+   "file data/trials.jsonl: 615 rows"
   ]
  },
- "reports_read": 36,
+ "reports_read": 47,
  "other_files": [
   "filing_flags_study.json",
   "index_cost_calibration.json",
@@ -537,8 +540,8 @@
     "gate_version": "3.1",
     "rule": "ath_breakout",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "ath_breakout",
      "sha256": "12fe0766f5dde9609198cc47ccdd4486ce039719ff81a9474fc33d49eadd0994",
@@ -670,7 +673,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 18,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -962,8 +965,8 @@
     "gate_version": "3.1",
     "rule": "ath_breakout",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "ath_breakout",
      "sha256": "12fe0766f5dde9609198cc47ccdd4486ce039719ff81a9474fc33d49eadd0994",
@@ -1083,7 +1086,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 18,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -1365,8 +1368,8 @@
     "gate_version": "3.1",
     "rule": "ath_breakout",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "ath_breakout",
      "sha256": "12fe0766f5dde9609198cc47ccdd4486ce039719ff81a9474fc33d49eadd0994",
@@ -1486,7 +1489,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 18,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -1752,6 +1755,674 @@
    }
   },
   {
+   "rule": "control",
+   "scored_as": "control",
+   "run": "walkforward, today, costs v1",
+   "report": "walkforward_balanced_wf_A_exp-control_20261126T150329.json",
+   "label": "control|default",
+   "evidence_rank": [
+    4,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "control",
+    "family": null,
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": null,
+    "gate_a": {
+     "preregistered": false,
+     "not_retroactive": null,
+     "neighbours_at_most": null,
+     "committed_before_first_run": null,
+     "unchanged_since_logged_runs": null,
+     "declares_gate_v3": false,
+     "in_a_family": false,
+     "family": null,
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "v1",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "walkforward_balanced_wf_A_exp-control_20261126T150329.json",
+     "run_at": "2026-11-26T15:03:29+00:00",
+     "code_sha": "ecbfb40"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.14350279415507977,
+       "se": 0.020295111934763237,
+       "t": -7.070805749500483,
+       "lags": 7,
+       "p_one_sided": 0.9999999999992298,
+       "tracking_error": 0.057221579812193835,
+       "information_ratio": -2.5078439747044445,
+       "interval": [
+        -0.17668474888399785,
+        -0.11100228493031276
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.0
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "runs_min": 500,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the rule is in no family of config/gate_v3.yaml",
+      "judged": true
+     },
+     "s4": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family"
+      },
+      "why": "the rule is in no family",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "supplied": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "no pre-registration and no neighbour was supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'v1', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "no pre-registration was supplied (Gate A)",
+     "the rule is in no family of config/gate_v3.yaml: it must be added before its first run"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": -0.6080309136182691,
+      "cagr": -0.1150506508431115,
+      "max_drawdown": 0.6159021475454118,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -2.5078439747044445,
+       "se": 0.35060665789006795,
+       "t": -7.152870369879782,
+       "lags": 7,
+       "t_naive": -6.942108225315405,
+       "se_naive": 0.36125106283408653,
+       "haircut": -1.2539219873522223,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.14350279415507977,
+       "vol_ann": 0.057221579812193835
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.6712597740002997,
+      "cagr": -0.13513530108822824,
+      "max_drawdown": 0.6772805680004073,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -2.5078439747044445,
+       "se": 0.35060665789006795,
+       "t": -7.152870369879782,
+       "lags": 7,
+       "t_naive": -6.942108225315405,
+       "se_naive": 0.36125106283408653,
+       "haircut": -1.2539219873522223,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.14350279415507977,
+       "vol_ann": 0.057221579812193835
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.15664101374153178,
+      "alpha_se": 0.019616299252692926,
+      "alpha_t": -7.985247967708695,
+      "beta": 0.10228131370917755,
+      "beta_se": 0.017494904422185258,
+      "r2": 0.10762682805236934,
+      "tracking_error": 0.05406866383547592,
+      "lags": 7,
+      "alpha_se_ols": 0.019551345545983582
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": -0.13180605286339586,
+       "max_drawdown": 0.1359877142944691,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": -0.139065223680377
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.23482284587053492,
+       "max_drawdown": 0.23696572546540262,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": -0.25478965059122294
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.1253703547613947,
+       "max_drawdown": 0.12943930198384823,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.14659023195021992
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.11259310235256215,
+       "max_drawdown": 0.1243649573579455,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.11631297723212253
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.06214189805587822,
+       "max_drawdown": 0.07446773514700566,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": -0.06260262195276056
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.06496312366524803,
+       "max_drawdown": 0.09837046264852434,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": -0.08552072292517787
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": -0.02991092552297947,
+       "max_drawdown": 0.09483921246330396,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": -0.0830922907750109
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.10638883258740706,
+       "max_drawdown": 0.13688149687577034,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": -0.15919828674577008
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
+   "rule": "high_vix",
+   "scored_as": "high_vix",
+   "run": "walkforward, today, costs v1",
+   "report": "walkforward_balanced_wf_A_exp-high_vix_20261126T150649.json",
+   "label": "high_vix|default",
+   "evidence_rank": [
+    4,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "high_vix",
+    "family": null,
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": null,
+    "gate_a": {
+     "preregistered": false,
+     "not_retroactive": null,
+     "neighbours_at_most": null,
+     "committed_before_first_run": null,
+     "unchanged_since_logged_runs": null,
+     "declares_gate_v3": false,
+     "in_a_family": false,
+     "family": null,
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "v1",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "walkforward_balanced_wf_A_exp-high_vix_20261126T150649.json",
+     "run_at": "2026-11-26T15:06:49+00:00",
+     "code_sha": "ecbfb40"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.01984663636033175,
+       "se": 0.00917031151242568,
+       "t": -2.1642270639813876,
+       "lags": 7,
+       "p_one_sided": 0.9847765364115868,
+       "tracking_error": 0.028213809395619925,
+       "information_ratio": -0.703436961738774,
+       "interval": [
+        -0.034884489020894034,
+        -0.006370204922961259
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.011
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "runs_min": 500,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the rule is in no family of config/gate_v3.yaml",
+      "judged": true
+     },
+     "s4": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family"
+      },
+      "why": "the rule is in no family",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "supplied": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "no pre-registration and no neighbour was supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'v1', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "no pre-registration was supplied (Gate A)",
+     "the rule is in no family of config/gate_v3.yaml: it must be added before its first run"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": 0.02088050454283552,
+      "cagr": 0.002700535106171076,
+      "max_drawdown": 0.14215390135616246,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -0.703436961738774,
+       "se": 0.31428652128984974,
+       "t": -2.2382027674996325,
+       "lags": 7,
+       "t_naive": -1.9472246149815335,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.351718480869387,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.01984663636033175,
+       "vol_ann": 0.028213809395619925
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.14370206158344867,
+      "cagr": -0.020042158938845867,
+      "max_drawdown": 0.17397104409557806,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -0.703436961738774,
+       "se": 0.31428652128984974,
+       "t": -2.2382027674996325,
+       "lags": 7,
+       "t_naive": -1.9472246149815335,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.351718480869387,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.01984663636033175,
+       "vol_ann": 0.028213809395619925
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.024809877173797314,
+      "alpha_se": 0.009154628820962395,
+      "alpha_t": -2.710090999756027,
+      "beta": 0.03863893332851158,
+      "beta_se": 0.008057088364822797,
+      "r2": 0.06317924551367471,
+      "tracking_error": 0.02731508275010235,
+      "lags": 7,
+      "alpha_se_ols": 0.009877192879953953
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.007259170816981131,
+       "max_drawdown": 0.0,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": 0.0
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.0008055893351198717,
+       "max_drawdown": 0.015971183015484836,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": -0.020772394055807886
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.007505762643793545,
+       "max_drawdown": 0.00724768539877263,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.013714114545031686
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.05057000417052315,
+       "max_drawdown": 0.06306515375895194,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.054289879050083534
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.022089612254646118,
+       "max_drawdown": 0.03218751144478349,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": -0.02255033615152846
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.03829582056587166,
+       "max_drawdown": 0.0811800831569699,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": -0.0588534198258015
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.0659897991072722,
+       "max_drawdown": 0.00981166511311804,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": 0.012808433855240775
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.05774160012746998,
+       "max_drawdown": 0.0019430678289054093,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": 0.00493214596910696
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
    "rule": "mom_12_1_band",
    "scored_as": "mom_12_1_band",
    "run": "core, point_in_time, costs v1",
@@ -1805,8 +2476,8 @@
     "gate_version": "3.1",
     "rule": "mom_12_1_band",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "mom_12_1_band",
      "sha256": "3bd535bb5cb6e6ccf3fc799fe2bdd321af66323088e103142ae2e21ce85a238f",
@@ -2188,12 +2859,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -2651,8 +3322,8 @@
     "gate_version": "3.1",
     "rule": "mom_12_1_band",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "mom_12_1_band",
      "sha256": "3bd535bb5cb6e6ccf3fc799fe2bdd321af66323088e103142ae2e21ce85a238f",
@@ -3026,12 +3697,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -3487,8 +4158,8 @@
     "gate_version": "3.1",
     "rule": "mom_12_1_band_nofilter",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -3594,12 +4265,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -3927,8 +4598,8 @@
     "gate_version": "3.1",
     "rule": "mom_12_1_band_nofilter",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -4026,12 +4697,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -4304,6 +4975,1073 @@
    }
   },
   {
+   "rule": "mornings",
+   "scored_as": "mornings",
+   "run": "walkforward, today, costs v1",
+   "report": "walkforward_balanced_wf_A_exp-mornings_20261126T151014.json",
+   "label": "mornings|default",
+   "evidence_rank": [
+    4,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "mornings",
+    "family": null,
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": null,
+    "gate_a": {
+     "preregistered": false,
+     "not_retroactive": null,
+     "neighbours_at_most": null,
+     "committed_before_first_run": null,
+     "unchanged_since_logged_runs": null,
+     "declares_gate_v3": false,
+     "in_a_family": false,
+     "family": null,
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "v1",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "walkforward_balanced_wf_A_exp-mornings_20261126T151014.json",
+     "run_at": "2026-11-26T15:10:14+00:00",
+     "code_sha": "ecbfb40"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.07127112359079138,
+       "se": 0.016275899266372757,
+       "t": -4.37893614505485,
+       "lags": 7,
+       "p_one_sided": 0.9999940369966613,
+       "tracking_error": 0.047972427587276274,
+       "information_ratio": -1.4856684803187787,
+       "interval": [
+        -0.09637087274665797,
+        -0.04554706859805965
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.0
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "runs_min": 500,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the rule is in no family of config/gate_v3.yaml",
+      "judged": true
+     },
+     "s4": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family"
+      },
+      "why": "the rule is in no family",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "supplied": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "no pre-registration and no neighbour was supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'v1', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "no pre-registration was supplied (Gate A)",
+     "the rule is in no family of config/gate_v3.yaml: it must be added before its first run"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": -0.3155604294016878,
+      "cagr": -0.04827637930187989,
+      "max_drawdown": 0.33681190776533,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -1.4856684803187787,
+       "se": 0.345146030483657,
+       "t": -4.304463470829709,
+       "lags": 7,
+       "t_naive": -4.1125650085661025,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.7428342401593894,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.07127112359079138,
+       "vol_ann": 0.047972427587276274
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.42593804173804584,
+      "cagr": -0.06987020265074795,
+      "max_drawdown": 0.43715966682692653,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -1.4856684803187787,
+       "se": 0.345146030483657,
+       "t": -4.304463470829709,
+       "lags": 7,
+       "t_naive": -4.1125650085661025,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.7428342401593894,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.07127112359079138,
+       "vol_ann": 0.047972427587276274
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.08020356732456917,
+      "alpha_se": 0.016031890925483645,
+      "alpha_t": -5.0027515592113225,
+      "beta": 0.06953926091068076,
+      "beta_se": 0.012234167788616648,
+      "r2": 0.07078225314716968,
+      "tracking_error": 0.04625545789299919,
+      "lags": 7,
+      "alpha_se_ols": 0.016726073412976557
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": -0.06054540211643766,
+       "max_drawdown": 0.07516216330462056,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": -0.0678045729334188
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.13223496227171816,
+       "max_drawdown": 0.13835195184277704,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": -0.15220176699240617
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.09196287869674713,
+       "max_drawdown": 0.10225847457121784,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.11318275588557236
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.0659205906250907,
+       "max_drawdown": 0.08102275126001401,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.06964046550465108
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.01021235825308553,
+       "max_drawdown": 0.04106434240053669,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": -0.010673082149967872
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": 0.00870779160388202,
+       "max_drawdown": 0.052507899809787095,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": -0.011849807656047817
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.03037193020751272,
+       "max_drawdown": 0.054474838811867654,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": -0.02280943504451871
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.03779337651051895,
+       "max_drawdown": 0.0647930242034489,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": -0.09060283066888197
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
+   "rule": "mornings_wide_stop",
+   "scored_as": "mornings_wide_stop",
+   "run": "walkforward, today, costs v1",
+   "report": "walkforward_balanced_wf_A_exp-mornings_wide_stop_20261126T151403.json",
+   "label": "mornings_wide_stop|default",
+   "evidence_rank": [
+    4,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "mornings_wide_stop",
+    "family": null,
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": null,
+    "gate_a": {
+     "preregistered": false,
+     "not_retroactive": null,
+     "neighbours_at_most": null,
+     "committed_before_first_run": null,
+     "unchanged_since_logged_runs": null,
+     "declares_gate_v3": false,
+     "in_a_family": false,
+     "family": null,
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "v1",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "walkforward_balanced_wf_A_exp-mornings_wide_stop_20261126T151403.json",
+     "run_at": "2026-11-26T15:14:03+00:00",
+     "code_sha": "ecbfb40"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.026742634686756205,
+       "se": 0.010647217314773022,
+       "t": -2.5117017804878254,
+       "lags": 7,
+       "p_one_sided": 0.9939924712391336,
+       "tracking_error": 0.030741764277643614,
+       "information_ratio": -0.8699121639613996,
+       "interval": [
+        -0.04470767880428285,
+        -0.007979593492606903
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.0095
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "runs_min": 500,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the rule is in no family of config/gate_v3.yaml",
+      "judged": true
+     },
+     "s4": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family"
+      },
+      "why": "the rule is in no family",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "supplied": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "no pre-registration and no neighbour was supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'v1', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "no pre-registration was supplied (Gate A)",
+     "the rule is in no family of config/gate_v3.yaml: it must be added before its first run"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": -0.03219926249185434,
+      "cagr": -0.004262110255487506,
+      "max_drawdown": 0.1680958201315328,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -0.8699121639613996,
+       "se": 0.3459009648615246,
+       "t": -2.514916847108691,
+       "lags": 7,
+       "t_naive": -2.4080542687868247,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.4349560819806998,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.026742634686756205,
+       "vol_ann": 0.030741764277643614
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.1882407432404256,
+      "cagr": -0.026849421798105344,
+      "max_drawdown": 0.210037923623985,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -0.8699121639613996,
+       "se": 0.3459009648615246,
+       "t": -2.514916847108691,
+       "lags": 7,
+       "t_naive": -2.4080542687868247,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.4349560819806998,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.026742634686756205,
+       "vol_ann": 0.030741764277643614
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.03378535924264502,
+      "alpha_se": 0.010334911762127936,
+      "alpha_t": -3.269051542989535,
+      "beta": 0.05482775766748464,
+      "beta_se": 0.009287458091996848,
+      "r2": 0.1071497166131875,
+      "tracking_error": 0.029055653599828545,
+      "lags": 7,
+      "alpha_se_ols": 0.010506587056104
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": -0.03287412144879143,
+       "max_drawdown": 0.04163051753060165,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": -0.04013329226577256
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.06415696193070841,
+       "max_drawdown": 0.06981812098049733,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": -0.08412376665139643
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.004631871292618661,
+       "max_drawdown": 0.024403482249055086,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.025851748481443892
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.05307836842589919,
+       "max_drawdown": 0.06053232718023627,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.05679824330545957
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.010901485732342842,
+       "max_drawdown": 0.02447291411717467,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": 0.0104407618354605
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": 0.030949181586523933,
+       "max_drawdown": 0.027310553078188415,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": 0.010391582326594095
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.050706701446828095,
+       "max_drawdown": 0.0252095239988126,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": -0.0024746638052033365
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.036035332791609864,
+       "max_drawdown": 0.011985736536732738,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": -0.01677412136675316
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
+   "rule": "news_continuation",
+   "scored_as": "news_continuation",
+   "run": "oneshots, today",
+   "report": "oneshots_news_continuation_20261126T153434.json",
+   "label": "news_continuation",
+   "evidence_rank": [
+    1,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "news_continuation",
+    "family": "news_drift",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": {
+     "rule": "news_continuation",
+     "sha256": "533831f810a61682b3e09a56eb8edc70b034b3a3627031b80aef9322d9ebcc58",
+     "status": "pre-registered",
+     "date": "2026-11-13",
+     "neighbours": [
+      "move15",
+      "relvol2",
+      "relvol5",
+      "stop1",
+      "stop2"
+     ],
+     "committed_at": "2026-11-13T00:54:53+01:00",
+     "first_committed_at": "2026-11-13T00:54:53+01:00",
+     "amendments": [],
+     "design_saw_holdout": null,
+     "amendment_log": [],
+     "versions": [
+      {
+       "sha256": "533831f810a61682b3e09a56eb8edc70b034b3a3627031b80aef9322d9ebcc58",
+       "committed_at": "2026-11-13T00:54:53+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": false,
+     "in_a_family": true,
+     "family": "news_drift",
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "not stated",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "oneshots_news_continuation_20261126T153434.json",
+     "run_at": "2026-11-26T15:34:34.127264+00:00",
+     "code_sha": "2744cf6"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.01601101445160907,
+       "se": 0.012505171504900301,
+       "t": -1.2803514486254715,
+       "lags": 7,
+       "p_one_sided": 0.8997892194832442,
+       "tracking_error": 0.03286555401246903,
+       "information_ratio": -0.48716703347019713,
+       "interval": [
+        -0.03772775879521663,
+        0.004924907657292188
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.106
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {
+       "family": "news_drift"
+      },
+      "limit": {
+       "runs_min": 2000,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "no matched random control was supplied",
+      "judged": true
+     },
+     "s4": {
+      "met": false,
+      "numbers": {
+       "dsr": 0.0009441929114210704,
+       "psr": 0.0953895535511502,
+       "sharpe": -0.48716703347019713,
+       "hurdle": 0.6698871434219078,
+       "n_trials": 18,
+       "trial_sharpe_var": 0.0005181347150259067,
+       "var_source": "variance of the logged trial Sharpes",
+       "family": "news_drift",
+       "configurations": 18,
+       "trial_sharpes_used": 0,
+       "trial_sharpe_series": "active_return",
+       "trial_sharpes_absolute_only_flagged": 25,
+       "whole_registry_configurations": 15064,
+       "sessions_judged": 1931,
+       "variance_of_trial_sharpes": null,
+       "variance_floor": 0.0005181347150259067,
+       "variance_floor_binds": true
+      },
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family",
+       "variance_floor": "1/(T-1)"
+      },
+      "why": "deflated Sharpe 0.001 is below 0.9",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": false,
+      "numbers": {
+       "declared": [
+        "move15",
+        "relvol2",
+        "relvol5",
+        "stop1",
+        "stop2"
+       ],
+       "results": {
+        "move15": false,
+        "relvol2": false,
+        "relvol5": false,
+        "stop1": false,
+        "stop2": false
+       },
+       "active_return": {
+        "move15": -0.009249126032791634,
+        "relvol2": -0.05420455700713365,
+        "relvol5": -0.0018157717571884848,
+        "stop1": -0.012176159830408158,
+        "stop2": -0.01703768698647623
+       },
+       "undeclared": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "move15: active return -0.92% a year; relvol2: active return -5.42% a year; relvol5: active return -0.18% a year; stop1: active return -1.22% a year; stop2: active return -1.70% a year",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'not stated', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "the pre-registration does not declare its gate v3 role, kind, family and candidate pool (it predates decision 16): this is a re-score, not a verdict"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": 0.05021965728459454,
+      "cagr": 0.006415016662198791,
+      "max_drawdown": 0.1298399756881493,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -0.48716703347019713,
+       "se": 0.3917031233640343,
+       "t": -1.2437149576094706,
+       "lags": 7,
+       "t_naive": -1.3485552946149824,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.24358351673509857,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.01601101445160907,
+       "vol_ann": 0.03286555401246903
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.11910586356816844,
+      "cagr": -0.016413822263580125,
+      "max_drawdown": 0.19880641798896248,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -0.48716703347019713,
+       "se": 0.3917031233640343,
+       "t": -1.2437149576094706,
+       "lags": 7,
+       "t_naive": -1.3485552946149824,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.24358351673509857,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.01601101445160907,
+       "vol_ann": 0.03286555401246903
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.018699347043073515,
+      "alpha_se": 0.012066102118308839,
+      "alpha_t": -1.5497421503419515,
+      "beta": 0.02092872533701018,
+      "beta_se": 0.006362556291009246,
+      "r2": 0.01366001812936024,
+      "tracking_error": 0.03264876945314771,
+      "lags": 7,
+      "alpha_se_ols": 0.011805865504129962
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.019297240185044418,
+       "max_drawdown": 0.005860993811828141,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": 0.012038069368063287
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": 0.02552447251688661,
+       "max_drawdown": 0.018732044970747208,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": 0.005557667796198595
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.022000184160591463,
+       "max_drawdown": 0.043606538375467685,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.043220061349416694
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.06391946742351973,
+       "max_drawdown": 0.07064748410288402,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.06763934230308011
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.006510718231855117,
+       "max_drawdown": 0.025103172095887527,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": -0.0069714421287374595
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.019724875660070085,
+       "max_drawdown": 0.03612276553313554,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": -0.04028247491999992
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.023969648998505066,
+       "max_drawdown": 0.03199669198974442,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": -0.029211716253526365
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.10048221244336308,
+       "max_drawdown": 0.015527850119475661,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": 0.04767275828500006
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
    "rule": "news_gap_week",
    "scored_as": "news_gap_week",
    "run": "oneshots, point_in_time",
@@ -4320,8 +6058,8 @@
     "gate_version": "3.1",
     "rule": "news_gap_week",
     "family": "news_drift",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "news_gap_week",
      "sha256": "be0e75a6ac81d0609c79c3b31f45f823f9978d55ee6d4f773496fce95d47a53d",
@@ -4441,19 +6179,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.014980741317633715,
+       "dsr": 0.009155731028572872,
        "psr": 0.3052617632732545,
        "sharpe": -0.1844343353580354,
-       "hurdle": 0.6015706701115355,
-       "n_trials": 12,
+       "hurdle": 0.6698871434219078,
+       "n_trials": 18,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "news_drift",
-       "configurations": 12,
+       "configurations": 18,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
-       "trial_sharpes_absolute_only_flagged": 19,
-       "whole_registry_configurations": 10890,
+       "trial_sharpes_absolute_only_flagged": 25,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -4464,7 +6202,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.015 is below 0.9",
+      "why": "deflated Sharpe 0.009 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -4729,6 +6467,397 @@
    }
   },
   {
+   "rule": "orb_stocks_in_play",
+   "scored_as": "orb_stocks_in_play",
+   "run": "oneshots, today",
+   "report": "oneshots_orb_stocks_in_play_20261126T153534.json",
+   "label": "orb_stocks_in_play",
+   "evidence_rank": [
+    1,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "orb_stocks_in_play",
+    "family": "opening_range_breakout",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": {
+     "rule": "orb_stocks_in_play",
+     "sha256": "6c47db75ad3cefc0287d91c025c98f3c34d8e8169c5f7650f8148c2fd0060e13",
+     "status": "pre-registered",
+     "date": "2026-11-13",
+     "neighbours": [
+      "top10",
+      "top40",
+      "stop20"
+     ],
+     "committed_at": "2026-11-13T00:54:53+01:00",
+     "first_committed_at": "2026-11-13T00:54:53+01:00",
+     "amendments": [],
+     "design_saw_holdout": null,
+     "amendment_log": [],
+     "versions": [
+      {
+       "sha256": "6c47db75ad3cefc0287d91c025c98f3c34d8e8169c5f7650f8148c2fd0060e13",
+       "committed_at": "2026-11-13T00:54:53+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": false,
+     "in_a_family": true,
+     "family": "opening_range_breakout",
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "not stated",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "oneshots_orb_stocks_in_play_20261126T153534.json",
+     "run_at": "2026-11-26T15:35:34.153851+00:00",
+     "code_sha": "2744cf6"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.1774759673494914,
+       "se": 0.005641214689136925,
+       "t": -31.46059441617249,
+       "lags": 7,
+       "p_one_sided": 1.0,
+       "tracking_error": 0.01549478579191923,
+       "information_ratio": -11.453915512794495,
+       "interval": [
+        -0.1886872738201225,
+        -0.16675806294386733
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.0
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {
+       "family": "opening_range_breakout"
+      },
+      "limit": {
+       "runs_min": 500,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "no matched random control was supplied",
+      "judged": true
+     },
+     "s4": {
+      "met": false,
+      "numbers": {
+       "dsr": 6.989902363283102e-80,
+       "psr": 3.408157429192351e-73,
+       "sharpe": -11.453915512794495,
+       "hurdle": 0.5272069152147992,
+       "n_trials": 8,
+       "trial_sharpe_var": 0.0005181347150259067,
+       "var_source": "variance of the logged trial Sharpes",
+       "family": "opening_range_breakout",
+       "configurations": 8,
+       "trial_sharpes_used": 0,
+       "trial_sharpe_series": "active_return",
+       "trial_sharpes_absolute_only_flagged": 8,
+       "whole_registry_configurations": 15064,
+       "sessions_judged": 1931,
+       "variance_of_trial_sharpes": null,
+       "variance_floor": 0.0005181347150259067,
+       "variance_floor_binds": true
+      },
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family",
+       "variance_floor": "1/(T-1)"
+      },
+      "why": "deflated Sharpe 0.000 is below 0.9",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": false,
+      "numbers": {
+       "declared": [
+        "top10",
+        "top40",
+        "stop20"
+       ],
+       "results": {
+        "top10": false,
+        "top40": false,
+        "stop20": false
+       },
+       "active_return": {
+        "top10": -0.1967574530366607,
+        "top40": -0.14829733312402316,
+        "stop20": -0.14836383884159146
+       },
+       "undeclared": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "top10: active return -19.68% a year; top40: active return -14.83% a year; stop20: active return -14.84% a year",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'not stated', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "the pre-registration does not declare its gate v3 role, kind, family and candidate pool (it predates decision 16): this is a re-score, not a verdict"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": -0.6943831411042207,
+      "cagr": -0.14332826325878956,
+      "max_drawdown": 0.6947442028975737,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -11.453915512794495,
+       "se": 0.7117398609268052,
+       "t": -16.092839732032946,
+       "lags": 7,
+       "t_naive": -31.706247236855848,
+       "se_naive": 0.36125106283408653,
+       "haircut": -5.726957756397248,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.1774759673494914,
+       "vol_ann": 0.01549478579191923
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.7436839766928438,
+      "cagr": -0.16277178002517867,
+      "max_drawdown": 0.7437986709524219,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -11.453915512794495,
+       "se": 0.7117398609268052,
+       "t": -16.092839732032946,
+       "lags": 7,
+       "t_naive": -31.706247236855848,
+       "se_naive": 0.36125106283408653,
+       "haircut": -5.726957756397248,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.1774759673494914,
+       "vol_ann": 0.01549478579191923
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.17976985902910803,
+      "alpha_se": 0.005388982381252783,
+      "alpha_t": -33.3587765390535,
+      "beta": 0.017857994605272515,
+      "beta_se": 0.0024392401578478473,
+      "r2": 0.044744726248467925,
+      "tracking_error": 0.015148088696862431,
+      "lags": 7,
+      "alpha_se_ols": 0.005477581568776317
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": -0.0697895322333455,
+       "max_drawdown": 0.0697895322333455,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": -0.07704870305032663
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.1325134671872631,
+       "max_drawdown": 0.13458191833780353,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": -0.1524802719079511
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.13130022882979764,
+       "max_drawdown": 0.1330002641811061,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.15252010601862287
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.18773285517758642,
+       "max_drawdown": 0.1884864934338114,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.1914527300571468
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.1552478057976271,
+       "max_drawdown": 0.1552478057976271,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": -0.15570852969450943
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.18740799507048767,
+       "max_drawdown": 0.18763972909982518,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": -0.2079655943304175
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": -0.12355680466396368,
+       "max_drawdown": 0.12469982607454033,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": -0.1767381699159951
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.10784748737830374,
+       "max_drawdown": 0.10890149397766302,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": -0.16065694153666676
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
    "rule": "overnight_spy",
    "scored_as": "overnight_spy",
    "run": "multiday, today",
@@ -4745,8 +6874,8 @@
     "gate_version": "3.1",
     "rule": "overnight_spy",
     "family": "overnight_premium",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "overnight_spy",
      "sha256": "b35fbfe77c6e83f32c25a579099106d32e8c833b5a3fac0952ee8ba2d3f41e0f",
@@ -4856,7 +6985,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 2,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -5131,8 +7260,8 @@
     "gate_version": "3.1",
     "rule": "post_earnings_week",
     "family": "earnings_drift",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "post_earnings_week",
      "sha256": "30eebcfdf16267dc786fb9a6155b4d3ce1887e4ed0531eeb566eda0d904e327c",
@@ -5238,16 +7367,15 @@
        "pool": null,
        "drawdown_percentile": null,
        "family": "earnings_drift",
-       "drew_from": "universe",
-       "matched_reading": "matched"
+       "drew_from": "universe"
       },
       "limit": {
-       "runs_min": 500,
+       "runs_min": 2000,
        "pool": "candidate_pool",
        "family_wise_level": 0.1,
        "families": 12
       },
-      "why": "the control drew from universe, not from the rule's own candidate pool",
+      "why": "500 runs, 2000 needed",
       "judged": true
      },
      "s4": {
@@ -5265,7 +7393,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 14,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -5534,6 +7662,7 @@
      "engine is 'research_harness', Holm needs 'simbroker'",
      "cost_model is 'not stated', Holm needs 'v2'",
      "benchmark is 'spy_not_stated', Holm needs 'spy_total_return'",
+     "500 control runs, 2000 needed",
      "the control drew from universe, not the rule's own candidate pool",
      "its window ran 464 sessions into the hold-out"
     ]
@@ -5556,8 +7685,8 @@
     "gate_version": "3.1",
     "rule": "pullback_uptrend",
     "family": "short_term_reversal",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "pullback_uptrend",
      "sha256": "57693a0de82dfcda135b01dfa9cead6c621f037eb86276563ee45d84e8aa0552",
@@ -5690,7 +7819,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 39,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -5984,8 +8113,8 @@
     "gate_version": "3.1",
     "rule": "rel_strength",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "rel_strength",
      "sha256": "2470995969d3a851b3bb56fd4c23b008efec8fbc933be541726422f662c5edcf",
@@ -6095,12 +8224,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -6379,8 +8508,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -6510,19 +8639,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.27781323565717697,
+       "dsr": 0.26798057614058457,
        "psr": 0.8790215870978413,
        "sharpe": 0.4255100460923469,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -6533,7 +8662,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.278 is below 0.9",
+      "why": "deflated Sharpe 0.268 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -6820,8 +8949,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -6939,19 +9068,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.08775861559570113,
+       "dsr": 0.08311878533745354,
        "psr": 0.6599220899636662,
        "sharpe": 0.1492803113790858,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -6962,7 +9091,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.088 is below 0.9",
+      "why": "deflated Sharpe 0.083 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -7246,8 +9375,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -7365,19 +9494,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.0021052085588005834,
+       "dsr": 0.001914766462730991,
        "psr": 0.13955806546871646,
        "sharpe": -0.3891166958259733,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -7672,8 +9801,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "spy_noise_band",
      "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
@@ -7791,19 +9920,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.0074946348573709885,
+       "dsr": 0.006898493397548199,
        "psr": 0.2558548510302836,
        "sharpe": -0.23633531253148216,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -8082,6 +10211,430 @@
    }
   },
   {
+   "rule": "spy_noise_band",
+   "scored_as": "spy_noise_band",
+   "run": "spy_cost_rerun, today, v2idx",
+   "report": "spy_cost_rerun_balanced_20261126T153719.json",
+   "label": "spy_noise_band|v2idx",
+   "evidence_rank": [
+    5,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "spy_noise_band",
+    "family": "spy_intraday_momentum",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": {
+     "rule": "spy_noise_band",
+     "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
+     "status": "pre-registered",
+     "date": "2026-11-12",
+     "neighbours": [
+      "lb10",
+      "lb20",
+      "lb30",
+      "check15",
+      "exit1555"
+     ],
+     "committed_at": "2026-11-12T20:30:04+01:00",
+     "first_committed_at": "2026-11-12T18:11:05+01:00",
+     "amendments": [
+      "## Amendment 1 (12 Nov 2026, backend-quant, issue #149, before any control result was seen)"
+     ],
+     "design_saw_holdout": null,
+     "amendment_log": [
+      {
+       "amendment": "## Amendment 1 (12 Nov 2026, backend-quant, issue #149, before any control result was seen)",
+       "committed_at": "2026-11-12T20:30:04+01:00"
+      }
+     ],
+     "versions": [
+      {
+       "sha256": "48f93d2986492e97d19e6a99c94e5909ab05c050cdc0614ddbd1dbbb5b1b8f49",
+       "committed_at": "2026-11-12T18:11:05+01:00",
+       "amended_only": false
+      },
+      {
+       "sha256": "a7f9ce0201ea2afd4cb2e34135cae4cb2cd752dcdef33c4d3a716674897fffc3",
+       "committed_at": "2026-11-12T18:11:12+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "054b6baf502bac3a9cf51c15aaab036b3a1414a61cdce1cd7b5571eaa3f8e1ed",
+       "committed_at": "2026-11-12T20:30:04+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": false,
+     "in_a_family": true,
+     "family": "spy_intraday_momentum",
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "not stated",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "spy_cost_rerun_balanced_20261126T153719.json",
+     "run_at": "2026-11-26T15:37:19+00:00",
+     "code_sha": "2744cf6"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": true,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": 0.005355495170544063,
+       "se": 0.0014597019355952873,
+       "t": 3.668896395865924,
+       "lags": 7,
+       "p_one_sided": 0.00012179988300231592,
+       "tracking_error": 0.004502609109746274,
+       "information_ratio": 1.1894204093692358,
+       "interval": [
+        0.0031812341920421615,
+        0.007699558185108464
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 1.0
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "",
+      "judged": true
+     },
+     "s2": {
+      "met": true,
+      "numbers": {
+       "active_return_at": {
+        "1x": 0.005355495170544063,
+        "2x": 0.004408578094208317,
+        "3x": 0.003461661017872571
+       },
+       "costs_a_year": 0.0009469170763357461,
+       "breakeven_multiple": 6.655717173533343
+      },
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {
+       "family": "spy_intraday_momentum"
+      },
+      "limit": {
+       "runs_min": 2000,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "no matched random control was supplied",
+      "judged": true
+     },
+     "s4": {
+      "met": true,
+      "numbers": {
+       "dsr": 0.9416539148381744,
+       "psr": 0.9997328801490065,
+       "sharpe": 1.1894204093692358,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
+       "trial_sharpe_var": 0.0005181347150259067,
+       "var_source": "variance of the logged trial Sharpes",
+       "family": "spy_intraday_momentum",
+       "configurations": 16,
+       "trial_sharpes_used": 0,
+       "trial_sharpe_series": "active_return",
+       "trial_sharpes_absolute_only_flagged": 0,
+       "whole_registry_configurations": 15064,
+       "sessions_judged": 1931,
+       "variance_of_trial_sharpes": null,
+       "variance_floor": 0.0005181347150259067,
+       "variance_floor_binds": true
+      },
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family",
+       "variance_floor": "1/(T-1)"
+      },
+      "why": "",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "declared": [
+        "lb10",
+        "lb20",
+        "lb30",
+        "check15",
+        "exit1555"
+       ],
+       "results": {
+        "lb10": null,
+        "lb20": null,
+        "lb30": null,
+        "check15": null,
+        "exit1555": null
+       },
+       "active_return": {},
+       "undeclared": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "lb10: no result supplied; lb20: no result supplied; lb30: no result supplied; check15: no result supplied; exit1555: no result supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'not stated', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "the pre-registration does not declare its gate v3 role, kind, family and candidate pool (it predates decision 16): this is a re-score, not a verdict"
+    ],
+    "verdict": "incomplete",
+    "verdict_text": "incomplete, hindsight (Amendment 1 written after the first run)",
+    "hindsight": [
+     {
+      "amendment": "## Amendment 1 (12 Nov 2026, backend-quant, issue #149, before any control result was seen)",
+      "committed_at": "2026-11-12T19:30:04Z",
+      "why": "committed 2026-11-12T19:30:04Z, after the first logged run (2026-11-12T17:19:09Z)"
+     }
+    ],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "timing",
+     "benchmark": "average_matched_time_weighted",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": 0.2420433349242077,
+      "cagr": 0.028691295746786638,
+      "max_drawdown": 0.0029136030724881135,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 1.1894204093692358,
+       "se": 0.31310245083915816,
+       "t": 3.7988217792017385,
+       "lags": 7,
+       "t_naive": 3.2925035570497583,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.5947102046846179,
+       "haircut_share": 0.5,
+       "warning": true,
+       "mean_ann": 0.005355495170544063,
+       "vol_ann": 0.004502609109746274
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": 0.04180991236684495,
+      "cagr": 0.005359621984334151,
+      "max_drawdown": 0.004536203781345227,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 1.1894204093692358,
+       "se": 0.31310245083915816,
+       "t": 3.7988217792017385,
+       "lags": 7,
+       "t_naive": 3.2925035570497583,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.5947102046846179,
+       "haircut_share": 0.5,
+       "warning": true,
+       "mean_ann": 0.005355495170544063,
+       "vol_ann": 0.004502609109746274
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.004549672660248333,
+      "alpha_se": 0.0013641809859880557,
+      "alpha_t": 3.3350946149957323,
+      "beta": 0.006273345062253757,
+      "beta_se": 0.001413856180101926,
+      "r2": 0.06539092717399297,
+      "tracking_error": 0.0043540336656051155,
+      "lags": 7,
+      "alpha_se_ols": 0.001574427971331462
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.008147132642889687,
+       "max_drawdown": 0.0006035915224091859,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": 0.0008879618259085564
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": 0.027603012682577033,
+       "max_drawdown": 0.0016537860708820684,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": 0.007636207961889019
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.022043554997260184,
+       "max_drawdown": 0.0010556783798215674,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": 0.0008236778084349528
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.003988524974322116,
+       "max_drawdown": 0.0029136030724878914,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": 0.0002686500947617354
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.012157107779911414,
+       "max_drawdown": 0.0017832831767632396,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": 0.011696383883029071
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": 0.029472844672084664,
+       "max_drawdown": 0.001780467758244364,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": 0.008915245412154826
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.06149892637406462,
+       "max_drawdown": 0.0011674275279721646,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": 0.00831756112203319
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.05634777948075986,
+       "max_drawdown": 0.0018340591903636128,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": 0.0035383253223968403
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
    "rule": "spy_noise_band_carry",
    "scored_as": "spy_noise_band_carry",
    "run": "spy, point_in_time, 0.5 bp",
@@ -8098,8 +10651,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -8188,19 +10741,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.25128466727155496,
+       "dsr": 0.24193678137569022,
        "psr": 0.8625994458804049,
        "sharpe": 0.3964412068180161,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -8211,7 +10764,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.251 is below 0.9",
+      "why": "deflated Sharpe 0.242 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -8472,8 +11025,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -8550,19 +11103,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.10698569483125236,
+       "dsr": 0.10161050244592662,
        "psr": 0.6999685870660582,
        "sharpe": 0.18984848318353925,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -8573,7 +11126,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.107 is below 0.9",
+      "why": "deflated Sharpe 0.102 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -8831,8 +11384,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -8909,19 +11462,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.008739450327151926,
+       "dsr": 0.00805733924760457,
        "psr": 0.2735373263162162,
        "sharpe": -0.21713675481550485,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -8932,7 +11485,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.009 is below 0.9",
+      "why": "deflated Sharpe 0.008 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -9190,8 +11743,8 @@
     "gate_version": "3.1",
     "rule": "spy_noise_band_carry",
     "family": "spy_intraday_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": null,
     "gate_a": {
      "preregistered": false,
@@ -9268,19 +11821,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 0.01990706130077151,
+       "dsr": 0.018513152739182068,
        "psr": 0.3885336155733491,
        "sharpe": -0.10220566800716098,
-       "hurdle": 0.6398270204256487,
-       "n_trials": 15,
+       "hurdle": 0.6505844872700791,
+       "n_trials": 16,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "spy_intraday_momentum",
-       "configurations": 15,
+       "configurations": 16,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 0,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -9291,7 +11844,7 @@
        "trials": "family",
        "variance_floor": "1/(T-1)"
       },
-      "why": "deflated Sharpe 0.020 is below 0.9",
+      "why": "deflated Sharpe 0.019 is below 0.9",
       "judged": true
      },
      "s5": {
@@ -9817,8 +12370,8 @@
     "gate_version": "3.1",
     "rule": "spy_trend_filter",
     "family": "index_trend_timing",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "spy_trend_filter",
      "sha256": "64fdba6359073b27e4e4f3023a2287c2962c06e71b7899aabf3b0e07c9d9889e",
@@ -9972,7 +12525,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 20,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -10531,8 +13084,8 @@
     "gate_version": "3.1",
     "rule": "spy_trend_filter",
     "family": "index_trend_timing",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "spy_trend_filter",
      "sha256": "64fdba6359073b27e4e4f3023a2287c2962c06e71b7899aabf3b0e07c9d9889e",
@@ -10686,7 +13239,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 20,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -10979,8 +13532,8 @@
     "gate_version": "3.1",
     "rule": "trend_highs",
     "family": "new_highs_breakout",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "trend_highs",
      "sha256": "8e3c0e55788f94ef8c4dfa2d2443c518e9d317440c1cab3d4f0f53cef6641f67",
@@ -11096,7 +13649,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 18,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -11421,8 +13974,8 @@
     "gate_version": "3.1",
     "rule": "trend_momentum",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "trend_momentum",
      "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
@@ -11853,12 +14406,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -12326,8 +14879,8 @@
     "gate_version": "3.1",
     "rule": "trend_momentum",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "trend_momentum",
      "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
@@ -12749,12 +15302,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -13232,8 +15785,8 @@
     "gate_version": "3.1",
     "rule": "trend_momentum",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "trend_momentum",
      "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
@@ -13647,12 +16200,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -14091,8 +16644,8 @@
     "gate_version": "3.1",
     "rule": "trend_momentum",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "trend_momentum",
      "sha256": "a3636c8dcbb25332d617320ca8243b884f6e6c1808b29377427955c6daf0a0c1",
@@ -14502,12 +17055,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -14938,8 +17491,8 @@
     "gate_version": "3.1",
     "rule": "trend_momentum_gbm",
     "family": "cross_sectional_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "trend_momentum_gbm",
      "sha256": "f8c737f6c1b9447d1d511952293fffffd467910b3a238b4e6e6be88beebefa07",
@@ -15085,12 +17638,12 @@
        "var_source": "variance of the logged trial Sharpes",
        "family": "cross_sectional_momentum",
        "configurations": 761,
-       "trial_sharpes_used": 0,
+       "trial_sharpes_used": 14,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 286,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
-       "variance_of_trial_sharpes": null,
+       "variance_of_trial_sharpes": 0.0001326997085822162,
        "variance_floor": 0.0005181347150259067,
        "variance_floor_binds": true
       },
@@ -15375,8 +17928,8 @@
     "gate_version": "3.1",
     "rule": "weekly_fall_rebound",
     "family": "short_term_reversal",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "weekly_fall_rebound",
      "sha256": "77f35d6ed77a3eb34dd190bf421cf287ead6ce8df10081e349ebf6c4020b9c56",
@@ -15508,7 +18061,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 39,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -15799,8 +18352,8 @@
     "gate_version": "3.1",
     "rule": "weekly_fall_rebound",
     "family": "short_term_reversal",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "weekly_fall_rebound",
      "sha256": "77f35d6ed77a3eb34dd190bf421cf287ead6ce8df10081e349ebf6c4020b9c56",
@@ -15932,7 +18485,7 @@
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
        "trial_sharpes_absolute_only_flagged": 39,
-       "whole_registry_configurations": 10890,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -16202,6 +18755,340 @@
    }
   },
   {
+   "rule": "wide_stop",
+   "scored_as": "wide_stop",
+   "run": "walkforward, today, costs v1",
+   "report": "walkforward_balanced_wf_A_exp-wide_stop_20261126T151738.json",
+   "label": "wide_stop|default",
+   "evidence_rank": [
+    4,
+    1,
+    1
+   ],
+   "gate_v2": null,
+   "gate_v3": {
+    "gate": "B-sleeve",
+    "gate_version": "3.1",
+    "rule": "wide_stop",
+    "family": null,
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": null,
+    "gate_a": {
+     "preregistered": false,
+     "not_retroactive": null,
+     "neighbours_at_most": null,
+     "committed_before_first_run": null,
+     "unchanged_since_logged_runs": null,
+     "declares_gate_v3": false,
+     "in_a_family": false,
+     "family": null,
+     "tier": "full"
+    },
+    "source": {
+     "engine": "research_harness",
+     "cost_model": "v1",
+     "data_repairs": false,
+     "benchmark": "spy_total_return",
+     "report": "walkforward_balanced_wf_A_exp-wide_stop_20261126T151738.json",
+     "run_at": "2026-11-26T15:17:38+00:00",
+     "code_sha": "ecbfb40"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "s1": {
+      "met": false,
+      "numbers": {
+       "sessions": 1931,
+       "annualised": -0.04569443254540918,
+       "se": 0.012731036958908055,
+       "t": -3.5892152927445755,
+       "lags": 7,
+       "p_one_sided": 0.9998341625777709,
+       "tracking_error": 0.03609915768125161,
+       "information_ratio": -1.2658032896191636,
+       "interval": [
+        -0.06864848964660432,
+        -0.022008175549517176
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_above_zero": 0.0
+      },
+      "limit": {
+       "annualised_above": 0.0
+      },
+      "why": "the active return is not above zero",
+      "judged": true
+     },
+     "s2": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "costs_multiple": 2.0,
+       "annualised_above": 0.0
+      },
+      "why": "no daily cost series was supplied",
+      "judged": true
+     },
+     "s3": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "runs_min": 500,
+       "pool": "candidate_pool",
+       "family_wise_level": 0.1,
+       "families": 12
+      },
+      "why": "the rule is in no family of config/gate_v3.yaml",
+      "judged": true
+     },
+     "s4": {
+      "met": null,
+      "numbers": {},
+      "limit": {
+       "dsr_min": 0.9,
+       "trials": "family"
+      },
+      "why": "the rule is in no family",
+      "judged": true
+     },
+     "s5": {
+      "met": null,
+      "numbers": {
+       "universe": "today"
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "no run on the point-in-time universe was supplied",
+      "judged": true
+     },
+     "s6": {
+      "met": null,
+      "numbers": {
+       "supplied": []
+      },
+      "limit": {
+       "each": "active return above zero",
+       "neighbours_max": 5
+      },
+      "why": "no pre-registration and no neighbour was supplied",
+      "judged": true
+     }
+    },
+    "provisional": true,
+    "provisional_reasons": [
+     "engine is 'research_harness', a pass needs 'simbroker'",
+     "cost_model is 'v1', a pass needs 'v2'",
+     "data_repairs is False, a pass needs True",
+     "no pre-registration was supplied (Gate A)",
+     "the rule is in no family of config/gate_v3.yaml: it must be added before its first run"
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail",
+    "hindsight": [],
+    "tier": "full",
+    "label": null,
+    "needs_holdout_check": false,
+    "can_pass": false,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "kind": "selection",
+     "benchmark": "path_matched",
+     "mean_exposure": 0.0,
+     "mean_close_exposure": 0.0,
+     "mean_intraday_exposure": null,
+     "rule": {
+      "sessions": 1931,
+      "total_return": -0.16417435675006753,
+      "cagr": -0.023131926045162454,
+      "max_drawdown": 0.2552788769353477,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -1.2658032896191636,
+       "se": 0.34701286338512904,
+       "t": -3.647712875168905,
+       "lags": 7,
+       "t_naive": -3.5039434339339643,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.6329016448095818,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.04569443254540918,
+       "vol_ann": 0.03609915768125161
+      }
+     },
+     "rule_cash_at_zero": {
+      "sessions": 1931,
+      "total_return": -0.29894560425280325,
+      "cagr": -0.045292708256198355,
+      "max_drawdown": 0.306158918888057,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": -1.2658032896191636,
+       "se": 0.34701286338512904,
+       "t": -3.647712875168905,
+       "lags": 7,
+       "t_naive": -3.5039434339339643,
+       "se_naive": 0.36125106283408653,
+       "haircut": -0.6329016448095818,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": -0.04569443254540918,
+       "vol_ann": 0.03609915768125161
+      }
+     },
+     "benchmark_curve": {
+      "sessions": 1931,
+      "total_return": 0.19220120969453447,
+      "cagr": 0.023207689544754384,
+      "max_drawdown": 2.499710604841887e-06,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.0,
+       "se": "inf",
+       "t": 0.0,
+       "lags": 7,
+       "t_naive": 0.0,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.0,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.0,
+       "vol_ann": 0.0
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.6998684270142707,
+       "se": 0.35530166507709315,
+       "t": 1.9697865104640409,
+       "lags": 7,
+       "t_naive": 1.9373463472291637,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.3499342135071353,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12845180717768928,
+       "vol_ann": 0.18353707957034346
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": -0.054988180757255097,
+      "alpha_se": 0.012144307370756521,
+      "alpha_t": -4.527897646074619,
+      "beta": 0.0723520238138008,
+      "beta_se": 0.012130482858341592,
+      "r2": 0.13531778002155626,
+      "tracking_error": 0.03357668942154979,
+      "lags": 7,
+      "alpha_se_ols": 0.012141403367548433
+     },
+     "cash": "Treasury bills on both sides",
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": -0.06003278319574146,
+       "max_drawdown": 0.0668570700227995,
+       "partial": true,
+       "benchmark": 0.007259170816981131,
+       "excess": -0.06729195401272259
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.11395646830755413,
+       "max_drawdown": 0.1219962026044158,
+       "partial": false,
+       "benchmark": 0.019966804720688014,
+       "excess": -0.13392327302824214
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": -0.011989338911051917,
+       "max_drawdown": 0.033463295255574343,
+       "partial": false,
+       "benchmark": 0.02121987718882523,
+       "excess": -0.03320921609987715
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": -0.06982864595614524,
+       "max_drawdown": 0.07729391012697961,
+       "partial": false,
+       "benchmark": 0.003719874879560381,
+       "excess": -0.07354852083570562
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.005642343364265168,
+       "max_drawdown": 0.028260626138366662,
+       "partial": false,
+       "benchmark": 0.0004607238968823424,
+       "excess": 0.005181619467382825
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": 0.024602077297626757,
+       "max_drawdown": 0.034405922806859834,
+       "partial": false,
+       "benchmark": 0.020557599259929837,
+       "excess": 0.004044478037696919
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.055564985358149244,
+       "max_drawdown": 0.0372053615594099,
+       "partial": false,
+       "benchmark": 0.05318136525203143,
+       "excess": 0.002383620106117812
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.004013550490061579,
+       "max_drawdown": 0.03707955807602714,
+       "partial": false,
+       "benchmark": 0.05280945415836302,
+       "excess": -0.048795903668301444
+      }
+     ]
+    }
+   },
+   "holm_input": {
+    "p": null,
+    "enters_holm": false,
+    "why_not": [
+     "no control p-value"
+    ]
+   }
+  },
+  {
    "rule": "winners_run",
    "scored_as": "winners_run",
    "run": "multiday, today",
@@ -16218,8 +19105,8 @@
     "gate_version": "3.1",
     "rule": "winners_run",
     "family": "intraday_dip_reversal",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "winners_run",
      "sha256": "d0c908698baf765c08acb17cfa8335373484ed43a5a1fbe97a0413c9790d5159",
@@ -16317,19 +19204,19 @@
      "s4": {
       "met": false,
       "numbers": {
-       "dsr": 3.7696383421341e-26,
+       "dsr": 1.3636999106275752e-26,
        "psr": 1.0720997345190407e-11,
        "sharpe": -2.424301984908341,
-       "hurdle": 1.381978262654377,
-       "n_trials": 8632,
+       "hurdle": 1.4165331638475214,
+       "n_trials": 12777,
        "trial_sharpe_var": 0.0005181347150259067,
        "var_source": "variance of the logged trial Sharpes",
        "family": "intraday_dip_reversal",
-       "configurations": 8632,
+       "configurations": 12777,
        "trial_sharpes_used": 0,
        "trial_sharpe_series": "active_return",
-       "trial_sharpes_absolute_only_flagged": 14,
-       "whole_registry_configurations": 10890,
+       "trial_sharpes_absolute_only_flagged": 24,
+       "whole_registry_configurations": 15064,
        "sessions_judged": 1931,
        "variance_of_trial_sharpes": null,
        "variance_floor": 0.0005181347150259067,
@@ -16599,11 +19486,11 @@
     "gate": "B-book",
     "gate_version": "3.1",
     "rule": "index_core",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "index_core",
-     "sha256": "23ade4ed716d1ba1f6490bab6ef4d9f21795dc4c61614ced33b4d54696c0ff9b",
+     "sha256": "f34bdfbc56dfd5e607f902c6a2800ef13217963680eeba9470b99d2e073a94e2",
      "status": "pre-registered",
      "date": "2026-11-22",
      "neighbours": [
@@ -16613,14 +19500,15 @@
       "daily",
       "nocap"
      ],
-     "committed_at": "2026-11-26T11:29:21+01:00",
+     "committed_at": "2026-11-26T17:44:58+01:00",
      "first_committed_at": "2026-11-23T17:32:28+01:00",
      "amendments": [
       "## Amendment 1 (22 Nov 2026, QA-Ops, before any run on real data)",
       "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 3 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)",
-      "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out"
+      "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check"
      ],
      "design_saw_holdout": true,
      "amendment_log": [
@@ -16643,6 +19531,10 @@
       {
        "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
        "committed_at": "2026-11-26T11:29:21+01:00"
+      },
+      {
+       "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check",
+       "committed_at": "2026-11-26T17:44:58+01:00"
       }
      ],
      "versions": [
@@ -16664,6 +19556,11 @@
       {
        "sha256": "23ade4ed716d1ba1f6490bab6ef4d9f21795dc4c61614ced33b4d54696c0ff9b",
        "committed_at": "2026-11-26T11:29:21+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "f34bdfbc56dfd5e607f902c6a2800ef13217963680eeba9470b99d2e073a94e2",
+       "committed_at": "2026-11-26T17:44:58+01:00",
        "amended_only": true
       }
      ]
@@ -16745,11 +19642,11 @@
         "sharpe_spy": 0.8249779930680892,
         "sharpe_over_spy": 0.14306619734659837,
         "se": 0.1162798566067036,
-        "configurations": 12,
-        "hurdle": 0.1935840294708458,
-        "dsr": 0.3319806967777752,
+        "configurations": 18,
+        "hurdle": 0.2155681102110311,
+        "dsr": 0.26647398350079393,
         "psr": 0.890719019230554,
-        "why": "deflated Sharpe over SPY's 0.332 is below 0.9 (N = 12 configurations)"
+        "why": "deflated Sharpe over SPY's 0.266 is below 0.9 (N = 18 configurations)"
        }
       },
       "limit": {
@@ -16767,7 +19664,7 @@
         "trials": "book_idea"
        }
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.332 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.266 is below 0.9 (N = 18 configurations)"
      },
      "b3": {
       "met": false,
@@ -16781,7 +19678,7 @@
       "limit": {
        "costs_multiple": 2.0
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.324 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.259 is below 0.9 (N = 18 configurations)"
      },
      "b4": {
       "met": false,
@@ -16834,6 +19731,26 @@
        "evidence_based_budget_max_pct": 10.0
       },
       "why": ""
+     },
+     "b7": {
+      "met": true,
+      "numbers": {
+       "return_sleeves": []
+      },
+      "limit": {
+       "control": "sleeve_budget_in_spy",
+       "statistic": "cagr_points_over_control",
+       "start_offsets_sessions": [
+        0,
+        5,
+        10,
+        15,
+        20
+       ],
+       "offsets_min": 5,
+       "median_above": 0.0
+      },
+      "why": ""
      }
     },
     "provisional": false,
@@ -16843,7 +19760,7 @@
      "books": [
       "index_core"
      ],
-     "configurations": 12
+     "configurations": 18
     },
     "hindsight": [
      {
@@ -16855,10 +19772,15 @@
       "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
       "committed_at": "2026-11-26T10:29:21Z",
       "why": "committed 2026-11-26T10:29:21Z, after the first logged run (2026-11-24T20:54:32Z)"
+     },
+     {
+      "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check",
+      "committed_at": "2026-11-26T16:44:58Z",
+      "why": "committed 2026-11-26T16:44:58Z, after the first logged run (2026-11-24T20:54:32Z)"
      }
     ],
     "verdict": "fail",
-    "verdict_text": "fail, hindsight (Amendments 4, 5 written after the first run)",
+    "verdict_text": "fail, hindsight (Amendments 4, 5, 6 written after the first run)",
     "can_pass": true,
     "statistics": {
      "window": [
@@ -17203,11 +20125,11 @@
     "gate": "B-book",
     "gate_version": "3.1",
     "rule": "index_core",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "index_core",
-     "sha256": "23ade4ed716d1ba1f6490bab6ef4d9f21795dc4c61614ced33b4d54696c0ff9b",
+     "sha256": "f34bdfbc56dfd5e607f902c6a2800ef13217963680eeba9470b99d2e073a94e2",
      "status": "pre-registered",
      "date": "2026-11-22",
      "neighbours": [
@@ -17217,14 +20139,15 @@
       "daily",
       "nocap"
      ],
-     "committed_at": "2026-11-26T11:29:21+01:00",
+     "committed_at": "2026-11-26T17:44:58+01:00",
      "first_committed_at": "2026-11-23T17:32:28+01:00",
      "amendments": [
       "## Amendment 1 (22 Nov 2026, QA-Ops, before any run on real data)",
       "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 3 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)",
-      "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out"
+      "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check"
      ],
      "design_saw_holdout": true,
      "amendment_log": [
@@ -17247,6 +20170,10 @@
       {
        "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
        "committed_at": "2026-11-26T11:29:21+01:00"
+      },
+      {
+       "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check",
+       "committed_at": "2026-11-26T17:44:58+01:00"
       }
      ],
      "versions": [
@@ -17268,6 +20195,11 @@
       {
        "sha256": "23ade4ed716d1ba1f6490bab6ef4d9f21795dc4c61614ced33b4d54696c0ff9b",
        "committed_at": "2026-11-26T11:29:21+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "f34bdfbc56dfd5e607f902c6a2800ef13217963680eeba9470b99d2e073a94e2",
+       "committed_at": "2026-11-26T17:44:58+01:00",
        "amended_only": true
       }
      ]
@@ -17349,11 +20281,11 @@
         "sharpe_spy": 0.8249779930680892,
         "sharpe_over_spy": 0.14107220823312017,
         "se": 0.11703518755587304,
-        "configurations": 12,
-        "hurdle": 0.19484151303671243,
-        "dsr": 0.3229632303117148,
+        "configurations": 18,
+        "hurdle": 0.21696839801708756,
+        "dsr": 0.25833392502336405,
         "psr": 0.8859722309905437,
-        "why": "deflated Sharpe over SPY's 0.323 is below 0.9 (N = 12 configurations)"
+        "why": "deflated Sharpe over SPY's 0.258 is below 0.9 (N = 18 configurations)"
        }
       },
       "limit": {
@@ -17371,7 +20303,7 @@
         "trials": "book_idea"
        }
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.323 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.258 is below 0.9 (N = 18 configurations)"
      },
      "b3": {
       "met": false,
@@ -17385,7 +20317,7 @@
       "limit": {
        "costs_multiple": 2.0
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.315 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.252 is below 0.9 (N = 18 configurations)"
      },
      "b4": {
       "met": false,
@@ -17438,6 +20370,26 @@
        "evidence_based_budget_max_pct": 10.0
       },
       "why": ""
+     },
+     "b7": {
+      "met": true,
+      "numbers": {
+       "return_sleeves": []
+      },
+      "limit": {
+       "control": "sleeve_budget_in_spy",
+       "statistic": "cagr_points_over_control",
+       "start_offsets_sessions": [
+        0,
+        5,
+        10,
+        15,
+        20
+       ],
+       "offsets_min": 5,
+       "median_above": 0.0
+      },
+      "why": ""
      }
     },
     "provisional": false,
@@ -17447,7 +20399,7 @@
      "books": [
       "index_core"
      ],
-     "configurations": 12
+     "configurations": 18
     },
     "hindsight": [
      {
@@ -17459,10 +20411,15 @@
       "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
       "committed_at": "2026-11-26T10:29:21Z",
       "why": "committed 2026-11-26T10:29:21Z, after the first logged run (2026-11-24T20:54:32Z)"
+     },
+     {
+      "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check",
+      "committed_at": "2026-11-26T16:44:58Z",
+      "why": "committed 2026-11-26T16:44:58Z, after the first logged run (2026-11-24T20:54:32Z)"
      }
     ],
     "verdict": "fail",
-    "verdict_text": "fail, hindsight (Amendments 4, 5 written after the first run)",
+    "verdict_text": "fail, hindsight (Amendments 4, 5, 6 written after the first run)",
     "can_pass": true,
     "statistics": {
      "window": [
@@ -17798,6 +20755,646 @@
    }
   },
   {
+   "book": "index_core",
+   "index_cap": "97%",
+   "universe": "pit",
+   "report": "index_core_aggressive_pit_cap97_20261127T101525.json",
+   "run_at": "2026-11-27T10:15:25+00:00",
+   "gate_v3": {
+    "gate": "B-book",
+    "gate_version": "3.1",
+    "rule": "index_core",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": {
+     "rule": "index_core",
+     "sha256": "f34bdfbc56dfd5e607f902c6a2800ef13217963680eeba9470b99d2e073a94e2",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "vol12",
+      "vol18",
+      "lookback63",
+      "daily",
+      "nocap"
+     ],
+     "committed_at": "2026-11-26T17:44:58+01:00",
+     "first_committed_at": "2026-11-23T17:32:28+01:00",
+     "amendments": [
+      "## Amendment 1 (22 Nov 2026, QA-Ops, before any run on real data)",
+      "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 3 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)",
+      "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check"
+     ],
+     "design_saw_holdout": true,
+     "amendment_log": [
+      {
+       "amendment": "## Amendment 1 (22 Nov 2026, QA-Ops, before any run on real data)",
+       "committed_at": "2026-11-23T17:32:28+01:00"
+      },
+      {
+       "amendment": "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+       "committed_at": "2026-11-23T17:32:28+01:00"
+      },
+      {
+       "amendment": "## Amendment 3 (23 Nov 2026, quant research, before any run on real data)",
+       "committed_at": "2026-11-23T22:06:40+01:00"
+      },
+      {
+       "amendment": "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)",
+       "committed_at": "2026-11-25T18:48:39+01:00"
+      },
+      {
+       "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+       "committed_at": "2026-11-26T11:29:21+01:00"
+      },
+      {
+       "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check",
+       "committed_at": "2026-11-26T17:44:58+01:00"
+      }
+     ],
+     "versions": [
+      {
+       "sha256": "97aca41b52fb33879d9befbd1cf56c4c7e1815d794fee18d2fcaca8305b297f2",
+       "committed_at": "2026-11-23T17:32:28+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "e36e537d096fef8d837c94671063dd54f41b8528f07fda096ae3dc3428e35074",
+       "committed_at": "2026-11-23T22:06:40+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "216f91f0258caf4d8bb92c331262ec99e9a31128022efe4784cbef3311d4099b",
+       "committed_at": "2026-11-25T18:48:39+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "23ade4ed716d1ba1f6490bab6ef4d9f21795dc4c61614ced33b4d54696c0ff9b",
+       "committed_at": "2026-11-26T11:29:21+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "f34bdfbc56dfd5e607f902c6a2800ef13217963680eeba9470b99d2e073a94e2",
+       "committed_at": "2026-11-26T17:44:58+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "listed_as_book": true,
+     "components": [
+      "index_core",
+      "volatility_cap"
+     ],
+     "sleeve_budgets": {},
+     "budgets_as_pre_registered": true
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "v2",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "index_core_aggressive_pit_cap97_20261127T101525.json",
+     "run_at": "2026-11-27T10:15:25+00:00",
+     "code_sha": "06b4ad8"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "b1": {
+      "met": true,
+      "numbers": {
+       "total_return": 1.415258935397179,
+       "positive_years": 6,
+       "years": 8,
+       "years_not_counted": []
+      },
+      "limit": {
+       "total_return_above": 0.0,
+       "positive_years_min": 5,
+       "years_min": 8
+      },
+      "why": ""
+     },
+     "b2": {
+      "met": false,
+      "numbers": {
+       "cagr": 0.12196072646703104,
+       "spy_cagr": 0.14390087660986994,
+       "cagr_vs_spy_points": -2.19401501428389,
+       "max_drawdown": 0.18318381811299056,
+       "spy_max_drawdown": 0.3377737502311541,
+       "max_drawdown_vs_spy": 0.5423269806716167,
+       "branch": {
+        "defensive": false,
+        "growth": false
+       },
+       "cagr_vs_spy_points_interval": [
+        -6.7411620560208,
+        2.000984808813568
+       ],
+       "max_drawdown_vs_spy_interval": [
+        0.5060770313010403,
+        0.8856284644712368
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_meeting": {
+        "defensive": 0.3645,
+        "growth": 0.0935,
+        "either": 0.373
+       },
+       "bootstrap_share_shallower_drawdown": 0.995,
+       "chance": {
+        "met": false,
+        "sharpe_book": 0.9654272395287404,
+        "sharpe_spy": 0.8250115831435498,
+        "sharpe_over_spy": 0.14041565638519057,
+        "se": 0.1171694625862675,
+        "configurations": 18,
+        "hurdle": 0.2172173268977669,
+        "dsr": 0.25608094188206276,
+        "psr": 0.884618955870012,
+        "why": "deflated Sharpe over SPY's 0.256 is below 0.9 (N = 18 configurations)"
+       }
+      },
+      "limit": {
+       "defensive": {
+        "cagr_vs_spy_points_min": -2.0,
+        "max_drawdown_vs_spy_max": 0.75
+       },
+       "growth": {
+        "cagr_vs_spy_points_min": 1.0,
+        "max_drawdown_vs_spy_max": 1.1
+       },
+       "chance": {
+        "dsr_min": 0.9,
+        "statistic": "sharpe_over_spy",
+        "trials": "book_idea"
+       }
+      },
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.256 is below 0.9 (N = 18 configurations)"
+     },
+     "b3": {
+      "met": false,
+      "numbers": {
+       "b1": true,
+       "b2": false,
+       "cagr": 0.12161940686547257,
+       "max_drawdown": 0.18346896963220038,
+       "breakeven_multiple": 375.2899724058807
+      },
+      "limit": {
+       "costs_multiple": 2.0
+      },
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.249 is below 0.9 (N = 18 configurations)"
+     },
+     "b4": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "b1": true,
+       "b2": false,
+       "b3": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "B1 to B3 do not all hold on the point-in-time universe"
+     },
+     "b5": {
+      "met": true,
+      "numbers": {
+       "declared": [
+        "vol12",
+        "vol18",
+        "lookback63",
+        "daily",
+        "nocap"
+       ],
+       "results": {
+        "vol12": true,
+        "vol18": true,
+        "lookback63": true,
+        "daily": true,
+        "nocap": true
+       }
+      },
+      "limit": {
+       "neighbours_pass": "b1"
+      },
+      "why": ""
+     },
+     "b6": {
+      "met": true,
+      "numbers": {
+       "sleeves": {},
+       "evidence_based_budget_pct": 0,
+       "labels": {},
+       "missing_verdicts": []
+      },
+      "limit": {
+       "every_return_sleeve": "pass",
+       "or": "evidence_based",
+       "evidence_based_budget_max_pct": 10.0
+      },
+      "why": ""
+     },
+     "b7": {
+      "met": true,
+      "numbers": {
+       "return_sleeves": []
+      },
+      "limit": {
+       "control": "sleeve_budget_in_spy",
+       "statistic": "cagr_points_over_control",
+       "start_offsets_sessions": [
+        0,
+        5,
+        10,
+        15,
+        20
+       ],
+       "offsets_min": 5,
+       "median_above": 0.0
+      },
+      "why": ""
+     }
+    },
+    "provisional": false,
+    "provisional_reasons": [],
+    "book_configurations": {
+     "idea": "index_core",
+     "books": [
+      "index_core"
+     ],
+     "configurations": 18
+    },
+    "hindsight": [
+     {
+      "amendment": "## Amendment 4 (25 Nov 2026, quant research, before any run at this cap)",
+      "committed_at": "2026-11-25T17:48:39Z",
+      "why": "committed 2026-11-25T17:48:39Z, after the first logged run (2026-11-24T20:54:32Z)"
+     },
+     {
+      "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "committed_at": "2026-11-26T10:29:21Z",
+      "why": "committed 2026-11-26T10:29:21Z, after the first logged run (2026-11-24T20:54:32Z)"
+     },
+     {
+      "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24 and 25 Nov 2026): the original 97% core, once, as a consistency check",
+      "committed_at": "2026-11-26T16:44:58Z",
+      "why": "committed 2026-11-26T16:44:58Z, after the first logged run (2026-11-24T20:54:32Z)"
+     }
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail, hindsight (Amendments 4, 5, 6 written after the first run)",
+    "can_pass": true,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "book": {
+      "sessions": 1931,
+      "total_return": 1.415258935397179,
+      "cagr": 0.12196072646703104,
+      "max_drawdown": 0.18318381811299056,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.9654272395287404,
+       "se": 0.3646040671637491,
+       "t": 2.647878415177285,
+       "lags": 7,
+       "t_naive": 2.6724550841588433,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4827136197643702,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12327858182546593,
+       "vol_ann": 0.12769329140292607
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8250115831435498,
+       "se": 0.36040599745699353,
+       "t": 2.2891172426785067,
+       "lags": 7,
+       "t_naive": 2.2837623692264586,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4125057915717749,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.15139499846612448,
+       "vol_ann": 0.18350651258648107
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.02623097983253582,
+      "alpha_se": 0.018533921751580404,
+      "alpha_t": 1.4152957039596372,
+      "beta": 0.6410225104936019,
+      "beta_se": 0.05451915193845847,
+      "r2": 0.8486201941805036,
+      "tracking_error": 0.049695217305535395,
+      "lags": 7,
+      "alpha_se_ols": 0.017976690768399996
+     },
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.13051779469840485,
+       "max_drawdown": 0.019979222248141526,
+       "partial": true,
+       "benchmark": 0.13781744964820075,
+       "excess": -0.007299654949795897
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.035720577930635766,
+       "max_drawdown": 0.14921368278359248,
+       "partial": false,
+       "benchmark": -0.04457358635932729,
+       "excess": 0.008853008428691522
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.2416206553765572,
+       "max_drawdown": 0.06368648290042367,
+       "partial": false,
+       "benchmark": 0.3113380845482947,
+       "excess": -0.06971742917173751
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.10246808333326074,
+       "max_drawdown": 0.17582768877760835,
+       "partial": false,
+       "benchmark": 0.18492176844733743,
+       "excess": -0.08245368511407669
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.26394362601583965,
+       "max_drawdown": 0.04938515281501643,
+       "partial": false,
+       "benchmark": 0.28617675399217557,
+       "excess": -0.02223312797633592
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.1457520164605528,
+       "max_drawdown": 0.18318381811299134,
+       "partial": false,
+       "benchmark": -0.1817168462164639,
+       "excess": 0.03596482975591109
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.2276488676488393,
+       "max_drawdown": 0.0955897077187664,
+       "partial": false,
+       "benchmark": 0.26189550634703496,
+       "excess": -0.034246638698195664
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.2210757533951464,
+       "max_drawdown": 0.08117101344951283,
+       "partial": false,
+       "benchmark": 0.24885149723075384,
+       "excess": -0.027775743835607436
+      }
+     ],
+     "cash_yield": {
+      "rf": {
+       "mean_ann": 0.023207689544754384,
+       "total": 0.19220120969453447,
+       "sessions": 1931
+      },
+      "mean_idle_share": 0.14878802826152385,
+      "zero_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.415258935397179,
+        "cagr": 0.12196072646703104,
+        "max_drawdown": 0.18318381811299056,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9654272395287404,
+         "se": 0.3646040671637491,
+         "t": 2.647878415177285,
+         "lags": 7,
+         "t_naive": 2.6724550841588433,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4827136197643702,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12327858182546593,
+         "vol_ann": 0.12769329140292607
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8250115831435498,
+         "se": 0.36040599745699353,
+         "t": 2.2891172426785067,
+         "lags": 7,
+         "t_naive": 2.2837623692264586,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4125057915717749,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.15139499846612448,
+         "vol_ann": 0.18350651258648107
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.02623097983253582,
+        "alpha_se": 0.018533921751580404,
+        "alpha_t": 1.4152957039596372,
+        "beta": 0.6410225104936019,
+        "beta_se": 0.05451915193845847,
+        "r2": 0.8486201941805036,
+        "tracking_error": 0.049695217305535395,
+        "lags": 7,
+        "alpha_se_ols": 0.017976690768399996
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.4330429002769143,
+        "cagr": 0.12303539546210529,
+        "max_drawdown": 0.1828985737345774,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9727940037836998,
+         "se": 0.364396235129901,
+         "t": 2.669604979417297,
+         "lags": 7,
+         "t_naive": 2.692847451165782,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4863970018918499,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12423898911466312,
+         "vol_ann": 0.12771356384952348
+        }
+       }
+      },
+      "tbill_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.4660634789916482,
+        "cagr": 0.12501281200134606,
+        "max_drawdown": 0.18029206722344726,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8069675225722545,
+         "se": 0.36090105460812083,
+         "t": 2.2359799514814065,
+         "lags": 7,
+         "t_naive": 2.233813559582174,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.40348376128612723,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.10305071180413111,
+         "vol_ann": 0.12770118861246257
+        }
+       },
+       "simulated_excess": {
+        "sessions": 1931,
+        "total_return": 1.415258935397179,
+        "cagr": 0.12196072646703104,
+        "max_drawdown": 0.18318381811299056,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7856442841279374,
+         "se": 0.36050696020346873,
+         "t": 2.179276327104816,
+         "lags": 7,
+         "t_naive": 2.1747874676531094,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3928221420639687,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.10033363373343197,
+         "vol_ann": 0.12770872996906227
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.6998956078446908,
+         "se": 0.35531806356601175,
+         "t": 1.9697720988920753,
+         "lags": 7,
+         "t_naive": 1.9374215880608638,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3499478039223454,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12845005037409055,
+         "vol_ann": 0.1835274417132705
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.02071273370372825,
+        "alpha_se": 0.01794562971552218,
+        "alpha_t": 1.15419375257769,
+        "beta": 0.6410116450760934,
+        "beta_se": 0.05451719946048944,
+        "r2": 0.848680025931049,
+        "tracking_error": 0.04968846830134276,
+        "lags": 7,
+        "alpha_se_ols": 0.01796745874094857
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.4842214259280917,
+        "cagr": 0.12609039848883885,
+        "max_drawdown": 0.18000581667999616,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8143574606076803,
+         "se": 0.3606863670634408,
+         "t": 2.257799392968029,
+         "lags": 7,
+         "t_naive": 2.2542700752736446,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.40717873030384016,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.10401111909332832,
+         "vol_ann": 0.1277216997750771
+        }
+       },
+       "cash_added_cagr": 0.003052085534315019
+      }
+     }
+    }
+   },
+   "spy": "spy_total_return",
+   "sleeve_test": null,
+   "at_run": {
+    "verdict": "fail",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "marks": {
+     "b1": true,
+     "b2": false,
+     "b3": false,
+     "b4": false,
+     "b5": true,
+     "b6": true,
+     "b7": true
+    }
+   }
+  },
+  {
    "book": "index_core_trend_momentum",
    "index_cap": "27%",
    "universe": "pit",
@@ -17807,11 +21404,11 @@
     "gate": "B-book",
     "gate_version": "3.1",
     "rule": "index_core_trend_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "index_core_trend_momentum",
-     "sha256": "7c450257f9b09732afe0bbe92c9a5c36404d3ba939833f4c8912cbd8090a4915",
+     "sha256": "5decb6e506a40d8095c96056f1bd2cfc794713419add54ba205a45bdce1bef1d",
      "status": "pre-registered",
      "date": "2026-11-22",
      "neighbours": [
@@ -17821,13 +21418,15 @@
       "vol18",
       "lookback63"
      ],
-     "committed_at": "2026-11-26T11:29:21+01:00",
+     "committed_at": "2026-11-26T17:44:58+01:00",
      "first_committed_at": "2026-11-23T17:47:35+01:00",
      "amendments": [
       "## Amendment 1 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)",
-      "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out"
+      "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+      "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check"
      ],
      "design_saw_holdout": true,
      "amendment_log": [
@@ -17846,6 +21445,14 @@
       {
        "amendment": "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
        "committed_at": "2026-11-26T11:29:21+01:00"
+      },
+      {
+       "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+       "committed_at": "2026-11-26T15:56:44+01:00"
+      },
+      {
+       "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check",
+       "committed_at": "2026-11-26T17:44:58+01:00"
       }
      ],
      "versions": [
@@ -17867,6 +21474,16 @@
       {
        "sha256": "7c450257f9b09732afe0bbe92c9a5c36404d3ba939833f4c8912cbd8090a4915",
        "committed_at": "2026-11-26T11:29:21+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "58eaa26a2bddb8b37720bc6108f2ece1e1738c61de85322e09c54069fd8d7d32",
+       "committed_at": "2026-11-26T15:56:44+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "5decb6e506a40d8095c96056f1bd2cfc794713419add54ba205a45bdce1bef1d",
+       "committed_at": "2026-11-26T17:44:58+01:00",
        "amended_only": true
       }
      ]
@@ -17951,11 +21568,11 @@
         "sharpe_spy": 0.8249779930680892,
         "sharpe_over_spy": 0.05743521076520652,
         "se": 0.14107382818869238,
-        "configurations": 12,
-        "hurdle": 0.2348613157136491,
-        "dsr": 0.10425327613569237,
+        "configurations": 24,
+        "hurdle": 0.27929417215972785,
+        "dsr": 0.057900594049282716,
         "psr": 0.6580432842448682,
-        "why": "deflated Sharpe over SPY's 0.104 is below 0.9 (N = 12 configurations)"
+        "why": "deflated Sharpe over SPY's 0.058 is below 0.9 (N = 24 configurations)"
        }
       },
       "limit": {
@@ -17973,7 +21590,7 @@
         "trials": "book_idea"
        }
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.104 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.058 is below 0.9 (N = 24 configurations)"
      },
      "b3": {
       "met": false,
@@ -17987,7 +21604,7 @@
       "limit": {
        "costs_multiple": 2.0
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.091 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.050 is below 0.9 (N = 24 configurations)"
      },
      "b4": {
       "met": false,
@@ -18042,6 +21659,28 @@
        "evidence_based_budget_max_pct": 10.0
       },
       "why": "trend_momentum_sleeve: fail"
+     },
+     "b7": {
+      "met": null,
+      "numbers": {
+       "return_sleeves": [
+        "trend_momentum_sleeve"
+       ]
+      },
+      "limit": {
+       "control": "sleeve_budget_in_spy",
+       "statistic": "cagr_points_over_control",
+       "start_offsets_sessions": [
+        0,
+        5,
+        10,
+        15,
+        20
+       ],
+       "offsets_min": 5,
+       "median_above": 0.0
+      },
+      "why": "no control book was run (the sleeves' budget held in SPY), so the sleeves' value over SPY is not known"
      }
     },
     "provisional": false,
@@ -18051,7 +21690,7 @@
      "books": [
       "index_core_trend_momentum"
      ],
-     "configurations": 12
+     "configurations": 24
     },
     "hindsight": [
      {
@@ -18063,10 +21702,20 @@
       "amendment": "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
       "committed_at": "2026-11-26T10:29:21Z",
       "why": "committed 2026-11-26T10:29:21Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+      "committed_at": "2026-11-26T14:56:44Z",
+      "why": "committed 2026-11-26T14:56:44Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check",
+      "committed_at": "2026-11-26T16:44:58Z",
+      "why": "committed 2026-11-26T16:44:58Z, after the first logged run (2026-11-24T20:58:16Z)"
      }
     ],
     "verdict": "fail",
-    "verdict_text": "fail, hindsight (Amendments 3, 4 written after the first run)",
+    "verdict_text": "fail, hindsight (Amendments 3, 4, 5, 6 written after the first run)",
     "can_pass": true,
     "statistics": {
      "window": [
@@ -18408,17 +22057,17 @@
    "book": "index_core_trend_momentum",
    "index_cap": "80%",
    "universe": "pit",
-   "report": "index_core_trend_momentum_aggressive_pit_cap80_20261125T180708.json",
-   "run_at": "2026-11-25T18:07:08+00:00",
+   "report": "index_core_trend_momentum_aggressive_pit_cap80_20261126T154126.json",
+   "run_at": "2026-11-26T15:41:26+00:00",
    "gate_v3": {
     "gate": "B-book",
     "gate_version": "3.1",
     "rule": "index_core_trend_momentum",
-    "generated_at": "2026-11-25T18:23:33Z",
-    "gate_sha": "1b914556e6f7bfef708e228b9b8a123b3b9d4d784b468197ccf031febf5b2a9a",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
     "prereg": {
      "rule": "index_core_trend_momentum",
-     "sha256": "7c450257f9b09732afe0bbe92c9a5c36404d3ba939833f4c8912cbd8090a4915",
+     "sha256": "5decb6e506a40d8095c96056f1bd2cfc794713419add54ba205a45bdce1bef1d",
      "status": "pre-registered",
      "date": "2026-11-22",
      "neighbours": [
@@ -18428,13 +22077,15 @@
       "vol18",
       "lookback63"
      ],
-     "committed_at": "2026-11-26T11:29:21+01:00",
+     "committed_at": "2026-11-26T17:44:58+01:00",
      "first_committed_at": "2026-11-23T17:47:35+01:00",
      "amendments": [
       "## Amendment 1 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
       "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)",
-      "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out"
+      "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+      "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check"
      ],
      "design_saw_holdout": true,
      "amendment_log": [
@@ -18453,6 +22104,14 @@
       {
        "amendment": "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
        "committed_at": "2026-11-26T11:29:21+01:00"
+      },
+      {
+       "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+       "committed_at": "2026-11-26T15:56:44+01:00"
+      },
+      {
+       "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check",
+       "committed_at": "2026-11-26T17:44:58+01:00"
       }
      ],
      "versions": [
@@ -18474,6 +22133,16 @@
       {
        "sha256": "7c450257f9b09732afe0bbe92c9a5c36404d3ba939833f4c8912cbd8090a4915",
        "committed_at": "2026-11-26T11:29:21+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "58eaa26a2bddb8b37720bc6108f2ece1e1738c61de85322e09c54069fd8d7d32",
+       "committed_at": "2026-11-26T15:56:44+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "5decb6e506a40d8095c96056f1bd2cfc794713419add54ba205a45bdce1bef1d",
+       "committed_at": "2026-11-26T17:44:58+01:00",
        "amended_only": true
       }
      ]
@@ -18501,9 +22170,9 @@
      "cost_model": "v2",
      "data_repairs": true,
      "benchmark": "spy_total_return",
-     "report": "index_core_trend_momentum_aggressive_pit_cap80_20261125T180708.json",
-     "run_at": "2026-11-25T18:07:08+00:00",
-     "code_sha": "aea3752"
+     "report": "index_core_trend_momentum_aggressive_pit_cap80_20261126T154126.json",
+     "run_at": "2026-11-26T15:41:26+00:00",
+     "code_sha": "2744cf6"
     },
     "sessions": 1931,
     "sessions_before_window_dropped": 0,
@@ -18558,11 +22227,11 @@
         "sharpe_spy": 0.8249779930680892,
         "sharpe_over_spy": 0.11572145678314151,
         "se": 0.12239560368548608,
-        "configurations": 12,
-        "hurdle": 0.20376559485357276,
-        "dsr": 0.23596551520492978,
+        "configurations": 24,
+        "hurdle": 0.2423155254680186,
+        "dsr": 0.15049740371491363,
         "psr": 0.8277906880957239,
-        "why": "deflated Sharpe over SPY's 0.236 is below 0.9 (N = 12 configurations)"
+        "why": "deflated Sharpe over SPY's 0.150 is below 0.9 (N = 24 configurations)"
        }
       },
       "limit": {
@@ -18580,7 +22249,7 @@
         "trials": "book_idea"
        }
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.236 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.150 is below 0.9 (N = 24 configurations)"
      },
      "b3": {
       "met": false,
@@ -18594,7 +22263,7 @@
       "limit": {
        "costs_multiple": 2.0
       },
-      "why": "neither branch holds; deflated Sharpe over SPY's 0.222 is below 0.9 (N = 12 configurations)"
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.140 is below 0.9 (N = 24 configurations)"
      },
      "b4": {
       "met": false,
@@ -18649,6 +22318,120 @@
        "evidence_based_budget_max_pct": 10.0
       },
       "why": "trend_momentum_sleeve: fail"
+     },
+     "b7": {
+      "met": false,
+      "numbers": {
+       "return_sleeves": [
+        "trend_momentum_sleeve"
+       ],
+       "offsets": {
+        "0": {
+         "first_session": "2017-05-01",
+         "sessions": 1931,
+         "book_cagr": 0.10870057177252912,
+         "control_cagr": 0.11640509662014775,
+         "book_max_drawdown": 0.16117554978862014,
+         "control_max_drawdown": 0.18030612215073427,
+         "book_sharpe": 0.9406994498512307,
+         "control_sharpe": 0.9602393201615942,
+         "cagr_points_over_control": -0.7704524847618632,
+         "sharpe_over_control": -0.019539870310363527,
+         "max_drawdown_points_over_control": -1.9130572362114129
+        },
+        "5": {
+         "first_session": "2017-05-08",
+         "sessions": 1926,
+         "book_cagr": 0.10913251105512267,
+         "control_cagr": 0.11424089495202772,
+         "book_max_drawdown": 0.16091536824635322,
+         "control_max_drawdown": 0.18044257063353764,
+         "book_sharpe": 0.9438921815937948,
+         "control_sharpe": 0.947484223555657,
+         "cagr_points_over_control": -0.5108383896905044,
+         "sharpe_over_control": -0.0035920419618621358,
+         "max_drawdown_points_over_control": -1.9527202387184417
+        },
+        "10": {
+         "first_session": "2017-05-15",
+         "sessions": 1921,
+         "book_cagr": 0.1104455534529436,
+         "control_cagr": 0.1180805642069298,
+         "book_max_drawdown": 0.16032352948067263,
+         "control_max_drawdown": 0.18067270099372812,
+         "book_sharpe": 0.954330859639091,
+         "control_sharpe": 0.9716840571097539,
+         "cagr_points_over_control": -0.7635010753986204,
+         "sharpe_over_control": -0.017353197470662884,
+         "max_drawdown_points_over_control": -2.0349171513055486
+        },
+        "15": {
+         "first_session": "2017-05-22",
+         "sessions": 1916,
+         "book_cagr": 0.10904468292508551,
+         "control_cagr": 0.11640144893556359,
+         "book_max_drawdown": 0.16029678188108476,
+         "control_max_drawdown": 0.1805007569285606,
+         "book_sharpe": 0.9443313592195188,
+         "control_sharpe": 0.958256045646442,
+         "cagr_points_over_control": -0.7356766010478077,
+         "sharpe_over_control": -0.013924686426923127,
+         "max_drawdown_points_over_control": -2.020397504747584
+        },
+        "20": {
+         "first_session": "2017-05-30",
+         "sessions": 1911,
+         "book_cagr": 0.1078603146072632,
+         "control_cagr": 0.11627321785566025,
+         "book_max_drawdown": 0.16071658895075047,
+         "control_max_drawdown": 0.1806490281868457,
+         "book_sharpe": 0.9334352838582197,
+         "control_sharpe": 0.9560547959019146,
+         "cagr_points_over_control": -0.8412903248397052,
+         "sharpe_over_control": -0.022619512043694834,
+         "max_drawdown_points_over_control": -1.9932439236095223
+        }
+       },
+       "offsets_not_pre_registered": [],
+       "cagr_points_over_control": {
+        "median": -0.7635010753986204,
+        "min": -0.8412903248397052,
+        "max": -0.5108383896905044,
+        "range": 0.3304519351492008,
+        "sd": 0.12554758559227297,
+        "n": 5
+       },
+       "sharpe_over_control": {
+        "median": -0.017353197470662884,
+        "min": -0.022619512043694834,
+        "max": -0.0035920419618621358,
+        "range": 0.019027470081832698,
+        "sd": 0.007325966012583967,
+        "n": 5
+       },
+       "max_drawdown_points_over_control": {
+        "median": -1.9932439236095223,
+        "min": -2.0349171513055486,
+        "max": -1.9130572362114129,
+        "range": 0.12185991509413574,
+        "sd": 0.050019166118848796,
+        "n": 5
+       }
+      },
+      "limit": {
+       "control": "sleeve_budget_in_spy",
+       "statistic": "cagr_points_over_control",
+       "start_offsets_sessions": [
+        0,
+        5,
+        10,
+        15,
+        20
+       ],
+       "offsets_min": 5,
+       "median_above": 0.0
+      },
+      "why": "the book's CAGR over its control book's is -0.76 points at the median of 5 start offsets (the same budget held in SPY did as well)"
      }
     },
     "provisional": false,
@@ -18658,7 +22441,7 @@
      "books": [
       "index_core_trend_momentum"
      ],
-     "configurations": 12
+     "configurations": 24
     },
     "hindsight": [
      {
@@ -18670,10 +22453,20 @@
       "amendment": "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
       "committed_at": "2026-11-26T10:29:21Z",
       "why": "committed 2026-11-26T10:29:21Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+      "committed_at": "2026-11-26T14:56:44Z",
+      "why": "committed 2026-11-26T14:56:44Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check",
+      "committed_at": "2026-11-26T16:44:58Z",
+      "why": "committed 2026-11-26T16:44:58Z, after the first logged run (2026-11-24T20:58:16Z)"
      }
     ],
     "verdict": "fail",
-    "verdict_text": "fail, hindsight (Amendments 3, 4 written after the first run)",
+    "verdict_text": "fail, hindsight (Amendments 3, 4, 5, 6 written after the first run)",
     "can_pass": true,
     "statistics": {
      "window": [
@@ -19000,14 +22793,767 @@
    },
    "at_run": {
     "verdict": "fail",
-    "gate_sha": "021eaa1a5aa767a7454882164b11920d2cc2d89238af6ff03baeca5b737fd394",
+    "gate_sha": "af08d53f39f3727ca6ae5593802d904d2288b4faf127619511ed4c422d81c5f9",
     "marks": {
      "b1": true,
      "b2": false,
      "b3": false,
      "b4": false,
      "b5": true,
-     "b6": false
+     "b6": false,
+     "b7": false
+    }
+   }
+  },
+  {
+   "book": "index_core_trend_momentum",
+   "index_cap": "97%",
+   "universe": "pit",
+   "report": "index_core_trend_momentum_aggressive_pit_cap97_20261127T104028.json",
+   "run_at": "2026-11-27T10:40:28+00:00",
+   "gate_v3": {
+    "gate": "B-book",
+    "gate_version": "3.1",
+    "rule": "index_core_trend_momentum",
+    "generated_at": "2026-11-27T10:40:28Z",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "prereg": {
+     "rule": "index_core_trend_momentum",
+     "sha256": "5decb6e506a40d8095c96056f1bd2cfc794713419add54ba205a45bdce1bef1d",
+     "status": "pre-registered",
+     "date": "2026-11-22",
+     "neighbours": [
+      "budget5",
+      "nocap",
+      "vol12",
+      "vol18",
+      "lookback63"
+     ],
+     "committed_at": "2026-11-26T17:44:58+01:00",
+     "first_committed_at": "2026-11-23T17:47:35+01:00",
+     "amendments": [
+      "## Amendment 1 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+      "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)",
+      "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+      "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check"
+     ],
+     "design_saw_holdout": true,
+     "amendment_log": [
+      {
+       "amendment": "## Amendment 1 (23 Nov 2026, quant research, before any run on real data)",
+       "committed_at": "2026-11-23T17:47:35+01:00"
+      },
+      {
+       "amendment": "## Amendment 2 (23 Nov 2026, quant research, before any run on real data)",
+       "committed_at": "2026-11-23T22:06:40+01:00"
+      },
+      {
+       "amendment": "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)",
+       "committed_at": "2026-11-25T18:48:39+01:00"
+      },
+      {
+       "amendment": "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+       "committed_at": "2026-11-26T11:29:21+01:00"
+      },
+      {
+       "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+       "committed_at": "2026-11-26T15:56:44+01:00"
+      },
+      {
+       "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check",
+       "committed_at": "2026-11-26T17:44:58+01:00"
+      }
+     ],
+     "versions": [
+      {
+       "sha256": "13c52e2acd9bff4fee24a28079f9a7aaf75332b1997a7de499a9a5117fe1d32d",
+       "committed_at": "2026-11-23T17:47:35+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "923cbff0e9899ac8bcebaca7fd8307c0f017441571fe940dd3013ef5d3883c0a",
+       "committed_at": "2026-11-23T22:06:40+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "cd739b923327fc848af89bb064d1c57bb3e2cbbab2ff0d23593ef6b387d8f939",
+       "committed_at": "2026-11-25T18:48:39+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "7c450257f9b09732afe0bbe92c9a5c36404d3ba939833f4c8912cbd8090a4915",
+       "committed_at": "2026-11-26T11:29:21+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "58eaa26a2bddb8b37720bc6108f2ece1e1738c61de85322e09c54069fd8d7d32",
+       "committed_at": "2026-11-26T15:56:44+01:00",
+       "amended_only": true
+      },
+      {
+       "sha256": "5decb6e506a40d8095c96056f1bd2cfc794713419add54ba205a45bdce1bef1d",
+       "committed_at": "2026-11-26T17:44:58+01:00",
+       "amended_only": true
+      }
+     ]
+    },
+    "gate_a": {
+     "preregistered": true,
+     "not_retroactive": true,
+     "neighbours_at_most": true,
+     "committed_before_first_run": true,
+     "unchanged_since_logged_runs": true,
+     "declares_gate_v3": true,
+     "listed_as_book": true,
+     "components": [
+      "index_core",
+      "volatility_cap",
+      "trend_momentum_sleeve"
+     ],
+     "sleeve_budgets": {
+      "trend_momentum_sleeve": 10.0
+     },
+     "budgets_as_pre_registered": true
+    },
+    "source": {
+     "engine": "simbroker",
+     "cost_model": "v2",
+     "data_repairs": true,
+     "benchmark": "spy_total_return",
+     "report": "index_core_trend_momentum_aggressive_pit_cap97_20261127T104028.json",
+     "run_at": "2026-11-27T10:40:28+00:00",
+     "code_sha": "06b4ad8"
+    },
+    "sessions": 1931,
+    "sessions_before_window_dropped": 0,
+    "sessions_in_holdout_dropped": 0,
+    "marks": {
+     "b1": {
+      "met": true,
+      "numbers": {
+       "total_return": 1.3830901640096998,
+       "positive_years": 6,
+       "years": 8,
+       "years_not_counted": []
+      },
+      "limit": {
+       "total_return_above": 0.0,
+       "positive_years_min": 5,
+       "years_min": 8
+      },
+      "why": ""
+     },
+     "b2": {
+      "met": false,
+      "numbers": {
+       "cagr": 0.11999919562805128,
+       "spy_cagr": 0.14390087660986994,
+       "cagr_vs_spy_points": -2.3901680981818663,
+       "max_drawdown": 0.18638846646930318,
+       "spy_max_drawdown": 0.3377737502311541,
+       "max_drawdown_vs_spy": 0.5518145395897373,
+       "branch": {
+        "defensive": false,
+        "growth": false
+       },
+       "cagr_vs_spy_points_interval": [
+        -6.86505447310671,
+        1.7367529467958658
+       ],
+       "max_drawdown_vs_spy_interval": [
+        0.5254868789165086,
+        0.9118898571656228
+       ],
+       "interval_level": 0.9,
+       "bootstrap_share_meeting": {
+        "defensive": 0.327,
+        "growth": 0.081,
+        "either": 0.3345
+       },
+       "bootstrap_share_shallower_drawdown": 0.9945,
+       "chance": {
+        "met": false,
+        "sharpe_book": 0.9240239801823978,
+        "sharpe_spy": 0.8250115831435498,
+        "sharpe_over_spy": 0.099012397038848,
+        "se": 0.11107313144165354,
+        "configurations": 24,
+        "hurdle": 0.21989959933384584,
+        "dsr": 0.1382188035071136,
+        "psr": 0.8136470550218176,
+        "why": "deflated Sharpe over SPY's 0.138 is below 0.9 (N = 24 configurations)"
+       }
+      },
+      "limit": {
+       "defensive": {
+        "cagr_vs_spy_points_min": -2.0,
+        "max_drawdown_vs_spy_max": 0.75
+       },
+       "growth": {
+        "cagr_vs_spy_points_min": 1.0,
+        "max_drawdown_vs_spy_max": 1.1
+       },
+       "chance": {
+        "dsr_min": 0.9,
+        "statistic": "sharpe_over_spy",
+        "trials": "book_idea"
+       }
+      },
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.138 is below 0.9 (N = 24 configurations)"
+     },
+     "b3": {
+      "met": false,
+      "numbers": {
+       "b1": true,
+       "b2": false,
+       "cagr": 0.1192682736655466,
+       "max_drawdown": 0.18678685319979038,
+       "breakeven_multiple": 174.0315998904407
+      },
+      "limit": {
+       "costs_multiple": 2.0
+      },
+      "why": "neither branch holds; deflated Sharpe over SPY's 0.129 is below 0.9 (N = 24 configurations)"
+     },
+     "b4": {
+      "met": false,
+      "numbers": {
+       "universe": "point_in_time",
+       "source": "this run is on the point-in-time universe",
+       "b1": true,
+       "b2": false,
+       "b3": false
+      },
+      "limit": {
+       "universe": "point_in_time"
+      },
+      "why": "B1 to B3 do not all hold on the point-in-time universe"
+     },
+     "b5": {
+      "met": true,
+      "numbers": {
+       "declared": [
+        "budget5",
+        "nocap",
+        "vol12",
+        "vol18",
+        "lookback63"
+       ],
+       "results": {
+        "budget5": true,
+        "nocap": true,
+        "vol12": true,
+        "vol18": true,
+        "lookback63": true
+       }
+      },
+      "limit": {
+       "neighbours_pass": "b1"
+      },
+      "why": ""
+     },
+     "b6": {
+      "met": false,
+      "numbers": {
+       "sleeves": {
+        "trend_momentum_sleeve": "fail"
+       },
+       "evidence_based_budget_pct": 0,
+       "labels": {},
+       "missing_verdicts": []
+      },
+      "limit": {
+       "every_return_sleeve": "pass",
+       "or": "evidence_based",
+       "evidence_based_budget_max_pct": 10.0
+      },
+      "why": "trend_momentum_sleeve: fail"
+     },
+     "b7": {
+      "met": false,
+      "numbers": {
+       "return_sleeves": [
+        "trend_momentum_sleeve"
+       ],
+       "offsets": {
+        "0": {
+         "first_session": "2017-05-01",
+         "sessions": 1931,
+         "book_cagr": 0.11999919562805128,
+         "control_cagr": 0.12390825408511641,
+         "book_max_drawdown": 0.18638846646930318,
+         "control_max_drawdown": 0.20205333508369405,
+         "book_sharpe": 0.9240239801823978,
+         "control_sharpe": 0.9221060620848588,
+         "cagr_points_over_control": -0.3909058457065129,
+         "sharpe_over_control": 0.0019179180975390508,
+         "max_drawdown_points_over_control": -1.566486861439087
+        },
+        "5": {
+         "first_session": "2017-05-08",
+         "sessions": 1926,
+         "book_cagr": 0.11993617971978354,
+         "control_cagr": 0.12460561154899263,
+         "book_max_drawdown": 0.18629961420184593,
+         "control_max_drawdown": 0.20161773546885264,
+         "book_sharpe": 0.9223776913135446,
+         "control_sharpe": 0.9261062086945255,
+         "cagr_points_over_control": -0.4669431829209092,
+         "sharpe_over_control": -0.0037285173809809002,
+         "max_drawdown_points_over_control": -1.5318121267006712
+        },
+        "10": {
+         "first_session": "2017-05-15",
+         "sessions": 1921,
+         "book_cagr": 0.1215180841392638,
+         "control_cagr": 0.1269813308243668,
+         "book_max_drawdown": 0.18639561268096472,
+         "control_max_drawdown": 0.2019345849664087,
+         "book_sharpe": 0.9333523714323968,
+         "control_sharpe": 0.940294238756996,
+         "cagr_points_over_control": -0.5463246685103007,
+         "sharpe_over_control": -0.006941867324599227,
+         "max_drawdown_points_over_control": -1.5538972285443986
+        },
+        "15": {
+         "first_session": "2017-05-22",
+         "sessions": 1916,
+         "book_cagr": 0.12049030407989236,
+         "control_cagr": 0.12478304014888097,
+         "book_max_drawdown": 0.1864217970993236,
+         "control_max_drawdown": 0.20165974317842206,
+         "book_sharpe": 0.9258225398443031,
+         "control_sharpe": 0.9252335300016609,
+         "cagr_points_over_control": -0.4292736068988612,
+         "sharpe_over_control": 0.0005890098426422075,
+         "max_drawdown_points_over_control": -1.5237946079098452
+        },
+        "20": {
+         "first_session": "2017-05-30",
+         "sessions": 1911,
+         "book_cagr": 0.1193490823229646,
+         "control_cagr": 0.12465726914569175,
+         "book_max_drawdown": 0.18618201998857076,
+         "control_max_drawdown": 0.201944407344669,
+         "book_sharpe": 0.9169428579222905,
+         "control_sharpe": 0.9231700144301814,
+         "cagr_points_over_control": -0.5308186822727157,
+         "sharpe_over_control": -0.006227156507890963,
+         "max_drawdown_points_over_control": -1.576238735609825
+        }
+       },
+       "offsets_not_pre_registered": [],
+       "cagr_points_over_control": {
+        "median": -0.4669431829209092,
+        "min": -0.5463246685103007,
+        "max": -0.3909058457065129,
+        "range": 0.15541882280378783,
+        "sd": 0.06596880310534453,
+        "n": 5
+       },
+       "sharpe_over_control": {
+        "median": -0.0037285173809809002,
+        "min": -0.006941867324599227,
+        "max": 0.0019179180975390508,
+        "range": 0.008859785422138278,
+        "sd": 0.003983598697588149,
+        "n": 5
+       },
+       "max_drawdown_points_over_control": {
+        "median": -1.5538972285443986,
+        "min": -1.576238735609825,
+        "max": -1.5237946079098452,
+        "range": 0.05244412769997986,
+        "sd": 0.02231593241863264,
+        "n": 5
+       }
+      },
+      "limit": {
+       "control": "sleeve_budget_in_spy",
+       "statistic": "cagr_points_over_control",
+       "start_offsets_sessions": [
+        0,
+        5,
+        10,
+        15,
+        20
+       ],
+       "offsets_min": 5,
+       "median_above": 0.0
+      },
+      "why": "the book's CAGR over its control book's is -0.47 points at the median of 5 start offsets (the same budget held in SPY did as well)"
+     }
+    },
+    "provisional": false,
+    "provisional_reasons": [],
+    "book_configurations": {
+     "idea": "index_core_trend_momentum",
+     "books": [
+      "index_core_trend_momentum"
+     ],
+     "configurations": 24
+    },
+    "hindsight": [
+     {
+      "amendment": "## Amendment 3 (25 Nov 2026, quant research, before any run at this cap)",
+      "committed_at": "2026-11-25T17:48:39Z",
+      "why": "committed 2026-11-25T17:48:39Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 4 (26 Nov 2026, backend-quant, issue #705, after the runs of 24 and 25 Nov 2026): the design saw the hold-out",
+      "committed_at": "2026-11-26T10:29:21Z",
+      "why": "committed 2026-11-26T10:29:21Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 5 (26 Nov 2026, backend-quant, issue #706, after the runs of 24 and 25 Nov 2026): the control book",
+      "committed_at": "2026-11-26T14:56:44Z",
+      "why": "committed 2026-11-26T14:56:44Z, after the first logged run (2026-11-24T20:58:16Z)"
+     },
+     {
+      "amendment": "## Amendment 6 (26 Nov 2026, backend-quant, issue #710, after the runs of 24, 25 and 26 Nov 2026): the core at the original 97%, once, as a consistency check",
+      "committed_at": "2026-11-26T16:44:58Z",
+      "why": "committed 2026-11-26T16:44:58Z, after the first logged run (2026-11-24T20:58:16Z)"
+     }
+    ],
+    "verdict": "fail",
+    "verdict_text": "fail, hindsight (Amendments 3, 4, 5, 6 written after the first run)",
+    "can_pass": true,
+    "statistics": {
+     "window": [
+      "2017-05-01",
+      "2024-12-31"
+     ],
+     "book": {
+      "sessions": 1931,
+      "total_return": 1.3830901640096998,
+      "cagr": 0.11999919562805128,
+      "max_drawdown": 0.18638846646930318,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.9240239801823978,
+       "se": 0.3617938488174068,
+       "t": 2.5540068832091785,
+       "lags": 7,
+       "t_naive": 2.557844322818722,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4620119900911989,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.12211110135193864,
+       "vol_ann": 0.13215144192235628
+      }
+     },
+     "spy": {
+      "sessions": 1931,
+      "total_return": 1.8016420354959544,
+      "cagr": 0.14390087660986994,
+      "max_drawdown": 0.3377737502311541,
+      "sharpe": {
+       "n": 1931,
+       "sharpe": 0.8250115831435498,
+       "se": 0.36040599745699353,
+       "t": 2.2891172426785067,
+       "lags": 7,
+       "t_naive": 2.2837623692264586,
+       "se_naive": 0.36125106283408653,
+       "haircut": 0.4125057915717749,
+       "haircut_share": 0.5,
+       "warning": false,
+       "mean_ann": 0.15139499846612448,
+       "vol_ann": 0.18350651258648107
+      }
+     },
+     "alpha_beta": {
+      "n": 1931,
+      "alpha": 0.021384389578776603,
+      "alpha_se": 0.01847525041115013,
+      "alpha_t": 1.1574614201640676,
+      "beta": 0.6653239062960209,
+      "beta_se": 0.054969473863471154,
+      "r2": 0.853543007505011,
+      "tracking_error": 0.05058706729837281,
+      "lags": 7,
+      "alpha_se_ols": 0.018299307559357308
+     },
+     "calendar_years": [
+      {
+       "year": 2017,
+       "sessions": 170,
+       "months": 8,
+       "return": 0.12662675736618634,
+       "max_drawdown": 0.019019168024670963,
+       "partial": true,
+       "benchmark": 0.13781744964820075,
+       "excess": -0.011190692282014414
+      },
+      {
+       "year": 2018,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.04370884330100622,
+       "max_drawdown": 0.1555339407949633,
+       "partial": false,
+       "benchmark": -0.04457358635932729,
+       "excess": 0.0008647430583210713
+      },
+      {
+       "year": 2019,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.2394392405163155,
+       "max_drawdown": 0.06611733271399478,
+       "partial": false,
+       "benchmark": 0.3113380845482947,
+       "excess": -0.07189884403197921
+      },
+      {
+       "year": 2020,
+       "sessions": 253,
+       "months": 12,
+       "return": 0.11393531063741191,
+       "max_drawdown": 0.18195647495035105,
+       "partial": false,
+       "benchmark": 0.18492176844733743,
+       "excess": -0.07098645780992552
+      },
+      {
+       "year": 2021,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.27127808791453956,
+       "max_drawdown": 0.055553626239884135,
+       "partial": false,
+       "benchmark": 0.28617675399217557,
+       "excess": -0.014898666077636014
+      },
+      {
+       "year": 2022,
+       "sessions": 251,
+       "months": 12,
+       "return": -0.14810656975465175,
+       "max_drawdown": 0.18638846646930274,
+       "partial": false,
+       "benchmark": -0.1817168462164639,
+       "excess": 0.03361027646181214
+      },
+      {
+       "year": 2023,
+       "sessions": 250,
+       "months": 12,
+       "return": 0.21729522793955747,
+       "max_drawdown": 0.0938045560098083,
+       "partial": false,
+       "benchmark": 0.26189550634703496,
+       "excess": -0.04460027840747749
+      },
+      {
+       "year": 2024,
+       "sessions": 252,
+       "months": 12,
+       "return": 0.21524351008511755,
+       "max_drawdown": 0.07929494564098416,
+       "partial": false,
+       "benchmark": 0.24885149723075384,
+       "excess": -0.03360798714563629
+      }
+     ],
+     "cash_yield": {
+      "rf": {
+       "mean_ann": 0.023207689544754384,
+       "total": 0.19220120969453447,
+       "sessions": 1931
+      },
+      "mean_idle_share": 0.1327523429960619,
+      "zero_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.3830901640096998,
+        "cagr": 0.11999919562805128,
+        "max_drawdown": 0.18638846646930318,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9240239801823978,
+         "se": 0.3617938488174068,
+         "t": 2.5540068832091785,
+         "lags": 7,
+         "t_naive": 2.557844322818722,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4620119900911989,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12211110135193864,
+         "vol_ann": 0.13215144192235628
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.8250115831435498,
+         "se": 0.36040599745699353,
+         "t": 2.2891172426785067,
+         "lags": 7,
+         "t_naive": 2.2837623692264586,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4125057915717749,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.15139499846612448,
+         "vol_ann": 0.18350651258648107
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.021384389578776603,
+        "alpha_se": 0.01847525041115013,
+        "alpha_t": 1.1574614201640676,
+        "beta": 0.6653239062960209,
+        "beta_se": 0.054969473863471154,
+        "r2": 0.853543007505011,
+        "tracking_error": 0.05058706729837281,
+        "lags": 7,
+        "alpha_se_ols": 0.018299307559357308
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.4440044007045079,
+        "cagr": 0.12369439159559614,
+        "max_drawdown": 0.19953211438882656,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.9465014324254406,
+         "se": 0.3634808430741558,
+         "t": 2.6039926187591114,
+         "lags": 7,
+         "t_naive": 2.6200654608458405,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.4732507162127203,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12545961576568232,
+         "vol_ann": 0.13255089899250125
+        }
+       }
+      },
+      "tbill_cash": {
+       "rule": {
+        "sessions": 1931,
+        "total_return": 1.4318241032263628,
+        "cagr": 0.1229619630253862,
+        "max_drawdown": 0.18370742447019783,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7703305347603996,
+         "se": 0.35803761184232646,
+         "t": 2.151535227811875,
+         "lags": 7,
+         "t_naive": 2.1323965906619153,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3851652673801998,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.10180836407973533,
+         "vol_ann": 0.13216192203961044
+        }
+       },
+       "simulated_excess": {
+        "sessions": 1931,
+        "total_return": 1.3830901640096998,
+        "cagr": 0.11999919562805128,
+        "max_drawdown": 0.18638846646930318,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7502947803231965,
+         "se": 0.35766770593800024,
+         "t": 2.097742591424388,
+         "lags": 7,
+         "t_naive": 2.076934457817188,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.37514739016159826,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.09916615325990473,
+         "vol_ann": 0.13216958968738657
+        }
+       },
+       "benchmark": {
+        "sessions": 1931,
+        "total_return": 1.8016420354959544,
+        "cagr": 0.14390087660986994,
+        "max_drawdown": 0.3377737502311541,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.6998956078446908,
+         "se": 0.35531806356601175,
+         "t": 1.9697720988920753,
+         "lags": 7,
+         "t_naive": 1.9374215880608638,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3499478039223454,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.12845005037409055,
+         "vol_ann": 0.1835274417132705
+        }
+       },
+       "alpha_beta": {
+        "n": 1931,
+        "alpha": 0.016348043040490683,
+        "alpha_se": 0.017910602503491718,
+        "alpha_t": 0.9127578504019388,
+        "beta": 0.6653194824786354,
+        "beta_se": 0.05496742260911405,
+        "r2": 0.8535909690863195,
+        "tracking_error": 0.050582794612353134,
+        "lags": 7,
+        "alpha_se_ols": 0.018290849089722696
+       },
+       "exposure_matched": {
+        "sessions": 1931,
+        "total_return": 1.493983294658312,
+        "cagr": 0.126666890679773,
+        "max_drawdown": 0.19689397186044477,
+        "sharpe": {
+         "n": 1931,
+         "sharpe": 0.7932843513735908,
+         "se": 0.3596514318891758,
+         "t": 2.205703303352998,
+         "lags": 7,
+         "t_naive": 2.195936380505339,
+         "se_naive": 0.36125106283408653,
+         "haircut": 0.3966421756867954,
+         "haircut_share": 0.5,
+         "warning": false,
+         "mean_ann": 0.10515687849347896,
+         "vol_ann": 0.13255887162200708
+        }
+       },
+       "cash_added_cagr": 0.00296276739733492
+      }
+     }
+    }
+   },
+   "spy": "spy_total_return",
+   "sleeve_test": {
+    "rule": "trend_momentum_sleeve",
+    "verdict": "fail"
+   },
+   "at_run": {
+    "verdict": "fail",
+    "gate_sha": "8253b90ac909c00bc687cd95b279c241ce049ec0365945fd65fb570d3d8ee8ec",
+    "marks": {
+     "b1": true,
+     "b2": false,
+     "b3": false,
+     "b4": false,
+     "b5": true,
+     "b6": false,
+     "b7": false
     }
    }
   }
@@ -19062,34 +23608,6 @@
    }
   },
   {
-   "rule": "news_continuation",
-   "run": "oneshots, today",
-   "report": "oneshots_news_continuation_20261113T085255.json",
-   "why": "the daily file has no exposure column",
-   "summary": {
-    "cagr_pct": -1.48,
-    "return_pct": -13.23,
-    "sharpe": -0.41,
-    "max_drawdown_pct": 19.88,
-    "positive_years": 3,
-    "n_years": 10
-   }
-  },
-  {
-   "rule": "orb_stocks_in_play",
-   "run": "oneshots, today",
-   "report": "oneshots_orb_stocks_in_play_20261113T085035.json",
-   "why": "the daily file has no exposure column",
-   "summary": {
-    "cagr_pct": -16.71,
-    "return_pct": -82.42,
-    "sharpe": -12.11,
-    "max_drawdown_pct": 82.42,
-    "positive_years": 0,
-    "n_years": 10
-   }
-  },
-  {
    "rule": "spy_noise_band",
    "run": "spy_engine, point_in_time, 0.5",
    "report": "spy_engine_balanced_20261121T172654.json",
@@ -19132,21 +23650,6 @@
     "trades": 1109,
     "positive_years": 4,
     "n_years": 10
-   }
-  },
-  {
-   "rule": "spy_noise_band",
-   "run": "spy_cost_rerun, today, v2idx",
-   "report": "spy_cost_rerun_balanced_20261123T125724.json",
-   "why": "the daily file has no exposure column",
-   "summary": {
-    "cagr_pct": 0.54,
-    "return_pct": 4.18,
-    "sharpe": 1.19,
-    "max_drawdown_pct": 0.45,
-    "trades": 888,
-    "positive_years": 8,
-    "n_years": 8
    }
   },
   {
