@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import fcntl
 import os
+import sys
 
 import pytest
-from daily_helpers import START, FakeAlpaca, api, bars, load_script, run, sessions
+from daily_helpers import ROOT, START, FakeAlpaca, api, bars, load_script, run, sessions
 
 from kaibot.ingest import daily_bars as db
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import research_runner as rr  # noqa: E402
 
 DAYS = sessions(START)
 KEY = "PSKY@2026-11-05"
@@ -135,3 +139,26 @@ def test_the_committed_membership_names_psky_from_its_own_listing_only():
         "2025-08-08"
     keys = load_script().pit_keys()  # the real one (this module's load_script is not the pinned one)
     assert KEY in keys and "PARA@2025-07-31" in keys and "PSKY" not in keys
+
+
+# ---------------------------------------------------------------- the research runner's allow-list and queue
+
+
+def test_fetch_daily_is_allowed_one_pit_key_at_a_time_only():
+    """#812: the runner may fetch named SYMBOL@ASOF keys (the script also refuses a key the pit universe does not
+    name), never the whole universe, a symbols file, another store or a refresh, and not faster than 40 a minute."""
+    spec = rr.load_allowed().specs["scripts/fetch_daily.py"]
+    assert set(spec.flags) == {"--key", "--retry-holes", "--per-min", "--status"} and spec.heavy and not spec.writes
+    assert rr.check_args(spec, ["--key", "PSKY@2026-11-05", "--retry-holes", "--per-min", "40"])
+    for bad in (["--key", "PSKY"], ["--key", "psky@2026-11-05"], ["--key", "../x@2026-11-05"],
+                ["--key", "PSKY@2026-13-05"], ["--per-min", "41"], ["--per-min", "120"], ["--symbols", "AAPL"],
+                ["--symbols-file", "x.csv"], ["--refresh"], ["--no-universe"], ["--start", "2016-01-01"]):
+        with pytest.raises(rr.JobError):
+            rr.check_args(spec, bad)
+
+
+def test_the_psky_job_is_queued_with_the_key_the_membership_names():
+    cfg = rr.load_allowed()
+    jobs = [rr.check_job(j, cfg) for j in rr.load_queue() if j["id"] == "daily-key-psky-2026-11-27"]
+    assert len(jobs) == 1 and jobs[0].args[:2] == ("--key", KEY) and "--retry-holes" in jobs[0].args
+    assert KEY in load_script().pit_keys()
