@@ -37,6 +37,8 @@ The runner works in a checkout of its **own**, `~/Projects/kaibot-runner` (a sec
 3. Within about 15 minutes the Mac pulls `main` into the runner's checkout, runs the job, and posts on the issue a comment headed
    `Research runner job <id>`: the status (`ok`, `failed` or `timeout`), the exit code, the minutes taken, the commit,
    and the last 150 lines of output (redacted). A rejected job gets a comment that gives the reason and is never run.
+   An optional `note:` (one line of plain text, at most 200 characters) is printed as **Label:** in that comment
+   and in the results pull request (#812: `note: re-run after #812 (726-key universe)`).
 4. To run the same thing again, add a **new** id. Ids in `done.json` are skipped forever, including jobs that
    failed, timed out or were rejected.
 
@@ -51,6 +53,7 @@ Allowed scripts and flags (the full patterns are in `allowed.yaml`):
 | `scripts/fetch_listings.py` | `--since --first-bars --limit --status --build --report` | #376: SEC history (`--since`) and Alpaca first bars (`--first-bars`, paper keys); gets `--env`, sec, heavy, 120 min; writes `data/listings/` only. Not `--prices` |
 | `scripts/fetch_minute_pit.py` | `--end --per-min --max-minutes --limit --status --report` | #794: the 15:45-15:59 ET minutes of every point-in-time member (paper keys, data host only); gets `--env`, heavy, 240 min; at most 40 requests a minute by default (99 by the pattern); `--end` never in the hold-out; writes `data/bars_1550/` only |
 | `scripts/fetch_daily.py` | `--key --retry-holes --per-min --status` | #812: exactly one point-in-time key of the daily store (`SYMBOL@ASOF`, only a key `sp500_pit.Membership` names), as of its date; paper keys, data host only, at most 40 requests a minute; gets `--env`, heavy, 30 min; under the daily fetch lock (the engine's `data/fetch_daily.lock`); a complete key is skipped; writes `data/daily/` only |
+| `scripts/momentum_core.py` | `--version --universe --end --costs --earnings` | #812: the core pit runs of `trend_momentum`, `mom_12_1_band` and `mom_12_1_band_nofilter` only; `--universe pit`, `--end 2024-12-31`, `--costs v1`, `--earnings off` only; heavy, 180 min; logs trial rows |
 | `scripts/export_results.py` | `--rule` | 20 min; `writes: docs/research/results/`, opened as a PR by the runner (below) |
 | `scripts/market_alarm_report.py` | `--start --end --flags-only --rankings-only` | heavy, 60 min |
 | `kaibot.agents.evalset.golden` | none | the stub run only (`--live` costs money, `--record` writes a tracked file) |

@@ -86,6 +86,8 @@ FORBIDDEN_TARGET = re.compile(r"(^|[./_])(engine|service|lease|run_engine|watchd
 FORBIDDEN_FLAGS = {"--env", "--data", "--out", "--root", "--trials", "--open-holdout", "--universe-file", "--live",
                    "--record"}
 MAX_ARGS, MAX_ARG_LEN = 24, 128
+# A job's `note` (#812: "re-run after #812 (726-key universe)"): printed with its results; plain text only.
+NOTE_RE = re.compile(r"[A-Za-z0-9 #().,;:/+%_-]{0,200}")
 JOB_ENV_KEYS = ("HOME", "PATH", "LANG", "LC_ALL", "TMPDIR", "TZ", "SSL_CERT_FILE")
 NICE = ("/usr/bin/nice", "-n", "10")
 # A job's own output folder in the checkout (allowed.yaml `writes:`): only under docs/, always ending in "/".
@@ -141,6 +143,7 @@ class Job:
     spec: Spec
     args: tuple[str, ...]            # normalised: --flag [value] ...
     issue: int
+    note: str = ""                   # queue.yaml `note`: a label printed with the results (comment, PR)
 
 
 @dataclass
@@ -256,7 +259,10 @@ def check_job(raw, cfg: Config) -> Job:
     if not isinstance(script, str) or script not in cfg.specs:
         raise JobError(f"script {str(script)[:80]!r} is not on the allow-list (ops/runner/allowed.yaml)")
     spec = cfg.specs[script]
-    return Job(jid, spec, check_args(spec, raw.get("args")), issue)
+    note = raw.get("note", "")
+    if not isinstance(note, str) or not NOTE_RE.fullmatch(note):
+        raise JobError("note must be one line of plain text (at most 200 characters, no backticks or markup)")
+    return Job(jid, spec, check_args(spec, raw.get("args")), issue, note)
 
 
 def argv(job: Job, python: str, env_file: str = ENV_FILE) -> list[str]:
@@ -329,7 +335,7 @@ def comment(job: Job, res: dict, sha: str) -> str:
     fence = "`" * max(3, max((len(m) for m in re.findall(r"`+", out)), default=0) + 1)
     head = (f"**Research runner** job `{job.id}`: `{job.spec.target}` {' '.join(job.args)}\n\n"
             f"status **{res['status']}**, exit {res.get('rc')}, {res.get('minutes', 0):.1f} min, main @ `{sha[:12]}`, "
-            f"finished {res.get('finished', '')}\n\n")
+            f"finished {res.get('finished', '')}\n\n" + (f"**Label:** {job.note}\n\n" if job.note else ""))
     note = f"{res['checkout_note']}\n" if res.get("checkout_note") else ""
     return head + note + f"Last {len(out.splitlines())} lines (redacted):\n\n{fence}text\n{out}\n{fence}\n"
 
@@ -821,6 +827,8 @@ def _pr_text(job: Job, res: dict, sha: str, paths: list[str],
     what = (f"The research runner on the research Mac ran `{cmd}` (job {job.id}, status {res['status']}, exit "
             f"{res.get('rc')}, main @ {sha[:12]}) and committed the {len(paths)} changed file(s) it wrote under "
             f"{folders}. The runner never pushes to main; review and merge this pull request to keep the results.")
+    if job.note:
+        what += f" Label: {job.note}."
     reg = trials_line(trials)
     message = f"{title}\n\n{what}\n\n{reg}\n"
     shown = paths[:60] + ([f"... and {len(paths) - 60} more"] if len(paths) > 60 else [])
