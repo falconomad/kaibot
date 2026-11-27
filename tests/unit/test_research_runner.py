@@ -197,13 +197,15 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               "scripts/fetch_listings.py",  # #376: the new-listing history and first bars
                               # #708: the re-runs of the unscored runs (research window only, strict patterns)
                               "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py",
-                              "scripts/fetch_av_earnings.py"}  # #797: Alpha Vantage EARNINGS, free tier, research
+                              "scripts/fetch_av_earnings.py",  # #797: Alpha Vantage EARNINGS, free tier, research
+                              "scripts/fetch_minute_pit.py"}  # #794: the 15:50 minutes of the pit universe
     assert not cfg.specs["scripts/shadow_results.py"].flags and not cfg.specs["scripts/shadow_results.py"].writes
     assert cfg.repo == "falconomad/kaibot" and cfg.tail_lines == 150
     assert sorted(t for t, s in cfg.specs.items() if s.sec) == ["scripts/fetch_listings.py",
                                                                 "scripts/fetch_sec_fundamentals.py"]
     assert sorted(t for t, s in cfg.specs.items() if s.env) == ["scripts/fetch_av_earnings.py",  # #797
                                                                 "scripts/fetch_listings.py",
+                                                                "scripts/fetch_minute_pit.py",  # #794: paper keys
                                                                 "scripts/fetch_sec_fundamentals.py",
                                                                 "scripts/walk_forward.py"]  # #708: FRED (VIX)
     assert not cfg.specs["kaibot.agents.evalset.golden"].flags  # no --live (money), no --record

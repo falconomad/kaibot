@@ -7,6 +7,8 @@ market_data:
   alpaca_trading:   {use: paper_orders, auth: key, limit: "200 req/min per account (trading API, separate from data)", budget_per_min: 150}
   alpaca_daily_bars: {use: research_daily_store, auth: key, endpoint: "/v2/stocks/{symbol}/bars timeframe=1Day adjustment=raw|all feed=sip, end >= 15 min old",
                      note: "requests count against alpaca; two per symbol; scripts/fetch_daily.sh runs at 120/min, 40/min while the engine runs; research store data/daily, never in the live path"}
+  alpaca_minute_pit: {use: research_1550_minutes, auth: key, endpoint: "/v2/stocks/bars symbols=... timeframe=1Min adjustment=split feed=sip asof=<the store key's date>, 2016 to the research window's end",
+                     note: "requests count against alpaca; scripts/fetch_minute_pit.py (#794): one a session for each group of keys with one as-of date (15:45-15:59 ET, up to 300 symbols a request) or about two a key-month for a former member; at most 40 a minute by default (never above 120); resumable by month; research store data/bars_1550, never in the live path"}
   alpaca_corporate_actions: {use: splits_and_dividends, auth: key, endpoint: "/v1/corporate-actions, 1000 rows a page",
                      note: "requests count against alpaca; a few dozen per run of scripts/fetch_daily.sh; free-plan access and history depth are confirmed by the first run (docs/ops/daily_bars.md)"}
   alpaca_assets:    {use: new_listing_watch_shadow, auth: key, endpoint: "paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",
