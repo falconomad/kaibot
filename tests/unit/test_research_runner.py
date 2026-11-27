@@ -194,6 +194,7 @@ def test_the_committed_allow_list_loads_and_lists_exactly_the_approved_scripts()
                               "kaibot.agents.evalset.golden", "scripts/shadow_results.py",  # #371: as the helper
                               "scripts/gate_v3_rescore.py",  # #456: reads reports, writes the re-score only
                               "scripts/near_close_1550_rerun.py",  # #454: the 15:50-price re-run
+                              "scripts/momentum_core.py",  # #812: the core pit re-runs (three rules, strict)
                               "scripts/fetch_listings.py",  # #376: the new-listing history and first bars
                               # #708: the re-runs of the unscored runs (research window only, strict patterns)
                               "scripts/walk_forward.py", "scripts/oneshots.py", "scripts/spy_cost_rerun.py",

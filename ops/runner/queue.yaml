@@ -153,3 +153,59 @@ jobs:
     script: scripts/fetch_daily.py
     args: ["--key", "PSKY@2026-11-05", "--retry-holes", "--per-min", "40"]
     posts_to_issue: 812
+  # #812 (after #817 and the PSKY key job of its companion PR): re-runs of the point-in-time results that used the
+  # shrunken view (501 of 726 keys; #817's list), on the 726-key universe. Same scripts, same configurations, same
+  # pre-registrations (unchanged), research window only (--end 2024-12-31; the hold-out is not touched). Each job's
+  # comment and results PR carry the note below. TRIALS: each re-run logs trial rows and COUNTS in the registry, like
+  # #708's (the registry counts runs' configurations; decision 18 makes only control rows and start offsets other
+  # than 0 free): momentum_core +1 per base-fill 1x row (the rows the 13 Nov runs counted; its same-events exemption
+  # does not apply, the events change), trend_momentum_gbm +6, each book +6 (index_core_trend_momentum N 24 -> 42),
+  # the 15:50 re-run +1 (at_1550|1x), the owner's engine run of trend_momentum +6. The re-score logs none.
+  # The engine + SimBroker run of trend_momentum (kaibot.engine.research) is for the owner to start by hand: the
+  # runner refuses any *engine* target (FORBIDDEN_TARGET), as for #708's spy_engine.py.
+  - id: tm-core-pit-after812-2026-11-27         # trend_momentum, research core, pit (was ..._pit_20261113T084508)
+    script: scripts/momentum_core.py
+    args: ["--version", "trend_momentum", "--universe", "pit", "--end", "2024-12-31", "--costs", "v1", "--earnings", "off"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: mom-band-core-pit-after812-2026-11-27   # mom_12_1_band, research core, pit (was ..._pit_20261113T084643)
+    script: scripts/momentum_core.py
+    args: ["--version", "mom_12_1_band", "--universe", "pit", "--end", "2024-12-31", "--costs", "v1", "--earnings", "off"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: mom-band-nofilter-core-pit-after812-2026-11-27   # mom_12_1_band_nofilter, core, pit (was ..._20261113T084759)
+    script: scripts/momentum_core.py
+    args: ["--version", "mom_12_1_band_nofilter", "--universe", "pit", "--end", "2024-12-31", "--costs", "v1",
+           "--earnings", "off"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: tm-gbm-pit-after812-2026-11-27          # trend_momentum_gbm, engine + SimBroker, pit, costs v1 (was ..._20261124T185751)
+    script: scripts/trend_momentum_gbm.py
+    args: ["--end", "2024-12-31", "--universe", "pit", "--cost-model", "v1"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: index-core-book-after812-2026-11-27     # the book at the 27% cap (was index-core-book-2026-11-24), now with B7
+    script: scripts/index_core_book.py
+    args: ["--end", "2024-12-31"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: index-core-book-80-after812-2026-11-27  # at 80% (was index-core-book-80-2026-11-25 and -80-control-2026-11-26)
+    script: scripts/index_core_book.py
+    args: ["--end", "2024-12-31", "--index-cap", "80"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: index-core-book-97-after812-2026-11-27  # at 97% (was index-core-book-97-2026-11-26, if it ran before #817)
+    script: scripts/index_core_book.py
+    args: ["--end", "2024-12-31", "--index-cap", "97"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: near-close-1550-after812-2026-11-27     # #454: trend_momentum at the close and at 15:50 (was near-close-1550-2026-11-25)
+    script: scripts/near_close_1550_rerun.py
+    args: ["--end", "2024-12-31"]
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
+  - id: gate-v3-1-rescore-after812-2026-11-27   # last: the v3.1 table on the re-runs above; after the stage-6 re-score
+    script: scripts/gate_v3_rescore.py          # (gate-v3-1-rescore-stage6-2026-11-27). Runs no rule, logs no trial
+    args: []
+    posts_to_issue: 812
+    note: "re-run after #812 (726-key universe)"
