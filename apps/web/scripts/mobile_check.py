@@ -529,10 +529,13 @@ def interact(browser, dist: pathlib.Path, now: dt.datetime, session: str, fails:
             hdr = pg.evaluate(HEADER_JS)
             top = pg.evaluate("(() => { const t = document.querySelector('header.top'); const r = t.getBoundingClientRect(); "
                               "return [Math.round(r.height), t.scrollWidth > t.clientWidth, Math.max(...[...t.children].map((e) => e.getBoundingClientRect().right)), "
-                              "!!t.querySelector('.ts-chip.red'), (() => { const l = t.querySelector('.ts-chip b'); return !!l && l.scrollWidth <= l.clientWidth; })()]; })()")
+                              "!!t.querySelector('.ts-chip.red'), (() => { const l = t.querySelector('.ts-chip .trading-tl'); return !!l && l.scrollWidth <= l.clientWidth; })(), "
+                              # 27 Nov 2026: the compact line ("Sell only · After"), whole, never the reason cut off
+                              "(() => { const c = t.querySelector('.ts-chip'); const d = (s) => getComputedStyle(c.querySelector(s)).display; "
+                              "return c.scrollWidth <= c.clientWidth && d('.trading-reason') === 'none' && d('.trading-tl') !== 'none' && d('.trading-st') !== 'none'; })()]; })()")
             print("360 px: header", top, hdr)
-            if hdr["rows"] != 1 or top[0] != 72 or top[1] or top[2] > 344 or not top[3] or not top[4] or not 37 <= hdr["logo"] <= 38:
-                fails.append(f"at 360 px the header must be one 72 px row inside 360 - 16 px, with the 37.5 px logo and the halt chip, its label whole: {top}, {hdr}")
+            if hdr["rows"] != 1 or top[0] != 72 or top[1] or top[2] > 344 or not top[3] or not top[4] or not top[5] or not 37 <= hdr["logo"] <= 38:
+                fails.append(f"at 360 px the header must be one 72 px row inside 360 - 16 px, with the 37.5 px logo and the halt chip, its compact line whole: {top}, {hdr}")
         else:
             fit = pg.evaluate("(() => { const b = document.querySelector('.center form button').getBoundingClientRect(); "
                               "return [Math.round(document.documentElement.scrollHeight), innerHeight, Math.round(b.bottom * 10) / 10, "

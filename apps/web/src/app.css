@@ -266,8 +266,10 @@ input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--sea); }
   header.top { flex-wrap: nowrap; min-height: var(--topbar); padding: 6px 16px; gap: 8px; }
   .logo { height: 37.5px; }
   .logo-lg { height: 50px; }
-  header.top .engine-chip { max-width: 44vw; min-width: 0; }
-  header.top .engine-chip b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the chip never truncates (stakeholder, 27 Nov 2026): it keeps its width and one line; the trading line's compact
+     form ("Holding · Closed", below) is what makes it fit at 360 px beside the logo and PAPER */
+  header.top .engine-chip { flex: none; min-width: 0; white-space: nowrap; }
+  header.top .engine-chip b { white-space: nowrap; }
   /* the 37.5 px logo (25 Nov 2026): the spacer's 24 px and its gap go to the trading chip, whose label never truncates;
      its reason gives way first, and under 400 px it is left to the halt bar just below. PAPER is by the logo, so the
      chip itself keeps to the right (margin-left: auto) */
@@ -699,5 +701,23 @@ header.top .ts-chip.red::before { border-color: var(--fail); }
 .trading-state { margin: 4px 0 12px; font-size: 15px; }
 .trading-state .trading-line { flex-wrap: wrap; }
 .trading-state .trading-reason { white-space: normal; }
-@media (max-width: 640px) { header.top .ts-chip .trading-reason { max-width: 30vw; } }
-@media (max-width: 400px) { header.top .ts-chip { padding: 0 10px; } header.top .ts-chip .trading-reason { display: none; } }
+/* Phones (stakeholder, 27 Nov 2026): the top bar's line is compact, the state and the market's session ("Holding ·
+   Closed"), never the reason cut off with an ellipsis. The full line is the chip's aria-label and title; the Engine
+   screen and the halt bar below say the reason in full. Wider screens keep the full line. Measured with the logo and
+   PAPER (scripts/mobile_check.py), every state with every session fits on one line: the full words from 421 px, the
+   state's short word from 401 px, at 12 px from 381 px, and the session's short word too down to 360 px. */
+.trading-line .trading-short { display: none; white-space: nowrap; }
+.trading-line .trading-tl { font-weight: 600; color: var(--ink); }
+.trading-line.red .trading-tl { color: var(--fail); }
+.trading-line .trading-ss, .trading-line .trading-st { color: var(--slate); white-space: pre; } /* a flex item would drop its leading space */
+@media (max-width: 760px) {
+  header.top .ts-chip { padding: 0 10px; } header.top .ts-chip .trading-line { gap: 0; } header.top .ts-chip .trading-dot { margin-right: 6px; }
+  header.top .ts-chip .trading-reason { display: none; }
+  header.top .ts-chip .trading-ss { display: inline; }
+}
+@media (max-width: 420px) {
+  header.top .ts-chip { padding: 0 8px; }
+  header.top .ts-chip .trading-line > b { display: none; } header.top .ts-chip .trading-tl { display: inline; }
+}
+@media (max-width: 400px) { header.top .ts-chip .trading-line { font-size: 12px; } }
+@media (max-width: 380px) { header.top .ts-chip .trading-ss { display: none; } header.top .ts-chip .trading-st { display: inline; } }

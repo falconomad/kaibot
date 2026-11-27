@@ -234,11 +234,12 @@ describe("the logo: Design's Rising k, drawn from the delivered files", () => {
     expect(css).toMatch(/header\.top \.engine-chip::before \{[^}]*inset: 4px 0;/);
     expect(css).toMatch(/\.brand \{[^}]*min-height: 44px/);
     // on phones the larger logo takes the spacer's room, not the trading chip's label: it never truncates, its reason
-    // gives way, and under 400 px the reason is left to the halt bar (scripts/mobile_check.py measures 360 px)
+    // gives way to the market's session (scripts/mobile_check.py measures 360 px)
     const phone = /@media \(max-width: 760px\) \{\n {2}\/\* v4: one-row top bar([^]*?)\n\}/.exec(css)?.[1] ?? "";
     expect(phone).toMatch(/header\.top \.spacer \{ display: none; \} header\.top \.engine-chip \{ margin-left: auto; \} header\.top \.pill \{ padding: 0 5\.5px; \}/);
     expect(phone).toMatch(/header\.top \.ts-chip b \{ flex: none; \}/);
-    expect(css).toMatch(/@media \(max-width: 400px\) \{ header\.top \.ts-chip \{ padding: 0 10px; \} header\.top \.ts-chip \.trading-reason \{ display: none; \} \}/);
+    // and from 760 px down the reason gives way to the compact "Holding · Closed" (tradingstate.dom.test.tsx)
+    expect(css).toMatch(/@media \(max-width: 760px\) \{\n {2}header\.top \.ts-chip \{ padding: 0 10px; \}[^\n]*\n {2}header\.top \.ts-chip \.trading-reason \{ display: none; \}/);
   });
 
   it("PAPER is a tag on the wordmark's top right, half its old size, the text at the 12 px floor (25 Nov 2026)", () => {

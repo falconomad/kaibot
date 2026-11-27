@@ -1,19 +1,28 @@
 // N1 / N2 (docs/design/ui_after_engine_v3.md): the trading-state line and the damaged-journal steps. A lazy chunk:
 // the shell loads it after the first screen (components/Shell.tsx, useTradingState), Engine imports it directly.
 import { NAME } from "../brand/brand";
-import type { TradingState } from "../lib/tradingstate";
+import { LABEL_TINY, MARKET_SHORT, MARKET_TINY, type MarketSession, type TradingState } from "../lib/tradingstate";
 
-export { tradingLine, tradingState } from "../lib/tradingstate";
+export { marketSession, shortLine, tradingLine, tradingState } from "../lib/tradingstate";
 
 const TONE_DOT: Record<TradingState["tone"], string> = { ok: "var(--live)", calm: "var(--text-3)", warn: "var(--warn)", red: "var(--fail)" };
 
 /** N1: the one trading-state line ("Selling only — paused by you"). The label is the words, so colour is never the
- *  only cue; the dot only repeats it. Used in the top bar and on the Engine screen. */
-export function TradingLine({ s, className = "" }: { s: TradingState; className?: string }) {
+ *  only cue; the dot only repeats it. Used in the top bar and on the Engine screen.
+ *  `market`: the market's session, for the top bar's compact form on phones (app.css, at 760 px and under: "Holding ·
+ *  Closed" instead of the reason; at 420 px the state's short word, at 380 px the session's). The compact pieces are
+ *  hidden from screen readers: the chip's aria-label carries the full line. */
+export function TradingLine({ s, className = "", market }: { s: TradingState; className?: string; market?: MarketSession }) {
   return (
     <span className={`trading-line ${s.tone} ${className}`} data-kind={s.kind}>
       <i className="trading-dot" aria-hidden="true" style={{ background: TONE_DOT[s.tone] }} />
-      <b>{s.label}</b><span className="trading-reason"> — {s.reason}</span>
+      <b>{s.label}</b>
+      {market && <span className="trading-short trading-tl" aria-hidden="true">{LABEL_TINY[s.kind]}</span>}
+      <span className="trading-reason"> — {s.reason}</span>
+      {market && <>
+        <span className="trading-short trading-ss" aria-hidden="true"> · {MARKET_SHORT[market]}</span>
+        <span className="trading-short trading-st" aria-hidden="true"> · {MARKET_TINY[market]}</span>
+      </>}
       {s.needsYou && <span className="sr-only"> (needs you)</span>}
     </span>
   );
