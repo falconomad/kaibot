@@ -389,6 +389,16 @@ def daily_store_state() -> dict:
     return store_state(_switch("KAIBOT_DAILY_DATA") or ROOT / "data")
 
 
+def pit_store_state() -> dict | str:
+    """`--check` (#812, hand-off from #817): does the daily store hold the point-in-time keys the live daily path
+    reads? `kaibot.ingest.pit_store_check.engine_warning` on the store the daily path reads. Read-only (no network,
+    no write). A problem is a `WARNING: ...` line, never a FAILED one, so it does not change `--check`'s exit code;
+    the full report is `./scripts/check_pit_store.sh`."""
+    from kaibot.ingest.pit_store_check import engine_warning
+
+    return engine_warning(_switch("KAIBOT_DAILY_DATA") or ROOT / "data")
+
+
 def report_conflicts(eng: Engine, replicator: Replicator) -> None:
     """Rows Supabase refused as duplicates that are not the engine's (B2 of the #117 review): replication went on;
     each one becomes an event and a halt row the dashboard shows. Trading is not affected (its state is local).
@@ -777,6 +787,7 @@ def main() -> None:
         step("journal", journal_state)
         step("multi_day", lambda: multi_day_state(remote))
         step("daily_path", lambda: daily_path_state(eng, remote))
+        step("pit_store", pit_store_state)  # #812: a WARNING line only, never FAILED (exit code unchanged)
         def news_state():  # read-only: one request, nothing stored
             now = datetime.now(UTC)
             n = len(eng.market.data.news(["SPY"], now - pd.Timedelta(hours=72), now, max_pages=1))
